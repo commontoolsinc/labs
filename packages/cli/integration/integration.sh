@@ -418,11 +418,39 @@ run_piece_call() {
   echo "Successfully ran CLI piece call integration tests for ${API_URL}/${SPACE}/${CALLABLE_PIECE_ID}."
 }
 
+run_wish() {
+  setup_space
+
+  echo "Testing cf wish (blessed headless read)..."
+
+  # A fresh identity has no profile yet: `cf wish '#profile'` must resolve
+  # through the wish builtin's headless path, surface the zero-profile WishError,
+  # print it to stderr and exit non-zero.
+  set +e
+  WISH_OUT=$(cf wish '#profile' --api-url="$API_URL" --identity="$IDENTITY" 2>/tmp/cf-wish-err.txt)
+  WISH_CODE=$?
+  set -e
+  if [ "$WISH_CODE" == "0" ]; then
+    error "cf wish '#profile' with no profile should exit non-zero, got 0 (stdout: $WISH_OUT)"
+  fi
+  grep -q "No profile exists yet" /tmp/cf-wish-err.txt ||
+    error "cf wish '#profile' with no profile should mention the missing profile on stderr"
+
+  # --allow-empty turns the same empty read into 'null' on stdout with exit 0.
+  WISH_EMPTY=$(cf wish '#profile' --allow-empty --api-url="$API_URL" --identity="$IDENTITY")
+  if [ "$WISH_EMPTY" != "null" ]; then
+    error "cf wish '#profile' --allow-empty should print 'null', got: $WISH_EMPTY"
+  fi
+
+  echo "Successfully ran CLI wish integration tests for ${API_URL}."
+}
+
 case "$SECTION" in
   all)
     run_piece_values
     run_piece_links
     run_piece_call
+    run_wish
     ;;
   piece-basics)
     run_piece_values
@@ -436,6 +464,9 @@ case "$SECTION" in
     ;;
   piece-call)
     run_piece_call
+    ;;
+  wish)
+    run_wish
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"
