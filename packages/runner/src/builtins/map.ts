@@ -181,15 +181,15 @@ export function map(
     // all.
     const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
-    const list: Cell<any>[] | undefined = rawList === undefined
+    const list = rawList === undefined
       ? undefined
-      : !Array.isArray(rawList)
-      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
-      : rawList.map((slot, i) => {
+      : Array.isArray(rawList)
+      ? rawList.map((slot, i) => {
         const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
-      });
+      })
+      : rawList;
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern. The raw value is either a compact
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by

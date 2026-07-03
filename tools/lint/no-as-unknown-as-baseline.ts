@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builtins/map.ts": [
-    "178:16:1029mof",
-  ],
   "packages/runner/src/cell.ts": [
     "616:4:1t9v1z3",
     "689:17:z8zbpi",
