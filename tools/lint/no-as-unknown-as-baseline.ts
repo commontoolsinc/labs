@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-sync-schema-table-test.ts": [
-    "390:14:120x96t",
-  ],
   "packages/memory/v2/query.ts": [
     "143:28:nn9iil",
   ],

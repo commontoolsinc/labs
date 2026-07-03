@@ -386,11 +386,7 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
   const { schemaTable: _unusedSchemaTable, ...syncWithoutTable } =
     syncWithUnusedTable;
   assertEquals(expanded, syncWithoutTable);
-  assertEquals(
-    (expanded as unknown as { schemaTable?: Record<string, JSONSchema> })
-      .schemaTable,
-    undefined,
-  );
+  assertEquals(Object.hasOwn(expanded, "schemaTable"), false);
   assert(Object.isFrozen(expanded));
 
   assertThrows(
