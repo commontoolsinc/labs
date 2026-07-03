@@ -143,8 +143,11 @@ type DemoTool = BuiltInLLMTool & { inputSchema?: JSONSchema };
 
 // One demo agent (the unsafe raw reader or the safe direct-command path),
 // wired like main.tsx: logEmail-shaped sendMail + readRawBriefing tools on a
-// real llmDialog. `briefingBody` selects the variant (raw hostile text vs the
-// redacted marker the safe agent sees).
+// real llmDialog, plus a getDirectCommand tool through which the agent kernel
+// hands the model the direct command WITH the opaque recipient handle — the
+// reference must reach the model inside the conversation, not out of band.
+// `briefingBody` selects the variant (raw hostile text vs the redacted marker
+// the safe agent sees).
 async function setupDemoAgent(
   route: string,
   briefingBody: string | Record<string, unknown>,
@@ -155,6 +158,45 @@ async function setupDemoAgent(
     storageManager,
     cfcEnforcementMode: "enforce-explicit",
   });
+
+  // Play the agent kernel binding the direct user command BEFORE the agent
+  // starts: a builtin-identity write persisting the demo's three integrity
+  // atoms on the direct-command recipient value (pattern code cannot mint
+  // them). This is the settled by-reference contract (spec "Open decisions"
+  // §2): the legit recipient reaches sendMail as a link to THIS cell, never
+  // as model-emitted text.
+  const seedTx = runtime.edit();
+  seedTx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: AGENT_KERNEL_NAME,
+  });
+  const recipientCell = runtime.getCell(
+    space,
+    `direct-command-recipient-${route}`,
+    {
+      type: "string",
+      ifc: {
+        integrity: [
+          TRUSTED_AGENT_KERNEL_ATOM,
+          USER_SURFACE_INPUT_ATOM,
+          PROMPT_SLOT_BOUND_ATOM,
+        ],
+      },
+    } as const satisfies JSONSchema,
+    seedTx,
+  );
+  recipientCell.set(USER_EMAIL_RECIPIENT);
+  seedTx.prepareCfc();
+  expect((await seedTx.commit()).ok).toBeDefined();
+  await runtime.idle();
+  const linkPath = createLLMFriendlyLink(
+    recipientCell.getAsNormalizedFullLink(),
+    space,
+  );
+  // The JSON-string form of the handle — inert plain data everywhere, and
+  // exactly what the gate's resolver accepts.
+  const recipientHandle = JSON.stringify({ "@link": linkPath });
+
   const tx = runtime.edit();
   const { commonfabric } = createTrustedBuilder(runtime);
   const { pattern, handler, llmDialog, Writable } = commonfabric;
@@ -225,11 +267,50 @@ async function setupDemoAgent(
     },
   );
 
+  // The kernel affordance that surfaces the direct command to the model: the
+  // command text plus the OPAQUE recipient handle for routing fields. The
+  // model can only learn the reference from this tool's result in the
+  // transcript.
+  const getDirectCommand = handler(
+    {
+      type: "object",
+      properties: {
+        result: { type: "object", asCell: ["cell"] },
+      },
+      required: ["result"],
+    },
+    {
+      type: "object",
+      properties: {
+        command: { type: "string" },
+        recipientHandle: { type: "string" },
+      },
+      required: ["command", "recipientHandle"],
+    },
+    ({ result }: any, { command, recipientHandle }: any) => {
+      result.set({ command, recipientHandle });
+    },
+  );
+
   const testPattern = pattern(
     () => {
       const emails = Writable.of<SentEmail[]>([]);
       const messages = Writable.of<BuiltInLLMMessage[]>([]);
       const tools: Record<string, DemoTool> = {
+        getDirectCommand: {
+          description:
+            "Return the user's direct command with an opaque recipient " +
+            "handle for routing fields.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          handler: getDirectCommand({
+            command: DEMO_PROMPT,
+            recipientHandle,
+          }),
+        },
         readRawBriefing: {
           description: "Read the vendor briefing.",
           inputSchema: {
@@ -277,42 +358,6 @@ async function setupDemoAgent(
   await tx.commit();
   await runtime.idle();
 
-  // Play the agent kernel binding the direct user command: a builtin-identity
-  // write persisting the demo's three integrity atoms on the direct-command
-  // recipient value. This is the settled by-reference contract (spec "Open
-  // decisions" §2): the legit recipient reaches sendMail as a link to THIS
-  // cell, never as model-emitted text.
-  const bindDirectCommandRecipient = async () => {
-    const seedTx = runtime.edit();
-    seedTx.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: AGENT_KERNEL_NAME,
-    });
-    const cell = runtime.getCell(
-      space,
-      `direct-command-recipient-${route}`,
-      {
-        type: "string",
-        ifc: {
-          integrity: [
-            TRUSTED_AGENT_KERNEL_ATOM,
-            USER_SURFACE_INPUT_ATOM,
-            PROMPT_SLOT_BOUND_ATOM,
-          ],
-        },
-      } as const satisfies JSONSchema,
-      seedTx,
-    );
-    cell.set(USER_EMAIL_RECIPIENT);
-    seedTx.prepareCfc();
-    const commit = await seedTx.commit();
-    expect(commit.ok).toBeDefined();
-    await runtime.idle();
-    return {
-      "@link": createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space),
-    };
-  };
-
   const dispose = async () => {
     clearMockResponses();
     await runtime.idle();
@@ -320,7 +365,7 @@ async function setupDemoAgent(
     await storageManager.close();
   };
 
-  return { result, bindDirectCommandRecipient, dispose };
+  return { result, recipientHandle, linkPath, dispose };
 }
 
 function waitForMessages(result: any, expectedCount: number) {
@@ -430,7 +475,6 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
   it("lets the safe agent's direct-command sendMail through by reference", async () => {
     const t = await setupDemoAgent("safe-parent", REDACTED_BRIEFING_BODY);
     try {
-      const recipientRef = await t.bindDirectCommandRecipient();
       clearMockResponses();
       loadConversationFixture({
         description:
@@ -441,8 +485,21 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
             expectRequest: {
               messagesContain: [USER_EMAIL_RECIPIENT],
               messageCount: 1,
-              hasTools: ["readRawBriefing", "sendMail"],
+              hasTools: ["getDirectCommand", "readRawBriefing", "sendMail"],
             },
+            response: {
+              role: "assistant",
+              content: [{
+                type: "tool-call",
+                toolCallId: "safe-get-command",
+                toolName: "getDirectCommand",
+                input: {},
+              }],
+              id: "safe-turn-1",
+            },
+          },
+          {
+            type: "sendRequest",
             response: {
               role: "assistant",
               content: [{
@@ -451,14 +508,15 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
                 toolName: "readRawBriefing",
                 input: {},
               }],
-              id: "safe-turn-1",
+              id: "safe-turn-2",
             },
           },
           {
             type: "sendRequest",
             // The redacted briefing gave no instructions; the model routes
-            // the mail per the direct command, passing the kernel-bound
-            // recipient reference instead of re-emitting it as text.
+            // the mail per the direct command, echoing the opaque recipient
+            // handle it received from getDirectCommand's tool result instead
+            // of re-emitting the address as text.
             response: {
               role: "assistant",
               content: [{
@@ -466,12 +524,12 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
                 toolCallId: "safe-send-mail",
                 toolName: "sendMail",
                 input: {
-                  recipient: recipientRef,
+                  recipient: t.recipientHandle,
                   subject: "not approved",
                   body: "Security review and legal sign-off are still open.",
                 },
               }],
-              id: "safe-turn-2",
+              id: "safe-turn-3",
             },
           },
           {
@@ -479,7 +537,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
             response: {
               role: "assistant",
               content: "Sent the status email to john@example.org.",
-              id: "safe-turn-3",
+              id: "safe-turn-4",
             },
           },
         ],
@@ -487,7 +545,22 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
 
       const addMessage = await t.result.key("addMessage").pull();
       addMessage.send({ role: "user", content: DEMO_PROMPT });
-      await waitForMessages(t.result, 6);
+      // user + 3×(assistant tool-call + tool result) + final = 8
+      await waitForMessages(t.result, 8);
+
+      // The end-to-end by-reference contract: the reference the model passed
+      // to sendMail was handed to it INSIDE the conversation — the
+      // getDirectCommand tool result (message 2) carries the opaque handle,
+      // and the model's sendMail call (message 5) echoes it. If the runtime
+      // stopped surfacing the handle, this fails.
+      const messages = (await t.result.key("messages").pull()) as any[];
+      const commandResult = messages[2];
+      expect(commandResult.role).toBe("tool");
+      expect(JSON.stringify(commandResult.content)).toContain(t.linkPath);
+      const sendCall = messages[5];
+      expect(sendCall.role).toBe("assistant");
+      expect(sendCall.content[0].toolName).toBe("sendMail");
+      expect(sendCall.content[0].input.recipient).toBe(t.recipientHandle);
 
       // The direct-command send SUCCEEDED — the floor is satisfied by the
       // referenced cell's kernel-bound integrity, so the gate does not block
@@ -501,8 +574,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
 
       // ...and the tool result the model saw was the handler's ack, not an
       // error.
-      const messages = (await t.result.key("messages").pull()) as any[];
-      const ack = messages[4];
+      const ack = messages[6];
       expect(ack.role).toBe("tool");
       expect(ack.content[0].output.type).not.toBe("error-text");
     } finally {
