@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/link-resolution.ts": [
-    "354:16:183o20n",
-  ],
   "packages/runner/src/module.ts": [
     "94:15:1wh4wzo",
   ],

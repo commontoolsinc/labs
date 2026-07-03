@@ -368,7 +368,7 @@ export function resolveLink(
 
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
-  return result as unknown as ResolvedFullLink;
+  return result as typeof result & ResolvedFullLink;
 }
 
 function checkLegacyAt(
