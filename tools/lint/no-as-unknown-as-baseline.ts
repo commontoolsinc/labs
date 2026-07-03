@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/v2/sync-schema-table.ts": [
-    "286:44:dwdlp7",
-    "308:13:10shkw4",
-  ],
   "packages/patterns/google/core/util/calendar-write-client.test.ts": [
     "35:6:so8xng",
   ],

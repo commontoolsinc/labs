@@ -283,7 +283,9 @@ const compressResponseSync = (message: ServerMessage): ServerMessage => {
     ...message,
     ok: {
       ...message.ok,
-      sync: compressSessionSyncSchemas(sync as unknown as SessionSync),
+      sync: compressSessionSyncSchemas(
+        sync as Record<string, unknown> & SessionSync,
+      ),
     },
   };
 };
@@ -305,7 +307,7 @@ const expandResponseSync = (message: unknown): unknown => {
     ok: {
       ...message.ok,
       sync: expandSessionSyncSchemas(
-        sync as unknown as SchemaTableSessionSync,
+        sync as Record<string, unknown> & SchemaTableSessionSync,
       ),
     },
   };
