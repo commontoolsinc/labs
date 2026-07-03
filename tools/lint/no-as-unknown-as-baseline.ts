@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builder/pattern.ts": [
-    "210:26:1xr9qmx",
-    "485:6:14bv57d",
-  ],
   "packages/runner/src/builder/reactive.ts": [
     "83:58:1h4bsl2",
   ],
