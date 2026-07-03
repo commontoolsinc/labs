@@ -31,6 +31,58 @@ const asCellSchema = {
   required: ["isAdmin"],
 } as const satisfies JSONSchema;
 
+type AdminHolder = {
+  isAdmin: { get: () => boolean };
+};
+
+type ConfirmedRead = {
+  id: string;
+  path: string[];
+};
+
+function adminHolderFrom(value: unknown): AdminHolder {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("holder is not an object");
+  }
+  const isAdmin = Reflect.get(value, "isAdmin");
+  if (typeof isAdmin !== "object" || isAdmin === null) {
+    throw new Error("holder.isAdmin is not an object");
+  }
+  if (typeof Reflect.get(isAdmin, "get") !== "function") {
+    throw new Error("holder.isAdmin.get is not a function");
+  }
+  return value as AdminHolder;
+}
+
+function isConfirmedRead(value: unknown): value is ConfirmedRead {
+  if (typeof value !== "object" || value === null) return false;
+  const id = Reflect.get(value, "id");
+  const path = Reflect.get(value, "path");
+  return typeof id === "string" &&
+    Array.isArray(path) &&
+    path.every((part) => typeof part === "string");
+}
+
+function buildConfirmedReads(
+  replica: object,
+  source: unknown,
+  localSeq: number,
+): ConfirmedRead[] {
+  const buildReads = Reflect.get(replica, "buildReads");
+  if (typeof buildReads !== "function") {
+    throw new Error("replica.buildReads is not a function");
+  }
+  const reads = buildReads.call(replica, source, localSeq);
+  if (typeof reads !== "object" || reads === null) {
+    throw new Error("replica.buildReads did not return an object");
+  }
+  const confirmed = Reflect.get(reads, "confirmed");
+  if (!Array.isArray(confirmed) || !confirmed.every(isConfirmedRead)) {
+    throw new Error("replica.buildReads confirmed reads are malformed");
+  }
+  return confirmed;
+}
+
 describe("asCell link: value read-through stays a commit-conflict dependency", () => {
   let storage: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -69,17 +121,16 @@ describe("asCell link: value read-through stays a commit-conflict dependency", (
   it("the read-through lands in the commit-conflict set", async () => {
     const { cellA, cellB } = await seed();
 
-    const holder = cellA.withTx(tx).asSchema(asCellSchema).get() as unknown as {
-      isAdmin: { get: () => boolean };
-    };
+    const holder = adminHolderFrom(
+      cellA.withTx(tx).asSchema(asCellSchema).get(),
+    );
     expect(holder.isAdmin.get()).toBe(true);
 
-    const replica = storage.open(space).replica as unknown as {
-      buildReads(source: unknown, localSeq: number): {
-        confirmed: Array<{ id: string; path: string[] }>;
-      };
-    };
-    const confirmed = replica.buildReads(tx.tx, 1).confirmed;
+    const confirmed = buildConfirmedReads(
+      storage.open(space).replica,
+      tx.tx,
+      1,
+    );
     const cellBId = cellB.getAsNormalizedFullLink().id;
     assert(
       confirmed.some((r) => r.id === cellBId && r.path.includes("isAdmin")),
@@ -95,9 +146,9 @@ describe("asCell link: value read-through stays a commit-conflict dependency", (
     const cellC = runtime.getCell<string>(space, "cellC", undefined, tx);
 
     // Holder: read isAdmin through the link, branch, write — keep tx open.
-    const holder = cellA.withTx(tx).asSchema(asCellSchema).get() as unknown as {
-      isAdmin: { get: () => boolean };
-    };
+    const holder = adminHolderFrom(
+      cellA.withTx(tx).asSchema(asCellSchema).get(),
+    );
     const isAdmin = holder.isAdmin.get();
     expect(isAdmin).toBe(true);
     if (isAdmin) cellC.withTx(tx).set("allowed because isAdmin was true");

@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/ascell-link-read-through-conflict.test.ts": [
-    "72:65:n5i5b3",
-    "77:48:11yrxsy",
-    "98:65:n5i5b3",
-  ],
   "packages/runner/test/cell-cache.test.ts": [
     "879:43:1aozhk0",
   ],
