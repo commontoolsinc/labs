@@ -64,7 +64,7 @@ describe("SpecialNumberCodec", () => {
           context,
         );
         expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        expect((result as ProblematicValue).wireTypeTag).toBe(
           "SpecialNumber@1",
         );
       });
@@ -73,7 +73,7 @@ describe("SpecialNumberCodec", () => {
         // "Infinity" (missing leading +) is not a recognized literal.
         const result = codec.decode(expectedTag, "Infinity", context);
         expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        expect((result as ProblematicValue).wireTypeTag).toBe(
           "SpecialNumber@1",
         );
       });
