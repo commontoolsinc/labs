@@ -20,6 +20,10 @@ import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
 
+function testAccess<T>(bridge: CellBridge): T {
+  return bridge as object as T;
+}
+
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
   if (ino === undefined) throw new Error(`File ${name} not found`);
@@ -1101,10 +1105,10 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     propName: "input" | "result",
   ) => Promise<boolean>;
 
-  const pieceIno = await (bridge as unknown as {
+  const pieceIno = await testAccess<{
     loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  }>(bridge).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
+  await testAccess<{ hydratePieceProp: HydratePieceProp }>(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -1226,10 +1230,10 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     propName: "input" | "result",
   ) => Promise<boolean>;
 
-  const pieceIno = await (bridge as unknown as {
+  const pieceIno = await testAccess<{
     loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  }>(bridge).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
+  await testAccess<{ hydratePieceProp: HydratePieceProp }>(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -1381,9 +1385,8 @@ type MakeLinkResolver = (
 
 Deno.test("makeLinkResolver encodes unsafe link components", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = testAccess<{ makeLinkResolver: MakeLinkResolver }>(bridge)
+    .makeLinkResolver("home");
 
   assertEquals(
     resolveLink({
@@ -1401,9 +1404,8 @@ Deno.test("makeLinkResolver encodes unsafe link components", () => {
 
 Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = testAccess<{ makeLinkResolver: MakeLinkResolver }>(bridge)
+    .makeLinkResolver("home");
 
   assertEquals(
     resolveLink({
