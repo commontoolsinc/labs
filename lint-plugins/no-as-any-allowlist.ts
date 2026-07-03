@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/background-piece-service/src/otel.ts",
   "packages/cli/commands/piece.ts",
   "packages/cli/lib/multi-user-test-worker.ts",
   "packages/cli/lib/piece.ts",

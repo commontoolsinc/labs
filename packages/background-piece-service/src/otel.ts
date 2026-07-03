@@ -1,5 +1,6 @@
 import {
   context,
+  type ContextManager,
   type Meter,
   metrics,
   trace,
@@ -47,6 +48,14 @@ export function getMeter(): Meter {
     ? _meterProvider.getMeter("bg-piece-service", "1.0.0")
     : metrics.getMeter("bg-piece-service", "1.0.0");
 }
+
+type DenoTelemetryGlobal = typeof globalThis & {
+  Deno?: {
+    telemetry?: {
+      contextManager?: ContextManager & { enable(): ContextManager };
+    };
+  };
+};
 
 /**
  * Flush and shut down the tracer provider so buffered spans aren't dropped when
@@ -142,8 +151,8 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
 
     // Prefer Deno's built-in context manager (Deno >= 2.2); fall back to the
     // async-hooks manager otherwise.
-    // deno-lint-ignore no-explicit-any
-    const denoCm = (globalThis as any)?.Deno?.telemetry?.contextManager;
+    const denoCm = (globalThis as DenoTelemetryGlobal).Deno?.telemetry
+      ?.contextManager;
     const contextManager = denoCm && typeof denoCm.enable === "function"
       ? denoCm
       : new AsyncHooksContextManager();
