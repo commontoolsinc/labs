@@ -211,7 +211,7 @@ describe("mergeable array appends", () => {
       // Session 2 appends "B" through the proxy while still at the pre-"A" basis.
       const txB = rt2.edit();
       const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+        .getAsQueryResult<[]>([], txB, true);
       proxy.push("B");
       await txB.commit();
       await rt2.storageManager.synced();

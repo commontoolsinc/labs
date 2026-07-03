@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/array-push-mergeable.test.ts": [
-    "214:41:1pxtp17",
-  ],
   "packages/runner/test/artifact-index-pinning.test.ts": [
     "61:8:letd2b",
     "96:24:5e6b9w",
