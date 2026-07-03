@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-sqlite-schema-test.ts": [
-    "104:6:1yihvm6",
-    "111:6:nx24ux",
-    "124:6:jnhoj4",
-    "133:6:1mnl37s",
-  ],
   "packages/memory/test/v2-sync-schema-table-test.ts": [
     "390:14:120x96t",
   ],

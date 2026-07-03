@@ -9,6 +9,7 @@ import {
   createTableSQL,
   linkColumnsOf,
   table,
+  type TableSchema,
 } from "../v2/sqlite/schema.ts";
 
 describe("cfLink", () => {
@@ -95,20 +96,20 @@ describe("createTableSQL", () => {
     // The server reaches createTableSQL with `db.tables` straight off the wire,
     // which never passed through table()/normalizeColumn. A hostile `sqlType`
     // with `;` must be rejected at the interpolation site, not executed.
-    const malicious = {
+    const malicious: TableSchema = {
       type: "object",
       required: ["c"],
       properties: {
         c: { type: "string", sqlType: "text); SELECT * FROM commit;--" },
       },
-    } as unknown as Parameters<typeof createTableSQL>[1];
+    };
     expect(() => createTableSQL("t", malicious)).toThrow("invalid sqlType");
 
-    const badName = {
+    const badName: TableSchema = {
       type: "object",
       required: [],
       properties: { "a) ;--": { type: "string", sqlType: "text" } },
-    } as unknown as Parameters<typeof createTableSQL>[1];
+    };
     expect(() => createTableSQL("t", badName)).toThrow("invalid column name");
   });
 
@@ -117,20 +118,20 @@ describe("createTableSQL", () => {
     for (let i = 0; i < 300; i++) {
       props[`c${i}`] = { type: "string", sqlType: "text" };
     }
-    const huge = {
+    const huge: TableSchema = {
       type: "object",
       required: [],
       properties: props,
-    } as unknown as Parameters<typeof createTableSQL>[1];
+    };
     expect(() => createTableSQL("t", huge)).toThrow("too many columns");
   });
 
   it("rejects a zero-column table", () => {
-    const empty = {
+    const empty: TableSchema = {
       type: "object",
       required: [],
       properties: {},
-    } as unknown as Parameters<typeof createTableSQL>[1];
+    };
     expect(() => createTableSQL("t", empty)).toThrow("at least one column");
   });
 });
