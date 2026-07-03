@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/v2/sqlite/row-label.ts": [
-    "932:31:171h3ph",
-  ],
   "packages/memory/v2/standalone.ts": [
     "113:60:1h43u",
   ],

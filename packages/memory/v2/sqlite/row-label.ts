@@ -929,7 +929,9 @@ export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
 export function rowLabelSpecOf(tableSchema: unknown): RowLabelSpec | undefined {
   if (!isRecord(tableSchema)) return undefined;
   const spec = tableSchema.rowLabel;
-  return isRecord(spec) ? spec as unknown as RowLabelSpec : undefined;
+  return isRecord(spec)
+    ? spec as Record<string, unknown> & RowLabelSpec
+    : undefined;
 }
 
 /**
