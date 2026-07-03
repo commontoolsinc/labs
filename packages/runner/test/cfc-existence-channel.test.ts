@@ -420,6 +420,64 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     expect(shapeConf).toContainEqual("old-secret");
   });
 
+  // A declared re-mint can cover a path the transaction never wrote (the
+  // schema policy input names it while the write lands elsewhere): with no
+  // covering written path, the fold anchors at the cleared entry's OWN
+  // path instead of dropping the history.
+  it("declared re-mint without a covering write anchors existence at the entry's path", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-anchor-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["old-secret"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-anchor-out", {
+      secret: "seed",
+      other: 1,
+    });
+    const taint = rt.edit();
+    taint.readOrThrow(readAddress(sourceId, []));
+    taint.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      "tainted",
+    );
+    taint.prepareCfc();
+    expect((await taint.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["secret"]).length).toBe(1);
+
+    // The clean tx writes a DIFFERENT doc but records a schema input naming
+    // this doc's SECRET path: the declared entry re-mints at ["secret"]
+    // with no write to this doc at all — no written path can anchor the
+    // fold.
+    const declared = internSchema(
+      { type: "string", ifc: { confidentiality: ["base"] } } as JSONSchema,
+      true,
+    );
+    const elsewhereId = await writeTainted(rt, undefined, "ec-anchor-else", {
+      unrelated: 1,
+    });
+    const clean = rt.edit();
+    clean.writeValueOrThrow(
+      { space, scope: "space", id: uri(elsewhereId), path: ["value"] },
+      { unrelated: 2 },
+    );
+    clean.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: {
+        space,
+        scope: "space",
+        id: uri(outId),
+        path: ["value", "secret"],
+      },
+      schemaHash: declared.taggedHashString,
+      schema: declared.schema,
+    });
+    clean.prepareCfc();
+    expect((await clean.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["secret"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toContainEqual("old-secret");
+  });
+
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite
   // must not churn the metadata — the grown existence entry re-derives
   // identically.

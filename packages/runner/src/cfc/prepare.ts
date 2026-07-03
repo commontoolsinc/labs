@@ -4142,9 +4142,11 @@ export const prepareBoundaryCommit = (
         }
       }
       // Cleared existence not covered by any stamp path (a link write
-      // replaced the slot, or the tx had no label of its own): the shallowest
-      // written path covering the cleared entry receives a bare shape entry
-      // so the existence history survives the overwrite regardless.
+      // replaced the slot, a declared entry re-minted at the path, or the
+      // tx had no label of its own): the shallowest written path covering
+      // the cleared entry — or, when none does (a declared re-mint without
+      // a write there), the entry's own path — receives a bare shape entry
+      // so the existence history survives regardless.
       const leftoverByPath = new Map<
         string,
         { path: readonly string[]; atoms: unknown[] }
@@ -4162,12 +4164,10 @@ export const prepareBoundaryCommit = (
             shallowest = written;
           }
         }
-        if (shallowest === undefined) {
-          return;
-        }
-        const key = pathKey(shallowest);
+        const anchor = shallowest ?? cleared.path;
+        const key = pathKey(anchor);
         const bucket = leftoverByPath.get(key) ??
-          { path: shallowest, atoms: [...flowConfidentiality] };
+          { path: anchor, atoms: [...flowConfidentiality] };
         bucket.atoms.push(...cleared.confidentiality);
         leftoverByPath.set(key, bucket);
       });
