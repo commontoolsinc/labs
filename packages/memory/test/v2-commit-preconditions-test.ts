@@ -15,6 +15,7 @@ import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import {
   commitPreconditionValueHash,
+  type ClientCommit,
   type EntityDocument,
   toDocumentPath,
 } from "../v2.ts";
@@ -34,6 +35,11 @@ const createEngine = async (): Promise<{
 };
 
 const toEntityDocument = (value: FabricValue): EntityDocument => ({ value });
+
+const toCommitPreconditions = (
+  preconditions: unknown[],
+): ClientCommit["preconditions"] =>
+  preconditions as unknown as ClientCommit["preconditions"];
 
 Deno.test("origin-committed precondition accepts a committed same-session origin", async () => {
   const { engine, path } = await createEngine();
@@ -761,8 +767,7 @@ Deno.test("malformed preconditions are rejected with ProtocolError", async () =>
             commit: {
               localSeq: 1,
               reads: { confirmed: [], pending: [] },
-              // deno-lint-ignore no-explicit-any
-              preconditions: [precondition as any],
+              preconditions: toCommitPreconditions([precondition]),
               operations: [{
                 op: "set",
                 id: "entity:should-not-commit",

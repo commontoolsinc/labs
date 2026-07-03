@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/memory/test/v2-commit-preconditions-test.ts",
   "packages/memory/test/v2-server-test.ts",
   "packages/memory/test/v2-storage-path-test.ts",
   "packages/memory/test/v2-watch-sync-test.ts",
