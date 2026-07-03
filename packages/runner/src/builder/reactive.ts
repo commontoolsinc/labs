@@ -80,9 +80,9 @@ export function stream<T>(
   schema?: JSONSchema,
 ): Stream<T> {
   // The runtime creates a Stream cell, but reactiveWithCell is typed to return Reactive
-  return reactiveWithCell<T>(undefined, schema, "stream") as unknown as Stream<
-    T
-  >;
+  return reactiveWithCell<T>(undefined, schema, "stream") as
+    & Reactive<T>
+    & Stream<T>;
 }
 
 function defaultForValue(value: unknown): JSONValue {
