@@ -53,23 +53,37 @@ export interface Output {
   invocationCount: number;
 }
 
+type VoidRuntimeStreamCell = Stream<void> & {
+  get?: () => unknown;
+  send(event: Record<string, unknown>): void;
+};
+
+function isStreamMarker(value: unknown): value is { $stream: true } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "$stream" in value &&
+    value.$stream === true
+  );
+}
+
 // Handler that invokes a stream from the wished piece
 // KEY FINDING: Despite blessed doc claims, Stream<T> in signature does NOT auto-unwrap.
 // The stream comes through as a Cell wrapping { $stream: true }. Call .send({}) on the Cell.
 const invokeServerStream = handler<
   unknown,
   {
-    stream: Stream<void>;
+    stream: VoidRuntimeStreamCell;
     lastInvocationStatus: Writable<string>;
     invocationCount: Writable<number>;
   }
 >((_event, state) => {
   try {
     // Stream arrives as a Cell, not an unwrapped callable stream
-    const streamCell = state.stream as any;
+    const streamCell = state.stream;
     const innerValue = streamCell.get ? streamCell.get() : streamCell;
 
-    if (innerValue && innerValue.$stream) {
+    if (isStreamMarker(innerValue)) {
       // Cell contains { $stream: true } marker - call .send() on the Cell itself
       // Event must be object (runtime calls preventDefault), can have data props, NO functions
       streamCell.send({}); // Could also be { someData: "value" }
@@ -101,7 +115,7 @@ export default pattern<Input, Output>(
     const wishResult = wish<{
       counter: number;
       invocationLog: string[];
-      incrementCounter: Stream<void>;
+      incrementCounter: VoidRuntimeStreamCell;
     }>({
       query: "#crossPieceTestServer",
     });
