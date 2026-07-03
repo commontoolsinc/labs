@@ -12,7 +12,8 @@ measured numbers (OFF vs ON, same commit) once W3 exists.
 | W2 — builder-born ROG | ✅ done (`b01b75554`) | Zero-recognition front-end at pattern() finalization (WeakMap side-table); str→interpolate native; unknown refs fail-closed to effect boundaries; full runner suite 738/0 with construction ALWAYS-ON (baseline parity) |
 | W3 — flag-on dispatch + measurement harness | ✅ done (runner level) | W3a–W3f (`88d139fba`…`886ee0a8b`). Vertical slice green; differential + fallback oracles; measurement harness. Numbers (compute-heavy pure pattern): **nodes −58–64%, docs flat/−1, wall −70–75%**, census interpreted. Flag-ON triage 27→15→4→**1** (only reload-sibling-overdirty: legacy-topology introspection + interpreter-node REHYDRATION IDENTITY, tracked follow-up). **Flag-OFF 738/0** (byte-clean). Gates landed: liveTrusted leaf trust (SECURITY), leaf caps (instantiatesPattern/needsCellContext/writesInput; v1's schema suppression DROPPED as unsound), scope_narrowing + narrowest-read-scope threading (opt-in raw marker), control_reference_semantics (links vs values — emission follow-up), no_node_ops cost gate, pattern-inline reverted to opt-in (piece-identity contract). |
 | W4 — multi-segment emission | ✅ done (`ba7bef58c`…`ab87218b7`) | Segments coalesce around VERBATIM legacy boundary nodes (handler/effect/control/collection/pattern/gated-leaf) — the original alias topology IS the wiring (v1 F1/F2/F3 dissolve by construction). **Full corpus census (generated-patterns, flag-ON, all green): 122/180 patterns interpret (67.8%); on engaged patterns 59.3% of node ops collapse; 1281 legacy actions → 845 scheduler nodes (−34%)**. Fallbacks: nothing_to_collapse 33 (cost gate), no_rog 14 + incomplete 10 (engagement headroom), scope 1. Fix trail: ungated leaves (argumentSchema===false bypass), schema-bound per-leaf reads for fully-external leaves (legacy readJavaScriptArgument parity — cleared calendar/proxy-length/reading-list). pattern-tests flag-ON **84/84**; chat sim flag-ON 12/0 (4.8s); runner flag-ON 737/1 / flag-OFF 738/0; root test all-pass; root integration 7/7. Collections per-element path moves to the next WO. |
-| W5 — transformer native ops | ⬜ | — |
+| W5a — inline map coordinator | ✅ done (`83835b141`+) | **The doc-explosion law breaks**: eligible pure-element maps evaluate per-element via evalRog (live BuiltRog from construction — the no_rog serialization boundary never applies). Measured N=10: **docs 54→24 (−56%), nodes 46→26 (−43%), wall −70%**, byte-equal. Legacy-parity mechanics: element-identity keyed runs (results follow elements across inserts), same cell causes, pointwise per-element txs, consolidated raw writes, resume guard, CT-1623 by-identity op protocol (ri2SubstituteOpRefs), loud non-array/sentinel errors, MONOTONIC DEGRADE to the real legacy map builtin for scoped lists/elements (D-EMISSION-SCOPE enforced dynamically). Gates: runner flag-ON **737/1** (pre-tracked reload item only) / flag-off 738/0; pattern-tests flag-ON 84/84; generated-patterns green; chat sim 12/0. Corpus: engagement 71.1%, inline refusals 0. filter/flatMap + nested-inline (consumed-as-value) next. |
+| W5b — transformer native ops | ⬜ | — |
 | W6 — function lowering | ⬜ | — |
 | W7 — suites + chat sim + measurements (continuous) | 🟡 green at every milestone so far | **Root `deno task test` flag-off: ALL PASSING (207.5s; baseline 210.5s — no construction cost).** **Root integration 7/7** (after the str un-hoist fix; cli suite needed a pre-existing deno.jsonc fix reproduced broken on main). **Chat sim flag-ON 12/0 in 5.4s** — the v1 ~226× pathology does NOT reproduce (conservative gates keep group-chat legacy). Runner: flag-off 738/0, flag-ON 737/1. |
 
@@ -109,3 +110,17 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   NEXT: engagement headroom (no_rog 14 = plain-JSON patterns without live
   factory; incomplete 10 — census the reasons), W5 transformer native ops
   (D-V2-STR-DIRECT), collections per-element docs, rehydration identity.
+
+- (2026-07-03) **W5a inline map MILESTONE.** Per-element child patterns
+  gone on eligible maps; doc law broken (−56% docs, −43% nodes, −70% wall
+  N=10). Corpus fix trail: derivation-aware side-table for the
+  traverse-utils op clone (strict lookup kept for dispatch — positional
+  node correspondence); usage from the element ROG incl. the RESULT
+  expression (pure projections have zero ops); element-identity keying
+  (mid-list inserts); monotonic degrade to the REAL legacy builtin for
+  scoped lists (same signature + container cause = seamless); CT-1623
+  by-identity sentinel protocol preserved + loud misses; non-array loud
+  error. NEXT: nested-pattern inline w/ consumed-as-value (the doc savings
+  Berni flagged: not everything materialized in a nested call needs
+  materialization), filter/flatMap, no_rog/incomplete headroom, W5b
+  transformer native ops (D-V2-STR-DIRECT).
