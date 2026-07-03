@@ -83,6 +83,49 @@ describe("TypeScriptCompiler", () => {
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
 
+  it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {
+    // The interleaved driver only changes WHERE the event loop can run
+    // (macrotask yields at module boundaries) — never what is emitted. Pin
+    // byte-for-byte equivalence across a multi-module program so the two
+    // drivers cannot drift.
+    const compiler = new TypeScriptCompiler(types);
+    const files = {
+      "/main.tsx":
+        "import { sub } from './math/subtract.ts';export const run = () => sub(10,2);export default run;",
+      "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
+      "/math/subtract.ts":
+        "import { add } from '../utils.ts';export const sub = (x:number,y:number)=>add(x,y*-1)",
+    };
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.tsx", files),
+    );
+    const sync = compiler.compileToModules(resolved);
+    const interleaved = await compiler.compileToModulesInterleaved(resolved);
+
+    expect(new Set(interleaved.keys())).toEqual(new Set(sync.keys()));
+    for (const [name, out] of sync) {
+      expect(interleaved.get(name)!.js).toBe(out.js);
+      expect(JSON.stringify(interleaved.get(name)!.sourceMap)).toBe(
+        JSON.stringify(out.sourceMap),
+      );
+    }
+  });
+
+  it("compileToModulesInterleaved surfaces type errors like compileToModules", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.tsx", {
+        "/main.tsx":
+          "function add(x:number, y:number): number {return x+y}; export default add(`0`, 2);",
+      }),
+    );
+    const expected =
+      "Argument of type 'string' is not assignable to parameter of type 'number'.";
+    expect(() => compiler.compileToModules(resolved)).toThrow(expected);
+    await expect(compiler.compileToModulesInterleaved(resolved)).rejects
+      .toThrow(expected);
+  });
+
   it("Compiles programs that include authored .js sources", async () => {
     // `allowJs` on the per-module emit path: a `.js` source emits its compiled
     // body under its own name (`/math.js` → `/math.js`), which TypeScript
