@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/html/test/worker-reconciler-cell-child.test.ts",
   "packages/html/test/worker-reconciler-cell-props.test.ts",
   "packages/html/test/worker-reconciler-cfc-render-policy.test.ts",
   "packages/html/test/worker-reconciler-space-stamp.test.ts",

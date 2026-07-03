@@ -8,6 +8,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
 
+type VDomOpType = VDomOp["op"];
+type VDomOpOfType<T extends VDomOpType> = Extract<VDomOp, { op: T }>;
+type RuntimeCellConstructor = new (...args: unknown[]) => object;
+
 /**
  * Helper to collect ops emitted by the reconciler.
  */
@@ -20,7 +24,10 @@ function createOpsCollector() {
       allOps.length = 0;
     },
     hasOp: (opType: string) => allOps.some((op) => op.op === opType),
-    getOpsOfType: (opType: string) => allOps.filter((op) => op.op === opType),
+    getOpsOfType: <T extends VDomOpType>(
+      opType: T,
+    ): VDomOpOfType<T>[] =>
+      allOps.filter((op): op is VDomOpOfType<T> => op.op === opType),
   };
 }
 
@@ -39,7 +46,9 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   const CellImplConstructor = dummyCell.constructor;
 
   // Define MockCell extending CellImpl
-  class MockCell extends (CellImplConstructor as any) {
+  const MockCellBase = CellImplConstructor as unknown as RuntimeCellConstructor;
+
+  class MockCell extends MockCellBase {
     private subscribers = new Set<(value: any) => void>();
 
     constructor(public value: any) {
@@ -72,6 +81,17 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     }
   }
 
+  function workerChild(cell: MockCell): Cell<WorkerRenderNode> {
+    return cell as unknown as Cell<WorkerRenderNode>;
+  }
+
+  function mountMockCell(
+    reconciler: WorkerReconciler,
+    cell: MockCell,
+  ): void {
+    reconciler.mount(cell as unknown as Cell<unknown>);
+  }
+
   await t.step(
     "updates child Cell VNode in place when tag matches",
     async () => {
@@ -95,7 +115,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as any],
+        children: [workerChild(childCell)],
       };
 
       const rootCell = new MockCell(rootVNode);
@@ -105,13 +125,13 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const createOps = collector.getOpsOfType("create-element");
-      const spanCreate = createOps.find((op: any) => op.tagName === "span");
+      const spanCreate = createOps.find((op) => op.tagName === "span");
 
       if (!spanCreate) {
         throw new Error("Span was not created!");
       }
 
-      const spanNodeId = (spanCreate as any).nodeId;
+      const spanNodeId = spanCreate.nodeId;
       collector.clear();
 
       // Update Cell: same tag but different props and children
@@ -125,7 +145,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
       // VNode in-place update: span element should NOT be removed/recreated
       const removeOps = collector.getOpsOfType("remove-node");
-      const spanRemoved = removeOps.some((op: any) => op.nodeId === spanNodeId);
+      const spanRemoved = removeOps.some((op) => op.nodeId === spanNodeId);
       assertEquals(
         spanRemoved,
         false,
@@ -133,9 +153,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
 
       const newCreateOps = collector.getOpsOfType("create-element");
-      const newSpanCreated = newCreateOps.some((op: any) =>
-        op.tagName === "span"
-      );
+      const newSpanCreated = newCreateOps.some((op) => op.tagName === "span");
       assertEquals(
         newSpanCreated,
         false,
@@ -144,11 +162,11 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
       // Props should be updated in place
       const setPropOps = collector.getOpsOfType("set-prop");
-      const idUpdate = setPropOps.find((op: any) =>
+      const idUpdate = setPropOps.find((op) =>
         op.nodeId === spanNodeId && op.key === "id"
       );
       assertEquals(
-        (idUpdate as any)?.value,
+        idUpdate?.value,
         "child-span-updated",
         "Prop should be updated in place",
       );
@@ -223,7 +241,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
       assertEquals(idOps.length, 1, "changed static prop should re-emit once");
       assertEquals(
-        (idOps[0] as any).value,
+        idOps[0].value,
         "tab-2",
         "changed static prop should carry the new value",
       );
@@ -670,16 +688,19 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       type: "vnode",
       name: "div",
       props: {},
-      children: [childCell as any],
+      children: [workerChild(childCell)],
     });
 
-    reconciler.mount(rootCell as any);
+    mountMockCell(reconciler, rootCell);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const createSpanOp = collector.getOpsOfType("create-element").find(
-      (op: any) => op.tagName === "span",
+      (op) => op.tagName === "span",
     );
-    const spanNodeId = (createSpanOp as any).nodeId;
+    if (!createSpanOp) {
+      throw new Error("Expected span to be created");
+    }
+    const spanNodeId = createSpanOp.nodeId;
     collector.clear();
 
     // Update child cell to button
@@ -693,13 +714,11 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const removeOps = collector.getOpsOfType("remove-node");
-    const spanRemoved = removeOps.some((op: any) => op.nodeId === spanNodeId);
+    const spanRemoved = removeOps.some((op) => op.nodeId === spanNodeId);
     assertEquals(spanRemoved, true, "Span should be removed when tag changes");
 
     const newCreateOps = collector.getOpsOfType("create-element");
-    const buttonCreated = newCreateOps.some((op: any) =>
-      op.tagName === "button"
-    );
+    const buttonCreated = newCreateOps.some((op) => op.tagName === "button");
     assertEquals(buttonCreated, true, "Button should be created");
   });
 
@@ -717,7 +736,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       children: [childCell],
     });
 
-    reconciler.mount(rootCell as any);
+    mountMockCell(reconciler, rootCell);
     await new Promise((resolve) => setTimeout(resolve, 10));
     collector.clear();
 
@@ -730,7 +749,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     const updateTextOps = collector.getOpsOfType("update-text");
     assertEquals(updateTextOps.length, 1, "Should emit update-text");
-    assertEquals((updateTextOps[0] as any).text, "World");
+    assertEquals(updateTextOps[0].text, "World");
   });
 
   await t.step(
@@ -979,7 +998,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         }],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const setEventOps = collector.getOpsOfType("set-event");
@@ -1024,7 +1043,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: ["Click me"],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -1071,7 +1090,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: ["Click me"],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -1111,7 +1130,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: ["Click me"],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -1146,7 +1165,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: childrenCell,
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const initialTextOps = collector.getOpsOfType("create-text");
@@ -1200,7 +1219,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: [],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -1245,7 +1264,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         children: [childCell],
       });
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
@@ -1266,7 +1285,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         1,
         "Should emit update-text for new value",
       );
-      assertEquals((updateOps[0] as any).text, "World", "Check new value");
+      assertEquals(updateOps[0].text, "World", "Check new value");
     },
   );
 
@@ -1302,7 +1321,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       };
       const rootCell = new MockCell(rootVNode);
 
-      reconciler.mount(rootCell as any);
+      mountMockCell(reconciler, rootCell);
       await new Promise((resolve) => setTimeout(resolve, 10));
       collector.clear();
 
