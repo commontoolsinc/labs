@@ -9,6 +9,10 @@ import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 
+function invalidFabricValue(value: unknown): FabricValue {
+  return value as FabricValue;
+}
+
 describe("valueEqual()", () => {
   it("returns `true` for equal primitives", () => {
     expect(valueEqual(1, 1)).toBe(true);
@@ -35,8 +39,8 @@ describe("valueEqual()", () => {
     // rejects it rather than silently mis-answering, and does so regardless
     // of which argument is the function. (Distinct values are used so the
     // `Object.is()` fast path doesn't short-circuit before the check.)
-    const fn = (() => {}) as unknown as FabricValue;
-    const fn2 = (() => {}) as unknown as FabricValue;
+    const fn = invalidFabricValue(() => {});
+    const fn2 = invalidFabricValue(() => {});
     expect(() => valueEqual(fn, fn2)).toThrow();
     expect(() => valueEqual(fn, 1)).toThrow();
     expect(() => valueEqual(fn, { a: 1 })).toThrow();
@@ -48,8 +52,8 @@ describe("valueEqual()", () => {
     // A non-array, non-plain object (a `Date`, `Map`, or other class
     // instance) is reachable only via an unsound cast; reject it rather than
     // treat it as an empty record.
-    const date = new Date() as unknown as FabricValue;
-    const map = new Map() as unknown as FabricValue;
+    const date = invalidFabricValue(new Date());
+    const map = invalidFabricValue(new Map());
     expect(() => valueEqual(date, { a: 1 })).toThrow();
     expect(() => valueEqual({ a: 1 }, date)).toThrow();
     expect(() => valueEqual(map, {})).toThrow();

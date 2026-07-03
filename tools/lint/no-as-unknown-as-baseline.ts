@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/valueEquals.test.ts": [
-    "38:26:1yq2m3c",
-    "39:27:1yq2m3c",
-    "51:28:1ykni6w",
-    "52:26:1rj1hjg",
-  ],
   "packages/fs-sync-example/src/daemon.ts": [
     "171:9:1s2xq1",
   ],
