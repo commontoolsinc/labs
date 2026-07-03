@@ -7,10 +7,16 @@ import * as domserializer from "dom-serializer";
 import { RenderOptions } from "./render.ts";
 import { styleObjectToCssString } from "./render-utils.ts";
 
+type StyleObject = Record<string, unknown>;
+
 const eventListeners = new WeakMap<
   object,
   Map<string, Array<(event: unknown) => void>>
 >();
+
+function isDomElement(node: unknown): node is domhandler.Element {
+  return node instanceof domhandler.Element;
+}
 
 function getNodeEventListeners(node: object) {
   let listeners = eventListeners.get(node);
@@ -29,7 +35,7 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       key: string,
       value: unknown,
     ) {
-      const el = element as any;
+      const el = element as domhandler.Element;
 
       // Handle style object specially - convert to CSS string
       if (
@@ -39,7 +45,7 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
         value !== null &&
         !Array.isArray(value)
       ) {
-        const cssString = styleObjectToCssString(value as Record<string, any>);
+        const cssString = styleObjectToCssString(value as StyleObject);
         el.attribs["style"] = cssString;
         return;
       }
@@ -91,26 +97,26 @@ export class MockDoc {
     // used by the renderer.
     const nodeExt = {
       remove: {
-        value() {
-          return DomUtils.removeElement(this as any);
+        value(this: domhandler.ChildNode) {
+          return DomUtils.removeElement(this);
         },
       },
       replaceWith: {
-        value(newNode: any) {
-          return DomUtils.replaceElement(this as any, newNode);
+        value(this: domhandler.ChildNode, newNode: domhandler.ChildNode) {
+          return DomUtils.replaceElement(this, newNode);
         },
       },
       innerHTML: {
-        get() {
-          return domserializer.render((this as any).children);
+        get(this: domhandler.ParentNode) {
+          return domserializer.render(this.children);
         },
-        set(value: string) {
+        set(this: domhandler.ParentNode, value: string) {
           if (value !== "") {
             throw new Error(
               "Only the empty string is supported when setting innerHTML.",
             );
           }
-          const children = DomUtils.getChildren(this as any);
+          const children = DomUtils.getChildren(this);
           for (const child of children) {
             DomUtils.removeElement(child);
           }
@@ -122,75 +128,75 @@ export class MockDoc {
     // used by the renderer.
     const nodeWithChildrenExt = {
       getElementsByTagName: {
-        value(tagName: string) {
-          // @ts-ignore: Cast to Node, we only
-          // want to query the children, do not match `this`.
-          const node = this as domhandler.NodeWithChildren;
-          return DomUtils.getElementsByTagName(tagName, node.children, true);
+        value(this: domhandler.ParentNode, tagName: string) {
+          return DomUtils.getElementsByTagName(tagName, this.children, true);
         },
       },
       append: {
-        value(nodeOrText: any) {
-          return DomUtils.appendChild(this as any, nodeOrText);
+        value(this: domhandler.ParentNode, nodeOrText: domhandler.ChildNode) {
+          return DomUtils.appendChild(this, nodeOrText);
         },
       },
       appendChild: {
-        value(nodeOrText: any) {
-          return DomUtils.appendChild(this as any, nodeOrText);
+        value(this: domhandler.ParentNode, nodeOrText: domhandler.ChildNode) {
+          return DomUtils.appendChild(this, nodeOrText);
         },
       },
       insertBefore: {
-        value(child: any, ref: any | null) {
+        value(
+          this: domhandler.ParentNode,
+          child: domhandler.ChildNode,
+          ref: domhandler.ChildNode | null,
+        ) {
           return ref !== null
             ? DomUtils.prepend(ref, child)
-            : DomUtils.appendChild(this as any, child);
+            : DomUtils.appendChild(this, child);
         },
       },
       getAttribute: {
-        value(attrName: string) {
-          if (this && (this as any).attribs) {
-            // @ts-ignore: domhandler.Element has `attribs`
-            return (this as Element).attribs[attrName];
+        value(this: domhandler.ParentNode, attrName: string) {
+          if (isDomElement(this)) {
+            return this.attribs[attrName];
           }
         },
       },
       setAttribute: {
-        value(attrName: string, value: string) {
-          if (this && (this as any).attribs) {
-            // @ts-ignore: domhandler.Element has `attribs`
-            (this as Element).attribs[attrName] = value;
+        value(
+          this: domhandler.ParentNode,
+          attrName: string,
+          value: string,
+        ) {
+          if (isDomElement(this)) {
+            this.attribs[attrName] = value;
           }
         },
       },
       hasAttribute: {
-        value(attrName: string) {
-          if (this && (this as any).attribs) {
-            // @ts-ignore: domhandler.Element has `attribs`
-            return attrName in (this as Element).attribs;
+        value(this: domhandler.ParentNode, attrName: string) {
+          if (isDomElement(this)) {
+            return attrName in this.attribs;
           }
           return false;
         },
       },
       removeAttribute: {
-        value(attrName: string) {
-          if (this && (this as any).attribs) {
-            // @ts-ignore: domhandler.Element has `attribs`
-            delete (this as Element).attribs[attrName];
+        value(this: domhandler.ParentNode, attrName: string) {
+          if (isDomElement(this)) {
+            delete this.attribs[attrName];
           }
         },
       },
       dataset: {
-        get() {
-          const el = this as any;
-          if (!el.attribs) return {};
+        get(this: domhandler.ParentNode) {
+          if (!isDomElement(this)) return {};
           const dataset: Record<string, string> = {};
-          for (const key in el.attribs) {
+          for (const key in this.attribs) {
             if (key.startsWith("data-")) {
               const dataKey = key.slice(5).replace(
                 /-([a-z])/g,
                 (_, char) => char.toUpperCase(),
               );
-              dataset[dataKey] = el.attribs[key];
+              dataset[dataKey] = this.attribs[key];
             }
           }
           return dataset;
@@ -231,9 +237,8 @@ export class MockDoc {
     // used by the renderer.
     const docExt = {
       body: {
-        get() {
-          // @ts-ignore: domhandler.Document is also a domhandler.Node
-          return (this as domhandler.Node).getElementsByTagName("body")[0];
+        get(this: domhandler.Document) {
+          return DomUtils.getElementsByTagName("body", this.children, true)[0];
         },
       },
       createElement: {
@@ -250,8 +255,8 @@ export class MockDoc {
         },
       },
       getElementById: {
-        value(id: string) {
-          return DomUtils.getElementById(id, this as any, true);
+        value(this: domhandler.Document, id: string) {
+          return DomUtils.getElementById(id, this, true);
         },
       },
     };
