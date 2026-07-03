@@ -17,6 +17,8 @@ import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 
+type RuntimeCellConstructor = new (...args: unknown[]) => object;
+
 function createOpsCollector() {
   const allOps: VDomOp[] = [];
   return {
@@ -254,7 +256,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const CellImplConstructor = dummyCell.constructor;
 
-    class MockCell extends (CellImplConstructor as any) {
+    const MockCellBase =
+      CellImplConstructor as unknown as RuntimeCellConstructor;
+
+    class MockCell extends MockCellBase {
       private subscribers = new Set<(value: unknown) => void>();
 
       constructor(public value: unknown) {
