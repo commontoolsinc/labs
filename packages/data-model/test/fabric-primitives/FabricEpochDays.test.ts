@@ -8,6 +8,14 @@ import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 
+const expectEpochDays = (value: unknown): FabricEpochDays => {
+  expect(value).toBeInstanceOf(FabricEpochDays);
+  if (!(value instanceof FabricEpochDays)) {
+    throw new Error("expected FabricEpochDays");
+  }
+  return value;
+};
+
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
@@ -80,9 +88,9 @@ describe("FabricEpochDays", () => {
             expectedTag,
             "AA",
             context,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
-          expect(decoded.value).toBe(0n);
+          );
+          const epochDays = expectEpochDays(decoded);
+          expect(epochDays.value).toBe(0n);
         });
       });
 
@@ -93,9 +101,9 @@ describe("FabricEpochDays", () => {
             expectedTag,
             codec.encode(sd),
             context,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
-          expect(decoded.value).toBe(0n);
+          );
+          const epochDays = expectEpochDays(decoded);
+          expect(epochDays.value).toBe(0n);
         });
 
         it("round-trips positive day count", () => {
@@ -105,9 +113,9 @@ describe("FabricEpochDays", () => {
             expectedTag,
             codec.encode(sd),
             context,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
-          expect(decoded.value).toBe(days);
+          );
+          const epochDays = expectEpochDays(decoded);
+          expect(epochDays.value).toBe(days);
         });
 
         it("round-trips negative day count (pre-epoch)", () => {
@@ -117,9 +125,9 @@ describe("FabricEpochDays", () => {
             expectedTag,
             codec.encode(sd),
             context,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
-          expect(decoded.value).toBe(days);
+          );
+          const epochDays = expectEpochDays(decoded);
+          expect(epochDays.value).toBe(days);
         });
       });
     });
