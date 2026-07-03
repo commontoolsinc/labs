@@ -1,5 +1,8 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import type { MemorySpace } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+
+const memorySpace = (value: string): MemorySpace => value as MemorySpace;
 
 Deno.test("resolveSpaceStoreUrl uses a dedicated engine subdirectory in directory mode", () => {
   const root = new URL("file:///tmp/cf-memory/");
@@ -29,17 +32,17 @@ Deno.test("resolveSpaceStoreUrl rejects traversal-like subjects", () => {
   const root = new URL("file:///tmp/cf-memory/");
 
   assertThrows(
-    () => resolveSpaceStoreUrl(root, "../../evil" as any),
+    () => resolveSpaceStoreUrl(root, memorySpace("../../evil")),
     Error,
     "Invalid memory space identifier for store path",
   );
   assertThrows(
-    () => resolveSpaceStoreUrl(root, "nested/space" as any),
+    () => resolveSpaceStoreUrl(root, memorySpace("nested/space")),
     Error,
     "Invalid memory space identifier for store path",
   );
   assertThrows(
-    () => resolveSpaceStoreUrl(root, ".." as any),
+    () => resolveSpaceStoreUrl(root, memorySpace("..")),
     Error,
     "Invalid memory space identifier for store path",
   );
@@ -49,7 +52,7 @@ Deno.test("resolveSpaceStoreUrl rejects malformed unicode subjects with validati
   const root = new URL("file:///tmp/cf-memory/");
 
   assertThrows(
-    () => resolveSpaceStoreUrl(root, "\uD800" as any),
+    () => resolveSpaceStoreUrl(root, memorySpace("\uD800")),
     Error,
     "Invalid memory space identifier for store path",
   );
