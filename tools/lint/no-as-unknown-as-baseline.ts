@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/llm/src/client.test.ts": [
-    "34:17:1lgs2xo",
-  ],
   "packages/memory/fact.ts": [
     "146:39:1yp8y32",
   ],

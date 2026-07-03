@@ -31,13 +31,15 @@ function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 function runClientStream(client: LLMClient, chunks: string[]) {
-  return (client as unknown as {
+  const streamClient: {
     stream(
       body: ReadableStream<Uint8Array>,
       id: string,
       callback?: (text: string) => void,
     ): Promise<unknown>;
-  }).stream(streamFromChunks(chunks), "trace-1", () => {});
+  } = client as any;
+
+  return streamClient.stream(streamFromChunks(chunks), "trace-1", () => {});
 }
 
 describe("LLMClient test-environment guard", () => {
