@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/html/test/worker-reconciler-space-stamp.test.ts",
   "packages/lib-shell/src/runtime.ts",
   "packages/lib-shell/test/runtime.test.ts",
   "packages/llm/src/client.ts",
