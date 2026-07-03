@@ -10,6 +10,7 @@ import {
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
 } from "../v2.ts";
+import type { AppliedCommit } from "../v2/engine.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const HELLO = {
@@ -201,7 +202,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       },
     }));
     assertEquals(
-      (assertResponse(shiftMessage(writerMessages)).ok as any)?.seq,
+      assertResponse<AppliedCommit>(shiftMessage(writerMessages)).ok?.seq,
       2,
     );
 
