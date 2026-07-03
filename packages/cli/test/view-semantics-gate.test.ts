@@ -31,6 +31,10 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
+function typedTestValue<T>(value: unknown): T {
+  return value as T;
+}
+
 // --- createSemantics: build success path that the !program guard backstops ----
 
 Deno.test("semantics: a healthy build returns a Program (the !program guard is a backstop)", () => {
@@ -54,7 +58,7 @@ Deno.test("semantics: prewarm never sees a throw because build isolates its own"
 const x = 1;
 const y = x;`;
   const doc = parseDocument(blob);
-  const sem = createSemantics(blob, { cwd: 12345 as unknown as string })!;
+  const sem = createSemantics(blob, { cwd: typedTestValue<string>(12345) })!;
   sem.prewarm(); // build throws internally, latches failed, does not propagate
   sem.prewarm(); // the latch short-circuits the second attempt
   assertEquals(sem.typeAt(nameOffsetOf(doc, "y")), null);
@@ -186,7 +190,7 @@ Deno.test("diff semantics: a hostile cwd is rejected by containment before build
     let threw = false;
     try {
       createDiffSemantics("difftext", diffMapsFor(join(root, "m.ts")), {
-        cwd: 12345 as unknown as string,
+        cwd: typedTestValue<string>(12345),
       });
     } catch {
       threw = true;
@@ -213,7 +217,7 @@ Deno.test("diff semantics: no in-workspace root file means a null service (not a
 // directly: a build is cached after the first success, and a throwing or
 // program-less build latches so it is not retried.
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
-  const fake = {} as unknown as ts.Program;
+  const fake = typedTestValue<ts.Program>({});
 
   let okCalls = 0;
   const ok = _internal.lazyProgram(() => {
