@@ -55,6 +55,12 @@ export type ValueRef =
   | { kind: "opOut"; op: OpId; path: PathStep[] }
   | { kind: "const"; value: unknown }
   | { kind: "internal"; cell: number; path: PathStep[] }
+  /** A read of an EXTERNALLY-identified cell (the builder saw
+   * `export().external` — a pre-existing/well-known cell referenced in the
+   * pattern body). Indexes this Rog's `externals` table; the dispatch binds
+   * the stored reference and seeds the value (a plain external input, like
+   * an argument — no producer). */
+  | { kind: "external"; cell: number; path: PathStep[] }
   /** A reference to the pattern's own egress/result tree at `path` — the
    * result-self-reference shape (v1 fell back `unrecognized_alias` on it). */
   | { kind: "result"; path: PathStep[] };
@@ -324,6 +330,11 @@ export interface Rog {
   ops: Op[];
   /** Declared internal cells, referenced by `internal` ValueRefs by index. */
   internals: InternalDecl[];
+  /** Externally-identified cells referenced by `external` ValueRefs by
+   * index. Each entry is the cell's serialized external REFERENCE, exactly
+   * what legacy `toJSONWithLegacyAliases` writes for it (json-utils: "if
+   * external, copy the reference as is"). */
+  externals?: unknown[];
   /** Same-bundle lowered helper functions, invoked via `call` ops. */
   fns?: FnDef[];
   /** Set when construction met a shape it could not represent: the ROG is

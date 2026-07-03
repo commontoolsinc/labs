@@ -357,6 +357,8 @@ function rogFullyInlinable(
   leafTrust: DispatchOptions["leafTrust"],
 ): boolean {
   if (built.rog.incomplete?.length) return false;
+  // Whole-child in-memory evaluation has no external-cell seeding yet.
+  if (built.rog.externals?.length) return false;
   for (const op of built.rog.ops) {
     const d = op.detail;
     if (d.kind === "leaf") {
@@ -488,6 +490,7 @@ function buildSegmentNode(
   const include = new Set<OpId>(segmentNodeOps);
   const externalOps = new Set<OpId>();
   const internalReads = new Set<number>();
+  const externalReads = new Set<number>();
   let readsArgument = false;
 
   const queue = [...segmentNodeOps];
@@ -520,6 +523,11 @@ function buildSegmentNode(
             externalOps.add(decl.producedBy);
           }
         }
+      } else if (ref.kind === "external") {
+        if (!rog.externals || rog.externals[ref.cell] === undefined) {
+          return `external_ref_out_of_range:${ref.cell}`;
+        }
+        externalReads.add(ref.cell);
       } else if (ref.kind === "result") {
         return "result_self_reference";
       }
@@ -590,6 +598,15 @@ function buildSegmentNode(
     }
     inputs.internals = internals;
   }
+  if (externalReads.size > 0) {
+    // The stored reference is EXACTLY what legacy writes for the cell in a
+    // node binding (toJSONWithLegacyAliases external passthrough).
+    const externals: Record<string, unknown> = {};
+    for (const idx of externalReads) {
+      externals[String(idx)] = rog.externals![idx];
+    }
+    inputs.externals = externals;
+  }
   if (externalOps.size > 0) {
     const ops: Record<string, unknown> = {};
     for (const id of externalOps) {
@@ -654,6 +671,7 @@ function makeSegmentImplementation(
     inputsCell: Cell<{
       argument?: unknown;
       internals?: Record<string, unknown>;
+      externals?: Record<string, unknown>;
       ops?: Record<string, unknown>;
       leafInputs?: Record<string, unknown>;
     }>,
@@ -684,6 +702,10 @@ function makeSegmentImplementation(
         for (const [key, value] of Object.entries(bound.internals ?? {})) {
           seedByInternal.set(Number(key), value);
         }
+        const seedByExternal = new Map<number, unknown>();
+        for (const [key, value] of Object.entries(bound.externals ?? {})) {
+          seedByExternal.set(Number(key), value);
+        }
         // Fully-external leaves: read the ORIGINAL alias tree through the
         // leaf's own argumentSchema (legacy readJavaScriptArgument).
         const leafInputOverrides = new Map<OpId, unknown>();
@@ -702,6 +724,7 @@ function makeSegmentImplementation(
           children: built.children,
           seed,
           seedByInternal,
+          seedByExternal,
           leafInputOverrides,
         });
         const out: Record<string, unknown> = {};

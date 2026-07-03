@@ -241,6 +241,8 @@ function buildRog(input: RogBuildInput): BuiltRog {
   // Internals table (D-V2-INTERNALS-TABLE): index per internal root.
   const internals: InternalDecl[] = [];
   const internalIdxByRoot = new Map<object, number>();
+  const externals: unknown[] = [];
+  const externalIdxByRoot = new Map<object, number>();
   for (const [root, partialCause] of internalCauses) {
     const idx = internals.length;
     internalIdxByRoot.set(root as unknown as object, idx);
@@ -268,8 +270,19 @@ function buildRog(input: RogBuildInput): BuiltRog {
     const { path, external, scope } = exported;
     const top = exported.cell as unknown as object;
     if (external) {
-      incomplete.push("external_cell");
-      return undefined;
+      // Externally-identified cell: store its serialized reference (exactly
+      // what legacy toJSONWithLegacyAliases writes) and read it by index.
+      let idx = externalIdxByRoot.get(top);
+      if (idx === undefined) {
+        idx = externals.length;
+        externalIdxByRoot.set(top, idx);
+        externals.push(external);
+      }
+      return {
+        kind: "external",
+        cell: idx,
+        path: (path as readonly PropertyKey[]).map((p) => String(p)),
+      };
     }
     if (scope !== undefined && scope !== DEFAULT_CELL_SCOPE) {
       // Narrowed scopes (user/session) stay legacy for now (v1
@@ -656,6 +669,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
     result,
     ops: ops as Op[],
     internals,
+    ...(externals.length > 0 && { externals }),
     ...(incomplete.length > 0 && { incomplete: dedupe(incomplete) }),
   };
   return { rog, leafImpls, children, collectionElements, leafArgSchemas };

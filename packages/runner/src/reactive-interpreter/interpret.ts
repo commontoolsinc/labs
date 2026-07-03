@@ -60,6 +60,9 @@ export interface EvalContext {
    * derivedInternalCells defaults, read through the tx by the dispatch.
    */
   seedByInternal?: Map<number, unknown>;
+  /** SEED by EXTERNALS-TABLE INDEX: values of externally-identified cells
+   * (`external` ValueRefs), read through the tx by the dispatch. */
+  seedByExternal?: Map<number, unknown>;
   /** PROBE MODE: never invoke leaf bodies; verdicts are structural only. */
   probe?: boolean;
   /** Unwrap a live Cell HANDLE to its value for control predicates (an
@@ -257,6 +260,8 @@ export function evalRog(
         }
         return undefined;
       }
+      case "external":
+        return navigate(ctx.seedByExternal?.get(ref.cell), ref.path);
       case "result":
         // Result-self-reference: needs the dispatch's materialized result
         // cell (the value is only complete after this evaluation). Not
