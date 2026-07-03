@@ -194,7 +194,7 @@ describe("sqlite protocol verbs (loopback)", () => {
     // A hostile `db.tables` payload: the sqlType fails DDL validation, so
     // ensureTables throws AFTER the cell-db is attached. The attach must be
     // cleaned up, not leaked on the shared per-space connection.
-    const badDb = {
+    const badDb: SqliteDbRef = {
       id,
       tables: {
         messages: {
@@ -205,7 +205,7 @@ describe("sqlite protocol verbs (loopback)", () => {
           },
         },
       },
-    } as unknown as SqliteDbRef;
+    };
     await expect(
       session.transact({
         localSeq: 1,
