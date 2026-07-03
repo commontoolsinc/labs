@@ -30,7 +30,7 @@ const isDeferredLinkContextError = (error: unknown): boolean =>
 function bindingTargetLink(value: unknown): unknown {
   if (isCell(value)) {
     try {
-      return (value as unknown as LinkableCell).getAsLink({
+      return (value as LinkableCell).getAsLink({
         includeSchema: true,
         keepAsCell: KeepAsCell.All,
       });
@@ -41,7 +41,7 @@ function bindingTargetLink(value: unknown): unknown {
   }
   if (isCellResult(value)) {
     try {
-      return (getCellOrThrow(value) as unknown as LinkableCell).getAsLink({
+      return (getCellOrThrow(value) as LinkableCell).getAsLink({
         includeSchema: true,
         keepAsCell: KeepAsCell.All,
       });

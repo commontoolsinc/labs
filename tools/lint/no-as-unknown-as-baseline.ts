@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/src/h.ts": [
-    "33:20:aw8ryo",
-    "44:36:131nvn4",
-  ],
   "packages/html/src/main/events.ts": [
     "145:25:b1vouf",
     "147:18:1tqtrtz",
