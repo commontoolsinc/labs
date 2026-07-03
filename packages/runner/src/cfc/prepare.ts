@@ -1234,8 +1234,10 @@ const isPureLinkStructure = (value: unknown): boolean => {
 // node gets an exact-path `structure` stamp with the per-tx join. Bare
 // link leaves get nothing: a pointer read at the leaf's own path is blind
 // passing, and the link entry already carries the target's transport
-// label. `undefined` (a removal) gets nothing either — "this path was
-// cleared" stays in the SC-4 existence-channel residual.
+// label. `undefined` (a removal) mints no stamp of its own; if the removed
+// path carried labels, the SC-4 grow folds them into the written path's
+// existence entry (see `clearedExistence` in the persist region), so only
+// the removal of never-labeled paths stays unrecorded.
 const pureLinkContainerPaths = (
   value: unknown,
   path: readonly string[],
@@ -3887,6 +3889,19 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     let flowCleared = false;
+    // SC-4 (C3): the existence channel never shrinks. When the flow-clear
+    // drops a derived or structure entry under a written path, its
+    // confidentiality is collected here and folded into the written path's
+    // `observes:"shape"` entry below — "this path was once written under J"
+    // reveals every historical writer, so the existence label GROWS across
+    // overwrites while the value label replaces (§8.12.8 stays a
+    // value-class rule; C0 §5). Link entries are excluded: they label the
+    // pointer, and folding them into content shape would re-smear the
+    // pointer/content split.
+    const clearedExistence: Array<{
+      path: readonly string[];
+      confidentiality: readonly unknown[];
+    }> = [];
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
@@ -3913,6 +3928,15 @@ export const prepareBoundaryCommit = (
         flowWrittenPaths.some((written) => isPrefix(written, entryPath))
       ) {
         flowCleared = true;
+        if (
+          entry.origin !== "link" &&
+          (entry.label.confidentiality?.length ?? 0) > 0
+        ) {
+          clearedExistence.push({
+            path: entryPath,
+            confidentiality: entry.label.confidentiality!,
+          });
+        }
         continue;
       }
       const schemaEntry = mergedSchemaEntrySchemas.get(key);
@@ -3972,7 +3996,7 @@ export const prepareBoundaryCommit = (
       }
     }
 
-    if (flowPersist && flowHasLabels) {
+    if (flowPersist && (flowHasLabels || clearedExistence.length > 0)) {
       // Attach the per-tx join at each written path. Within one tx every
       // write carries the same join, so deeper written paths are redundant
       // with a shallower written ancestor and are collapsed away (§4.6.4
@@ -4013,6 +4037,25 @@ export const prepareBoundaryCommit = (
         }
         derivedStampPaths.push(path);
       }
+      // SC-4 grow (C3): the confidentiality of every derived/structure
+      // entry the flow-clear dropped folds into the shape-channel entry of
+      // the stamp path covering it — new J first, then the cleared atoms,
+      // so re-deriving the same overwrite reproduces the same grown entry
+      // byte-for-byte (SC-11). Consumed pool indices are tracked so
+      // anything not covered by a stamp still lands below.
+      const attachedExistence = new Set<number>();
+      const grownConfidentialityFor = (
+        path: readonly string[],
+      ): unknown[] => {
+        const atoms: unknown[] = [...flowConfidentiality];
+        clearedExistence.forEach((cleared, index) => {
+          if (isPrefix(path, cleared.path)) {
+            attachedExistence.add(index);
+            atoms.push(...cleared.confidentiality);
+          }
+        });
+        return uniqueCfcAtoms(atoms);
+      };
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
         // collapse against paths that actually receive a covering entry.
@@ -4028,28 +4071,31 @@ export const prepareBoundaryCommit = (
         // entry carries the full J and keeps §8.12.8 replace-on-overwrite;
         // the `shape` (existence) entry carries confidentiality only —
         // existence is a confidentiality channel (SC-4: "this path was
-        // once written"), and integrity there would be joined by C3's
-        // grow-on-overwrite, which for integrity claims is an over-claim
-        // (integrity meets, never joins). Same conf atoms either way, so a
-        // class-unaware reader consuming both as covering entries sees
-        // exactly today's label — additively safe, no dial (C0 §9).
-        persistedLabelEntries.push({
-          path,
-          label: {
-            ...(flowConfidentiality.length > 0
-              ? { confidentiality: [...flowConfidentiality] }
-              : {}),
-            ...(flowIntegrity.length > 0
-              ? { integrity: [...flowIntegrity] }
-              : {}),
-          },
-          origin: "derived",
-          observes: "value",
-        });
-        if (flowConfidentiality.length > 0) {
+        // once written"), and integrity there would be joined by the
+        // grow-on-overwrite above, which for integrity claims is an
+        // over-claim (integrity meets, never joins). A class-unaware
+        // reader consuming both as covering entries sees today's label or
+        // a wider one — additively safe, no dial (C0 §9).
+        if (flowHasLabels) {
           persistedLabelEntries.push({
             path,
-            label: { confidentiality: [...flowConfidentiality] },
+            label: {
+              ...(flowConfidentiality.length > 0
+                ? { confidentiality: [...flowConfidentiality] }
+                : {}),
+              ...(flowIntegrity.length > 0
+                ? { integrity: [...flowIntegrity] }
+                : {}),
+            },
+            origin: "derived",
+            observes: "value",
+          });
+        }
+        const shapeConfidentiality = grownConfidentialityFor(path);
+        if (shapeConfidentiality.length > 0) {
+          persistedLabelEntries.push({
+            path,
+            label: { confidentiality: shapeConfidentiality },
             origin: "derived",
             observes: "shape",
           });
@@ -4070,10 +4116,51 @@ export const prepareBoundaryCommit = (
         // structure entries (absent `observes`) stay covering — unchanged
         // compat; the flow join is unaffected either way since value reads
         // consume the `shape` class too (C0 §4).
+        const structureConfidentiality = grownConfidentialityFor(path);
+        if (flowHasLabels || structureConfidentiality.length > 0) {
+          persistedLabelEntries.push({
+            path,
+            label: { confidentiality: structureConfidentiality },
+            origin: "structure",
+            observes: "shape",
+          });
+        }
+      }
+      // Cleared existence not covered by any stamp path (a link write
+      // replaced the slot, or the tx had no label of its own): the shallowest
+      // written path covering the cleared entry receives a bare shape entry
+      // so the existence history survives the overwrite regardless.
+      const leftoverByPath = new Map<
+        string,
+        { path: readonly string[]; atoms: unknown[] }
+      >();
+      clearedExistence.forEach((cleared, index) => {
+        if (attachedExistence.has(index)) {
+          return;
+        }
+        let shallowest: readonly string[] | undefined;
+        for (const written of flowWrittenPaths) {
+          if (
+            isPrefix(written, cleared.path) &&
+            (shallowest === undefined || written.length < shallowest.length)
+          ) {
+            shallowest = written;
+          }
+        }
+        if (shallowest === undefined) {
+          return;
+        }
+        const key = pathKey(shallowest);
+        const bucket = leftoverByPath.get(key) ??
+          { path: shallowest, atoms: [...flowConfidentiality] };
+        bucket.atoms.push(...cleared.confidentiality);
+        leftoverByPath.set(key, bucket);
+      });
+      for (const bucket of leftoverByPath.values()) {
         persistedLabelEntries.push({
-          path,
-          label: { confidentiality: [...flowConfidentiality] },
-          origin: "structure",
+          path: canonicalizeLogicalPath(bucket.path),
+          label: { confidentiality: uniqueCfcAtoms(bucket.atoms) },
+          origin: "derived",
           observes: "shape",
         });
       }

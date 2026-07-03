@@ -267,7 +267,7 @@ describe("CFC flow labels (default transition)", () => {
   // path from a transaction that read nothing labeled replaces the derived
   // component, so the label tracks the current value (the old, tainted value
   // is gone; reads of it journaled its label at read time).
-  it("replaces the derived component when the value is overwritten by an untainted write", async () => {
+  it("untainted overwrite replaces the value channel and grows the existence channel", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -332,11 +332,14 @@ describe("CFC flow labels (default transition)", () => {
       ).toContainEqual("secret");
 
       // Untainted overwrite: a write whose journal contains no reads (raw
-      // root write). The derived component is replaced (cleared — this tx
-      // derived nothing), not unioned forever. Note that `cell.set()` is
-      // NOT such a write: it journals a read of the prior value, so a
-      // set-overwrite of a tainted doc conservatively re-derives the taint
-      // — by the journal it consumed the old value.
+      // root write). The VALUE channel is replaced (cleared — this tx
+      // derived nothing): §8.12.8 replace-on-overwrite is a value-class
+      // rule. The EXISTENCE (shape) channel grows instead of vanishing
+      // (SC-4, C3): "this path was once written under secret" must not
+      // become a public bit. Note that `cell.set()` is NOT an untainted
+      // write: it journals a read of the prior value, so a set-overwrite
+      // of a tainted doc conservatively re-derives the taint — by the
+      // journal it consumed the old value.
       const clean = runtime.edit();
       clean.writeOrThrow({
         space: signer.did(),
@@ -348,7 +351,17 @@ describe("CFC flow labels (default transition)", () => {
       expect((await clean.commit()).ok).toBeDefined();
 
       const entriesAfter = replicaEntries(storageManager, targetId);
-      expect(entriesAfter.find((e) => e.origin === "derived")).toBeUndefined();
+      const derivedAfter = entriesAfter.filter((e) => e.origin === "derived");
+      expect(
+        derivedAfter.filter((e) =>
+          (e as { observes?: string }).observes !== "shape"
+        ),
+      ).toEqual([]);
+      expect(derivedAfter.length).toBe(1);
+      expect((derivedAfter[0] as { observes?: string }).observes).toBe(
+        "shape",
+      );
+      expect(derivedAfter[0].label.confidentiality).toEqual(["secret"]);
     } finally {
       await runtime.dispose();
       await storageManager.close();
