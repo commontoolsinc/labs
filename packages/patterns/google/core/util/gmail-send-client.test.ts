@@ -18,7 +18,6 @@ type FetchCall = {
 };
 
 const originalFetch = globalThis.fetch;
-const originalEnvironment = getPatternEnvironment();
 
 function auth(overrides: Partial<TestAuth> = {}): TestAuth {
   return {
@@ -87,6 +86,30 @@ function installFetch(
     return await handler(call, calls.length - 1);
   }) as typeof fetch;
   return calls;
+}
+
+function mockPatternEnvironment(apiUrl: URL): { restore(): void } {
+  const originalPatternEnvironment = getPatternEnvironment();
+  const originalLocation = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "location",
+  );
+  setTestPatternEnvironment({ apiUrl });
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: { href: apiUrl.href } as Location,
+  });
+
+  return {
+    restore: () => {
+      setTestPatternEnvironment(originalPatternEnvironment);
+      if (originalLocation) {
+        Object.defineProperty(globalThis, "location", originalLocation);
+      } else {
+        Reflect.deleteProperty(globalThis, "location");
+      }
+    },
+  };
 }
 
 Deno.test({
@@ -172,9 +195,9 @@ Deno.test({
 Deno.test({
   name: "GmailSendClient refreshes auth and retries label operations",
   async fn() {
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://api.example.test/app/"),
-    });
+    const environmentMock = mockPatternEnvironment(
+      new URL("https://api.example.test/app/"),
+    );
     const cell = mutableAuthCell(auth({
       token: "expired-token",
       refreshToken: "refresh-token-1",
@@ -312,7 +335,7 @@ Deno.test({
       assertEquals(calls.length, 5);
     } finally {
       globalThis.fetch = originalFetch;
-      setTestPatternEnvironment(originalEnvironment);
+      environmentMock.restore();
     }
   },
 });
@@ -382,9 +405,9 @@ Deno.test({
 Deno.test({
   name: "GmailSendClient stops retrying after repeated auth failures",
   async fn() {
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://api.example.test/app/"),
-    });
+    const environmentMock = mockPatternEnvironment(
+      new URL("https://api.example.test/app/"),
+    );
     const cell = mutableAuthCell(auth({ token: "stale-token-0" }));
     const calls = installFetch((call, index) => {
       if (call.url.includes("/api/integrations/google-oauth/refresh")) {
@@ -424,7 +447,7 @@ Deno.test({
       assertEquals(cell.get()?.token, "stale-token-3");
     } finally {
       globalThis.fetch = originalFetch;
-      setTestPatternEnvironment(originalEnvironment);
+      environmentMock.restore();
     }
   },
 });
@@ -432,9 +455,9 @@ Deno.test({
 Deno.test({
   name: "GmailSendClient refreshes auth while sending and emits debug logs",
   async fn() {
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://api.example.test/app/"),
-    });
+    const environmentMock = mockPatternEnvironment(
+      new URL("https://api.example.test/app/"),
+    );
     const originalLog = console.log;
     const logs: string[] = [];
     console.log = ((...args: unknown[]) => {
@@ -520,7 +543,7 @@ Deno.test({
     } finally {
       globalThis.fetch = originalFetch;
       console.log = originalLog;
-      setTestPatternEnvironment(originalEnvironment);
+      environmentMock.restore();
     }
   },
 });
@@ -603,9 +626,9 @@ Deno.test({
 Deno.test({
   name: "GmailSendClient covers refresh failure paths",
   async fn() {
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://api.example.test/app/"),
-    });
+    const environmentMock = mockPatternEnvironment(
+      new URL("https://api.example.test/app/"),
+    );
 
     const batchCell = mutableAuthCell(auth({
       token: "expired-batch-token",
@@ -684,10 +707,7 @@ Deno.test({
         "Authentication failed after 3 attempts",
       );
 
-      const withoutRefreshToken = {
-        ...auth(),
-        refreshToken: undefined as unknown as string,
-      };
+      const withoutRefreshToken = auth({ refreshToken: "" });
       installFetch(() => new Response("", { status: 401 }));
       await assertRejects(
         () =>
@@ -722,7 +742,7 @@ Deno.test({
       );
     } finally {
       globalThis.fetch = originalFetch;
-      setTestPatternEnvironment(originalEnvironment);
+      environmentMock.restore();
     }
   },
 });

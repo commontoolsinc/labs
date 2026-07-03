@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/google/core/util/gmail-send-client.test.ts": [
-    "689:32:zjpzly",
-  ],
   "packages/patterns/integration/cfc-authorship-chat.test.ts": [
     "149:35:62ruji",
   ],
