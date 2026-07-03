@@ -20,6 +20,8 @@ const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 
+type ElementPropertyBag = HTMLElement & Record<string, unknown>;
+
 interface PendingChildInsert {
   parentId: number;
   childId: number;
@@ -37,6 +39,10 @@ function isElementNode(node: unknown): node is HTMLElement {
 
 function isTextNode(node: unknown): node is Node {
   return hasNodeType(node, TEXT_NODE);
+}
+
+function propertyBag(node: HTMLElement): ElementPropertyBag {
+  return node as ElementPropertyBag;
 }
 
 /**
@@ -332,13 +338,13 @@ export class DomApplicator {
     if (key.startsWith("on") && key.length > 2) {
       this.removeEvent(nodeId, key.slice(2).toLowerCase());
     } else if (key.startsWith("$") && key.length > 1) {
-      (node as any)[key.slice(1)] = undefined;
+      propertyBag(node)[key.slice(1)] = undefined;
     } else if (key.startsWith("data-")) {
       node.removeAttribute(key);
     } else if (key === "style") {
       node.removeAttribute("style");
     } else {
-      (node as any)[key] = undefined;
+      propertyBag(node)[key] = undefined;
     }
   }
 
@@ -408,7 +414,8 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
-    const existing = (node as any)[propName];
+    const target = propertyBag(node);
+    const existing = target[propName];
     if (
       existing instanceof CellHandle &&
       cellRefToKey(existing.ref()) === cellRefToKey(cellRef)
@@ -421,7 +428,7 @@ export class DomApplicator {
 
     // Set the CellHandle on the element's property
     // Custom elements like cf-input and cf-checkbox expect this
-    (node as any)[propName] = cellHandle;
+    target[propName] = cellHandle;
     this.notifyBoundProperty(node, propName);
   }
 
