@@ -34,6 +34,15 @@ to creation and opaque to the pattern. The handle cell reads back
 [`packages/runner/src/builtins/sqlite-builtins.ts`](../../../packages/runner/src/builtins/sqlite-builtins.ts)
 `sqliteDatabase`).
 
+- The handle value is stored **self-contained** (one raw inline write, no
+  linked sub-documents). A rowLabel rule's term lists are arrays of objects,
+  which an ordinary cell write would split into per-element linked docs that no
+  schema-driven sync loads — a second runtime would deep-resolve them to
+  `null`, hash a DIFFERENT request for the same shared query result cell, and
+  the two runtimes would re-issue against each other's hashes forever.
+  Self-containment keeps the request identity equal across every client of a
+  shared db; `db.exec`'s rev bump is a leaf write for the same reason (a
+  whole-value rewrite from a handler frame would re-split the term lists).
 - There is **no way to point the database at an arbitrary cell**. A pattern
   cannot pass "some other cell" as the database's identity; doing so would
   re-introduce ambient authority (a pattern naming a cell it was never granted).
