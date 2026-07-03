@@ -48,7 +48,7 @@ export default pattern<SliderStoryInput, SliderStoryOutput>(() => {
             label="orientation"
             description="Horizontal or vertical slider"
             defaultValue="horizontal"
-            value={orientation as any}
+            value={orientation}
             items={[
               { label: "horizontal", value: "horizontal" },
               { label: "vertical", value: "vertical" },
