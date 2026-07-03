@@ -99,7 +99,7 @@ function cloneModuleRecord(module: Module): Module {
     }
     Object.defineProperty(clone, key, descriptor);
   }
-  return clone as unknown as Module;
+  return clone as typeof clone & Module;
 }
 
 export interface RawModuleOptions {
