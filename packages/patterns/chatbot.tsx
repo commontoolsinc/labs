@@ -1,5 +1,6 @@
 import {
   BuiltInLLMMessage,
+  BuiltInLLMTool,
   computed,
   Default,
   fetchJsonUnchecked,
@@ -21,7 +22,7 @@ const sendMessage = handler<
     detail: {
       text: string;
       attachments: Array<PromptAttachment>;
-      mentions: Array<any>;
+      mentions: Array<unknown>;
       message: string; // Backward compatibility
     };
   },
@@ -63,8 +64,8 @@ const clearChat = handler(
 
 type ChatInput = {
   messages?: Writable<Array<BuiltInLLMMessage> | Default<[]>>;
-  tools?: any;
-  theme?: any;
+  tools?: object;
+  theme?: object;
   system?: string;
 };
 
@@ -72,8 +73,8 @@ type PromptAttachment = {
   id: string;
   name: string;
   type: "file" | "clipboard" | "mention";
-  data?: any; // File | Blob | string
-  piece?: any;
+  data?: unknown; // File | Blob | string
+  piece?: unknown;
   removable?: boolean; // Whether this attachment can be removed
 };
 
@@ -101,7 +102,7 @@ export type ChatOutput = {
   pinCell: Stream<{ path: string; name: string }>;
   unpinAllCells: Stream<void>;
   pinToChat: Stream<{ path: string; name: string; accumulate: boolean }>;
-  tools: any;
+  tools: Record<string, unknown>;
   ui: {
     chatLog: VNode;
     promptInput: VNode;
@@ -147,6 +148,14 @@ export const TitleGenerator = pattern<
   return title;
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object";
+
+const asLlmTools = (
+  tools: object | undefined,
+): Record<string, BuiltInLLMTool> | undefined =>
+  tools as Record<string, BuiltInLLMTool> | undefined;
+
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = new Writable<string>("anthropic:claude-sonnet-4-5");
@@ -172,11 +181,11 @@ export default pattern<ChatInput, ChatOutput>(
           return system ?? "You are a polite but efficient assistant.";
         }),
         messages,
-        tools,
+        tools: asLlmTools(tools),
         model,
         context: computed(() => ({
           [latestName]: latest,
-        })) as any,
+        })) as never,
       },
     );
 
@@ -185,8 +194,9 @@ export default pattern<ChatInput, ChatOutput>(
     });
 
     const items = computed(() => {
-      if (!result) return [];
-      const items = Object.keys(result as any).map((key) => ({
+      const modelDirectory: unknown = result;
+      if (!isRecord(modelDirectory)) return [];
+      const items = Object.keys(modelDirectory).map((key) => ({
         label: key,
         value: key,
       }));
@@ -217,7 +227,7 @@ export default pattern<ChatInput, ChatOutput>(
         snapToBottom
       >
         <cf-chat
-          theme={theme}
+          theme={theme as never}
           $messages={messages}
           pending={pending}
         />
