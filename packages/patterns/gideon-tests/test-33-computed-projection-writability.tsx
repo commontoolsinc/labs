@@ -33,6 +33,10 @@ interface Source {
   name: string;
 }
 
+type SourceCellProxy = Source & {
+  key<K extends keyof Source>(key: K): Cell<Source[K]>;
+};
+
 // Schema definition for default value
 interface InputSchema {
   source:
@@ -101,7 +105,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
 
   // Approach 2: .key() method - claims to maintain writability
   // Note: .key() returns OpaqueCell which is used in handlers for writes
-  const authViaKey = (source as any).key("auth");
+  const authViaKey = (source as SourceCellProxy).key("auth");
 
   // For display - all use direct property access on source
   // (both computedAuth and source.auth should show the same values)
