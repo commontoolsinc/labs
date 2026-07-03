@@ -1,12 +1,7 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
 import { assertEquals, assertNotEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import {
-  CellBridge,
-  type HandlerTarget,
-  type SpaceState,
-  type WritePath,
-} from "./cell-bridge.ts";
+import { CellBridge, type SpaceState, type WritePath } from "./cell-bridge.ts";
 import {
   CFC_COMPAT_XATTR_PREFIX,
   CFC_FAIL_CLOSED_ATOM_CLASS,
@@ -54,10 +49,10 @@ function makeCell(
 /**
  * A FakeCell that supports sink() subscriptions, enabling reactive rename tests.
  */
-class SinkableCell {
+class SinkableCell implements FakeCell {
   _value: unknown;
   _sinks: Array<(v: unknown) => void> = [];
-  schema = undefined;
+  schema: Record<string, unknown> | undefined = undefined;
   private root: SinkableCell;
   private path: string[];
 
@@ -94,14 +89,14 @@ class SinkableCell {
   }
 
   asSchemaFromLinks(): FakeCell {
-    return this as unknown as FakeCell;
+    return this;
   }
 
   key(segment: string): FakeCell {
     return new SinkableCell(undefined, this.root, [
       ...this.path,
       segment,
-    ]) as unknown as FakeCell;
+    ]);
   }
 
   sink(fn: (v: unknown) => void): () => void {
@@ -130,7 +125,7 @@ function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
 function buildTestSpace(
   bridge: CellBridge,
   spaceName: string,
-  fakePieces: unknown[],
+  fakePieces: object[],
 ): SpaceState {
   const tree = bridge.tree;
   const spaceIno = tree.addDir(tree.rootIno, encodeFuseComponent(spaceName));
@@ -138,10 +133,11 @@ function buildTestSpace(
   const entitiesIno = tree.addDir(spaceIno, "entities");
 
   const state: SpaceState = {
-    manager: null as unknown as SpaceState["manager"],
-    pieces: {
-      getAllPieces: () => Promise.resolve(fakePieces),
-    } as unknown as SpaceState["pieces"],
+    manager: testManager,
+    pieces: asTestPiecesController({
+      getAllPieces: () =>
+        Promise.resolve(fakePieces.map(asTestPieceController)),
+    }),
     spaceIno,
     piecesIno,
     entitiesIno,
@@ -223,6 +219,44 @@ type WriteFsFile = (
   text: string,
 ) => Promise<boolean>;
 
+type CellBridgeTestAccess = {
+  addPieceToSpace: AddPieceToSpace;
+  buildSourceTree: BuildSourceTree;
+  enqueuePiecePropRebuild: EnqueuePiecePropRebuild;
+  hydratePieceProp: HydratePieceProp;
+  loadPieceTree: LoadPieceTree;
+  prepareLookup: (parentIno: bigint, name: string) => Promise<boolean>;
+  rebuildPieceProp: RebuildPieceProp;
+  subscribePiece: SubscribePiece;
+  syncPieceListOnce: SyncPieceListOnce;
+  updateIndexJson: UpdateIndexJson;
+  updatePiecesJson: UpdatePiecesJson;
+  writeFsFile: WriteFsFile;
+};
+
+type TestPieceController = SpaceState["pieceControllers"] extends
+  Map<string, infer T> ? T
+  : never;
+type TestPiecesController = Pick<SpaceState["pieces"], "getAllPieces">;
+
+const testManager = null as never as SpaceState["manager"];
+
+function testAccess(bridge: CellBridge): CellBridgeTestAccess {
+  return bridge as object as CellBridgeTestAccess;
+}
+
+function asTestPieceController<T extends object>(
+  piece: T,
+): TestPieceController & T {
+  return piece as TestPieceController & T;
+}
+
+function asTestPiecesController(
+  pieces: TestPiecesController,
+): SpaceState["pieces"] & TestPiecesController {
+  return pieces as SpaceState["pieces"] & TestPiecesController;
+}
+
 // ---------------------------------------------------------------------------
 // Group 1: loadPieceTree — initial tree structure
 // ---------------------------------------------------------------------------
@@ -245,7 +279,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name", async () =
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, tree.rootIno, "My Note", "home");
 
   const metaIno = tree.lookup(pieceIno, "meta.json");
@@ -278,7 +312,7 @@ Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without ea
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, tree.rootIno, "Article", "home");
 
   const inputIno = tree.lookup(pieceIno, "input");
@@ -319,9 +353,9 @@ Deno.test("CellBridge CFC annotations attach to hydrated JSON projections and fa
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Annotated Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -406,9 +440,9 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Derived Generation", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -434,7 +468,7 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
   );
 
   const rebuiltResultCell = makeResultCell("two");
-  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+  await testAccess(bridge)
     .rebuildPieceProp.call(bridge, {
       cell: rebuiltResultCell,
       newValue: rebuiltResultCell.get(),
@@ -505,15 +539,14 @@ Deno.test("CellBridge finalizes CFC annotations after committed writeback", asyn
 
   state.pieceControllers.set(
     "Finalize Generation",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Finalize Generation", "home");
   state.pieceMap.set("Finalize Generation", piece.id);
   state.pieceInos.set("Finalize Generation", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
   const initialResultIno = tree.lookup(pieceIno, "result")!;
   const initialTitleIno = tree.lookup(initialResultIno, "title")!;
@@ -525,7 +558,7 @@ Deno.test("CellBridge finalizes CFC annotations after committed writeback", asyn
     cell: "result",
     jsonPath: ["title"],
     isJsonFile: false,
-    piece: piece as unknown as WritePath["piece"],
+    piece: asTestPieceController(piece),
   };
   await bridge.writeValue(titleWritePath, "two");
   await bridge.finalizeWritePath(titleWritePath);
@@ -640,15 +673,14 @@ Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeba
 
   state.pieceControllers.set(
     "Finalize Namespace",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Finalize Namespace", "home");
   state.pieceMap.set("Finalize Namespace", piece.id);
   state.pieceInos.set("Finalize Namespace", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
   const rootPath: WritePath = {
     spaceName: "home",
@@ -656,7 +688,7 @@ Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeba
     cell: "result",
     jsonPath: [],
     isJsonFile: true,
-    piece: piece as unknown as WritePath["piece"],
+    piece: asTestPieceController(piece),
   };
 
   let resultIno = tree.lookup(pieceIno, "result")!;
@@ -758,15 +790,14 @@ Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", asyn
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, tree.rootIno, "Lookup JSON", "home");
 
   // result.json exists as a stub placeholder before hydration
   assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
 
-  const prepared = await (bridge as unknown as {
-    prepareLookup: (parentIno: bigint, name: string) => Promise<boolean>;
-  }).prepareLookup(pieceIno, "result.json");
+  const prepared = await testAccess(bridge)
+    .prepareLookup(pieceIno, "result.json");
 
   assertEquals(prepared, true);
   assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
@@ -835,11 +866,10 @@ Deno.test("CellBridge.hydratePieceProp renders link-backed handlers only at disc
     },
   };
 
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Link-Handler", "home");
-  const hydrated = await (bridge as unknown as {
-    hydratePieceProp: HydratePieceProp;
-  }).hydratePieceProp(pieceIno, "result");
+  const hydrated = await testAccess(bridge)
+    .hydratePieceProp(pieceIno, "result");
 
   assertEquals(hydrated, true);
   const resultIno = tree.lookup(pieceIno, "result");
@@ -886,15 +916,14 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
 
   state.pieceControllers.set(
     "Post",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Post", "home");
   state.pieceMap.set("Post", piece.id);
   state.pieceInos.set("Post", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "input");
   const inputIno = tree.lookup(pieceIno, "input");
   assertEquals(
@@ -904,7 +933,7 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
   );
   assertEquals(getFileContent(tree, inputIno!, "title"), "hello");
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(
@@ -947,16 +976,16 @@ Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydr
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Cached-Piece")!;
   const initialResultCellGets = resultCellGets;
   const initialResultGets = resultGets;
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   assertEquals(resultCellGets - initialResultCellGets, 1);
@@ -1012,15 +1041,14 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
 
   state.pieceControllers.set(
     "Callable Fixture",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Callable Fixture", "home");
   state.pieceMap.set("Callable Fixture", piece.id);
   state.pieceInos.set("Callable Fixture", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const initialResultIno = tree.lookup(pieceIno, "result");
@@ -1055,7 +1083,7 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
     { search: rebuiltToolCell },
   );
 
-  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+  await testAccess(bridge)
     .rebuildPieceProp.call(bridge, {
       cell: rebuiltResultCell,
       newValue: rebuiltResultCell.get(),
@@ -1088,7 +1116,7 @@ Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () =>
   let maxActive = 0;
   const events: string[] = [];
 
-  (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+  testAccess(bridge)
     .rebuildPieceProp = async (args) => {
       active++;
       maxActive = Math.max(maxActive, active);
@@ -1100,9 +1128,8 @@ Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () =>
       active--;
     };
 
-  const enqueue = (bridge as unknown as {
-    enqueuePiecePropRebuild: EnqueuePiecePropRebuild;
-  }).enqueuePiecePropRebuild.bind(bridge);
+  const enqueue = testAccess(bridge)
+    .enqueuePiecePropRebuild.bind(bridge);
 
   const baseJob = {
     cell,
@@ -1163,15 +1190,14 @@ Deno.test("CellBridge.rebuildPieceProp clears stale result mounts when value bec
 
   state.pieceControllers.set(
     "Null Result Fixture",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Null Result Fixture", "home");
   state.pieceMap.set("Null Result Fixture", piece.id);
   state.pieceInos.set("Null Result Fixture", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const initialResultIno = tree.lookup(pieceIno, "result");
@@ -1179,7 +1205,7 @@ Deno.test("CellBridge.rebuildPieceProp clears stale result mounts when value bec
   assertEquals(getFileContent(tree, initialResultIno!, "title"), "before");
   assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
 
-  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+  await testAccess(bridge)
     .rebuildPieceProp.call(bridge, {
       cell: makeCell(null, undefined),
       newValue: null,
@@ -1221,24 +1247,24 @@ Deno.test("CellBridge.rebuildPieceProp clears stale FS projection mounts when va
       get: () => Promise.resolve({}),
     },
     result: {
-      getCell: () => Promise.resolve(initialResultCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(initialResultCell),
       get: () => Promise.resolve(initialResultCell.get()),
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Null-FS-Fixture")!;
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
 
-  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+  await testAccess(bridge)
     .rebuildPieceProp.call(bridge, {
       cell: makeCell(null, undefined),
       newValue: null,
@@ -1293,15 +1319,14 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
 
   state.pieceControllers.set(
     "Contact Book",
-    piece as unknown as SpaceState["pieceControllers"] extends
-      Map<string, infer T> ? T : never,
+    asTestPieceController(piece),
   );
-  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+  const pieceIno = await testAccess(bridge)
     .loadPieceTree(piece, state.piecesIno, "Contact Book", "home");
   state.pieceMap.set("Contact Book", piece.id);
   state.pieceInos.set("Contact Book", pieceIno);
 
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const handlers = getFileContent(tree, pieceIno, ".handlers");
@@ -1334,7 +1359,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
     },
   });
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
 
   const name1 = await addPiece(state, makeNotePiece("of:id-1"), "home");
@@ -1388,7 +1413,7 @@ Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming th
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   const name = await addPiece(state, piece, "home");
 
@@ -1419,7 +1444,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three colli
     },
   });
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
 
   const name1 = await addPiece(state, makeStandupPiece("of:su-1"), "home");
@@ -1444,7 +1469,7 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
 
   await addPiece(
@@ -1483,7 +1508,7 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
     "home",
   );
 
-  (bridge as unknown as { updateIndexJson: UpdateIndexJson }).updateIndexJson
+  testAccess(bridge).updateIndexJson
     .call(bridge, state);
 
   const indexJson = JSON.parse(
@@ -1508,7 +1533,7 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
     summary: "beta summary",
   });
 
-  (bridge as unknown as { updatePiecesJson: UpdatePiecesJson }).updatePiecesJson
+  testAccess(bridge).updatePiecesJson
     .call(bridge, state);
 
   const piecesJson = JSON.parse(
@@ -1545,16 +1570,16 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
       get: () => Promise.resolve({}),
     },
     result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(resultCell),
       get: () => Promise.resolve(resultCell.get()),
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  (bridge as unknown as { updatePiecesJson: UpdatePiecesJson }).updatePiecesJson
+  testAccess(bridge).updatePiecesJson
     .call(bridge, state);
   let piecesJson = JSON.parse(
     getFileContent(tree, state.piecesIno, "pieces.json"),
@@ -1578,7 +1603,7 @@ Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS pat
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
-  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+  const ok = await testAccess(bridge)
     .writeFsFile(
       {
         fsProjection: "markdown",
@@ -1609,7 +1634,7 @@ Deno.test("CellBridge.writeFsFile removes deleted markdown frontmatter keys and 
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
-  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+  const ok = await testAccess(bridge)
     .writeFsFile(
       {
         fsProjection: "markdown",
@@ -1652,7 +1677,7 @@ Deno.test("CellBridge.writeFsFile removes deleted keys from application/json pro
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
-  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+  const ok = await testAccess(bridge)
     .writeFsFile(
       {
         fsProjection: "json",
@@ -1705,7 +1730,7 @@ Deno.test("CellBridge.buildSourceTree encodes source path segments and decodes w
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
 
-  await (bridge as unknown as { buildSourceTree: BuildSourceTree })
+  await testAccess(bridge)
     .buildSourceTree(pieceIno, piece, state, "notes");
 
   const srcIno = tree.lookup(pieceIno, ".src")!;
@@ -1753,7 +1778,7 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
   state.pieceControllers.set("notes", piece as never);
   state.srcInos.set("notes", pieceIno);
 
-  await (bridge as unknown as { buildSourceTree: BuildSourceTree })
+  await testAccess(bridge)
     .buildSourceTree(pieceIno, piece, state, "notes");
 
   const srcIno = tree.lookup(pieceIno, ".src")!;
@@ -1805,12 +1830,12 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
   // Build the space with only the first piece already added
   const state = buildTestSpace(bridge, "home", [existingPiece, newPiece]);
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, existingPiece, "home");
 
   // Now the getAllPieces mock already returns both pieces; sync should add p2
-  await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })
+  await testAccess(bridge)
     .syncPieceListOnce.call(bridge, state, "home");
 
   assertEquals(
@@ -1842,7 +1867,7 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
   // Start with one piece in the tree
   const state = buildTestSpace(bridge, "home", []);
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
@@ -1854,11 +1879,11 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
   );
 
   // Now getAllPieces returns empty — piece was deleted
-  state.pieces = {
+  state.pieces = asTestPiecesController({
     getAllPieces: () => Promise.resolve([]),
-  } as unknown as SpaceState["pieces"];
+  });
 
-  await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })
+  await testAccess(bridge)
     .syncPieceListOnce.call(bridge, state, "home");
 
   assertEquals(
@@ -1895,13 +1920,13 @@ Deno.test({
         get: () => Promise.resolve({}),
       },
       result: {
-        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(resultCell),
         get: () => Promise.resolve({}),
       },
     };
 
     // First, add the piece to the space to set up the directory and state maps
-    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    const addPiece = testAccess(bridge)
       .addPieceToSpace.bind(bridge);
     await addPiece(state, piece, "home");
 
@@ -1917,7 +1942,7 @@ Deno.test({
     if (addedSubs) { for (const cancel of addedSubs) cancel(); }
 
     // Now call subscribePiece separately to attach the rename sink
-    const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    const subs = await testAccess(bridge)
       .subscribePiece.call(
         bridge,
         piece,
@@ -1977,7 +2002,7 @@ Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   const projectedName = await addPiece(state, piece, "home");
 
@@ -2017,7 +2042,7 @@ Deno.test("CellBridge.addPieceToSpace falls back to a normalized piece id for sy
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   const projectedName = await addPiece(state, piece, "home");
 
@@ -2048,12 +2073,12 @@ Deno.test({
         get: () => Promise.resolve({}),
       },
       result: {
-        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(resultCell),
         get: () => Promise.resolve({}),
       },
     };
 
-    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    const addPiece = testAccess(bridge)
       .addPieceToSpace.bind(bridge);
     await addPiece(state, piece, "home");
 
@@ -2061,7 +2086,7 @@ Deno.test({
     const addedSubs = state.pieceSubs.get("Start-Here");
     if (addedSubs) { for (const cancel of addedSubs) cancel(); }
 
-    const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    const subs = await testAccess(bridge)
       .subscribePiece.call(
         bridge,
         piece,
@@ -2114,21 +2139,21 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
     name: () => "FS Piece",
     getPatternMeta: () => Promise.resolve({}),
     input: {
-      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(inputCell),
       get: () => Promise.resolve(inputCell.get()),
     },
     result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(resultCell),
       get: () => Promise.resolve(resultCell.get()),
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "FS-Piece")!;
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
   assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
@@ -2142,9 +2167,9 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
     cell: "result",
     jsonPath: ["content"],
     isJsonFile: false,
-    piece: piece as unknown as WritePath["piece"],
+    piece: asTestPieceController(piece),
   });
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -2196,11 +2221,11 @@ Deno.test("CellBridge hydrates and writes back markdown FS projection scalars", 
     name: () => "FS Roundtrip",
     getPatternMeta: () => Promise.resolve({}),
     input: {
-      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(inputCell),
       get: () => Promise.resolve(inputCell.get()),
     },
     result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      getCell: () => Promise.resolve(resultCell),
       get: (path?: (string | number)[]) => {
         if (path?.join("/") === "$FS/frontmatter") {
           return Promise.resolve(resultValue.$FS.frontmatter);
@@ -2214,12 +2239,12 @@ Deno.test("CellBridge hydrates and writes back markdown FS projection scalars", 
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "FS-Roundtrip")!;
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const index = getFileContent(tree, pieceIno, "index.md");
@@ -2233,11 +2258,11 @@ Deno.test("CellBridge hydrates and writes back markdown FS projection scalars", 
   const metaIno = tree.lookup(pieceIno, "meta")!;
   assertEquals(getFileContent(tree, metaIno, "pinned"), "true");
 
-  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+  const ok = await testAccess(bridge)
     .writeFsFile(
       {
         fsProjection: "markdown",
-        piece: piece as unknown as WritePath["piece"],
+        piece: asTestPieceController(piece),
       },
       "---\nentityId: attacker\ntitle: Updated\ncount: 8\npublished: true\n---\n\nUpdated body",
     );
@@ -2286,16 +2311,16 @@ Deno.test({
       name: () => "Status Piece",
       getPatternMeta: () => Promise.resolve({}),
       input: {
-        getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(inputCell),
         get: () => Promise.resolve(resultCell.get()),
       },
       result: {
-        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(resultCell),
         get: () => Promise.resolve(resultCell.get()),
       },
     };
 
-    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    const addPiece = testAccess(bridge)
       .addPieceToSpace.bind(bridge);
     await addPiece(state, piece, "home");
 
@@ -2345,21 +2370,21 @@ Deno.test({
       name: () => "Undefined Sink Piece",
       getPatternMeta: () => Promise.resolve({}),
       input: {
-        getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(inputCell),
         get: () => Promise.resolve(inputCell.get()),
       },
       result: {
-        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(resultCell),
         get: () => Promise.resolve({ content: "Pulled fallback" }),
       },
     };
 
-    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    const addPiece = testAccess(bridge)
       .addPieceToSpace.bind(bridge);
     await addPiece(state, piece, "home");
 
     const pieceIno = tree.lookup(state.piecesIno, "Undefined-Sink-Piece")!;
-    await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    await testAccess(bridge)
       .hydratePieceProp.call(bridge, pieceIno, "result");
     resultCell.set(undefined);
     await new Promise((r) => setTimeout(r, 250));
@@ -2394,21 +2419,21 @@ Deno.test({
       name: () => "Undefined Transient Piece",
       getPatternMeta: () => Promise.resolve({}),
       input: {
-        getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(inputCell),
         get: () => Promise.resolve(inputCell.get()),
       },
       result: {
-        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        getCell: () => Promise.resolve(resultCell),
         get: () => Promise.resolve(getterValue),
       },
     };
 
-    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    const addPiece = testAccess(bridge)
       .addPieceToSpace.bind(bridge);
     await addPiece(state, piece, "home");
 
     const pieceIno = tree.lookup(state.piecesIno, "Undefined-Transient-Piece")!;
-    await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    await testAccess(bridge)
       .hydratePieceProp.call(bridge, pieceIno, "result");
 
     getterValue = undefined;
@@ -2447,12 +2472,12 @@ Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", a
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Invalidate-Piece")!;
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, pieceIno, "result");
   assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
 
@@ -2462,7 +2487,7 @@ Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", a
     cell: "result",
     jsonPath: ["content"],
     isJsonFile: false,
-    piece: piece as unknown as WritePath["piece"],
+    piece: asTestPieceController(piece),
   });
 
   const resultIno = tree.lookup(pieceIno, "result");
@@ -2501,7 +2526,7 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     }),
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
@@ -2510,12 +2535,12 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     state.entitiesIno,
     "of%3Aentity-handler-piece",
   )!;
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+  await testAccess(bridge)
     .hydratePieceProp.call(bridge, entityIno, "result");
   assertEquals(tree.lookup(entityIno, "result") !== undefined, true);
 
   bridge.invalidateHandlerTarget({
-    piece: piece as unknown as HandlerTarget["piece"],
+    piece: asTestPieceController(piece),
     cellProp: "result",
     cellKey: "content",
   });
@@ -2616,14 +2641,13 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
     },
   };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+  const addPiece = testAccess(bridge)
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Race-Piece")!;
-  const firstHydration = (bridge as unknown as {
-    hydratePieceProp: HydratePieceProp;
-  }).hydratePieceProp.call(bridge, pieceIno, "result");
+  const firstHydration = testAccess(bridge)
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   await Promise.resolve();
   bridge.invalidateWritePath({
@@ -2632,11 +2656,10 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
     cell: "result",
     jsonPath: ["content"],
     isJsonFile: false,
-    piece: piece as unknown as WritePath["piece"],
+    piece: asTestPieceController(piece),
   });
-  const secondHydration = (bridge as unknown as {
-    hydratePieceProp: HydratePieceProp;
-  }).hydratePieceProp.call(bridge, pieceIno, "result");
+  const secondHydration = testAccess(bridge)
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   if (resolveFirstGet) resolveFirstGet();
   await Promise.all([firstHydration, secondHydration]);
