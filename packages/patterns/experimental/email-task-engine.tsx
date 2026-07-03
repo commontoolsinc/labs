@@ -221,7 +221,7 @@ const executeEditNote = handler<
         const titleFromName = name.replace(/^📝\s*/, "").trim();
         return (
           titleFromName.toLowerCase() === noteTitle.toLowerCase() ||
-          (piece as any)?.title?.toLowerCase() === noteTitle.toLowerCase()
+          piece?.title?.toLowerCase() === noteTitle.toLowerCase()
         );
       });
 
@@ -535,7 +535,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       .map((piece: NotePiece) => {
         const name = piece?.[NAME] || "";
         const title = name.replace(/^📝\s*/, "").trim();
-        const content = (piece as any)?.content || "";
+        const content = piece?.content || "";
         return {
           title,
           contentPreview: truncateText(content, 200),
