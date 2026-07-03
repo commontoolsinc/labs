@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/toolshed-http-auth.ts": [
-    "339:43:v93ldq",
-  ],
   "packages/runner/src/traverse-recorder.ts": [
     "129:15:1bs5u4l",
     "130:10:9z9zwz",

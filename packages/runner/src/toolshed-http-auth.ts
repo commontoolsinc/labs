@@ -336,7 +336,7 @@ export async function signFirstPartyHttpRequest(params: {
     validUntil,
     proofKind: PROOF_ALGORITHM,
   });
-  const payload = textEncoder.encode(base) as unknown as AsBytes<string>;
+  const payload = textEncoder.encode(base) as AsBytes<string>;
   const signed = await params.signer.sign(payload);
   if (signed.error) throw signed.error;
 
