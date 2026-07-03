@@ -648,7 +648,14 @@ release: require (a) declared in the query contract, (b) the table's governing
 policy permits it (a `rowLabel`-adjacent schema flag), (c) auditable (count of
 withheld rows in diagnostics). Never for aggregates. Tests: per-user mailbox
 view (each participant sees their rows only); the withheld-count is not
-observable in the result shape beyond the declared release.
+observable in the result shape beyond the declared release. Status: **LANDED
+(#4478/#4484)** — keep-mask/withheld semantics in
+`packages/runner/test/sqlite-row-label-read.test.ts`, per-user view +
+reader-isolated result cells in
+`packages/patterns/integration/sqlite-read-clearance-multi-runtime.test.ts`;
+the same file's result-shape test pins the raw cleared result doc to exactly
+the declared surface (kept rows + `withheld` + pending/error + request
+bookkeeping — no placeholders, gaps, or ids of withheld rows).
 
 **E4 — Phase 3.c server-side commit-time re-derivation (independent of
 E1–E3).**
