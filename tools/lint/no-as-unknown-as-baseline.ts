@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/schema-tags.test.ts": [
-    "137:6:1fafidi",
-  ],
   "packages/data-model/test/SchemaAndHash.test.ts": [
     "63:15:2e69kz",
     "86:15:2e69kz",

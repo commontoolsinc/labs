@@ -131,10 +131,10 @@ describe("tagsFromSchema", () => {
   });
 
   it("skips non-string entries in a tags array", () => {
-    const schema = {
-      type: "object",
+    const schema: JSONSchema = { type: "object" };
+    Object.assign(schema, {
       tags: ["good", 42, "also-good"],
-    } as unknown as JSONSchema;
+    });
     expect(tagsFromSchema(schema)).toEqual(["good", "also-good"]);
   });
 

@@ -1,10 +1,11 @@
 /**
  * Discovery-tag utilities for JSONSchema values.
  *
- * This module is a dependency-free leaf (only the `JSONSchema` type) so that
- * the schema generator — which type-checks its import graph under stricter
- * compiler options — and client-side consumers can share the tag definition
- * with the runtime.
+ * This module keeps runtime dependencies out of the schema tag helpers.
+ * It imports only the `JSONSchema` type.
+ * The schema generator type-checks its import graph under stricter compiler
+ * options.
+ * Client-side consumers share the tag definition with the runtime.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
