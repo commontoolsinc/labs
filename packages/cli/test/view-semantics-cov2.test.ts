@@ -29,41 +29,45 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
+function hostileTypedValue<T>(value: unknown): T {
+  return value as T;
+}
+
 /** A value typed as `string` that throws the instant the splitter reads its
  * length — the first thing `splitSections` touches. */
 function textThatThrows(): string {
-  return {
+  return hostileTypedValue<string>({
     get length(): number {
       throw new Error("hostile text length");
     },
-  } as unknown as string;
+  });
 }
 
 /** An offset typed as `number` that throws when coerced to a primitive, which
  * happens inside `sectionAt` (`offset >= s.start`) on the first query. */
 function offsetThatThrows(): number {
-  return {
+  return hostileTypedValue<number>({
     [Symbol.toPrimitive](): number {
       throw new Error("hostile offset");
     },
-  } as unknown as number;
+  });
 }
 
 /** A path typed as `string` that throws when stringified, which the workspace
  * containment check does before any read. */
 function pathThatThrows(): string {
-  return {
+  return hostileTypedValue<string>({
     toString(): string {
       throw new Error("hostile path");
     },
-  } as unknown as string;
+  });
 }
 
 /** A cwd typed as `string` but a number at runtime: the @std/path helpers
  * `discoverConfig` calls reject it, so `safe()` swallows the throw and the
  * `?? { importMap: {}, root: cwd }` fallback runs. */
 function cwdThatThrows(): string {
-  return 12345 as unknown as string;
+  return hostileTypedValue<string>(12345);
 }
 
 // --- createSemantics: setup-time guards -------------------------------------

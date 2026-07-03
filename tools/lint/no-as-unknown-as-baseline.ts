@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/test/view-semantics-cov2.test.ts": [
-    "39:4:1b6biqj",
-    "49:4:17o21c3",
-    "59:4:ag235n",
-    "66:15:og5i13",
-  ],
   "packages/cli/test/view-semantics-gate.test.ts": [
     "57:49:og5i13",
     "189:19:og5i13",
