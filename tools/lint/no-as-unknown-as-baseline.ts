@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cli/lib/test-runner.ts": [
-    "356:23:12wj75o",
-    "378:23:12wj75o",
-    "514:25:12wj75o",
-    "657:23:12wj75o",
-  ],
   "packages/cli/support/profiling/capture-deno-inspector-profile-lib.test.ts": [
     "225:30:7drzpq",
     "260:34:7drzpq",

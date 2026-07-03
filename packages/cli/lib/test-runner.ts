@@ -323,6 +323,14 @@ type GlobalWithLoggers = {
   };
 };
 
+type GlobalLoggerRegistry = NonNullable<
+  NonNullable<GlobalWithLoggers["commonfabric"]>["logger"]
+>;
+
+function globalLoggerRegistry(): GlobalLoggerRegistry | undefined {
+  return (globalThis as GlobalWithLoggers).commonfabric?.logger;
+}
+
 function fmtMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms >= 10) return `${Math.round(ms)}ms`;
@@ -365,10 +373,10 @@ function getGlobalLogCounts(): {
   error: number;
   total: number;
 } {
-  const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commonfabric?.logger) {
-    for (const logger of Object.values(g.commonfabric.logger)) {
+  const loggers = globalLoggerRegistry();
+  if (loggers) {
+    for (const logger of Object.values(loggers)) {
       const c = logger.counts;
       r.debug += c.debug;
       r.info += c.info;
@@ -387,10 +395,10 @@ function getGlobalLogCountDeltas(): {
   error: number;
   total: number;
 } {
-  const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commonfabric?.logger) {
-    for (const logger of Object.values(g.commonfabric.logger)) {
+  const loggers = globalLoggerRegistry();
+  if (loggers) {
+    for (const logger of Object.values(loggers)) {
       const d = logger.getCountDeltas();
       r.debug += d.debug;
       r.info += d.info;
@@ -523,9 +531,9 @@ function printLoggerStats(
   };
   const countEntries: CountEntry[] = [];
   if (useDelta) {
-    const g = globalThis as unknown as GlobalWithLoggers;
-    if (g.commonfabric?.logger) {
-      for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
+    const loggers = globalLoggerRegistry();
+    if (loggers) {
+      for (const [name, logger] of Object.entries(loggers)) {
         const c = logger.getCountDeltas();
         if (c.total > 0) {
           countEntries.push({
@@ -666,10 +674,10 @@ function printStorageStats(elapsedMs: number, limit = 16): void {
     }
   }
 
-  const g = globalThis as unknown as GlobalWithLoggers;
+  const loggers = globalLoggerRegistry();
   const countEntries: StorageCountEntry[] = [];
-  if (g.commonfabric?.logger) {
-    for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
+  if (loggers) {
+    for (const [name, logger] of Object.entries(loggers)) {
       if (!isStorageLoggerName(name)) continue;
       const c = logger.counts;
       if (c.total > 0) {
@@ -704,8 +712,8 @@ function printStorageStats(elapsedMs: number, limit = 16): void {
   }
 
   const keyEntries: StorageCountKeyEntry[] = [];
-  if (g.commonfabric?.logger) {
-    for (const [loggerName, logger] of Object.entries(g.commonfabric.logger)) {
+  if (loggers) {
+    for (const [loggerName, logger] of Object.entries(loggers)) {
       if (!isStorageLoggerName(loggerName) || !logger.countsByKey) continue;
       for (const [key, counts] of Object.entries(logger.countsByKey)) {
         if (counts.total === 0) continue;
