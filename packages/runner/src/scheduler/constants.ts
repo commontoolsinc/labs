@@ -22,5 +22,11 @@ export const AUTO_DEBOUNCE_DELAY_MS = 100;
 // How long a resumed action's initial run may be held while waiting for its
 // space to finish syncing (the flag-off resume hold; see runner.ts
 // awaitSyncBeforeInitialRun). The sync completing releases the hold early; the
-// timeout only bounds a stuck sync.
-export const INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS = 10_000;
+// timeout only bounds a slow or never-quiescing sync. The hold is an
+// anti-churn OPTIMIZATION (avoid re-deriving against half-synced inputs), not
+// a correctness gate — reads see whatever has synced either way — so its
+// worst case must stay cheap: space-wide synced() is unbounded on a busy
+// space, and a large cap turns every resumed action into a long stall
+// (observed: CI's slow runners quantized second-navigation boots to ~10s and
+// starved a 30s UI-commit wait; see lunch-poll-vote integration failure).
+export const INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS = 2_000;
