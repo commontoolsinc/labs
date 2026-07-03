@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import {
   DEEP_FREEZE,
   FabricInstance,
+  type FabricPlainObject,
   FabricPrimitive,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
@@ -17,6 +18,9 @@ import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstruction
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
 import { hashOf } from "@/value-hash.ts";
+
+const uncheckedPayload = (value: unknown): FabricPlainObject =>
+  value as FabricPlainObject;
 
 describe("FabricLink", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
@@ -59,12 +63,12 @@ describe("FabricLink", () => {
 
     describe("validation", () => {
       it("rejects a non-plain-object payload", () => {
-        expect(() => new FabricLink([] as unknown as Record<string, never>))
+        expect(() => new FabricLink(uncheckedPayload([])))
           .toThrow("must be a plain object");
       });
 
       it("rejects `null`", () => {
-        expect(() => new FabricLink(null as unknown as Record<string, never>))
+        expect(() => new FabricLink(uncheckedPayload(null)))
           .toThrow("must be a plain object");
       });
 
