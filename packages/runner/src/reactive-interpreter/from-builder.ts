@@ -331,10 +331,17 @@ function buildRog(input: RogBuildInput): BuiltRog {
     building.add(obj);
     try {
       if (!containsMappableRef(obj)) {
-        // Pure static data — carry inline.
-        const ref: ValueRef = { kind: "const", value: obj };
-        valueMemo.set(obj, ref);
-        return ref;
+        // Pure static data — carry a SNAPSHOT (bot finding: legacy
+        // serializes pattern inputs, so post-construction mutation of a
+        // captured object must not leak into evaluation).
+        try {
+          const ref: ValueRef = { kind: "const", value: structuredClone(obj) };
+          valueMemo.set(obj, ref);
+          return ref;
+        } catch {
+          incomplete.push("unclonable_const");
+          return undefined;
+        }
       }
       if (Array.isArray(obj)) {
         const items: ValueRef[] = [];

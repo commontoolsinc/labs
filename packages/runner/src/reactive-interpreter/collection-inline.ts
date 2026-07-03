@@ -264,6 +264,21 @@ export function makeInlineMapImplementation(
       const rawList = probeScoped(() =>
         listCell.withTx(tx).getRaw() as unknown
       );
+      // RESUME-INPUT guard (legacy awaitInputThenSettle parity): on a resume
+      // reconcile the input list may be undefined/transiently empty while
+      // its durable value streams in — blanking the persisted container now
+      // would clobber it. Hold and await the input; its arrival re-triggers
+      // this reconcile via the journaled read above.
+      const priorSlots = probeScoped(() => resultPresence.withTx(tx).get());
+      const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
+      const listPending = rawList === undefined ||
+        (Array.isArray(rawList) && rawList.length === 0);
+      if (resumeAwaitSync && priorLen > 0 && listPending) {
+        runtime.storageManager.trackUntilSettled(
+          listCell.sync().then(() => undefined).catch(() => undefined),
+        );
+        return;
+      }
       // Legacy parity: an undefined input list → empty container + stop the
       // per-element work (map.ts's undefined-input cleanup).
       if (rawList === undefined) {
@@ -333,6 +348,14 @@ export function makeInlineMapImplementation(
         if (needsSubscribe) {
           run.cancel?.();
           const elemResult = run.resultCell;
+          // A params change must re-run the element (bot finding P1): the
+          // params read happens inside the element tx, but the SUBSCRIPTION
+          // must declare it too.
+          const paramsAddr = usage.usesParams
+            ? toMemorySpaceAddress(
+              inputsCell.key("params").getAsNormalizedFullLink(),
+            )
+            : undefined;
           const elementAction: Action = (childTx) => {
             // Read ONLY this slot in its own tx → pointwise label isolation.
             const elemValue = runtime.getCellFromLink(
@@ -360,16 +383,20 @@ export function makeInlineMapImplementation(
                   `out=${JSON.stringify(out)} errors=${errors.length}`,
               );
             }
-            // §4.8 consolidated element write: the whole subtree (VNodes
-            // included) stores INLINE in this one element doc.
             elemResult.withTx(childTx).setRawUntyped(
               fabricFromNativeValue(convertCellsToLinks(out)),
             );
+            // Surface isolated element errors to scheduler.onError (bot
+            // finding P2), matching the segment protocol: the write above
+            // survives; the throw notifies handlers.
+            if (errors.length > 0) throw errors[0].error;
           };
           run.cancel = runtime.scheduler.subscribe(
             elementAction,
             {
-              reads: [toMemorySpaceAddress(link)],
+              reads: paramsAddr
+                ? [toMemorySpaceAddress(link), paramsAddr]
+                : [toMemorySpaceAddress(link)],
               shallowReads: [],
               writes: [
                 toMemorySpaceAddress(elemResult.getAsNormalizedFullLink()),
