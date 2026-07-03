@@ -8,6 +8,14 @@ import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 
+const expectEpochNsec = (value: unknown): FabricEpochNsec => {
+  expect(value).toBeInstanceOf(FabricEpochNsec);
+  if (!(value instanceof FabricEpochNsec)) {
+    throw new Error("expected FabricEpochNsec");
+  }
+  return value;
+};
+
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
@@ -86,9 +94,9 @@ describe("FabricEpochNsec", () => {
             expectedTag,
             "AA",
             context,
-          ) as unknown as FabricEpochNsec;
-          expect(decoded).toBeInstanceOf(FabricEpochNsec);
-          expect(decoded.value).toBe(0n);
+          );
+          const epochNsec = expectEpochNsec(decoded);
+          expect(epochNsec.value).toBe(0n);
         });
       });
 
@@ -99,9 +107,9 @@ describe("FabricEpochNsec", () => {
             expectedTag,
             codec.encode(sn),
             context,
-          ) as unknown as FabricEpochNsec;
-          expect(decoded).toBeInstanceOf(FabricEpochNsec);
-          expect(decoded.value).toBe(0n);
+          );
+          const epochNsec = expectEpochNsec(decoded);
+          expect(epochNsec.value).toBe(0n);
         });
 
         it("round-trips positive nanosecond timestamp", () => {
@@ -112,9 +120,9 @@ describe("FabricEpochNsec", () => {
             expectedTag,
             codec.encode(sn),
             context,
-          ) as unknown as FabricEpochNsec;
-          expect(decoded).toBeInstanceOf(FabricEpochNsec);
-          expect(decoded.value).toBe(nsec);
+          );
+          const epochNsec = expectEpochNsec(decoded);
+          expect(epochNsec.value).toBe(nsec);
         });
 
         it("round-trips negative nanosecond timestamp (pre-epoch)", () => {
@@ -124,9 +132,9 @@ describe("FabricEpochNsec", () => {
             expectedTag,
             codec.encode(sn),
             context,
-          ) as unknown as FabricEpochNsec;
-          expect(decoded).toBeInstanceOf(FabricEpochNsec);
-          expect(decoded.value).toBe(nsec);
+          );
+          const epochNsec = expectEpochNsec(decoded);
+          expect(epochNsec.value).toBe(nsec);
         });
 
         it("round-trips large future date", () => {
@@ -137,8 +145,9 @@ describe("FabricEpochNsec", () => {
             expectedTag,
             codec.encode(sn),
             context,
-          ) as unknown as FabricEpochNsec;
-          expect(decoded.value).toBe(nsec);
+          );
+          const epochNsec = expectEpochNsec(decoded);
+          expect(epochNsec.value).toBe(nsec);
         });
       });
     });
