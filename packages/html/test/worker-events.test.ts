@@ -9,20 +9,46 @@ import {
   serializeEvent,
 } from "../src/main/events.ts";
 
-// Mock Event class for testing (Deno doesn't have full DOM by default)
-class MockEvent {
+// Mock Event class for testing.
+class MockEvent implements Event {
   type: string;
-  target: unknown;
+  target: EventTarget | null;
   isTrusted: boolean;
+  bubbles = false;
+  cancelBubble = false;
+  cancelable = false;
+  composed = false;
+  currentTarget: EventTarget | null = null;
+  defaultPrevented = false;
+  eventPhase = Event.NONE;
+  returnValue = true;
+  srcElement: EventTarget | null = null;
+  timeStamp = 0;
+  NONE = Event.NONE;
+  CAPTURING_PHASE = Event.CAPTURING_PHASE;
+  AT_TARGET = Event.AT_TARGET;
+  BUBBLING_PHASE = Event.BUBBLING_PHASE;
 
   constructor(
     type: string,
-    init?: { target?: unknown; isTrusted?: boolean },
+    init?: { target?: EventTarget | null; isTrusted?: boolean },
   ) {
     this.type = type;
-    this.target = init?.target;
+    this.target = init?.target ?? null;
     this.isTrusted = init?.isTrusted ?? false;
   }
+
+  composedPath(): EventTarget[] {
+    return [];
+  }
+
+  initEvent(): void {}
+
+  preventDefault(): void {}
+
+  stopImmediatePropagation(): void {}
+
+  stopPropagation(): void {}
 }
 
 class MockKeyboardEvent extends MockEvent {
@@ -44,7 +70,7 @@ class MockKeyboardEvent extends MockEvent {
       ctrlKey?: boolean;
       metaKey?: boolean;
       shiftKey?: boolean;
-      target?: unknown;
+      target?: EventTarget | null;
     } = {},
   ) {
     super(type, init);
@@ -75,7 +101,7 @@ class MockMouseEvent extends MockEvent {
       ctrlKey?: boolean;
       metaKey?: boolean;
       shiftKey?: boolean;
-      target?: unknown;
+      target?: EventTarget | null;
     } = {},
   ) {
     super(type, init);
@@ -97,7 +123,7 @@ class MockInputEvent extends MockEvent {
     init: {
       inputType?: string;
       data?: string | null;
-      target?: unknown;
+      target?: EventTarget | null;
     } = {},
   ) {
     super(type, init);
@@ -113,12 +139,20 @@ class MockCustomEvent extends MockEvent {
     type: string,
     init: {
       detail?: unknown;
-      target?: unknown;
+      target?: EventTarget | null;
     } = {},
   ) {
     super(type, init);
     this.detail = init.detail;
   }
+}
+
+function eventTarget<T extends object>(fields: T): EventTarget & T {
+  return Object.assign(fields, {
+    addEventListener: () => {},
+    dispatchEvent: () => true,
+    removeEventListener: () => {},
+  });
 }
 
 Deno.test("events - isDomEventMessage", async (t) => {
@@ -169,7 +203,7 @@ Deno.test("events - isDomEventMessage", async (t) => {
 
 Deno.test("events - serializeEvent", async (t) => {
   await t.step("serializes basic event type", () => {
-    const event = new MockEvent("click") as unknown as Event;
+    const event = new MockEvent("click");
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "click");
   });
@@ -177,7 +211,7 @@ Deno.test("events - serializeEvent", async (t) => {
   await t.step("captures trusted provenance", () => {
     const event = new MockEvent("click", {
       isTrusted: true,
-    }) as unknown as Event;
+    });
     const serialized = serializeEvent(event);
     assertEquals(serialized.provenance, {
       origin: "dom",
@@ -188,21 +222,23 @@ Deno.test("events - serializeEvent", async (t) => {
   await t.step("captures data-ui markers from composed event paths", () => {
     const event = new MockEvent("click", {
       isTrusted: true,
-      target: { dataset: { ordinaryHandlerData: "preserved" } },
-    }) as MockEvent & { composedPath: () => unknown[] };
+      target: eventTarget({
+        dataset: { ordinaryHandlerData: "preserved" },
+      }),
+    });
     event.composedPath = () => [
-      { dataset: { cfButton: "" } },
-      { dataset: { uiAction: "TrustedSaveTitle" } },
-      {
+      eventTarget({ dataset: { cfButton: "" } }),
+      eventTarget({ dataset: { uiAction: "TrustedSaveTitle" } }),
+      eventTarget({
         dataset: {
           uiPattern: "TrustedSaveSurface",
           uiEventIntegrity: "TrustedSaveSurface",
         },
-      },
-      event.target,
+      }),
+      event.target!,
     ];
 
-    const serialized = serializeEvent(event as unknown as Event);
+    const serialized = serializeEvent(event);
 
     assertEquals(serialized.target?.dataset, {
       ordinaryHandlerData: "preserved",
@@ -229,7 +265,7 @@ Deno.test("events - serializeEvent", async (t) => {
       ctrlKey: false,
       metaKey: true,
       shiftKey: false,
-    }) as unknown as Event;
+    });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "keydown");
@@ -247,7 +283,7 @@ Deno.test("events - serializeEvent", async (t) => {
       button: 0,
       buttons: 1,
       shiftKey: true,
-    }) as unknown as Event;
+    });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "click");
@@ -260,7 +296,7 @@ Deno.test("events - serializeEvent", async (t) => {
     const event = new MockInputEvent("input", {
       inputType: "insertText",
       data: "a",
-    }) as unknown as Event;
+    });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "input");
@@ -269,14 +305,14 @@ Deno.test("events - serializeEvent", async (t) => {
   });
 
   await t.step("serializes target properties", () => {
-    const target = {
+    const target = eventTarget({
       name: "myInput",
       value: "hello",
       checked: true,
       selected: false,
       selectedIndex: 2,
-    };
-    const event = new MockEvent("change", { target }) as unknown as Event;
+    });
+    const event = new MockEvent("change", { target });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.target?.name, "myInput");
@@ -287,10 +323,10 @@ Deno.test("events - serializeEvent", async (t) => {
   });
 
   await t.step("serializes dataset", () => {
-    const target = {
+    const target = eventTarget({
       dataset: { foo: "bar", baz: "qux" },
-    };
-    const event = new MockEvent("click", { target }) as unknown as Event;
+    });
+    const event = new MockEvent("click", { target });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.target?.dataset?.foo, "bar");
@@ -300,7 +336,7 @@ Deno.test("events - serializeEvent", async (t) => {
   await t.step("serializes custom event detail", () => {
     const event = new MockCustomEvent("custom", {
       detail: { message: "hello", count: 42 },
-    }) as unknown as Event;
+    });
 
     const serialized = serializeEvent(event);
     assertEquals(serialized.type, "custom");
@@ -309,7 +345,7 @@ Deno.test("events - serializeEvent", async (t) => {
   });
 
   await t.step("omits undefined properties", () => {
-    const event = new MockEvent("click") as unknown as Event;
+    const event = new MockEvent("click");
     const serialized = serializeEvent(event);
 
     // Should only have type

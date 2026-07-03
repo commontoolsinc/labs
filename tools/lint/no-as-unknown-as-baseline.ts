@@ -1,16 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/html/test/worker-events.test.ts": [
-    "172:41:12r38dw",
-    "180:7:1u2o5ad",
-    "205:44:rmkpet",
-    "232:7:grxfjd",
-    "250:7:14cyuso",
-    "263:7:ro9x9z",
-    "279:54:23rwq5",
-    "293:53:1fjiyhj",
-    "303:7:1hegkh1",
-    "312:41:12r38dw",
-  ],
   "packages/html/test/worker-reconciler-cell-child.test.ts": [
     "104:32:niwoa9",
     "176:29:1ryfleh",
