@@ -62,6 +62,37 @@ Jobs and steps for a run:
 `GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
 
+## Root Test Job Shape
+
+The `Test` job in `.github/workflows/deno.yml` runs the root `deno task test`
+with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded CI
+job, so the root job skips it. The root task still collects workspace coverage
+with `DENO_COVERAGE_DIR`.
+
+The root task is `tasks/test.ts`. It reads the workspace list from
+`deno.jsonc`, starts `deno task test` in every enabled package at the same time,
+and waits for all packages to finish. Its wall time is set by the slowest
+package test task, plus the fixed setup and coverage report steps around it.
+
+When this job becomes the long pole, start with the `Package timings:` block
+printed by `tasks/test.ts`. A slow package may simply be running many independent
+test modules serially. Deno's `--parallel` mode can reduce that package's wall
+time, but only after checking for tests that share process-wide state.
+
+Known serial CLI tests:
+
+- `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
+  `test/log-level.test.ts`, `test/main-command.test.ts`,
+  `test/test-runner-compile-byte-cache.test.ts`, and
+  `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
+- `test/view-mod-gate.test.ts` changes into a removed directory to test the
+  missing-current-directory fallback.
+- `test/view-pager-pty.test.ts` drives a real pseudo-terminal and is sensitive
+  to heavy workspace contention.
+
+The CLI package keeps those tests in a serial group and runs the rest of its
+test modules with `--parallel`.
+
 ## Coverage Debt Baselines
 
 Performance Check also tracks coverage debt as uncovered source lines. See
