@@ -593,11 +593,7 @@ Deno.test("memory v2 server direct writes schedule dirty refreshes without conne
   const originalFlush = server.flushSessions.bind(server);
   let flushCalls = 0;
 
-  (server as unknown as {
-    flushSessions(
-      ...args: Parameters<Server["flushSessions"]>
-    ): ReturnType<Server["flushSessions"]>;
-  }).flushSessions = async (...args) => {
+  server.flushSessions = async (...args) => {
     flushCalls += 1;
     return await originalFlush(...args);
   };
@@ -2566,11 +2562,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
   const originalTransact = server.transact.bind(server);
   const releaseTx2 = Promise.withResolvers<void>();
 
-  (server as unknown as {
-    transact(
-      message: Parameters<Server["transact"]>[0],
-    ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  server.transact = async (message) => {
     if (message.requestId === "tx-2") {
       await releaseTx2.promise;
     }
@@ -2722,11 +2714,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
   const releaseTx3 = Promise.withResolvers<void>();
   let syncCalls = 0;
 
-  (server as unknown as {
-    syncSessionForConnection(
-      ...args: Parameters<Server["syncSessionForConnection"]>
-    ): ReturnType<Server["syncSessionForConnection"]>;
-  }).syncSessionForConnection = async (...args) => {
+  server.syncSessionForConnection = async (...args) => {
     syncCalls += 1;
     if (syncCalls === 1) {
       await releaseFirstRefresh.promise;
@@ -2734,11 +2722,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     return await originalSync(...args);
   };
 
-  (server as unknown as {
-    transact(
-      message: Parameters<Server["transact"]>[0],
-    ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  server.transact = async (message) => {
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }
@@ -2938,11 +2922,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
   const releaseTx3 = Promise.withResolvers<void>();
   let syncCalls = 0;
 
-  (server as unknown as {
-    syncSessionForConnection(
-      ...args: Parameters<Server["syncSessionForConnection"]>
-    ): ReturnType<Server["syncSessionForConnection"]>;
-  }).syncSessionForConnection = async (...args) => {
+  server.syncSessionForConnection = async (...args) => {
     syncCalls += 1;
     if (syncCalls === 1) {
       await releaseFirstRefresh.promise;
@@ -2950,11 +2930,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     return await originalSync(...args);
   };
 
-  (server as unknown as {
-    transact(
-      message: Parameters<Server["transact"]>[0],
-    ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  server.transact = async (message) => {
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }

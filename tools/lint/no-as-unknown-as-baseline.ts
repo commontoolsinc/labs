@@ -1,12 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-server-test.ts": [
-    "484:10:1p0tt6o",
-    "2456:10:7bcaar",
-    "2612:10:122m3yb",
-    "2624:10:7bcaar",
-    "2828:10:122m3yb",
-    "2840:10:7bcaar",
-  ],
   "packages/memory/test/v2-sqlite-protocol-test.ts": [
     "207:6:ymscnl",
   ],
