@@ -1381,7 +1381,9 @@ export class Runner {
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
     if (rootCell.getRaw() === undefined) {
+      const rootSyncStart = performance.now();
       return rootCell.sync().then(() => {
+        logger.time(rootSyncStart, "start", "rootCellSync");
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -1437,6 +1439,7 @@ export class Runner {
       // No patternId, no meta cell — the source docs are the single durable
       // source. A piece carrying only a legacy `pattern` link is unrecoverable
       // (the sanctioned data-wipe outcome).
+      const loadStart = performance.now();
       return pm
         .loadPatternByIdentity(
           identityRef.identity,
@@ -1444,6 +1447,9 @@ export class Runner {
           rootCell.space,
         )
         .then((loaded) => {
+          // Resume-boot decomposition: source-doc fetch + module load/eval for
+          // a pattern this runtime has never instantiated.
+          logger.time(loadStart, "start", "loadPatternByIdentity");
           if (loaded) {
             return this.doStart(rootCell, seenCells);
           } else {
@@ -1487,6 +1493,7 @@ export class Runner {
           return true;
         }
 
+        const startCoreStart = performance.now();
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
@@ -1498,6 +1505,10 @@ export class Runner {
           });
         } catch (err) {
           return Promise.reject(err);
+        } finally {
+          // Synchronous instantiation cost of the resumed piece (pattern
+          // setup, node wiring), distinct from the syncs around it.
+          logger.time(startCoreStart, "start", "startCoreResume");
         }
 
         return true;
@@ -1841,6 +1852,27 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
+    const syncStart = performance.now();
+    try {
+      return await this.syncCellsForRunningPatternInner(
+        resultCell,
+        pattern,
+        inputs,
+      );
+    } finally {
+      // Resume-boot decomposition: this is the dependency pre-sync a fresh
+      // runtime pays before wiring a stored piece back up. Recorded under the
+      // runner timing stats (they record even when the logger is disabled) so
+      // load summaries can attribute slow storage-resume boots.
+      logger.time(syncStart, "start", "syncCellsForRunningPattern");
+    }
+  }
+
+  private async syncCellsForRunningPatternInner(
+    resultCell: Cell<any>,
+    pattern: Module | Pattern,
+    inputs?: any,
+  ): Promise<boolean> {
     const seen = new Set<Cell<any>>();
     const promises = new Set<Promise<any>>();
 
@@ -1920,7 +1952,15 @@ export class Runner {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
 
-    await Promise.all(cells.map((c) => c.sync()));
+    // Per-cell spans: `n` in the timing stats is the number of cells this
+    // resume pre-synced, total/max its round-trip cost (spans overlap, so the
+    // wall cost is bounded by the enclosing syncCellsForRunningPattern span).
+    await Promise.all(cells.map((c) => {
+      const cellSyncStart = performance.now();
+      return Promise.resolve(c.sync()).finally(() =>
+        logger.time(cellSyncStart, "start", "resumeCellSync")
+      );
+    }));
 
     return true;
   }
