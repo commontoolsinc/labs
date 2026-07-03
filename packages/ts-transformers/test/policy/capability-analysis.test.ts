@@ -2861,13 +2861,35 @@ Deno.test(
     assertEquals(findings.length, 1);
     assertEquals(findings[0]!.rootName, "input");
     assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
     assert(ts.isCallExpression(findings[0]!.node));
   },
 );
 
 Deno.test(
-  "Mergeable-push misuse: flags an iterate-then-push to the same collection",
+  "Mergeable-push misuse: flags an iterate-dedup-then-push to the same collection",
   () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        for (const u of input.key("users")) {
+          if (u.name === "a") return;
+        }
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores an iterate-then-push when the iteration serves neither the push nor a write",
+  () => {
+    // The iteration still keeps the append in the conflict set, but with no
+    // dedup guard, no value dependence, and no sibling write there is usually
+    // no better expression to point at, so the check stays silent.
     const findings = collectMergeablePushMisuses(
       `const fn = (input) => {
         for (const u of input.key("users")) { u; }
@@ -2875,8 +2897,54 @@ Deno.test(
       };`,
     );
 
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a value-dependent push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        input.key("users").push({ position: existing.length });
+      };`,
+    );
+
     assertEquals(findings.length, 1);
-    assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies an append-then-trim as an independent read-modify-write",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        input.key("messages").push({ text: "a" });
+        const current = input.key("messages").get();
+        input.key("messages").set(current.slice(-50));
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "messages");
+    assertEquals(findings[0]!.kind, "independent-read-modify-write");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores a push when the read serves neither the push nor another write",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const snapshot = input.key("users").get();
+        input.key("log").set(snapshot);
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
   },
 );
 
@@ -2895,6 +2963,7 @@ Deno.test(
 
     assertEquals(findings.length, 1);
     assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
   },
 );
 
