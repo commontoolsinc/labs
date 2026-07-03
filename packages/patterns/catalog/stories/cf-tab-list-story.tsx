@@ -113,7 +113,7 @@ export default pattern<TabListStoryInput, TabListStoryOutput>(() => {
             label="orientation"
             description="Direction for tab-list layout"
             defaultValue="horizontal"
-            value={orientation as any}
+            value={orientation}
             items={[
               { label: "horizontal", value: "horizontal" },
               { label: "vertical", value: "vertical" },
@@ -123,7 +123,7 @@ export default pattern<TabListStoryInput, TabListStoryOutput>(() => {
             label="variant"
             description="Visual style: underline (default) or chip (pill)"
             defaultValue="underline"
-            value={variant as any}
+            value={variant}
             items={[
               { label: "underline", value: "underline" },
               { label: "chip", value: "chip" },
