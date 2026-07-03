@@ -16,17 +16,32 @@ type Favorite = {
   tag: string;
   userTags: Writable<string[]>;
   spaceName?: string;
+  // Stable key the favorite entity is addressed by (the piece's identity),
+  // stored on the entry by home's addFavorite so the remove reaches it.
+  id?: string;
 };
 
 const onRemoveFavorite = handler<
   Record<string, never>,
   {
     favorites: Writable<Array<Favorite> | Default<[]>>;
-    item: Writable<unknown>;
+    id?: string;
+    item?: Writable<unknown>;
   }
->((_, { favorites, item }) => {
-  const favorite = favorites.get().find((f: Favorite) => f.cell.equals(item));
-  if (favorite) favorites.remove(favorite);
+>((_, { favorites, id, item }) => {
+  // A favorite added through the keyed path carries an id. Drop its membership
+  // by that id — the same key home's addFavorite used, so both reach the same
+  // entity — and clear the entity, since it outlives its link.
+  if (id) {
+    favorites.removeByValue(favorites.elementById(id));
+    const entry: Writable<Favorite | undefined> = favorites.elementById(id);
+    entry.set(undefined);
+    return;
+  }
+  // A favorite added before keyed addressing has no id; remove it by matching
+  // its piece cell.
+  if (!item) return;
+  favorites.set(favorites.get().filter((f) => !f.cell.equals(item)));
 });
 
 const onUpdateUserTags = handler<
@@ -56,6 +71,7 @@ export default pattern<Record<string, never>>((_) => {
                   size="sm"
                   onClick={onRemoveFavorite({
                     favorites: favorites!,
+                    id: item.id,
                     item: item.cell,
                   })}
                 >
