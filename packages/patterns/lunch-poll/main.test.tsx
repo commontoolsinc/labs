@@ -25,6 +25,19 @@ import CozyPoll, {
   type Vote,
 } from "./main.tsx";
 
+// This file's single identity IS the host, so adding options triggers the
+// host-gated art generation. Mock the image endpoint so the flows stay
+// deterministic and never reach a live dev server's real generator (the
+// stored-art wiring itself is asserted in art-sync.test.tsx).
+export const fetchMocks = [
+  {
+    urlIncludes: "/api/ai/img",
+    contentType: "image/png",
+    base64Body:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  },
+];
+
 const findNodeByProp = (
   root: unknown,
   prop: string,

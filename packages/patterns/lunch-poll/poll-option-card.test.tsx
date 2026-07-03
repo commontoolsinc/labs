@@ -20,6 +20,7 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
+  SetOptionImageEvent,
   Vote,
 } from "./main.tsx";
 
@@ -43,11 +44,17 @@ const propValue = (node: unknown, prop: string): unknown => {
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
 const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
+const noopSetOptionImage = handler<SetOptionImageEvent, EmptyState>(() => {});
 
+// Carries a stored image so this admin-viewer card takes the stored-art path
+// (no generation request) — the generation flow itself is covered by
+// art-sync.test.tsx with a mocked image endpoint.
 const STORED_OPTION: Option = {
   id: "opt-sushi",
   title: "Sushi Place",
   addedByName: "Alex",
+  imageUrl:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
 };
 
 const votes: Vote[] = [
@@ -68,6 +75,7 @@ export default pattern(() => {
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
   const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
   const logVisit: Stream<LogVisitEvent> = noopLogVisit({});
+  const setOptionImage: Stream<SetOptionImageEvent> = noopSetOptionImage({});
 
   const card = PollOptionCard({
     option: STORED_OPTION,
@@ -80,6 +88,7 @@ export default pattern(() => {
     castVote,
     removeOption,
     logVisit,
+    setOptionImage,
   });
 
   const assert_my_green_vote_label_renders = computed(() =>

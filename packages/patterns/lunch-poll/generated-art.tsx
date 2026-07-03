@@ -5,9 +5,18 @@ import {
   type FetchBinaryResult,
   NAME,
   pattern,
+  type Stream,
   UI,
   type VNode,
 } from "commonfabric";
+
+/** Notification sent when this instance's generation completes. */
+export interface GeneratedArtEvent {
+  /** The caller-supplied `id` input, passed back for correlation. */
+  id: string;
+  /** The generated image as a persistable `data:` URL. */
+  imageUrl: string;
+}
 
 // Cuisine illustration thumbnail. Callers can disable generation and pass a
 // stored source URL; a parent that owns item state can persist the returned
@@ -39,7 +48,7 @@ const cuisineArtPrompt = (title: string) =>
   "draw buildings, palaces, storefronts, logos, people, or text. Clean white " +
   "background, no border.";
 
-const safeImageUrl = (raw: string | undefined): string => {
+export const safeImageUrl = (raw: string | undefined): string => {
   const s = (raw ?? "").trim();
   if (!s) return "";
   if (s.startsWith("data:image/")) return s;
@@ -95,6 +104,20 @@ export interface GeneratedArtInput {
 
   /** Whether this instance may call the image generation endpoint. */
   shouldGenerate?: boolean | Default<true>;
+
+  /** Correlation id echoed in `onGenerated` events (e.g. the option id). */
+  id?: string | Default<"">;
+
+  /**
+   * Parent-owned stream notified once with the generated image's data URL
+   * (plus the `id` input). The idiomatic persistence seam: the parent's
+   * handler stores the value and passes it back as `sourceUrl`, after which
+   * this instance stops generating. The notify runs INSIDE this pattern on
+   * purpose — computed outputs derived from fetch cells do not currently
+   * materialize for parent readers (see the CT-1811-family runtime gap), so
+   * parents must be told, not read.
+   */
+  onGenerated?: Stream<GeneratedArtEvent>;
 }
 
 /**
@@ -118,17 +141,37 @@ export interface GeneratedArtOutput {
    */
   image: FetchBinaryResult | undefined;
 
+  /**
+   * The generated image as a `data:` URL (`""` until generated). The
+   * persistence-friendly form: a parent stores this string in shared state
+   * (e.g. an option's `imageUrl`) and passes it back as `sourceUrl`, after
+   * which every viewer serves the stored value and no instance generates.
+   */
+  imageDataUrl: string;
+
   /** Current image source/generation state. */
   fetchState: GeneratedArtFetchState;
+
+  /**
+   * `"sent"` once the `onGenerated` notification fired (`""` otherwise).
+   * Drives the notify computed; NOT reliably readable by parents (fetch-cell
+   * derived — the same CT-1811-family gap as `fetchState`).
+   */
+  notifyState: string;
 }
 
 export default pattern<GeneratedArtInput, GeneratedArtOutput>(
-  ({ prompt, sourceUrl, shouldGenerate }) => {
+  ({ prompt, sourceUrl, shouldGenerate, id, onGenerated }) => {
     const requestUrl = computed(() => {
+      // Guard the transiently-unset prompt (a map element materializing):
+      // without it a real generation request goes out with "undefined"/"" in
+      // the art prompt (CT-1820's adjacent hazard).
+      const title = (prompt ?? "").trim();
+      if (!title) return "";
       const stored = safeImageUrl(sourceUrl);
       if (stored) return "";
       if (shouldGenerate === false) return "";
-      return generatedImageUrlFor(prompt);
+      return generatedImageUrlFor(title);
     });
 
     const generatedArt = fetchBinary({
@@ -141,14 +184,41 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
     const image = computed(() => generatedArt.result);
     const imageBytes = computed(() => generatedArt.result?.bytes);
     const imageMediaType = computed(() => generatedArt.result?.mediaType ?? "");
+    const imageDataUrl = computed(() => {
+      const bytes = generatedArt.result?.bytes;
+      const mediaType = generatedArt.result?.mediaType;
+      if (!bytes || !mediaType) return "";
+      // ~10 kB thumbnails; a simple char loop is fine at this size. `btoa` is
+      // a hardened sandbox global; FabricBytes reads out via `slice()`.
+      const raw = bytes.slice();
+      let binary = "";
+      for (let i = 0; i < raw.length; i++) {
+        binary += String.fromCharCode(raw[i]);
+      }
+      return `data:${mediaType};base64,${btoa(binary)}`;
+    });
     const hasSourceUrl = computed(() => safeImageUrl(sourceUrl) !== "");
     const hasGeneratedImage = computed(() => !!generatedArt.result?.bytes);
     const fetchState = computed(() => {
+      if (!(prompt ?? "").trim()) return "";
       if (safeImageUrl(sourceUrl)) return "stored";
       if (shouldGenerate === false) return "";
       if (generatedArt.result?.bytes) return "generated";
       if (generatedArt.pending) return "pending";
       return generatedArt.error ? "error" : "requested";
+    });
+
+    // Notify the parent's persistence stream once the generation resolves
+    // (pre-#4325 idiom, kept child-internal — same-level fetch-cell reads).
+    // The parent's handler is idempotent on the stored value, and once it
+    // writes `sourceUrl` back, `requestUrl` goes empty and this instance
+    // stops generating — so re-runs converge instead of looping.
+    const notifyState = computed(() => {
+      if (!onGenerated) return "";
+      const generated = imageDataUrl;
+      if (!generated) return "";
+      onGenerated.send({ id: (id ?? "").trim(), imageUrl: generated });
+      return "sent";
     });
 
     return {
@@ -199,7 +269,9 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
         </div>
       ),
       image,
+      imageDataUrl,
       fetchState,
+      notifyState,
     };
   },
 );

@@ -13,10 +13,17 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
+  SetOptionImageEvent,
   Vote,
   VoteColor,
 } from "./main.tsx";
-import GeneratedArt from "./generated-art.tsx";
+import GeneratedArt, {
+  type GeneratedArtFetchState,
+  safeImageUrl,
+} from "./generated-art.tsx";
+
+/** Admin-side generated-art persistence state for one option row. */
+export type PollOptionArtSyncState = GeneratedArtFetchState;
 
 /** Shared per-session target cell used for one open option editor at a time. */
 export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
@@ -84,6 +91,9 @@ export interface PollOptionCardInput {
 
   /** Parent-owned admin stream that records this option in visit history. */
   logVisit: Stream<LogVisitEvent>;
+
+  /** Parent-owned admin stream persisting this option's generated art. */
+  setOptionImage: Stream<SetOptionImageEvent>;
 }
 
 /**
@@ -97,6 +107,15 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
+
+  /**
+   * Generated-art lifecycle for this row: `"stored"` once the option carries a
+   * persisted image (every viewer), the underlying fetch state while the host's
+   * client is generating, and `""` for non-hosts before anything is stored.
+   * The host-side persistence send lives in this computed, so reading it (the
+   * UI does) is what drives the sync.
+   */
+  artSyncState: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -112,6 +131,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       castVote,
       removeOption,
       logVisit,
+      setOptionImage,
     },
   ) => {
     const oid = option.id;
@@ -119,6 +139,27 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const displayRank = formatRank({ rank });
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
+
+    // Generated cuisine thumbnail. The stored option image is the shared
+    // truth every viewer renders; generation is gated to the host's client
+    // (`shouldGenerate`) and only while nothing is stored (GeneratedArt
+    // skips the request once `sourceUrl` is set). Persistence is the child's
+    // `onGenerated` notification into the parent-owned stream — the parent
+    // never reads fetch-derived child outputs (CT-1811-family gap); once the
+    // handler stores the data URL, `sourceUrl` flows back in and generation
+    // stops everywhere.
+    const art = GeneratedArt({
+      prompt: optionTitle,
+      sourceUrl: option.imageUrl,
+      shouldGenerate: isAdmin,
+      id: oid,
+      onGenerated: setOptionImage,
+    });
+
+    // Row-level art state, from parent-owned cells only.
+    const artSyncState = computed<PollOptionArtSyncState>(() =>
+      safeImageUrl(option.imageUrl) ? "stored" : ""
+    );
 
     return {
       [NAME]: optionTitle,
@@ -137,12 +178,11 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
           }}
         >
           {
-            /* Restored #4325 generated-art sub-pattern: each option card
-              instantiates GeneratedArt, which builds an art-director prompt from
-              the title and fetches a hand-drawn cuisine thumbnail from the image
-              endpoint (falling back to a placeholder while pending/on error). */
+            /* Generated-art thumbnail (call-form instance above): stored
+              option image for everyone; host-gated generation while empty,
+              persisted via artSyncState → setOptionImage. */
           }
-          <GeneratedArt prompt={optionTitle} />
+          {art[UI]}
           <span
             style={{
               minWidth: "28px",
@@ -336,6 +376,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
+      artSyncState,
     };
   },
 );
