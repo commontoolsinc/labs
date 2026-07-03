@@ -628,6 +628,210 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
+  // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
+  // measure under `observe` before a host flips to `persist`): the join IS
+  // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
+  // write in the transaction, no envelope on the stored target at all.
+  it("observe mode derives the join as a diagnostic and persists nothing", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "observe",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-observe-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // The same laundering shape the persist tests use: read the secret,
+      // write a derived plain value to an unlabeled doc.
+      const tx = runtime.edit();
+      const raw = runtime.getCell(
+        signer.did(),
+        "cfc-flow-observe-source",
+        undefined,
+        tx,
+      ).getRaw() as { secret?: string };
+      expect(raw.secret).toBe("s3cr3t");
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-flow-observe-target",
+        undefined,
+        tx,
+      );
+      target.set({ copied: `${raw.secret}!` });
+      tx.prepareCfc();
+
+      // The join was derived and reported...
+      expect(
+        tx.getCfcState().diagnostics.some((d) =>
+          /^flow-labels\(observe\): would derive 1 confidentiality \/ 0 integrity atom\(s\) onto \d+ written doc\(s\)$/
+            .test(d)
+        ),
+      ).toBe(true);
+      // ...but nothing was persisted: no ["cfc"] write in this transaction...
+      const targetId = target.getAsNormalizedFullLink().id;
+      expect(
+        [...(tx.getWriteDetails?.(signer.did()) ?? [])].some(
+          (w) => w.address.id === targetId && w.address.path[0] === "cfc",
+        ),
+      ).toBe(false);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      // ...and the stored doc carries no envelope at all (no version bump
+      // from label persistence — the doc has exactly its value).
+      const storedTarget = (storageManager.open(signer.did())
+        .replica as unknown as {
+          getDocument(id: string): { cfc?: unknown } | undefined;
+        }).getDocument(targetId);
+      expect(storedTarget).toBeDefined();
+      expect(storedTarget!.cfc).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // The flow-clear machinery is ancestor-aware: an untainted overwrite AT A
+  // PATH clears stale per-value components at every DEEPER path
+  // (isPrefix(written, entry) — the write replaced that whole subtree), and
+  // the resulting envelope must still be written even when it comes out
+  // empty (flowCleared), or the stale label never leaves storage. The
+  // exact-path case is covered above ("replaces the derived component…");
+  // this pins the proper-ancestor direction.
+  it("clears a deeper derived component when an ancestor path is overwritten untainted", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-ancestor-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      const targetId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-ancestor-target",
+          {
+            type: "object",
+            properties: {
+              outer: {
+                type: "object",
+                properties: { inner: { type: "string" } },
+              },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, { value: { outer: { inner: "x0" } } });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Tainted write at the DEEP leaf: derived entry at ["outer","inner"].
+      const taint = runtime.edit();
+      const raw = runtime.getCell(
+        signer.did(),
+        "cfc-flow-ancestor-source",
+        undefined,
+        taint,
+      ).getRaw() as { secret?: string };
+      taint.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: ["value", "outer", "inner"],
+      }, `${raw.secret}!`);
+      taint.prepareCfc();
+      expect((await taint.commit()).ok).toBeDefined();
+
+      const entry = replicaEntries(storageManager, targetId).find((e) =>
+        e.origin === "derived"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.path).toEqual(["outer", "inner"]);
+
+      // Untainted overwrite of the ANCESTOR subtree (raw write, no reads in
+      // the journal): the deeper derived entry is stale — the value it
+      // labeled is gone — and must be cleared.
+      const clean = runtime.edit();
+      clean.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: ["value", "outer"],
+      }, { inner: "fresh public text" });
+      clean.prepareCfc();
+      expect((await clean.commit()).ok).toBeDefined();
+
+      expect(
+        replicaEntries(storageManager, targetId).find((e) =>
+          e.origin === "derived"
+        ),
+      ).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   // A2: trigger reads (§8.9.2). The decision to run was influenced by the
   // triggering change even when the run never reads the changed value, so
   // its labels join the derivation.
