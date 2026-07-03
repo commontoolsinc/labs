@@ -897,7 +897,7 @@ describe("value-hash", () => {
         // the same `getStringRep()` codepath as bare string values, so a long
         // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
         const longKey = "x".repeat(100);
-        const obj = { [longKey]: 1 } as unknown as FabricValue;
+        const obj = { [longKey]: 1 } satisfies FabricValue;
         const keyHash = sha256(new TextEncoder().encode(longKey));
         // Stream: TAG_OBJECT, [TAG_STRING_HASH, keyHash], value(1.0), TAG_END
         const expected = sha256([
@@ -920,9 +920,9 @@ describe("value-hash", () => {
       });
 
       it("is deterministic and key-distinct for long object keys", () => {
-        const a1 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
-        const a2 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
-        const b = { ["b".repeat(100)]: 1 } as unknown as FabricValue;
+        const a1 = { ["a".repeat(100)]: 1 } satisfies FabricValue;
+        const a2 = { ["a".repeat(100)]: 1 } satisfies FabricValue;
+        const b = { ["b".repeat(100)]: 1 } satisfies FabricValue;
         expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
         expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
       });
@@ -1336,14 +1336,14 @@ describe("value-hash", () => {
     });
 
     it("hashes deterministically for an interned symbol nested in an object", () => {
-      const a = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
-      const b = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
+      const a = { tag: Symbol.for("nested-tag") } satisfies FabricValue;
+      const b = { tag: Symbol.for("nested-tag") } satisfies FabricValue;
       expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
     });
 
     it("hashes deterministically for an interned symbol nested in an array", () => {
-      const a = [Symbol.for("x"), 1] as unknown as FabricValue;
-      const b = [Symbol.for("x"), 1] as unknown as FabricValue;
+      const a = [Symbol.for("x"), 1] satisfies FabricValue;
+      const b = [Symbol.for("x"), 1] satisfies FabricValue;
       expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
     });
 
@@ -1354,7 +1354,7 @@ describe("value-hash", () => {
     });
 
     it("also throws for a unique symbol nested in an object", () => {
-      const value = { tag: Symbol("nope") } as unknown as FabricValue;
+      const value = { tag: Symbol("nope") } satisfies FabricValue;
       expect(() => hashOf(value)).toThrow(
         "Cannot hash unique (uninterned) symbol",
       );

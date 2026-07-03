@@ -1,15 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/value-hash.test.ts": [
-    "900:37:1gvons3",
-    "923:44:1vndl86",
-    "924:44:1vndl86",
-    "925:43:95l19h",
-    "1339:50:rx1ujv",
-    "1340:50:rx1ujv",
-    "1345:37:218ql4",
-    "1346:37:218ql4",
-    "1357:44:49r25w",
-  ],
   "packages/data-model/test/valueEquals.test.ts": [
     "38:26:1yq2m3c",
     "39:27:1yq2m3c",
