@@ -110,28 +110,36 @@ export class StandaloneMemoryServer {
 // a client's writes actually land in.
 function logCommitOperations(connectionTag: number, payload: string): void {
   try {
-    const parsed = MemoryServer.parseClientMessage(payload) as unknown as {
-      commit?: { operations?: Array<Record<string, any>> };
-    };
-    const operations = parsed?.commit?.operations;
+    const parsed = MemoryServer.parseClientMessage(payload);
+    const commit = parsed && "commit" in parsed && isRecord(parsed.commit)
+      ? parsed.commit
+      : undefined;
+    const operations = Array.isArray(commit?.operations)
+      ? commit.operations
+      : undefined;
     if (!Array.isArray(operations)) return;
     for (const op of operations) {
-      const detail = op?.op === "patch"
+      if (!isRecord(op)) continue;
+      const detail = op.op === "patch"
         ? ` paths=${
           JSON.stringify(
             (op.patches ?? []).map((p: { path?: string }) => p?.path),
           )
         }`
-        : op?.op === "set"
+        : op.op === "set"
         ? ` keys=${JSON.stringify(Object.keys(op.value?.value ?? {}))}`
         : "";
+      const id = "id" in op ? String(op.id).slice(0, 24) : "undefined";
+      const scope = "scope" in op ? op.scope ?? "(space)" : "(space)";
       console.error(
-        `[memwrite conn=${connectionTag}] op=${op?.op} id=${
-          String(op?.id).slice(0, 24)
-        } scope=${op?.scope ?? "(space)"}${detail}`,
+        `[memwrite conn=${connectionTag}] op=${op.op} id=${id} scope=${scope}${detail}`,
       );
     }
   } catch {
     // Logging only.
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
