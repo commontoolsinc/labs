@@ -17,14 +17,53 @@ import {
 // Type for backlinks (inline to work around CLI path resolution bug)
 type MentionablePiece = {
   [NAME]?: string;
+  id?: string;
+  noteId?: string;
+  $id?: string;
+  $ID?: string;
   isHidden?: boolean;
   content?: string;
-  mentioned: MentionablePiece[];
-  backlinks: MentionablePiece[];
+  mentioned: ReadonlyArray<MentionablePiece>;
+  backlinks: ReadonlyArray<MentionablePiece>;
 };
 
 type MinimalPiece = {
   [NAME]?: string;
+};
+
+type ParentNotebook = Record<string, unknown> & MinimalPiece & {
+  title?: string;
+  parentNotebook?: ParentNotebook | null;
+};
+
+type Readable<T> = {
+  get: () => T;
+};
+
+type MentionableSource =
+  | readonly MentionablePiece[]
+  | Default<[]>
+  | { get?: object };
+
+const isReadable = <T,>(value: unknown): value is Readable<T> => {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as { get?: unknown };
+  return typeof candidate.get === "function";
+};
+
+const readMaybeCell = <T,>(
+  value: T | Readable<T> | undefined,
+): T | undefined => isReadable<T>(value) ? value.get() : value;
+
+const readMentionable = (
+  value: MentionableSource | undefined,
+): ReadonlyArray<MentionablePiece> => {
+  const resolved = isReadable<ReadonlyArray<MentionablePiece> | Default<[]>>(
+      value,
+    )
+    ? value.get()
+    : value;
+  return Array.isArray(resolved) ? resolved : [];
 };
 
 // Default system prompt - based on leaked/inferred Claude system prompt style
@@ -46,7 +85,7 @@ type Input = {
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new ChatNotes. */
   linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference (passed via SELF from notebook.tsx) */
-  parentNotebook?: any;
+  parentNotebook?: ParentNotebook | null;
   /** Selected model for generation. Defaults to Sonnet 4.5 */
   model?: Writable<string | Default<"anthropic:claude-sonnet-4-5">>;
 };
@@ -62,7 +101,7 @@ export type Output = {
   [UI]: VNode;
   mentioned: Array<MentionablePiece> | Default<[]>;
   backlinks: MentionablePiece[];
-  parentNotebook: any;
+  parentNotebook: ParentNotebook | null;
   content: string | Default<"">;
   isHidden: boolean | Default<false>;
   noteId: string | Default<"">;
@@ -78,7 +117,7 @@ export type Output = {
 // - Other sections are user messages
 function parseContentToMessages(
   content: string,
-  mentionable: MentionablePiece[],
+  mentionable: ReadonlyArray<MentionablePiece>,
 ): { system: string; messages: LLMMessage[] } {
   if (!content.trim()) {
     return { system: DEFAULT_SYSTEM_PROMPT, messages: [] };
@@ -149,17 +188,16 @@ function parseContentToMessages(
 // Format: [[Name (id)]] -> ## [Name]\n[content of linked note]
 function expandWikiLinks(
   text: string,
-  mentionable: MentionablePiece[],
+  mentionable: ReadonlyArray<MentionablePiece>,
 ): string {
   // Match [[Name (id)]] pattern
   const wikiLinkRegex = /\[\[([^\]]*?)\s*\(([^)]+)\)\]\]/g;
 
   return text.replace(wikiLinkRegex, (match, name, id) => {
     // Find the piece by ID
-    const piece = mentionable?.find((c: any) => {
+    const piece = mentionable?.find((c) => {
       // Check various ways the ID might be stored
-      const pieceId = c?.id || c?.noteId || (c as any)?.$id ||
-        (c as any)?.["$ID"];
+      const pieceId = c?.id || c?.noteId || c?.$id || c?.$ID;
       return pieceId === id;
     });
 
@@ -194,7 +232,7 @@ const handleNewBacklink = handler<
   {
     detail: {
       text: string;
-      pieceId: any;
+      pieceId: unknown;
       piece: Writable<MentionablePiece>;
       navigate: boolean;
     };
@@ -263,16 +301,14 @@ const handleGenerate = handler<
     llmSystem: Writable<string>;
     llmMessages: Writable<LLMMessage[]>;
     isGenerating: Writable<boolean>;
-    mentionable: any;
+    mentionable: MentionableSource;
     beforeAIInsert: Writable<string>;
   }
 >((_event, state) => {
   const currentContent = state.content.get();
 
   // Parse entire content into messages - get raw array from mentionable
-  const mentionableArray = Array.isArray(state.mentionable)
-    ? state.mentionable
-    : state.mentionable?.get?.() ?? [];
+  const mentionableArray = readMentionable(state.mentionable);
   const { system, messages } = parseContentToMessages(
     currentContent,
     mentionableArray,
@@ -320,10 +356,13 @@ const handleCancelGeneration = handler<
 });
 
 // Navigate to parent notebook
-const goToParent = handler<Record<string, never>, { self: any }>(
-  (_, { self }) => {
-    const p = (self as any).parentNotebook;
-    if (p) navigateTo(p);
+const goToParent = handler<
+  Record<string, never>,
+  { parentNotebook: ParentNotebook | null }
+>(
+  (_, { parentNotebook }) => {
+    const p = parentNotebook;
+    if (p) navigateTo(p as never);
   },
 );
 
@@ -405,7 +444,7 @@ const ChatNote = pattern<Input, Output>(
 
     // Compute parent notebook
     const parentNotebook = computed(() => {
-      const selfParent = (self as any)?.parentNotebook;
+      const selfParent = self?.parentNotebook;
       if (selfParent) return selfParent;
       if (parentNotebookProp) return parentNotebookProp;
       return null;
@@ -413,9 +452,16 @@ const ChatNote = pattern<Input, Output>(
 
     // Use provided linkPattern or default to creating new ChatNotes
     const patternJson = computed(() => {
-      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const lpValue = readMaybeCell<string | Default<"">>(linkPattern);
       const custom = typeof lpValue === "string" ? lpValue.trim() : "";
       return custom || JSON.stringify(ChatNote);
+    });
+
+    const hasParentNotebook = computed(() => !!parentNotebook);
+    const parentNotebookLabel = computed(() => {
+      const notebook = parentNotebook;
+      if (!notebook) return "Notebook";
+      return notebook[NAME] ?? notebook.title ?? "Notebook";
     });
 
     // Generation state display (reactive expression auto-wraps at use sites)
@@ -470,7 +516,7 @@ const ChatNote = pattern<Input, Output>(
               gap="2"
               align="center"
               style={{
-                display: (self as any).parentNotebook ? "flex" : "none",
+                display: hasParentNotebook ? "flex" : "none",
                 marginBottom: "4px",
               }}
             >
@@ -483,10 +529,9 @@ const ChatNote = pattern<Input, Output>(
                 In:
               </span>
               <cf-chip
-                label={(self as any).parentNotebook?.[NAME] ??
-                  (self as any).parentNotebook?.title ?? "Notebook"}
+                label={parentNotebookLabel}
                 interactive
-                oncf-click={goToParent({ self })}
+                oncf-click={goToParent({ parentNotebook })}
               />
             </cf-hstack>
 

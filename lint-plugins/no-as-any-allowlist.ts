@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/experimental/chat-note.tsx",
   "packages/patterns/experimental/email-task-engine.tsx",
   "packages/patterns/gideon-tests/test-33-computed-projection-writability.tsx",
   "packages/patterns/gideon-tests/test-cross-piece-client.tsx",
