@@ -93,6 +93,66 @@ describe("Cell with Optional Link", () => {
       // Should return a cell (even without link)
       expect(result).toBeDefined();
     });
+
+    describe("reserved cause keys", () => {
+      it("rejects a top-level $generated key in record causes", () => {
+        const cell = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(() => cell.for({ $generated: 0 })).toThrow(
+          'top-level key "$generated" is reserved',
+        );
+        const cell2 = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(() => cell2.for({ $kind: "stream", $generated: 1 })).toThrow(
+          "is reserved",
+        );
+      });
+
+      it("reserves only $generated, not other $-prefixed keys", () => {
+        // Every builder-minted cause carries `$generated`, so a cause without
+        // it can never collide with one — other sigil-looking keys stay legal.
+        const cell = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(cell.for({ $kind: "stream" })).toBe(cell);
+        const cell2 = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(cell2.for({ $anythingElse: true })).toBe(cell2);
+      });
+
+      it("allows $generated nested below the top level", () => {
+        const cell = new CellImpl(runtime, tx, { path: [], space }, false);
+        // Nested keys can never collide with the flat generated causes
+        expect(cell.for({ outer: { $generated: 0 } })).toBe(cell);
+      });
+
+      it("leaves non-record causes untouched", () => {
+        const a = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(a.for("$generated")).toBe(a); // a string, not a record key
+        const b = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(b.for(["$generated", 0])).toBe(b); // array elements aren't keys
+        const c = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(c.for(42)).toBe(c);
+      });
+
+      it("stays a silent no-op when the cause is already set (allowIfSet)", () => {
+        const existingCell = runtime.getCell<number>(
+          space,
+          "test-cell-reserved-ignored",
+          undefined,
+          tx,
+        );
+        existingCell.set(42);
+
+        // The reserved cause never takes effect on this cell, so the
+        // suggestion path stays a no-op rather than throwing.
+        const result = existingCell.for({ $generated: 0 }, true);
+        expect(result).toBe(existingCell);
+        expect(existingCell.get()).toBe(42);
+      });
+
+      it("rejects reserved keys on a fresh cell even with allowIfSet", () => {
+        const cell = new CellImpl(runtime, tx, { path: [], space }, false);
+        expect(() => cell.for({ $generated: 0 }, true)).toThrow(
+          "is reserved",
+        );
+      });
+    });
   });
 
   describe(".key() without link", () => {

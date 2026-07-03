@@ -1,5 +1,7 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   type CellScope,
   type FactoryInput,
@@ -197,6 +199,36 @@ export function patternFromFrame<T, R>(
   );
 }
 
+/**
+ * Reject user-supplied causes carrying a top-level `$generated` record key.
+ *
+ * That key marks the causes the pattern builder mints itself
+ * (`{ $generated: N }`, plus `$kind` on streams and `name` on duplicate-name
+ * wraps): a user cause like `Cell.for({ $generated: 0 })` would deliberately
+ * mimic that namespace, and keeping the namespaces disjoint is what lets the
+ * partial-cause assignment in `factoryFromPattern` skip collision checks for
+ * generated causes entirely. `$generated` alone suffices — every builder-minted
+ * cause carries it, so a cause without it can never hash-equal one (`$kind`
+ * and other sigil-looking keys stay usable). Only the top level matters —
+ * causes collide as whole records under the canonical value hash, and every
+ * builder-minted cause is a flat record, so a `$generated` nested deeper can
+ * never equal one.
+ *
+ * Enforced at the single intake point (`Cell.for`, the only writer of
+ * `_causeContainer.cause`) and re-asserted at the assignment site that relies
+ * on it.
+ */
+export function assertNoReservedCauseKeys(cause: unknown): void {
+  if (isRecord(cause) && "$generated" in cause) {
+    throw new Error(
+      `Cannot use cause ${
+        toCompactDebugString(cause)
+      }: top-level key "$generated" is reserved\n` +
+        `help: "$generated" marks system-generated cell causes; rename the key`,
+    );
+  }
+}
+
 function factoryFromPattern<T, R>(
   argumentSchemaArg: JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
@@ -307,6 +339,19 @@ function factoryFromPattern<T, R>(
   };
 
   const assignedInternalPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
+  // Canonical keys of the NAMED causes already assigned. Only named causes need
+  // collision handling: `.for()` rejects reserved keys at intake
+  // (`assertNoReservedCauseKeys`), so no user-supplied cause carries
+  // `$generated` — which makes every cause minted by
+  // `nextAnonymousPartialCause` (per-build-unique counter) and every
+  // `{name, $generated}` disambiguation wrap collision-free by construction:
+  // no check, no set entry. A candidate name's collision test is an O(1) `Set`
+  // lookup on `hashStringOf` — the canonical value hash, which is exactly
+  // `deepEqual`'s comparison on the JSON values causes are made of: records
+  // hash key-order-insensitively (keys fed in sorted UTF-8 byte order), numbers
+  // by their float64 bits with a dedicated `-0` cache entry, and `NaN`
+  // canonically — i.e. `Object.is` primitive semantics.
+  const assignedNamedCauseKeys = new Set<string>();
   let anonymousPartialCauseCount = 0;
   const nextAnonymousPartialCause = (isStream: boolean): JSONObject => {
     const generated = { $generated: anonymousPartialCauseCount++ };
@@ -322,18 +367,27 @@ function factoryFromPattern<T, R>(
     }
 
     const isStream = isRecord(value) && value.$stream === true;
-    let partialCause = name === undefined
-      ? nextAnonymousPartialCause(isStream)
-      : name as JSONValue;
-    while (
-      Array.from(assignedInternalPartialCauses.values()).some((used) =>
-        deepEqual(used, partialCause)
-      )
-    ) {
-      const generated = nextAnonymousPartialCause(isStream);
-      partialCause = name === undefined
-        ? generated
-        : { name: name as JSONValue, ...generated };
+    let partialCause: JSONValue;
+    if (name === undefined) {
+      partialCause = nextAnonymousPartialCause(isStream);
+    } else {
+      // `.for()` already rejected reserved keys; re-assert at the assignment
+      // site because the no-collision-check reasoning above relies on it (a
+      // future second writer of causes must not silently void it).
+      assertNoReservedCauseKeys(name);
+      const key = hashStringOf(name as JSONValue);
+      if (assignedNamedCauseKeys.has(key)) {
+        // Duplicate name: disambiguate with a fresh generated counter. The
+        // wrap is unique by construction and unforgeable (user causes can't
+        // carry `$generated`), so it needs no re-check and no set entry.
+        partialCause = {
+          name: name as JSONValue,
+          ...nextAnonymousPartialCause(isStream),
+        };
+      } else {
+        assignedNamedCauseKeys.add(key);
+        partialCause = name as JSONValue;
+      }
     }
     assignedInternalPartialCauses.set(top, partialCause);
   });

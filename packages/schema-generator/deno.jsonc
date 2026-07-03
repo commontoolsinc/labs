@@ -14,7 +14,7 @@
     "typescript": "npm:typescript"
   },
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS,FIXTURE,SKIP_INPUT_CHECK test/**/*.test.ts",
+    "test": "deno test --parallel --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS,FIXTURE,SKIP_INPUT_CHECK test/**/*.test.ts",
     "test:check": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS,FIXTURE,SKIP_INPUT_CHECK test/**/*.test.ts",
     "check": "deno check src/**/*.ts test/**/*.ts",
     "fmt": "deno fmt src/ test/",

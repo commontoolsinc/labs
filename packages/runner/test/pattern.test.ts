@@ -151,6 +151,49 @@ describe("pattern", () => {
     ]);
   });
 
+  it("rejects a reserved $generated key in user-supplied causes at build time", () => {
+    const isPositive = lift((value: number) => value > 0);
+
+    // A user cause carrying `$generated` would mimic the anonymous-cause
+    // namespace — the build throws at the `.for()` call.
+    expect(() =>
+      pattern(() => {
+        const sneaky = (isPositive(1) as any).for({ $generated: 0 });
+        return { sneaky };
+      })
+    ).toThrow('top-level key "$generated" is reserved');
+
+    expect(() =>
+      pattern(() => {
+        const sneaky = (isPositive(1) as any).for({
+          $kind: "stream",
+          $generated: 0,
+        });
+        return { sneaky };
+      })
+    ).toThrow("is reserved");
+  });
+
+  it("accepts record causes without a top-level $generated key", () => {
+    const isPositive = lift((value: number) => value > 0);
+
+    const testPattern = pattern(() => {
+      // Nested `$generated` can't collide with the flat generated causes, and
+      // only `$generated` is reserved — other `$`-keys stay legal.
+      const nested = (isPositive(1) as any).for({ outer: { $generated: 0 } });
+      const sigilish = (isPositive(2) as any).for({ $kind: "stream" });
+      return { nested, sigilish };
+    });
+
+    // Both records flow through as partial causes unchanged.
+    expect((testPattern.result as any).nested.$alias.partialCause).toEqual({
+      outer: { $generated: 0 },
+    });
+    expect((testPattern.result as any).sigilish.$alias.partialCause).toEqual({
+      $kind: "stream",
+    });
+  });
+
   it("complex pattern has correct schema and nodes", () => {
     const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift<number>((x) => x * 2);

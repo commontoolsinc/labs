@@ -1,6 +1,7 @@
 import { Console } from "./console.ts";
 import {
   type CacheableModule,
+  type CompiledModuleArtifact,
   type EvaluateResult,
   type Exports,
   type Harness,
@@ -9,24 +10,23 @@ import {
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
-import {
-  collectImportSpecifiers,
-  getTypeScriptEnvironmentTypes,
-  InMemoryProgram,
-  type MappedPosition,
-  type Program,
-  type ProgramResolver,
-  type Source,
+import type {
+  MappedPosition,
+  Program,
+  ProgramResolver,
+  Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-import ts from "typescript";
+import { InMemoryProgram } from "@commonfabric/js-compiler/program";
+import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
 import {
-  CommonFabricTransformerPipeline,
   PATTERN_COVERAGE_GLOBAL,
-  type PatternCoverageOptions,
-  ReactiveErrorTransformer,
   sourceDisablesCfTransform,
-} from "@commonfabric/ts-transformers";
+} from "@commonfabric/ts-transformers/runtime-contract";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -52,8 +52,8 @@ import {
 import {
   composeBundleSourceMap,
   identitySourceMap,
-  type SourceMap,
-} from "@commonfabric/js-compiler";
+} from "@commonfabric/js-compiler/source-map";
+import type { SourceMap } from "@commonfabric/js-compiler";
 import {
   loadModuleGraph,
   runtimeModuleRecords,
@@ -89,7 +89,6 @@ import { FabricAwareResolver } from "./fabric-resolver.ts";
 import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 
 const logger = getLogger("engine");
-const IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -197,6 +196,9 @@ export class Engine extends EventTarget implements Harness {
   }
 
   async initializeCompiler(): Promise<CompilerInternals> {
+    // First compiler use on this engine: load the deferred compiler stack
+    // (typescript + transformers), kept off the worker-boot path.
+    const { TypeScriptCompiler } = await ensureCompilerStack();
     const environmentTypes = await Engine.getEnvironmentTypes(
       this.ctRuntime.staticCache,
     );
@@ -247,6 +249,9 @@ export class Engine extends EventTarget implements Harness {
   > {
     logger.timeStart("compileToRecordGraph");
     try {
+      // Pretransform/import-scan below parse before the compiler internals
+      // are awaited — load the deferred compiler stack up front.
+      await ensureCompilerStack();
       const id = options.identifier ?? computeId(program);
       assertNoReservedFabricPaths(program.files);
       const mappedProgram = pretransformProgramForModules(program, id);
@@ -326,17 +331,18 @@ export class Engine extends EventTarget implements Harness {
       // transitively sensitive, so a partial set cannot be trusted — fall back
       // to a full recompile. The cache is queried by identity (directly, or
       // lazily once identities are known) without leaking the engine's prefix.
-      // Coverage compiles need fresh emitted JavaScript because cached bodies do
-      // not include counters.
-      const cached = patternCoverage !== undefined
+      const cachedCandidate = options.precompiledModules ??
+        (options.precompiledModulesFor
+          ? await options.precompiledModulesFor({
+            entryIdentity,
+            identities: [...new Set(identityByPath.values())],
+          })
+          : undefined);
+      const cached = patternCoverage !== undefined &&
+          cachedCandidate !== undefined &&
+          !cachedArtifactsIncludePatternCoverage(cachedCandidate)
         ? undefined
-        : options.precompiledModules ??
-          (options.precompiledModulesFor
-            ? await options.precompiledModulesFor({
-              entryIdentity,
-              identities: [...new Set(identityByPath.values())],
-            })
-            : undefined);
+        : cachedCandidate;
       const fullHit = cached !== undefined &&
         moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
 
@@ -356,6 +362,11 @@ export class Engine extends EventTarget implements Harness {
               artifact.sourceMap as SourceMap,
             );
           }
+          if (options.patternCoverage !== undefined) {
+            options.patternCoverage.registerSpans(
+              artifact.patternCoverageSpans ?? [],
+            );
+          }
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
@@ -366,11 +377,13 @@ export class Engine extends EventTarget implements Harness {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new ReactiveErrorTransformer({
+          diagnosticMessageTransformer: new (compilerStack()
+            .ReactiveErrorTransformer)({
             verbose: options.verboseErrors,
           }),
           beforeTransformers: (program) => {
-            const pipeline = new CommonFabricTransformerPipeline({
+            const pipeline = new (compilerStack()
+              .CommonFabricTransformerPipeline)({
               patternCoverage,
             });
             return {
@@ -499,6 +512,11 @@ export class Engine extends EventTarget implements Harness {
       const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
+        const patternCoverageSpans = patternCoverage === undefined
+          ? undefined
+          : options.patternCoverage?.spansForFile(
+            coverageFilenameFor(file.name, id, mounts),
+          );
         const imports = cacheableImportsFor(
           file.name,
           importEdges,
@@ -511,6 +529,9 @@ export class Engine extends EventTarget implements Harness {
           source: file.contents,
           js: precompiledBodies.get(file.name)!,
           ...(sourceMap === undefined ? {} : { sourceMap }),
+          ...(patternCoverageSpans === undefined
+            ? {}
+            : { patternCoverageSpans }),
           imports,
         };
       });
@@ -557,6 +578,8 @@ export class Engine extends EventTarget implements Harness {
       return { patternCount: 0, fileCount: 0, diagnostics: [] };
     }
 
+    // Pretransform parses before the compiler internals are awaited.
+    await ensureCompilerStack();
     const runTransform = options.transform ?? true;
     const unioned = new Map<string, Source>();
     const mains: string[] = [];
@@ -585,7 +608,8 @@ export class Engine extends EventTarget implements Harness {
         runtimeModules: Engine.runtimeModuleNames(),
         beforeTransformers: runTransform
           ? (program) => {
-            const pipeline = new CommonFabricTransformerPipeline();
+            const pipeline = new (compilerStack()
+              .CommonFabricTransformerPipeline)();
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -707,7 +731,8 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       specifierAliases,
       beforeTransformers: (program) => {
-        const pipeline = new CommonFabricTransformerPipeline();
+        const pipeline = new (compilerStack()
+          .CommonFabricTransformerPipeline)();
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
@@ -750,6 +775,14 @@ export class Engine extends EventTarget implements Harness {
   /**
    * Compile + evaluate a program through the ESM module-record path,
    * returning `{ main, exportMap }` plus the per-identity namespaces.
+   *
+   * Low-level: this does NOT register the evaluated artifacts in the pattern
+   * index, so anonymous map/filter/flatMap ops from the returned namespace have
+   * no content-addressed entry ref and would resolve via their embedded graph.
+   * To RUN a pattern from the returned namespace, use
+   * `PatternManager.compileAndRegisterModules`, which fuses registration in (see
+   * CT-1811). Reach for this bare form only to inspect serialized/verified output
+   * without running.
    */
   async compileAndEvaluateModules(
     program: RuntimeProgram,
@@ -1109,6 +1142,19 @@ export class Engine extends EventTarget implements Harness {
       ]),
     );
 
+    // A module without the persisted record surface (legacy doc, or a test
+    // building modules by hand) makes buildRecordsFromCompiled parse its body
+    // — load the deferred compiler stack first. The warm-cache boot path
+    // always carries the surface (runtimeVersion fingerprints the extractor),
+    // so the steady boot stays compiler-free.
+    if (
+      modules.some((m) =>
+        m.exportNames === undefined || m.starTargetSpecs === undefined ||
+        m.importSpecs === undefined
+      )
+    ) {
+      await ensureCompilerStack();
+    }
     const graph = buildRecordsFromCompiled(modules, {
       runtimeModules: runtimeModulesOption,
     });
@@ -1266,22 +1312,6 @@ export class Engine extends EventTarget implements Harness {
         : this.canonicalSourceByPrefixed.get(`/${source}`));
   }
 
-  // Translate a source-location string into a stable content-addressed
-  // implementation identity. See the Harness interface for the contract.
-  implementationHashForSource(sourceLocation: string): string | undefined {
-    const match = sourceLocation.match(/^(.*):(\d+):(\d+)$/);
-    const sourcePath = match ? match[1] : sourceLocation;
-    const suffix = match ? `:${match[2]}:${match[3]}` : "";
-    // `fn.src` is already canonical (`cf:module/<hash>/<path>`); reduce it to the
-    // pure per-module code identity `cf:module/<hash>` for the fingerprint.
-    const canonical = sourcePath.match(/^cf:module\/([^/]+)/);
-    if (canonical) {
-      return `cf:module/${canonical[1]}${suffix}`;
-    }
-    const hash = this.moduleHashByPrefixedSource.get(sourcePath);
-    return hash === undefined ? undefined : `cf:module/${hash}${suffix}`;
-  }
-
   // Map a single position to its original source location.
   // Returns null if no source map is loaded for the filename.
   mapPosition(
@@ -1307,7 +1337,8 @@ export class Engine extends EventTarget implements Harness {
     return getRuntimeModuleTypes(cache);
   }
 
-  static getEnvironmentTypes(cache: StaticCache) {
+  static async getEnvironmentTypes(cache: StaticCache) {
+    const { getTypeScriptEnvironmentTypes } = await ensureCompilerStack();
     return getTypeScriptEnvironmentTypes(cache);
   }
 
@@ -1382,9 +1413,15 @@ function assertFabricImportsHaveSpace(
   options: { fabricImports?: { space: MemorySpace } },
 ): void {
   if (options.fabricImports !== undefined) return;
+  // Deferred compiler stack (parses): only called from compileToRecordGraph,
+  // which awaits ensureCompilerStack() first.
+  const { collectImportSpecifiers, ts } = compilerStack();
   for (const file of files) {
     for (
-      const specifier of collectImportSpecifiers(file, IMPORT_SCAN_TARGET)
+      const specifier of collectImportSpecifiers(
+        file,
+        ts.ScriptTarget.ES2023,
+      )
     ) {
       if (isFabricImportSpecifier(specifier)) {
         throw new Error(
@@ -1485,6 +1522,15 @@ function patternCoverageOptionsForCompile(
     },
     registerSpan: (span) => collector.registerSpan(span),
   };
+}
+
+function cachedArtifactsIncludePatternCoverage(
+  artifacts: ReadonlyMap<string, CompiledModuleArtifact>,
+): boolean {
+  for (const artifact of artifacts.values()) {
+    if (!Array.isArray(artifact.patternCoverageSpans)) return false;
+  }
+  return true;
 }
 
 function coverageFilenameFor(

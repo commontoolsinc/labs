@@ -8,6 +8,11 @@ import {
   FABRIC_MOUNT_ROOT,
   type FabricMount,
 } from "../src/sandbox/module-record-compiler.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync identity-hash internals directly (below the async
+// flow boundaries that normally load the deferred compiler stack).
+await ensureCompilerStack();
 
 const OTHER_HASH = "Bvcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c";
 

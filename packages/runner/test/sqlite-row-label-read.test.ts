@@ -331,6 +331,33 @@ describe("computeRowLabelRead — per-row labels from origins", () => {
     assertEquals(kept.keep, [true]);
   });
 
+  it("a dual-op rowLabel node ({principal, dbOwner}) never labels an aggregate [owner] (soundness)", () => {
+    // A hand-crafted wire node carrying TWO recognized op keys is ambiguous:
+    // the evaluator labels each row with ONLY the extracted principal, while
+    // the static common-alternative analysis used to dispatch on dbOwner first
+    // and count the owner as a guaranteed reader — labeling a COUNT(*) [owner]
+    // although the owner is not an alternative in ANY contributing row's label
+    // (CFC spec §8.17.4). Such a spec must refuse at re-validation.
+    const dualTables = JSON.parse(JSON.stringify(emailTables)) as Record<
+      string,
+      { rowLabel?: { confidentiality?: unknown } }
+    >;
+    dualTables.emails.rowLabel!.confidentiality = {
+      principal: {
+        protocol: "mailto",
+        of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+      },
+      dbOwner: true,
+    };
+    const res = computeRowLabelRead({
+      tables: dualTables,
+      columns: [col("cnt", null, null)],
+      rows: [{ cnt: 2 }],
+      owner: OWNER,
+    });
+    expectError(res, "invalid rowLabel");
+  });
+
   it("two confidentiality-bearing tables with DISJOINT readers refuse the aggregate (Epic E2)", () => {
     // Each table has a single static reader, but different ones — no principal
     // reads every row of both, so the aggregate (which could range over either)

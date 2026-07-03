@@ -409,6 +409,21 @@ describe("Cell", () => {
     expect(c.key("a").key("b").key("c").get()).toBe(42);
   });
 
+  it("should expose only the debug value alias", () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "should expose only the debug value alias",
+      undefined,
+      tx,
+    );
+    cell.set(42);
+
+    expect(
+      (cell as unknown as { __debugValue: number }).__debugValue,
+    ).toBe(42);
+    expect("value" in cell).toBe(false);
+  });
+
   it("should get raw value using getRaw", () => {
     const cell = runtime.getCell<{ x: number; y: number }>(
       space,

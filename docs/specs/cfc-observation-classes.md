@@ -49,8 +49,9 @@ Better than the audit implied — most of the plumbing is present:
   })` inside `deriveFlowJoin` (`prepare.ts`) already selects labels by a
   boolean shape flag and by origin.
 - **The `structure` origin already labels container shape** at exact paths
-  (`prepare.ts` persist region), applying only to reads *at* the container path,
-  not strictly below it.
+  (`prepare.ts` persist region), applying to reads *at* the container path and
+  to recursive ancestor reads, never to reads strictly below it (per the
+  `types.ts` component contract and the SC-7 note in `cfc-spec-changes.md`).
 
 So C is a *refinement* of existing axes, not new machinery.
 
@@ -77,6 +78,17 @@ type LabelMapEntry = {
   legacy (pre-C) entry is therefore covering, so a class-unaware reader
   over-taints (fail-safe) and old persisted data needs no migration. This is the
   same wire-compat move as the clause `anyOf` wrapper in Epic A.
+- **One carve-out, forced by the §6 parity contract: legacy `origin:"link"`
+  entries.** Read literally, "absent = covering" would make a plain value read
+  start consuming link-origin entries — but today `deriveFlowJoin` *drops*
+  them via `excludeLinkOrigin`, so the literal reading would break §6's
+  byte-identity contract for `value`/`shape`/`enumerate` reads on day one.
+  Normative rule: **an entry with `origin:"link"` and absent `observes` is
+  implicitly `observes:"followRef"`** — consumed by `followRef` reads only,
+  never as a covering entry. This reproduces today's behavior exactly
+  (dropped for value reads), and the followRef consumption it enables is the
+  new SC-8 behavior, arriving under §9's reader-first rollout. Every other
+  origin keeps the plain covering rule.
 
 **Alternative considered and rejected:** a single `PathLabelTemplate`-shaped
 entry carrying per-class label fields (`{ value?, shape?, enumerate? }`). It
@@ -100,6 +112,14 @@ A read consumes the join of every entry whose class is in its consumed set:
 The load-bearing change is the third row: the `followRef` observation, today
 dropped from the flow join, becomes a consumed class carrying the link entry's
 label — closing SC-8.
+
+**Where `count` went.** The spec's fifth class (§4.6.3) deliberately does not
+get its own axis value: a count observation (cardinality without membership)
+is strictly weaker than `enumerate`, so count-shaped reads (length, `COUNT`)
+consume the `enumerate` class — a sound over-approximation. A distinct
+`count` value is additive later if a consumer ever needs the precision (e.g.
+releasing a count more widely than membership); nothing in C1–C5 depends on
+the distinction.
 
 ## 5. SC-4: existence grows, value replaces
 
@@ -142,10 +162,26 @@ entries via `excludeLinkOrigin: true` (`prepare.ts`). Two distinct effects:
 
 ## 7. Observation ceiling (LLM path) and render
 
-The LLM observation ceiling (`llm.ts`) and render label views consume per-class
-in C4: a public `value` read of a child under a secret container `shape` no
-longer inherits the container's shape label (today the flat model takes the
-max). That precision win is what pays for the epic on the LLM/agent surface.
+C4 makes the two big consumers class-aware, both via the §4 table — same
+classification, same longest-prefix resolution, applied to the ceiling fit
+instead of the flow join:
+
+- **LLM observation ceiling (`llm.ts` / llm-dialog).** Serializing a value
+  into a prompt or tool context is a **recursive value read**: the ceiling
+  fit consumes `value + shape + enumerate` entries at each serialized path.
+  The genuinely new case is **opaque link handles**
+  (`cfcOpaqueLinkForPath`): rendering WHICH reference sits at a slot without
+  dereferencing it is a `followRef` observation, so an opaque handle
+  consumes the link entry's `followRef` label only — not the target's
+  `value` label. An opaque handle to a secret document taints the prompt
+  with the pointer's label, not the secret's. Mechanically, the ceiling-fit
+  path applies the same read-classification helper C1 adds for
+  `forEachFlowObservation`; C4 settles which call site carries it.
+- **Render label views** consume per-class the same way: a public `value`
+  read of a child under a secret container `shape` no longer inherits the
+  container's shape label (today the flat model takes the max).
+
+That precision win is what pays for the epic on the LLM/agent surface.
 
 ## 8. Staging (C1–C5)
 

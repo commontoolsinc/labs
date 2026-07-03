@@ -32,3 +32,17 @@ export function isConflictRejection(
 ): boolean {
   return error?.name === "ConflictError";
 }
+
+/**
+ * A stale-basis inconsistency: a value the transaction read changed on this
+ * replica between the read and the commit (see storage/v2-transaction.ts
+ * `validate()`). Like a conflict it is resolved by re-running the transaction
+ * against fresh state; unlike a conflict the invalidating change is local
+ * rather than a rejection from upstream. A transport, authorization, or
+ * malformed-store error is not a stale basis and re-running does not resolve it.
+ */
+export function isStorageTransactionInconsistent(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "StorageTransactionInconsistent";
+}

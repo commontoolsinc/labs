@@ -17,7 +17,7 @@
  * const comments = await client.listComments(fileId);
  * ```
  */
-import { Cell, getPatternEnvironment } from "commonfabric";
+import { getPatternEnvironment, type Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 
@@ -109,7 +109,7 @@ export function extractFileId(url: string): string | null {
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
 export class GoogleDocsClient {
-  private auth: Cell<Auth>;
+  private auth: Writable<Auth>;
   private retries: number;
   private delay: number;
   private delayIncrement: number;
@@ -117,7 +117,7 @@ export class GoogleDocsClient {
   private onRefresh?: () => Promise<void>;
 
   constructor(
-    auth: Cell<Auth>,
+    auth: Writable<Auth>,
     {
       retries = 3,
       delay = 1000,

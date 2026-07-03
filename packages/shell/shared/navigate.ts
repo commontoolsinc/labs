@@ -29,6 +29,39 @@ export function navigate(command: NavigationCommand) {
   globalThis.dispatchEvent(new NavigationEvent(command));
 }
 
+const OpenExternalEventName = "cf-open-external";
+
+// Cancellable event dispatched before a modifier-click ("open in new tab")
+// builds a shell URL. An embedder (e.g. Loom) can host `cf-open-external` and
+// call `preventDefault()` to apply its own URL scheme; if the event is not
+// cancelled, the shell default runs (`appViewToUrlPath` + `globalThis.open`).
+// Mirrors the `cf-navigate` idiom so plain and modifier clicks are both
+// interceptable from a single, well-known event surface.
+class OpenExternalEvent extends CustomEvent<NavigationCommand> {
+  command: NavigationCommand;
+  constructor(command: NavigationCommand) {
+    super(OpenExternalEventName, { detail: command, cancelable: true });
+    this.command = command;
+  }
+}
+
+// Open a navigation target in a new tab. Dispatches a cancellable
+// `cf-open-external` event first; if a host cancels it via `preventDefault()`,
+// the host owns the new-tab navigation. Otherwise the shell default builds a
+// URL from the current location and calls `globalThis.open`.
+export function openInNewTab(command: NavigationCommand) {
+  const event = new OpenExternalEvent(command);
+  const proceed = globalThis.dispatchEvent(event);
+  if (!proceed) return;
+  const url = appViewToUrlPath(
+    preserveAppViewMode(
+      urlToAppView(new URL(globalThis.location.href)),
+      command,
+    ),
+  );
+  globalThis.open(url, "_blank", "noopener");
+}
+
 class ReplaceNavigationEvent extends CustomEvent<NavigationCommand> {
   command: NavigationCommand;
   constructor(command: NavigationCommand) {

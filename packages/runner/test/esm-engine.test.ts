@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -192,6 +193,27 @@ describe("Engine.compileToRecordGraph", () => {
         ) => [m.identity, { js: `${m.js}\n//cached:${m.identity}` }]),
       );
 
+    const taggedCoverageFrom = (
+      modules: {
+        identity: string;
+        js: string;
+        sourceMap?: unknown;
+        patternCoverageSpans?: PatternCoverageSpan[];
+      }[],
+    ) =>
+      new Map(
+        modules.map((m) => [
+          m.identity,
+          {
+            js: `${m.js}\n//cached:${m.identity}`,
+            ...(m.sourceMap === undefined ? {} : { sourceMap: m.sourceMap }),
+            ...(m.patternCoverageSpans === undefined
+              ? {}
+              : { patternCoverageSpans: m.patternCoverageSpans }),
+          },
+        ]),
+      );
+
     it("returns a descriptor per emitted module in identity space", async () => {
       const { modules, entryIdentity, graph } = await engine
         .compileToRecordGraph(MULTI);
@@ -237,7 +259,7 @@ describe("Engine.compileToRecordGraph", () => {
       expect((main as { total(): number }).total()).toBe(42);
     });
 
-    it("ignores precompiled bodies when pattern coverage is enabled", async () => {
+    it("ignores precompiled bodies without coverage spans when pattern coverage is enabled", async () => {
       const first = await engine.compileToRecordGraph(MULTI);
       const tagged = taggedFrom(first.modules);
       const coverage = new PatternCoverageCollector();
@@ -258,6 +280,34 @@ describe("Engine.compileToRecordGraph", () => {
       );
       expect((main as { total(): number }).total()).toBe(42);
       expect(coverage.report().totals.coveredRuntimeLines).toBeGreaterThan(0);
+    });
+
+    it("reuses coverage precompiled bodies and restores their spans", async () => {
+      const firstCoverage = new PatternCoverageCollector();
+      const first = await engine.compileToRecordGraph(MULTI, {
+        patternCoverage: firstCoverage,
+      });
+      const tagged = taggedCoverageFrom(first.modules);
+      const coverage = new PatternCoverageCollector();
+
+      const compiled = await engine.compileToRecordGraph(MULTI, {
+        patternCoverage: coverage,
+        precompiledModules: tagged,
+      });
+      for (const m of compiled.modules) {
+        expect(m.js).toContain(`//cached:${m.identity}`);
+      }
+
+      const { main } = engine.evaluateRecordGraph(
+        compiled.id,
+        compiled.graph,
+        compiled.mainSpecifier,
+        MULTI.files,
+      );
+      expect((main as { total(): number }).total()).toBe(42);
+      const report = coverage.report();
+      expect(report.totals.runtimeLines).toBeGreaterThan(0);
+      expect(report.totals.coveredRuntimeLines).toBeGreaterThan(0);
     });
 
     it("security-verifies UNtrusted direct precompiled injection (no blind trust)", async () => {

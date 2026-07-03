@@ -67,6 +67,13 @@ function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
 }
 
+function outputWindow(output: string, startNeedle: string, endNeedle: string) {
+  const start = output.indexOf(startNeedle);
+  const end = start === -1 ? -1 : output.indexOf(endNeedle, start);
+  if (start === -1 || end === -1) return "";
+  return output.slice(start, end + endNeedle.length);
+}
+
 Deno.test("Schema Shrink Validation", async (t) => {
   await t.step(
     "errors when parameter is 'unknown' but code accesses properties",
@@ -2064,6 +2071,277 @@ Deno.test("Schema Shrink Validation", async (t) => {
         (e) => e.type === "schema:path-not-in-type",
       );
       assertGreater(shrinkErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "keeps auth writable when handlers pass it to provider clients that refresh tokens",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commonfabric";',
+        'import { CalendarWriteClient, GmailSendClient, type Auth } from "provider-clients";',
+        "const send = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    GmailSendClient(auth);",
+        "  },",
+        ");",
+        "const writeCalendar = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    CalendarWriteClient(auth);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "provider-clients.d.ts": [
+            'declare module "provider-clients" {',
+            '  import type { Writable } from "commonfabric";',
+            "  export type Auth = { token: string };",
+            "  export interface AuthCell {",
+            "    get(): Auth | undefined;",
+            "    update(values: { token?: string }): void;",
+            "  }",
+            "  export interface GmailSendClientFactory {",
+            "    (auth: Writable<Auth>): void;",
+            "    (auth: AuthCell): void;",
+            "  }",
+            "  export const GmailSendClient: GmailSendClientFactory;",
+            "  export function CalendarWriteClient(auth: Writable<Auth>): void;",
+            "}",
+          ].join("\n"),
+        },
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+
+      const send = outputWindow(
+        result.output,
+        "const send = handler",
+        "GmailSendClient(auth)",
+      );
+      const calendar = outputWindow(
+        result.output,
+        "const writeCalendar = handler",
+        "CalendarWriteClient(auth)",
+      );
+
+      assertStringIncludes(send, 'asCell: ["cell"]');
+      assertEquals(send.includes('asCell: ["readonly"]'), false);
+      assertStringIncludes(calendar, 'asCell: ["cell"]');
+      assertEquals(calendar.includes('asCell: ["readonly"]'), false);
+    },
+  );
+
+  await t.step(
+    "handler keeps imported write-only cell arguments write-only",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commonfabric";',
+        'import { persistAuth, type Auth } from "auth-writer";',
+        "const persist = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    persistAuth(auth);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "auth-writer.d.ts": [
+            'declare module "auth-writer" {',
+            '  import type { WriteonlyCell } from "commonfabric";',
+            "  export type Auth = { token: string };",
+            "  export function persistAuth(auth: WriteonlyCell<Auth>): void;",
+            "}",
+          ].join("\n"),
+        },
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+
+      const persist = outputWindow(
+        result.output,
+        "const persist = handler",
+        "persistAuth(auth)",
+      );
+
+      assertStringIncludes(persist, 'asCell: ["writeonly"]');
+      assertEquals(persist.includes('asCell: ["cell"]'), false);
+      assertEquals(persist.includes('asCell: ["readonly"]'), false);
+    },
+  );
+
+  await t.step(
+    "shrinks auth to readonly when an imported callee declares a ReadonlyCell parameter",
+    async () => {
+      // A handler hands its whole auth cell to an out-of-file client whose
+      // parameter is declared ReadonlyCell<Auth>. That declaration is the
+      // capability contract at the import boundary: the callee needs only read
+      // authority, so the handler demonstrates no write need and is not placed
+      // in the field's write-authority set. A client that persists a refresh
+      // must instead declare Writable or WriteonlyCell, which makes the write
+      // explicit to the transformer (see the provider-clients step above).
+      // In well-typed code a Writable<Auth> value is not assignable to a
+      // ReadonlyCell<Auth> parameter (distinct brands, TS2345), so this shape is
+      // reached through a ReadonlyCell-typed input or an explicit cast; the
+      // snippet drives the parameter-type mapping the analysis applies.
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commonfabric";',
+        'import { readAuth, type Auth } from "readonly-auth-client";',
+        "const inspect = handler(",
+        "  (_event: unknown, auth: Writable<Auth>) => {",
+        "    readAuth(auth);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "readonly-auth-client.d.ts": [
+            'declare module "readonly-auth-client" {',
+            '  import type { ReadonlyCell } from "commonfabric";',
+            "  export type Auth = { token: string };",
+            "  export function readAuth(auth: ReadonlyCell<Auth>): void;",
+            "}",
+          ].join("\n"),
+        },
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+
+      const inspect = outputWindow(
+        result.output,
+        "const inspect = handler",
+        "readAuth(auth)",
+      );
+
+      assertStringIncludes(inspect, 'asCell: ["readonly"]');
+      assertEquals(inspect.includes('asCell: ["cell"]'), false);
+    },
+  );
+
+  await t.step(
+    "errors when a cell argument flows to an ambiguous cell-union parameter",
+    async () => {
+      // `sendMixed` declares `AuthCell | Writable<Auth>` — a union that mixes a
+      // cell wrapper with an unresolvable member, so overload resolution cannot
+      // pick the capability and the auth cell silently degrades. That is the
+      // overload-split case and must be flagged. `persistBare` declares bare
+      // `Cell<Auth>`: intentionally NOT flagged (not a union; passing a cell to
+      // a neutral Cell parameter is not, on its own, an ambiguity worth a hard
+      // error).
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commonfabric";',
+        'import { sendMixed, persistBare, type Auth } from "ambiguous-clients";',
+        "const a = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    sendMixed(auth);",
+        "  },",
+        ");",
+        "const b = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    persistBare(auth);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "ambiguous-clients.d.ts": [
+            'declare module "ambiguous-clients" {',
+            '  import type { Cell, Writable } from "commonfabric";',
+            "  export type Auth = { token: string };",
+            "  export interface AuthCell {",
+            "    get(): Auth | undefined;",
+            "    update(values: { token?: string }): void;",
+            "  }",
+            "  export function sendMixed(auth: AuthCell | Writable<Auth>): void;",
+            "  export function persistBare(auth: Cell<Auth>): void;",
+            "}",
+          ].join("\n"),
+        },
+      });
+      const unreadable = result.diagnostics.filter(
+        (d) => d.type === "capability:unreadable-cell-argument",
+      );
+
+      assertEquals(
+        unreadable.length,
+        1,
+        `expected one diagnostic, got: ${
+          result.diagnostics.map((d) => d.type).join(", ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "does not flag a cell argument to a classifiable or escape-hatch parameter",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commonfabric";',
+        'import { writeIt, logIt, type Auth } from "ok-clients";',
+        "const a = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    writeIt(auth);",
+        "  },",
+        ");",
+        "const b = handler(",
+        "  (_event: unknown, { auth }: { auth: Writable<Auth> }) => {",
+        "    logIt(auth);",
+        "  },",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: {
+          ...COMMONFABRIC_TYPES,
+          "ok-clients.d.ts": [
+            'declare module "ok-clients" {',
+            '  import type { Writable } from "commonfabric";',
+            "  export type Auth = { token: string };",
+            "  export function writeIt(auth: Writable<Auth>): void;",
+            "  export function logIt(value: unknown): void;",
+            "}",
+          ].join("\n"),
+        },
+      });
+      const unreadable = result.diagnostics.filter(
+        (d) => d.type === "capability:unreadable-cell-argument",
+      );
+
+      assertEquals(unreadable.length, 0);
     },
   );
 });

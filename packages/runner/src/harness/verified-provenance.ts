@@ -3,18 +3,16 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
 /**
  * Content-addressed provenance for verified implementation functions.
  *
- * An entry exists ONLY for a function object that became verified through one
- * of the runner-owned registration channels:
- *
- *  1. post-evaluation module indexing (`PatternManager.indexArtifact`): the
- *     implementation function of an exported / `__cfReg`-registered builder
- *     artifact, with the module's content identity and the artifact's
- *     export/`__cfReg` symbol;
- *  2. the in-action registrar (`Runner.invokeJavaScriptImplementation`): a
- *     builder artifact created DURING a verified action's execution, with the
- *     identity derived from the new function's canonical source location and
- *     `dynamic: true` (in-session only — such artifacts never resolve across
- *     a reload, unchanged from the legacy behavior).
+ * An entry exists ONLY for a function object recorded through the single
+ * runner-owned registration channel: post-evaluation module indexing
+ * (`Engine.recordModuleProvenance`, gated by `isTrustedBuilderArtifact` and
+ * the defining-module guard), which records the implementation function of an
+ * exported / `__cfReg`-registered builder artifact with the module's content
+ * identity and the artifact's export/`__cfReg` symbol. There is NO in-action
+ * registration channel: a builder artifact minted DURING a running action has
+ * no content-addressed identity, and the runner fails closed at creation time
+ * instead of admitting it (identity E5 — see
+ * `Runner.invokeJavaScriptImplementation` / `builder/action-context.ts`).
  *
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
@@ -28,7 +26,14 @@ export type VerifiedProvenance = {
   identity: string;
   /** Export / `__cfReg` symbol of the registered factory (absent: dynamic). */
   symbol?: string;
-  /** Created during a verified action's execution (in-session only). */
+  /**
+   * Symbol-less dynamic provenance: in-session-only authority — never
+   * serializable to a cross-session `$implRef`. No production writer exists
+   * today (in-action mints fail closed, above); the adversarial suite
+   * (content-addressed-identity-adversarial.test.ts, attack 7) constructs it
+   * directly to pin these semantics, which any future dynamic registrar must
+   * honor.
+   */
   dynamic?: true;
   /** CT-1665 verified binding identity, when the factory carried one. */
   bindingIdentity?: { sourceFile: string; bindingPath: string[] };

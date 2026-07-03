@@ -24,7 +24,11 @@ type StoredEntry = {
 // the headline case proves the mark is still minted there.
 describe("CFC external-ingest provenance mint (split-mint)", () => {
   const makeRuntime = (
-    overrides: { cfcEnforcementMode?: string; cfcFlowLabels?: string } = {},
+    overrides: {
+      cfcEnforcementMode?: string;
+      cfcFlowLabels?: string;
+      cfcWriteFloor?: string;
+    } = {},
   ) => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime(
@@ -252,6 +256,59 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
 
       // ...but the payload's own (unverified) declared policy label did NOT
       // persist — a failed write must not store unverified policy metadata.
+      const declared = entriesOf(storageManager, id)
+        .filter((e) => e.origin === "declared");
+      expect(declared.length).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists the mark even when the payload fails the write floor", async () => {
+    // Same invariant as the schema-verification case, for the D3 write floor:
+    // an ingest payload violating a requiredIntegrity floor records the reason
+    // (enforcing modes abort the whole tx), but on a committing (disabled)
+    // runtime the runtime-authored mark still persists and only the payload's
+    // declared policy label is dropped. Exercises the floor's ingest-target
+    // branch (ingestVerificationFailed instead of skipping the mint).
+    const { storageManager, runtime } = makeRuntime({
+      cfcWriteFloor: "enforce",
+    });
+    try {
+      const floored = internSchema(
+        {
+          type: "object",
+          properties: {
+            field: {
+              type: "string",
+              ifc: { requiredIntegrity: ["ingest-endorsement"] },
+            },
+          },
+          required: ["field"],
+        } as JSONSchema,
+        true,
+      );
+
+      const id = runtime.getCell(space, "ingest-floored")
+        .getAsNormalizedFullLink().id;
+      const { error } = await runtime.editWithRetry((tx) => {
+        stampExternalIngest(tx, meta(id, "sha256:floor-miss"));
+        const cell = runtime.getCell(
+          space,
+          "ingest-floored",
+          floored.schema,
+          tx,
+        );
+        cell.set({ field: "unendorsed" });
+      });
+      // Disabled enforcement commits despite the recorded floor reason.
+      expect(error).toBeUndefined();
+
+      const marks = entriesOf(storageManager, id)
+        .flatMap((e) => e.label.integrity ?? []);
+      expect(marks).toContainEqual(externalIngestAtom("sha256:floor-miss"));
+
       const declared = entriesOf(storageManager, id)
         .filter((e) => e.origin === "declared");
       expect(declared.length).toBe(0);

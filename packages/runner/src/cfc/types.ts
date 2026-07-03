@@ -330,10 +330,40 @@ export type CfcFlowLabelsMode = "off" | "observe" | "persist";
 
 export const DEFAULT_CFC_FLOW_LABELS_MODE: CfcFlowLabelsMode = "off";
 
+/**
+ * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3),
+ * orthogonal to the enforcement ladder and the flow dial: `off` = no check;
+ * `observe` = evaluate the floor and emit diagnostics, never reject;
+ * `enforce` = a floor miss records a prepare reason (which rejects the commit
+ * under the enforcing enforcement modes, and is logged otherwise). The floor
+ * tests the WRITTEN VALUE's integrity — schema mints, carried link-view
+ * integrity, the flow hereditary meet — never the consumed-read set (that is
+ * the read-side gate in `verifyInputRequirements`).
+ */
+export type CfcWriteFloorMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "off";
+
+/**
+ * Trigger-read gating (§8.9.2 / SC-3, Epic H5). When ON, the addresses whose
+ * invalidating writes SCHEDULED this run (`CfcTxState.triggerReads`) join the
+ * consumed set the enforcement gates quantify over — the sink-request egress
+ * ceiling and the input-requirement/requiredIntegrity gate — not only the flow
+ * derivation. Closes the residual "dep changed" channel (~1 bit/change event)
+ * where a handler scheduled by a secret write egresses without re-reading the
+ * secret. Adds reads to the gate (fail-closed direction) at the cost of extra
+ * metadata resolution per prepare, so it ships behind a flag (default OFF).
+ */
+export type CfcTriggerReadGating = boolean;
+
+export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
   flowLabelsMode: CfcFlowLabelsMode;
+  writeFloorMode: CfcWriteFloorMode;
+  triggerReadGating: CfcTriggerReadGating;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
