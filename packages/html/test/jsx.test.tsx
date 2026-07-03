@@ -6,6 +6,26 @@ import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createCell } from "../../runner/src/cell.ts";
 
+type BoundValueVNode = {
+  props: {
+    $value: {
+      "/": {
+        "link@1": {
+          id?: string;
+          space?: string;
+          path?: readonly unknown[];
+        };
+      };
+    };
+  };
+};
+
+type CellValueVNode = {
+  props: {
+    $value: unknown;
+  };
+};
+
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {
     const fragment = (
@@ -79,8 +99,12 @@ describe("jsx binding props", () => {
       const cell = runtime.getCell(signer.did(), "jsx-binding", undefined, tx);
       cell.set("hello");
 
-      const vnode = h("cf-cfc-authorship", { $value: cell }, []);
-      const link = (vnode as any).props.$value["/"]["link@1"];
+      const vnode = h(
+        "cf-cfc-authorship",
+        { $value: cell },
+        [],
+      ) as unknown as BoundValueVNode;
+      const link = vnode.props.$value["/"]["link@1"];
 
       assert.equal(link.id, cell.getAsNormalizedFullLink().id);
       assert.equal(link.space, signer.did());
@@ -101,9 +125,13 @@ describe("jsx binding props", () => {
     try {
       const cell = createCell(runtime, { path: [] });
 
-      const vnode = h("cf-cfc-authorship", { $value: cell }, []);
+      const vnode = h(
+        "cf-cfc-authorship",
+        { $value: cell },
+        [],
+      ) as unknown as CellValueVNode;
 
-      assert.equal((vnode as any).props.$value, cell);
+      assert.equal(vnode.props.$value, cell);
     } finally {
       await runtime.dispose();
     }
