@@ -334,6 +334,44 @@ function buildSegmentNode(
     internals: rog.internals,
   };
 
+  // FULLY-EXTERNAL leaves read their ORIGINAL input alias tree through their
+  // own argumentSchema (legacy readJavaScriptArgument semantics — schema
+  // defaults + validation; a transiently-partial upstream value resolves the
+  // way legacy resolves it, instead of a raw deep-read that throws in the
+  // leaf body). A leaf chained to an intra-segment producer keeps in-memory
+  // resolution (its input is derived this very action; the cells are stale).
+  const schemaBoundLeaves: Array<{ id: OpId; schema: unknown }> = [];
+  for (const id of segmentNodeOps) {
+    const op = opById.get(id)!;
+    if (op.detail.kind !== "leaf" || op.inputs.length === 0) continue;
+    let externalOnly = true;
+    const walk = [...dependencyRefsOf(op)];
+    while (walk.length > 0 && externalOnly) {
+      const ref = walk.pop()!;
+      if (ref.kind === "opOut") {
+        if (include.has(ref.op)) {
+          if (ref.op >= nodeCount) {
+            // A construct re-derivation of the original tree — descend.
+            walk.push(...dependencyRefsOf(opById.get(ref.op)!));
+          } else {
+            externalOnly = false;
+          }
+        }
+      } else if (ref.kind === "internal") {
+        const producer = rog.internals[ref.cell]?.producedBy;
+        if (producer !== undefined && include.has(producer)) {
+          externalOnly = false;
+        }
+      }
+    }
+    if (externalOnly) {
+      schemaBoundLeaves.push({
+        id,
+        schema: built.leafArgSchemas.get(id),
+      });
+    }
+  }
+
   // INPUTS binding: whole argument when read (per-path narrowing is the
   // D-V2-READSETS follow-up), externally-written internals by cause, and
   // upstream boundary/segment op outputs through their ORIGINAL aliases.
@@ -357,6 +395,13 @@ function buildSegmentNode(
     }
     inputs.ops = ops;
   }
+  if (schemaBoundLeaves.length > 0) {
+    const leafInputs: Record<string, unknown> = {};
+    for (const { id } of schemaBoundLeaves) {
+      leafInputs[String(id)] = pattern.nodes[id].inputs;
+    }
+    inputs.leafInputs = leafInputs;
+  }
 
   // OUTPUTS binding: this segment's node ops write their ORIGINAL aliases.
   const outputs: Record<string, unknown> = {};
@@ -369,6 +414,7 @@ function buildSegmentNode(
     subRog,
     segmentNodeOps,
     [...externalOps],
+    schemaBoundLeaves,
     segment.id,
     options,
   );
@@ -398,6 +444,7 @@ function makeSegmentImplementation(
   subRog: Rog,
   outputOpIds: OpId[],
   externalOpIds: OpId[],
+  schemaBoundLeaves: Array<{ id: OpId; schema: unknown }>,
   segmentId: string,
   options: DispatchOptions,
 ) {
@@ -406,6 +453,7 @@ function makeSegmentImplementation(
       argument?: unknown;
       internals?: Record<string, unknown>;
       ops?: Record<string, unknown>;
+      leafInputs?: Record<string, unknown>;
     }>,
     sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
     _addCancel: unknown,
@@ -434,12 +482,25 @@ function makeSegmentImplementation(
         for (const [key, value] of Object.entries(bound.internals ?? {})) {
           seedByInternal.set(Number(key), value);
         }
+        // Fully-external leaves: read the ORIGINAL alias tree through the
+        // leaf's own argumentSchema (legacy readJavaScriptArgument).
+        const leafInputOverrides = new Map<OpId, unknown>();
+        for (const { id, schema } of schemaBoundLeaves) {
+          const at = inputsCell.key("leafInputs").key(String(id));
+          const value = schema !== undefined
+            ? (at as unknown as {
+              asSchema: (s: unknown) => Cell<unknown>;
+            }).asSchema(schema).withTx(tx).get()
+            : at.withTx(tx).get();
+          leafInputOverrides.set(id, value);
+        }
         const { opValues, errors } = evalRog(subRog, {
           argument: bound.argument,
           leafImpls: built.leafImpls,
           children: built.children,
           seed,
           seedByInternal,
+          leafInputOverrides,
         });
         const out: Record<string, unknown> = {};
         for (const opId of outputOpIds) {

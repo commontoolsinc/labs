@@ -70,6 +70,14 @@ export interface EvalContext {
   /** Read-only Cell view overlay for producer-fed context leaves (v1 2(b)):
    * op id → input field names to wrap via `wrapReadOnlyValue`. */
   inputCellViews?: Map<OpId, ReadonlySet<string>>;
+  /**
+   * PRE-RESOLVED leaf inputs (fully-external leaves): the dispatch reads a
+   * leaf's ORIGINAL input alias tree through the leaf's own argumentSchema
+   * (legacy `readJavaScriptArgument` semantics — schema defaults,
+   * validation), and hands the value here. Present ⇒ the leaf skips
+   * ref-resolution and uses this value (run-gate still applies).
+   */
+  leafInputOverrides?: Map<OpId, unknown>;
   /** Wrap a plain value in a read-only Cell view (runner-supplied). */
   wrapReadOnlyValue?: (value: unknown) => unknown;
 }
@@ -278,8 +286,11 @@ export function evalRog(
         // A leaf takes its SINGLE structured input; none ⇒ called with
         // undefined (legacy's no-argument lift runs and may produce a
         // constant).
-        if (op.inputs.length === 0) return impl(undefined);
-        let input = resolve(op.inputs[0]);
+        const hasOverride = ctx.leafInputOverrides?.has(op.id) ?? false;
+        if (!hasOverride && op.inputs.length === 0) return impl(undefined);
+        let input = hasOverride
+          ? ctx.leafInputOverrides!.get(op.id)
+          : resolve(op.inputs[0]);
         const fieldsToWrap = ctx.inputCellViews?.get(op.id);
         if (
           fieldsToWrap && fieldsToWrap.size > 0 && ctx.wrapReadOnlyValue &&

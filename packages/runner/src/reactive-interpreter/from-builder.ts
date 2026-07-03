@@ -58,6 +58,11 @@ export interface BuiltRog {
    * carries the child's live leaf impls alongside the child Rog the op's
    * detail also references). */
   children: Map<OpId, BuiltRog>;
+  /** Each leaf module's declared argumentSchema (when present) — the
+   * dispatch binds fully-external leaf inputs through it so schema-driven
+   * read semantics (defaults, validation) match legacy's
+   * readJavaScriptArgument. */
+  leafArgSchemas: Map<OpId, unknown>;
   /** Live element pattern factories for collection ops (op id → factory),
    * so W4 can resolve the element's own BuiltRog at dispatch time. */
   collectionElements: Map<OpId, unknown>;
@@ -181,6 +186,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
   const leafImpls = new Map<OpId, (input: unknown) => unknown>();
   const children = new Map<OpId, BuiltRog>();
   const collectionElements = new Map<OpId, unknown>();
+  const leafArgSchemas = new Map<OpId, unknown>();
 
   // Pass 1 — reserve op ids for nodes; map output roots to producers.
   const ops: (Op | null)[] = nodes.map(() => null);
@@ -456,6 +462,9 @@ function buildRog(input: RogBuildInput): BuiltRog {
         // schemas (leaf-caps.ts — the v1 static scans at capture time).
         const argumentSchema =
           (mod as { argumentSchema?: unknown }).argumentSchema;
+        if (argumentSchema !== undefined && argumentSchema !== false) {
+          leafArgSchemas.set(id, argumentSchema);
+        }
         const caps = computeLeafCaps(
           mod.implementation,
           argumentSchema,
@@ -612,7 +621,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
     internals,
     ...(incomplete.length > 0 && { incomplete: dedupe(incomplete) }),
   };
-  return { rog, leafImpls, children, collectionElements };
+  return { rog, leafImpls, children, collectionElements, leafArgSchemas };
 }
 
 function dedupe(reasons: string[]): string[] {
