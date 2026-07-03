@@ -71,7 +71,7 @@ export function toJSONWithLegacyAliases(
       ignoreSelfAliases,
     );
     if (alias === null) return undefined;
-    if (alias !== undefined) return alias as unknown as JSONValue;
+    if (alias !== undefined) return alias as LegacyAlias & JSONValue;
     throw new Error(`Cell not found in pattern aliases`);
   }
 
@@ -130,9 +130,10 @@ export function toJSONWithLegacyAliases(
     // serializer (its toJSON under the internal-serialization context): this
     // function builds the in-memory node representation, so embedded
     // sub-pattern graphs must stay bare — no boundary `$patternRef`.
+    const patternWithToJSON = value as Pattern & Partial<toJSON>;
     const valueToProcess = (isPattern(value) &&
-        typeof (value as unknown as toJSON).toJSON === "function")
-      ? serializePatternGraph(value as unknown as Pattern) as Record<
+        typeof patternWithToJSON.toJSON === "function")
+      ? serializePatternGraph(value as Pattern) as Record<
         string,
         any
       >
@@ -368,8 +369,8 @@ export function moduleToJSON(module: Module) {
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
     implementation = toJSONWithLegacyAliases(
-      implementation as unknown as FactoryInput<any>,
-    ) as unknown as Pattern;
+      implementation as FactoryInput<any>,
+    ) as Pattern & JSONValue;
     return {
       ...rest,
       implementation,
@@ -475,7 +476,7 @@ export function serializePatternGraph(
   const previous = internalGraphSerialization;
   internalGraphSerialization = true;
   try {
-    const withToJSON = pattern as unknown as Partial<toJSON>;
+    const withToJSON = pattern as Partial<toJSON>;
     return (typeof withToJSON.toJSON === "function"
       ? withToJSON.toJSON()
       : patternToJSON(pattern)) as Record<string, unknown>;
