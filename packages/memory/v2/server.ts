@@ -239,8 +239,7 @@ const toPreconditionFailedError = (
     return {
       name: "PreconditionFailedError",
       message,
-      precondition: (error as unknown as { precondition: string })
-        .precondition,
+      precondition: (error as Error & { precondition: string }).precondition,
     };
   }
   return undefined;
@@ -3565,7 +3564,9 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
-      commit: parsed.commit as unknown as TransactRequest["commit"],
+      commit: parsed.commit as
+        & Record<string, unknown>
+        & TransactRequest["commit"],
     };
   }
 
@@ -3582,7 +3583,9 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
-      query: parsed.query as unknown as GraphQueryRequest["query"],
+      query: parsed.query as
+        & Record<string, unknown>
+        & GraphQueryRequest["query"],
     };
   }
 
