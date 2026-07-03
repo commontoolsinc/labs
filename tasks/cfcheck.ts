@@ -17,7 +17,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/weekly-calendar/weekly-calendar.tsx",
 ]);
 
 async function collectPatternFiles(dir: string): Promise<string[]> {
