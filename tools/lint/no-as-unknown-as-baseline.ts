@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/fs-sync-example/src/daemon.ts": [
-    "171:9:1s2xq1",
-  ],
   "packages/fs-sync-example/src/run-daemon.ts": [
     "26:55:elsfat",
     "82:39:1nrrqxc",

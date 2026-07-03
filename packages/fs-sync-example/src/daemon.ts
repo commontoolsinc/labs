@@ -155,7 +155,7 @@ function applyEdit(
 
 function buildStateFromFs(
   filePath: string,
-  CellFor: (cause: unknown) => Cell<any>,
+  CellFor: (cause: unknown) => Cell<Todo>,
 ): State {
   const text = Deno.readTextFileSync(filePath);
   const parsed = parseMarkdown(text);
@@ -168,7 +168,7 @@ function buildStateFromFs(
         id: todo.id,
         description: todo.description,
         done: todo.done,
-      }) as unknown as Todo
+      }) as Todo & Cell<Todo>
     ),
   };
 }
