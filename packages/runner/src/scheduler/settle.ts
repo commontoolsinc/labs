@@ -470,11 +470,16 @@ export async function runPullSchedulerSettleLoop(
       iteration.declaredReadPulledActions,
     );
     if (didAnyActionHitPassRunBudget(state, iteration.order)) {
+      // Gate only the actions that actually exhausted their budget (the
+      // candidate filter requires passRuns >= PASS_RUN_BUDGET): a node with
+      // zero runs this pass has produced no evidence of non-convergence, and
+      // gating it defers first-run frontier work past idle() (the
+      // calendar/extractor bystander-backoff regression). Ungated runnable
+      // work continues in the next pass via the continuation re-tick.
       const budgetBackoff = maybeApplyBudgetBackoff(
         state,
         collectCurrentBackoffCandidates(state),
         "pass-budget",
-        { requirePassRunBudget: false },
       );
       if (budgetBackoff.applied) {
         backoffApplied = true;
@@ -663,7 +668,6 @@ function maybeApplyBudgetBackoff(
   state: SchedulerSettleLoopState,
   workSet: ReadonlySet<Action>,
   reason: "iteration-cap" | "pass-budget",
-  options: { requirePassRunBudget?: boolean } = {},
 ): {
   applied: boolean;
   actionCount: number;
@@ -677,7 +681,6 @@ function maybeApplyBudgetBackoff(
     getNextEligibleRunTime: state.getNextEligibleRunTime,
     isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
     reason,
-    requirePassRunBudget: options.requirePassRunBudget,
   });
   if (plan.actions.length === 0) {
     return { applied: false, actionCount: 0 };

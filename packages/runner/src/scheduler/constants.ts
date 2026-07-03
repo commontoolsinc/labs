@@ -1,5 +1,13 @@
 export const MAX_ITERS = 10;
-export const PASS_RUN_BUDGET = 5;
+// A node runs at most once per settle iteration, so its per-pass run count is
+// bounded by MAX_ITERS by construction. The budget is a backstop against any
+// multi-run-per-iteration path — NOT a depth limit: first-run materialization
+// of a discovered-dependency chain legitimately re-runs every downstream node
+// once per level (one level unrolls per iteration), so a budget below
+// MAX_ITERS misclassifies deep healthy chains as cycling and defers their
+// still-never-ran frontier past idle() (see scheduler-convergence
+// "materializes a discovered-dependency chain deeper than the pass budget").
+export const PASS_RUN_BUDGET = MAX_ITERS;
 export const BACKOFF_BASE_MS = 250;
 export const BACKOFF_MAX_MS = 2000;
 export const MAX_SETTLE_STATS_HISTORY = 20;

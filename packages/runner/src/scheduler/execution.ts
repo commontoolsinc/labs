@@ -260,7 +260,6 @@ export function planBudgetBackoff(state: {
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly reason: "iteration-cap" | "pass-budget";
-  readonly requirePassRunBudget?: boolean;
   readonly now?: number;
 }): BudgetBackoffPlan {
   const now = state.now ?? performance.now();
@@ -293,7 +292,6 @@ function isBudgetBackoffCandidate(
     readonly getNextEligibleRunTime: (action: Action) => number | undefined;
     readonly isDebouncedComputationWaiting: (action: Action) => boolean;
     readonly reason: "iteration-cap" | "pass-budget";
-    readonly requirePassRunBudget?: boolean;
   },
   record: SchedulerNode,
   now: number,
@@ -312,11 +310,7 @@ function isBudgetBackoffCandidate(
   // never resolves (observed: rapid-notebook-create + reload integration
   // tests timed out on `runtime:idle`). Kept as-is; the pass-budget gate only
   // applies to the pass-budget reason.
-  if (
-    state.reason === "pass-budget" &&
-    state.requirePassRunBudget !== false &&
-    record.passRuns < PASS_RUN_BUDGET
-  ) {
+  if (state.reason === "pass-budget" && record.passRuns < PASS_RUN_BUDGET) {
     return false;
   }
   if (state.isDebouncedComputationWaiting(record.action)) return false;

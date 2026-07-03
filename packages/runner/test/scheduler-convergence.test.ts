@@ -372,6 +372,78 @@ describe("bounded convergence", () => {
     expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
+  it("materializes a discovered-dependency chain deeper than the pass budget within idle()", async () => {
+    // Regression for the pass-budget bystander backoff (calendar-event-manager
+    // assertion_1 / extractor-building-blocks assertion_2): a chain whose READS
+    // are discovered run-by-run (raw builtins, VNode link traversal) unrolls one
+    // level per settle iteration, so every downstream node legitimately re-runs
+    // once per level — first-run materialization, not cycling. With
+    // PASS_RUN_BUDGET below the chain depth, the downstream observer exhausted
+    // its budget mid-materialization and the pass-budget backoff (whole-registry
+    // candidates, requirePassRunBudget: false) gated the still-never-ran
+    // FRONTIER node — zero runs, zero evidence — deferring it past idle(), so
+    // callers sampled a half-materialized graph.
+    const DEPTH = 8;
+    const cells = Array.from(
+      { length: DEPTH + 1 },
+      (_, i) =>
+        runtime.getCell<number>(space, `deep-chain-${i}`, undefined, tx),
+    );
+    cells[0].set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // comp[i] reads cells[i-1] (DISCOVERED — not declared) and writes cells[i]
+    // (declared, so demand can flow upstream before any run).
+    const compRuns = new Array<number>(DEPTH + 1).fill(0);
+    for (let i = 1; i <= DEPTH; i++) {
+      const src = cells[i - 1];
+      const dst = cells[i];
+      const comp: Action = (actionTx) => {
+        compRuns[i]++;
+        const value = src.withTx(actionTx).get();
+        // A placeholder write on missing input mirrors incremental VNode
+        // materialization: every level's run changes what downstream reads,
+        // so the whole downstream re-runs each settle iteration.
+        dst.withTx(actionTx).send(value === undefined ? -i : value + 1);
+      };
+      runtime.scheduler.subscribe(
+        comp,
+        {
+          reads: [],
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(dst.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+    }
+
+    let observed: number | undefined;
+    const effect: Action = (actionTx) => {
+      observed = cells[DEPTH].withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(cells[DEPTH].getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.idle();
+
+    // The whole chain must have materialized: every computation ran at least
+    // once and the effect observed the fully-propagated value.
+    for (let i = 1; i <= DEPTH; i++) {
+      expect(compRuns[i], `comp[${i}] never ran`).toBeGreaterThan(0);
+    }
+    expect(observed, "effect observed the fully-propagated value").toBe(
+      DEPTH + 1,
+    );
+  });
+
   it("should preserve dirty effects after pass budget exhaustion", async () => {
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;

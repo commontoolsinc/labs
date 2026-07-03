@@ -718,7 +718,7 @@ describe("scheduler event lineage", () => {
     expect(payloads.get()).toEqual([]);
   });
 
-  it("stops handler-result pieces when the handler commit fails permanently", async () => {
+  it("stops handler-result pieces when the handler commit never converges", async () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { cell, handler, lift, pattern } = commonfabric;
     const childPattern = pattern<{ source: number }>(({ source }) => {
