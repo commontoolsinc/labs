@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/multi-runtime-worker.ts": [
-    "332:10:v188bh",
-  ],
   "packages/patterns/integration/shared-profile.test.ts": [
     "174:31:1ommbyn",
   ],

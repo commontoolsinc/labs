@@ -33,6 +33,10 @@ export type WorkerResponse =
   | { id: number; ok: unknown }
   | { id: number; error: string };
 
+type WorkerResponsePort = {
+  postMessage(response: WorkerResponse): void;
+};
+
 export interface TrustedUiDescriptor {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
   surface: string;
@@ -467,8 +471,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const { id, cmd, args } = event.data;
   const handler = handlers[cmd];
+  const responsePort = self as WorkerResponsePort;
   const respond = (response: WorkerResponse) =>
-    (self as unknown as Worker).postMessage(response);
+    responsePort.postMessage(response);
   if (!handler) {
     respond({ id, error: `unknown command "${cmd}"` });
     return;
