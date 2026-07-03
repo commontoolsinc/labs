@@ -94,15 +94,15 @@ import {
   type PersistedSchedulerObservationSnapshot,
   type SchedulerActionObservation,
 } from "./persistent-observation.ts";
+import { collectPullIterationSeeds as collectPullIterationSeedsState } from "./settle.ts";
 import {
-  collectPullIterationSeeds as collectPullIterationSeedsState,
   type DirtyPullRunnableState,
   type DirtyPullRunnableStateWithDebounce,
   hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
   hasRunnablePullWork as hasRunnablePullWorkState,
   type PendingPullRunnableState,
   type PullSchedulingState,
-} from "./settle.ts";
+} from "./work-oracle.ts";
 import type { ExecuteContinuationState } from "./continuation.ts";
 import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
@@ -1669,9 +1669,7 @@ export class Scheduler {
 
   private createExecuteContinuationState(): ExecuteContinuationState {
     return {
-      pending: this.pending,
-      nodes: this.nodes,
-      effects: this.nodes.effects,
+      pullScheduling: this.pullSchedulingState,
       eventQueue: this.eventQueue,
       idlePromises: this.idlePromises,
       consumeRerunAfterCurrentExecute: () => {
@@ -1679,15 +1677,6 @@ export class Scheduler {
         this.rerunAfterCurrentExecute = false;
         return shouldRerun;
       },
-      isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
-      materializerIndex: this.materializers,
-      shouldRunFirstPullComputationInDemandContext: (action) =>
-        this.shouldRunFirstPullComputationInDemandContext(action),
-      isDebouncedComputationWaiting: (action) =>
-        this.isDebouncedComputationWaiting(action),
-      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
-      getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
       scheduleWake: (at) => this.gates.scheduleWake(at),
       hasWakeTimer: () => this.gates.hasWakeTimer(),

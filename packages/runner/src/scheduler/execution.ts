@@ -1,4 +1,5 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
@@ -168,32 +169,6 @@ export function recordSettleActionRun(
   }
 }
 
-export function isPendingPullActionRunnable(state: {
-  readonly effects: ReadonlySet<Action>;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly shouldRunFirstPullComputationInDemandContext: (
-    action: Action,
-  ) => boolean;
-}, action: Action): boolean {
-  return state.effects.has(action) ||
-    state.isDemandedPullComputation(action) ||
-    state.shouldRunFirstPullComputationInDemandContext(action);
-}
-
-export function isDirtyPullActionRunnable(state: {
-  readonly effects: ReadonlySet<Action>;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly isThrottled: (action: Action) => boolean;
-  readonly isDebouncedComputationWaiting?: (action: Action) => boolean;
-}, action: Action): boolean {
-  return (
-    state.effects.has(action) ||
-    state.isDemandedPullComputation(action)
-  ) &&
-    !state.isThrottled(action) &&
-    state.isDebouncedComputationWaiting?.(action) !== true;
-}
-
 export function summarizeSettleIteration(state: {
   readonly workSetSize: number;
   readonly order: readonly Action[];
@@ -330,8 +305,7 @@ function nextBackoffDelayMs(record: SchedulerNode): number {
 }
 
 export interface ExecuteContinuationPlan {
-  hasPendingPullWork: boolean;
-  hasDirtyPullWork: boolean;
+  hasRunnablePullWork: boolean;
   hasImmediateRerunRequest: boolean;
   hasQueuedEventReadyNow: boolean;
   hasParkedHeadEvent: boolean;
@@ -381,107 +355,28 @@ export function planEventInvalidDependencyScheduling(state: {
 }
 
 export function planPullExecuteContinuation(state: {
-  readonly pending: ReadonlySet<Action>;
-  readonly nodes: NodeRegistry;
-  readonly effects: ReadonlySet<Action>;
-  readonly materializerIndex: MaterializerIndexState;
+  readonly pull: PullSchedulingState;
   readonly shouldRerunAfterCurrentExecute: boolean;
   readonly hasQueuedEventReadyNow: boolean;
   readonly hasParkedHeadEvent: boolean;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly shouldRunFirstPullComputationInDemandContext: (
-    action: Action,
-  ) => boolean;
-  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
-  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  readonly now?: number;
 }): ExecuteContinuationPlan {
-  const now = state.now ?? performance.now();
-  let nextDirtyPullRunAt: number | undefined;
-  let nextDirtyPullRunWaitsForIdle = false;
-  // A deferred run keeps idle() blocked when its eventual run is something an
-  // idle waiter expects to observe: effects and materializers (side effects),
-  // and a never-ran demanded computation whose FIRST run is still awaited
-  // (e.g. a debounced child created under a live parent's provisional demand).
-  // Deferring such an action removes it from hasPendingPullWork, so its future
-  // run must be tracked here or idle() returns before the gate opens. Limited
-  // to the first run: once the computation has produced output, subsequent
-  // debounce/throttle-deferred reruns are not awaited (idle must not block
-  // through a throttle window and re-run a recently-run action).
-  const futureRunWaitsForIdle = (action: Action): boolean =>
-    state.effects.has(action) ||
-    state.materializerIndex.isMaterializer(action) ||
-    state.shouldRunFirstPullComputationInDemandContext(action);
-  const noteFutureEligibility = (action: Action) => {
-    if (state.isDebouncedComputationWaiting(action)) {
-      const nextDebounceAt = state.getNextDebounceRunTime(action);
-      if (nextDebounceAt !== undefined) {
-        nextDirtyPullRunAt = minDefined(
-          nextDirtyPullRunAt,
-          nextDebounceAt,
-        );
-        nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
-        return true;
-      }
-    }
-
-    const nextEligibleAt = state.getNextEligibleRunTime(action);
-    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
-      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= futureRunWaitsForIdle(action);
-      return true;
-    }
-
-    return false;
-  };
-
-  const pendingPullWork = [...state.pending].filter((action) =>
-    state.effects.has(action) ||
-    state.materializerIndex.isMaterializer(action) ||
-    state.isDemandedPullComputation(action) ||
-    state.shouldRunFirstPullComputationInDemandContext(action)
-  );
-  const hasPendingPullWork = pendingPullWork.some((action) =>
-    !noteFutureEligibility(action)
-  );
-
-  // Dirty pull work is by definition invalid — scan the invalid-node index
-  // rather than every registered node.
-  const hasDirtyPullWork = [...state.nodes.getInvalidNodes()].some((action) => {
-    if (!isInvalidAction(state.nodes, action)) {
-      return false;
-    }
-    if (
-      !state.effects.has(action) &&
-      !state.isDemandedPullComputation(action) &&
-      !state.materializerIndex.isMaterializer(action)
-    ) {
-      return false;
-    }
-
-    if (noteFutureEligibility(action)) {
-      return false;
-    }
-
-    return true;
-  });
+  const assessment = assessPullWork(state.pull);
 
   const hasImmediateRerunRequest = state.shouldRerunAfterCurrentExecute &&
-    nextDirtyPullRunAt === undefined;
+    assessment.nextWakeAt === undefined;
   const shouldQueueAnotherTick = hasImmediateRerunRequest ||
-    hasPendingPullWork ||
-    hasDirtyPullWork ||
+    assessment.runnableNow ||
     state.hasQueuedEventReadyNow;
 
   return {
-    hasPendingPullWork,
-    hasDirtyPullWork,
+    hasRunnablePullWork: assessment.runnableNow,
     hasImmediateRerunRequest,
     hasQueuedEventReadyNow: state.hasQueuedEventReadyNow,
     hasParkedHeadEvent: state.hasParkedHeadEvent,
-    ...(nextDirtyPullRunAt !== undefined ? { nextDirtyPullRunAt } : {}),
-    nextDirtyPullRunWaitsForIdle,
+    ...(assessment.nextWakeAt !== undefined
+      ? { nextDirtyPullRunAt: assessment.nextWakeAt }
+      : {}),
+    nextDirtyPullRunWaitsForIdle: assessment.deferredIdleBlocking,
     shouldQueueAnotherTick,
   };
 }

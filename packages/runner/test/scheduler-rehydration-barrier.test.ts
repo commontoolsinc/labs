@@ -1,9 +1,9 @@
 import { assertEquals } from "@std/assert";
+import { collectPullIterationSeeds } from "../src/scheduler/settle.ts";
 import {
-  collectPullIterationSeeds,
   hasRunnablePullWork,
   type PullSchedulingState,
-} from "../src/scheduler/settle.ts";
+} from "../src/scheduler/work-oracle.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import type { Action } from "../src/scheduler/types.ts";
 
@@ -12,7 +12,7 @@ import type { Action } from "../src/scheduler/types.ts";
 // a sync-fill of a resuming never-ran action can't promote it into the
 // status-based runnable-seed set, run it fresh, and abort the resume. Without
 // the barrier this made notebook reload nondeterministic and could hang on slow
-// CI runners. See settle.ts:hasPendingInitialRehydrations.
+// CI runners. See work-oracle.ts:hasPendingInitialRehydrations.
 
 function makeState(opts: {
   rehydrationsPending: boolean;

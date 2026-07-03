@@ -1,25 +1,14 @@
 import { queueTask } from "./diagnostics.ts";
 import { isHeadEventParked } from "./events.ts";
 import { planPullExecuteContinuation } from "./execution.ts";
-import type { MaterializerIndexState } from "./materializers.ts";
-import type { NodeRegistry } from "./node-record.ts";
+import type { PullSchedulingState } from "./work-oracle.ts";
 import type { Action, QueuedEvent } from "./types.ts";
 
 export interface ExecuteContinuationState {
-  readonly pending: ReadonlySet<Action>;
-  readonly nodes: NodeRegistry;
-  readonly effects: ReadonlySet<Action>;
+  readonly pullScheduling: PullSchedulingState;
   readonly eventQueue: readonly QueuedEvent[];
   readonly idlePromises: (() => void)[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly materializerIndex: MaterializerIndexState;
-  readonly shouldRunFirstPullComputationInDemandContext: (
-    action: Action,
-  ) => boolean;
-  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
-  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly hasPendingLineageHeadEvent: () => boolean;
   readonly scheduleWake: (at: number) => void;
   readonly hasWakeTimer: () => boolean;
@@ -113,19 +102,10 @@ export function applyPullExecuteContinuation(
     .consumeRerunAfterCurrentExecute();
 
   const continuation = planPullExecuteContinuation({
-    pending: state.pending,
-    nodes: state.nodes,
-    effects: state.effects,
+    pull: state.pullScheduling,
     shouldRerunAfterCurrentExecute,
     hasQueuedEventReadyNow,
     hasParkedHeadEvent,
-    isDemandedPullComputation: state.isDemandedPullComputation,
-    materializerIndex: state.materializerIndex,
-    shouldRunFirstPullComputationInDemandContext:
-      state.shouldRunFirstPullComputationInDemandContext,
-    isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
-    getNextDebounceRunTime: state.getNextDebounceRunTime,
-    getNextEligibleRunTime: state.getNextEligibleRunTime,
   });
 
   if (!continuation.shouldQueueAnotherTick) {
