@@ -392,6 +392,123 @@ describe("CFProfileBadge", () => {
       expect(navigated).toBe(false);
     });
 
+    it("cmd/ctrl-click dispatches cancellable cf-open-external (CT-1830)", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceX",
+        id: "fid1:profileX",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      const hadLocation = "location" in globalThis &&
+        globalThis.location !== undefined;
+      // deno-lint-ignore no-explicit-any
+      const origLocation = (globalThis as any).location;
+      // deno-lint-ignore no-explicit-any
+      const origOpen = (globalThis as any).open;
+      let captured: unknown;
+      let cancelable = false;
+      const onOpen = (e: Event) => {
+        captured = (e as CustomEvent).detail;
+        cancelable = e.cancelable;
+      };
+      Object.defineProperty(globalThis, "location", {
+        value: { href: "http://localhost:8000/home" },
+        configurable: true,
+        writable: true,
+      });
+      // deno-lint-ignore no-explicit-any
+      (globalThis as any).open = () => null;
+      globalThis.addEventListener("cf-open-external", onOpen);
+      try {
+        el._handleClick({
+          stopPropagation() {},
+          metaKey: true,
+          ctrlKey: false,
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      } finally {
+        globalThis.removeEventListener("cf-open-external", onOpen);
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).open = origOpen;
+        if (hadLocation) {
+          Object.defineProperty(globalThis, "location", {
+            value: origLocation,
+            configurable: true,
+            writable: true,
+          });
+        } else {
+          // deno-lint-ignore no-explicit-any
+          delete (globalThis as any).location;
+        }
+      }
+
+      expect(captured).toEqual({
+        spaceDid: "did:key:zSpaceX",
+        pieceId: "fid1:profileX",
+      });
+      expect(cancelable).toBe(true);
+    });
+
+    it("preventDefault() on cf-open-external suppresses globalThis.open (CT-1830)", async () => {
+      const resolved = navResolvedCell({
+        path: [],
+        space: "did:key:zSpaceX",
+        id: "fid1:profileX",
+      });
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      el.profile = { resolveAsCell: () => Promise.resolve(resolved) };
+      await el._resolve();
+
+      const hadLocation = "location" in globalThis &&
+        globalThis.location !== undefined;
+      // deno-lint-ignore no-explicit-any
+      const origLocation = (globalThis as any).location;
+      // deno-lint-ignore no-explicit-any
+      const origOpen = (globalThis as any).open;
+      let opened = false;
+      const onOpen = (e: Event) => e.preventDefault();
+      Object.defineProperty(globalThis, "location", {
+        value: { href: "http://localhost:8000/home" },
+        configurable: true,
+        writable: true,
+      });
+      // deno-lint-ignore no-explicit-any
+      (globalThis as any).open = () => {
+        opened = true;
+        return null;
+      };
+      globalThis.addEventListener("cf-open-external", onOpen);
+      try {
+        el._handleClick({
+          stopPropagation() {},
+          metaKey: true,
+          ctrlKey: false,
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      } finally {
+        globalThis.removeEventListener("cf-open-external", onOpen);
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).open = origOpen;
+        if (hadLocation) {
+          Object.defineProperty(globalThis, "location", {
+            value: origLocation,
+            configurable: true,
+            writable: true,
+          });
+        } else {
+          // deno-lint-ignore no-explicit-any
+          delete (globalThis as any).location;
+        }
+      }
+
+      expect(opened).toBe(false);
+    });
+
     it("stays non-navigable when noNavigate is set, even on a root cell", async () => {
       // The profile-home self-badge is bound to a `computed()` projection that
       // happens to resolve as a root cell (path []) but is NOT a real piece, so
