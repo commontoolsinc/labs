@@ -1,20 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-sqlite-row-label-test.ts": [
-    "280:4:stweph",
-    "291:4:109nzv",
-    "437:4:pizoz0",
-    "746:46:ymsqsa",
-    "882:4:1w8oqp7",
-    "892:4:1kaz5z8",
-    "910:4:1e9dkzk",
-    "926:4:12wnl1i",
-    "945:4:18lvc95",
-    "956:4:1kiir50",
-    "979:4:1w8oqp7",
-    "994:4:1kaz5z8",
-    "1005:4:1dv4fv7",
-    "1034:4:12wnl1i",
-  ],
   "packages/memory/test/v2-sqlite-schema-test.ts": [
     "104:6:1yihvm6",
     "111:6:nx24ux",

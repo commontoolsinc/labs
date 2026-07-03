@@ -277,7 +277,7 @@ Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)"
   const emptyConjunction = {
     version: 1,
     confidentiality: { allOf: [] },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assertEquals(
     ruleCommonAlternatives(emptyConjunction, { dbOwner: OWNER }),
     [],
@@ -288,7 +288,7 @@ Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)"
   const malformedConjunct = {
     version: 1,
     confidentiality: { allOf: ["not-a-node"] },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assertEquals(
     ruleCommonAlternatives(malformedConjunct, { dbOwner: OWNER }),
     [],
@@ -434,7 +434,7 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
         },
       }],
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(
     typeof validateRowLabelSpec(badClause, Object.keys(EMAIL_COLUMNS)) ===
       "string",
@@ -743,7 +743,7 @@ Deno.test("an unknown op reaching the evaluator fails closed", () => {
 });
 
 Deno.test("an unsupported spec version fails closed", () => {
-  const spec = { ...emailSpec(), version: 2 } as unknown as RowLabelSpec;
+  const spec: RowLabelSpec = { ...emailSpec(), version: 2 as 1 };
   expectError(
     spec,
     { from: "a@b.c", to: "", cc: "", auth: "" },
@@ -879,7 +879,7 @@ Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous,
         of: { match: { field: "from", source: ADDR.source, flags: "g" } },
       },
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(
     typeof validateRowLabelSpec(constantPrincipal, ["from"]) === "string",
   );
@@ -889,7 +889,7 @@ Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous,
   const allOfConstant = {
     version: 1,
     confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(typeof validateRowLabelSpec(allOfConstant, ["from"]) === "string");
 
   // The anyOf-alternative entry point: a when-gated alternative that ALSO
@@ -907,7 +907,7 @@ Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous,
         },
       }],
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(typeof validateRowLabelSpec(whenPrincipalAlt, ["from"]) === "string");
 });
 
@@ -923,7 +923,7 @@ Deno.test("a dual-op integrity node in a wire spec is rejected (ambiguous, fail 
       },
       constant: "x",
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(typeof validateRowLabelSpec(authoredConstant, ["from"]) === "string");
 
   const authoredEndorsed = {
@@ -942,7 +942,7 @@ Deno.test("a dual-op integrity node in a wire spec is rejected (ambiguous, fail 
         },
       },
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(
     typeof validateRowLabelSpec(authoredEndorsed, ["from", "to"]) === "string",
   );
@@ -953,7 +953,7 @@ Deno.test("a dual-op integrity node in a wire spec is rejected (ambiguous, fail 
       intersect: [{ constant: "a" }],
       allOf: [{ constant: "b" }],
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assert(typeof validateRowLabelSpec(intersectAllOf, ["from"]) === "string");
 });
 
@@ -976,7 +976,7 @@ Deno.test("ruleCommonAlternatives never counts a dual-op node's owner as a commo
         of: { match: { field: "from", source: ADDR.source, flags: "g" } },
       },
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assertEquals(
     ruleCommonAlternatives(constantPrincipal, { dbOwner: OWNER }),
     [],
@@ -991,7 +991,7 @@ Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwra
   const ambiguousWrapper = {
     version: 1,
     confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assertEquals(
     ruleCommonAlternatives(ambiguousWrapper, { dbOwner: OWNER }),
     [],
@@ -1002,7 +1002,7 @@ Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwra
   const emptyAllOfConstant = {
     version: 1,
     confidentiality: { allOf: [], constant: "x" },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   assertEquals(ruleConstrainsConfidentiality(emptyAllOfConstant), true);
   assertEquals(
     ruleCommonAlternatives(emptyAllOfConstant, { dbOwner: OWNER }),
@@ -1031,7 +1031,7 @@ Deno.test("evaluateRowLabel fails closed on a dual-op node that bypassed validat
       },
       constant: "x",
     },
-  } as unknown as RowLabelSpec;
+  } as RowLabelSpec;
   expectError(
     authoredConstant,
     { from: "alice@a.example" },
