@@ -226,6 +226,7 @@ export const canonicalizeCfcMetadata = (
       path: canonicalizeLogicalPath(entry.path),
       label: canonicalizeCfcLabel(entry.label),
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+      ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     })).sort((left, right) => {
       const leftKey = logicalPathToPointer(left.path);
       const rightKey = logicalPathToPointer(right.path);
@@ -234,7 +235,19 @@ export const canonicalizeCfcMetadata = (
       }
       const leftOrigin = left.origin ?? "";
       const rightOrigin = right.origin ?? "";
-      return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
+      if (leftOrigin !== rightOrigin) {
+        return leftOrigin < rightOrigin ? -1 : 1;
+      }
+      // Same (path, origin) can legitimately hold per-class entries (the C2
+      // persist split writes `value` and `shape` siblings) — order by class
+      // so canonicalization stays deterministic.
+      const leftObserves = left.observes ?? "";
+      const rightObserves = right.observes ?? "";
+      return leftObserves < rightObserves
+        ? -1
+        : leftObserves > rightObserves
+        ? 1
+        : 0;
     }),
   },
 });
