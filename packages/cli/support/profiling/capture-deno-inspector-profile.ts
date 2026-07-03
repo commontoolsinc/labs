@@ -8,5 +8,5 @@ if (import.meta.main) {
     createWebSocket: (url) => new WebSocket(url),
     removeSignalListener: Deno.removeSignalListener,
   });
-  if (exitCode !== 0) Deno.exit(exitCode);
+  Deno.exit(exitCode);
 }
