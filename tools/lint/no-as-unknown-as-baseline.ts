@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/fabric-instances/ProblematicValue.test.ts": [
-    "34:16:offlu9",
-    "48:16:offlu9",
-  ],
   "packages/data-model/test/fabric-instances/UnknownValue.test.ts": [
     "33:16:offlu9",
     "46:16:offlu9",

@@ -28,10 +28,10 @@ describe("ProblematicValue", () => {
   describe("instance members", () => {
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: recurses state, freezes in place", () => {
-        const child = { x: 1 };
+        const child = { x: 1 } satisfies FabricValue;
         const pv = new ProblematicValue(
           "Bad@1",
-          child as unknown as FabricValue,
+          child,
           "oops",
         );
         const result = deepFreeze(pv);
@@ -42,10 +42,10 @@ describe("ProblematicValue", () => {
       });
 
       it("via direct member invocation: recurses state, freezes in place", () => {
-        const child = { x: 1 };
+        const child = { x: 1 } satisfies FabricValue;
         const pv = new ProblematicValue(
           "Bad@1",
-          child as unknown as FabricValue,
+          child,
           "oops",
         );
         const result = pv[DEEP_FREEZE](subFreeze);
