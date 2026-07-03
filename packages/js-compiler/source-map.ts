@@ -1,4 +1,4 @@
-import { SourceMap } from "./interface.ts";
+import type { SourceMap } from "./interface.ts";
 import { MappedPosition, SourceMapConsumer } from "source-map-js";
 import { LRUCache } from "@commonfabric/utils/cache";
 
@@ -246,16 +246,15 @@ function composeBundleSourceMapTextual(
   }
   if (!any) return undefined;
   const composed = {
-    version: 3,
+    version: "3",
     file: bundleFilename,
+    sourceRoot: "",
     sources,
     names,
     mappings: out.join(""),
     ...(anyContent ? { sourcesContent: contents } : {}),
   };
-  // Same `version` shape as the legacy path's `JSON.parse(generator.toString())`
-  // (a numeric 3 behind the RawSourceMap string type).
-  return composed as unknown as SourceMap;
+  return composed as SourceMap;
 }
 
 /**
@@ -350,12 +349,13 @@ export function identitySourceMap(
   // per-line addMapping/serialize round-trip on the boot path.
   const mappings = "AAAA" + ";AACA".repeat(lineCount - 1);
   return {
-    version: 3,
+    version: "3",
     file: source,
+    sourceRoot: "",
     sources: [source],
     names: [],
     mappings,
-  } as unknown as SourceMap;
+  };
 }
 
 /**

@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/js-compiler/source-map.ts": [
-    "250:18:y6gcii",
-    "320:4:18r1lo0",
-  ],
   "packages/llm/src/client.test.ts": [
     "34:17:1lgs2xo",
   ],
