@@ -177,7 +177,7 @@ async function readProfileCreateProbe(page: Page) {
           key?: (path: string) => ProbeCell;
           resolveAsCell?: () => Promise<ProbeCell>;
         };
-        const rt = (globalThis as unknown as {
+        const rt = (globalThis as {
           commonfabric?: {
             rt?: { getHomeSpaceCell?: () => Promise<ProbeCell> };
           };

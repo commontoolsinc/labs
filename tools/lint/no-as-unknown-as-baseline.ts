@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/shared-profile.test.ts": [
-    "174:31:1ommbyn",
-  ],
   "packages/patterns/tools/openapi-to-provider.ts": [
     "116:23:hudewo",
     "134:26:3adeps",
