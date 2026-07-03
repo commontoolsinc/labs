@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/codec-common/codecOf.ts": [
-    "14:23:1xdygto",
-  ],
   "packages/data-model/src/codec-common/SymbolCodec.ts": [
     "26:41:1xov6zr",
   ],

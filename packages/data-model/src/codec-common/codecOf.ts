@@ -10,8 +10,9 @@ import {
  * error if the value's class has no `[CODEC]`.
  */
 export function codecOf(value: FabricSpecialObject): FabricCodec {
-  const codec =
-    (value.constructor as unknown as Partial<FabricClassWithCodec>)[CODEC];
+  const codec = (value.constructor as
+    & typeof value.constructor
+    & Partial<FabricClassWithCodec>)[CODEC];
 
   if (codec === undefined) {
     throw new Error(
