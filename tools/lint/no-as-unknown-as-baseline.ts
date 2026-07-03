@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/fabric-primitives/FabricBytes.test.ts": [
-    "147:12:17acmoc",
-    "158:12:17acmoc",
-  ],
   "packages/data-model/test/fabric-primitives/FabricEpochDays.test.ts": [
     "83:12:b1op4e",
     "96:12:dkmqmk",

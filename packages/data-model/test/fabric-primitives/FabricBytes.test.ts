@@ -144,8 +144,11 @@ describe("FabricBytes", () => {
             expectedTag,
             codec.encode(fb),
             context,
-          ) as unknown as FabricBytes;
+          );
           expect(decoded).toBeInstanceOf(FabricBytes);
+          if (!(decoded instanceof FabricBytes)) {
+            throw new Error("expected FabricBytes");
+          }
           expect(decoded.slice()).toEqual(new Uint8Array([10, 20, 30, 40]));
         });
 
@@ -155,8 +158,11 @@ describe("FabricBytes", () => {
             expectedTag,
             codec.encode(fb),
             context,
-          ) as unknown as FabricBytes;
+          );
           expect(decoded).toBeInstanceOf(FabricBytes);
+          if (!(decoded instanceof FabricBytes)) {
+            throw new Error("expected FabricBytes");
+          }
           expect(decoded.length).toBe(0);
         });
       });
