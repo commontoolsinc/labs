@@ -3,6 +3,10 @@ import { createRuntime } from "../packages/cli/lib/dev.ts";
 
 const PATTERNS_DIR = "packages/patterns";
 
+const NON_PATTERN_FILES = new Set([
+  "packages/patterns/mod.ts",
+]);
+
 const NON_PATTERN_PREFIXES = [
   "packages/patterns/integration/",
   "packages/patterns/tools/",
@@ -12,7 +16,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/mod.ts",
   "packages/patterns/scrabble/scrabble-words.ts",
   "packages/patterns/weekly-calendar/weekly-calendar.tsx",
 ]);
@@ -39,6 +42,7 @@ async function collectPatternFiles(dir: string): Promise<string[]> {
 
 function isPatternSource(path: string): boolean {
   if (!path.endsWith(".ts") && !path.endsWith(".tsx")) return false;
+  if (NON_PATTERN_FILES.has(path)) return false;
   if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
   return !NON_PATTERN_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
