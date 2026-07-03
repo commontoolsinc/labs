@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/sandbox/compartment-globals.ts": [
-    "92:37:y75qvp",
-  ],
   "packages/runner/src/sandbox/plain-data.ts": [
     "285:30:146tvds",
     "318:40:146tvds",

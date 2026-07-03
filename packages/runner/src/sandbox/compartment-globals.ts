@@ -89,9 +89,7 @@ export function createSafeConsoleGlobal(
   consoleLike:
     | Record<string, unknown>
     | Console
-    | undefined = globalThis.console as unknown as
-      | Record<string, unknown>
-      | undefined,
+    | undefined = globalThis.console,
 ): Record<string, unknown> {
   const safeConsole: Record<string, unknown> = {};
 
