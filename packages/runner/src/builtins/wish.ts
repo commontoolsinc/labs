@@ -1723,6 +1723,18 @@ export function wish(
     });
   }
 
+  // The profile-picker sidecar rendered as a VNode, for the `[UI]` slot of a
+  // #profile wish with 2+ candidates and no valid default. `.result` rides the
+  // main wish state (ordered[0]) — the picker is only the switching affordance
+  // (CT-1829); its "Use" / "Set default" writes reorder candidates so the
+  // builtin's ordered[0] — and thus `.result` — flips reactively.
+  function profilePickerUI(ctx: WishContext): VNode {
+    return h("cf-render", {
+      "data-profile-picker-ui": "wish",
+      $cell: launchProfilePickerPattern(ctx, ctx.tx),
+    });
+  }
+
   // Launch the profile picker for #profile wishes with multiple profiles. Feeds
   // the home `profiles`/`defaultProfile`/`mru` cells (as sigil links) so the
   // picker can render natively, select (stamp MRU), set the default, and create
@@ -1777,15 +1789,36 @@ export function wish(
     if (!cachedProfilePickerPattern) {
       void profilePickerPatternCache.fetch(runtime).then(
         (pattern) => {
-          if (!cancelled && pattern && profilePickerPatternResultCell) {
+          if (cancelled || !profilePickerPatternResultCell) return;
+          if (pattern) {
             runSidecarInOwnTx(
               profilePickerPatternResultCell,
               pattern,
               pickerInputForTx,
             );
+          } else {
+            // Fetch/compile failed (createSidecarPatternCache swallows the
+            // error and resolves to undefined). Surface it as an error UI in the
+            // picker sidecar cell so the picker slot doesn't stay blank forever.
+            // `.result` is unaffected: under CT-1829 it rides the main wish state
+            // (ordered[0]), not this sidecar (a superseded fetch also resolves
+            // to undefined — a benign extra error UI on a since-replaced cell).
+            commitPatternErrorUI(
+              profilePickerPatternResultCell,
+              `Can't load profile-picker.tsx`,
+            );
           }
         },
-      );
+      ).catch((error) => {
+        // Defensive: a throw inside the `.then` body (or a truly-rejecting
+        // fetch) would otherwise be an unhandled rejection. Surface it too.
+        if (!cancelled && profilePickerPatternResultCell) {
+          commitPatternErrorUI(
+            profilePickerPatternResultCell,
+            errorMessage(error),
+          );
+        }
+      });
     } else if (!cancelled && profilePickerPatternResultCell) {
       runtime.run(
         tx,
@@ -1964,27 +1997,6 @@ export function wish(
               queryKey,
             );
 
-            // #profile with multiple profiles → launch the dedicated profile
-            // picker (native name/avatar/link rows, inline create, MRU/default
-            // writes). Headless / single-profile callers fall through to the
-            // fast path below and get the default profile directly.
-            if (
-              isProfilePersonaTarget(activeParsed) &&
-              !headless &&
-              uniqueResultCells.length > 1
-            ) {
-              measureWishPhase(
-                "send-profile-picker",
-                queryKey,
-                () =>
-                  sendResult(
-                    tx,
-                    launchProfilePickerPattern(ctx, tx),
-                  ),
-              );
-              return;
-            }
-
             // Unified shape: always return { result, candidates, [UI] }
             // For single result, use fast path (no picker needed)
             // For multiple results, launch suggestion pattern for picker
@@ -2000,6 +2012,43 @@ export function wish(
                   tx,
                 ),
             );
+
+            // #profile with 2+ candidates and no valid default (the only case
+            // that reaches here interactively; a valid default short-circuits to
+            // a single candidate in resolveWishTarget) → CT-1829: `.result` is
+            // always the single best profile (ordered default → MRU → first, i.e.
+            // uniqueResultCells[0]), sent eagerly on the main wish state exactly
+            // like the generic multi-match path does at wish.ts:2052. The picker
+            // sidecar becomes the `[UI]` switching affordance: its "Use" (MRU)
+            // and "Set default" writes reorder candidates so `.result` follows
+            // reactively. This removes the orphan-second-profile deadlock where
+            // the wish output was replaced by the picker's initially-empty (and
+            // forever-empty on fetch failure) result cell.
+            if (
+              isProfilePersonaTarget(activeParsed) &&
+              !headless &&
+              uniqueResultCells.length > 1
+            ) {
+              measureWishPhase(
+                "send-profile-picker",
+                queryKey,
+                () =>
+                  sendWishState(
+                    tx,
+                    {
+                      result: projectWishCellValue(
+                        uniqueResultCells[0],
+                        schema,
+                      ),
+                      candidates: candidatesCell,
+                      [UI]: profilePickerUI(ctx),
+                    },
+                    outputScope,
+                    schema,
+                  ),
+              );
+              return;
+            }
 
             if (uniqueResultCells.length === 1 || headless) {
               // Single result or headless mode - fast path with unified shape
