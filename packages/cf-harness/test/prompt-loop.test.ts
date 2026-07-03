@@ -10,7 +10,11 @@ import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
+import {
+  type BuiltinToolInputMap,
+  type BuiltinToolInvocationResult,
+  CfHarnessEngine,
+} from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { createHarnessImageAttachment } from "../src/image-attachments.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
@@ -33,6 +37,7 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type { OpenAIChatCompletionRequest } from "../src/gateway/openai-client.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -134,6 +139,23 @@ class FakeProcessRunner implements ProcessRunner {
     this.requests.push(request);
     return Promise.resolve(
       this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+    );
+  }
+}
+
+class FailOnInvokeBuiltinToolEngine extends CfHarnessEngine {
+  readonly invocations: Array<{
+    toolId: BuiltinToolId;
+    input: unknown;
+  }> = [];
+
+  override invokeBuiltinTool<TToolId extends BuiltinToolId>(
+    toolId: TToolId,
+    input: BuiltinToolInputMap[TToolId],
+  ): Promise<BuiltinToolInvocationResult<TToolId>> {
+    this.invocations.push({ toolId, input });
+    return Promise.reject(
+      new Error(`unexpected builtin tool invocation: ${toolId}`),
     );
   }
 }
@@ -2969,6 +2991,400 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
     assertEquals(loop.engine.getRunState().status, "failed");
     assertEquals(loop.engine.getRunState().subagentRuns, undefined);
     assertEquals(loop.engine.getRunState().toolOutputs, []);
+  }
+});
+
+Deno.test("CfHarnessPromptLoop rejects invalid builtin tool inputs before invoking the engine", async () => {
+  const cases: Array<{
+    name: string;
+    toolName: BuiltinToolId;
+    arguments: Record<string, unknown>;
+    message: string;
+  }> = [
+    {
+      name: "bash non-string cwd",
+      toolName: "bash",
+      arguments: { command: "pwd", cwd: 42 },
+      message: "bash cwd must be a string when provided",
+    },
+    {
+      name: "bash string timeout",
+      toolName: "bash",
+      arguments: { command: "pwd", timeoutMs: "1000" },
+      message: "bash timeoutMs must be a number when provided",
+    },
+    {
+      name: "bash negative timeout",
+      toolName: "bash",
+      arguments: { command: "pwd", timeoutMs: -1 },
+      message: "bash timeoutMs must be a non-negative number when provided",
+    },
+    {
+      name: "read_file non-string path",
+      toolName: "read_file",
+      arguments: { path: 42 },
+      message: "read_file path must be a string",
+    },
+    {
+      name: "read_file negative maxBytes",
+      toolName: "read_file",
+      arguments: { path: "notes/todo.txt", maxBytes: -1 },
+      message: "read_file maxBytes must be an integer at least 0 when provided",
+    },
+    {
+      name: "read_file unsupported encoding",
+      toolName: "read_file",
+      arguments: { path: "notes/todo.txt", encoding: "utf-16" },
+      message: 'read_file encoding must be "utf-8" when provided',
+    },
+    {
+      name: "web_fetch fractional maxBytes",
+      toolName: "web_fetch",
+      arguments: { url: "https://example.test/", maxBytes: 1.5 },
+      message:
+        "web_fetch maxBytes must be an integer from 1 to 1000000 when provided",
+    },
+    {
+      name: "web_fetch excessive timeout",
+      toolName: "web_fetch",
+      arguments: { url: "https://example.test/", timeoutMs: 60_001 },
+      message:
+        "web_fetch timeoutMs must be an integer from 1 to 60000 when provided",
+    },
+    {
+      name: "read_skill_resource excessive maxBytes",
+      toolName: "read_skill_resource",
+      arguments: {
+        skill: "test-skill",
+        path: "references/guide.md",
+        maxBytes: 256_001,
+      },
+      message:
+        "read_skill_resource maxBytes must be an integer from 0 to 256000 when provided",
+    },
+    {
+      name: "run_skill_script args include non-string",
+      toolName: "run_skill_script",
+      arguments: {
+        skill: "test-skill",
+        path: "scripts/check.ts",
+        args: ["ok", 42],
+      },
+      message:
+        "run_skill_script args must be an array of strings when provided",
+    },
+    {
+      name: "run_skill_script excessive timeout",
+      toolName: "run_skill_script",
+      arguments: {
+        skill: "test-skill",
+        path: "scripts/check.ts",
+        timeoutMs: 600_001,
+      },
+      message:
+        "run_skill_script timeoutMs must be an integer from 0 to 600000 when provided",
+    },
+    {
+      name: "edit_file missing edits",
+      toolName: "edit_file",
+      arguments: { path: "notes/todo.txt" },
+      message: "edit_file edits must be a non-empty array",
+    },
+    {
+      name: "edit_file non-object edit",
+      toolName: "edit_file",
+      arguments: { path: "notes/todo.txt", edits: [null] },
+      message: "edit_file edits[0] must be an object",
+    },
+    {
+      name: "edit_file empty oldText",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{ oldText: "", newText: "new" }],
+      },
+      message: "edit_file edits[0].oldText must be a non-empty string",
+    },
+    {
+      name: "edit_file non-string oldText",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{ oldText: 42, newText: "new" }],
+      },
+      message: "edit_file edits[0].oldText must be a string",
+    },
+    {
+      name: "edit_file non-string newText",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{ oldText: "old", newText: 42 }],
+      },
+      message: "edit_file edits[0].newText must be a string",
+    },
+    {
+      name: "edit_file non-boolean replaceAll",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{ oldText: "old", newText: "new", replaceAll: "yes" }],
+      },
+      message: "edit_file edits[0].replaceAll must be a boolean when provided",
+    },
+    {
+      name: "edit_file zero expectedReplacements",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{ oldText: "old", newText: "new", expectedReplacements: 0 }],
+      },
+      message:
+        "edit_file edits[0].expectedReplacements must be a positive integer when provided",
+    },
+    {
+      name: "write_file non-string content",
+      toolName: "write_file",
+      arguments: { path: "notes/todo.txt", content: 42 },
+      message: "write_file content must be a string",
+    },
+    {
+      name: "write_file unsupported mode",
+      toolName: "write_file",
+      arguments: { path: "notes/todo.txt", content: "new", mode: "merge" },
+      message: 'write_file mode must be "replace" or "append" when provided',
+    },
+    {
+      name: "write_file non-boolean createParents",
+      toolName: "write_file",
+      arguments: {
+        path: "notes/todo.txt",
+        content: "new",
+        createParents: "yes",
+      },
+      message: "write_file createParents must be a boolean when provided",
+    },
+  ];
+
+  for (const testCase of cases) {
+    let requestCount = 0;
+    const sandboxRuntime = new FakeSandboxRuntime();
+    const engine = new FailOnInvokeBuiltinToolEngine({
+      sandboxRuntime,
+      runId: `run-invalid-builtin-input-${testCase.name.replaceAll(" ", "-")}`,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      allowedToolIds: [testCase.toolName],
+      engine,
+      fetchFn: () => {
+        requestCount += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-invalid-builtin-input",
+                    type: "function",
+                    function: {
+                      name: testCase.toolName,
+                      arguments: JSON.stringify(testCase.arguments),
+                    },
+                  }],
+                },
+              }],
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+
+    await assertRejects(
+      () =>
+        loop.runPrompt({
+          prompt: "Run a tool with bad args.",
+          promptSlotBinding: directPromptSlotBinding,
+        }),
+      Error,
+      testCase.message,
+    );
+    assertEquals(requestCount, 1);
+    assertEquals(loop.engine.getRunState().status, "failed");
+    assertEquals(loop.engine.getRunState().toolOutputs, []);
+    assertEquals(engine.invocations, []);
+  }
+});
+
+Deno.test("CfHarnessPromptLoop dispatches valid builtin tool inputs to every engine tool", async () => {
+  const cases: Array<{
+    name: string;
+    toolName: Exclude<BuiltinToolId, "delegate_task">;
+    arguments: Record<string, unknown>;
+  }> = [
+    {
+      name: "bash",
+      toolName: "bash",
+      arguments: {
+        command: "pwd",
+        cwd: "/workspace",
+        timeoutMs: 25,
+        cfcInputLabels: { confidentiality: ["trusted"] },
+      },
+    },
+    {
+      name: "bash-no-sandbox",
+      toolName: "bash-no-sandbox",
+      arguments: {
+        command: "agent-browser get title",
+        cwd: "/workspace",
+        timeoutMs: 50,
+      },
+    },
+    {
+      name: "read_file",
+      toolName: "read_file",
+      arguments: {
+        path: "notes/todo.txt",
+        encoding: "utf-8",
+        maxBytes: 0,
+      },
+    },
+    {
+      name: "view_image",
+      toolName: "view_image",
+      arguments: { path: "images/pixel.png" },
+    },
+    {
+      name: "web_fetch",
+      toolName: "web_fetch",
+      arguments: {
+        url: "not-a-url",
+        maxBytes: 1,
+        maxTextChars: 1,
+        timeoutMs: 1,
+      },
+    },
+    {
+      name: "read_skill_resource",
+      toolName: "read_skill_resource",
+      arguments: {
+        skill: "test-skill",
+        path: "references/guide.md",
+        maxBytes: 0,
+      },
+    },
+    {
+      name: "run_skill_script",
+      toolName: "run_skill_script",
+      arguments: {
+        skill: "test-skill",
+        path: "scripts/check.ts",
+        args: ["--fast"],
+        cwd: "/workspace",
+        timeoutMs: 0,
+      },
+    },
+    {
+      name: "edit_file",
+      toolName: "edit_file",
+      arguments: {
+        path: "notes/todo.txt",
+        edits: [{
+          oldText: "old",
+          newText: "new",
+          replaceAll: true,
+          expectedReplacements: 1,
+        }],
+        expectedDigest: "sha256:before",
+      },
+    },
+    {
+      name: "write_file",
+      toolName: "write_file",
+      arguments: {
+        path: "notes/todo.txt",
+        content: "new",
+        mode: "append",
+        createParents: true,
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    let requestCount = 0;
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      processRunner: new FakeProcessRunner(),
+      runId: `run-valid-builtin-input-${testCase.name}`,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+      now: (() => {
+        const timestamps = [
+          "2026-04-16T23:20:00.000Z",
+          "2026-04-16T23:20:01.000Z",
+          "2026-04-16T23:20:02.000Z",
+          "2026-04-16T23:20:03.000Z",
+        ];
+        return () => timestamps.shift() ?? "2026-04-16T23:20:04.000Z";
+      })(),
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      allowedToolIds: [testCase.toolName],
+      engine,
+      fetchFn: () => {
+        requestCount += 1;
+        const payload = requestCount === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-valid-builtin-input",
+                  type: "function",
+                  function: {
+                    name: testCase.toolName,
+                    arguments: JSON.stringify(testCase.arguments),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Tool input was accepted.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      },
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Run a tool with valid args.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    assertEquals(result.finalAssistantText, "Tool input was accepted.");
+    assertEquals(requestCount, 2);
+    assertEquals(
+      result.runState.toolOutputs.map((ref) => ref.toolId),
+      [testCase.toolName],
+    );
   }
 });
 

@@ -1109,6 +1109,394 @@ interface CfcSandboxResultCarrier {
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+type EngineBuiltinToolId = Exclude<BuiltinToolId, "delegate_task">;
+
+type EngineBuiltinToolInputValidators = {
+  [TToolId in EngineBuiltinToolId]: (
+    input: Record<string, unknown>,
+  ) => BuiltinToolInputMap[TToolId];
+};
+
+const toolInputTypeError = (
+  toolId: BuiltinToolId,
+  field: string,
+  expected: string,
+): Error => new Error(`${toolId} ${field} must be ${expected}`);
+
+const requireStringToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): string => {
+  const value = input[field];
+  if (typeof value !== "string") {
+    throw toolInputTypeError(toolId, field, "a string");
+  }
+  return value;
+};
+
+const optionalStringToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): string | undefined => {
+  const value = input[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw toolInputTypeError(toolId, field, "a string when provided");
+  }
+  return value;
+};
+
+const optionalNumberToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): number | undefined => {
+  const value = input[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number") {
+    throw toolInputTypeError(toolId, field, "a number when provided");
+  }
+  return value;
+};
+
+const optionalNonNegativeNumberToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): number | undefined => {
+  const value = optionalNumberToolInputField(toolId, input, field);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value < 0) {
+    throw toolInputTypeError(
+      toolId,
+      field,
+      "a non-negative number when provided",
+    );
+  }
+  return value;
+};
+
+const optionalIntegerToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+  min: number,
+  max?: number,
+): number | undefined => {
+  const value = optionalNumberToolInputField(toolId, input, field);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    (max !== undefined && value > max)
+  ) {
+    throw toolInputTypeError(
+      toolId,
+      field,
+      max === undefined
+        ? `an integer at least ${min} when provided`
+        : `an integer from ${min} to ${max} when provided`,
+    );
+  }
+  return value;
+};
+
+const optionalBooleanToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): boolean | undefined => {
+  const value = input[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw toolInputTypeError(toolId, field, "a boolean when provided");
+  }
+  return value;
+};
+
+const optionalStringArrayToolInputField = (
+  toolId: BuiltinToolId,
+  input: Record<string, unknown>,
+  field: string,
+): readonly string[] | undefined => {
+  const value = input[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !Array.isArray(value) || !value.every((item) => typeof item === "string")
+  ) {
+    throw toolInputTypeError(
+      toolId,
+      field,
+      "an array of strings when provided",
+    );
+  }
+  return value;
+};
+
+const validateBashLikeToolInput = (
+  toolId: "bash" | "bash-no-sandbox",
+  input: Record<string, unknown>,
+): BuiltinToolInputMap[typeof toolId] => {
+  const command = requireStringToolInputField(toolId, input, "command");
+  const cwd = optionalStringToolInputField(toolId, input, "cwd");
+  const timeoutMs = optionalNonNegativeNumberToolInputField(
+    toolId,
+    input,
+    "timeoutMs",
+  );
+  return {
+    ...input,
+    command,
+    ...(cwd !== undefined ? { cwd } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+};
+
+const validateEditFileEdits = (
+  input: Record<string, unknown>,
+): BuiltinToolInputMap["edit_file"]["edits"] => {
+  const edits = input.edits;
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw toolInputTypeError("edit_file", "edits", "a non-empty array");
+  }
+  return edits.map((edit, index) => {
+    const fieldPrefix = `edits[${index}]`;
+    if (!isObjectRecord(edit)) {
+      throw toolInputTypeError("edit_file", fieldPrefix, "an object");
+    }
+    const oldText = edit.oldText;
+    if (typeof oldText !== "string") {
+      throw toolInputTypeError(
+        "edit_file",
+        `${fieldPrefix}.oldText`,
+        "a string",
+      );
+    }
+    if (oldText.length === 0) {
+      throw toolInputTypeError(
+        "edit_file",
+        `${fieldPrefix}.oldText`,
+        "a non-empty string",
+      );
+    }
+    const newText = edit.newText;
+    if (typeof newText !== "string") {
+      throw toolInputTypeError(
+        "edit_file",
+        `${fieldPrefix}.newText`,
+        "a string",
+      );
+    }
+    const replaceAll = edit.replaceAll;
+    if (replaceAll !== undefined && typeof replaceAll !== "boolean") {
+      throw toolInputTypeError(
+        "edit_file",
+        `${fieldPrefix}.replaceAll`,
+        "a boolean when provided",
+      );
+    }
+    const expectedReplacements = edit.expectedReplacements;
+    if (
+      expectedReplacements !== undefined &&
+      (
+        typeof expectedReplacements !== "number" ||
+        !Number.isSafeInteger(expectedReplacements) ||
+        expectedReplacements <= 0
+      )
+    ) {
+      throw toolInputTypeError(
+        "edit_file",
+        `${fieldPrefix}.expectedReplacements`,
+        "a positive integer when provided",
+      );
+    }
+    return {
+      ...edit,
+      oldText,
+      newText,
+      ...(replaceAll !== undefined ? { replaceAll } : {}),
+      ...(expectedReplacements !== undefined ? { expectedReplacements } : {}),
+    };
+  });
+};
+
+const engineBuiltinToolInputValidators = {
+  bash: (input) => validateBashLikeToolInput("bash", input),
+  "bash-no-sandbox": (input) =>
+    validateBashLikeToolInput("bash-no-sandbox", input),
+  read_file: (input) => {
+    const path = requireStringToolInputField("read_file", input, "path");
+    const encoding = optionalStringToolInputField(
+      "read_file",
+      input,
+      "encoding",
+    );
+    if (encoding !== undefined && encoding !== "utf-8") {
+      throw new Error('read_file encoding must be "utf-8" when provided');
+    }
+    const maxBytes = optionalIntegerToolInputField(
+      "read_file",
+      input,
+      "maxBytes",
+      0,
+    );
+    return {
+      ...input,
+      path,
+      ...(encoding !== undefined ? { encoding } : {}),
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
+    };
+  },
+  view_image: (input) => ({
+    ...input,
+    path: requireStringToolInputField("view_image", input, "path"),
+  }),
+  web_fetch: (input) => {
+    const url = requireStringToolInputField("web_fetch", input, "url");
+    const maxBytes = optionalIntegerToolInputField(
+      "web_fetch",
+      input,
+      "maxBytes",
+      1,
+      1_000_000,
+    );
+    const maxTextChars = optionalIntegerToolInputField(
+      "web_fetch",
+      input,
+      "maxTextChars",
+      1,
+      100_000,
+    );
+    const timeoutMs = optionalIntegerToolInputField(
+      "web_fetch",
+      input,
+      "timeoutMs",
+      1,
+      60_000,
+    );
+    return {
+      ...input,
+      url,
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
+      ...(maxTextChars !== undefined ? { maxTextChars } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    };
+  },
+  read_skill_resource: (input) => {
+    const skill = requireStringToolInputField(
+      "read_skill_resource",
+      input,
+      "skill",
+    );
+    const path = requireStringToolInputField(
+      "read_skill_resource",
+      input,
+      "path",
+    );
+    const maxBytes = optionalIntegerToolInputField(
+      "read_skill_resource",
+      input,
+      "maxBytes",
+      0,
+      256_000,
+    );
+    return {
+      ...input,
+      skill,
+      path,
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
+    };
+  },
+  run_skill_script: (input) => {
+    const skill = requireStringToolInputField(
+      "run_skill_script",
+      input,
+      "skill",
+    );
+    const path = requireStringToolInputField(
+      "run_skill_script",
+      input,
+      "path",
+    );
+    const args = optionalStringArrayToolInputField(
+      "run_skill_script",
+      input,
+      "args",
+    );
+    const cwd = optionalStringToolInputField(
+      "run_skill_script",
+      input,
+      "cwd",
+    );
+    const timeoutMs = optionalIntegerToolInputField(
+      "run_skill_script",
+      input,
+      "timeoutMs",
+      0,
+      600_000,
+    );
+    return {
+      ...input,
+      skill,
+      path,
+      ...(args !== undefined ? { args } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    };
+  },
+  edit_file: (input) => {
+    const path = requireStringToolInputField("edit_file", input, "path");
+    const edits = validateEditFileEdits(input);
+    const expectedDigest = optionalStringToolInputField(
+      "edit_file",
+      input,
+      "expectedDigest",
+    );
+    return {
+      ...input,
+      path,
+      edits,
+      ...(expectedDigest !== undefined ? { expectedDigest } : {}),
+    };
+  },
+  write_file: (input) => {
+    const path = requireStringToolInputField("write_file", input, "path");
+    const content = requireStringToolInputField("write_file", input, "content");
+    const mode = optionalStringToolInputField("write_file", input, "mode");
+    if (mode !== undefined && mode !== "replace" && mode !== "append") {
+      throw new Error(
+        'write_file mode must be "replace" or "append" when provided',
+      );
+    }
+    const createParents = optionalBooleanToolInputField(
+      "write_file",
+      input,
+      "createParents",
+    );
+    return {
+      ...input,
+      path,
+      content,
+      ...(mode !== undefined ? { mode } : {}),
+      ...(createParents !== undefined ? { createParents } : {}),
+    };
+  },
+} satisfies EngineBuiltinToolInputValidators;
+
 const cfcResultFromOutput = (
   output: unknown,
 ): CfcSandboxResult | undefined =>
@@ -2409,19 +2797,21 @@ export class CfHarnessPromptLoop {
       resultRef: ToolResultRef;
     };
     try {
-      result = toolCall.function.name === "delegate_task"
-        ? await this.#invokeDelegateTaskTool({
+      if (toolCall.function.name === "delegate_task") {
+        result = await this.#invokeDelegateTaskTool({
           toolCall,
           input: delegateInput!,
           model,
           promptSlotBinding,
           signal,
           sequence,
-        })
-        : await this.#invokeBuiltinTool(
+        });
+      } else {
+        result = await this.#invokeBuiltinTool(
           toolCall.function.name,
           input,
         );
+      }
     } catch (error) {
       recordActivity({
         type: "cf-harness.tool-activity",
@@ -2670,21 +3060,78 @@ export class CfHarnessPromptLoop {
     return { output: stripInternalCfcFields(output) };
   }
 
-  async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
-    toolId: TToolId,
+  async #invokeBuiltinTool(
+    toolId: EngineBuiltinToolId,
     input: Record<string, unknown>,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
   }> {
-    const result = await this.engine.invokeBuiltinTool(
-      toolId,
-      input as unknown as BuiltinToolInputMap[TToolId],
-    );
-    return {
-      output: result.output,
-      resultRef: result.resultRef,
-    };
+    switch (toolId) {
+      case "bash": {
+        const result = await this.engine.invokeBuiltinTool(
+          "bash",
+          engineBuiltinToolInputValidators.bash(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "bash-no-sandbox": {
+        const result = await this.engine.invokeBuiltinTool(
+          "bash-no-sandbox",
+          engineBuiltinToolInputValidators["bash-no-sandbox"](input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "read_file": {
+        const result = await this.engine.invokeBuiltinTool(
+          "read_file",
+          engineBuiltinToolInputValidators.read_file(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "view_image": {
+        const result = await this.engine.invokeBuiltinTool(
+          "view_image",
+          engineBuiltinToolInputValidators.view_image(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "web_fetch": {
+        const result = await this.engine.invokeBuiltinTool(
+          "web_fetch",
+          engineBuiltinToolInputValidators.web_fetch(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "read_skill_resource": {
+        const result = await this.engine.invokeBuiltinTool(
+          "read_skill_resource",
+          engineBuiltinToolInputValidators.read_skill_resource(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "run_skill_script": {
+        const result = await this.engine.invokeBuiltinTool(
+          "run_skill_script",
+          engineBuiltinToolInputValidators.run_skill_script(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "edit_file": {
+        const result = await this.engine.invokeBuiltinTool(
+          "edit_file",
+          engineBuiltinToolInputValidators.edit_file(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+      case "write_file": {
+        const result = await this.engine.invokeBuiltinTool(
+          "write_file",
+          engineBuiltinToolInputValidators.write_file(input),
+        );
+        return { output: result.output, resultRef: result.resultRef };
+      }
+    }
   }
 
   async #invokeDelegateTaskTool(options: {

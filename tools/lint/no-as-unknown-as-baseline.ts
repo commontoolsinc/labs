@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/cf-harness/src/prompt-loop.ts": [
-    "2682:12:lff1gh",
-  ],
   "packages/cf-harness/test/config.test.ts": [
     "133:39:jp6vf5",
     "140:39:jp6vf5",
@@ -874,6 +871,7 @@ export const noAsUnknownAsBaselineEntries = {
   ],
   "packages/runner/test/cell-core.test.ts": [
     "175:6:1v4fyfc",
+    "422:13:kkkrdw",
   ],
   "packages/runner/test/cell-get-slow-warning.test.ts": [
     "52:41:1yjlkjh",
@@ -1476,6 +1474,11 @@ export const noAsUnknownAsBaselineEntries = {
   "packages/toolshed/routes/ai/voice/voice.handlers.ts": [
     "145:38:1b29pct",
     "154:21:xyc7p6",
+  ],
+  "packages/toolshed/routes/ingest/ingest.utils.test.ts": [
+    "58:16:6im3n4",
+    "290:7:1i588xb",
+    "383:7:1czt9bb",
   ],
   "packages/toolshed/routes/integrations/google-oauth/google.descriptor.ts": [
     "55:25:cceqtv",
