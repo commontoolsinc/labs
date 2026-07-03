@@ -237,9 +237,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
-          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
+          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
           restore-keys: |
-            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -535,13 +535,14 @@ jobs:
       # Cross-run compile cache: persist the per-shard compiled-module-byte cache
       # so unchanged patterns reuse last run's emitted bytes (skip the
       # type-check + transform + emit). The key folds in a hash of everything
-      # that shapes the emitted bytes — the js-compiler, the CF transformer, the
-      # schema-generator it bakes schemas from, runner code that prepares and
-      # verifies compiled module records, static type assets loaded by the
-      # in-memory compiler, the api types lowered into schemas, the root
-      # deno.jsonc compiler options (jsx/jsxImportSource), and the lockfile — so
-      # any change to what emits or trusts the bytes invalidates the whole file
-      # even when it leaves module identity and the runtime-version tag untouched.
+      # that shapes emitted bytes or cached coverage spans — the js-compiler,
+      # the CF transformer, the schema-generator it bakes schemas from, runner
+      # code that prepares and verifies compiled module records, static type
+      # assets loaded by the in-memory compiler, the api types lowered into
+      # schemas, the root deno.jsonc compiler options (jsx/jsxImportSource), and
+      # the lockfile — so any change to what emits or trusts the bytes
+      # invalidates the whole file even when it leaves module identity and the
+      # runtime-version tag untouched.
       # This input list mirrors COMPILE_FINGERPRINT_INPUTS in
       # packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts, which
       # fingerprints the same set for the durable runtime cache; the
@@ -552,9 +553,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
           restore-keys: |
-            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+            cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -697,6 +698,14 @@ jobs:
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
 
+      - name: ♻️ Restore/save pattern unit compile byte cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
+          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
+          restore-keys: |
+            cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
         with:
@@ -706,9 +715,10 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/cf
-          mkdir -p test-results coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }}
+          mkdir -p test-results .compile-cache coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }}
           DENO_COVERAGE_DIR=coverage/raw/pattern-unit-${{ matrix.chunk }} \
           CF_PATTERN_COVERAGE_DIR=coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }} \
+          CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json" \
           CF_BINARY=./common-binaries/cf \
           deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 

@@ -37,6 +37,7 @@ import type {
   CommitPrecondition,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -62,10 +63,14 @@ import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcTriggerReadGating,
   type CfcTxState,
+  type CfcWriteFloorMode,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_TRIGGER_READ_GATING,
+  DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
@@ -119,6 +124,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
+    writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
+    triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     triggerReads: [],
@@ -137,6 +144,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // off — same shape as the enforcement floor (audit S3): code holding a
   // Cell must not disable propagation mid-transaction to launder a value.
   private cfcFlowLabelsPinned = false;
+  private cfcWriteFloorPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -204,6 +212,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (mode === "persist") {
       this.cfcFlowLabelsPinned = true;
     }
+  }
+
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
+    // Anti-downgrade pin (mirrors flow labels): once `enforce` is set — by the
+    // runtime at tx creation — pattern/handler code that reaches the tx cannot
+    // weaken it to `observe`/`off` to slip an SC-18 floor violation through
+    // (cubic review). Strengthening to `enforce` is always allowed.
+    if (this.cfcWriteFloorPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
+          `is pinned at "enforce"`,
+      );
+    }
+    this.cfcState.writeFloorMode = mode;
+    if (mode === "enforce") {
+      this.cfcWriteFloorPinned = true;
+    }
+  }
+
+  setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
+    this.cfcState.triggerReadGating = enabled;
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
@@ -670,24 +699,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.tx.markCreateOnly?.(link);
   }
 
-  recordArrayAppend(link: NormalizedFullLink, count: number): void {
-    this.assertWritable("recordArrayAppend");
-    this.tx.recordArrayAppend?.(toMemorySpaceAddress(link), count);
-  }
-
-  recordAddUnique(link: NormalizedFullLink, count: number): void {
-    this.assertWritable("recordAddUnique");
-    this.tx.recordAddUnique?.(toMemorySpaceAddress(link), count);
-  }
-
-  recordIncrement(link: NormalizedFullLink, by: number): void {
-    this.assertWritable("recordIncrement");
-    this.tx.recordIncrement?.(toMemorySpaceAddress(link), by);
-  }
-
-  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
-    this.assertWritable("recordRemoveByValue");
-    this.tx.recordRemoveByValue?.(toMemorySpaceAddress(link), value);
+  recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
+    this.assertWritable("recordMergeableOp");
+    this.tx.recordMergeableOp?.(toMemorySpaceAddress(link), delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -1168,6 +1182,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.setCfcFlowLabelsMode(mode);
   }
 
+  setCfcWriteFloorMode(mode: CfcWriteFloorMode): void {
+    this.wrapped.setCfcWriteFloorMode(mode);
+  }
+
+  setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
+    this.wrapped.setCfcTriggerReadGating(enabled);
+  }
+
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
   }
@@ -1287,20 +1309,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.markCreateOnly?.(link);
   }
 
-  recordArrayAppend(link: NormalizedFullLink, count: number): void {
-    this.wrapped.recordArrayAppend?.(link, count);
-  }
-
-  recordAddUnique(link: NormalizedFullLink, count: number): void {
-    this.wrapped.recordAddUnique?.(link, count);
-  }
-
-  recordIncrement(link: NormalizedFullLink, by: number): void {
-    this.wrapped.recordIncrement?.(link, by);
-  }
-
-  recordRemoveByValue(link: NormalizedFullLink, value: FabricValue): void {
-    this.wrapped.recordRemoveByValue?.(link, value);
+  recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
+    this.wrapped.recordMergeableOp?.(link, delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

@@ -5,7 +5,7 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commonfabric/js-compiler";
-import { CompilerError } from "@commonfabric/js-compiler/typescript";
+import { CompilerError } from "@commonfabric/js-compiler/errors";
 import type { CellScope } from "../builder/types.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 import { narrowestScope } from "../scope.ts";

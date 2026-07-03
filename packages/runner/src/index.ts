@@ -195,6 +195,9 @@ export {
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";
 export {
+  getCompileCacheRuntimeVersion,
+} from "./compilation-cache/cell-cache.ts";
+export {
   isSlugAddress,
   slugCause,
   slugIdForSpace,

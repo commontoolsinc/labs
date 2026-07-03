@@ -53,9 +53,10 @@ through `cf test`. Setting the variable on such a job has no effect at all.
 
 `tasks/perf-check.ts` downloads every `coverage-profile-*` artifact, joins all
 the LCOV files together, and hands them to `tasks/coverage-metrics.ts`. That
-code walks the tracked source files under `packages`, `tasks`, and `scripts`,
-and for each file counts how many of its lines no test covered. The counts roll
-up into `coverage-debt: <group> uncovered lines` metrics, for example
+code walks the tracked source files under `packages` and `tasks`, and for each
+file counts how many of its lines no test covered. The top-level `scripts`
+directory is excluded from this gate. The counts roll up into
+`coverage-debt: <group> uncovered lines` metrics, for example
 `coverage-debt: packages/patterns uncovered lines`, and the performance check
 gates a pull request on them.
 
@@ -116,6 +117,15 @@ gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>
 The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
 `cf test` in-process. The two integration jobs run browser-driven `deno test`
 files against a running Toolshed server.
+
+The compile byte cache is available to `cf test` through
+`CF_COMPILE_CACHE_FILE`. Coverage and non-coverage compiles use different cache
+keys. Coverage cache entries also carry the spans registered during the
+transform, so a restored coverage compile can rebuild the current collector
+before the cached module bytes run. The `pattern-unit-test` job wires both
+`CF_PATTERN_COVERAGE_DIR` and `CF_COMPILE_CACHE_FILE`, which lets CI reuse
+coverage-transformed module bytes between runs without mixing them with ordinary
+compiled bytes.
 
 ## Why the two integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
 

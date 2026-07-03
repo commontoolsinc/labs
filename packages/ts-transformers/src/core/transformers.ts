@@ -60,7 +60,9 @@ export interface FunctionCapabilitySummary {
 
 export type PatternCoverageKind = "runtime";
 
-export const PATTERN_COVERAGE_GLOBAL = "__cfPatternCoverage";
+// Moved to runtime-contract.ts (typescript-free) so the runtime can import it
+// without the compiler stack; re-exported here for the compile-side callers.
+export { PATTERN_COVERAGE_GLOBAL } from "./runtime-contract.ts";
 
 export interface PatternCoverageSpan {
   readonly fileName: string;

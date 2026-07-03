@@ -115,7 +115,8 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
-import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import type { Program } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   type SiteTable,

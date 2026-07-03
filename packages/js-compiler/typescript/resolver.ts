@@ -1,6 +1,5 @@
 import ts from "typescript";
 import { Program, ProgramResolver, Source } from "../interface.ts";
-import { dirname, join } from "@std/path/posix";
 
 export type UnresolvedModuleHandling =
   | { type: "allow"; identifiers: string[] }
@@ -82,26 +81,11 @@ function isUnresolvedModuleOk(
   }
 }
 
-/**
- * Resolve an import specifier relative to the importing source's path.
- * Relative specifiers (`./`, `../`) are joined against the importer's
- * directory; bare specifiers (e.g. `commonfabric`) are returned unchanged.
- */
-export function resolveImportSpecifier(
-  specifier: string,
-  from: Source,
-): string {
-  return resolveSpecifier(specifier, from);
-}
-
-function resolveSpecifier(specifier: string, from: Source): string {
-  if (
-    specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../"
-  ) {
-    return join(dirname(from.name), specifier);
-  }
-  return specifier;
-}
+// Moved to `../specifier.ts` (typescript-free) so runtime consumers can use it
+// without pulling the compiler into their bundle; re-exported here for the
+// existing compile-path importers.
+export { resolveImportSpecifier } from "../specifier.ts";
+import { resolveImportSpecifier as resolveSpecifier } from "../specifier.ts";
 
 /**
  * Collect every import/`export … from` specifier referenced by a source file,

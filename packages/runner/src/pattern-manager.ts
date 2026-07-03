@@ -1,9 +1,6 @@
-import ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  collectImportSpecifiers,
-  type Source,
-} from "@commonfabric/js-compiler";
+import type { Source } from "@commonfabric/js-compiler";
+import { compilerStack } from "./harness/deferred-compiler-stack.ts";
 import { Module, Pattern } from "./builder/types.ts";
 import {
   brandTrustedPattern,
@@ -22,6 +19,7 @@ import type {
   CompiledModuleArtifact,
   EvaluateResult,
   Exports,
+  TypeScriptHarnessProcessOptions,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
@@ -55,7 +53,6 @@ const logger = getLogger("pattern-manager");
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
-const FABRIC_IMPORT_SCAN_TARGET = ts.ScriptTarget.ES2023;
 
 function throwableStorageError(error: CommitError): Error {
   if (error instanceof Error) return error;
@@ -63,6 +60,16 @@ function throwableStorageError(error: CommitError): Error {
     name: error.name,
     cause: error,
   });
+}
+
+function moduleByteCacheRuntimeVersion(
+  runtimeVersion: string | undefined,
+  options: { patternCoverage: boolean },
+): string | undefined {
+  if (runtimeVersion === undefined) return undefined;
+  return options.patternCoverage
+    ? `${runtimeVersion}/pattern-coverage`
+    : runtimeVersion;
 }
 
 /**
@@ -76,13 +83,16 @@ function throwableStorageError(error: CommitError): Error {
 function fabricImportRefsFromSource(
   doc: SourceDoc,
 ): CacheableModule["imports"] {
+  // Deferred compiler stack (parses): source docs only reach this via
+  // loadVerifiedSourceClosure, which awaits ensureCompilerStack().
+  const { collectImportSpecifiers, ts } = compilerStack();
   const source: Source = { name: doc.filename, contents: doc.code };
   const refs: CacheableModule["imports"] = [];
   const seen = new Set<string>();
   for (
     const specifier of collectImportSpecifiers(
       source,
-      FABRIC_IMPORT_SCAN_TARGET,
+      ts.ScriptTarget.ES2023,
     )
   ) {
     if (!isFabricImportSpecifier(specifier)) continue;
@@ -119,6 +129,19 @@ export class PatternManager {
   // instance. The hash is computed with `createRef` purely as a stable digest
   // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
+  // Single-flight dedup for the expensive tail of `loadPatternByIdentity`
+  // (storage closure read + SES evaluation), keyed by `${space}\0${identity}`.
+  // Boot references the same entry several times at once (one load per
+  // referencing piece/system pattern); without this every concurrent miss ran
+  // its own full closure evaluation — measured as 4 identical 9-module SES
+  // evals per cold worker boot, the multiplier behind most of the per-module
+  // boot-floor buckets. Followers await the leader and then resolve their own
+  // symbol from the indexes the leader's evaluation populated — the same path
+  // a load arriving after completion takes.
+  private inProgressByIdentityLoads = new Map<
+    string,
+    Promise<Pattern | undefined>
+  >();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -470,6 +493,62 @@ export class PatternManager {
   }
 
   /**
+   * Compile + evaluate a program's modules AND register the evaluated artifacts,
+   * returning the full module namespace (`EvaluateResult`).
+   *
+   * This is the load seam for callers that need the raw evaluated namespace —
+   * `main.default`, a named `fetchMocks` export, multi-user descriptors — rather
+   * than the single `Pattern` that `compilePattern` returns. It is the reason the
+   * CLI pattern-test harness and the multi-user worker previously reached for the
+   * lower-level `Engine.compileAndEvaluateModules` directly and skipped
+   * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
+   * entry ref and fell back to a defer-corrupted embedded graph instead of their
+   * canonical `$patternRef` artifact.
+   *
+   * Registration is fused with evaluation here on purpose, so it cannot be
+   * forgotten — mirroring what the runtime's own `compilePattern` /
+   * `patternFromEvaluation` load path does. Reach for the bare
+   * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
+   * *without running* (engine unit tests), where stamping entry refs is unwanted.
+   */
+  async compileAndRegisterModules(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<EvaluateResult> {
+    const byteCache = this.runtime.moduleByteCache;
+    const runtimeVersion = byteCache === undefined
+      ? undefined
+      : moduleByteCacheRuntimeVersion(
+        await getCompileCacheRuntimeVersion(),
+        { patternCoverage: options?.patternCoverage !== undefined },
+      );
+    if (byteCache === undefined || runtimeVersion === undefined) {
+      const result = await this.runtime.harness.compileAndEvaluateModules(
+        program,
+        options,
+      );
+      this.registerEvaluatedModules(result);
+      return result;
+    }
+
+    const { id, graph, mainSpecifier, modules } = await this.runtime.harness
+      .compileToRecordGraph(program, {
+        ...options,
+        precompiledModulesFor: ({ identities }) =>
+          Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
+      });
+    byteCache.putAll(runtimeVersion, modules);
+    const result = this.runtime.harness.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
+    this.registerEvaluatedModules(result);
+    return result;
+  }
+
+  /**
    * ESM compile + evaluate backed by the content-addressed cell cache in
    * `cacheCtx.space`. On a warm full hit the per-module compiled bodies are
    * reused (no TypeScript compile / transformer pipeline / SES re-verify); on a
@@ -751,7 +830,6 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
-    const harness = this.runtime.harness;
     // In-memory artifact index: the pattern may already be live this session —
     // an evaluated ESM artifact, or a hand-built pattern given a synthetic
     // pointer via `associatePatternIdentity`. This path is independent of the
@@ -773,6 +851,43 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    const key = `${space}\0${entryIdentity}`;
+    const pending = this.inProgressByIdentityLoads.get(key);
+    if (pending === undefined) {
+      const load = this.loadPatternByIdentityFromStorage(
+        entryIdentity,
+        symbol,
+        space,
+      ).finally(() => this.inProgressByIdentityLoads.delete(key));
+      this.inProgressByIdentityLoads.set(key, load);
+      return await load;
+    }
+    // Follower: the leader's evaluation indexes every symbol of the closure,
+    // so after it settles the in-memory lookups above serve this call. Its
+    // failure is the leader caller's to surface; this call retries on its own
+    // behalf below.
+    await pending.catch(() => {});
+    // Back through the front door: hits the now-populated indexes in the
+    // common case. If the leader failed or did not surface this symbol, the
+    // in-flight entry is gone, so this call becomes the leader of its own
+    // attempt — the same load it would have run without dedup. Each pass
+    // consumes a settled leader, so the recursion is bounded by the number of
+    // concurrent callers.
+    return await this.loadPatternByIdentity(entryIdentity, symbol, space);
+  }
+
+  /**
+   * The storage-backed tail of {@link loadPatternByIdentity}: closure read,
+   * SES evaluation, artifact indexing, and the cold-load recovery fallbacks.
+   * Callers must hold the single-flight slot for `(space, entryIdentity)`.
+   */
+  private async loadPatternByIdentityFromStorage(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
     const runtimeVersion = await getCompileCacheRuntimeVersion();
     if (runtimeVersion === undefined) {
       return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
@@ -993,8 +1108,22 @@ export class PatternManager {
    * Index every module of a just-evaluated ESM bundle by its content identity
    * (CT-1623). Lets `loadPatternByIdentity` reuse a sub-pattern module already
    * evaluated as part of its parent's bundle — no storage read, no SES re-eval.
+   *
+   * Public because it is the shared indexing step every path that RUNS a
+   * just-evaluated pattern must perform: the runtime's own load path calls it via
+   * `patternFromEvaluation`, and the namespace load seam `compileAndRegisterModules`
+   * (used by the CLI test harness and the multi-user worker) calls it too.
+   * Skipping it leaves anonymous map/filter/flatMap ops un-indexed, so
+   * `getArtifactEntryRef` misses and the op falls back to its embedded graph
+   * instead of the content-addressed canonical artifact — the CT-1811 defer
+   * corruption. It is deliberately NOT folded into `Engine.compileAndEvaluateModules`,
+   * since that primitive is also used to inspect serialized/verified output
+   * without running (engine unit tests), where the side effect of stamping entry
+   * refs is unwanted — `compileAndRegisterModules` is the fused seam callers use to
+   * run. Idempotent per identity (re-registering refreshes the LRU), so paths that
+   * already registered are unaffected.
    */
-  private registerEvaluatedModules(result: EvaluateResult): void {
+  registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {

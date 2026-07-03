@@ -68,6 +68,8 @@ Deno.test("source inventory helpers group tracked files by package", () => {
     shouldTrackSourceFile("packages/vendor-astral/src/page.ts"),
     false,
   );
+  assertEquals(shouldTrackSourceFile("scripts/start-local-dev.sh"), false);
+  assertEquals(shouldTrackSourceFile("scripts/build.ts"), false);
   assertEquals(
     metricGroupFor("packages/runner/src/cell.ts"),
     "packages/runner",
@@ -89,6 +91,7 @@ Deno.test("collectSourceFiles excludes generated and dependency directories", as
     await writeSourceFile("packages/example/node_modules/dep/index.ts");
     await writeSourceFile("packages/example/coverage/report.ts");
     await writeSourceFile("packages/example/src/test/helper.ts");
+    await writeSourceFile("scripts/build.ts");
 
     const files = await collectSourceFiles(rootDir);
     assertEquals(
@@ -170,6 +173,7 @@ Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files
       files: [
         "packages/example/src/covered.ts",
         "packages/example/src/untested.ts",
+        "scripts/build.ts",
         // A test file is not tracked source, so it is skipped.
         "packages/example/src/covered.test.ts",
       ],
@@ -180,6 +184,7 @@ Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files
     // Absent from the report: every tracked line is uncovered.
     assertEquals(uncovered.get("packages/example/src/untested.ts"), [1]);
     // Untracked and unrequested files are absent.
+    assertEquals(uncovered.has("scripts/build.ts"), false);
     assertEquals(uncovered.has("packages/example/src/covered.test.ts"), false);
     assertEquals(uncovered.has("packages/example/src/other.ts"), false);
   } finally {

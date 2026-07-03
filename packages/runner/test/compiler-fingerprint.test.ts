@@ -231,7 +231,7 @@ describe("compile-cache version axis", () => {
     );
   });
 
-  it("fingerprints the compiler-input packages that shape emitted bytes", () => {
+  it("fingerprints the inputs that shape emitted bytes and coverage spans", () => {
     // `api` carries the pattern-facing types the schema-generator lowers into
     // baked schemas, so it is fingerprinted alongside the pipeline.
     for (
@@ -239,6 +239,7 @@ describe("compile-cache version axis", () => {
         "packages/ts-transformers",
         "packages/js-compiler",
         "packages/runner/src/harness",
+        "packages/runner/src/pattern-coverage.ts",
         "packages/runner/src/sandbox",
         "packages/schema-generator",
         "packages/api",
@@ -258,7 +259,7 @@ describe("compile-cache version axis", () => {
     const workflow = await Deno.readTextFile(denoWorkflowPath);
     const expected = `hashFiles(${ciHashFilesArgs()})`;
     const occurrences = workflow.split(expected).length - 1;
-    expect(occurrences).toBe(4);
+    expect(occurrences).toBe(6);
     expect(workflow).toContain(
       "hashFiles('packages/generated-patterns/**/*.ts')",
     );

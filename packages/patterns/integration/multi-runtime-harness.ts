@@ -200,6 +200,13 @@ export class MultiRuntimeSession {
     return await this.#client.call("read", { path });
   }
 
+  /** Read the RAW stored value at `path` (links resolved to the target cell,
+   *  no result-schema shaping) — for state the declared schema does not
+   *  carry, e.g. a query result's `requestHash`. */
+  async readRaw(path: (string | number)[] = []): Promise<unknown> {
+    return await this.#client.call("readRaw", { path });
+  }
+
   /** Inspect the normalized link (id, space, scope) at `path` in the result. */
   async link(
     path: (string | number)[] = [],

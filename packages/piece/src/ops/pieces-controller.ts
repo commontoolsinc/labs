@@ -14,7 +14,7 @@ import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commonfabric/identity";
-import { HttpProgramResolver } from "@commonfabric/js-compiler";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ACLManager } from "./acl-manager.ts";
 import { homeSchema } from "@commonfabric/home-schemas";
 

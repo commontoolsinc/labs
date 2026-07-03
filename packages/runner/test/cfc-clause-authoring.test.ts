@@ -6,6 +6,11 @@ import { Runtime } from "../src/runtime.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { isOrClause } from "../src/cfc/clause.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import {
+  CFC_LABEL_READ_FAILED_ATOM,
+  cfcObservationFitsCeiling,
+} from "../src/cfc/observation.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-clause-authoring");
@@ -52,7 +57,7 @@ describe("CFC authored disjunctive confidentiality", () => {
         id: runtime.getCell(signer.did(), "authored-or", schema, readTx)
           .getAsNormalizedFullLink().id,
       });
-      readTx.commit();
+      await readTx.commit();
 
       const conf = (metadata?.labelMap.entries ?? []).flatMap(
         (entry) => entry.label.confidentiality ?? [],
@@ -66,6 +71,87 @@ describe("CFC authored disjunctive confidentiality", () => {
       expect(orClause!.anyOf).toHaveLength(2);
       expect(orClause!.anyOf).toContainEqual(userA);
       expect(orClause!.anyOf).toContainEqual(userB);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persisted clause read by a clause-UNAWARE flat reader is outside every ceiling (mixed-version fail-closed, design decision 1)", async () => {
+    // The mixed-version story of design decision 1
+    // (docs/plans/cfc-future-work-implementation.md, Epic A): a reader that
+    // predates clause subsumption (#4470) deepEquals the WHOLE `{anyOf:[…]}`
+    // object against each ceiling entry, so an authored clause can only ever
+    // over-restrict on old readers — never leak. Confirmed end-to-end: schema
+    // → committed labelMap → read-back label → flat fit.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const schema = {
+        type: "string",
+        ifc: { confidentiality: [{ anyOf: [userB, userA] }] },
+      } as const satisfies JSONSchema;
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(signer.did(), "mixed-version", schema, tx);
+      cell.set("participant-readable");
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const readTx = runtime.edit();
+      const metadata = readStoredCfcMetadata(readTx, {
+        space: signer.did(),
+        id: runtime.getCell(signer.did(), "mixed-version", schema, readTx)
+          .getAsNormalizedFullLink().id,
+      });
+      await readTx.commit();
+
+      const label = (metadata?.labelMap.entries ?? []).flatMap(
+        (entry) => entry.label.confidentiality ?? [],
+      );
+      const clause = label.find(isOrClause)!;
+      expect(clause).toBeDefined();
+
+      // Faithful local reimplementation of the PRE-A2 fit — atomsOutsideCeiling
+      // as of #4055, before #4470 rewrote it to clause subsumption: plain
+      // deepEqual set-membership plus the ungrantable read-failed marker, no
+      // clause awareness.
+      const flatAtomsOutsideCeiling = (
+        confidentiality: readonly unknown[],
+        ceiling: readonly unknown[],
+      ): unknown[] =>
+        confidentiality.filter((value) =>
+          deepEqual(value, CFC_LABEL_READ_FAILED_ATOM) ||
+          !ceiling.some((allowed) => deepEqual(allowed, value))
+        );
+
+      // Ceilings naming each alternative — alone, together, and among
+      // unrelated atoms. The flat reader compares the whole clause object to
+      // each entry, so none admits it: fit fails everywhere.
+      const ceilings: (readonly unknown[])[] = [
+        [], // declared public-only
+        [userA],
+        [userB],
+        [userA, userB], // names every alternative — still not the clause object
+        [userA, userB, "did:key:carol"],
+      ];
+      for (const ceiling of ceilings) {
+        const outside = flatAtomsOutsideCeiling(label, ceiling);
+        expect(outside).toContainEqual(clause);
+        expect(flatAtomsOutsideCeiling([clause], ceiling)).toHaveLength(1);
+      }
+
+      // Contrast: the CURRENT clause-aware fit admits the same read-back
+      // clause at a flat ceiling naming one alternative (A2's weaker-clause
+      // direction), and still rejects it at public-only. The flat reader is
+      // strictly MORE restrictive than the clause-aware one — fail-closed by
+      // construction, not by coincidence.
+      expect(cfcObservationFitsCeiling([clause], [userA])).toBe(true);
+      expect(cfcObservationFitsCeiling([clause], [])).toBe(false);
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -1,0 +1,307 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import type { SinkMaxConfidentiality } from "../src/cfc/mod.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+
+const signer = await Identity.fromPassphrase("runner-cfc-trigger-read-gating");
+
+// Epic H5 (§8.9.2 / SC-3): the addresses whose invalidating writes SCHEDULED a
+// reactive rerun (trigger reads) join the enforcement consumed set behind the
+// `cfcTriggerReadGating` flag (default off). Without it, a handler scheduled by
+// a secret's write can egress to a ceiling'd sink — or write a
+// requiredIntegrity-floored target — without ever re-reading that secret, and
+// pass. The tests drive each gate with the flag OFF (passes today) and ON
+// (rejected), the fail-closed direction.
+const CONFIDENTIAL_SCHEMA = internSchema(
+  {
+    type: "object",
+    properties: {
+      secret: { type: "string", ifc: { confidentiality: ["medical"] } },
+    },
+    required: ["secret"],
+  } satisfies JSONSchema,
+  true,
+);
+
+const OUT_SCHEMA = internSchema(
+  {
+    type: "object",
+    properties: { v: { type: "string" } },
+    required: ["v"],
+  } satisfies JSONSchema,
+  true,
+);
+
+const makeRuntime = (opts: {
+  storageManager: ReturnType<typeof StorageManager.emulate>;
+  cfcTriggerReadGating?: boolean;
+  cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+}) =>
+  new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager: opts.storageManager,
+    cfcEnforcementMode: "enforce-explicit",
+    cfcSinkMaxConfidentiality: opts.cfcSinkMaxConfidentiality,
+    ...(opts.cfcTriggerReadGating !== undefined
+      ? { cfcTriggerReadGating: opts.cfcTriggerReadGating }
+      : {}),
+  });
+
+// Seed a confidential cell and return the id whose /secret carries [medical].
+const seedConfidential = async (
+  runtime: Runtime,
+  id: string,
+): Promise<string> => {
+  const seed = runtime.edit();
+  const target = runtime.getCell(signer.did(), id, undefined, seed);
+  const targetId = target.getAsNormalizedFullLink().id;
+  seed.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: targetId,
+    path: [],
+  }, {
+    value: { secret: "rosebud" },
+    cfc: {
+      version: 1,
+      schemaHash: CONFIDENTIAL_SCHEMA.taggedHashString,
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: ["secret"],
+          label: { confidentiality: ["medical"] },
+        }],
+      },
+    },
+  });
+  seed.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: `cid:${CONFIDENTIAL_SCHEMA.taggedHashString}`,
+    path: [],
+  }, { value: CONFIDENTIAL_SCHEMA.schema });
+  expect((await seed.commit()).ok).toBeDefined();
+  return targetId;
+};
+
+// A tx that (a) marks itself CFC-relevant by writing an output cell, (b) records
+// the confidential cell as a TRIGGER read (never re-reading it), and (c)
+// enqueues a fetchJson sink request. No confidential read is consumed directly.
+const scheduledEgress = (
+  runtime: Runtime,
+  outId: string,
+  secretId: string,
+) => {
+  const tx = runtime.edit();
+  runtime.getCell(signer.did(), outId, OUT_SCHEMA.schema, tx).set({
+    v: "computed",
+  });
+  tx.addCfcTriggerReads([{
+    space: signer.did(),
+    id: secretId as `${string}:${string}`,
+    type: "application/json",
+    path: ["value", "secret"],
+  }]);
+  enqueueSinkRequestPostCommitEffect(
+    tx,
+    "fetchJson",
+    "fetchJson:h5",
+    createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+    "fetchJson-start",
+    () => {},
+  );
+  tx.prepareCfc();
+  return tx;
+};
+
+describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
+  it("flag OFF (default): a scheduled egress that never re-reads the secret passes", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-off-secret");
+      const tx = scheduledEgress(runtime, "h5-off-out", secretId);
+      const result = await tx.commit();
+      // Today: the trigger read is not in the consumed set, so the public-only
+      // sink ceiling is not tripped.
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("flag ON: the same scheduled egress is rejected by the sink ceiling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-on-secret");
+      const tx = scheduledEgress(runtime, "h5-on-out", secretId);
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message)).toContain(
+        "exceeds ceiling for fetchJson",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("flag ON but no trigger read: an unrelated scheduled egress still passes", async () => {
+    // The gate only folds in ACTUAL trigger reads — a run scheduled by a
+    // non-confidential write (no confidential trigger) is not over-blocked.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-none-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:none",
+        createFrozenRequestSnapshot({ url: "https://example.com/ok" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("flag ON: a cid: trigger read is excluded (content-addressed docs never gate)", async () => {
+    // Trigger entries for content-addressed schema/program docs (cid:) are
+    // structural plumbing, dropped at ingest by addCfcTriggerReads
+    // (flowReadExcluded), so a run whose only trigger is a cid: address has an
+    // empty trigger set and egresses freely even with the gate on.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-cid-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id:
+          `cid:${CONFIDENTIAL_SCHEMA.taggedHashString}` as `${string}:${string}`,
+        type: "application/json",
+        path: ["value"],
+      }]);
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:cid",
+        createFrozenRequestSnapshot({ url: "https://example.com/ok" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("the input-requirement gate also consults trigger reads under the flag", async () => {
+    // A requiredIntegrity-floored write whose only consumed input is a TRIGGER
+    // read that lacks the required atom: flag OFF passes (empty gate set), flag
+    // ON fails (the trigger read joins gatedReads and misses the floor).
+    const run = async (gating: boolean) => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcTriggerReadGating: gating,
+      });
+      try {
+        // A trigger source labeled with a NON-required endorsement.
+        const seed = runtime.edit();
+        const srcCell = runtime.getCell(
+          signer.did(),
+          "h5-ri-src",
+          undefined,
+          seed,
+        );
+        const srcId = srcCell.getAsNormalizedFullLink().id;
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: srcId,
+          path: [],
+        }, {
+          value: "data",
+          cfc: {
+            version: 1,
+            schemaHash: "seed-h5-ri",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { integrity: ["other-endorsement"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        const sink = runtime.getCell(
+          signer.did(),
+          "h5-ri-sink",
+          {
+            type: "object",
+            properties: {
+              out: { type: "string", ifc: { requiredIntegrity: ["needed"] } },
+            },
+            required: ["out"],
+          } as const satisfies JSONSchema,
+          tx,
+        );
+        sink.set({ out: "derived" });
+        tx.addCfcTriggerReads([{
+          space: signer.did(),
+          id: srcId as `${string}:${string}`,
+          type: "application/json",
+          path: ["value"],
+        }]);
+        tx.prepareCfc();
+        const result = await tx.commit();
+        return String((result.error as Error | undefined)?.message ?? "");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    };
+    expect(await run(false)).not.toContain("requiredIntegrity failed");
+    expect(await run(true)).toContain("requiredIntegrity failed");
+  });
+});

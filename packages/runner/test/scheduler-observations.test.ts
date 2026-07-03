@@ -353,6 +353,9 @@ describe("persistent scheduler observations", () => {
           target.withTx(actionTx).set(runs);
         },
         {
+          // Content-addressed identity (replaces the legacy `.src` key — the
+          // fingerprint keys on this, never on the source location).
+          implementationHash: "cf:module/test-cw:changingWriter",
           writes: [
             firstTarget.getAsNormalizedFullLink(),
             secondTarget.getAsNormalizedFullLink(),
@@ -383,12 +386,12 @@ describe("persistent scheduler observations", () => {
       expect(changedObservation?.declaredWrites).toBeUndefined();
 
       const restoredChangingWriter = Object.assign((() => {}) as Action, {
+        implementationHash: "cf:module/test-cw:changingWriter",
         writes: [
           firstTarget.getAsNormalizedFullLink(),
           secondTarget.getAsNormalizedFullLink(),
         ],
       });
-      (restoredChangingWriter as { src?: string }).src = "changingWriter";
       expect(
         runtime.scheduler.rehydrateActionFromObservation(
           restoredChangingWriter,
@@ -446,13 +449,14 @@ describe("persistent scheduler observations", () => {
         toMemorySpaceAddress(target.getAsNormalizedFullLink()),
       ];
       let runs = 0;
-      const logSurfaceWriter = function logSurfaceWriter(
-        actionTx: IExtendedStorageTransaction,
-      ) {
-        runs++;
-        source.withTx(actionTx).get();
-        target.withTx(actionTx).set(runs);
-      } as Action;
+      const logSurfaceWriter = Object.assign(
+        function logSurfaceWriter(actionTx: IExtendedStorageTransaction) {
+          runs++;
+          source.withTx(actionTx).get();
+          target.withTx(actionTx).set(runs);
+        },
+        { implementationHash: "cf:module/test-lsw:logSurfaceWriter" },
+      ) as Action;
 
       runtime.scheduler.subscribe(logSurfaceWriter, {
         reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
@@ -463,8 +467,9 @@ describe("persistent scheduler observations", () => {
       await runtime.scheduler.run(logSurfaceWriter);
       expect(observations.at(-1)?.currentKnownWrites).toEqual(surface);
 
-      const restoredWriter = (() => {}) as Action;
-      (restoredWriter as { src?: string }).src = "logSurfaceWriter";
+      const restoredWriter = Object.assign((() => {}) as Action, {
+        implementationHash: "cf:module/test-lsw:logSurfaceWriter",
+      });
       expect(
         runtime.scheduler.rehydrateActionFromObservation(
           restoredWriter,

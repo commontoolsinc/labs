@@ -1,5 +1,5 @@
-import { transformCfDirective } from "@commonfabric/ts-transformers";
-import ts from "typescript";
+import type ts from "typescript";
+import { compilerStack } from "./deferred-compiler-stack.ts";
 import { RuntimeProgram } from "./types.ts";
 
 export function pretransformProgram(
@@ -17,6 +17,9 @@ export function pretransformProgram(
 export function transformInjectHelperModule(
   program: RuntimeProgram,
 ): RuntimeProgram {
+  // Deferred compiler stack (parses + prints): pretransform only runs on
+  // compile flows, which await ensureCompilerStack() at their entry.
+  const { transformCfDirective } = compilerStack();
   return {
     main: program.main,
     files: program.files.map((source) => ({
@@ -86,22 +89,23 @@ function prefix(filename: string, id: string): string {
 }
 
 function normalizeMixedModuleImports(source: string): string {
-  const sourceFile = ts.createSourceFile(
+  const { ts: tsc } = compilerStack();
+  const sourceFile = tsc.createSourceFile(
     "source.tsx",
     source,
-    ts.ScriptTarget.ES2023,
+    tsc.ScriptTarget.ES2023,
     true,
-    ts.ScriptKind.TSX,
+    tsc.ScriptKind.TSX,
   );
-  const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+  const printer = tsc.createPrinter({ newLine: tsc.NewLineKind.LineFeed });
   const replacements: { start: number; end: number; text: string }[] = [];
 
   for (const statement of sourceFile.statements) {
     if (
-      !ts.isImportDeclaration(statement) ||
+      !tsc.isImportDeclaration(statement) ||
       !statement.importClause ||
       !statement.importClause.namedBindings ||
-      !ts.isNamedImports(statement.importClause.namedBindings)
+      !tsc.isNamedImports(statement.importClause.namedBindings)
     ) {
       continue;
     }
@@ -112,19 +116,19 @@ function normalizeMixedModuleImports(source: string): string {
     let rewrittenStatements: ts.ImportDeclaration[] | undefined;
     if (importClause.name) {
       rewrittenStatements = [
-        ts.factory.createImportDeclaration(
+        tsc.factory.createImportDeclaration(
           statement.modifiers,
-          ts.factory.createImportClause(
+          tsc.factory.createImportClause(
             importClause.isTypeOnly,
-            ts.factory.createIdentifier(importClause.name.text),
+            tsc.factory.createIdentifier(importClause.name.text),
             undefined,
           ),
           cloneModuleSpecifier(statement.moduleSpecifier),
           cloneImportAttributes(statement.attributes, sourceFile),
         ),
-        ts.factory.createImportDeclaration(
+        tsc.factory.createImportDeclaration(
           statement.modifiers,
-          ts.factory.createImportClause(
+          tsc.factory.createImportClause(
             importClause.isTypeOnly,
             undefined,
             cloneNamedImports(namedBindings, sourceFile),
@@ -145,11 +149,11 @@ function normalizeMixedModuleImports(source: string): string {
         element,
       ) => element !== defaultSpecifier);
       rewrittenStatements = [
-        ts.factory.createImportDeclaration(
+        tsc.factory.createImportDeclaration(
           statement.modifiers,
-          ts.factory.createImportClause(
+          tsc.factory.createImportClause(
             importClause.isTypeOnly || defaultSpecifier.isTypeOnly,
-            ts.factory.createIdentifier(defaultSpecifier.name.text),
+            tsc.factory.createIdentifier(defaultSpecifier.name.text),
             undefined,
           ),
           cloneModuleSpecifier(statement.moduleSpecifier),
@@ -159,9 +163,9 @@ function normalizeMixedModuleImports(source: string): string {
 
       if (remainingElements.length > 0) {
         rewrittenStatements.push(
-          ts.factory.createImportDeclaration(
+          tsc.factory.createImportDeclaration(
             statement.modifiers,
-            ts.factory.createImportClause(
+            tsc.factory.createImportClause(
               importClause.isTypeOnly,
               undefined,
               cloneNamedImportsFromElements(remainingElements, sourceFile),
@@ -181,7 +185,7 @@ function normalizeMixedModuleImports(source: string): string {
       text: preserveLineCount(
         source.slice(start, end),
         rewrittenStatements.map((entry) =>
-          printer.printNode(ts.EmitHint.Unspecified, entry, sourceFile)
+          printer.printNode(tsc.EmitHint.Unspecified, entry, sourceFile)
         ).join(" "),
       ),
     });
@@ -198,8 +202,9 @@ function normalizeMixedModuleImports(source: string): string {
 }
 
 function cloneModuleSpecifier(moduleSpecifier: ts.Expression): ts.Expression {
-  return ts.isStringLiteral(moduleSpecifier)
-    ? ts.factory.createStringLiteral(moduleSpecifier.text)
+  const { ts: tsc } = compilerStack();
+  return tsc.isStringLiteral(moduleSpecifier)
+    ? tsc.factory.createStringLiteral(moduleSpecifier.text)
     : moduleSpecifier;
 }
 
@@ -207,11 +212,12 @@ function cloneImportAttributes(
   attributes: ts.ImportAttributes | undefined,
   sourceFile: ts.SourceFile,
 ): ts.ImportAttributes | undefined {
+  const { ts: tsc } = compilerStack();
   if (!attributes) return undefined;
-  const cloned = ts.factory.createImportAttributes(
-    ts.factory.createNodeArray(
+  const cloned = tsc.factory.createImportAttributes(
+    tsc.factory.createNodeArray(
       attributes.elements.map((element) =>
-        ts.factory.createImportAttribute(
+        tsc.factory.createImportAttribute(
           cloneModuleExportName(element.name, sourceFile),
           cloneImportAttributeValue(element.value),
         )
@@ -233,14 +239,15 @@ function cloneNamedImportsFromElements(
   elements: readonly ts.ImportSpecifier[],
   sourceFile: ts.SourceFile,
 ): ts.NamedImports {
-  return ts.factory.createNamedImports(
+  const { ts: tsc } = compilerStack();
+  return tsc.factory.createNamedImports(
     elements.map((element) =>
-      ts.factory.createImportSpecifier(
+      tsc.factory.createImportSpecifier(
         element.isTypeOnly,
         element.propertyName
           ? cloneModuleExportName(element.propertyName, sourceFile)
           : undefined,
-        ts.factory.createIdentifier(element.name.text),
+        tsc.factory.createIdentifier(element.name.text),
       )
     ),
   );
@@ -250,14 +257,16 @@ function cloneModuleExportName(
   name: ts.ModuleExportName,
   sourceFile: ts.SourceFile,
 ): ts.ModuleExportName {
-  return ts.isIdentifier(name)
-    ? ts.factory.createIdentifier(name.text)
-    : ts.factory.createStringLiteral(name.text ?? name.getText(sourceFile));
+  const { ts: tsc } = compilerStack();
+  return tsc.isIdentifier(name)
+    ? tsc.factory.createIdentifier(name.text)
+    : tsc.factory.createStringLiteral(name.text ?? name.getText(sourceFile));
 }
 
 function cloneImportAttributeValue(value: ts.Expression): ts.Expression {
-  if (ts.isStringLiteral(value)) {
-    return ts.factory.createStringLiteral(value.text);
+  const { ts: tsc } = compilerStack();
+  if (tsc.isStringLiteral(value)) {
+    return tsc.factory.createStringLiteral(value.text);
   }
   return value;
 }

@@ -15,7 +15,9 @@ import type {
 import {
   isConflictRejection,
   isPermanentRejection,
+  isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { getDirectTransactionMergeableOpAddresses } from "../storage/transaction-inspection.ts";
 import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
@@ -703,6 +705,13 @@ export async function dispatchQueuedEvent(state: {
 
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
+    // A commit that carries a mergeable op (append/add-unique/increment/
+    // remove-by-value) represents durable, commutative user intent that cannot
+    // truly conflict. A stale-basis inconsistency — the same-replica race the
+    // space-rehydration storm produces — must not exhaust the fixed retry budget
+    // and drop that intent; it is retried within the retry window like a
+    // conflict instead (see classifyCommitDisposition).
+    const hasMergeableOps = transactionHasMergeableOps(tx);
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
@@ -727,6 +736,7 @@ export async function dispatchQueuedEvent(state: {
         result.error,
         queuedEvent,
         state.backpressure,
+        hasMergeableOps,
       );
 
       state.runtime.telemetry.submit({
@@ -894,6 +904,13 @@ function formatEventCommitAddress(address: {
   return `${address.space}/${address.id}/${address.path.join("/")}`;
 }
 
+function transactionHasMergeableOps(tx: IExtendedStorageTransaction): boolean {
+  for (const _ of getDirectTransactionMergeableOpAddresses(tx) ?? []) {
+    return true;
+  }
+  return false;
+}
+
 type CommitDisposition =
   | { kind: "success" }
   | { kind: "permanent" }
@@ -914,17 +931,28 @@ type CommitDisposition =
  *  - success: nothing more to do.
  *  - permanent: a precondition failure; never retried.
  *  - backoff / convergence-failed: a stale-basis ConflictError under
- *    contention. It backs off and retries until it lands or the retry window
- *    elapses, after which it fails terminally rather than being silently
- *    dropped. This is the backpressure path.
+ *    contention, or a stale-basis StorageTransactionInconsistent on a commit
+ *    that carries a mergeable op. It backs off and retries until it lands or the
+ *    retry window elapses, after which it fails terminally rather than being
+ *    silently dropped. This is the backpressure path.
  *  - bounded-retry / give-up: any other transient error (a handler-initiated
- *    abort, a system error). These are not contention, so backpressure would
- *    not help; they keep the fixed retriesLeft budget and stop after it.
+ *    abort, a system error). These are not a stale basis, so re-running against
+ *    fresh state would not help; they keep the fixed retriesLeft budget and stop
+ *    after it.
+ *
+ * The extra windowing for a mergeable-op commit is scoped to the stale-basis
+ * StorageTransactionInconsistent — the same-replica race the rehydration storm
+ * produces, which re-running resolves. A mergeable op is add-wins and
+ * commutative, so retrying it against fresh state is always safe and its durable
+ * intent must not be dropped when the fixed budget runs out. A non-stale-basis
+ * rejection (authorization, malformed store op, transport) still keeps the fixed
+ * budget even with a mergeable op present, since retrying cannot resolve it.
  */
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,
   policy: CommitBackpressurePolicy,
+  hasMergeableOps: boolean,
 ): CommitDisposition {
   if (!error) {
     return { kind: "success" };
@@ -932,7 +960,9 @@ function classifyCommitDisposition(
   if (isPermanentRejection(error)) {
     return { kind: "permanent" };
   }
-  if (!isConflictRejection(error)) {
+  const windowed = isConflictRejection(error) ||
+    (hasMergeableOps && isStorageTransactionInconsistent(error));
+  if (!windowed) {
     return queuedEvent.retriesLeft > 0
       ? { kind: "bounded-retry" }
       : { kind: "give-up" };

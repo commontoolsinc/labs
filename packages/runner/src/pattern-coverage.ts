@@ -46,6 +46,16 @@ export class PatternCoverageCollector {
     this.#spans.set(spanKey(span.fileName, span.id), span);
   }
 
+  registerSpans(spans: readonly PatternCoverageSpan[]): void {
+    for (const span of spans) this.registerSpan(span);
+  }
+
+  spansForFile(fileName: string): PatternCoverageSpan[] {
+    return [...this.#spans.values()]
+      .filter((span) => span.fileName === fileName)
+      .map((span) => ({ ...span }));
+  }
+
   hit(fileName: string, id: number): void {
     const key = spanKey(fileName, id);
     this.#hits.set(key, (this.#hits.get(key) ?? 0) + 1);

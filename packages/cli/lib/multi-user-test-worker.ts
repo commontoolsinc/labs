@@ -34,6 +34,10 @@ import {
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
 import {
+  flushDefaultModuleByteCache,
+  getDefaultModuleByteCache,
+} from "./compile-byte-cache.ts";
+import {
   createSession,
   Identity,
   type KeyPairRaw,
@@ -163,6 +167,7 @@ const handlers: Record<
       spaceName: args.spaceName as string,
     });
     const space = session.space;
+    const moduleByteCache = getDefaultModuleByteCache();
     const { StorageManager } = await import(
       "@commonfabric/runner/storage/cache.deno"
     );
@@ -179,6 +184,7 @@ const handlers: Record<
       // declared `ifc` policies (the production runtime default).
       cfcEnforcementMode: "enforce-explicit",
       apiUrl: new URL(import.meta.url),
+      moduleByteCache,
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
     });
     runtime.enableIdempotencyCheck();
@@ -222,9 +228,14 @@ const handlers: Record<
         args.root as string | undefined,
       ),
     );
-    const { main } = await engine.compileAndEvaluateModules(program, {
-      patternCoverage,
-    });
+    // `compileAndRegisterModules` seals compile + evaluate + register (see
+    // test-runner.ts): map/filter/flatMap ops resolve via their content-addressed
+    // canonical artifact instead of the defer-corrupted embedded graph (CT-1811).
+    const evalResult = await runtime.patternManager.compileAndRegisterModules(
+      program,
+      { patternCoverage },
+    );
+    const { main } = evalResult;
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.
     loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     consoleCaptureActive = true;
@@ -405,6 +416,7 @@ const handlers: Record<
     // `engine` is the runtime's own harness; runtime.dispose() disposes it.
     await runtime?.dispose();
     await storageManager?.close();
+    flushDefaultModuleByteCache();
     runtime = undefined;
     storageManager = undefined;
     engine = undefined;

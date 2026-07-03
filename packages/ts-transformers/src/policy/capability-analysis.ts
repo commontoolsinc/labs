@@ -1,5 +1,9 @@
 import ts from "typescript";
 import {
+  MERGEABLE_OP_METHODS,
+  type MergeableOpMethodKind,
+} from "@commonfabric/api";
+import {
   classifyArrayCallbackContainerCall,
   isCellLikeType,
   isWildcardTraversalCall,
@@ -138,15 +142,24 @@ function extendSourceRef(
 
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
-const WRITER_METHODS = new Set(["set", "update", "increment"]);
+// The mergeable-op writer methods (increment, push, addUnique, removeByValue)
+// come from the canonical catalog in @commonfabric/api, so a new mergeable op is
+// classified by registering it there — no edit here. The non-mergeable Cell
+// writers stay listed explicitly.
+const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
+  MERGEABLE_OP_METHODS.filter((op) => op.kind === kind).map((op) => op.method);
+
+const WRITER_METHODS = new Set([
+  "set",
+  "update",
+  ...mergeableMethods("scalar-writer"),
+]);
 const ARRAY_IDENTITY_WRITER_METHODS = new Set([
-  "push",
-  "addUnique",
   "unshift",
   "splice",
   "remove",
   "removeAll",
-  "removeByValue",
+  ...mergeableMethods("array-identity-writer"),
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 // The mergeable tail-append op. Only `push` commits as a mergeable `append`

@@ -19,6 +19,7 @@
 //     --concurrency N       parallel job fetches, default 8
 //     --min-runs N          drop jobs seen in fewer than N runs (default: 10% of runs)
 //     --main-only           only fetch pushes to main, skipping pre-land PR runs
+//     --run-id ID           chart this workflow run ID, repeatable
 
 const args = Deno.args;
 function opt(name: string, def: string): string {
@@ -39,7 +40,8 @@ function numOpt(
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
     "Usage: scripts/ci-gantt.ts [--repo OWNER/REPO] [--workflow FILE] [--limit N]\n" +
-      "       [--out PATH] [--scale N] [--concurrency N] [--min-runs N] [--main-only]",
+      "       [--out PATH] [--scale N] [--concurrency N] [--min-runs N]\n" +
+      "       [--main-only] [--run-id ID]",
   );
   Deno.exit(0);
 }
@@ -50,12 +52,15 @@ const LIMIT = numOpt("limit", 100, { min: 1, integer: true });
 const OUT = opt("out", "ci-gantt.png");
 const SCALE = numOpt("scale", 2, { min: 0.1 });
 const CONCURRENCY = numOpt("concurrency", 8, { min: 1, integer: true });
+const RUN_IDS = args.flatMap((arg, index) =>
+  arg === "--run-id" && args[index + 1] ? [args[index + 1]] : []
+);
 const MIN_RUNS_OVERRIDE = args.includes("--min-runs")
   ? numOpt("min-runs", 1, { min: 1, integer: true })
   : null;
-// By default only successful job executions feed the timings, so failed or
-// cancelled runs don't skew the min/max. Pass --all-conclusions to include them.
-const SUCCESS_ONLY = !args.includes("--all-conclusions");
+// Sampled charts use successful jobs by default. Exact-run charts include every
+// non-skipped job.
+const SUCCESS_ONLY = !RUN_IDS.length && !args.includes("--all-conclusions");
 // Restrict to pushes to main (post-land), excluding pre-land pull_request runs.
 const MAIN_ONLY = args.includes("--main-only");
 
@@ -100,11 +105,14 @@ async function pool<T, R>(
 }
 
 interface Run {
+  attempt?: number;
   databaseId: number;
   status: string;
   conclusion: string;
   event: string;
+  headBranch?: string;
   startedAt: string;
+  workflowName?: string;
 }
 
 interface Job {
@@ -113,6 +121,29 @@ interface Job {
   conclusion: string | null;
   started_at: string | null;
   completed_at: string | null;
+}
+
+function hasTiming(job: Job): boolean {
+  if (!job.started_at || !job.completed_at) return false;
+  const st = Date.parse(job.started_at);
+  const en = Date.parse(job.completed_at);
+  return Number.isFinite(st) && Number.isFinite(en) && en > st;
+}
+
+const JOBS_PER_PAGE = 100;
+async function fetchJobs(path: string): Promise<Job[]> {
+  const jobs: Job[] = [];
+  for (let page = 1;; page++) {
+    const sep = path.includes("?") ? "&" : "?";
+    const body = await gh([
+      "api",
+      `${path}${sep}per_page=${JOBS_PER_PAGE}&page=${page}`,
+    ]);
+    const pageJobs = (JSON.parse(body).jobs ?? []) as Job[];
+    jobs.push(...pageJobs);
+    if (pageJobs.length < JOBS_PER_PAGE) break;
+  }
+  return jobs;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,25 +201,42 @@ function esc(s: string): string {
 // ---------------------------------------------------------------------------
 
 console.error(
-  `Fetching last ${LIMIT} ${WORKFLOW} runs on ${REPO}${
-    MAIN_ONLY ? " (main pushes only)" : ""
-  } ...`,
+  RUN_IDS.length
+    ? `Fetching ${RUN_IDS.length} selected run(s) on ${REPO} ...`
+    : `Fetching last ${LIMIT} ${WORKFLOW} runs on ${REPO}${
+      MAIN_ONLY ? " (main pushes only)" : ""
+    } ...`,
 );
-const runs: Run[] = JSON.parse(
-  await gh([
-    "run",
-    "list",
-    "--repo",
-    REPO,
-    "--workflow",
-    WORKFLOW,
-    "--limit",
-    String(LIMIT),
-    ...(MAIN_ONLY ? ["--branch", "main", "--event", "push"] : []),
-    "--json",
-    "databaseId,status,conclusion,event,startedAt",
-  ]),
-);
+const runJsonFields =
+  "attempt,databaseId,status,conclusion,event,headBranch,startedAt,workflowName";
+const runs: Run[] = RUN_IDS.length
+  ? await pool(RUN_IDS, CONCURRENCY, async (runId) =>
+    JSON.parse(
+      await gh([
+        "run",
+        "view",
+        runId,
+        "--repo",
+        REPO,
+        "--json",
+        runJsonFields,
+      ]),
+    ) as Run)
+  : JSON.parse(
+    await gh([
+      "run",
+      "list",
+      "--repo",
+      REPO,
+      "--workflow",
+      WORKFLOW,
+      "--limit",
+      String(LIMIT),
+      ...(MAIN_ONLY ? ["--branch", "main", "--event", "push"] : []),
+      "--json",
+      runJsonFields,
+    ]),
+  );
 
 const completed = runs.filter((r) => r.status === "completed");
 console.error(
@@ -197,11 +245,25 @@ console.error(
 
 const jobsPerRun = await pool(completed, CONCURRENCY, async (run, i) => {
   if ((i + 1) % 10 === 0) console.error(`  ${i + 1}/${completed.length}`);
-  const body = await gh([
-    "api",
-    `/repos/${REPO}/actions/runs/${run.databaseId}/jobs?per_page=100`,
-  ]);
-  return { run, jobs: (JSON.parse(body).jobs ?? []) as Job[] };
+  let jobs = await fetchJobs(
+    `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs`,
+  );
+  if ((run.attempt ?? 1) > 1) {
+    const latestJobs = await fetchJobs(
+      `/repos/${REPO}/actions/runs/${run.databaseId}/jobs`,
+    );
+    const latestByName = new Map(
+      latestJobs.map((job) => [job.name, job]),
+    );
+    jobs = jobs.map((job) => {
+      const latest = latestByName.get(job.name);
+      if (latest && !hasTiming(job) && hasTiming(latest)) return latest;
+      return latest
+        ? { ...job, status: latest.status, conclusion: latest.conclusion }
+        : job;
+    });
+  }
+  return { run, jobs };
 });
 
 // Accumulate timings keyed by exact job name (each shard is its own key).
@@ -211,8 +273,14 @@ const acc = new Map<
 >();
 
 for (const { run, jobs } of jobsPerRun) {
-  const t0 = Date.parse(run.startedAt);
-  if (Number.isNaN(t0)) continue;
+  const startCandidates = [
+    run.startedAt,
+    ...jobs.map((job) => job.started_at),
+  ]
+    .map((value) => value ? Date.parse(value) : NaN)
+    .filter((value) => Number.isFinite(value));
+  const t0 = Math.min(...startCandidates);
+  if (!Number.isFinite(t0)) continue;
   for (const j of jobs) {
     if (
       SUCCESS_ONLY ? j.conclusion !== "success" : j.conclusion === "skipped"
@@ -239,7 +307,7 @@ for (const { run, jobs } of jobsPerRun) {
 }
 
 const minRuns = MIN_RUNS_OVERRIDE ??
-  Math.max(5, Math.round(0.1 * completed.length));
+  (RUN_IDS.length ? 1 : Math.max(5, Math.round(0.1 * completed.length)));
 
 const aggregates: JobAgg[] = [];
 for (const [name, e] of acc) {
@@ -252,10 +320,11 @@ for (const [name, e] of acc) {
     end: stat(e.end),
     dur: stat(e.dur),
     count: e.start.length,
-    // The deploy/attest tail is "main only" relative to PR runs. When the data
-    // is already all main pushes, that distinction is moot — nothing is hatched
-    // off and every job just lands in its own start-time tier.
-    mainOnly: MAIN_ONLY ? false : !e.events.has("pull_request"),
+    // The deploy/attest tail is "main only" relative to PR runs. Exact-run and
+    // main-only charts put every job into start-time tiers.
+    mainOnly: RUN_IDS.length || MAIN_ONLY
+      ? false
+      : !e.events.has("pull_request"),
   });
 }
 if (aggregates.length === 0) {
@@ -517,10 +586,25 @@ const totalH = Math.round(legendY + 16);
 // title
 const date = new Date().toISOString().slice(0, 10);
 const runKind = MAIN_ONLY ? "main push" : "run";
-const title =
-  `${REPO} · ${WORKFLOW} — typical ${runKind} (median of ${completed.length} completed ${
+const workflowNames = new Set(
+  completed.map((run) => run.workflowName).filter((name) => !!name),
+);
+const workflowLabel = RUN_IDS.length
+  ? workflowNames.size === 1 ? [...workflowNames][0] : "selected workflows"
+  : WORKFLOW;
+const exactRun = RUN_IDS.length === 1 ? completed[0] : null;
+const exactBranch = exactRun?.headBranch ? `, ${exactRun.headBranch}` : "";
+const titleScope = exactRun
+  ? `run ${exactRun.databaseId} (${exactRun.event}${exactBranch})`
+  : RUN_IDS.length
+  ? `${completed.length} selected runs`
+  : `typical ${runKind}`;
+const titleCount = RUN_IDS.length
+  ? `${completed.length} completed ${completed.length === 1 ? "run" : "runs"}`
+  : `median of ${completed.length} completed ${
     MAIN_ONLY ? "main pushes" : "runs"
-  })`;
+  }`;
+const title = `${REPO} · ${workflowLabel} — ${titleScope} (${titleCount})`;
 const subtitle =
   `Bars = median start to finish; whiskers = min/max; text = median (min–max) duration; ` +
   `${

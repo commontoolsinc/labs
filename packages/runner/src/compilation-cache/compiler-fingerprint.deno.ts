@@ -23,11 +23,12 @@ import { SOURCE_COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts
 
 /**
  * Repo-relative inputs hashed into the fingerprint: the source that determines
- * the compiler's emitted bytes, plus the lockfile and root compiler options.
- * Directory inputs are hashed whole, so the version also moves when a test,
- * fixture, or doc under them changes, and the whole-file `deno.lock` moves it on
- * any dependency bump. The result over-invalidates rather than under-
- * invalidates: a redundant recompile, never a stale read.
+ * the compiler's emitted bytes and cached coverage span metadata, plus the
+ * lockfile and root compiler options. Directory inputs are hashed whole, so the
+ * version also moves when a test, fixture, or doc under them changes, and the
+ * whole-file `deno.lock` moves it on any dependency bump. The result
+ * over-invalidates rather than under-invalidates: a redundant recompile, never
+ * a stale read.
  *
  * This is the single definition of the input set. The CI compile-cache key
  * fingerprints the same inputs; {@link ciHashFilesArgs} renders this list into
@@ -39,6 +40,8 @@ import { SOURCE_COMPILE_CACHE_RUNTIME_VERSION } from "./compile-cache-version.ts
  *  - `packages/js-compiler` — the TypeScript-to-JS compiler driver;
  *  - `packages/runner/src/harness` — runner code that prepares resolved
  *    programs before they reach the compiler;
+ *  - `packages/runner/src/pattern-coverage.ts` — coverage span mapping stored
+ *    beside coverage-transformed bytes;
  *  - `packages/runner/src/sandbox` — module-record assembly and verification
  *    used before cached compiled bodies execute;
  *  - `packages/schema-generator` — schema emission consumed by the pipeline;
@@ -54,6 +57,7 @@ export const COMPILE_FINGERPRINT_INPUTS: readonly string[] = [
   "packages/ts-transformers",
   "packages/js-compiler",
   "packages/runner/src/harness",
+  "packages/runner/src/pattern-coverage.ts",
   "packages/runner/src/sandbox",
   "packages/schema-generator",
   "packages/api",

@@ -440,6 +440,47 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
 }
 
 /**
+ * How the pattern transformer classifies a mergeable write: an
+ * `array-identity-writer` takes element arguments whose identity is tracked
+ * (`push` / `addUnique` / `removeByValue`); a `scalar-writer` does not
+ * (`increment`).
+ */
+export type MergeableOpMethodKind = "scalar-writer" | "array-identity-writer";
+
+/**
+ * One mergeable Cell mutation method: the {@link IWritable} method name, the
+ * patch-op tag its write records, and its transformer classification.
+ */
+export interface MergeableOpMethod {
+  readonly method: string;
+  readonly wireOp: string;
+  readonly kind: MergeableOpMethodKind;
+}
+
+/**
+ * The canonical list of mergeable Cell mutation methods — the {@link IWritable}
+ * methods whose write is carried to the store as a merge-aware patch operation
+ * (resolved against durable state) rather than a whole-value diff, so concurrent
+ * edits of one collection combine instead of clobbering.
+ *
+ * This is the single registration point for that set. The runtime op registry
+ * (`runner storage/mergeable-ops.ts`, keyed by `wireOp`) and the pattern
+ * transformer's method classification both derive from it, so adding a mergeable
+ * op is one entry here plus its behavior descriptor — the transformer picks up
+ * the new method with no edit, and a consistency test cross-checks the wire tags.
+ */
+export const MERGEABLE_OP_METHODS: readonly MergeableOpMethod[] = [
+  { method: "push", wireOp: "append", kind: "array-identity-writer" },
+  { method: "addUnique", wireOp: "add-unique", kind: "array-identity-writer" },
+  {
+    method: "removeByValue",
+    wireOp: "remove-by-value",
+    kind: "array-identity-writer",
+  },
+  { method: "increment", wireOp: "increment", kind: "scalar-writer" },
+];
+
+/**
  * Streamable cells can send events.
  */
 export interface IStreamable<T> {
