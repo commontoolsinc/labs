@@ -34,9 +34,17 @@ const runtime = new Runtime({
 });
 const engine = runtime.harness as Engine;
 
-const entry = path.join(repoRoot, "packages", "patterns", "system", "default-app.tsx");
+const entry = path.join(
+  repoRoot,
+  "packages",
+  "patterns",
+  "system",
+  "default-app.tsx",
+);
 const root = path.join(repoRoot, "packages", "patterns");
-const program = await engine.resolve(new FileSystemProgramResolver(entry, root));
+const program = await engine.resolve(
+  new FileSystemProgramResolver(entry, root),
+);
 console.log(`resolved files: ${program.files.length}`);
 
 // Event-loop lag probe at 5ms period: max observed gap ≈ the longest single

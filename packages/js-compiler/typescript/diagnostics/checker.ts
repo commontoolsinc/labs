@@ -70,7 +70,9 @@ export class Checker {
    */
   collectDeclarationErrors(sourceFile: SourceFile): ErrorDetails[] {
     const errors: ErrorDetails[] = [];
-    for (const diagnostic of this.program.getDeclarationDiagnostics(sourceFile)) {
+    for (
+      const diagnostic of this.program.getDeclarationDiagnostics(sourceFile)
+    ) {
       // Skip "private name" errors for known exported symbols
       const message = typeof diagnostic.messageText === "string"
         ? diagnostic.messageText
