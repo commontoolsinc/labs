@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/type-check.test.ts": [
-    "186:46:1ykni6w",
-    "188:45:1rj1hjg",
-    "190:43:17flkz6",
-  ],
   "packages/data-model/test/value-hash.test.ts": [
     "900:37:1gvons3",
     "923:44:1vndl86",

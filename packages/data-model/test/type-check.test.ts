@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { isFabricPlainObject, isFabricValueLayer } from "@/type-check.ts";
-import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -181,14 +180,10 @@ describe("type-check", () => {
       });
 
       it("rejects non-plain class instances (`Date`, `Map`, …)", () => {
-        // Not representable as a `FabricPlainObject`; reachable only via an unsound
-        // cast, so the guard is fed them as `unknown`.
-        expect(isFabricPlainObject(new Date() as unknown as FabricValue))
-          .toBe(false);
-        expect(isFabricPlainObject(new Map() as unknown as FabricValue))
-          .toBe(false);
-        expect(isFabricPlainObject(/regex/ as unknown as FabricValue))
-          .toBe(false);
+        // These values are not FabricValue objects, but the guard accepts unknown input.
+        expect(isFabricPlainObject(new Date())).toBe(false);
+        expect(isFabricPlainObject(new Map())).toBe(false);
+        expect(isFabricPlainObject(/regex/)).toBe(false);
       });
     });
   });

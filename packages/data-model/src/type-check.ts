@@ -73,6 +73,7 @@ export function isFabricPlainObject(
 export function isFabricPlainObject(
   value: Immutable<FabricValue>,
 ): value is Immutable<FabricPlainObject>;
+export function isFabricPlainObject(value: unknown): value is FabricPlainObject;
 export function isFabricPlainObject(value: unknown): boolean {
   return isPlainObject(value);
 }
