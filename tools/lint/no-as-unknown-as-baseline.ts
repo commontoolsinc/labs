@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/google/core/util/calendar-write-client.test.ts": [
-    "35:6:so8xng",
-  ],
   "packages/patterns/google/core/util/gmail-send-client.test.ts": [
     "689:32:zjpzly",
   ],

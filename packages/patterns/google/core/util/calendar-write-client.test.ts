@@ -1,6 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { Writable } from "commonfabric";
-import { setTestPatternEnvironment } from "../../../tools/test-support/commonfabric.ts";
+import {
+  getPatternEnvironment,
+  setTestPatternEnvironment,
+} from "../../../tools/test-support/commonfabric.ts";
 import {
   type Auth,
   CalendarWriteClient,
@@ -32,7 +35,7 @@ function authCell(initial: Auth): TestAuthCell {
       update: (next: Auth) => {
         current = next;
       },
-    } as unknown as Writable<Auth>,
+    } as Writable<Auth>,
     getCurrent: () => current,
   };
 }
@@ -143,6 +146,30 @@ function mockMissingSesGlobals(): { restore(): void } {
         Object.defineProperty(globalThis, "setTimeout", timeoutDescriptor);
       } else {
         Reflect.deleteProperty(globalThis, "setTimeout");
+      }
+    },
+  };
+}
+
+function mockPatternEnvironment(apiUrl: URL): { restore(): void } {
+  const originalPatternEnvironment = getPatternEnvironment();
+  const originalLocation = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "location",
+  );
+  setTestPatternEnvironment({ apiUrl });
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: { href: apiUrl.href } as Location,
+  });
+
+  return {
+    restore: () => {
+      setTestPatternEnvironment(originalPatternEnvironment);
+      if (originalLocation) {
+        Object.defineProperty(globalThis, "location", originalLocation);
+      } else {
+        Reflect.deleteProperty(globalThis, "location");
       }
     },
   };
@@ -295,10 +322,9 @@ Deno.test("createCalendarWriteClient updates, deletes, and RSVPs", async () => {
 });
 
 Deno.test("CalendarWriteClient refreshes and retries expired auth", async () => {
-  setTestPatternEnvironment({
-    apiUrl: new URL("https://toolshed.example/app/"),
-  });
-
+  const environmentMock = mockPatternEnvironment(
+    new URL("https://toolshed.example/app/"),
+  );
   const fetchMock = mockFetch([
     () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
     () =>
@@ -346,17 +372,14 @@ Deno.test("CalendarWriteClient refreshes and retries expired auth", async () => 
     assertEquals(auth.getCurrent().token, "new-token");
   } finally {
     fetchMock.restore();
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://commonfabric.test/"),
-    });
+    environmentMock.restore();
   }
 });
 
 Deno.test("CalendarWriteClient tolerates SES globals without Intl or timers", async () => {
-  setTestPatternEnvironment({
-    apiUrl: new URL("https://toolshed.example/app/"),
-  });
-
+  const environmentMock = mockPatternEnvironment(
+    new URL("https://toolshed.example/app/"),
+  );
   const sesGlobals = mockMissingSesGlobals();
   const fetchMock = mockFetch([
     () => response({ error: { message: "Expired" } }, 401, "Unauthorized"),
@@ -430,9 +453,7 @@ Deno.test("CalendarWriteClient tolerates SES globals without Intl or timers", as
   } finally {
     fetchMock.restore();
     sesGlobals.restore();
-    setTestPatternEnvironment({
-      apiUrl: new URL("https://commonfabric.test/"),
-    });
+    environmentMock.restore();
   }
 });
 
