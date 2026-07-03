@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/artifact-index-pinning.test.ts": [
-    "61:8:letd2b",
-    "96:24:5e6b9w",
-  ],
   "packages/runner/test/ascell-link-read-through-conflict.test.ts": [
     "72:65:n5i5b3",
     "77:48:11yrxsy",

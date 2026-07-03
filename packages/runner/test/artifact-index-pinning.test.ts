@@ -37,6 +37,27 @@ const program = (n: number): RuntimeProgram => ({
   ],
 });
 
+function setPrivateNumberField(
+  target: object,
+  field: string,
+  value: number,
+): void {
+  if (typeof Reflect.get(target, field) !== "number") {
+    throw new Error(`${field} is not a number field`);
+  }
+  if (!Reflect.set(target, field, value)) {
+    throw new Error(`${field} could not be set`);
+  }
+}
+
+function getPrivateSetField(target: object, field: string): Set<unknown> {
+  const value = Reflect.get(target, field);
+  if (!(value instanceof Set)) {
+    throw new Error(`${field} is not a Set field`);
+  }
+  return value;
+}
+
 describe("artifact index pinning (session-lifetime)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -58,8 +79,7 @@ describe("artifact index pinning (session-lifetime)", () => {
     const pm = runtime.patternManager;
     // Shrink the bounded module-namespace cache so three compiles overflow it.
     // The ARTIFACT index must not be governed by this bound.
-    (pm as unknown as { maxEvaluatedModuleCacheSize: number })
-      .maxEvaluatedModuleCacheSize = 1;
+    setPrivateNumberField(pm, "maxEvaluatedModuleCacheSize", 1);
 
     const first = await pm.compilePattern(program(1));
     const firstRef = pm.getArtifactEntryRef(first);
@@ -93,8 +113,7 @@ describe("artifact index pinning (session-lifetime)", () => {
     const tx = runtime.edit();
     await pm.compilePattern(program(7), { space: signer.did(), tx });
     await tx.commit();
-    const pending = (pm as unknown as { pendingCacheWriteBacks: Set<unknown> })
-      .pendingCacheWriteBacks;
+    const pending = getPrivateSetField(pm, "pendingCacheWriteBacks");
     expect(pending.size).toBe(0);
   });
 });
