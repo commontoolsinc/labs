@@ -6,6 +6,7 @@ import {
   lift,
   NAME,
   pattern,
+  type PatternFactory,
   UI,
 } from "commonfabric";
 
@@ -28,6 +29,13 @@ type InputSchema = {
 
 type ResultSchema = {
   pieces: BGPieceEntry[];
+};
+
+type ReactiveArray<T> = T[] & {
+  mapWithPattern<I, S>(
+    op: PatternFactory<I, S>,
+    params: Record<string, unknown>,
+  ): S[];
 };
 
 export function removePieceFromList(
@@ -262,7 +270,10 @@ export default pattern<InputSchema, ResultSchema>(
         <div>
           <style>{css}</style>
           <div className="bg-piece-container">
-            {(pieces as any).mapWithPattern(pieceRowPattern, { pieces })}
+            {(pieces as ReactiveArray<BGPieceEntry>).mapWithPattern(
+              pieceRowPattern,
+              { pieces },
+            )}
           </div>
         </div>
       ),
