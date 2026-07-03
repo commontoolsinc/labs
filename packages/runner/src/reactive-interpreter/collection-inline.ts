@@ -272,7 +272,11 @@ export function makeInlineMapImplementation(
         elementRuns.clear();
         return;
       }
-      const len = Array.isArray(rawList) ? rawList.length : 0;
+      if (!Array.isArray(rawList)) {
+        // Legacy parity (map.ts): a defined non-array list is a loud error.
+        throw new Error("map currently only supports arrays");
+      }
+      const len = rawList.length;
       if (len > 0) resumeAwaitSync = false;
 
       const slotLink = (i: number): NormalizedFullLink =>
