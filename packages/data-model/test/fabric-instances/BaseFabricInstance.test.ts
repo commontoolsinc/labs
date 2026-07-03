@@ -35,7 +35,7 @@ class Probe extends BaseFabricInstance {
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     Object.freeze(this);
-    return this as unknown as FabricValue;
+    return this;
   }
 
   [IS_DEEP_FROZEN](
