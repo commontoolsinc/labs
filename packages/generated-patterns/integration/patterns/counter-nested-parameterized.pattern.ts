@@ -69,11 +69,13 @@ const sanitizeChildConfig = (
   entry: unknown,
   index: number,
 ): ChildConfig => {
-  const value = typeof entry === "object" && entry !== null ? entry : {};
-  const id = sanitizeIdentity((value as any).id, index);
-  const start = Math.trunc(toFiniteNumber((value as any).start, 0));
-  const step = normalizeStep((value as any).step);
-  const labelPrefix = sanitizeLabelPrefix((value as any).labelPrefix, "Child");
+  const value = typeof entry === "object" && entry !== null
+    ? entry as Record<string, unknown>
+    : {};
+  const id = sanitizeIdentity(value.id, index);
+  const start = Math.trunc(toFiniteNumber(value.start, 0));
+  const step = normalizeStep(value.step);
+  const labelPrefix = sanitizeLabelPrefix(value.labelPrefix, "Child");
   return { id, start, step, labelPrefix };
 };
 
