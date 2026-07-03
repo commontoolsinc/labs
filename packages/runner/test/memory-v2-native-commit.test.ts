@@ -1276,6 +1276,14 @@ Deno.test("assertNoIndexedArrayStructuralOps rejects indexed-array structural op
     );
   }
 
+  const malformedPatch: PatchOp = { op: "remove", path: "/value/arr/0" };
+  (malformedPatch as { path: unknown }).path = 0;
+  assertThrows(
+    () => assertNoIndexedArrayStructuralOps([malformedPatch]),
+    Error,
+    "is not a JSON pointer string",
+  );
+
   const allowed: PatchOp[][] = [
     [{ op: "add", path: "/value/obj/key", value: "x" }], // object key, not index
     [{ op: "remove", path: "/value/obj/key" }],

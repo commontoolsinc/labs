@@ -642,6 +642,17 @@ const terminalSegmentIsArrayIndex = (pointer: string): boolean => {
   return last !== undefined && ARRAY_INDEX_SEGMENT.test(last);
 };
 
+const patchPointerValue = (patch: PatchOp, field: string): string => {
+  const value = (patch as PatchOp & Record<string, unknown>)[field];
+  if (typeof value !== "string") {
+    throw new Error(
+      `v2 patch registry invariant violation: field '${field}' on ${patch.op} ` +
+        `is not a JSON pointer string`,
+    );
+  }
+  return value;
+};
+
 // Generator invariant guard (see docs/specs/memory-v2/08-conflict-granularity.md
 // §"Array writes and the leaf-only matcher"). The commit-conflict matcher and
 // the scheduler reader-dirty index are both LEAF-ONLY, which is sound only if
@@ -672,7 +683,7 @@ export const assertNoIndexedArrayStructuralOps = (
       continue;
     }
     const pointers = patchOpPointerFields(patch).map((field) =>
-      (patch as unknown as Record<string, string>)[field]
+      patchPointerValue(patch, field)
     );
     if (!pointers.some(terminalSegmentIsArrayIndex)) {
       continue;
