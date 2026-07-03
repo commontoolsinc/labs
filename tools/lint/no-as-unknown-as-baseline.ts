@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/shallowMutableClone.test.ts": [
-    "78:12:ynopry",
-  ],
   "packages/data-model/test/type-check.test.ts": [
     "186:46:1ykni6w",
     "188:45:1rj1hjg",

@@ -74,8 +74,7 @@ describe("shallowMutableClone()", () => {
   });
 
   it("preserves a `FabricInstance` class and content (not a husk)", () => {
-    const native = new Error("boom");
-    (native as unknown as Record<string, unknown>).code = "E42";
+    const native = Object.assign(new Error("boom"), { code: "E42" });
     const input = deepFreeze(FabricError.fromNativeError(native));
 
     const out = shallowMutableClone(input);
