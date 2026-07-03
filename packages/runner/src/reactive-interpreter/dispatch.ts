@@ -203,7 +203,18 @@ export function planInterpreterDispatch(
     }
   }
 
-  const part = partition({ built, boundaryLeafOps });
+  // CONSUMED-AS-VALUE nested patterns inline (zero child docs — the child's
+  // value flows through the parent's existing cells): a `pattern` op whose
+  // child is fully inlinable AND whose output is never RETAINED (no direct
+  // reference from the result tree or any effect/collection/pattern op —
+  // those need the child as an addressable PIECE, the launched-child
+  // contract) evaluates in-segment via evalRog.
+  const inlinablePatternOps = findValueConsumedPatternOps(
+    built,
+    options.leafTrust,
+  );
+
+  const part = partition({ built, boundaryLeafOps, inlinablePatternOps });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
 
   // Build one synthetic node per segment that collapses ≥1 node-derived op.
@@ -263,6 +274,76 @@ export function planInterpreterDispatch(
     );
   }
   return { kind: "interpret", nodes };
+}
+
+// ---------------------------------------------------------------------------
+// Consumed-as-value nested-pattern analysis (W6).
+// ---------------------------------------------------------------------------
+
+/** Nested `pattern` ops that are safe to inline: the child is fully
+ * inlinable AND every reference to the op's output is a VALUE consumption
+ * by a pure op. Retention sites (→ boundary, the piece contract):
+ *   - the result tree (the op's result cell is the pattern's observable);
+ *   - any effect/collection/pattern op's refs (a handler can push/retain);
+ *   - a construct that is itself retained (transitively: result-tree
+ *     constructs, effect-input constructs).
+ */
+function findValueConsumedPatternOps(
+  built: BuiltRog,
+  leafTrust: DispatchOptions["leafTrust"],
+): Set<OpId> {
+  const rog = built.rog;
+  const candidates = new Set<OpId>();
+  for (const op of rog.ops) {
+    if (op.detail.kind !== "pattern") continue;
+    const child = built.children.get(op.id);
+    if (child && rogFullyInlinable(child, leafTrust)) candidates.add(op.id);
+  }
+  if (candidates.size === 0) return candidates;
+
+  // Producer of a ref (op id), or undefined for argument/const/result refs.
+  const producerOf = (
+    ref: import("./rog.ts").ValueRef,
+  ): OpId | undefined => {
+    if (ref.kind === "opOut") return ref.op;
+    if (ref.kind === "internal") {
+      return rog.internals[ref.cell]?.producedBy;
+    }
+    return undefined;
+  };
+
+  // RETAINED ops: transitively, anything referenced from the result tree or
+  // from a non-pure op's refs — walked through constructs (a retained
+  // construct retains every op it references).
+  const retained = new Set<OpId>();
+  const retain = (ref: import("./rog.ts").ValueRef) => {
+    const producer = producerOf(ref);
+    if (producer === undefined || retained.has(producer)) return;
+    const op = rog.ops[producer];
+    if (!op) return;
+    if (op.detail.kind === "construct") {
+      // The construct VALUE is retained ⇒ every op it references is too.
+      retained.add(producer);
+      for (const r of dependencyRefsOf(op)) retain(r);
+    } else if (op.detail.kind === "pattern") {
+      retained.add(producer);
+    }
+    // Other pure producers (leaf/expr/...) already consumed candidate
+    // values — their OUTPUT being retained does not retain the candidate.
+  };
+
+  retain(rog.result);
+  for (const op of rog.ops) {
+    const d = op.detail;
+    const nonPure = d.kind === "effect" || d.kind === "collection" ||
+      d.kind === "pattern";
+    if (!nonPure) continue;
+    for (const ref of dependencyRefsOf(op)) retain(ref);
+    if (d.kind === "effect") { for (const ref of d.writeTargets) retain(ref); }
+  }
+
+  for (const id of retained) candidates.delete(id);
+  return candidates;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,8 +421,8 @@ function tryBuildInlineCollectionNode(
   // per-element read isolation; keep those on the legacy coordinator.
   if (usage.usesArray) return refuse("uses_array");
 
-  const elementResultSchema =
-    (elementFactory as { resultSchema?: unknown }).resultSchema as
+  const elementResultSchema = (elementFactory as { resultSchema?: unknown })
+    .resultSchema as
       | undefined
       | Record<string, unknown>;
 

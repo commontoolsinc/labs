@@ -181,4 +181,50 @@ describe("interpreter dispatch differential (W3c)", () => {
       `expected >=4 collapsed node ops, census=${JSON.stringify(census)}`,
     );
   });
+
+  it("consumed-as-value nested pattern inlines; result-retained stays a piece", async () => {
+    // `inner` is consumed as a VALUE (only a downstream lift reads it) →
+    // inlines, zero child docs. `retainedInner` is aliased DIRECTLY into
+    // the result → its result cell is the observable piece → boundary.
+    const buildPattern = () =>
+      pattern<{ y: number; z: number }>((input) => {
+        const inner = pattern<{ x: number }>((i) => ({
+          doubled: lift((v: { x: number }) => v.x * 2)({ x: i.x }),
+        }));
+        const retainedInner = pattern<{ x: number }>((i) => ({
+          tripled: lift((v: { x: number }) => v.x * 3)({ x: i.x }),
+        }));
+        const valueConsumed = inner({ x: input.y });
+        const final = lift((v: { d: number }) => v.d + 1)({
+          d: (valueConsumed as unknown as { doubled: number }).doubled,
+        });
+        return { final, retained: retainedInner({ x: input.z }) };
+      }) as unknown as Pattern;
+
+    const argument = { y: 20, z: 5 };
+    const edit = { path: ["y"], value: 100 };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { final: 41, retained: { tripled: 15 } });
+    assertEquals(legacy.afterEdit, {
+      final: 201,
+      retained: { tripled: 15 },
+    });
+    assert(
+      census.interpreted >= 1,
+      `expected interpretation, census=${JSON.stringify(census)}`,
+    );
+    // The retained child stays a preserved pattern boundary; the
+    // value-consumed child is NOT among the boundaries (it inlined).
+    assert(
+      (census.boundariesByKind["pattern"] ?? 0) === 1,
+      `expected exactly one pattern boundary, census=${JSON.stringify(census)}`,
+    );
+  });
 });

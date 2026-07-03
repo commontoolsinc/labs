@@ -77,7 +77,9 @@ describe("partition over builder-born ROGs (W3)", () => {
     const factory = pattern<{ q: string }>((input) => {
       const url = str`https://api.example.com/${input.q}`;
       const fetched = fetchJson<{ value: number }>({ url });
-      const rendered = lift((v: { r: unknown }) => `got ${JSON.stringify(v.r)}`)(
+      const rendered = lift((v: { r: unknown }) =>
+        `got ${JSON.stringify(v.r)}`
+      )(
         { r: fetched },
       );
       return { rendered };

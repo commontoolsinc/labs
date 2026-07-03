@@ -39,7 +39,7 @@ import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Action } from "../scheduler.ts";
 import type { AddCancel, Cancel } from "../cancel.ts";
-import type { Cell, JSONSchema, Pattern } from "../builder/types.ts";
+import type { Cell, JSONSchema } from "../builder/types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveOpPattern } from "../builtins/op-pattern-ref.ts";

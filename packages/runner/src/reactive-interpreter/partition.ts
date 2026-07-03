@@ -32,7 +32,6 @@ import {
   inputsOf,
   type Op,
   type OpId,
-  type Rog,
   type ValueRef,
 } from "./rog.ts";
 import { type BuiltRog, getBuiltRogResolved } from "./from-builder.ts";
@@ -144,10 +143,12 @@ function boundaryKindOf(
   inlinePurePatterns: boolean,
   boundaryLeafOps: ReadonlySet<OpId> | undefined,
   controlAsBoundary: boolean,
+  inlinablePatternOps: ReadonlySet<OpId> | undefined,
 ): Boundary["kind"] | null {
   if (op.kind === "effect") return "effect";
   if (op.kind === "collection") return "collection";
   if (op.kind === "pattern") {
+    if (inlinablePatternOps?.has(op.id)) return null;
     return inlinePurePatterns && isPureInlinablePattern(built, op.id)
       ? null
       : "pattern";
@@ -196,6 +197,12 @@ export interface PartitionInput {
    * (D-V2-CONTROL-MODERNIZE: no builtin-fidelity chase). Default TRUE until
    * native control emission writes links. */
   controlAsBoundary?: boolean;
+  /** SPECIFIC nested-pattern ops the dispatch proved CONSUMED-AS-VALUE
+   * (every reference is a value read by a pure op — never retained in the
+   * result tree or by an effect) with a fully-inlinable child: these are
+   * PURE (evalRog inlines the child; zero child docs). Supersedes the
+   * all-or-nothing `inlinePurePatterns` for per-op precision. */
+  inlinablePatternOps?: ReadonlySet<OpId>;
 }
 
 /**
@@ -243,6 +250,7 @@ export function partition(input: PartitionInput): PartitionResult {
       inlinePurePatterns,
       input.boundaryLeafOps,
       controlAsBoundary,
+      input.inlinablePatternOps,
     );
     if (k !== null) {
       isBoundary[i] = true;

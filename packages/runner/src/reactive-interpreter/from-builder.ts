@@ -405,7 +405,9 @@ function buildRog(input: RogBuildInput): BuiltRog {
   // --- per-node op emission ----------------------------------------------------
 
   const inputField = (node: NodeRef, key: string): unknown =>
-    isRecord(node.inputs) ? (node.inputs as Record<string, unknown>)[key] : undefined;
+    isRecord(node.inputs)
+      ? (node.inputs as Record<string, unknown>)[key]
+      : undefined;
 
   const emitOpForNode = (node: NodeRef, id: OpId): Op => {
     const outSchema = (moduleOf(node)?.resultSchema ?? {}) as SchemaHandle;

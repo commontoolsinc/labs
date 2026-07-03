@@ -20,8 +20,8 @@ import {
 } from "../../src/reactive-interpreter/dispatch.ts";
 import {
   attachDocRecorder,
-  nodeStats,
   type NodeStats,
+  nodeStats,
 } from "../support/interpreter-measure.ts";
 import { trustExecutable } from "../support/trusted-builder.ts";
 
