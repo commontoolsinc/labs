@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/cli/lib/multi-user-test-worker.ts",
   "packages/cli/lib/piece.ts",
   "packages/cli/lib/test-runner.ts",
   "packages/cli/test/fixtures/settle/invalid-step.test.tsx",

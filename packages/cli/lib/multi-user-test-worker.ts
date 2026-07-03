@@ -73,6 +73,16 @@ export interface ParticipantInitResult {
   allowConsoleWarnings: boolean;
 }
 
+interface DefaultPatternSeed {
+  allPieces: unknown[];
+  recentPieces: unknown[];
+  backlinksIndex: { mentionable: unknown[] };
+}
+
+interface SpaceSeed {
+  defaultPattern: Cell<DefaultPatternSeed>;
+}
+
 const SETUP_CAUSE = "multi-user-test-setup";
 const SETTLE_FAST_MS = 2;
 
@@ -266,19 +276,24 @@ const handlers: Record<
     // Minimal wish("#default") environment, seeded once by the first worker.
     if (args.seedDefaults === true) {
       const setupTx = rt().edit();
-      const spaceCell = rt().getCell(space, space, undefined, setupTx);
-      const defaultPatternCell = rt().getCell(
+      const spaceCell = rt().getCell<SpaceSeed>(
+        space,
+        space,
+        undefined,
+        setupTx,
+      );
+      const defaultPatternCell = rt().getCell<DefaultPatternSeed>(
         space,
         "default-pattern",
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
-      (defaultPatternCell as any).key("recentPieces").set([]);
-      (defaultPatternCell as any).key("backlinksIndex").set({
+      defaultPatternCell.key("allPieces").set([]);
+      defaultPatternCell.key("recentPieces").set([]);
+      defaultPatternCell.key("backlinksIndex").set({
         mentionable: [],
       });
-      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+      spaceCell.key("defaultPattern").set(defaultPatternCell);
       rt().prepareTxForCommit?.(setupTx);
       await setupTx.commit();
       await rt().idle();
