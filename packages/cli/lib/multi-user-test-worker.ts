@@ -73,6 +73,14 @@ export interface ParticipantInitResult {
   allowConsoleWarnings: boolean;
 }
 
+type ActionStream = {
+  send?: (value: unknown) => void;
+};
+
+type WorkerResponsePort = {
+  postMessage(response: WorkerResponse): void;
+};
+
 const SETUP_CAUSE = "multi-user-test-setup";
 const SETTLE_FAST_MS = 2;
 
@@ -361,9 +369,7 @@ const handlers: Record<
   /** Invoke an action step's stream and settle. */
   async action({ index }) {
     const stepCell = stepCells[index as number];
-    const stream = stepCell.key("action" as never) as unknown as {
-      send?: (value: unknown) => void;
-    };
+    const stream = stepCell.key("action" as never) as ActionStream;
     if (typeof stream?.send !== "function") {
       throw new Error(`Test step ${index} action is not a stream`);
     }
@@ -464,8 +470,9 @@ const handlers: Record<
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const { id, cmd, args } = event.data;
   const handler = handlers[cmd];
+  const responsePort = self as WorkerResponsePort;
   const respond = (response: WorkerResponse) =>
-    (self as unknown as Worker).postMessage(response);
+    responsePort.postMessage(response);
   if (!handler) {
     respond({ id, error: `unknown command "${cmd}"` });
     return;
