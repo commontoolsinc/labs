@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   encodePointer,
   parentPath,
@@ -12,6 +12,7 @@ Deno.test("memory v2 path helpers round-trip JSON pointers", () => {
 
   assertEquals(encoded, "/value/nested~1key/tilde~0value/0");
   assertEquals(parsePointer(encoded), path);
+  assertThrows(() => parsePointer("value"), Error, "invalid JSON pointer");
 });
 
 Deno.test("memory v2 path helpers compute parents and overlap", () => {
