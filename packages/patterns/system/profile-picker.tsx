@@ -20,17 +20,22 @@ import ProfileCreate, {
 } from "./profile-create.tsx";
 import type { ProfileHomeOutput } from "./profile-home.tsx";
 
-// The profile picker launched by the #profile wish when the user has more than
-// one profile. It renders each profile natively (name + avatar + a link),
-// offers an inline "create another" affordance, lets the user pick a default,
-// and stamps most-recently-used (MRU) on selection. The chosen profile flows
-// back as the wish `result`:
-//   result = default (if set) ⟶ else most-recently-used ⟶ else first.
-// This default-first order matches headless `#profile` resolution
-// (wish.ts getProfileCandidateCells) so the "current profile" is the same
-// whether resolved headless or through the picker.
-// Selection writes MRU and the "set default" control writes `defaultProfile`,
-// both as trusted picker-surface actions (owner-protected; see profile-create).
+// The profile picker rendered as the `[UI]` of a #profile wish when the user
+// has 2+ profiles and no valid default. It renders each profile natively
+// (name + avatar + a link), offers an inline "create another" affordance, lets
+// the user pick a default, and stamps most-recently-used (MRU) on selection.
+//
+// The picker is purely the SWITCHING affordance (CT-1829): the wish `.result`
+// does NOT flow through this pattern. The wish builtin resolves `.result`
+// eagerly to the single best profile — default (if set) ⟶ else MRU head ⟶
+// else first (wish.ts getProfileCandidateCells) — in every mode. Selection
+// writes MRU and the "set default" control writes `defaultProfile`, both as
+// trusted picker-surface actions (owner-protected; see profile-create); those
+// writes reorder the builtin's candidates, which is what flips `.result`.
+//
+// The `resultIndex`/`result` computeds below duplicate the builtin's ordering
+// and are VESTIGIAL — nothing reads them anymore; kept one release for
+// compatibility, then to be deleted (CT-1829 follow-up).
 
 type ProfilePickerInput = {
   profiles: Writable<ProfileHomeOutput[]>;
