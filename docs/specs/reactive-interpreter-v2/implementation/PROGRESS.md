@@ -149,3 +149,15 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   reactive collection usage), W5b transformer native ops (hygiene — live
   capture already removed SES from the interpreted path), function
   lowering (the W6 arc), control link-emission (engagement).
+
+- (2026-07-03) **PR #4514 bot-review round addressed** (4 findings, each
+  real): params-change element re-runs (subscription declares the params
+  address), element-error surfacing to scheduler.onError (throw after the
+  consolidated write), the resume-input blank (full awaitInputThenSettle
+  port incl. the confirmed-empty SETTLE half — the first fix deferred
+  forever and the resume-input-settle suite caught it), const-snapshot
+  semantics (structuredClone; unclonable → incomplete). Root suite green
+  BOTH flags after; pattern-tests 84/84, chat sim 12/0, generated-patterns
+  green, CI green with the coverage-debt override. Remaining non-marginal:
+  filter/flatMap inline (~11% of reactive collection usage), control
+  link-emission, W5b native ops, W6 function lowering.
