@@ -236,7 +236,7 @@ describe("cloneIfNecessary", () => {
       const error = FabricError.fromNativeError(new Error("test"));
       Object.freeze(error);
       const result = cloneIfNecessary(
-        error as unknown as FabricValue,
+        error as FabricValue,
         { frozen: false },
       );
       expect(result).toBeInstanceOf(FabricError);
@@ -359,7 +359,7 @@ describe("cloneIfNecessary", () => {
     it("passes through `FabricEpochNsec` unchanged", () => {
       const epoch = new FabricEpochNsec(1234567890n);
       Object.freeze(epoch);
-      const result = cloneIfNecessary(epoch as unknown as FabricValue);
+      const result = cloneIfNecessary(epoch as FabricValue);
       expect(result).toBe(epoch); // identity -- special primitives are immutable
     });
 
@@ -368,7 +368,7 @@ describe("cloneIfNecessary", () => {
       Object.freeze(epoch);
       // frozen parameter is irrelevant for special primitives
       const result = cloneIfNecessary(
-        epoch as unknown as FabricValue,
+        epoch as FabricValue,
         { frozen: false },
       );
       expect(result).toBe(epoch); // identity -- special primitives are immutable
@@ -647,14 +647,14 @@ describe("cloneIfNecessary", () => {
 
                 const expected = expectedOutcome(
                   c,
-                  value as unknown as FabricValue,
+                  value as FabricValue,
                   vec.opts,
                 );
 
                 if (expected.kind === "throws") {
                   expect(() =>
                     cloneIfNecessary(
-                      value as unknown as FabricValue,
+                      value as FabricValue,
                       vec.opts,
                     )
                   ).toThrow();
@@ -672,14 +672,14 @@ describe("cloneIfNecessary", () => {
                 } else if (vec.opts.deep) {
                   identityExpected = vec.opts.frozen &&
                     isDeepFrozenFabricValue(
-                      value as unknown as FabricValue,
+                      value as FabricValue,
                     );
                 } else {
                   identityExpected = wasFrozen === vec.opts.frozen;
                 }
 
                 const result = cloneIfNecessary(
-                  value as unknown as FabricValue,
+                  value as FabricValue,
                   vec.opts,
                 ) as FabricSpecialObject;
 

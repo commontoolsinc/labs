@@ -1,13 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/cloneIfNecessary.test.ts": [
-    "239:14:15k3cl9",
-    "362:44:1vxdt5a",
-    "371:14:1vxdt5a",
-    "650:24:q6esx6",
-    "657:28:q6esx6",
-    "675:28:q6esx6",
-    "682:24:q6esx6",
-  ],
   "packages/data-model/test/codec-common/BigIntCodec.test.ts": [
     "85:28:owpis5",
     "107:28:owpis5",
