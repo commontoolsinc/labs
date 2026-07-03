@@ -1,5 +1,6 @@
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
+import { entryObservationClass } from "./observation-classes.ts";
 import type { CfcAddress, CfcDereferenceTrace, CfcMetadata } from "./types.ts";
 import {
   canonicalizeCfcLogicalPath,
@@ -42,10 +43,18 @@ export const cfcLabelViewFromMetadata = (
   return rebaseCfcLabelView(
     {
       version: 1,
-      entries: metadata.labelMap.entries.map((entry) => ({
-        path: entry.path,
-        label: entry.label,
-      })),
+      entries: metadata.labelMap.entries.map((entry) => {
+        // The view carries the EFFECTIVE class: the persisted
+        // `origin:"link"` ⇒ implicit `followRef` carve-out (C0 §3) is
+        // resolved here, so view consumers classify without knowing about
+        // origins.
+        const observes = entryObservationClass(entry);
+        return {
+          path: entry.path,
+          label: entry.label,
+          ...(observes !== undefined ? { observes } : {}),
+        };
+      }),
     },
     path,
   );

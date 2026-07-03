@@ -3,10 +3,18 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
-import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+import type {
+  CfcLabelView,
+  IFCLabel,
+  LabelObservationClass,
+} from "./label-view-core.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 
-export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+export type {
+  CfcLabelView,
+  IFCLabel,
+  LabelObservationClass,
+} from "./label-view-core.ts";
 
 export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
   "runtime.setup.result-projection";
@@ -196,13 +204,10 @@ export type LabelEntryOrigin =
  * observation (cardinality without membership) is strictly weaker than
  * `enumerate`, so count-shaped reads (length, COUNT) consume the `enumerate`
  * class — a sound over-approximation (C0 §4).
+ *
+ * (The union itself lives in `label-view-core.ts` — the leaf of the module
+ * graph — and is re-exported above; label views carry the same axis, C4.)
  */
-export type LabelObservationClass =
-  | "value"
-  | "shape"
-  | "enumerate"
-  | "followRef";
-
 export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
