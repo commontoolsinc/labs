@@ -1767,7 +1767,7 @@ export class Runtime {
     const cached = this.resolveSpaceNameSync(name);
     if (cached !== undefined) return cached;
     const session = await createSession({
-      identity: this.storageManager.as as unknown as Identity,
+      identity: this.storageManager.as as Identity,
       spaceName: name,
     });
     // Register the derived identity only as fresh-space ACL bootstrap
