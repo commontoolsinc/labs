@@ -167,5 +167,18 @@ describe("BigIntCodec", () => {
         expect(decoded).toBe(-129n);
       });
     });
+
+    describe("registry dispatch", () => {
+      it("can be registered directly in a custom registry", async () => {
+        const { CodecRegistry } = await import(
+          "@/codec-json/CodecRegistry.ts"
+        );
+        const registry = new CodecRegistry();
+        registry.register(codec);
+
+        expect(codec.uniqueHandledClass).toBe(BigInt);
+        expect(registry.codecFromValue(42n)).toBe(codec);
+      });
+    });
   });
 });

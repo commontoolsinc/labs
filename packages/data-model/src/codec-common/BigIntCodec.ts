@@ -23,13 +23,16 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * byte-level spec): minimal two's-complement big-endian, with sign extension
  * as needed.
  *
- * `BigInt` is a non-`new`-able pseudo-constructor, so it is cast to
- * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
- * confirms via `typeof`.
+ * `BigInt` is a non-`new`-able pseudo-constructor, so the class fast path uses
+ * a local type that carries both its callable shape and the constructor slot
+ * the registry uses for lookup.
  */
+type BigIntPseudoConstructor = typeof BigInt & Constructor;
+const BIGINT_PSEUDO_CONSTRUCTOR = BigInt as BigIntPseudoConstructor;
+
 export class BigIntCodec extends BaseFabricCodec {
   constructor() {
-    super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
+    super(CODEC_TYPE_TAGS.BigInt, BIGINT_PSEUDO_CONSTRUCTOR);
   }
 
   /** @inheritDoc */

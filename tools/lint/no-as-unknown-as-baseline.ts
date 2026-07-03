@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/codec-common/BigIntCodec.ts": [
-    "32:41:le169c",
-  ],
   "packages/data-model/src/codec-common/codecOf.ts": [
     "14:23:1xdygto",
   ],
