@@ -13,7 +13,7 @@ import {
   normalizeLLMResponse,
   resetMockMode,
 } from "./client.ts";
-import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "./types.ts";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL, type LLMResponse } from "./types.ts";
 
 const GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments.";
@@ -177,6 +177,38 @@ describe("LLMClient test-environment guard", () => {
       }),
     ).rejects.toThrow("no matching mock response found");
 
+    resetMockMode();
+  });
+
+  it("streams text from array mock responses", async () => {
+    enableMockMode();
+    const responseWithMalformedPart = {
+      role: "assistant",
+      content: [
+        null,
+        { type: "text", text: "mock chunk" },
+        { type: "image", image: "https://example.com/image.png" },
+      ],
+      id: "mock-stream",
+    } as unknown as LLMResponse;
+
+    addMockResponse(
+      () => true,
+      responseWithMalformedPart,
+    );
+
+    const chunks: string[] = [];
+    const result = await client.sendRequest(
+      {
+        messages: [{ role: "user", content: "hello" }],
+        model: "test-model",
+        stream: true,
+      },
+      (text) => chunks.push(text),
+    );
+
+    expect(chunks).toEqual(["mock chunk"]);
+    expect(result.id).toBe("mock-stream");
     resetMockMode();
   });
 

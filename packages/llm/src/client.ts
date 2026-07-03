@@ -10,12 +10,19 @@ import {
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
+type TextContentPart = { type: "text"; text: string };
 
 export class LLMStreamError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "LLMStreamError";
   }
+}
+
+function isTextContentPart(part: unknown): part is TextContentPart {
+  if (part === null || typeof part !== "object") return false;
+  const candidate = part as { type?: unknown; text?: unknown };
+  return candidate.type === "text" && typeof candidate.text === "string";
 }
 
 /**
@@ -538,10 +545,8 @@ export class LLMClient {
           if (typeof mockResponse.content === "string") {
             text = mockResponse.content;
           } else if (Array.isArray(mockResponse.content)) {
-            const textPart = mockResponse.content.find((p: any) =>
-              p.type === "text"
-            ) as any;
-            text = textPart?.text || "";
+            const textPart = mockResponse.content.find(isTextContentPart);
+            text = textPart?.text ?? "";
           }
 
           if (text) {
