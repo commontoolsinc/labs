@@ -73,7 +73,10 @@ export const fetchJsonDeriveSubpattern = pattern<
   { token: string },
   { contacts: string[]; pending: boolean }
 >(({ token }) => {
-  const fetchResult = FetchPage({ token }) as any;
+  const fetchResult = FetchPage({ token }) as {
+    contacts: string[];
+    pending: boolean;
+  };
   return {
     contacts: fetchResult.contacts,
     pending: fetchResult.pending,

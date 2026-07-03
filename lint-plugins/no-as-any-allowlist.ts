@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/generated-patterns/integration/patterns/ct-1334-fetchjson-derive-subpattern.pattern.ts",
   "packages/html/src/main/applicator.ts",
   "packages/html/src/mock-doc.ts",
   "packages/html/src/worker/reconciler.ts",
