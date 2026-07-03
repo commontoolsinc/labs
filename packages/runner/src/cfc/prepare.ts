@@ -107,6 +107,9 @@ const INTERNAL_VERIFIER_META = {
   ...internalVerifierRead,
 };
 
+const asFabricValue = <T>(value: T): T & FabricValue =>
+  value as T & FabricValue;
+
 const isPrefix = (
   prefix: readonly string[],
   path: readonly string[],
@@ -4360,7 +4363,7 @@ const ensureSchemaDocument = (
   }, {
     // System-owned canonical schema document. This is intentionally outside the
     // phase-1 value-surface attempted-target model.
-    value: schema as unknown as FabricValue,
+    value: asFabricValue(schema),
   });
 };
 
@@ -6383,7 +6386,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata as unknown as FabricValue);
+    }, asFabricValue(metadata));
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

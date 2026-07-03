@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/cfc/prepare.ts": [
-    "3075:18:uhqgji",
-    "4036:16:ggi5xg",
-  ],
   "packages/runner/src/link-resolution.ts": [
     "354:16:183o20n",
   ],
