@@ -74,5 +74,18 @@ describe("SymbolCodec", () => {
         expect(result).toBe(Symbol.for(key));
       });
     });
+
+    describe("registry dispatch", () => {
+      it("can be registered directly in a custom registry", async () => {
+        const { CodecRegistry } = await import(
+          "@/codec-json/CodecRegistry.ts"
+        );
+        const registry = new CodecRegistry();
+        registry.register(codec);
+
+        expect(codec.uniqueHandledClass).toBe(Symbol);
+        expect(registry.codecFromValue(Symbol.for("direct"))).toBe(codec);
+      });
+    });
   });
 });

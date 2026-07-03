@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/src/codec-common/SymbolCodec.ts": [
-    "26:41:1xov6zr",
-  ],
   "packages/data-model/src/codec-json/JsonEncodingContext.ts": [
     "377:16:mzx5a6",
     "379:10:1m6seer",

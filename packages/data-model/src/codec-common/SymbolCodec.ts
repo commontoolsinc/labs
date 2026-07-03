@@ -17,13 +17,16 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * which routes them to the registry's "unhandled value" path instead of being
  * silently coerced to a registry symbol.
  *
- * `Symbol` is a non-`new`-able pseudo-constructor, so it is cast to
- * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
- * confirms via `typeof`.
+ * `Symbol` is a non-`new`-able pseudo-constructor, so the class fast path uses
+ * a local type that carries both its callable shape and the constructor slot
+ * the registry uses for lookup.
  */
+type SymbolPseudoConstructor = typeof Symbol & Constructor;
+const SYMBOL_PSEUDO_CONSTRUCTOR = Symbol as SymbolPseudoConstructor;
+
 export class SymbolCodec extends BaseFabricCodec {
   constructor() {
-    super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
+    super(CODEC_TYPE_TAGS.Symbol, SYMBOL_PSEUDO_CONSTRUCTOR);
   }
 
   /** @inheritDoc */
