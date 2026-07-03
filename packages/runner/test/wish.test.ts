@@ -3438,6 +3438,335 @@ describe("wish built-in", () => {
         expect("count" in pieceData).toBe(true);
       }
     });
+
+    // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
+    // (ordered default → MRU → first) in every mode. The picker no longer owns
+    // `.result`; it is only the `[UI]` switching affordance. These tests pin the
+    // decided contract that Loom (loom PR #3627) binds to. This is a distinct
+    // describe from the "host embedding contract" block landing in PR #4502 — do
+    // not depend on that one.
+    describe("single-result #profile contract (CT-1829)", () => {
+      // Stand up N profiles in one profile space, wire the home default-pattern
+      // `profiles` list (and optionally `defaultProfile` / `mru`), run a
+      // `#profile` wish (interactive unless `headless`), and return the wish
+      // state cell so callers can read `.result` / `[UI]` and re-pull after
+      // writes.
+      async function setupProfiles(
+        label: string,
+        opts: {
+          names: string[];
+          defaultIndex?: number;
+          // Indices into `names`, most-recently-used first.
+          mruIndices?: number[];
+          // Point `defaultProfile` at a cell that is not in `profiles` (an
+          // invalid default link) so `defaultValid` is false.
+          invalidDefault?: boolean;
+          headless?: boolean;
+        },
+      ) {
+        const profileSpaceDid = (await Identity.fromPassphrase(
+          `ct1829-${label}-space`,
+        )).did();
+        const profileCells = opts.names.map((name, i) => {
+          const cell = runtime.getCell(
+            profileSpaceDid,
+            `ct1829-${label}-profile-${i}`,
+            undefined,
+            tx,
+          );
+          cell.set({
+            name,
+            initialNameApplied: name,
+            avatar: "",
+            bio: "",
+            elements: [],
+          });
+          return cell;
+        });
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          `ct1829-${label}-home-default`,
+          undefined,
+          tx,
+        );
+        homeDefaultCell.key("profiles").set(profileCells);
+        if (opts.invalidDefault) {
+          // An invalid default link: points at a cell in the HOME space, which
+          // profileCellIsValid rejects (it requires the profile live in a
+          // non-home space). So `defaultValid` is false and the default is
+          // ignored — the next ordering rule (MRU) applies.
+          const orphan = runtime.getCell(
+            userIdentity.did(),
+            `ct1829-${label}-orphan-default`,
+            undefined,
+            tx,
+          );
+          orphan.set({
+            name: "Orphan",
+            initialNameApplied: "Orphan",
+            avatar: "",
+            bio: "",
+            elements: [],
+          });
+          homeDefaultCell.key("defaultProfile").set(orphan);
+        } else if (opts.defaultIndex !== undefined) {
+          homeDefaultCell.key("defaultProfile").set(
+            profileCells[opts.defaultIndex],
+          );
+        }
+        if (opts.mruIndices) {
+          homeDefaultCell.key("mru").set(
+            opts.mruIndices.map((i) => profileCells[i]),
+          );
+        }
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish(
+            opts.headless
+              ? { query: "#profile", headless: true }
+              : { query: "#profile" },
+          ),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          `ct1829-${label}-result`,
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        return { result, homeDefaultCell, profileCells };
+      }
+
+      it("0 profiles → result undefined, error set, create-surface UI", async () => {
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "ct1829-zero-home-default",
+          undefined,
+          tx,
+        );
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "ct1829-zero-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        const state = result.key("profile").get();
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(state?.result).toBeUndefined();
+        expect(String(state?.error)).toContain("profile");
+        expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      });
+
+      it("1 profile → result = it (interactive)", async () => {
+        const { result } = await setupProfiles("one-interactive", {
+          names: ["Solo"],
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Solo");
+      });
+
+      it("1 profile → result = it (headless)", async () => {
+        const { result } = await setupProfiles("one-headless", {
+          names: ["Solo"],
+          headless: true,
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Solo");
+      });
+
+      it("2+ with valid default → result = default (interactive)", async () => {
+        const { result } = await setupProfiles("default-interactive", {
+          names: ["First", "TheDefault"],
+          defaultIndex: 1,
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("TheDefault");
+      });
+
+      it("2+ with valid default → result = default (headless)", async () => {
+        const { result } = await setupProfiles("default-headless", {
+          names: ["First", "TheDefault"],
+          defaultIndex: 1,
+          headless: true,
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("TheDefault");
+      });
+
+      it("2+ no default → result = MRU head, INTERACTIVE (new behavior; no empty window)", async () => {
+        // The orphan-second-profile case: 2 profiles, no default, MRU lists the
+        // second first. Pre-CT-1829 this launched the picker and left `.result`
+        // undefined until the sidecar ran (undefined forever on fetch failure —
+        // which is exactly what happens here, the sidecar 404s against the test
+        // apiUrl). Now `.result` rides the main wish state and resolves eagerly.
+        const { result } = await setupProfiles("mru-interactive", {
+          names: ["Ada", "Grace"],
+          mruIndices: [1],
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("2+ no default → result = MRU head (headless)", async () => {
+        const { result } = await setupProfiles("mru-headless", {
+          names: ["Ada", "Grace"],
+          mruIndices: [1],
+          headless: true,
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("2+ no default, no MRU → result = first (interactive)", async () => {
+        const { result } = await setupProfiles("first-interactive", {
+          names: ["Ada", "Grace"],
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Ada");
+      });
+
+      it("2+ no default, no MRU → result = first (headless)", async () => {
+        const { result } = await setupProfiles("first-headless", {
+          names: ["Ada", "Grace"],
+          headless: true,
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Ada");
+      });
+
+      it("invalid default link → skipped, next rule (MRU) applies", async () => {
+        // defaultProfile points at a cell not in `profiles` → defaultValid is
+        // false, so the default is ignored and MRU order wins.
+        const { result } = await setupProfiles("invalid-default", {
+          names: ["Ada", "Grace"],
+          invalidDefault: true,
+          mruIndices: [1],
+        });
+        expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("interactive 2+ no default renders the picker sidecar as [UI]", async () => {
+        const { result } = await setupProfiles("picker-ui", {
+          names: ["Ada", "Grace"],
+        });
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(ui?.name).toBe("cf-render");
+        expect(ui?.props?.["data-profile-picker-ui"]).toBe("wish");
+        // And `.result` is populated even though the sidecar has not run.
+        expect(result.key("profile").get()?.result?.name).toBe("Ada");
+      });
+
+      it("MRU write flips result (the switcher contract: selection = MRU write → result changes)", async () => {
+        // Start with Ada as most-recently-used (no default) → result = Ada.
+        const { result, profileCells } = await setupProfiles(
+          "mru-flip",
+          { names: ["Ada", "Grace"], mruIndices: [0] },
+        );
+        expect(result.key("profile").get()?.result?.name).toBe("Ada");
+
+        // Simulate the picker's "Use" action: stamp Grace as most-recently-used.
+        // This is the trusted picker-surface write the switcher makes — it feeds
+        // the same MRU ordering the builtin reads, so `.result` (ordered[0])
+        // tracks the selection rather than the picker's confirm gesture.
+        const liveMru = runtime.getHomeSpaceCell(tx)
+          .key("defaultPattern")
+          .resolveAsCell()
+          .key("mru") as any;
+        liveMru.set([profileCells[1].withTx(tx)]);
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Resolve `#profile` after the selection write: ordered[0] — and thus
+        // `.result` — now follows the new MRU head. (A live picker sidecar drives
+        // this reactively through the scheduler graph; here we re-resolve to
+        // assert the ordering contract the write feeds.)
+        const wishPattern2 = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const rc2 = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "ct1829-mru-flip-after-selection",
+          undefined,
+          tx,
+        );
+        const r2 = runtime.run(tx, wishPattern2, {}, rc2);
+        await tx.commit();
+        tx = runtime.edit();
+        await r2.pull();
+
+        expect(r2.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("picker sidecar fetch failure → result still resolves; error surfaced in picker UI", async () => {
+        // Point the pattern environment at a host whose fetch fails, so the
+        // picker sidecar fetch rejects/404s. Under CT-1829 `.result` no longer
+        // rides the sidecar cell, so it must still resolve to ordered[0]; the
+        // fetch failure is surfaced as an error inside the picker `[UI]` cell,
+        // not as an unhandled rejection.
+        const originalFetch = globalThis.fetch;
+        const originalEnvironment = getPatternEnvironment();
+        setPatternEnvironment({
+          apiUrl: new URL("https://ct1829-picker-fail.test/"),
+        });
+        globalThis.fetch = ((input: Request | URL | string) => {
+          const url = input instanceof Request ? input.url : String(input);
+          if (url.includes("profile-picker.tsx")) {
+            return Promise.reject(new Error("picker fetch boom"));
+          }
+          return Promise.resolve(new Response("not found", { status: 404 }));
+        }) as typeof fetch;
+
+        try {
+          const { result } = await setupProfiles("picker-fail", {
+            names: ["Ada", "Grace"],
+          });
+          // `.result` still resolves to the single best profile.
+          expect(result.key("profile").get()?.result?.name).toBe("Ada");
+
+          // The picker sidecar cell surfaces the fetch error: the sidecar cache
+          // swallows the fetch rejection and resolves to undefined, so the new
+          // undefined-pattern branch commits an error UI into the picker cell.
+          // Give the deferred fetch a moment to route through and commit.
+          const pickerCell = result.key("profile").key(UI).key("props")
+            .key("$cell").resolveAsCell();
+          const deadline = Date.now() + 5_000;
+          let errorNode: any;
+          while (Date.now() < deadline) {
+            await runtime.idle();
+            errorNode = pickerCell.key(UI).get() as any;
+            if (errorNode) break;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          expect(errorNode).toBeDefined();
+        } finally {
+          globalThis.fetch = originalFetch;
+          setPatternEnvironment(originalEnvironment);
+          await runtime.idle();
+        }
+      });
+    });
   });
 });
 
