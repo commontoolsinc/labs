@@ -5,6 +5,7 @@ const PATTERNS_DIR = "packages/patterns";
 
 const NON_PATTERN_FILES = new Set([
   "packages/patterns/mod.ts",
+  "packages/patterns/scrabble/scrabble-words.ts",
 ]);
 
 const NON_PATTERN_PREFIXES = [
@@ -16,7 +17,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/scrabble/scrabble-words.ts",
   "packages/patterns/weekly-calendar/weekly-calendar.tsx",
 ]);
 
