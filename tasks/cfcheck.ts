@@ -12,7 +12,6 @@ const NON_PATTERN_PREFIXES = [
 // TODO: Drive this list to zero so cfcheck covers every authored pattern file.
 const EXCLUDED_PATTERN_FILES = new Set<string>([
   // BURNDOWN
-  "packages/patterns/deprecated/linkedlist-in-cell.tsx",
   "packages/patterns/examples/write-and-run.tsx",
   "packages/patterns/google/WIP/google-docs-importer.tsx",
   "packages/patterns/google/core/bill-extractor/index.tsx",
