@@ -20,6 +20,14 @@ import {
 import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
 import { hashOf } from "@/value-hash.ts";
 
+const expectFabricRegExp = (value: unknown): FabricRegExp => {
+  expect(value).toBeInstanceOf(FabricRegExp);
+  if (!(value instanceof FabricRegExp)) {
+    throw new Error("expected FabricRegExp");
+  }
+  return value;
+};
+
 describe("FabricRegExp", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
   // rule (doesn't fit a single member, isn't construction mechanics).
@@ -51,7 +59,7 @@ describe("FabricRegExp", () => {
 
       it("rejects one with extra enumerable properties", () => {
         const original = /abc/g;
-        (original as unknown as Record<string, unknown>).custom = 1;
+        (original as RegExp & Record<string, unknown>).custom = 1;
         expect(() => new FabricRegExp(original)).toThrow(
           "Cannot store RegExp with extra enumerable properties",
         );
@@ -167,11 +175,11 @@ describe("FabricRegExp", () => {
             expectedTag,
             codec.encode(re),
             context,
-          ) as unknown as FabricRegExp;
-          expect(decoded).toBeInstanceOf(FabricRegExp);
-          expect(decoded.source).toBe("ab+c");
-          expect(decoded.flags).toBe("gi");
-          expect(decoded.flavor).toBe("es2025");
+          );
+          const fabricRegExp = expectFabricRegExp(decoded);
+          expect(fabricRegExp.source).toBe("ab+c");
+          expect(fabricRegExp.flags).toBe("gi");
+          expect(fabricRegExp.flavor).toBe("es2025");
         });
 
         it("round-trips a flagless regex", () => {
@@ -180,10 +188,10 @@ describe("FabricRegExp", () => {
             expectedTag,
             codec.encode(re),
             context,
-          ) as unknown as FabricRegExp;
-          expect(decoded).toBeInstanceOf(FabricRegExp);
-          expect(decoded.source).toBe("^x*$");
-          expect(decoded.flags).toBe("");
+          );
+          const fabricRegExp = expectFabricRegExp(decoded);
+          expect(fabricRegExp.source).toBe("^x*$");
+          expect(fabricRegExp.flags).toBe("");
         });
       });
     });
@@ -231,7 +239,7 @@ describe("FabricRegExp", () => {
 
     it("rejects a `RegExp` with extra enumerable properties", () => {
       const re = /abc/;
-      (re as unknown as Record<string, unknown>).custom = 1;
+      (re as RegExp & Record<string, unknown>).custom = 1;
       expect(() => shallowFabricFromNativeValue(re)).toThrow(
         "Cannot store RegExp with extra enumerable properties",
       );

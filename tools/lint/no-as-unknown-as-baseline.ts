@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/data-model/test/fabric-primitives/FabricRegExp.test.ts": [
-    "54:18:1tnjs92",
-    "170:12:3fxa2h",
-    "183:12:3fxa2h",
-    "234:10:nlzm9k",
-  ],
   "packages/data-model/test/native-conversion.test.ts": [
     "82:49:15k3cl9",
     "147:8:lws235",
