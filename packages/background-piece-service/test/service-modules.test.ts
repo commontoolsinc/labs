@@ -110,13 +110,15 @@ class FakeEntryCell {
   }
 }
 
+type FakePiecesEntryCell = FakeEntryCell | { get(): undefined };
+
 class FakePiecesCell {
   syncCount = 0;
   schemaSyncCount = 0;
   pushed: unknown[] = [];
-  sinks: ((value: FakeEntryCell[]) => void)[] = [];
+  sinks: ((value: FakePiecesEntryCell[]) => void)[] = [];
 
-  constructor(public entries: FakeEntryCell[] = []) {}
+  constructor(public entries: FakePiecesEntryCell[] = []) {}
 
   get() {
     return this.entries;
@@ -149,7 +151,7 @@ class FakePiecesCell {
     this.entries.push(value as FakeEntryCell);
   }
 
-  sink(fn: (value: FakeEntryCell[]) => void) {
+  sink(fn: (value: FakePiecesEntryCell[]) => void) {
     this.sinks.push(fn);
     fn(this.entries);
     return () => {
@@ -264,13 +266,19 @@ async function withMockWorker<T>(fn: () => Promise<T> | T): Promise<T> {
   MockWorker.instances = [];
   MockWorker.sendReady = true;
   MockWorker.respondByDefault = true;
-  (globalThis as unknown as { Worker: typeof Worker }).Worker =
-    MockWorker as unknown as typeof Worker;
+  Object.defineProperty(globalThis, "Worker", {
+    configurable: true,
+    value: MockWorker,
+    writable: true,
+  });
   try {
     return await fn();
   } finally {
-    (globalThis as unknown as { Worker: typeof Worker }).Worker =
-      originalWorker;
+    Object.defineProperty(globalThis, "Worker", {
+      configurable: true,
+      value: originalWorker,
+      writable: true,
+    });
   }
 }
 
@@ -451,7 +459,7 @@ describe("BackgroundPieceService", () => {
     const piecesCell = new FakePiecesCell([
       enabled,
       disabled,
-      empty as unknown as FakeEntryCell,
+      empty,
     ]);
     const runtime = fakeRuntime(piecesCell);
     const watched: string[][] = [];

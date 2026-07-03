@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/background-piece-service/test/service-modules.test.ts": [
-    "267:14:1cjelcj",
-    "268:15:a0i7ae",
-    "272:16:1cjelcj",
-    "462:12:x1k8uj",
-  ],
   "packages/cf-harness/src/prompt-loop.ts": [
     "2682:12:lff1gh",
   ],
@@ -675,6 +669,10 @@ export const noAsUnknownAsBaselineEntries = {
   "packages/memory/v2/query.ts": [
     "143:28:nn9iil",
   ],
+  "packages/memory/v2/patch.ts": [
+    "500:27:1a42vg9",
+    "573:22:1nx3p03",
+  ],
   "packages/memory/v2/server.ts": [
     "172:21:1m0gun8",
     "220:27:9qolh0",
@@ -832,9 +830,15 @@ export const noAsUnknownAsBaselineEntries = {
   "packages/runner/src/storage/inspector.ts": [
     "312:26:1000cb7",
   ],
+  "packages/runner/src/storage/mergeable-ops.ts": [
+    "115:31:1hjwfhv",
+  ],
   "packages/runner/src/storage/v2.ts": [
     "2504:26:1q6nbz2",
     "2898:4:kgzoiy",
+  ],
+  "packages/runner/src/storage/v2-transaction.ts": [
+    "676:14:4464ka",
   ],
   "packages/runner/src/toolshed-http-auth.ts": [
     "339:43:v93ldq",
@@ -1051,6 +1055,10 @@ export const noAsUnknownAsBaselineEntries = {
   ],
   "packages/runner/test/link-utils.test.ts": [
     "431:41:cr2hmb",
+  ],
+  "packages/runner/test/mergeable-append-multispace-conflict.test.ts": [
+    "194:49:1mecz9i",
+    "258:49:1mecz9i",
   ],
   "packages/runner/test/list-builtin-edge-paths.test.ts": [
     "105:22:1wta9fx",
