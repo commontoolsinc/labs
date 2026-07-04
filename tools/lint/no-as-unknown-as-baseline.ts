@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-policy-schema-ref-resolution.test.ts": [
-    "24:4:mgxccf",
-    "94:4:mgxccf",
-  ],
   "packages/runner/test/cfc-privileged-system-write.test.ts": [
     "56:24:1pumtjx",
     "90:24:1pumtjx",

@@ -110,6 +110,12 @@ const INTERNAL_VERIFIER_META = {
 const asFabricValue = <T>(value: T): T & FabricValue =>
   value as T & FabricValue;
 
+type WriteDetailReader = Pick<IExtendedStorageTransaction, "getWriteDetails">;
+
+type PolicyValueTransaction =
+  & WriteDetailReader
+  & Pick<IExtendedStorageTransaction, "readValueOrThrow">;
+
 const isPrefix = (
   prefix: readonly string[],
   path: readonly string[],
@@ -2429,7 +2435,7 @@ const currentPrincipalIntegrityReason = (
 // Exported for unit testing of write-detail reconstruction (the granularity
 // composition below). Not part of the public CFC surface.
 export const writeDetailValueForTarget = (
-  tx: IExtendedStorageTransaction,
+  tx: WriteDetailReader,
   target: {
     space: MemorySpace;
     id: URI;
@@ -2542,7 +2548,7 @@ export const writeDetailValueForTarget = (
 };
 
 const writeValueForTarget = (
-  tx: IExtendedStorageTransaction,
+  tx: WriteDetailReader,
   target: {
     space: MemorySpace;
     id: URI;
@@ -2552,7 +2558,7 @@ const writeValueForTarget = (
 ): FabricValue => writeDetailValueForTarget(tx, target, "value");
 
 const previousWriteValueForTarget = (
-  tx: IExtendedStorageTransaction,
+  tx: WriteDetailReader,
   target: {
     space: MemorySpace;
     id: URI;
@@ -2584,7 +2590,7 @@ const writeInstallsInitialSchemaDefault = (
 };
 
 const linkedWriteValueForPolicy = (
-  tx: IExtendedStorageTransaction,
+  tx: PolicyValueTransaction,
   baseTarget: {
     space: MemorySpace;
     id: URI;
@@ -2808,7 +2814,7 @@ const policySchemaMatchesValue = (
 // Exported for unit testing of the unresolvable-link fail-closed branch (S17).
 // Not part of the public CFC surface.
 export const wildcardPolicyMatchesValue = (
-  tx: IExtendedStorageTransaction,
+  tx: PolicyValueTransaction,
   target: {
     space: MemorySpace;
     id: URI;

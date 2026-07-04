@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { wildcardPolicyMatchesValue } from "../src/cfc/prepare.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 // Regression guard for $ref resolution inside policy value matching.
 //
@@ -21,7 +20,7 @@ describe("CFC policy value matching resolves $refs against the schema root", () 
   const tx = {
     getWriteDetails: () => [],
     readValueOrThrow: () => undefined,
-  } as unknown as IExtendedStorageTransaction;
+  };
 
   it("matches an array value whose items schema is a #/$defs ref", () => {
     const schema = {
@@ -91,7 +90,7 @@ describe("CFC writeAuthorizedBy policy applies when its value-condition $ref is 
   const tx = {
     getWriteDetails: () => [],
     readValueOrThrow: () => undefined,
-  } as unknown as IExtendedStorageTransaction;
+  };
 
   it("applies (fail closed) when the items $ref names a dropped $def", () => {
     // The shape a poisoned merge produces: the writeAuthorizedBy-bearing array
