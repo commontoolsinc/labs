@@ -40,6 +40,14 @@ type SourceTrackedImplementation = ((...args: any[]) => any) & {
   src?: string;
 };
 
+const expectModule = (value: unknown): Module => {
+  expect(isModule(value)).toBe(true);
+  if (!isModule(value)) {
+    throw new Error("Expected module");
+  }
+  return value;
+};
+
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
@@ -100,8 +108,7 @@ describe("module", () => {
         { type: "string" } as const satisfies JSONSchema,
       );
 
-      expect(isModule(greet)).toBe(true);
-      const module = greet as unknown as Module;
+      const module = expectModule(greet);
       expect(module.argumentSchema).toEqual(schema);
     });
 
@@ -128,8 +135,7 @@ describe("module", () => {
         outputSchema,
       );
 
-      expect(isModule(greet)).toBe(true);
-      const module = greet as unknown as Module;
+      const module = expectModule(greet);
       expect(module.argumentSchema).toBeDefined();
       expect(module.resultSchema).toBeDefined();
       expect((module.argumentSchema as JSONSchemaObj).description).toBe(
@@ -301,8 +307,7 @@ describe("module", () => {
         },
       );
 
-      expect(isModule(mouseHandler)).toBe(true);
-      const module = mouseHandler as unknown as Module;
+      const module = expectModule(mouseHandler);
       expect(module.argumentSchema).toBeDefined();
       expect((module.argumentSchema as JSONSchemaObj).properties?.$event)
         .toEqual(eventSchema);
