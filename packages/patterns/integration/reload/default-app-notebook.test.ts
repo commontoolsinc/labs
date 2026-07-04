@@ -18,6 +18,37 @@ import {
 } from "../cfc-browser-helpers.ts";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
+type BrowserAppState = {
+  view?: unknown;
+};
+
+type BrowserAppApi = {
+  serialize?: () => BrowserAppState | undefined;
+};
+
+type BrowserCommonFabricApi = {
+  rt?: {
+    idle?: () => Promise<void>;
+    setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+    on?: (event: string, handler: (marker: unknown) => void) => void;
+    off?: (event: string, handler: (marker: unknown) => void) => void;
+  };
+  readCell?: (options: {
+    id: string;
+    path?: string[];
+    meta?: "argument" | "internal";
+  }) => Promise<unknown>;
+  __eventInvocationTrace?: unknown[];
+  __eventInvocationTraceHandler?: (marker: unknown) => void;
+};
+
+type BrowserGlobal = typeof globalThis & {
+  app?: BrowserAppApi;
+  commonfabric?: BrowserCommonFabricApi;
+};
+
+type PageElementHandle = Awaited<ReturnType<Page["$"]>>;
+
 const { FRONTEND_URL } = env;
 // Keep these as guardrails rather than exact budgets; CI reload runs vary
 // slightly while still exercising persisted scheduler-state reuse.
@@ -250,16 +281,8 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
 
 async function resetEventInvocationTrace(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: {
-        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
-        on?: (event: string, handler: (marker: unknown) => void) => void;
-        off?: (event: string, handler: (marker: unknown) => void) => void;
-        idle?: () => Promise<void>;
-      };
-      __eventInvocationTrace?: unknown[];
-      __eventInvocationTraceHandler?: (marker: unknown) => void;
-    } | undefined;
+    const global = globalThis as BrowserGlobal;
+    const api = global.commonfabric;
     const rt = api?.rt;
     if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
 
@@ -572,7 +595,7 @@ async function clickButtonWithTitle(
 async function findButtonWithText(
   page: Page,
   searchText: string,
-): Promise<any | null> {
+): Promise<PageElementHandle> {
   try {
     const buttons = await page.$$("cf-button, button, a", {
       strategy: "pierce",
@@ -600,14 +623,15 @@ async function collectNotebookRenderState(page: Page): Promise<{
   renderedNoteLabels: string[];
 }> {
   return await page.evaluate(async () => {
-    const commonfabric = globalThis.commonfabric as any;
-    const appState = globalThis.app?.serialize?.();
+    const global = globalThis as BrowserGlobal;
+    const commonfabric = global.commonfabric;
+    const appState = global.app?.serialize?.();
     const view = appState?.view;
     const pieceId = view && typeof view === "object" && "pieceId" in view &&
         typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
-    let current: any;
+    let current: unknown;
     if (pieceId) {
       const originalLog = console.log;
       try {
@@ -617,9 +641,14 @@ async function collectNotebookRenderState(page: Page): Promise<{
         console.log = originalLog;
       }
     }
-    const notes = Array.isArray(current?.notes) ? current.notes : [];
-    const mentionable = Array.isArray(current?.mentionable)
-      ? current.mentionable
+    const currentRecord = current && typeof current === "object"
+      ? current as Record<string, unknown>
+      : undefined;
+    const notes = Array.isArray(currentRecord?.notes)
+      ? currentRecord.notes
+      : [];
+    const mentionable = Array.isArray(currentRecord?.mentionable)
+      ? currentRecord.mentionable
       : [];
     const collectStoredNoteLabels = (value: unknown) => {
       const labels: string[] = [];
@@ -658,8 +687,10 @@ async function collectNotebookRenderState(page: Page): Promise<{
       function collect(currentRoot: Document | ShadowRoot): void {
         for (const el of currentRoot.querySelectorAll("*")) {
           if (el.localName === "cf-chip") {
-            const label = ((el as any).label ?? el.getAttribute("label") ?? "")
-              .trim();
+            const chip = el as Element & { label?: unknown };
+            const label = (typeof chip.label === "string"
+              ? chip.label
+              : el.getAttribute("label") ?? "").trim();
             if (label.startsWith("📝 New Note")) {
               labels.push(label);
             }
@@ -674,21 +705,22 @@ async function collectNotebookRenderState(page: Page): Promise<{
       return labels;
     };
     const noteLabels = collectRenderedNoteLabels(document);
-    const storedUiNoteLabels = collectStoredNoteLabels(current?.["$UI"]);
+    const storedUiNoteLabels = collectStoredNoteLabels(currentRecord?.["$UI"]);
 
     return {
-      isNotebook: current?.isNotebook === true,
-      noteCount: typeof current?.noteCount === "number"
-        ? current.noteCount
+      isNotebook: currentRecord?.isNotebook === true,
+      noteCount: typeof currentRecord?.noteCount === "number"
+        ? currentRecord.noteCount
         : -1,
       notesLength: notes.length,
       mentionableLength: mentionable.length,
-      showNewNotePrompt: typeof current?.showNewNotePrompt === "boolean"
-        ? current.showNewNotePrompt
+      showNewNotePrompt: typeof currentRecord?.showNewNotePrompt === "boolean"
+        ? currentRecord.showNewNotePrompt
         : undefined,
-      usedCreateAnotherNote: typeof current?.usedCreateAnotherNote === "boolean"
-        ? current.usedCreateAnotherNote
-        : undefined,
+      usedCreateAnotherNote:
+        typeof currentRecord?.usedCreateAnotherNote === "boolean"
+          ? currentRecord.usedCreateAnotherNote
+          : undefined,
       storedUiNoteChips: storedUiNoteLabels.length,
       storedUiNoteLabels,
       renderedNoteChips: noteLabels.length,
