@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-link-integrity-gate.test.ts": [
-    "79:64:1rntpjj",
-  ],
   "packages/runner/test/cfc-llm-derived-stamp.test.ts": [
     "153:8:1on2hvn",
   ],

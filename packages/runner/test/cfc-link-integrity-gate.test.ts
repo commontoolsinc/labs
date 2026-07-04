@@ -11,6 +11,22 @@ const INJECTION_SAFE_ATOM = {
   type: "https://commonfabric.org/cfc/atom/InjectionSafe",
 };
 
+type StoredCfcDocument = {
+  cfc?: {
+    labelMap?: {
+      entries: Array<
+        {
+          path: string[];
+          label: {
+            confidentiality?: unknown[];
+            integrity?: Array<{ type?: string }>;
+          };
+        }
+      >;
+    };
+  };
+};
+
 // Regression guard for runtime-evidence atoms on the link-write path (audit S4
 // review follow-up). The integrity mint gate originally covered only
 // schema-derived labels; an author could persist a forged InjectionSafe through
@@ -76,26 +92,11 @@ describe("CFC link-write integrity gate", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       const persistedId = parseLink(target.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<
-                {
-                  path: string[];
-                  label: {
-                    confidentiality?: unknown[];
-                    integrity?: Array<{ type?: string }>;
-                  };
-                }
-              >;
-            };
-          };
-        } | undefined;
-      };
-      const entries =
-        replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
-          [];
+      const document = storageManager.open(signer.did()).replica.getDocument(
+        persistedId,
+      ) as StoredCfcDocument | undefined;
+      const entries = document?.cfc?.labelMap?.entries ??
+        [];
       const allIntegrity = entries.flatMap((e) => e.label.integrity ?? []);
       // The forged InjectionSafe must not have been persisted anywhere.
       expect(
