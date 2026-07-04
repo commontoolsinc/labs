@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/storage-mixed-query-refresh.bench.ts": [
-    "147:46:19gxezt",
-  ],
   "packages/runner/test/storage-sigil-topology-refresh.bench.ts": [
     "109:46:19gxezt",
   ],

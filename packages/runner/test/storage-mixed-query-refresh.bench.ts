@@ -144,7 +144,7 @@ const setup = async (retargetSources: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space);
 
   await (provider as any).send(
     BASE_SOURCES.map((uri, index) => ({
