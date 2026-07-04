@@ -100,9 +100,11 @@ describe("list builtin edge paths", () => {
     const cellC = runtime.getCell<number>(space, "m-c", undefined, tx);
     cellC.withTx(tx).set(3);
 
-    const mapPattern = pattern<{ values: number[] }>(({ values }) => ({
+    const mapPattern = pattern<{ values: OpaqueCell<number[]> }>((
+      { values },
+    ) => ({
       values,
-      tagged: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+      tagged: values.mapWithPattern(
         // deno-lint-ignore no-explicit-any
         op as any,
         {},
@@ -148,9 +150,11 @@ describe("list builtin edge paths", () => {
     const cellC = runtime.getCell<number>(space, "f-c", undefined, tx);
     cellC.withTx(tx).set(30);
 
-    const filterPattern = pattern<{ values: number[] }>(({ values }) => ({
+    const filterPattern = pattern<{ values: OpaqueCell<number[]> }>((
+      { values },
+    ) => ({
       values,
-      evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
+      evens: values.filterWithPattern(
         // deno-lint-ignore no-explicit-any
         op as any,
         {},
@@ -194,9 +198,11 @@ describe("list builtin edge paths", () => {
     const cellC = runtime.getCell<number>(space, "fm-c", undefined, tx);
     cellC.withTx(tx).set(9);
 
-    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => ({
+    const flatMapPattern = pattern<{ values: OpaqueCell<number[]> }>(({
       values,
-      indices: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+    }) => ({
+      values,
+      indices: values.flatMapWithPattern(
         // deno-lint-ignore no-explicit-any
         op as any,
         {},
@@ -234,8 +240,10 @@ describe("list builtin edge paths", () => {
       ({ element }: any) => expand(element),
     );
 
-    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => ({
-      out: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
+    const flatMapPattern = pattern<{ values: OpaqueCell<number[]> }>((
+      { values },
+    ) => ({
+      out: values.flatMapWithPattern(
         // deno-lint-ignore no-explicit-any
         op as any,
         {},
@@ -275,9 +283,11 @@ describe("list builtin edge paths", () => {
       // deno-lint-ignore no-explicit-any
       ({ element }: any) => lift((x: number) => x)(element),
     );
-    const opPattern = pattern<{ values: number[] }>(({ values }) => ({
+    const opPattern = pattern<{ values: OpaqueCell<number[]> }>((
+      { values },
+    ) => ({
       // deno-lint-ignore no-explicit-any
-      out: build(values as unknown as OpaqueCell<number[]>, op as any),
+      out: build(values, op as any),
     }));
     const resultCell = runtime.getCell<{ out: number[] }>(
       space,

@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/list-builtin-edge-paths.test.ts": [
-    "105:22:1wta9fx",
-    "153:21:1wta9fx",
-    "199:23:1wta9fx",
-    "238:19:1wta9fx",
-    "280:24:1wta9fx",
-  ],
   "packages/runner/test/llm-conversation-fixture.test.ts": [
     "161:14:1dqidfy",
   ],
