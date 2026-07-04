@@ -9,6 +9,18 @@ import {
   StorageManager,
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
+
+type CallbackEvaluatorDebugState = {
+  callbackCreatorCache: Map<string, () => unknown>;
+};
+
+const callbackCreatorCacheSize = (engine: Engine): number => {
+  const sesRuntime = Reflect.get(engine, "sesRuntime") as
+    | { callbackEvaluator?: CallbackEvaluatorDebugState }
+    | undefined;
+  return sesRuntime?.callbackEvaluator?.callbackCreatorCache.size ?? 0;
+};
+
 describe("Engine in SES mode", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -679,26 +691,10 @@ describe("Engine in SES mode", () => {
     ) => number;
 
     expect(next(1)).toBe(2);
-    expect(
-      (engine as unknown as {
-        sesRuntime: {
-          callbackEvaluator: {
-            callbackCreatorCache: Map<string, () => unknown>;
-          };
-        };
-      }).sesRuntime.callbackEvaluator.callbackCreatorCache.size,
-    ).toBe(1);
+    expect(callbackCreatorCacheSize(engine)).toBe(1);
 
     engine.dispose();
 
-    expect(
-      (engine as unknown as {
-        sesRuntime?: {
-          callbackEvaluator: {
-            callbackCreatorCache: Map<string, () => unknown>;
-          };
-        };
-      }).sesRuntime?.callbackEvaluator.callbackCreatorCache.size ?? 0,
-    ).toBe(0);
+    expect(callbackCreatorCacheSize(engine)).toBe(0);
   });
 });
