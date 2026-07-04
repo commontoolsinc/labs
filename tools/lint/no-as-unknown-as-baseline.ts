@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-pull.test.ts": [
-    "179:48:w7j6bt",
-    "869:49:1a2nx3f",
-  ],
   "packages/runner/test/scheduler-test-utils.ts": [
     "109:29:v41f8p",
   ],
