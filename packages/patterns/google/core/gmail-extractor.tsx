@@ -62,6 +62,7 @@
  * ```
  */
 import {
+  type BuiltInLLMMessage,
   computed,
   Default,
   generateObject,
@@ -455,13 +456,18 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
     // Result type is inferred from extraction.schema by the runtime
     const rawAnalyses = emails.map((email: Email) => {
       const analysis = generateObject({
-        prompt: computed(() => {
-          if (!shouldRunAnalysis) return undefined;
-          if (!email.markdownContent) return undefined;
+        messages: computed((): BuiltInLLMMessage[] => {
+          if (!shouldRunAnalysis) return [];
+          if (!email.markdownContent) return [];
           const template = extractionPromptTemplate || "";
-          if (!template) return undefined;
-          return interpolateTemplate(template, email);
-        }) as any,
+          if (!template) return [];
+          const content = interpolateTemplate(template, email);
+          if (!content) return [];
+          return [{
+            role: "user",
+            content,
+          }];
+        }),
         schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
       });
