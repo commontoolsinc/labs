@@ -1337,7 +1337,7 @@ export class StorageManager implements IStorageManager {
 
     const base: NormalizedLink = {
       space,
-      id: id as any,
+      id: id as URI,
       scope: normalizeCellScope(scope),
       path: [],
     };

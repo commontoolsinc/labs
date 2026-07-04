@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/src/storage/v2.ts",
   "packages/runner/src/traverse-recorder.ts",
   "packages/runner/test/address.test.ts",
   "packages/runner/test/array-push-id-bug.test.ts",
