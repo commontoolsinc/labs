@@ -1375,36 +1375,17 @@ const forEachFlowObservation = (
   // "dep changed" leaks one bit per change through the timing/existence of
   // writes the rerun makes. Runtime-surface addresses were already dropped
   // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization and applies `flowReadExcluded`); the `cid:` check
-  // stays as defense in depth for trigger entries that arrive by other
-  // construction paths.
+  // canonicalization and applies `flowReadExcluded`). The path half of that
+  // exclusion cannot be rechecked here — stored paths are canonical, where
+  // a user `value.source` is indistinguishable from the raw `["source"]`
+  // surface — but the id-based `cid:` check stays as defense in depth for
+  // trigger entries that arrive by other construction paths: `cid:` docs
+  // sit on an unverified write path any same-space writer can reach (audit
+  // S5), so a poisoned labelMap on one must not join the flow derivation.
   for (const trigger of tx.getCfcState().triggerReads) {
     if (trigger.id.startsWith("cid:")) {
       continue;
     }
-    if (
-      consume(
-        trigger.space,
-        trigger.id as URI,
-        normalizeCellScope(trigger.scope),
-        "application/json",
-        trigger.path,
-        { shape: "value", nonRecursive: false },
-      )
-    ) {
-      return true;
-    }
-  }
-  // Trigger reads (§8.9.2): the addresses whose invalidating writes
-  // scheduled this run. The decision to run now was influenced by their
-  // values even when this run's branch never re-reads them — without this,
-  // "dep changed" leaks one bit per change through the timing/existence of
-  // writes the rerun makes. Runtime-surface addresses were already dropped
-  // by `addCfcTriggerReads` (which sees the raw notification path before
-  // canonicalization), so no `flowReadExcluded` check here — the stored
-  // path is canonical, where a user `value.source` is indistinguishable
-  // from the raw `["source"]` surface.
-  for (const trigger of tx.getCfcState().triggerReads) {
     if (
       consume(
         trigger.space,
@@ -3639,6 +3620,26 @@ export const prepareBoundaryCommit = (
   if (ingestKey !== undefined) {
     targetKeys.add(ingestKey);
   }
+  // (S16) Result containers a list coordinator (filter/flatMap) declared this
+  // tx: re-derive their `structure` label from J every reconcile, decoupled
+  // from value writes. Membership taint (the predicate-result reads the
+  // coordinator consumed) settles on a later pass than the container's root
+  // value write, and incremental changes are slot/no-op writes that never
+  // re-stamp the root — so without this the taint never lands. Only when there
+  // IS taint (flowHasLabels): a transient empty-J reconcile must NOT clear a
+  // correct prior structure label (resume/loading), so we leave the container
+  // off the persist loop then (fail-safe: keep the existing label).
+  const structureContainerPaths = new Map<string, readonly string[]>();
+  if (flowPersist && flowHasLabels) {
+    for (const addr of tx.getCfcState().structureContainers) {
+      const containerKey = targetKey(addr);
+      structureContainerPaths.set(
+        containerKey,
+        canonicalizeLogicalPath(addr.path),
+      );
+      targetKeys.add(containerKey);
+    }
+  }
   if (flowPersist && flowTargets !== undefined) {
     // Flow targets enter the persist loop when there is taint to attach or
     // stale per-value components (derived/link) to replace under a written
@@ -4071,6 +4072,28 @@ export const prepareBoundaryCommit = (
         });
         return uniqueCfcAtoms(atoms);
       };
+      // (S16) A declared list-coordinator container re-derives its `structure`
+      // from J this reconcile even with no value write: drop the carried-forward
+      // structure entry at the exact container path (preserving per-slot
+      // `link[i]` labels) and re-stamp it below with the current J.
+      const structureContainerPath = structureContainerPaths.get(key);
+      if (structureContainerPath !== undefined) {
+        const containerPathKey = pathKey(structureContainerPath);
+        for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
+          const candidateEntry = persistedLabelEntries[i];
+          if (
+            candidateEntry.origin === "structure" &&
+            pathKey(candidateEntry.path) === containerPathKey
+          ) {
+            persistedLabelEntries.splice(i, 1);
+          }
+        }
+        if (
+          !structureStampPaths.some((p) => pathKey(p) === containerPathKey)
+        ) {
+          structureStampPaths.push(structureContainerPath);
+        }
+      }
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
         // collapse against paths that actually receive a covering entry.

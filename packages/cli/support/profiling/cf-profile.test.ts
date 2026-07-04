@@ -99,6 +99,13 @@ async function terminateChildProcess(
   return await child.status;
 }
 
+function profilingCaptureEnv(): Record<string, string> {
+  const env = profilingChildEnv();
+  const coverageDir = Deno.env.get("DENO_COVERAGE_DIR");
+  if (coverageDir) env.DENO_COVERAGE_DIR = coverageDir;
+  return env;
+}
+
 Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: "cf-profile-test-" });
   try {
@@ -113,7 +120,6 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
         "-A",
         scriptPath,
         `--profile-output=${profilePath}`,
-        "--profile-start-pattern=Usage",
         "--profile-stop-pattern=Usage",
         "--help",
       ],
@@ -135,7 +141,7 @@ Deno.test("cf-profile captures a CPU profile for CLI help", async () => {
     const meta = JSON.parse(await Deno.readTextFile(metaPath));
     assertEquals(meta.command, ["--help"]);
     assertEquals("profileDoneMarker" in meta, false);
-    assertEquals(meta.profileStartPattern, "Usage");
+    assertEquals("profileStartPattern" in meta, false);
     assertEquals(meta.profileStopPattern, "Usage");
     assertEquals(meta.cliStatus.success, true);
     assertEquals(meta.captureStatus.success, true);
@@ -293,7 +299,7 @@ Deno.test("capture-deno-inspector-profile waits for profiler start before summar
         `--websocket-url=${await inspectorUrl.promise}`,
       ],
       clearEnv: true,
-      env: profilingChildEnv(),
+      env: profilingCaptureEnv(),
       stdout: "piped",
       stderr: "piped",
     }).spawn();
@@ -436,7 +442,7 @@ Deno.test("capture-deno-inspector-profile starts from a console marker", async (
         `--websocket-url=${await inspectorUrl.promise}`,
       ],
       clearEnv: true,
-      env: profilingChildEnv(),
+      env: profilingCaptureEnv(),
       stdout: "piped",
       stderr: "piped",
     }).spawn();
