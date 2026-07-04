@@ -14,13 +14,30 @@ type SchedulerInternals = {
 function getSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): SchedulerInternals {
-  const internal = scheduler as unknown as {
-    markAndScheduleInvalidAction: SchedulerInternals["markDirty"];
-  };
+  expectSchedulerField(scheduler, "markAndScheduleInvalidAction");
+  const markAndScheduleInvalidAction = Reflect.get(
+    scheduler,
+    "markAndScheduleInvalidAction",
+  );
+  if (typeof markAndScheduleInvalidAction !== "function") {
+    throw new TypeError("Scheduler benchmark internals are unavailable");
+  }
+  const markDirtyForScheduler = markAndScheduleInvalidAction.bind(
+    scheduler,
+  ) as SchedulerInternals["markDirty"];
 
   return {
-    markDirty: (action) => internal.markAndScheduleInvalidAction(action),
+    markDirty: markDirtyForScheduler,
   };
+}
+
+function expectSchedulerField(
+  scheduler: Runtime["scheduler"],
+  field: string,
+): void {
+  if (!(field in scheduler)) {
+    throw new TypeError(`Scheduler benchmark missing ${field}`);
+  }
 }
 
 async function setupSharedSeedGraph(effectCount: number) {
