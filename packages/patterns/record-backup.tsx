@@ -95,6 +95,24 @@ interface RecordPiece {
 
 // ===== Data Extraction =====
 
+type SchemaField = {
+  type?: unknown;
+};
+
+type ImportedNoteInput = Parameters<typeof Note>[0] & {
+  embedded: true;
+};
+
+const readMaybeCellValue = (value: unknown): unknown => {
+  if (value === null || value === undefined) return value;
+  const get = (value as { get?: unknown }).get;
+  if (!get) return value;
+  if (typeof get !== "function") {
+    throw new TypeError("Cell getter is not callable");
+  }
+  return get.call(value);
+};
+
 /**
  * Coerce data types to match schema expectations
  * Handles common type mismatches (e.g., "1986" string → 1986 number)
@@ -112,8 +130,7 @@ function coerceDataTypes(
 
   for (const [field, schema] of Object.entries(def.schema)) {
     const value = coerced[field];
-    // deno-lint-ignore no-explicit-any
-    const fieldSchema = schema as any;
+    const fieldSchema = schema as SchemaField;
 
     if (value === undefined || value === null || value === "") continue;
 
@@ -147,14 +164,13 @@ function extractModuleData(
   }
 
   const data: Record<string, unknown> = {};
+  const pieceFields = piece as Record<string, unknown>;
   for (const field of def.fieldMapping) {
     try {
-      // deno-lint-ignore no-explicit-any
-      const value = (piece as any)?.[field];
+      const value = pieceFields[field];
       if (value !== undefined) {
         // Unwrap Cell values if needed, with error handling
-        // deno-lint-ignore no-explicit-any
-        data[field] = (value as any)?.get ? (value as any).get() : value;
+        data[field] = readMaybeCellValue(value);
       }
     } catch (e) {
       // Cell.get() or other operations may throw
@@ -365,7 +381,7 @@ function parseImportJson(jsonText: string): {
 function noteInputFromImportedData(
   data: Record<string, unknown>,
   recordPatternJson: string,
-): Record<string, unknown> {
+): ImportedNoteInput {
   let content = "";
   if (typeof data.content === "string") {
     content = data.content;
@@ -457,13 +473,10 @@ const importRecords = handler<
       for (const moduleData of recordData.modules) {
         try {
           const piece = moduleData.type === "notes"
-            ? Note(
-              // deno-lint-ignore no-explicit-any
-              noteInputFromImportedData(
-                moduleData.data,
-                recordPatternJson,
-              ) as any,
-            )
+            ? Note(noteInputFromImportedData(
+              moduleData.data,
+              recordPatternJson,
+            ))
             : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
@@ -498,13 +511,10 @@ const importRecords = handler<
       for (const moduleData of recordData.trashedModules) {
         try {
           const piece = moduleData.type === "notes"
-            ? Note(
-              // deno-lint-ignore no-explicit-any
-              noteInputFromImportedData(
-                moduleData.data,
-                recordPatternJson,
-              ) as any,
-            )
+            ? Note(noteInputFromImportedData(
+              moduleData.data,
+              recordPatternJson,
+            ))
             : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
@@ -534,8 +544,7 @@ const importRecords = handler<
       }
 
       // Create the Record with all its modules
-      // deno-lint-ignore no-explicit-any
-      const record = (Record as any)({
+      const record = Record({
         title: recordData.title,
         subPieces: subPieces,
         trashedSubPieces: trashedSubPieces,
