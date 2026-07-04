@@ -342,6 +342,24 @@ type PlacedCell = Writable<PlacedTile[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
 type MessageCell = Writable<string | Default<"">>;
 
+type DragSourceCell = Writable<Letter | PlacedTile>;
+
+interface ScrabbleDropEvent {
+  detail?: {
+    sourceCell?: DragSourceCell;
+    dropZoneRect?: {
+      left: number;
+      top: number;
+    };
+    pointerX?: number;
+    pointerY?: number;
+  };
+}
+
+type PromptGlobal = typeof globalThis & {
+  prompt?: (message?: string, defaultValue?: string) => string | null;
+};
+
 export interface GameInput {
   gameName?: PerSpace<string | Default<"Scrabble Match">>;
   board?: PerSpace<BoardCell>;
@@ -620,7 +638,7 @@ function calculateTurnScore(
   return { total: total + (bingoBonus ? 50 : 0), wordScores, bingoBonus };
 }
 
-function getDraggedLetterId(sourceCell: { get?: () => unknown } | undefined) {
+function getDraggedLetterId(sourceCell: DragSourceCell | undefined) {
   const source = sourceCell?.get?.();
   if (!source || typeof source !== "object") return undefined;
   if ("id" in source && typeof source.id === "string") return source.id;
@@ -831,7 +849,7 @@ const resetGameHandler = handler<
 });
 
 const dropOnBoard = handler<
-  any,
+  ScrabbleDropEvent,
   {
     rack: RackCell;
     placed: PlacedCell;
@@ -843,7 +861,10 @@ const dropOnBoard = handler<
   const dropZoneRect = event.detail?.dropZoneRect;
   const pointerX = event.detail?.pointerX;
   const pointerY = event.detail?.pointerY;
-  if (!sourceCell || !dropZoneRect) return;
+  if (
+    !sourceCell || !dropZoneRect || typeof pointerX !== "number" ||
+    typeof pointerY !== "number"
+  ) return;
 
   const letterId = getDraggedLetterId(sourceCell);
   if (!letterId) {
@@ -901,7 +922,7 @@ const dropOnBoard = handler<
     isBlank: rackLetter.isBlank,
   };
   if (sourceLetter.isBlank && !sourceLetter.char) {
-    const chosenChar = (globalThis as any).prompt?.(
+    const chosenChar = (globalThis as PromptGlobal).prompt?.(
       "Enter a letter for this blank tile (A-Z):",
     );
     if (!chosenChar || !/^[A-Za-z]$/.test(chosenChar)) {
@@ -965,7 +986,7 @@ const placeTileOnBoard = handler<
 });
 
 const returnToRack = handler<
-  any,
+  ScrabbleDropEvent,
   { rack: RackCell; placed: PlacedCell; message: MessageCell }
 >((event, { rack, placed, message }) => {
   const sourceCell = event.detail?.sourceCell;
