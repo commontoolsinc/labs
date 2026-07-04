@@ -13,6 +13,42 @@ import { createBuilder } from "../src/builder/factory.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
+function countVerifiedFunctions(engine: Engine): number {
+  const executableRegistry = Reflect.get(engine, "executableRegistry");
+  if (typeof executableRegistry !== "object" || executableRegistry === null) {
+    throw new Error("Expected engine executable registry");
+  }
+  const buckets = Reflect.get(
+    executableRegistry,
+    "verifiedImplementationsByEntryRef",
+  );
+  if (!(buckets instanceof Map)) {
+    throw new Error("Expected verified implementation buckets");
+  }
+
+  let count = 0;
+  for (const bucket of buckets.values()) {
+    if (!(bucket instanceof Map)) {
+      throw new Error("Expected verified implementation bucket");
+    }
+    count += bucket.size;
+  }
+  return count;
+}
+
+function invokeJavaScriptImplementation(
+  runtime: Runtime,
+  module: { wrapper?: string },
+  fn: (...args: any[]) => unknown,
+  argument: unknown,
+): unknown {
+  const invoke = Reflect.get(runtime.runner, "invokeJavaScriptImplementation");
+  if (typeof invoke !== "function") {
+    throw new Error("Expected runner JavaScript invocation helper");
+  }
+  return invoke.call(runtime.runner, module, fn, argument);
+}
+
 describe("SES security regressions", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -324,31 +360,19 @@ describe("SES security regressions", () => {
     };
 
     const { main } = await engine.compileAndEvaluateModules(program);
-    const countVerifiedFunctions = () =>
-      (engine as unknown as {
-        executableRegistry: {
-          verifiedImplementationsByEntryRef: Map<string, Map<string, unknown>>;
-        };
-      }).executableRegistry.verifiedImplementationsByEntryRef.values()
-        .reduce((n, bucket) => n + bucket.size, 0);
 
     // The nested computation (now the module-scope `__cfLift_N`) and the
     // handler are blessed at load: the global executable index is already
     // populated before any invocation.
-    const verifiedAtLoad = countVerifiedFunctions();
+    const verifiedAtLoad = countVerifiedFunctions(engine);
     expect(verifiedAtLoad).toBeGreaterThan(0);
 
     // Invoking the verified handler runs against the load-blessed functions and
     // succeeds — no invocation-time blessing is needed, and the index stays
     // consistent (load-time blessing covered every nested callback).
     expect(() =>
-      (runtime.runner as unknown as {
-        invokeJavaScriptImplementation(
-          module: { wrapper?: string },
-          fn: (...args: any[]) => unknown,
-          argument: unknown,
-        ): unknown;
-      }).invokeJavaScriptImplementation(
+      invokeJavaScriptImplementation(
+        runtime,
         main?.makeNested as { wrapper?: string },
         (main?.makeNested as { implementation: (...args: any[]) => unknown })
           .implementation,
@@ -356,7 +380,9 @@ describe("SES security regressions", () => {
       )
     ).not.toThrow();
 
-    expect(countVerifiedFunctions()).toBeGreaterThanOrEqual(verifiedAtLoad);
+    expect(countVerifiedFunctions(engine)).toBeGreaterThanOrEqual(
+      verifiedAtLoad,
+    );
   });
 
   it("freezes callback compartment globalThis bindings", () => {
