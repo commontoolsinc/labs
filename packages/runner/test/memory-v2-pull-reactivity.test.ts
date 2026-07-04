@@ -33,6 +33,51 @@ const visibleIds = (
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
+type EmulatedServerAccess = {
+  server(): MemoryV2Server;
+};
+
+type ProviderObserver = {
+  get(uri: URI): { value: unknown } | undefined;
+  sync(
+    uri: URI,
+    selector: { path: string[]; schema: unknown },
+  ): Promise<{ ok?: Record<PropertyKey, never> }>;
+};
+
+function isEmulatedServerAccess(
+  candidate: unknown,
+): candidate is EmulatedServerAccess {
+  if (typeof candidate !== "object" || candidate === null) return false;
+  return typeof (candidate as Partial<EmulatedServerAccess>).server ===
+    "function";
+}
+
+function emulatedServer(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): MemoryV2Server {
+  if (!isEmulatedServerAccess(storageManager)) {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  return storageManager.server();
+}
+
+function isProviderObserver(candidate: unknown): candidate is ProviderObserver {
+  if (typeof candidate !== "object" || candidate === null) return false;
+  return typeof (candidate as Partial<ProviderObserver>).get === "function" &&
+    typeof (candidate as Partial<ProviderObserver>).sync === "function";
+}
+
+function providerObserver(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): ProviderObserver {
+  const provider = storageManager.open(space);
+  if (!isProviderObserver(provider)) {
+    throw new Error("Expected a memory/v2 provider observer");
+  }
+  return provider;
+}
+
 describe("Memory v2 pull reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -51,14 +96,8 @@ describe("Memory v2 pull reactivity", () => {
     });
     tx = runtime.edit();
 
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
     remoteClient = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(candidate.server()),
+      transport: MemoryV2Client.loopback(emulatedServer(storageManager)),
     });
     remoteSession = await remoteClient.mount(
       space,
@@ -147,13 +186,7 @@ describe("Memory v2 pull reactivity", () => {
     const expandedChildValue = structuredClone(
       fixture.docs.find((doc) => doc.id === expandedChildId)?.value,
     );
-    const observer = storageManager.open(space) as unknown as {
-      get(uri: URI): { value: unknown } | undefined;
-      sync(
-        uri: URI,
-        selector: { path: string[]; schema: unknown },
-      ): Promise<{ ok?: Record<PropertyKey, never> }>;
-    };
+    const observer = providerObserver(storageManager);
 
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
