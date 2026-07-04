@@ -122,8 +122,100 @@ type WatchRefreshHarness = {
   ): Promise<{ ok?: unknown; error?: { message?: string } }>;
 };
 
+type LocalReadCheckHarness = {
+  commitReadsStaleLocally(commit: unknown): boolean;
+  get(address: { id: URI; type: MIME }): { is?: unknown } | undefined;
+};
+
+type AdmissionHarness = {
+  recordStaleFloor(commit: unknown, localSeq: number): void;
+  preemptThreshold(commit: unknown): number | undefined;
+  noteCaughtUpLocalSeq(localSeq: number | undefined): void;
+  reset(): void;
+};
+
+type ResetHarness = {
+  waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+  reset(): void;
+};
+
+type GraphObserver = {
+  get(uri: URI): { value: unknown } | undefined;
+  sync(
+    uri: URI,
+    selector: { path: string[]; schema: unknown },
+  ): Promise<{ ok?: Record<PropertyKey, never> }>;
+};
+
 const retryRepairHarness = (replica: unknown): RetryRepairHarness =>
   replica as RetryRepairHarness;
+
+const emulatedServer = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): MemoryV2Server => {
+  const server = Reflect.get(storageManager, "server");
+  if (typeof server !== "function") {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  return server.call(storageManager) as MemoryV2Server;
+};
+
+const localReadCheckHarness = (replica: unknown): LocalReadCheckHarness => {
+  const candidate = replica as Partial<LocalReadCheckHarness>;
+  if (
+    typeof candidate.commitReadsStaleLocally !== "function" ||
+    typeof candidate.get !== "function"
+  ) {
+    throw new Error("Expected a memory v2 local read check harness");
+  }
+  return candidate as LocalReadCheckHarness;
+};
+
+const watchRefreshHarness = (replica: unknown): WatchRefreshHarness => {
+  const candidate = replica as Partial<WatchRefreshHarness>;
+  if (
+    typeof candidate.closeNow !== "function" ||
+    typeof candidate.refreshWatchSet !== "function"
+  ) {
+    throw new Error("Expected a memory v2 watch refresh harness");
+  }
+  return candidate as WatchRefreshHarness;
+};
+
+const admissionHarness = (replica: unknown): AdmissionHarness => {
+  const candidate = replica as Partial<AdmissionHarness>;
+  if (
+    typeof candidate.recordStaleFloor !== "function" ||
+    typeof candidate.preemptThreshold !== "function" ||
+    typeof candidate.noteCaughtUpLocalSeq !== "function" ||
+    typeof candidate.reset !== "function"
+  ) {
+    throw new Error("Expected a memory v2 admission harness");
+  }
+  return candidate as AdmissionHarness;
+};
+
+const resetHarness = (replica: unknown): ResetHarness => {
+  const candidate = replica as Partial<ResetHarness>;
+  if (
+    typeof candidate.waitForCaughtUpLocalSeq !== "function" ||
+    typeof candidate.reset !== "function"
+  ) {
+    throw new Error("Expected a memory v2 reset harness");
+  }
+  return candidate as ResetHarness;
+};
+
+const graphObserver = (provider: unknown): GraphObserver => {
+  const candidate = provider as Partial<GraphObserver>;
+  if (
+    typeof candidate.get !== "function" ||
+    typeof candidate.sync !== "function"
+  ) {
+    throw new Error("Expected a memory v2 graph observer");
+  }
+  return candidate as GraphObserver;
+};
 
 const syntheticConflict = (
   uri: URI,
@@ -168,14 +260,8 @@ describe("Memory v2 storage notifications", () => {
     });
     tx = runtime.edit();
 
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
     remoteClient = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(candidate.server()),
+      transport: MemoryV2Client.loopback(emulatedServer(storageManager)),
     });
     remoteSession = await remoteClient.mount(
       space,
@@ -686,9 +772,7 @@ describe("Memory v2 storage notifications", () => {
 
   it("hold-mode local check flags only provably-stale confirmed reads", async () => {
     const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      commitReadsStaleLocally: (commit: unknown) => boolean;
-    };
+    const replica = localReadCheckHarness(provider.replica);
     const uri = `of:hold-check-${Date.now()}` as URI;
 
     // Establish a confirmed record with seq > 0.
@@ -698,6 +782,9 @@ describe("Memory v2 storage notifications", () => {
       operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
     });
     await provider.sync(uri);
+    await waitFor(() =>
+      replica.get({ id: uri, type: "application/json" as MIME }) !== undefined
+    );
 
     const read = (seq: number) => ({
       reads: { confirmed: [{ id: uri, path: [], seq }], pending: [] },
@@ -833,10 +920,13 @@ describe("Memory v2 storage notifications", () => {
     const view = MemoryV2Client.WatchView.fromSync(sync);
     const client = {
       close: () => Promise.resolve(),
-    } as unknown as MemoryV2Client.Client;
-    const session = {
-      watchAddSync: () => Promise.resolve({ view, sync }),
-    } as unknown as MemoryV2Client.SpaceSession;
+    } as MemoryV2Client.Client;
+    const session = Object.assign(
+      Object.create(MemoryV2Client.SpaceSession.prototype),
+      {
+        watchAddSync: () => Promise.resolve({ view, sync }),
+      },
+    ) as MemoryV2Client.SpaceSession;
     const sessionFactory: SessionFactory = {
       create: () => Promise.resolve({ client, session }),
     };
@@ -847,7 +937,7 @@ describe("Memory v2 storage notifications", () => {
     }
     const testStorageManager = new TestStorageManager();
     const provider = testStorageManager.open(space);
-    const replica = provider.replica as unknown as WatchRefreshHarness;
+    const replica = watchRefreshHarness(provider.replica);
 
     replica.closeNow();
     const result = await replica.refreshWatchSet([[
@@ -862,12 +952,7 @@ describe("Memory v2 storage notifications", () => {
 
   it("admission control records, thresholds, and prunes a stale floor", () => {
     const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      recordStaleFloor: (commit: unknown, localSeq: number) => void;
-      preemptThreshold: (commit: unknown) => number | undefined;
-      noteCaughtUpLocalSeq: (localSeq: number | undefined) => void;
-      reset: () => void;
-    };
+    const replica = admissionHarness(provider.replica);
     const uri = `of:admission-floor-${Date.now()}`;
     const reading = {
       localSeq: 9,
@@ -896,10 +981,7 @@ describe("Memory v2 storage notifications", () => {
 
   it("reset rejects caught-up waiters from the previous replica epoch", async () => {
     const provider = storageManager.open(space);
-    const replica = provider.replica as unknown as {
-      waitForCaughtUpLocalSeq: (localSeq: number) => Promise<void>;
-      reset: () => void;
-    };
+    const replica = resetHarness(provider.replica);
 
     const wait = replica.waitForCaughtUpLocalSeq(3);
     replica.reset();
@@ -999,13 +1081,7 @@ describe("Memory v2 storage notifications", () => {
     const subscription = new Subscription();
     storageManager.subscribe(subscription);
     const fixture = createGraphFixture(space);
-    const observer = storageManager.open(space) as unknown as {
-      get(uri: URI): { value: unknown } | undefined;
-      sync(
-        uri: URI,
-        selector: { path: string[]; schema: unknown },
-      ): Promise<{ ok?: Record<PropertyKey, never> }>;
-    };
+    const observer = graphObserver(storageManager.open(space));
 
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,

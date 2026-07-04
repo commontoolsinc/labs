@@ -1,15 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-subscription.test.ts": [
-    "157:37:1gs5cuw",
-    "670:37:13ittuj",
-    "683:24:1vmtt9w",
-    "825:6:g5r7rm",
-    "828:6:pq1660",
-    "839:37:fo2e9y",
-    "854:37:qtr5yp",
-    "888:37:1bqz6be",
-    "991:48:ibbsvq",
-  ],
   "packages/runner/test/memory-v2-transaction-path.test.ts": [
     "350:17:8mlgki",
   ],
