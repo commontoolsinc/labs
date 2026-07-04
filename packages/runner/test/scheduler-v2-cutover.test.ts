@@ -43,6 +43,84 @@ async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
   expect(result).toBe("idle");
 }
 
+function schedulerNodes(scheduler: Runtime["scheduler"]): NodeRegistry {
+  const nodes = Reflect.get(scheduler, "nodes");
+  expect(nodes).toBeInstanceOf(NodeRegistry);
+  return nodes;
+}
+
+function schedulerInvalidationInternals(
+  scheduler: Runtime["scheduler"],
+): {
+  nodes: NodeRegistry;
+  markAndScheduleInvalidAction: (action: Action) => void;
+} {
+  const marker = Reflect.get(scheduler, "markAndScheduleInvalidAction");
+  expect(typeof marker).toBe("function");
+  return {
+    nodes: schedulerNodes(scheduler),
+    markAndScheduleInvalidAction: (action) => marker.call(scheduler, action),
+  };
+}
+
+function schedulerBackoffInternals(
+  scheduler: Runtime["scheduler"],
+): {
+  nodes: NodeRegistry;
+  gates: SchedulerGates;
+  clearBackoffForCleanNodes: () => void;
+} {
+  const gates = Reflect.get(scheduler, "gates");
+  const clearBackoffForCleanNodes = Reflect.get(
+    scheduler,
+    "clearBackoffForCleanNodes",
+  );
+  expect(gates).toBeInstanceOf(SchedulerGates);
+  expect(typeof clearBackoffForCleanNodes).toBe("function");
+  return {
+    nodes: schedulerNodes(scheduler),
+    gates,
+    clearBackoffForCleanNodes: () => clearBackoffForCleanNodes.call(scheduler),
+  };
+}
+
+function dependencyGraphFixtureState(
+  nodes: NodeRegistry,
+  options: {
+    dependents?: WeakMap<Action, Set<Action>>;
+    reverseDependencies?: WeakMap<Action, Set<Action>>;
+  } = {},
+): DependencyGraphState {
+  return {
+    triggerIndex: {
+      triggers: new Map(),
+      nonRecursiveTriggers: new Map(),
+      actionTriggerEntities: new WeakMap(),
+      addActionReads: () => ({
+        entities: new Set(),
+        triggerPathsByEntity: new Map(),
+      }),
+      removeActionFromEntities: () => {},
+      removeSpace: () => {},
+      collectReadersForWrite: () => new Set(),
+      hasRegisteredTriggers: () => false,
+      clear: () => {},
+      collectTriggeredActionsForChange: () => ({
+        entity: `${space}/space/unused:trigger`,
+        hasMatchingTriggerPaths: false,
+        triggeredActions: [],
+      }),
+    },
+    writersByEntity: new Map(),
+    dependencies: new WeakMap(),
+    dependents: options.dependents ?? new WeakMap(),
+    reverseDependencies: options.reverseDependencies ?? new WeakMap(),
+    nodes,
+    materializerIndex: { isMaterializer: () => false },
+    getSchedulingWrites: () => undefined,
+  };
+}
+
 describe("scheduler v2 cutover fixtures", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -320,14 +398,7 @@ describe("scheduler v2 cutover fixtures", () => {
       await runtime.scheduler.idle();
       expect(runtime.scheduler.isDirty(effect)).toBe(false);
 
-      const internal = runtime.scheduler as unknown as {
-        nodes: {
-          get: (action: Action) =>
-            | { gate: { backoffUntil?: number } }
-            | undefined;
-        };
-        markAndScheduleInvalidAction: (action: Action) => void;
-      };
+      const internal = schedulerInvalidationInternals(runtime.scheduler);
       internal.nodes.get(writer)!.gate.backoffUntil = performance.now() +
         30_000;
       internal.markAndScheduleInvalidAction(writer);
@@ -896,21 +967,13 @@ describe("scheduler v2 cutover fixtures", () => {
         writes: [outputLink],
       },
     );
-    const internal = runtime.scheduler as unknown as {
-      nodes: {
-        get(action: Action): {
-          status: string;
-          declaredReads: unknown[];
-          invalidCauses: unknown[];
-        } | undefined;
-      };
-    };
+    const nodes = schedulerNodes(runtime.scheduler);
 
     const cancel = runtime.scheduler.subscribe(writer);
 
     try {
       await runtime.scheduler.idle();
-      const record = internal.nodes.get(writer);
+      const record = nodes.get(writer);
       expect(record?.status).toBe("never-ran");
       expect(record?.declaredReads).toEqual([sourceAddress]);
       expect(record?.invalidCauses).toEqual([]);
@@ -921,7 +984,7 @@ describe("scheduler v2 cutover fixtures", () => {
       tx = runtime.edit();
       await runtime.scheduler.idle();
 
-      expect(internal.nodes.get(writer)?.invalidCauses).toEqual([]);
+      expect(nodes.get(writer)?.invalidCauses).toEqual([]);
       expect(runs).toBe(0);
       expect(output.get()).toBe(0);
     } finally {
@@ -1178,19 +1241,12 @@ describe("scheduler v2 cutover fixtures", () => {
     // the only root unsubscribes, the cycle must become unreachable instead
     // of sustaining itself through its internal edges.
     const nodes = new NodeRegistry();
-    const state = {
-      nodes,
-      dependents: new WeakMap<Action, Set<Action>>(),
-      reverseDependencies: new WeakMap<Action, Set<Action>>(),
-      materializerIndex: { isMaterializer: () => false },
-      staleness: {
-        addStaleUpstream: () => {},
-        removeStaleUpstream: () => {},
-      },
-      isStale: () => false,
-      queueExecution: () => {},
-      getSchedulingWrites: () => undefined,
-    } as unknown as DependencyGraphState;
+    const dependents = new WeakMap<Action, Set<Action>>();
+    const reverseDependencies = new WeakMap<Action, Set<Action>>();
+    const state = dependencyGraphFixtureState(nodes, {
+      dependents,
+      reverseDependencies,
+    });
 
     const liveRoot: Action = function liveRoot() {};
     const cycleA: Action = function cycleA() {};
@@ -1215,13 +1271,7 @@ describe("scheduler v2 cutover fixtures", () => {
 
   it("keeps a shared writer live when one arm of a demand diamond is removed", () => {
     const nodes = new NodeRegistry();
-    const state = {
-      nodes,
-      dependents: new WeakMap<Action, Set<Action>>(),
-      reverseDependencies: new WeakMap<Action, Set<Action>>(),
-      materializerIndex: { isMaterializer: () => false },
-      getSchedulingWrites: () => undefined,
-    } as unknown as DependencyGraphState;
+    const state = dependencyGraphFixtureState(nodes);
 
     const writer: Action = function diamondWriter() {};
     const left: Action = function diamondLeft() {};
@@ -1255,13 +1305,7 @@ describe("scheduler v2 cutover fixtures", () => {
     const nodes = new NodeRegistry();
     const action: Action = function selfDependentAction() {};
     nodes.register(action, "computation");
-    const state = {
-      nodes,
-      dependents: new WeakMap<Action, Set<Action>>(),
-      reverseDependencies: new WeakMap<Action, Set<Action>>(),
-      materializerIndex: { isMaterializer: () => false },
-      getSchedulingWrites: () => undefined,
-    } as unknown as DependencyGraphState;
+    const state = dependencyGraphFixtureState(nodes);
 
     expect(registerDependentEdge(state, action, action)).toBe(false);
     expect(state.dependents.get(action)).toBeUndefined();
@@ -1449,11 +1493,7 @@ describe("scheduler v2 cutover fixtures", () => {
   });
 
   it("cancels the shared wake when a clean node clears backoff", () => {
-    const scheduler = runtime.scheduler as unknown as {
-      nodes: NodeRegistry;
-      gates: SchedulerGates;
-      clearBackoffForCleanNodes: () => void;
-    };
+    const scheduler = schedulerBackoffInternals(runtime.scheduler);
     const action: Action = function adoptedBeforeBackoffWake() {};
     const record = scheduler.nodes.register(action, "computation");
     scheduler.nodes.setStatus(action, "clean");
@@ -1471,9 +1511,7 @@ describe("scheduler v2 cutover fixtures", () => {
   });
 
   it("resets a dormant node's convergence episode at an already-idle boundary", async () => {
-    const scheduler = runtime.scheduler as unknown as {
-      nodes: NodeRegistry;
-    };
+    const scheduler = { nodes: schedulerNodes(runtime.scheduler) };
     const action: Action = function dormantPreviousEpisode() {};
     const record = scheduler.nodes.register(action, "computation");
     scheduler.nodes.setStatus(action, "invalid");
