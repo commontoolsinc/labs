@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-write-reconstruction.test.ts": [
-    "30:5:axn26",
-    "196:40:hy5uzs",
-    "197:4:76tfym",
-  ],
   "packages/runner/test/cfreg-builder-identity.test.ts": [
     "112:25:1h049y8",
   ],

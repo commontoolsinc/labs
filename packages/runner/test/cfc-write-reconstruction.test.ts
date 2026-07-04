@@ -2,12 +2,8 @@ import { assertEquals, assertStrictEquals } from "@std/assert";
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type {
-  IExtendedStorageTransaction,
-  TransactionWriteDetail,
-} from "../src/storage/interface.ts";
+import type { TransactionWriteDetail } from "../src/storage/interface.ts";
 
 // `writeDetailValueForTarget` reconstructs "the value this transaction wrote
 // at a path" from the recorded write-details. A value may be recorded either
@@ -22,12 +18,15 @@ const SPACE = "did:key:test-space" as MemorySpace;
 const ID = "of:fid1:test-entity" as URI;
 const SCOPE = normalizeCellScope(undefined);
 
+type WriteDetailReader = {
+  getWriteDetails(space: MemorySpace): TransactionWriteDetail[];
+};
+
 const txWith = (
   details: TransactionWriteDetail[],
-): IExtendedStorageTransaction =>
-  ({
-    getWriteDetails: (_space: MemorySpace) => details,
-  }) as unknown as IExtendedStorageTransaction;
+): WriteDetailReader => ({
+  getWriteDetails: (_space: MemorySpace) => details,
+});
 
 const detail = (
   path: readonly string[],
@@ -192,9 +191,7 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
     body: `message number ${i}`,
     meta: { seen: false, tags: ["a", "b"] },
   }));
-  const base = deepFreeze(
-    { items: bigList, status: "draft" } as unknown as FabricValue,
-  ) as unknown as Record<string, unknown>;
+  const base = deepFreeze({ items: bigList, status: "draft" });
 
   const tx = txWith([
     detail(["value"], base),
