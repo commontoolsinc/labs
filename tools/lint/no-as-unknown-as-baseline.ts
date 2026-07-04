@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cell-get-slow-warning.test.ts": [
-    "52:41:1yjlkjh",
-  ],
   "packages/runner/test/cfc-boundary.test.ts": [
     "285:64:1b9455z",
     "372:64:1b9455z",

@@ -49,9 +49,9 @@ describe("Cell.get slow-path warning", () => {
     // instance. Report an elapsed time above the threshold for the next
     // cell/get span and silence the warning so it doesn't print.
     const cellLogger = getLogger("cell");
-    const loggerWithTimeEnd = cellLogger as unknown as {
+    const loggerWithTimeEnd: {
       timeEnd?: (...keys: string[]) => number | undefined;
-    };
+    } = cellLogger;
     const realTimeEnd = cellLogger.timeEnd.bind(cellLogger);
     const originalLevel = cellLogger.level;
     const warnsBefore = cellLogger.counts.warn;
