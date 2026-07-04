@@ -63,7 +63,7 @@ function currentPiece(): PieceController {
 
 // Read through the pattern's declared result schema, like the UI does —
 // schema defaults and scope annotations only apply on schema-aware reads.
-function result(): Cell<any> {
+function result(): Cell {
   const raw = controller().manager().getResult(currentPiece().getCell());
   return resultSchema !== undefined ? raw.asSchema(resultSchema as never) : raw;
 }
@@ -301,7 +301,7 @@ const handlers: Record<
     const tx = runtime.edit();
     let cell = result();
     for (const segment of (path ?? []) as (string | number)[]) {
-      cell = cell.key(segment as never) as Cell<any>;
+      cell = cell.key(segment as never) as Cell;
     }
     markUiInputBlindWriteTx(tx);
     // Mirror handleCellSet: thread the cell's PARENT address as the structural
@@ -338,7 +338,7 @@ const handlers: Record<
     const runtime = controller().manager().runtime;
     let cell = result();
     for (const segment of (path ?? []) as (string | number)[]) {
-      cell = cell.key(segment as never) as Cell<any>;
+      cell = cell.key(segment as never) as Cell;
     }
     const currentRaw = cell.get();
     const current = Array.isArray(currentRaw) ? currentRaw : [];
