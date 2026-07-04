@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-event-lineage.test.ts": [
-    "40:25:1y1onvv",
-  ],
   "packages/runner/test/scheduler-event-receipts.test.ts": [
     "38:25:1y1onvv",
   ],
