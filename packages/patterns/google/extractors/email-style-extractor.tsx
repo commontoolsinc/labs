@@ -207,12 +207,12 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     // LLM STYLE ANALYSIS
     // ========================================================================
 
-    const analysisPrompt = computed((): string | undefined => {
+    const analysisPrompt = computed((): string => {
       // Read reanalyzeFlag to allow re-triggering
       reanalyzeFlag.get();
 
       const emails = allEmails || [];
-      if (emails.length < 5) return undefined;
+      if (emails.length < 5) return "";
 
       const snippets = emails
         .slice(0, 30)
@@ -234,7 +234,7 @@ Extract the writing style patterns from these emails.`;
     });
 
     const styleResult = generateObject<EmailStyle>({
-      prompt: analysisPrompt as any,
+      prompt: analysisPrompt,
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
