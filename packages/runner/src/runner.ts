@@ -562,9 +562,11 @@ type BoundNodeIO = {
 };
 
 type ResolvedJavaScriptModule = {
-  fn: (...args: any[]) => any;
+  fn: JavaScriptImplementation;
   name: string | undefined;
 };
+
+type JavaScriptImplementation = (...args: unknown[]) => unknown;
 
 type JavaScriptNodeContext = BoundNodeIO & {
   tx: IExtendedStorageTransaction;
@@ -573,7 +575,7 @@ type JavaScriptNodeContext = BoundNodeIO & {
   resultCell: Cell<any>;
   addCancel: AddCancel;
   pattern: Pattern;
-  fn: (...args: any[]) => any;
+  fn: JavaScriptImplementation;
   name: string | undefined;
   schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
 };
@@ -1515,7 +1517,7 @@ export class Runner {
     // assembled purely from writes in the current runtime, so start() may need
     // to await dependency sync before process startup.
     const wasSyncedAtEntry =
-      (resultCell as Cell<any> & { synced?: boolean }).synced === true;
+      (resultCell as Cell<unknown> & { synced?: boolean }).synced === true;
 
     // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
@@ -3165,9 +3167,9 @@ export class Runner {
                 liveEntryRef.identity,
                 liveEntryRef.symbol,
               ) === module.implementation))
-      ? module.implementation as (...args: any[]) => any
+      ? module.implementation as JavaScriptImplementation
       : undefined;
-    const fn: (...args: any[]) => any = this.resolveByImplRef(module) ??
+    const fn: JavaScriptImplementation = this.resolveByImplRef(module) ??
       liveTrusted ??
       this.getFallbackJavaScriptImplementation(module);
 
@@ -3196,7 +3198,7 @@ export class Runner {
    */
   private resolveByImplRef(
     module: Module,
-  ): ((...args: any[]) => any) | undefined {
+  ): JavaScriptImplementation | undefined {
     const ref = (module as { $implRef?: { identity: string; symbol: string } })
       .$implRef;
     if (
@@ -3213,7 +3215,7 @@ export class Runner {
       const implementation =
         (artifact as { implementation?: unknown }).implementation ?? artifact;
       if (typeof implementation === "function") {
-        return implementation as (...args: any[]) => any;
+        return implementation as JavaScriptImplementation;
       }
     }
     // Eviction insurance: the artifact index is FIFO-bounded and can roll a
@@ -3224,7 +3226,7 @@ export class Runner {
     return this.runtime.harness.getVerifiedImplementation?.(
       ref.identity,
       ref.symbol,
-    ) as ((...args: any[]) => any) | undefined;
+    ) as JavaScriptImplementation | undefined;
   }
 
   /**
@@ -3808,7 +3810,7 @@ export class Runner {
       if (event?.preventDefault) event.preventDefault();
 
       const eventInputs = {
-        ...(inputs as Record<string, any>),
+        ...(inputs as Record<string, unknown>),
         $event: event,
       };
       // Spec scheduler-v2 §7.6 / decision 13: the handler's result cell — and
@@ -3817,7 +3819,7 @@ export class Runner {
       // collide on the receipt. The fallback covers non-dispatch invocations
       // (tests calling the handler directly).
       const cause = {
-        ...(inputs as Record<string, any>),
+        ...(inputs as Record<string, unknown>),
         $event: tx.dispatchedEventId ?? crypto.randomUUID(),
       };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
@@ -3973,7 +3975,7 @@ export class Runner {
     const presyncInputs = module.argumentSchema !== undefined
       ? async (event: any): Promise<void> => {
         const eventInputs = {
-          ...(inputs as Record<string, any>),
+          ...(inputs as Record<string, unknown>),
           $event: event,
         };
         const inputsCell = this.runtime.getImmutableCell(
@@ -4041,7 +4043,7 @@ export class Runner {
       : module.argumentSchema
       ? (depTx: IExtendedStorageTransaction, event: any) => {
         const eventInputs = {
-          ...(inputs as Record<string, any>),
+          ...(inputs as Record<string, unknown>),
           $event: event,
         };
         const inputsCell = this.runtime.getImmutableCell(
@@ -4459,7 +4461,7 @@ export class Runner {
 
   private getFallbackJavaScriptImplementation(
     module: Module,
-  ): (...args: any[]) => any {
+  ): JavaScriptImplementation {
     const implRef =
       (module as { $implRef?: { identity: string; symbol: string } }).$implRef;
     if (implRef) {
@@ -4477,12 +4479,12 @@ export class Runner {
     if (typeof module.implementation === "function") {
       return this.runtime.harness.getInvocation(
         Function.prototype.toString.call(module.implementation),
-      ) as (...args: any[]) => any;
+      ) as JavaScriptImplementation;
     }
     if (typeof module.implementation === "string") {
-      return this.runtime.harness.getInvocation(module.implementation) as (
-        ...args: any[]
-      ) => any;
+      return this.runtime.harness.getInvocation(
+        module.implementation,
+      ) as JavaScriptImplementation;
     }
     throw new Error(
       "JavaScript module is missing an executable implementation",
@@ -4491,7 +4493,7 @@ export class Runner {
 
   private invokeJavaScriptImplementation(
     module: Module,
-    fn: (...args: any[]) => any,
+    fn: JavaScriptImplementation,
     argument: unknown,
   ): unknown {
     const invoke = () => {
