@@ -6,13 +6,29 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+function expectArray(value: unknown): unknown[] {
+  expect(Array.isArray(value)).toBe(true);
+  if (!Array.isArray(value)) {
+    throw new Error("Expected an array");
+  }
+  return value;
+}
+
+function expectCell(value: unknown): Cell<any> {
+  expect(isCell(value)).toBe(true);
+  if (!isCell(value)) {
+    throw new Error("Expected a cell");
+  }
+  return value;
+}
 
 describe("Schema - AnyOf Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -516,18 +532,20 @@ describe("Schema - AnyOf Support", () => {
           undefined,
           tx,
         );
-        withLinks.setRawUntyped({
-          type: "vnode",
-          name: "div",
-          props: {
-            style: { color: "red" },
-          },
-          children: [
-            { type: "text", value: "single" },
-            childrenArrayCell.getAsLink(),
-            "or just text",
-          ],
-        } as unknown as FabricValue);
+        withLinks.setRawUntyped(
+          fabricFromNativeValue({
+            type: "vnode",
+            name: "div",
+            props: {
+              style: { color: "red" },
+            },
+            children: [
+              { type: "text", value: "single" },
+              childrenArrayCell.getAsLink(),
+              "or just text",
+            ],
+          }),
+        );
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",
@@ -579,13 +597,9 @@ describe("Schema - AnyOf Support", () => {
           expect((children[0] as Cell<any>).get().value).toBe("single");
           expect(isCell(children[1])).toBe(false);
           expect(Array.isArray(children[1])).toBe(true);
-          const child1 = children[1] as unknown as Cell<any>[];
-          expect(isCell(child1[0])).toBe(true);
-          expect(child1[0].get().value).toBe("hello");
-          expect(
-            isCell(child1[1]),
-          ).toBe(true);
-          expect(child1[1].get().value).toBe("world");
+          const child1 = expectArray(children[1]);
+          expect(expectCell(child1[0]).get().value).toBe("hello");
+          expect(expectCell(child1[1]).get().value).toBe("world");
           expect(isCell(children[2])).toBe(true);
           expect((children[2] as Cell<any>).get()).toBe("or just text");
         }
