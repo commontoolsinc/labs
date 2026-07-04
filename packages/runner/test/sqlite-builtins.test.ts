@@ -12,10 +12,87 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IStorageProviderWithReplica,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type SqliteQueryProvider = IStorageProviderWithReplica & {
+  sqliteQuery: NonNullable<IStorageProviderWithReplica["sqliteQuery"]>;
+};
+
+function assertSqliteQueryProvider(
+  provider: IStorageProviderWithReplica,
+): asserts provider is SqliteQueryProvider {
+  if (typeof provider.sqliteQuery !== "function") {
+    throw new Error("Expected sqliteQuery provider");
+  }
+}
+
+function sqliteQueryProvider(runtime: Runtime): SqliteQueryProvider {
+  const provider = runtime.storageManager.open(space);
+  assertSqliteQueryProvider(provider);
+  return provider;
+}
+
+function expectQueryState(value: unknown): QueryState {
+  if (
+    typeof value !== "object" || value === null ||
+    typeof (value as { pending?: unknown }).pending !== "boolean"
+  ) {
+    throw new Error("Expected query state");
+  }
+  return value as QueryState;
+}
+
+function queryResultView(value: unknown): {
+  get: () => QueryState;
+  sink: (f: () => void) => () => void;
+} {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Expected query result view");
+  }
+  const get = Reflect.get(value, "get");
+  const sink = Reflect.get(value, "sink");
+  if (typeof get !== "function" || typeof sink !== "function") {
+    throw new Error("Expected query result view methods");
+  }
+  return {
+    get: () => expectQueryState(Reflect.apply(get, value, [])),
+    sink: (f) => {
+      const cancel = Reflect.apply(sink, value, [f]);
+      if (typeof cancel !== "function") {
+        throw new Error("Expected query result sink cancellation");
+      }
+      return () => {
+        Reflect.apply(cancel, undefined, []);
+      };
+    },
+  };
+}
+
+function sqliteExecView(value: unknown): {
+  exec(sql: string, params?: readonly unknown[]): void;
+} {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    throw new Error("Expected sqlite exec cell");
+  }
+  const exec = Reflect.get(value, "exec");
+  if (typeof exec !== "function") {
+    throw new Error("Expected sqlite exec method");
+  }
+  return {
+    exec: (sql, params) => {
+      Reflect.apply(exec, value, [sql, params]);
+    },
+  };
+}
 
 describe("sqlite builtins (Phase 0 wiring)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -94,9 +171,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     // in-flight. `idle()` alone resolves against the half-settled
     // `{ pending: true }` state; `settled()` stays open until the flush writes
     // the result back.
-    const provider = runtime.storageManager.open(space) as unknown as {
-      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
-    };
+    const provider = sqliteQueryProvider(runtime);
     const original = provider.sqliteQuery.bind(provider);
     provider.sqliteQuery = async (...a) => {
       await new Promise((r) => setTimeout(r, 50));
@@ -127,10 +202,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       // Observe the result so the effect runs in pull mode. `idle()` returns
       // before the latency-bounded flush completes (still pending); `settled()`
       // waits for it.
-      const view = result as unknown as {
-        get: () => QueryState;
-        sink: (f: () => void) => () => void;
-      };
+      const view = queryResultView(result);
       const cancel = view.sink(() => {});
       try {
         await runtime.idle();
@@ -160,9 +232,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     makeDb: () => any,
     label: string,
   ): Promise<unknown> {
-    const provider = runtime.storageManager.open(space) as unknown as {
-      sqliteQuery: (db: { scope?: unknown }, ...rest: unknown[]) => unknown;
-    };
+    const provider = sqliteQueryProvider(runtime);
     const original = provider.sqliteQuery.bind(provider);
     let seenScope: unknown = "<<unset>>";
     provider.sqliteQuery = (db, ...rest) => {
@@ -242,10 +312,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     const result = runtime.run(tx, queryPattern, {}, resultCell);
     await tx.commit();
 
-    const view = result as unknown as {
-      get: () => QueryState;
-      sink: (f: () => void) => () => void;
-    };
+    const view = queryResultView(result);
     const cancel = view.sink(() => {});
     try {
       await runtime.idle();
@@ -269,9 +336,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
   it("writes an error result when the sqlite read fails, rather than staying pending", async () => {
     // Force the server read to fail. The builtin must surface that as a settled
     // error result on the query cell, not leave the query pending forever.
-    const provider = runtime.storageManager.open(space) as unknown as {
-      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
-    };
+    const provider = sqliteQueryProvider(runtime);
     const original = provider.sqliteQuery.bind(provider);
     provider.sqliteQuery = () =>
       Promise.reject(new Error("sqlite backend unavailable"));
@@ -297,9 +362,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     outcome: "resolve" | "reject",
     label: string,
   ): Promise<{ q: QueryState; secondHash: string }> {
-    const provider = runtime.storageManager.open(space) as unknown as {
-      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
-    };
+    const provider = sqliteQueryProvider(runtime);
     const original = provider.sqliteQuery.bind(provider);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -328,10 +391,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       runtime.run(tx, pattern, {}, resultCell);
       await tx.commit();
 
-      const qCell = resultCell.key("q").resolveAsCell() as unknown as {
-        get: () => QueryState;
-        sink: (f: () => void) => () => void;
-      };
+      const qCell = queryResultView(resultCell.key("q").resolveAsCell());
       const cancel = qCell.sink(() => {});
       try {
         // The first query is issued; its server read now waits on the gate.
@@ -345,15 +405,15 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         const execTx = runtime.edit();
         const handleLink = resultCell.key("db").resolveAsCell()
           .getAsNormalizedFullLink();
-        const db = createCell(
-          runtime,
-          { ...handleLink, schema: undefined },
-          execTx,
-          false,
-          "sqlite",
-        ) as unknown as {
-          exec(sql: string, params?: readonly unknown[]): void;
-        };
+        const db = sqliteExecView(
+          createCell(
+            runtime,
+            { ...handleLink, schema: undefined },
+            execTx,
+            false,
+            "sqlite",
+          ),
+        );
         db.exec("INSERT INTO notes (body) VALUES (?)", ["seed"]);
         expect((await execTx.commit()).error).toBeUndefined();
         await runtime.idle();
