@@ -117,51 +117,112 @@ type StaleSchedulerInternals = {
   updateDependents: (action: Action, log: ReactivityLog) => void;
 };
 
+type SchedulerNodeTestView = {
+  register: (action: Action, kind: "effect" | "computation") => unknown;
+  get: (
+    action: Action,
+  ) =>
+    | {
+      status: "never-ran" | "clean" | "invalid";
+      invalidCauses: unknown[];
+    }
+    | undefined;
+};
+
+function getSchedulerInternalField(
+  scheduler: Runtime["scheduler"],
+  field: string,
+): unknown {
+  if (!(field in scheduler)) {
+    throw new TypeError(`Scheduler internals missing ${field}`);
+  }
+  return Reflect.get(scheduler, field);
+}
+
+function expectObject<T extends object>(value: unknown, field: string): T {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError(`Scheduler internals invalid ${field}`);
+  }
+  return value as T;
+}
+
+function expectSet<T>(value: unknown, field: string): Set<T> {
+  if (!(value instanceof Set)) {
+    throw new TypeError(`Scheduler internals invalid ${field}`);
+  }
+  return value;
+}
+
+function expectFunction<T>(value: unknown, field: string): T {
+  if (typeof value !== "function") {
+    throw new TypeError(`Scheduler internals invalid ${field}`);
+  }
+  return value as T;
+}
+
 function getStaleSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): StaleSchedulerInternals {
-  const internal = scheduler as unknown as {
-    pending: Set<Action>;
-    dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
-    nodes: {
-      register: (action: Action, kind: "effect" | "computation") => unknown;
-      get: (
-        action: Action,
-      ) =>
-        | {
-          status: "never-ran" | "clean" | "invalid";
-          invalidCauses: unknown[];
-        }
-        | undefined;
-    };
-    markAndScheduleInvalidAction: (action: Action) => void;
-    isDemandedPullComputation: (action: Action) => boolean;
-    updateDependents: StaleSchedulerInternals["updateDependents"];
-  };
+  const pending = expectSet<Action>(
+    getSchedulerInternalField(scheduler, "pending"),
+    "pending",
+  );
+  const dependencyUpdateState = expectObject<
+    Parameters<typeof setSchedulerDependencies>[0]
+  >(
+    getSchedulerInternalField(scheduler, "dependencyUpdateState"),
+    "dependencyUpdateState",
+  );
+  const nodes = expectObject<SchedulerNodeTestView>(
+    getSchedulerInternalField(scheduler, "nodes"),
+    "nodes",
+  );
+  if (typeof nodes.register !== "function" || typeof nodes.get !== "function") {
+    throw new TypeError("Scheduler internals invalid nodes");
+  }
+  const markAndScheduleInvalidAction = expectFunction<
+    (action: Action) => void
+  >(
+    getSchedulerInternalField(scheduler, "markAndScheduleInvalidAction"),
+    "markAndScheduleInvalidAction",
+  );
+  const isDemandedPullComputation = expectFunction<
+    StaleSchedulerInternals["isDemandedPullComputation"]
+  >(
+    getSchedulerInternalField(scheduler, "isDemandedPullComputation"),
+    "isDemandedPullComputation",
+  );
+  const updateDependents = expectFunction<
+    StaleSchedulerInternals["updateDependents"]
+  >(
+    getSchedulerInternalField(scheduler, "updateDependents"),
+    "updateDependents",
+  );
 
   return {
-    pending: internal.pending,
+    pending,
     isInvalid: (action) => {
-      const record = internal.nodes.get(action);
+      const record = nodes.get(action);
       return record?.status === "invalid" || record?.status === "never-ran";
     },
     isDemandedPullComputation: (action) =>
-      internal.isDemandedPullComputation(action),
+      isDemandedPullComputation.call(scheduler, action),
     clearInvalid: (action) => {
-      const record = internal.nodes.get(action);
+      const record = nodes.get(action);
       if (!record) return;
       if (record.status === "invalid") {
         record.status = "clean";
       }
       record.invalidCauses = [];
     },
-    markDirty: (action) => internal.markAndScheduleInvalidAction(action),
+    markDirty: (action) => markAndScheduleInvalidAction.call(scheduler, action),
     registerEffect: (action) => {
-      internal.nodes.register(action, "effect");
+      nodes.register(action, "effect");
     },
     setDependencies: (action, log) =>
-      setSchedulerDependencies(internal.dependencyUpdateState, action, log),
-    updateDependents: (action, log) => internal.updateDependents(action, log),
+      setSchedulerDependencies(dependencyUpdateState, action, log),
+    updateDependents: (action, log) =>
+      updateDependents.call(scheduler, action, log),
   };
 }
 
