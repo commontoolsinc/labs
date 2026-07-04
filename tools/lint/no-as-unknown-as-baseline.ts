@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/pattern.test.ts": [
-    "335:47:srt226",
-  ],
   "packages/runner/test/patterns-async.test.ts": [
     "59:8:1l3dvdp",
   ],

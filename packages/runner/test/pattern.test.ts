@@ -7,6 +7,7 @@ import {
   isPattern,
   type JSONSchema,
   type Module,
+  type Node,
   type Pattern,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
@@ -375,7 +376,7 @@ describe("pattern", () => {
       list: { $alias: { cell: "argument", path: ["values"] } },
     });
 
-    const inputs = doubleArray.nodes[0].inputs as unknown as { op: Pattern };
+    const inputs = mapNodeInputs(doubleArray.nodes[0]);
     expect(isPattern(inputs.op)).toBe(true);
 
     const innerModule = inputs.op.nodes[0].module as Module;
@@ -612,3 +613,16 @@ describe("pattern", () => {
     expect(isPattern(neverPattern)).toBe(true);
   });
 });
+
+function mapNodeInputs(node: Node): { op: Pattern } {
+  const inputs = node.inputs;
+  if (
+    typeof inputs !== "object" ||
+    inputs === null ||
+    !("op" in inputs) ||
+    !isPattern(inputs.op)
+  ) {
+    throw new Error("Expected map node inputs to include an op pattern");
+  }
+  return { op: inputs.op };
+}
