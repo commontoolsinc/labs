@@ -11,17 +11,16 @@ import type {
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
 import type {
-  BuiltInCompileAndRunParams,
-  BuiltInCompileAndRunState,
-  BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
   BuiltInGenerateTextState,
-  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
   ConfLabelQuery,
+  CompileAndRunFunction,
   FetchBinaryResult,
+  FetchJsonUncheckedFunction,
   FetchOptions,
+  GenerateObjectFunction,
   InspectConfLabelResult,
   PatternToolFunction,
   PatternToolResult,
@@ -56,6 +55,14 @@ const WISH_ARGUMENT_SCHEMA = internSchema({
     scope: { type: "array", items: { type: "string" } },
   },
 });
+
+type FetchJsonUncheckedState = ReturnType<FetchJsonUncheckedFunction> extends
+  Reactive<infer State> ? State
+  : never;
+
+type FetchJsonUncheckedBuilderFunction = (
+  params: Parameters<FetchJsonUncheckedFunction>[0],
+) => Reactive<Omit<FetchJsonUncheckedState, "error"> & { error?: unknown }>;
 
 /**
  * Signature detection for ifElse/when/unless backward compatibility.
@@ -102,9 +109,7 @@ export function unlessHasSchemas(argsLength: number): boolean {
 export const compileAndRun = createNodeFactory({
   type: "ref",
   implementation: "compileAndRun",
-}) as <T = any, S = any>(
-  params: FactoryInput<BuiltInCompileAndRunParams<T>>,
-) => Reactive<BuiltInCompileAndRunState<S>>;
+}) as CompileAndRunFunction;
 
 export const llm = createNodeFactory({
   type: "ref",
@@ -125,9 +130,7 @@ export const llmDialog = createNodeFactory({
 export const generateObject = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
-}) as <T = any>(
-  params: FactoryInput<BuiltInGenerateObjectParams>,
-) => Reactive<BuiltInLLMGenerateObjectState<T>>;
+}) as GenerateObjectFunction;
 
 export const generateText = createNodeFactory({
   type: "ref",
@@ -175,12 +178,7 @@ export const fetchJson = createNodeFactory({
 export const fetchJsonUnchecked = createNodeFactory({
   type: "ref",
   implementation: "fetchJsonUnchecked",
-}) as (
-  params: FactoryInput<{
-    url: string;
-    options?: FetchOptions;
-  }>,
-) => Reactive<{ pending: boolean; result: any; error?: unknown }>;
+}) as FetchJsonUncheckedBuilderFunction;
 
 export const fetchProgram = createNodeFactory({
   type: "ref",
@@ -262,7 +260,7 @@ let ifElseFactory:
     condition: unknown;
     ifTrue: unknown;
     ifFalse: unknown;
-  }, any>
+  }, unknown>
   | undefined;
 
 // when(condition, value) - returns value if condition is truthy, else condition
@@ -303,7 +301,7 @@ let whenFactory:
     resultSchema?: JSONSchema;
     condition: unknown;
     value: unknown;
-  }, any>
+  }, unknown>
   | undefined;
 
 // unless(condition, fallback) - returns condition if truthy, else fallback
@@ -344,7 +342,7 @@ let unlessFactory:
     resultSchema?: JSONSchema;
     condition: unknown;
     fallback: unknown;
-  }, any>
+  }, unknown>
   | undefined;
 
 /**
@@ -548,12 +546,13 @@ export type { createCell };
  */
 export const patternTool = (<
   T,
+  R,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
   // CT-1655: must already be a pattern. Authors wrap callbacks explicitly —
   // `patternTool(pattern(fn), extraParams?)` — so the unit is addressable and
   // hoistable; the runtime no longer coerces a bare function into a pattern.
-  pattern: PatternFactory<T, any>,
+  pattern: PatternFactory<T, R>,
   extraParams?: FactoryInput<E>,
 ): PatternToolResult<E> => {
   return {
