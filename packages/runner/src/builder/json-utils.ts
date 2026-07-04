@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -117,6 +118,14 @@ export function toJSONWithLegacyAliases(
     );
   }
 
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props). The `for...in` copy branch below would flatten
+  // it to `{}`, so return it unchanged here — after the cell / alias / array
+  // handling above, which must still win for those forms.
+  if (value instanceof BaseFabricPrimitive) {
+    return value as unknown as JSONValue;
+  }
+
   // If this is an object or a pattern, process each key recursively.
   if (isRecord(value) || isPattern(value)) {
     // Guard against circular object references (e.g. schema objects with
@@ -139,11 +148,13 @@ export function toJSONWithLegacyAliases(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): This `isRecord`-gated `for...in` walk has no
-    // `FabricSpecialObject` guard, so a `FabricPrimitive` (state in private
-    // fields, zero enumerable own-props) flattens to `{}` and a
-    // `FabricInstance` is walked by its internal slots instead of its codec
-    // contents.
+    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
+    // the other special-object type, `FabricInstance` (a container), still
+    // reaches this `for...in` copy and is walked by its internal slots (zero
+    // enumerable own-props) instead of its codec contents. Unlike a primitive it
+    // *does* need descending into — but by its actual contents, which this walk
+    // won't do correctly. This site will need attention once FabricInstances see
+    // real use.
     for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
