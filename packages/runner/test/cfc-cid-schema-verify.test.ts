@@ -13,10 +13,11 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 // the canonical hash and reject a value that does not match its address.
 const space = "did:key:cid-verify" as const;
 
-const fakeTxReturning = (stored: JSONSchema): IExtendedStorageTransaction =>
-  ({
-    readOrThrow: () => ({ value: stored }),
-  }) as unknown as IExtendedStorageTransaction;
+const fakeTxReturning = (
+  stored: JSONSchema,
+): Pick<IExtendedStorageTransaction, "readOrThrow"> => ({
+  readOrThrow: () => ({ value: stored }),
+});
 
 describe("cid schema document verification", () => {
   it("returns the schema when its content matches the address", () => {

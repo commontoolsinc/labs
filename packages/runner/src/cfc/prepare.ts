@@ -4368,8 +4368,10 @@ const ensureSchemaDocument = (
 };
 
 // Exported for unit testing of the read-side content-address verification (S5).
+type SchemaDocumentReader = Pick<IExtendedStorageTransaction, "readOrThrow">;
+
 export const loadSchemaDocument = (
-  tx: IExtendedStorageTransaction,
+  tx: SchemaDocumentReader,
   space: MemorySpace,
   schemaHash: string,
 ): JSONSchema => {

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-cid-schema-verify.test.ts": [
-    "19:5:knof31",
-  ],
   "packages/runner/test/cfc-exact-copy.test.ts": [
     "57:64:1pxbkwv",
   ],
