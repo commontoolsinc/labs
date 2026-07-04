@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-tool-ceiling-empty.test.ts": [
-    "23:7:1f7zahp",
-  ],
   "packages/runner/test/cfc-ui-contract.test.ts": [
     "467:9:10od7qa",
     "533:9:10od7qa",

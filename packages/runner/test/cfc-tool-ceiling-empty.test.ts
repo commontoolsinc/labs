@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { ImmutableJSONValue } from "@commonfabric/api";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const { toolAllowsObservedConfidentiality } = llmDialogTestHelpers;
@@ -12,15 +13,16 @@ const { toolAllowsObservedConfidentiality } = llmDialogTestHelpers;
 // observations. A declared (even empty) ceiling must be enforced.
 describe("CFC tool ceiling empty", () => {
   const catalogWithToolCeiling = (
-    maxConfidentiality: unknown,
-  ): Parameters<typeof toolAllowsObservedConfidentiality>[0] =>
-    ({
-      llmTools: {
-        mytool: {
-          inputSchema: { type: "object", ifc: { maxConfidentiality } },
-        },
+    maxConfidentiality: readonly ImmutableJSONValue[] | undefined,
+  ): Parameters<typeof toolAllowsObservedConfidentiality>[0] => ({
+    llmTools: {
+      mytool: {
+        description: "test tool",
+        inputSchema: { type: "object", ifc: { maxConfidentiality } },
       },
-    }) as unknown as Parameters<typeof toolAllowsObservedConfidentiality>[0];
+    },
+    dynamicToolCells: new Map(),
+  });
 
   it("denies confidential observations under an empty tool ceiling", () => {
     expect(
