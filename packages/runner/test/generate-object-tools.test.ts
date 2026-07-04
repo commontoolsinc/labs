@@ -59,6 +59,8 @@ describe("generateObject with tools", () => {
   >["commonfabric"]["generateObject"];
   let dummyPattern: any;
 
+  const llmTool = (tool: BuiltInLLMTool): BuiltInLLMTool => tool;
+
   beforeEach(() => {
     clearMockResponses(); // Clear mocks from previous tests
     storageManager = StorageManager.emulate({ as: signer });
@@ -864,12 +866,12 @@ describe("generateObject with tools", () => {
           prompt: "test-multi-tool-pattern-based",
           schema: resultSchema,
           tools: {
-            listItems: patternTool(listItems, {
+            listItems: llmTool(patternTool(listItems, {
               items: itemsData,
-            }) as unknown as BuiltInLLMTool,
-            countItems: patternTool(countItems, {
+            })),
+            countItems: llmTool(patternTool(countItems, {
               items: itemsData,
-            }) as unknown as BuiltInLLMTool,
+            })),
           },
         });
         return result;
@@ -994,9 +996,9 @@ describe("generateObject with tools", () => {
               description: "Fetch data from source",
               handler: loadData({}),
             },
-            analyzeData: patternTool(analyzeData, {
+            analyzeData: llmTool(patternTool(analyzeData, {
               data: dataCell,
-            }) as unknown as BuiltInLLMTool,
+            })),
           },
         });
         return result;
@@ -1088,7 +1090,7 @@ describe("generateObject with tools", () => {
         prompt: "test-pattern-tool-result-location-link",
         schema: resultSchema,
         tools: {
-          returnLinked: patternTool(returnLinked) as unknown as BuiltInLLMTool,
+          returnLinked: llmTool(patternTool(returnLinked)),
         },
       })
     );
@@ -1527,18 +1529,18 @@ describe("generateObject with tools", () => {
           schema: parentResultSchema,
           observationMaxConfidentiality: ["internal"],
           tools: {
-            sanitizePage: {
+            sanitizePage: llmTool({
               description:
                 "Analyze the hostile page with a higher ceiling and return a safe verdict.",
-              ...(patternTool(subAgentPattern, {
+              ...patternTool(subAgentPattern, {
                 prompt: str`${childPrompt}\n\n${hostileBody}`,
-              }) as unknown as Record<string, unknown>),
+              }),
               useResultSchemaForObservation: true,
-            } as unknown as BuiltInLLMTool,
-            restrictedTool: {
+            }),
+            restrictedTool: llmTool({
               description: "Only callable after clean subagent output.",
-              ...(patternTool(restrictedTool) as unknown as BuiltInLLMTool),
-            },
+              ...llmTool(patternTool(restrictedTool)),
+            }),
           },
         });
       },
@@ -1728,9 +1730,9 @@ describe("generateObject with tools", () => {
           prompt,
           schema: parsedResultSchema,
           tools: {
-            helperTool: patternTool(
+            helperTool: llmTool(patternTool(
               childHelperTool,
-            ) as unknown as BuiltInLLMTool,
+            )),
           },
         } as any).result;
       },
@@ -1761,7 +1763,7 @@ describe("generateObject with tools", () => {
             delegate: {
               description:
                 "Run a child agent and require it to return data matching resultSchema.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+              ...llmTool(patternTool(subAgentPattern)),
             },
           },
         });
@@ -2249,11 +2251,11 @@ describe("generateObject with tools", () => {
           delegate: {
             description:
               "Run a higher-clearance worker and return schema-limited data.",
-            ...(patternTool(subAgentPattern, {
+            ...llmTool(patternTool(subAgentPattern, {
               messages: briefingMessages,
               observationMaxConfidentiality: [promptRisk, promptInfluence],
               schemaSanitizePromptInjection: true,
-            }) as unknown as BuiltInLLMTool),
+            })),
           },
         },
       });

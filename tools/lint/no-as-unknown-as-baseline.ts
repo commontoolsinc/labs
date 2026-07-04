@@ -1,16 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/generate-object-tools.test.ts": [
-    "862:15:u1ri7q",
-    "865:15:1bdde73",
-    "992:15:1l0nvbe",
-    "1084:50:hp37od",
-    "1528:17:1xw4ebm",
-    "1530:14:18j6dw2",
-    "1533:46:17wiisx",
-    "1726:14:1iqxz8q",
-    "1757:47:zgr2yv",
-    "2248:15:hwhuwi",
-  ],
   "packages/runner/test/link-utils.test.ts": [
     "431:41:cr2hmb",
   ],
