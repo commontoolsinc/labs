@@ -66,6 +66,68 @@ type DocKey = keyof typeof DOCS;
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
+type TestCommitOperation =
+  | { op: "set"; id: URI; type: MIME; value: unknown }
+  | {
+    op: "patch";
+    id: URI;
+    type: MIME;
+    patches: PatchOp[];
+    value: unknown;
+  }
+  | { op: "delete"; id: URI; type: MIME };
+type TestCommitTransaction = {
+  operations: Array<TestCommitOperation>;
+  schedulerObservation?: unknown;
+};
+type TestReplica = {
+  commitNative(
+    transaction: TestCommitTransaction,
+    source?: unknown,
+  ): Promise<
+    { ok: Record<PropertyKey, never>; error?: undefined } | {
+      ok?: undefined;
+      error: { name?: string; message?: string };
+    }
+  >;
+  buildReads(
+    source: unknown,
+    localSeq: number,
+  ): {
+    confirmed: ConfirmedRead[];
+    pending: PendingRead[];
+  };
+  get(address: {
+    id: URI;
+    type: MIME;
+  }): {
+    since?: number;
+    is?: FabricValue;
+  } | undefined;
+  pull(
+    entries: Array<[{ id: URI; type: MIME }, undefined]>,
+  ): Promise<
+    { ok: Record<PropertyKey, never>; error?: undefined } | {
+      ok?: undefined;
+      error: { name?: string; message?: string };
+    }
+  >;
+};
+
+const testReplica = (
+  replica: IStorageProviderWithReplica["replica"],
+): TestReplica => {
+  const candidate = replica as Partial<TestReplica>;
+  if (
+    typeof candidate.commitNative !== "function" ||
+    typeof candidate.buildReads !== "function" ||
+    typeof candidate.get !== "function" ||
+    typeof candidate.pull !== "function"
+  ) {
+    throw new Error("Expected a memory v2 test replica");
+  }
+  return candidate as TestReplica;
+};
 
 type RootValue = FabricValue;
 type DocState = {
@@ -492,52 +554,7 @@ const createHarness = () => {
   const provider = storageManager.open(space) as TestProvider;
   storageManager.subscribe(notifications);
 
-  const replica = provider.replica as unknown as {
-    commitNative(
-      transaction: {
-        operations: Array<
-          | { op: "set"; id: URI; type: MIME; value: unknown }
-          | {
-            op: "patch";
-            id: URI;
-            type: MIME;
-            patches: PatchOp[];
-            value: unknown;
-          }
-          | { op: "delete"; id: URI; type: MIME }
-        >;
-        schedulerObservation?: unknown;
-      },
-      source?: unknown,
-    ): Promise<
-      { ok: Record<PropertyKey, never>; error?: undefined } | {
-        ok?: undefined;
-        error: { name?: string; message?: string };
-      }
-    >;
-    buildReads(
-      source: unknown,
-      localSeq: number,
-    ): {
-      confirmed: ConfirmedRead[];
-      pending: PendingRead[];
-    };
-    get(address: {
-      id: URI;
-      type: MIME;
-    }): {
-      since?: number;
-      is?: FabricValue;
-    } | undefined;
-    pull(
-      entries: Array<[{ id: URI; type: MIME }, undefined]>,
-    ): Promise<
-      { ok: Record<PropertyKey, never>; error?: undefined } | {
-        ok?: undefined;
-        error: { name?: string; message?: string };
-      }
-    >;
-  };
+  const replica = testReplica(provider.replica);
 
   let nextLocalSeq = 1;
   const dispatch = (
@@ -1205,21 +1222,7 @@ Deno.test("memory v2 stacked commits preserve earlier patch fields across later 
     harness.model.setOutcome(3, { kind: "accept" });
     harness.model.setOutcome(4, { kind: "accept" });
 
-    const replica = harness.replica as unknown as {
-      commitNative(
-        transaction: {
-          operations: Array<
-            {
-              op: "patch";
-              id: URI;
-              type: MIME;
-              patches: PatchOp[];
-              value: { value: RootValue };
-            }
-          >;
-        },
-      ): Promise<any>;
-    };
+    const replica = harness.replica;
 
     const c2 = replica.commitNative({
       operations: [{
@@ -1920,19 +1923,19 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
     assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
 
     // Exactly one revert, scoped to A, whose changes read v1mine -> v2winner.
-    const reverts = harness.notifications.notifications.filter(
-      (notification) => notification.type === "revert",
+    const reverts = harness.notifications.notifications.filter((
+      notification,
+    ): notification is Extract<StorageNotification, { type: "revert" }> =>
+      notification.type === "revert"
     );
     assertEquals(reverts.length, 1);
-    const changes = [
-      ...(reverts[0] as unknown as {
-        changes: Iterable<{
-          address: { id: URI };
-          before?: { value?: RootValue };
-          after?: { value?: RootValue };
-        }>;
-      }).changes,
-    ];
+    const revert = reverts[0];
+    assertExists(revert);
+    const changes = [...revert.changes] as Array<{
+      address: { id: URI };
+      before?: { value?: RootValue };
+      after?: { value?: RootValue };
+    }>;
     assertEquals(changes.map((change) => change.address.id), [DOCS.A]);
     assertEquals(changes[0].before?.value, valueFor("v1mine"));
     assertEquals(changes[0].after?.value, valueFor("v2winner"));
