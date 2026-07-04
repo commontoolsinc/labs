@@ -1,13 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { Cell } from "../src/cell.ts";
-import type { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
   createResumeRepublisher,
   type ElementContribution,
+  type ResumeRepublishElementCell,
+  type ResumeRepublishRuntime,
+  type ResumeRepublishSchemaReadableCell,
+  type ResumeRepublishWritableCell,
 } from "../src/builtins/resume-republish.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 // Focused coverage for the shared resume-republish machinery
 // (src/builtins/resume-republish.ts), driving the straggler and guard arms that
@@ -27,17 +31,13 @@ const logger = getLogger("runner.resume-republish-unit", {
   level: "warn",
 });
 
-interface FakeLink {
-  space: string;
-  id: string;
-  path: readonly unknown[];
-  scope: string;
-}
-
 // A minimal cell stand-in. `value` is what get() returns; `syncResult` is the
 // promise its sync() hands back. Only the methods the republisher calls are
 // implemented.
-class FakeCell {
+class FakeCell
+  implements
+    ResumeRepublishElementCell<unknown>,
+    ResumeRepublishWritableCell<unknown> {
   setValues: unknown[] = [];
   constructor(
     readonly id: string,
@@ -45,23 +45,29 @@ class FakeCell {
     private readonly syncResult: () => Promise<unknown> = () =>
       Promise.resolve(),
   ) {}
-  getAsNormalizedFullLink(): FakeLink {
-    return { space: "space", id: this.id, path: [], scope: "space" };
+  getAsNormalizedFullLink(): NormalizedFullLink {
+    return {
+      space: "did:test:space",
+      id: `of:${this.id}`,
+      path: [],
+      scope: "space",
+    };
   }
-  withTx(): this {
+  withTx(_tx?: IExtendedStorageTransaction): this {
     return this;
   }
-  asSchema(): this {
+  asSchema(_schema?: JSONSchema): this {
     return this;
   }
   get(): unknown {
     return this.value;
   }
-  set(v: unknown): void {
+  set(v: unknown): this {
     this.setValues.push(v);
+    return this;
   }
-  sync(): Promise<unknown> {
-    return this.syncResult();
+  sync(): Promise<this> {
+    return this.syncResult().then(() => this);
   }
   asCell(): this {
     return this;
@@ -70,12 +76,13 @@ class FakeCell {
 
 // An input-list cell: get() returns `{ list }`. The list is whatever the test
 // supplies (a real array, a sparse array, or a non-array to drive the guard).
-class FakeInputsCell {
+class FakeInputsCell
+  implements ResumeRepublishSchemaReadableCell<{ list?: unknown }> {
   constructor(private readonly listValue: unknown) {}
-  asSchema(): this {
+  asSchema(_schema?: JSONSchema): this {
     return this;
   }
-  withTx(): this {
+  withTx(_tx?: IExtendedStorageTransaction): this {
     return this;
   }
   get(): { list?: unknown } {
@@ -91,17 +98,19 @@ interface FakeEditOptions {
 }
 
 function makeRuntime(options: FakeEditOptions = {}): {
-  runtime: Runtime;
+  runtime: ResumeRepublishRuntime;
   tracked: Promise<unknown>[];
 } {
   const tracked: Promise<unknown>[] = [];
-  const runtime = {
-    editWithRetry<T>(fn: (tx: unknown) => T) {
+  const tx = {} as IExtendedStorageTransaction;
+  const runtime: ResumeRepublishRuntime = {
+    editWithRetry<T>(fn: (tx: IExtendedStorageTransaction) => T) {
       if (options.failCommit) {
         return Promise.resolve({
           error: {
             name: "StorageTransactionAborted" as const,
             message: "forced commit failure",
+            reason: "forced commit failure",
           },
         });
       }
@@ -113,7 +122,7 @@ function makeRuntime(options: FakeEditOptions = {}): {
       const tx = {
         runWithAmbientReadMeta: <T>(_meta: unknown, action: () => T): T =>
           action(),
-      };
+      } as IExtendedStorageTransaction;
       const ok = fn(tx);
       return Promise.resolve({ ok });
     },
@@ -122,7 +131,7 @@ function makeRuntime(options: FakeEditOptions = {}): {
         tracked.push(work);
       },
     },
-  } as unknown as Runtime;
+  };
   return { runtime, tracked };
 }
 
@@ -136,17 +145,20 @@ const filterContribution: ElementContribution = (value, inputElement, out) => {
 };
 
 function makeRepublisher(opts: {
-  result: FakeCell | undefined;
+  result: ResumeRepublishWritableCell<any[]> | undefined;
   inputsList: unknown;
-  elementRuns: Map<string, { resultCell: Cell<any>; lastIndex: number }>;
-  runtime: Runtime;
+  elementRuns: Map<
+    string,
+    { resultCell: ResumeRepublishElementCell<any>; lastIndex: number }
+  >;
+  runtime: ResumeRepublishRuntime;
   contribute?: ElementContribution;
 }) {
   return createResumeRepublisher({
     runtime: opts.runtime,
     logger,
-    getResult: () => opts.result as unknown as Cell<any[]> | undefined,
-    inputsCell: new FakeInputsCell(opts.inputsList) as unknown as Cell<any>,
+    getResult: () => opts.result,
+    inputsCell: new FakeInputsCell(opts.inputsList),
     inputSchema: SCHEMA,
     resultSchema: SCHEMA,
     elementRuns: opts.elementRuns,
@@ -161,8 +173,14 @@ function makeRepublisher(opts: {
 function runsFor(
   inputCells: FakeCell[],
   resultCells: FakeCell[],
-): Map<string, { resultCell: Cell<any>; lastIndex: number }> {
-  const runs = new Map<string, { resultCell: Cell<any>; lastIndex: number }>();
+): Map<
+  string,
+  { resultCell: ResumeRepublishElementCell<any>; lastIndex: number }
+> {
+  const runs = new Map<
+    string,
+    { resultCell: ResumeRepublishElementCell<any>; lastIndex: number }
+  >();
   const keyCounts = new Map<string, number>();
   for (let i = 0; i < inputCells.length; i++) {
     if (inputCells[i] === undefined) continue;
@@ -173,7 +191,7 @@ function runsFor(
     keyCounts.set(dedupKey, occurrence + 1);
     const elementKey = JSON.stringify([...linkKey, occurrence]);
     runs.set(elementKey, {
-      resultCell: resultCells[i] as unknown as Cell<any>,
+      resultCell: resultCells[i],
       lastIndex: i,
     });
   }
@@ -194,7 +212,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish(results);
     await Promise.all(tracked);
 
     // The container was written exactly once, with both input elements.
@@ -227,7 +245,7 @@ describe("resume-republish unit", () => {
     // undefined and not awaited, so it returns it as still-pending and
     // re-awaits it. The re-await syncs element 1, whose value arrives truthy,
     // so the next republish includes it.
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([r0]);
     await drain(tracked);
 
     // The re-defer actually happened: the straggler was re-awaited (its sync
@@ -251,7 +269,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish(results);
     await drain(tracked);
     // Nothing to assert on a write; the guard simply returns without throwing.
     expect(true).toBe(true);
@@ -268,7 +286,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([r0]);
     await drain(tracked);
     // The guard returns [] without writing the container.
     expect(result.setValues.length).toBe(0);
@@ -292,7 +310,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([r0]);
     await drain(tracked);
 
     // Only element 0 is rebuilt; the hole and the entry-less index contribute
@@ -312,7 +330,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish(results);
     await drain(tracked);
     // The failed commit means no successful write; the error arm just logs.
     expect(result.setValues.length).toBe(0);
@@ -335,7 +353,7 @@ describe("resume-republish unit", () => {
       runtime,
     });
 
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([r0]);
     await drain(tracked);
     // The rejected sync skips the rebuild entirely; the container is untouched.
     expect(result.setValues.length).toBe(0);

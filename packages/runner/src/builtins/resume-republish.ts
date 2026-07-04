@@ -1,5 +1,3 @@
-import type { Cell } from "../cell.ts";
-import type { Runtime } from "../runtime.ts";
 import type { Logger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
 import { cellIdentityKey } from "./scope-policy.ts";
@@ -7,10 +5,50 @@ import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+
+export interface ResumeRepublishRuntime {
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
+  ): Promise<
+    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+  >;
+  storageManager: {
+    trackUntilSettled(work: Promise<unknown>): void;
+  };
+}
+
+export interface ResumeRepublishAwaitableCell {
+  sync(): Promise<unknown>;
+  getAsNormalizedFullLink(): NormalizedFullLink;
+}
+
+export interface ResumeRepublishReadableCell<T = any> {
+  withTx(tx?: IExtendedStorageTransaction): ResumeRepublishReadableCell<T>;
+  get(): T;
+}
+
+export interface ResumeRepublishSchemaReadableCell<T = any> {
+  asSchema(schema?: JSONSchema): ResumeRepublishReadableCell<T>;
+}
+
+export interface ResumeRepublishWritableCell<T = any> {
+  asSchema(schema?: JSONSchema): ResumeRepublishWritableCell<T>;
+  withTx(tx?: IExtendedStorageTransaction): ResumeRepublishWritableCell<T>;
+  set(value: T): unknown;
+}
+
+export type ResumeRepublishElementCell<T = any> =
+  & ResumeRepublishAwaitableCell
+  & ResumeRepublishReadableCell<T>;
 
 type ElementRuns = Map<
   string,
-  { resultCell: Cell<any>; lastIndex: number }
+  { resultCell: ResumeRepublishElementCell<any>; lastIndex: number }
 >;
 
 /**
@@ -33,18 +71,21 @@ export interface ResumeRepublisher {
    * cells confirm their docs, then rebuild and write it. The entry point; the
    * republish it schedules re-defers any straggler and calls back in.
    */
-  awaitPendingThenRepublish(cells: Cell<any>[], awaited?: Set<string>): void;
+  awaitPendingThenRepublish(
+    cells: ResumeRepublishAwaitableCell[],
+    awaited?: Set<string>,
+  ): void;
 }
 
 export interface ResumeRepublisherOptions {
-  runtime: Runtime;
+  runtime: ResumeRepublishRuntime;
   logger: Logger;
   /**
    * The result container is bound after the builtin's setup, so it is read
    * lazily on each republish rather than captured once.
    */
-  getResult: () => Cell<any[]> | undefined;
-  inputsCell: Cell<any>;
+  getResult: () => ResumeRepublishWritableCell<any[]> | undefined;
+  inputsCell: ResumeRepublishSchemaReadableCell<any>;
   inputSchema: JSONSchema;
   resultSchema: JSONSchema;
   elementRuns: ElementRuns;
@@ -91,7 +132,7 @@ export function createResumeRepublisher(
   } = opts;
 
   const republishFromConfirmed = (awaited: Set<string>): Promise<void> =>
-    runtime.editWithRetry((tx): Cell<any>[] => {
+    runtime.editWithRetry((tx): ResumeRepublishAwaitableCell[] => {
       const result = getResult();
       if (!result) return [];
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
@@ -101,7 +142,7 @@ export function createResumeRepublisher(
       if (!Array.isArray(list)) return [];
       const keyCounts = new Map<string, number>();
       const out: any[] = [];
-      const stillPending: Cell<any>[] = [];
+      const stillPending: ResumeRepublishElementCell<any>[] = [];
       for (let i = 0; i < list.length; i++) {
         if (!(i in list)) continue;
         const { dedupKey, linkKey } = cellIdentityKey(list[i]);
@@ -148,7 +189,7 @@ export function createResumeRepublisher(
   // a chain of re-awaits, so a straggler found at republish time is awaited too
   // and a settled-undefined element is honored once rather than awaited forever.
   const awaitPendingThenRepublish = (
-    cells: Cell<any>[],
+    cells: ResumeRepublishAwaitableCell[],
     awaited: Set<string> = new Set<string>(),
   ): void => {
     for (const c of cells) awaited.add(c.getAsNormalizedFullLink().id);
