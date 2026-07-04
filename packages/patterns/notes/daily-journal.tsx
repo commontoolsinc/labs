@@ -81,7 +81,7 @@ const handleCalendarChange = handler<
   const all = entries.get();
   for (const entry of all) {
     if (entry?.title === journalTitle(dateStr)) {
-      return navigateTo(entry as any);
+      return navigateTo(entry as never);
     }
   }
 
@@ -93,9 +93,9 @@ const handleCalendarChange = handler<
     title: noteTitle,
     content,
   });
-  entries.push(note as any);
-  addPiece.send({ piece: note as any });
-  return navigateTo(note as any);
+  entries.push(note as NotePiece);
+  addPiece.send({ piece: note as MentionablePiece });
+  return navigateTo(note as never);
 });
 
 /**
@@ -116,7 +116,7 @@ const handleGoToToday = handler<
   const all = entries.get();
   for (const entry of all) {
     if (entry?.title === journalTitle(dateStr)) {
-      return navigateTo(entry as any);
+      return navigateTo(entry as never);
     }
   }
 
@@ -129,9 +129,9 @@ const handleGoToToday = handler<
     title: noteTitle,
     content,
   });
-  entries.push(note as any);
-  addPiece.send({ piece: note as any });
-  return navigateTo(note as any);
+  entries.push(note as NotePiece);
+  addPiece.send({ piece: note as MentionablePiece });
+  return navigateTo(note as never);
 });
 
 // ===== Weekly rollup =====
@@ -418,7 +418,7 @@ ${notesXml}
                       Settings
                     </cf-button>
                   </div>
-                  {sortedEntries.map((entry: any) => (
+                  {sortedEntries.map((entry: NotePiece) => (
                     <cf-cell-link $cell={entry} />
                   ))}
                 </cf-vstack>
