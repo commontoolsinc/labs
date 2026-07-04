@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/patterns-async.test.ts": [
-    "59:8:1l3dvdp",
-  ],
   "packages/runner/test/patterns-dynamic.test.ts": [
     "309:25:1wta9fx",
     "380:25:1wta9fx",

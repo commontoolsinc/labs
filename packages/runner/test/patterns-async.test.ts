@@ -49,16 +49,15 @@ describe("Pattern Runner - Async", () => {
     let liftCalled = false;
     let timeoutCalled = false;
 
+    // @ts-expect-error This test returns a Promise through the synchronous lift type.
     const slowLift = lift<{ x: number }, number>(({ x }) => {
       liftCalled = true;
-      return new Promise((resolve) =>
+      return new Promise<number>((resolve) =>
         setTimeout(() => {
           timeoutCalled = true;
           resolve(x * 2);
         }, 100)
-      ) as unknown as number;
-      // Cast is a hack, because we don't actually want lift to be async as API.
-      // This is just temporary support.
+      );
     });
 
     const slowPattern = pattern<{ x: number }>(
