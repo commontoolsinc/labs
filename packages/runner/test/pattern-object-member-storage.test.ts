@@ -88,13 +88,16 @@ describe("Pattern result object with a function member", () => {
   it("throws when the result object carries a method member", () => {
     // The pattern returns an object literal carrying both a plain field and a
     // method. Built through the builder API, this constructs without error...
-    const methodPattern = pattern<Record<string, never>>(() => {
+    const methodPattern = pattern<
+      Record<string, never>,
+      { ok: boolean; read(): number }
+    >(() => {
       return {
         ok: true,
         read() {
           return 1;
         },
-      } as unknown as Record<string, never>;
+      };
     });
 
     const resultCell = runtime.getCell<{ ok?: boolean; read?: unknown }>(
@@ -116,13 +119,16 @@ describe("Pattern result object with a function member", () => {
     // A getter on the result object literal is invoked when the object is
     // built, so the runtime only ever sees a plain data property. Nothing is
     // dropped and nothing throws.
-    const getterPattern = pattern<Record<string, never>>(() => {
+    const getterPattern = pattern<
+      Record<string, never>,
+      { ok: boolean; derived: number }
+    >(() => {
       return {
         ok: true,
         get derived() {
           return 2;
         },
-      } as unknown as Record<string, never>;
+      };
     });
 
     const resultCell = runtime.getCell<{ ok?: boolean; derived?: number }>(
