@@ -38,9 +38,13 @@ type ProfileElementCell = {
   [NAME]?: string;
 };
 
-// NOTE(CT-1628): `cell: any` here/below and the `(Pattern(...) as any).for(...)`
-// casts later in this file are required until the CFC wrapper / pattern-factory
-// types expose a typed cell ref and `.for()`. Tracked for a proper type fix.
+type AddressableCell<T> = T & {
+  for(tag: string): unknown;
+};
+
+const elementCellRef = (cell: ProfileElementCell, tag: string): unknown =>
+  (cell as AddressableCell<ProfileElementCell>).for(tag);
+
 export type ProfileElement = {
   cell: any;
   tag: string;
@@ -276,7 +280,7 @@ const mutateElements = handler<
       const title = (state.title?.get() ?? "").trim() || url;
       const tag = (state.tag?.get() ?? "").trim() || url;
       appendElement({
-        cell: (UrlPatternReference({ title, url }) as any).for(tag),
+        cell: elementCellRef(UrlPatternReference({ title, url }), tag),
         source: "url",
         title,
         tag,
@@ -324,7 +328,8 @@ const mutateElements = handler<
     }
     case "addCard": {
       appendElement({
-        cell: (ProfileCatalogCard({ title: "Profile card" }) as any).for(
+        cell: elementCellRef(
+          ProfileCatalogCard({ title: "Profile card" }),
           "profile-card",
         ),
         source: "catalog",
@@ -343,9 +348,11 @@ const mutateElements = handler<
       const tag = event.tag ?? event.catalogId ?? event.patternUrl ??
         "profile";
       const cell = source === "url"
-        ? (UrlPatternReference({ title, url: event.patternUrl ?? "" }) as any)
-          .for(tag)
-        : (ProfileCatalogCard({ title }) as any).for(tag);
+        ? elementCellRef(
+          UrlPatternReference({ title, url: event.patternUrl ?? "" }),
+          tag,
+        )
+        : elementCellRef(ProfileCatalogCard({ title }), tag);
       appendElement({
         cell,
         tag,

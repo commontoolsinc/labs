@@ -6,6 +6,7 @@ import { fromFileUrl } from "@std/path";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 // CT-1755: a profile card can pin an EXISTING deployed piece. `mutateElements`'s
 // `addPiece` mode stores a real cross-space link to the target piece as the
@@ -45,6 +46,27 @@ const elementsSchema = {
   },
   // deno-lint-ignore no-explicit-any
 } as any;
+
+type ElementCell = {
+  getAsNormalizedFullLink(): NormalizedFullLink;
+};
+
+type ProfileElementRecord = {
+  source?: string;
+  title?: string;
+  tag?: string;
+  cell: ElementCell;
+};
+
+const linkTarget = (cell: ElementCell) => {
+  const link = cell.getAsNormalizedFullLink();
+  return {
+    space: link.space,
+    scope: link.scope,
+    id: link.id,
+    path: link.path,
+  };
+};
 
 describe("profile-home addPiece (followable piece card)", () => {
   let manager: EmulatedStorageManager;
@@ -113,6 +135,81 @@ describe("profile-home addPiece (followable piece card)", () => {
       const link = elements[0].cell.getAsNormalizedFullLink();
       expect(link.space).toBe(TARGET_SPACE);
       expect(link.id).toBe(`of:${TARGET_PIECE}`);
+    } finally {
+      await rt.dispose();
+    }
+  });
+
+  it("stores catalog and URL cards as addressed cell links", async () => {
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      const tx = rt.edit();
+      const pattern = await rt.patternManager.compilePattern(PROGRAM, {
+        space,
+        tx,
+      });
+      const resultCell = rt.getCell<Record<string, unknown>>(
+        space,
+        `${RESULT_CAUSE} catalog and url`,
+        undefined,
+        tx,
+      );
+      // deno-lint-ignore no-explicit-any
+      const result = rt.run(
+        tx,
+        pattern as any,
+        { initialName: "Ada" },
+        resultCell,
+      );
+      rt.prepareTxForCommit(tx);
+      const commit = await tx.commit();
+      expect(commit.error).toBeUndefined();
+      await result.pull();
+
+      const catalogEvent = {
+        catalogId: "profile-card",
+        title: "Profile card",
+        tag: "#profileCard",
+        userTags: ["person"],
+      };
+      const urlEvent = {
+        patternUrl: "https://example.com/pattern.tsx",
+        title: "Example pattern",
+        tag: "example-pattern",
+        userTags: ["url"],
+      };
+
+      const tx2 = rt.edit();
+      const addElement = result.withTx(tx2).key("addElement");
+      addElement.send(catalogEvent);
+      addElement.send(urlEvent);
+      const commit2 = await tx2.commit();
+      expect(commit2.error).toBeUndefined();
+      await result.pull();
+      await rt.idle();
+      await result.pull();
+
+      const elementsCell = result.key("elements").asSchema(elementsSchema);
+      await elementsCell.sync();
+      await elementsCell.pull();
+      const elements = elementsCell.get() as ProfileElementRecord[];
+      expect(elements.map((element) => element.source)).toEqual([
+        "catalog",
+        "url",
+      ]);
+
+      const catalogLink = linkTarget(elements[0].cell);
+      const urlLink = linkTarget(elements[1].cell);
+      expect(catalogLink.space).toBe(space);
+      expect(catalogLink.scope).toBe("space");
+      expect(catalogLink.path).toEqual([]);
+      expect(urlLink.space).toBe(space);
+      expect(urlLink.scope).toBe("space");
+      expect(urlLink.path).toEqual([]);
+      expect(urlLink.id).not.toBe(catalogLink.id);
     } finally {
       await rt.dispose();
     }
