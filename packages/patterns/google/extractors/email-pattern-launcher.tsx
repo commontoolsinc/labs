@@ -182,7 +182,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       { entry: RegistryEntry; emails: Set<string> }
     >();
 
-    for (const email of allEmails || [] as any[]) {
+    for (const email of allEmails ?? []) {
       const fromAddress = email?.from;
       if (!fromAddress) continue;
 
