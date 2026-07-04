@@ -81,7 +81,7 @@ describe("CT-1173: array push via query-result-proxy", () => {
     // Read back the raw array data
     const result = tx.readValueOrThrow(
       arrayCell.getAsNormalizedFullLink(),
-    ) as any[];
+    ) as unknown[];
 
     console.log("Result array:", JSON.stringify(result, null, 2));
 
