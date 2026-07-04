@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Writable } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
@@ -853,8 +852,10 @@ describe("Cell commit callbacks", () => {
         const result = arrayCell.get();
         expect(Array.isArray(result)).toBe(true);
 
-        const first = result[0] as unknown as Writable<{ foo: number }>;
-        expect(isCell(first)).toBe(true);
+        const first = result[0];
+        if (!isCell(first)) {
+          throw new Error("Expected array item to be a cell");
+        }
         expect(first.getAsNormalizedFullLink().path).toEqual(["0"]);
 
         const resolved = first.resolveAsCell();
@@ -894,8 +895,10 @@ describe("Cell commit callbacks", () => {
         arrayCell.setRawUntyped([target.getAsLink()]);
 
         const result = arrayCell.get();
-        const first = result[0] as unknown as Writable<{ foo: number }>;
-        expect(isCell(first)).toBe(true);
+        const first = result[0];
+        if (!isCell(first)) {
+          throw new Error("Expected array item to be a cell");
+        }
 
         const resolved = first.resolveAsCell();
         const resolvedLink = resolved.getAsNormalizedFullLink();
