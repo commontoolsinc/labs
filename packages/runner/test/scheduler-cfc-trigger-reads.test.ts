@@ -25,6 +25,12 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 const signer = await Identity.fromPassphrase("scheduler-cfc-trigger-reads");
 const space = signer.did() as MemorySpace;
 
+function schedulerNodes(runtime: Runtime): NodeRegistry {
+  const nodes = Reflect.get(runtime.scheduler, "nodes");
+  expect(nodes).toBeInstanceOf(NodeRegistry);
+  return nodes;
+}
+
 function makeChange(
   address: Partial<IMemoryChange["address"]> & { id: string },
 ): IMemoryChange {
@@ -397,9 +403,7 @@ describe("unsubscribe clears pending trigger reads", () => {
       );
       await runtime.idle();
 
-      const nodes = (runtime.scheduler as unknown as {
-        nodes: NodeRegistry;
-      }).nodes;
+      const nodes = schedulerNodes(runtime);
       const record = nodes.get(action);
       expect(record).toBeDefined();
       record!.invalidCauses = [{

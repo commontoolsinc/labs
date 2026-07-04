@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-cfc-trigger-reads.test.ts": [
-    "394:42:1tahh7d",
-  ],
   "packages/runner/test/scheduler-commit-backpressure.test.ts": [
     "60:25:1y1onvv",
   ],
