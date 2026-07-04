@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/result-utils.test.ts": [
-    "9:4:8wlele",
-    "13:4:1zoi63",
-  ],
   "packages/runner/test/resume-republish-unit.test.ts": [
     "116:4:abkfmi",
     "139:33:1a1nup0",

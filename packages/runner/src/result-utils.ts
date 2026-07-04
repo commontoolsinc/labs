@@ -5,8 +5,8 @@ import type { Cell } from "./cell.ts";
  * @param patternCell The cell with a path that contains the the pattern link
  */
 export function setPatternCell(
-  resultCell: Cell<unknown>,
-  patternCell: Cell<unknown>,
+  resultCell: Pick<Cell<unknown>, "setMetaRaw">,
+  patternCell: Pick<Cell<unknown>, "getRaw">,
 ) {
   // this could be a link to the pattern cell, and i'd like to get the
   // contents of that link embedded as the meta pattern. However, timing
