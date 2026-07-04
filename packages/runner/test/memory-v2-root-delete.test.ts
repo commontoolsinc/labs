@@ -20,7 +20,7 @@ Deno.test("memory v2 root deletes stay undefined through sink and get", async ()
   let tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    const cell = runtime.getCell<{ name: string }>(
+    const cell = runtime.getCell<{ name: string } | undefined>(
       space,
       "memory-v2-root-delete",
       undefined,
@@ -38,7 +38,7 @@ Deno.test("memory v2 root deletes stay undefined through sink and get", async ()
 
     await runtime.idle();
 
-    cell.withTx(tx).set(undefined as unknown as { name: string });
+    cell.withTx(tx).set(undefined);
     await tx.commit();
     tx = runtime.edit();
     await runtime.idle();
@@ -72,7 +72,7 @@ Deno.test("memory v2 source-backed cells clear to undefined", async () => {
       undefined,
       tx,
     );
-    const child = runtime.getCell<{ name: string }>(
+    const child = runtime.getCell<{ name: string } | undefined>(
       space,
       "memory-v2-root-delete-child",
       undefined,
@@ -84,7 +84,7 @@ Deno.test("memory v2 source-backed cells clear to undefined", async () => {
     await tx.commit();
 
     tx = runtime.edit();
-    child.withTx(tx).set(undefined as unknown as { name: string });
+    child.withTx(tx).set(undefined);
     await tx.commit();
     tx = runtime.edit();
 

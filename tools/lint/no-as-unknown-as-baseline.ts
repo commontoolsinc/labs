@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-root-delete.test.ts": [
-    "41:34:adhn6r",
-    "87:35:adhn6r",
-  ],
   "packages/runner/test/memory-v2-stacked-commit.test.ts": [
     "473:35:1lh80cu",
     "1161:36:d047n9",
