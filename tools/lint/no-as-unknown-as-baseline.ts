@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/rehydrate-internal-default.test.ts": [
-    "199:40:v0lnh0",
-  ],
   "packages/runner/test/result-utils.test.ts": [
     "9:4:8wlele",
     "13:4:1zoi63",

@@ -196,17 +196,12 @@ describe("rehydrate internal default (CT-1666)", () => {
       const internalLink = internalLinkOf(rc1, "activeTab");
       const argumentLink = getMetaLink(rc1, "argument");
       expect(argumentLink).toBeDefined();
-      const provider2 = sm2.open(space) as unknown as {
-        get(
-          id: string,
-          scope?: string,
-        ):
-          | { value?: unknown; argument?: unknown; internal?: unknown }
-          | undefined;
-      };
-      expect(provider2.get(internalLink.id, internalLink.scope))
+      const provider2 = sm2.open(space);
+      expect(provider2.replica.getDocument(internalLink.id, internalLink.scope))
         .toBeUndefined();
-      expect(provider2.get(argumentLink!.id, argumentLink!.scope))
+      expect(
+        provider2.replica.getDocument(argumentLink!.id, argumentLink!.scope),
+      )
         .toBeUndefined();
 
       const rc2 = rt2.getCell<Record<string, never>>(
@@ -216,7 +211,7 @@ describe("rehydrate internal default (CT-1666)", () => {
       await rc2.sync();
       await sm2.synced();
 
-      const resultDoc = provider2.get(
+      const resultDoc = provider2.replica.getDocument(
         rc2.getAsNormalizedFullLink().id,
         rc2.getAsNormalizedFullLink().scope,
       );
@@ -224,11 +219,17 @@ describe("rehydrate internal default (CT-1666)", () => {
       expect(resultDoc?.internal).toBeDefined();
       expect(resultDoc?.argument).toBeDefined();
 
-      const internalDoc = provider2.get(internalLink.id, internalLink.scope);
+      const internalDoc = provider2.replica.getDocument(
+        internalLink.id,
+        internalLink.scope,
+      );
       expect(internalDoc).toBeDefined();
       expect(internalDoc?.value).toEqual("profile");
 
-      const argumentDoc = provider2.get(argumentLink!.id, argumentLink!.scope);
+      const argumentDoc = provider2.replica.getDocument(
+        argumentLink!.id,
+        argumentLink!.scope,
+      );
       expect(argumentDoc).toBeDefined();
       expect(argumentDoc?.value).toEqual(inputs);
     } finally {
