@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-required-integrity-provenance.test.ts": [
-    "258:64:30mg0f",
-  ],
   "packages/runner/test/cfc-sink-ceiling-link-read.test.ts": [
     "294:8:gf4r6d",
   ],

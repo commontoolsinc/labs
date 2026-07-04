@@ -31,6 +31,20 @@ const REPRESENTS_PRINCIPAL_ATOM = {
 };
 const ADMIN_ATOM = "group-chat-admin";
 
+type StoredCfcDocument = {
+  cfc?: {
+    labelMap?: {
+      entries: Array<{
+        path: string[];
+        label: {
+          confidentiality?: unknown[];
+          integrity?: Array<{ type?: string }>;
+        };
+      }>;
+    };
+  };
+};
+
 // Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
 // write (how the runtime persists it), so a later read picks up the given label.
 const seedLabeledDoc = async (
@@ -255,22 +269,10 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
       // Non-vacuity anchor: assert the S4 strip actually ran — the persisted
       // labelMap kept the confidentiality but NOT the forged LinkReference.
       const persistedId = parseLink(src.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: unknown[];
-                  integrity?: Array<{ type?: string }>;
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const entries = replica.getDocument(persistedId)?.cfc?.labelMap
+      const document = storageManager.open(signer.did()).replica.getDocument(
+        persistedId,
+      ) as StoredCfcDocument | undefined;
+      const entries = document?.cfc?.labelMap
         ?.entries ?? [];
       expect(
         entries.flatMap((e) => e.label.integrity ?? [])
