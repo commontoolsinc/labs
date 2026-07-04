@@ -416,7 +416,7 @@ const stripRequiredFields = (schema: JSONSchema): JSONSchema => {
     return schema;
   }
 
-  const { required: _required, ...rest } = schema as any;
+  const { required: _required, ...rest } = schema;
   const result: Record<string, unknown> = { ...rest };
 
   if (isRecord(result.properties)) {

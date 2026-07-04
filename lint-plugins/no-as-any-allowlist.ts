@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/src/cfc/schema-sanitization.ts",
   "packages/runner/src/harness/executable-registry.ts",
   "packages/runner/src/link-utils.ts",
   "packages/runner/src/pattern-binding.ts",
