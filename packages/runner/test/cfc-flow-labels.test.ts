@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -14,16 +15,18 @@ type StoredEntry = {
   origin?: string;
 };
 
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+};
+
 const replicaEntries = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  id: string,
+  id: URI,
 ): StoredEntry[] => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      cfc?: { labelMap?: { entries: StoredEntry[] } };
-    } | undefined;
-  };
-  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const document = storageManager.open(signer.did()).replica.getDocument(id) as
+    | StoredCfcDocument
+    | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
 };
 
 // S16 default transition: a transaction's outputs are tainted by what it
