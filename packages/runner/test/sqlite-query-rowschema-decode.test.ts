@@ -118,7 +118,7 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
       properties: {
         author_cf_link: { asCell: ["cell"], type: "object" },
       },
-    } as unknown as JSONSchema;
+    } as const satisfies JSONSchema;
 
     const tx2 = runtime.edit();
     const p = cf.pattern(() =>
@@ -158,7 +158,7 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
       properties: {
         result: { type: "array", items: rowSchema },
       },
-    } as unknown as JSONSchema;
+    } as const satisfies JSONSchema;
     const tree = result.asSchema(wrapSchema).get() as {
       result?: Array<{ author_cf_link?: unknown }>;
     };

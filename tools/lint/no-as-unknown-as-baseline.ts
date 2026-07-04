@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/sqlite-query-rowschema-decode.test.ts": [
-    "121:6:2hafb3",
-    "161:6:89ea6r",
-  ],
   "packages/runner/test/sqlite-read-labeling.test.ts": [
     "178:2:1echq16",
     "250:8:1enubjt",
