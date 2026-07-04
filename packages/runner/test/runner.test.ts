@@ -1333,6 +1333,73 @@ describe("setup/start", () => {
     expect(error?.message).not.toContain("x".repeat(100));
   });
 
+  it("start() leaves no running registration when instantiation throws", async () => {
+    // A handler node whose $event input does not resolve to a stream marker
+    // (e.g. persisted state in an older format) makes node instantiation
+    // throw "Handler used as lift".
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "start cleans up when instantiation throws",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "Handler used as lift",
+    );
+
+    // Regression: the failed start used to leave the piece registered as
+    // running, so a second start() reported success for a piece that had no
+    // nodes or event handlers — events sent to it were silently dropped. It
+    // must fail the same way as the first attempt instead.
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "Handler used as lift",
+    );
+  });
+
+  it("run() with a given pattern leaves no running registration when instantiation throws", () => {
+    // Same regression as above, via the fresh-run entry (the path a live
+    // `cf piece new` takes): startCore's givenPattern branch must also clean
+    // up when node instantiation throws.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "fresh run cleans up when instantiation throws",
+    );
+
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow("Handler used as lift");
+
+    // A zombie registration would make the second run() short-circuit to
+    // "already running" and return without error. It must throw identically.
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow("Handler used as lift");
+  });
+
   it("setup ignores exhausted retry errors and still resolves", async () => {
     const pattern: Pattern = {
       argumentSchema: {

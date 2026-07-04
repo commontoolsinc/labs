@@ -1315,7 +1315,15 @@ export class Runner {
     // Determine initial pattern
     if (givenPattern) {
       currentPatternKey = initialRef ? patternIdentityKey(initialRef) : KEYLESS;
-      instantiatePattern(givenPattern, tx);
+      try {
+        instantiatePattern(givenPattern, tx);
+      } catch (error) {
+        // Without cleanup the piece stays registered in `this.cancels`, so
+        // every later start() reports "already running" for a piece that has
+        // no nodes or event handlers — events sent to it are then dropped.
+        cleanup();
+        throw error;
+      }
       if (!doNotUpdateOnPatternChange) {
         setupPatternWatcher();
       }
