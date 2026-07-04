@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -8,6 +9,25 @@ import { parseLink } from "../src/link-utils.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-labelmap-monotone");
+
+type StoredEntry = {
+  path: string[];
+  label: { confidentiality?: string[] };
+};
+
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+};
+
+const replicaEntries = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  id: URI,
+): StoredEntry[] => {
+  const document = storageManager.open(signer.did()).replica.getDocument(id) as
+    | StoredCfcDocument
+    | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
+};
 
 // Regression guard for labelMap store-confidentiality monotonicity (audit S9).
 //
@@ -86,19 +106,9 @@ describe("CFC labelMap confidentiality monotonicity", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       const persistedId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<
-                { path: string[]; label: { confidentiality?: string[] } }
-              >;
-            };
-          };
-        } | undefined;
-      };
-      const entry = replica.getDocument(persistedId)?.cfc?.labelMap?.entries
-        .find((e) => e.path.length === 1 && e.path[0] === "secret");
+      const entry = replicaEntries(storageManager, persistedId).find((e) =>
+        e.path.length === 1 && e.path[0] === "secret"
+      );
       expect(entry).toBeDefined();
       expect([...(entry!.label.confidentiality ?? [])].sort()).toEqual(
         ["base", "link-derived"],
@@ -185,20 +195,7 @@ describe("CFC labelMap confidentiality monotonicity", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       const persistedId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<
-                { path: string[]; label: { confidentiality?: string[] } }
-              >;
-            };
-          };
-        } | undefined;
-      };
-      const entries =
-        replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
-          [];
+      const entries = replicaEntries(storageManager, persistedId);
       const child = entries.find((e) =>
         e.path.length === 2 && e.path[0] === "obj" && e.path[1] === "field"
       );
