@@ -8,6 +8,7 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 // A storage manager with its OWN per-space client replicas, loopback-connected
 // to a SHARED in-process memory server (mirrors cross-space-value-read.test.ts).
@@ -52,19 +53,15 @@ const COUNTER_CAUSE = "mergeable-counter";
 const stringListSchema = {
   type: "array",
   items: { type: "string" },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 const numberSchema = {
   type: "number",
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 // A permissive schema that accepts any value, so a cell can hold a scalar that
 // the array/number mergeable methods then reject.
-const anySchema = {
-  // deno-lint-ignore no-explicit-any
-} as any;
+const anySchema = {} satisfies JSONSchema;
 
 // Read the durable array from a fresh session that pulls it straight off the
 // shared server, so the assertion reflects committed/durable state rather than
@@ -581,8 +578,7 @@ const voteListSchema = {
       voteType: { type: "string" },
     },
   },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 // Read the durable list from a fresh session and resolve each element link to
 // its content, so assertions reflect committed state, link-resolved.
@@ -902,21 +898,36 @@ describe("mergeable op guards and single-session branches", () => {
 
   it("addUnique onto a non-array value throws", () => {
     const tx = rt.edit();
-    const cell = rt.getCell(space, "scalar-au", anySchema, tx);
+    const cell = rt.getCell<unknown[] | number>(
+      space,
+      "scalar-au",
+      anySchema,
+      tx,
+    );
     cell.set(7);
     expect(() => cell.addUnique("x")).toThrow();
   });
 
   it("increment onto a non-number value throws", () => {
     const tx = rt.edit();
-    const cell = rt.getCell(space, "scalar-inc", anySchema, tx);
+    const cell = rt.getCell<number | string>(
+      space,
+      "scalar-inc",
+      anySchema,
+      tx,
+    );
     cell.set("not-a-number");
     expect(() => cell.increment(1)).toThrow();
   });
 
   it("removeByValue onto a non-array value throws", () => {
     const tx = rt.edit();
-    const cell = rt.getCell(space, "scalar-rm", anySchema, tx);
+    const cell = rt.getCell<unknown[] | number>(
+      space,
+      "scalar-rm",
+      anySchema,
+      tx,
+    );
     cell.set(7);
     expect(() => cell.removeByValue("x")).toThrow();
   });
@@ -946,8 +957,7 @@ describe("mergeable op guards and single-session branches", () => {
     const tx = rt.edit();
     // A boolean schema (`true`) is a valid JSON schema but not a record, so the
     // derived element schema is absent.
-    // deno-lint-ignore no-explicit-any
-    const cell = rt.getCell(space, "bool-schema", true as any, tx);
+    const cell = rt.getCell<unknown>(space, "bool-schema", true, tx);
     cell.set([{ a: 1 }]);
     const element = cell.elementById("k1");
     element.set({ a: 2 });
@@ -964,8 +974,7 @@ describe("mergeable op guards and single-session branches", () => {
   it("elementById tolerates a schema without an items entry", () => {
     const looseListSchema = {
       type: "array",
-      // deno-lint-ignore no-explicit-any
-    } as any;
+    } satisfies JSONSchema;
     const tx = rt.edit();
     const list = rt.getCell(space, "loose-list", looseListSchema, tx);
     list.set([]);
@@ -1014,8 +1023,7 @@ describe("mergeable op guards and single-session branches", () => {
           properties: { name: { type: "string" } },
         },
       },
-      // deno-lint-ignore no-explicit-any
-    } as any;
+    } satisfies JSONSchema;
     const tx = rt.edit();
     const list = rt.getCell(space, "ref-list", refListSchema, tx);
     list.set([]);
@@ -1058,8 +1066,7 @@ describe("mergeable op guards and single-session branches", () => {
         tags: { type: "array", items: { type: "string" } },
         count: { type: "number" },
       },
-      // deno-lint-ignore no-explicit-any
-    } as any;
+    } satisfies JSONSchema;
     const cause = "multi-field-entity";
 
     const tx0 = rt.edit();
@@ -1130,8 +1137,7 @@ describe("mergeable op guards and single-session branches", () => {
         tags: { type: "array", items: { type: "string" } },
         count: { type: "number" },
       },
-      // deno-lint-ignore no-explicit-any
-    } as any;
+    } satisfies JSONSchema;
     const cause = "net-zero-increment";
 
     const tx0 = rt.edit();
@@ -1171,8 +1177,7 @@ describe("mergeable op guards and single-session branches", () => {
   it("an append superseded by a non-array set is dropped", async () => {
     const cause = "append-then-scalar";
     const tx = rt.edit();
-    // deno-lint-ignore no-explicit-any
-    const cell = rt.getCell(space, cause, anySchema, tx);
+    const cell = rt.getCell<string[] | number>(space, cause, anySchema, tx);
     cell.set([]);
     cell.push("x");
     cell.set(5);
@@ -1187,8 +1192,7 @@ describe("mergeable op guards and single-session branches", () => {
       storageManager: readBack,
     });
     try {
-      // deno-lint-ignore no-explicit-any
-      const cell2 = rt2.getCell(space, cause, anySchema as any);
+      const cell2 = rt2.getCell<number>(space, cause, anySchema);
       await cell2.sync();
       await cell2.pull();
       expect(cell2.get()).toBe(5);
@@ -1253,8 +1257,7 @@ const namedListSchema = {
     type: "object",
     properties: { name: { type: "string" } },
   },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 async function readDurableNamed(
   server: MemoryV2Server.Server,
@@ -1509,8 +1512,7 @@ const favoriteLikeSchema = {
     },
     required: ["cell"],
   },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 // The key a favorite is addressed by: the favorited piece's intrinsic link,
 // identical in any session that references the same piece.
@@ -1545,7 +1547,12 @@ describe("keyed entity holding a cell reference (home favorites shape)", () => {
   it("favoriting a piece by its link dedups and removes by identity", () => {
     const tx = rt.edit();
     // The piece being favorited: any cell with a stable link.
-    const piece = rt.getCell(space, "favorited-piece", anySchema, tx);
+    const piece = rt.getCell<{ title: string }>(
+      space,
+      "favorited-piece",
+      anySchema,
+      tx,
+    );
     piece.set({ title: "a piece" });
 
     const favorites = rt.getCell<FavoriteLike[]>(
@@ -1578,9 +1585,19 @@ describe("keyed entity holding a cell reference (home favorites shape)", () => {
 
   it("favorites of two distinct pieces coexist and remove independently", () => {
     const tx = rt.edit();
-    const pieceA = rt.getCell(space, "piece-a", anySchema, tx);
+    const pieceA = rt.getCell<{ title: string }>(
+      space,
+      "piece-a",
+      anySchema,
+      tx,
+    );
     pieceA.set({ title: "A" });
-    const pieceB = rt.getCell(space, "piece-b", anySchema, tx);
+    const pieceB = rt.getCell<{ title: string }>(
+      space,
+      "piece-b",
+      anySchema,
+      tx,
+    );
     pieceB.set({ title: "B" });
 
     const favorites = rt.getCell<FavoriteLike[]>(
