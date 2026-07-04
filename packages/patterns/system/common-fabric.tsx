@@ -8,6 +8,7 @@ import {
   type FrameworkProvided,
   handler,
   ifElse,
+  type JSONObject,
   NAME,
   navigateTo,
   pattern,
@@ -18,6 +19,19 @@ import {
 ///// COMMON FABRIC (get it?) ////
 
 import { type MentionablePiece } from "./backlinks-index.tsx";
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.length > 0) {
+      return message;
+    }
+  }
+  return "<error>";
+}
 
 /**
  * Calculate the result of a mathematical expression.
@@ -139,7 +153,7 @@ export const calculator = pattern<
     try {
       result = evaluateMathExpression(sanitized).toString(sanitizedBase);
     } catch (error) {
-      result = { error: (error as any)?.message || "<error>" };
+      result = { error: errorMessage(error) };
     }
     return result;
   });
@@ -170,7 +184,7 @@ export const addListItem = handler<
       state.list.push({ title: args.item });
       args.result.set(`${state.list.get().length} items`);
     } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+      args.result.set(`Error: ${errorMessage(error)}`);
     }
   },
 );
@@ -191,7 +205,7 @@ export const readListItems = handler<
         args.result.set(`List items (${items.length} total):\n${itemList}`);
       }
     } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+      args.result.set(`Error: ${errorMessage(error)}`);
     }
   },
 );
@@ -356,7 +370,7 @@ export default pattern<ToolsInput>(({ list }) => {
  */
 type FetchAndRunPatternInput = {
   url: string;
-  args: Writable<any>;
+  args: Writable<JSONObject>;
 };
 
 export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
@@ -389,13 +403,15 @@ export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
   },
 );
 
+type CellLinkInput = { "@link": string };
+
 /**
  * `navigateTo({ cell: { "@link": "/of:xyz" } })` - Navigates to that cell's UI
  *
  * Especially useful after instantiating a pattern with fetchAndRunPattern:
  * Pass the "@link" you get at `cell` to navigate to the pattern's view.
  */
-type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
+type NavigateToPatternInput = { cell: Writable<CellLinkInput> }; // Hack to steer LLM
 export const navigateToPattern = pattern<NavigateToPatternInput>(
   ({ cell }) => {
     const success = navigateTo(cell);
