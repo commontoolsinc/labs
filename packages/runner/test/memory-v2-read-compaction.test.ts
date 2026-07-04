@@ -4,6 +4,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 
 const DOCUMENT_ADDRESS = {
   id: "bench:read-compaction" as const,
@@ -23,6 +24,34 @@ const createRuntime = async (label: string) => {
   });
   return { signer, storage, runtime };
 };
+
+type BuiltReads = {
+  confirmed: Array<{ id: string; path: string[]; seq: number }>;
+  pending: Array<{ id: string; path: string[]; localSeq: number }>;
+};
+
+type BuildReadsReplica = {
+  buildReads(source: unknown, localSeq: number): BuiltReads;
+};
+
+function isBuildReadsReplica(
+  candidate: unknown,
+): candidate is BuildReadsReplica {
+  if (typeof candidate !== "object" || candidate === null) return false;
+  return typeof (candidate as Partial<BuildReadsReplica>).buildReads ===
+    "function";
+}
+
+function buildReadsReplica(
+  storage: ReturnType<typeof StorageManager.emulate>,
+  space: MemorySpace,
+): BuildReadsReplica {
+  const replica = storage.open(space).replica;
+  if (!isBuildReadsReplica(replica)) {
+    throw new Error("Expected memory v2 replica with buildReads()");
+  }
+  return replica;
+}
 
 Deno.test("memory v2 compacts descendant confirmed reads under a recursive ancestor", async () => {
   const { signer, storage, runtime } = await createRuntime(
@@ -49,12 +78,7 @@ Deno.test("memory v2 compacts descendant confirmed reads under a recursive ances
     path: ["section0", "field0"],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = buildReadsReplica(storage, space);
   const reads = replica.buildReads(tx.tx, 1);
 
   assertEquals(reads.pending, []);
@@ -92,12 +116,7 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
     path: ["section0", "field0"],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = buildReadsReplica(storage, space);
   const reads = replica.buildReads(tx.tx, 1);
 
   assertEquals(reads.pending, []);
@@ -141,12 +160,7 @@ Deno.test("memory v2 excludes inline data URI reads from tracked commit dependen
     path: [],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ id: string; path: string[]; seq: number }>;
-      pending: Array<{ id: string; path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = buildReadsReplica(storage, space);
   const directReads = [...(tx.tx.getReadActivities?.() ?? [])];
   const reads = replica.buildReads(tx.tx, 1);
 
@@ -195,12 +209,7 @@ Deno.test("memory v2 excludeReadFromConflict drops ONLY marked nonRecursive (ref
     { nonRecursive: true },
   );
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = buildReadsReplica(storage, space);
   const reads = replica.buildReads(tx.tx, 1);
   const paths = reads.confirmed.map((read) => read.path.join("."));
 
@@ -247,12 +256,7 @@ Deno.test("memory v2 excludeReadFromConflict reads STAY in the reactivity log (a
     { meta: excludeReadFromConflict, nonRecursive: true },
   );
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = buildReadsReplica(storage, space);
 
   // Conflict set DROPS the link read (no spurious collision with disjoint writers).
   const conflictPaths = replica.buildReads(tx.tx, 1).confirmed.map((read) =>
