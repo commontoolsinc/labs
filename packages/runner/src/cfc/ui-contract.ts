@@ -5,10 +5,9 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "../link-utils.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import type { CfcAddress } from "./types.ts";
+import type { CfcAddress, WritePolicyInput } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
 
 type UiContractTrustRequirements = {
@@ -71,10 +70,10 @@ type SerializedTrustedEvent = {
   };
 };
 
-type TrustedEventPolicyTx = Pick<
-  IExtendedStorageTransaction,
-  "getCfcState" | "recordCfcWritePolicyInput"
->;
+type TrustedEventPolicyTx = {
+  getCfcState(): { writePolicyInputs: readonly WritePolicyInput[] };
+  recordCfcWritePolicyInput(input: WritePolicyInput): void;
+};
 
 type AddressLike = {
   space: string;

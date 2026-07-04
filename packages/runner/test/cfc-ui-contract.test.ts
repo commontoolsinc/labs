@@ -464,7 +464,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -530,7 +530,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         id: "of:cfc-ui-contract-array-document",
@@ -628,7 +628,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -708,7 +708,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -787,7 +787,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         id: documentId,
@@ -867,7 +867,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -945,7 +945,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -1029,7 +1029,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -1081,7 +1081,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "space",
@@ -1167,7 +1167,7 @@ describe("CFC trusted UI event enforcement", () => {
     };
 
     recordTrustedEventPolicyInputs(
-      tx as unknown as IExtendedStorageTransaction,
+      tx,
       [{
         space,
         scope: "user",

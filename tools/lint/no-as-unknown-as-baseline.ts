@@ -1,16 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-ui-contract.test.ts": [
-    "467:9:10od7qa",
-    "533:9:10od7qa",
-    "631:9:10od7qa",
-    "711:9:10od7qa",
-    "790:9:10od7qa",
-    "870:9:10od7qa",
-    "948:9:10od7qa",
-    "1032:9:10od7qa",
-    "1084:9:10od7qa",
-    "1170:9:10od7qa",
-  ],
   "packages/runner/test/cfc-unsupported-ifc-keys.test.ts": [
     "51:10:1ksv5oi",
   ],
