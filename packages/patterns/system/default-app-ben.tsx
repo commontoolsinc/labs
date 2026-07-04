@@ -10,7 +10,7 @@ import {
   Writable,
 } from "commonfabric";
 
-import { default as Note } from "../notes/note.tsx";
+import { default as Note, type NotePiece } from "../notes/note.tsx";
 
 // Maximum number of recent pieces to track
 const MAX_RECENT_PIECES = 10;
@@ -22,9 +22,9 @@ import KnowledgeGraph, {
   searchGraphPattern,
 } from "./knowledge-graph.tsx";
 
-import QuickCapture from "./quick-capture.tsx";
+import QuickCapture, { type QuickCaptureOutput } from "./quick-capture.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
-import DoList from "../do-list/do-list.tsx";
+import DoList, { type DoItem } from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import DailyJournal from "../notes/daily-journal.tsx";
 import PieceGrid from "./piece-grid.tsx";
@@ -32,9 +32,17 @@ import SuggestionHistory, {
   type SuggestionHistoryEntry,
 } from "./suggestion-history.tsx";
 
+type NotebookDropTarget = {
+  notes?: NotePiece[];
+};
+
 type MinimalPiece = {
   [NAME]?: string;
   isHidden?: boolean;
+};
+
+type JournalPiece = MinimalPiece & {
+  isJournal?: boolean;
 };
 
 type PiecesListInput = void;
@@ -67,9 +75,7 @@ const removePiece = handler<
   }
 >((_, state) => {
   const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex(
-    (c: any) => c && state.piece.equals(c),
-  );
+  const index = allPiecesValue.findIndex((c) => c && state.piece.equals(c));
 
   if (index !== -1) {
     const pieceListCopy = [...allPiecesValue];
@@ -82,15 +88,15 @@ const removePiece = handler<
 
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
-  { detail: { sourceCell: Writable<unknown> } },
-  { notebook: Writable<{ notes?: unknown[] }> }
+  { detail: { sourceCell: Writable<NotePiece> } },
+  { notebook: Writable<NotebookDropTarget> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
   // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n));
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -100,7 +106,7 @@ const dropOntoNotebook = handler<
   notesCell.push(sourceCell);
 });
 
-const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
+const toggleFab = handler<unknown, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(!fabExpanded.get());
   },
@@ -140,7 +146,7 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
 // Menu: Quick Capture
 const menuQuickCapture = handler<
   void,
-  { menuOpen: Writable<boolean>; quickCapture: any }
+  { menuOpen: Writable<boolean>; quickCapture: QuickCaptureOutput }
 >((_, { menuOpen, quickCapture }) => {
   menuOpen.set(false);
   return navigateTo(quickCapture);
@@ -153,9 +159,11 @@ const menuDailyJournal = handler<
 >((_, { menuOpen, allPieces }) => {
   menuOpen.set(false);
   const pieces = allPieces.get();
-  const existing = pieces.find((piece: any) => piece?.isJournal === true);
+  const existing = pieces.find((piece): piece is JournalPiece =>
+    piece != null && "isJournal" in piece && piece.isJournal === true
+  );
   if (existing) {
-    return navigateTo(existing as any);
+    return navigateTo(existing);
   }
   return navigateTo(DailyJournal({ title: "Daily Journal" }));
 });
@@ -234,14 +242,14 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const doListItems = new Writable<any[]>([]);
+  const doListItems = new Writable<DoItem[]>([]);
   const doList = DoList({ items: doListItems });
 
   // Combine user-managed allPieces with system pieces (like doList) so
   // BacklinksIndex picks up their mentionable items.
   const allPiecesWithSystem = computed(() => [
     ...allPieces.get(),
-    doList as any,
+    doList,
   ]);
 
   const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
@@ -464,7 +472,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     </cf-hstack>
                     <cf-table full-width hover>
                       <tbody>
-                        {recentPieces.map((piece: any) => (
+                        {recentPieces.map((piece) => (
                           <tr>
                             <td>
                               <cf-cell-context $cell={piece}>
@@ -511,7 +519,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                                 <cf-drop-zone
                                   accept="note"
                                   oncf-drop={dropOntoNotebook({
-                                    notebook: piece as any,
+                                    notebook: piece as NotebookDropTarget,
                                   })}
                                 >
                                   {link}
