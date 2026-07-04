@@ -368,11 +368,7 @@ describe("Pattern Runner - ifElse", () => {
     const originalSubscribe = runtime.scheduler.subscribe.bind(
       runtime.scheduler,
     );
-    (
-      runtime.scheduler as unknown as {
-        subscribe: typeof originalSubscribe;
-      }
-    ).subscribe = ((action, ...rest) => {
+    runtime.scheduler.subscribe = ((action, ...rest) => {
       subscribedActions.push({
         name: action.name,
         src: (action as { src?: string }).src,
@@ -427,20 +423,22 @@ describe("Pattern Runner - ifElse", () => {
       > = {};
       let phase = "init";
       const origEdit = runtime.edit.bind(runtime);
-      (runtime as unknown as { edit: typeof origEdit }).edit =
-        ((opts?: any) => {
-          const t = origEdit(opts);
-          const origWrite = t.writeValueOrThrow.bind(t);
-          (t as unknown as { writeValueOrThrow: typeof origWrite })
-            .writeValueOrThrow = ((address: any, value: any, options?: any) => {
-              (writesByPhase[phase] ??= []).push({
-                id: String(address.id),
-                target: linkTarget(value),
-              });
-              return origWrite(address, value, options);
-            }) as typeof origWrite;
-          return t;
-        }) as typeof origEdit;
+      runtime.edit = ((opts?: Parameters<typeof origEdit>[0]) => {
+        const t = origEdit(opts);
+        const origWrite = t.writeValueOrThrow.bind(t);
+        t.writeValueOrThrow = ((
+          address: Parameters<typeof origWrite>[0],
+          value: Parameters<typeof origWrite>[1],
+          options?: Parameters<typeof origWrite>[2],
+        ) => {
+          (writesByPhase[phase] ??= []).push({
+            id: String(address.id),
+            target: linkTarget(value),
+          });
+          return origWrite(address, value, options);
+        }) as typeof origWrite;
+        return t;
+      }) as typeof origEdit;
 
       // `n` is a truthy number rather than a boolean: changing it from 1 to 2
       // re-triggers ifElse while still selecting the same (`ifTrue`) branch. The

@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/patterns-ifelse.test.ts": [
-    "294:24:vfi2ex",
-    "352:15:805ni3",
-    "356:13:e7ev8z",
-  ],
   "packages/runner/test/patterns-regressions.test.ts": [
     "309:6:750awm",
   ],
