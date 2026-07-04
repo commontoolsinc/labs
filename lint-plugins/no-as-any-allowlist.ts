@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/google/extractors/bam-school-dashboard.tsx",
   "packages/patterns/google/extractors/email-pattern-launcher.tsx",
   "packages/patterns/google/extractors/email-style-extractor.tsx",
   "packages/patterns/google/extractors/expect-response-followup.tsx",

@@ -154,9 +154,9 @@ const analyzeSchoolEmail = pattern<Email, SchoolEmailAnalysis>((email) => {
   const sourceType = computed(() => classifySource(email.from || ""));
 
   const analysis = generateObject<SchoolEventResult>({
-    prompt: computed((): string | undefined => {
+    prompt: computed((): string => {
       if (!email.markdownContent) {
-        return undefined;
+        return "";
       }
 
       const source = sourceType;
@@ -184,7 +184,7 @@ Extract:
 6. Is Urgent: True if within 7 days, action required, or time-sensitive
 
 7. Summary: 1-2 sentences of what parents need to know`;
-    }) as any,
+    }),
     schema: SCHOOL_EVENT_SCHEMA,
     model: "anthropic:claude-haiku-4-5",
   });
