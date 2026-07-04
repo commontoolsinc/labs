@@ -31,15 +31,15 @@ export interface QuickCaptureOutput {
   [NAME]: string;
   [UI]: VNode;
   summary: string;
-  capture: Stream<{ text: string; attachments?: Writable<any>[] }>;
+  capture: Stream<{ text: string; attachments?: Writable<unknown>[] }>;
 }
 
 type PromptAttachment = {
   id: string;
   name: string;
   type: "file" | "clipboard" | "mention";
-  data?: any;
-  piece?: any;
+  data?: unknown;
+  piece?: unknown;
 };
 
 const clearChat = handler(
@@ -77,7 +77,7 @@ const sendMessage = handler<
 });
 
 const captureHandler = handler<
-  { text: string; attachments?: Writable<any>[] },
+  { text: string; attachments?: Writable<unknown>[] },
   { addMessage: Stream<BuiltInLLMMessage> }
 >(({ text }, { addMessage }) => {
   addMessage.send({
@@ -96,7 +96,7 @@ const createNoteHandler = handler<
     title,
     content,
   });
-  allPieces.push(note as any);
+  allPieces.push(note);
   return note;
 });
 
@@ -111,7 +111,7 @@ const createNotebookHandler = handler<
     })
   );
   const notebook = Notebook({ title, notes });
-  allPieces.push(notebook as any);
+  allPieces.push(notebook);
   return notebook;
 });
 
