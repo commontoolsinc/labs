@@ -25,6 +25,21 @@ type SqliteDbCell = {
   get(): unknown;
 };
 
+function expectSqliteDbCell(value: unknown): SqliteDbCell {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Expected sqlite db cell");
+  }
+  const exec = Reflect.get(value, "exec");
+  const get = Reflect.get(value, "get");
+  if (typeof exec !== "function" || typeof get !== "function") {
+    throw new Error("Expected sqlite db cell methods");
+  }
+  return {
+    exec: (sql, params) => Reflect.apply(exec, value, [sql, params]),
+    get: () => Reflect.apply(get, value, []),
+  };
+}
+
 describe("SqliteDb .exec (commit-folded write)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -51,13 +66,15 @@ describe("SqliteDb .exec (commit-folded write)", () => {
   ): SqliteDbCell {
     const handle = runtime.getCell(space, label, undefined, tx);
     handle.set(dbRef);
-    return createCell(
-      runtime,
-      handle.getAsNormalizedFullLink(),
-      tx,
-      false,
-      "sqlite",
-    ) as unknown as SqliteDbCell;
+    return expectSqliteDbCell(
+      createCell(
+        runtime,
+        handle.getAsNormalizedFullLink(),
+        tx,
+        false,
+        "sqlite",
+      ),
+    );
   }
 
   it("folds a write atomically with a sibling cell write", async () => {
@@ -103,16 +120,18 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     const tx = runtime.edit();
     const handle = runtime.getCell(space, "db-shaped", undefined, tx);
     handle.set(dbRef);
-    const db = createCell(
-      runtime,
-      {
-        ...handle.getAsNormalizedFullLink(),
-        schema: { type: "object", properties: {} },
-      },
-      tx,
-      false,
-      "sqlite",
-    ) as unknown as SqliteDbCell;
+    const db = expectSqliteDbCell(
+      createCell(
+        runtime,
+        {
+          ...handle.getAsNormalizedFullLink(),
+          schema: { type: "object", properties: {} },
+        },
+        tx,
+        false,
+        "sqlite",
+      ),
+    );
     // Sanity: a schema-shaped read drops the handle fields...
     expect(db.get()).toEqual({});
     // ...but exec still records the write from the raw handle.
@@ -279,9 +298,8 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     // .exec is a runtime write that requires a "sqlite"-kind cell (a handler's
     // db input). (.query is a build-time node constructor like .map, so it has
     // no _kind guard — `this` is an opaque builder ref at pattern-build time.)
-    expect(() =>
-      (plain as unknown as SqliteDbCell).exec("INSERT INTO t VALUES (1)")
-    ).toThrow("SqliteDb");
+    expect(() => expectSqliteDbCell(plain).exec("INSERT INTO t VALUES (1)"))
+      .toThrow("SqliteDb");
   });
 
   it("aborts the whole commit on SQL failure (sibling rolls back)", async () => {
