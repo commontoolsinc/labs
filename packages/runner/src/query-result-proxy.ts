@@ -1,5 +1,8 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
@@ -171,7 +174,7 @@ export function createQueryResultProxy<T>(
       readTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
   ]);
-  const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+  const value: FabricValue = readTx.readValueOrThrow(link, SHAPE_READ);
 
   // The SHAPE_READ above only tracks the container's shape, but the stream
   // check depends on a specific field's VALUE. Register an explicit read of
@@ -205,7 +208,7 @@ export function createQueryResultProxy<T>(
     if (value instanceof FabricPrimitive) {
       readTx.readValueOrThrow(link);
     }
-    return value;
+    return value as T;
   }
 
   // TODO(danfuzz): This may have to do something special to handle concrete
@@ -385,7 +388,12 @@ export function createQueryResultProxy<T>(
               const currentValue = readTx.readValueOrThrow(
                 link,
                 prop === "push" ? { meta: mergeableOpRead } : undefined,
-              ) as any[];
+              );
+              if (!Array.isArray(currentValue)) {
+                throw new Error(
+                  `Expected array value for ${prop} operation`,
+                );
+              }
               copy = [...currentValue];
             } else {
               copy = value.map((_, index) =>
