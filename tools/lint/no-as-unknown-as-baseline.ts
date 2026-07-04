@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/mergeable-append-multispace-conflict.test.ts": [
-    "194:49:1mecz9i",
-    "258:49:1mecz9i",
-  ],
   "packages/runner/test/list-builtin-edge-paths.test.ts": [
     "105:22:1wta9fx",
     "153:21:1wta9fx",

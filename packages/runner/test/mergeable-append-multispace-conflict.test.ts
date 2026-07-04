@@ -26,11 +26,19 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type {
+  AuthorizationError as IAuthorizationError,
+  URI,
+} from "@commonfabric/memory/interface";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type {
+  ISpaceReplica,
+  IStorageTransactionInconsistent,
+} from "../src/storage/interface.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("mergeable-append-multispace");
@@ -100,6 +108,55 @@ const PROGRAM: RuntimeProgram = {
 };
 
 const RESULT_CAUSE = "mergeable-append-multispace host";
+
+type CommitNative = NonNullable<ISpaceReplica["commitNative"]>;
+type CommitNativeArgs = Parameters<CommitNative>;
+type CommitNativeResult = ReturnType<CommitNative>;
+type CommitNativeTestResult = Promise<
+  Awaited<CommitNativeResult> | { error: IStorageTransactionInconsistent }
+>;
+type ReplicaWithCommitNative = Omit<ISpaceReplica, "commitNative"> & {
+  commitNative: (...args: CommitNativeArgs) => CommitNativeTestResult;
+};
+
+class InjectedAuthorizationError extends Error implements IAuthorizationError {
+  override name = "AuthorizationError" as const;
+}
+
+function openCommitNativeReplica(
+  manager: SharedServerStorageManager,
+): ReplicaWithCommitNative {
+  const replica = manager.open(space).replica;
+  if (typeof replica.commitNative !== "function") {
+    throw new Error("memory v2 replica does not support commitNative()");
+  }
+  return replica as ReplicaWithCommitNative;
+}
+
+function injectedInconsistency(
+  message: string,
+): IStorageTransactionInconsistent {
+  const error: IStorageTransactionInconsistent = {
+    name: "StorageTransactionInconsistent",
+    message,
+    address: {
+      id: "of:mergeable-append-multispace-test" as URI,
+      path: [],
+    },
+    from() {
+      return error;
+    },
+  };
+  return error;
+}
+
+function rejectInconsistency(message: string): CommitNativeTestResult {
+  return Promise.resolve({ error: injectedInconsistency(message) });
+}
+
+function rejectAuthorization(message: string): CommitNativeTestResult {
+  return Promise.resolve({ error: new InjectedAuthorizationError(message) });
+}
 
 const itemLinkListSchema = {
   type: "array",
@@ -225,20 +282,13 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     // in its own replica and is unaffected: it commits durably on the first
     // attempt (the multi-space split has no rollback), so pre-fix the child
     // exists but the home append is dropped.
-    const replica = manager.open(space).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replica = openCommitNativeReplica(manager);
     const realCommitNative = replica.commitNative.bind(replica);
     let injectedRemaining = 8;
-    replica.commitNative = (...args: unknown[]) => {
+    replica.commitNative = (...args: CommitNativeArgs) => {
       if (injectedRemaining > 0) {
         injectedRemaining--;
-        return Promise.resolve({
-          error: {
-            name: "StorageTransactionInconsistent",
-            message: "injected transient storm rejection",
-          },
-        });
+        return rejectInconsistency("injected transient storm rejection");
       }
       return realCommitNative(...args);
     };
@@ -297,20 +347,13 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     // into the retry window; it fails fast. Eight injections make accidental
     // windowing obvious: the wrong behavior would ride out the storm and land
     // the append, while the correct behavior consumes only the first rejection.
-    const replica = manager.open(space).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replica = openCommitNativeReplica(manager);
     const realCommitNative = replica.commitNative.bind(replica);
     let injectedRemaining = 8;
-    replica.commitNative = (...args: unknown[]) => {
+    replica.commitNative = (...args: CommitNativeArgs) => {
       if (injectedRemaining > 0) {
         injectedRemaining--;
-        return Promise.resolve({
-          error: {
-            name: "AuthorizationError",
-            message: "injected non-stale-basis rejection",
-          },
-        });
+        return rejectAuthorization("injected non-stale-basis rejection");
       }
       return realCommitNative(...args);
     };
