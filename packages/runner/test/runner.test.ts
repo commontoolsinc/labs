@@ -1162,14 +1162,19 @@ describe("storage subscription", () => {
   });
 
   it("clears cached patterns when storage notifies of changes", () => {
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<string, string>;
-      createStorageSubscription(): IStorageSubscription;
-    };
-
     const uri = "pattern-cache-test" as URI;
     const key = `${space}/space/${uri}`;
-    internals.resultPatternCache.set(key, "cached-pattern");
+    const resultPatternCache = Reflect.get(
+      runtime.runner,
+      "resultPatternCache",
+    );
+    const createStorageSubscription = Reflect.get(
+      runtime.runner,
+      "createStorageSubscription",
+    );
+    expect(resultPatternCache).toBeInstanceOf(Map);
+    expect(typeof createStorageSubscription).toBe("function");
+    resultPatternCache.set(key, "cached-pattern");
 
     const notification = {
       type: "commit",
@@ -1187,10 +1192,12 @@ describe("storage subscription", () => {
       ],
     } satisfies ICommitNotification;
 
-    const subscription = internals.createStorageSubscription();
+    const subscription: IStorageSubscription = createStorageSubscription.call(
+      runtime.runner,
+    );
     subscription.next(notification);
 
-    expect(internals.resultPatternCache.has(key)).toBe(false);
+    expect(resultPatternCache.has(key)).toBe(false);
   });
 });
 
