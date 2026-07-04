@@ -15,6 +15,7 @@
  */
 
 import {
+  type BuiltInLLMContent,
   computed,
   type Default,
   generateObject,
@@ -1781,7 +1782,7 @@ export const ExtractorModule = pattern<
         index: photo.index,
         ocr: generateText({
           system: OCR_SYSTEM_PROMPT,
-          prompt: prompt as any,
+          prompt: prompt as BuiltInLLMContent,
           model: "anthropic:claude-sonnet-4-5",
         }),
       };
@@ -1893,7 +1894,7 @@ export const ExtractorModule = pattern<
     // Single extraction call for all sources combined
     const singleExtraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: combinedExtractionPrompt as any,
+      prompt: combinedExtractionPrompt as BuiltInLLMContent,
       schema: RECOMMENDATIONS_SCHEMA,
       model: "anthropic:claude-haiku-4-5",
     });
