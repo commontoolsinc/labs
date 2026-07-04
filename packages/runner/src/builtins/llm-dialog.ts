@@ -1,4 +1,5 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -770,9 +771,13 @@ function traverseAndSerialize(
  * @param value - The value to traverse and cellify
  * @returns The cellified value
  *
- * TODO(danfuzz): This `Object.fromEntries(Object.entries(...))` walk has no
- * `FabricSpecialObject` guard; a `FabricPrimitive` flattens to `{}` (its state
- * is private) and a `FabricInstance` is walked by internal slots.
+ * TODO(danfuzz): A `FabricPrimitive` is now returned atomically, but the other
+ * special-object type, `FabricInstance` (a container), still reaches the
+ * `Object.fromEntries(Object.entries(...))` walk and is flattened by its
+ * internal slots (zero enumerable own-props) instead of its codec contents.
+ * Unlike a primitive it *does* need descending into — but by its actual
+ * contents, which this walk won't do correctly. This site will need attention
+ * once FabricInstances see real use.
  */
 function traverseAndCellify(
   runtime: Runtime,
@@ -811,6 +816,11 @@ function traverseAndCellify(
   if (Array.isArray(value)) {
     return value.map((v) => traverseAndCellify(runtime, space, v));
   }
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props). It is not a link, so the `Object.fromEntries(
+  // Object.entries(...))` rebuild below would flatten it to `{}`; leave it
+  // intact as an atomic leaf, like any string or number.
+  if (value instanceof BaseFabricPrimitive) return value;
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.entries(value).map((
