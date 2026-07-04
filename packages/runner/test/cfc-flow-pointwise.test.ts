@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -14,6 +15,10 @@ type StoredEntry = {
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
 };
 
 // S16 phase B: pointwise label precision is a structural fact of the
@@ -38,7 +43,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     cause: string,
     value: unknown,
     atom: string,
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
@@ -62,23 +67,21 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     return id;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica!.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const entriesOf = (id: URI): StoredEntry[] => {
+    const document = storageManager!.open(space).replica.getDocument(id) as
+      | StoredCfcDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
-  const derivedConfidentiality = (id: string): string[] =>
+  const derivedConfidentiality = (id: URI): string[] =>
     entriesOf(id)
       .filter((e) => e.origin === "derived")
       .flatMap((e) => e.label.confidentiality ?? []);
 
   // confidentiality of the container's STRUCTURE label (origin structure at the
   // container root) — the membership/order taint (§8.5.6.1).
-  const structureConfidentiality = (id: string): string[] =>
+  const structureConfidentiality = (id: URI): string[] =>
     entriesOf(id)
       .filter((e) => e.origin === "structure" && e.path.length === 0)
       .flatMap((e) => e.label.confidentiality ?? []);
@@ -103,11 +106,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "pointwise-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "pointwise-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const double = lift((value: { n: number }) => ({ doubled: value.n * 2 }));
     let mappedRef: any;
 
@@ -218,11 +217,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "memb-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "memb-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const isPositive = lift((value: { n: number }) => value.n > 0);
     let filteredRef: any;
 
@@ -306,11 +301,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "shape-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "shape-el-1", { n: -2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const isPositive = lift((value: { n: number }) => value.n > 0);
     let filteredRef: any;
 
@@ -390,11 +381,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "empty-el-0", { n: -1 }, "alice-secret");
     await seedLabeledDoc(runtime, "empty-el-1", { n: -2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const isPositive = lift((value: { n: number }) => value.n > 0);
     let filteredRef: any;
 
@@ -456,7 +443,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(probeConf).toContainEqual("bob-secret");
   });
 
-  const resolvedContainerId = (keptCell: any): string => {
+  const resolvedContainerId = (keptCell: any): URI => {
     const rtx = runtime!.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
