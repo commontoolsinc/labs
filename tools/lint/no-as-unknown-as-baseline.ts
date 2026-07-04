@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-nonexported-binding-identity.test.ts": [
-    "89:53:1emg3g0",
-  ],
   "packages/runner/test/cfc-policy-schema-ref-resolution.test.ts": [
     "24:4:mgxccf",
     "94:4:mgxccf",

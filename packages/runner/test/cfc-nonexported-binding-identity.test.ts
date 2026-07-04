@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { ImplementationIdentity } from "../src/cfc/types.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
 // compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
@@ -86,12 +87,12 @@ async function bindingPathsResolvedDuring(
   rt: Runtime,
   fn: () => void,
 ): Promise<string[][]> {
-  const proto = ExtendedStorageTransaction.prototype as unknown as {
-    setCfcImplementationIdentity: (identity: unknown) => void;
-  };
+  const proto = ExtendedStorageTransaction.prototype;
   const orig = proto.setCfcImplementationIdentity;
   const resolved: string[][] = [];
-  proto.setCfcImplementationIdentity = function (identity: unknown) {
+  proto.setCfcImplementationIdentity = function (
+    identity: ImplementationIdentity | undefined,
+  ) {
     const bindingPath = (identity as { bindingPath?: string[] } | undefined)
       ?.bindingPath;
     if (Array.isArray(bindingPath)) resolved.push(bindingPath);
