@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/array-ref-defs-propagation.test.ts",
   "packages/runner/test/cell-as-cell.test.ts",
   "packages/runner/test/cell-callbacks.test.ts",
   "packages/runner/test/cell-core.test.ts",

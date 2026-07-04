@@ -19,8 +19,24 @@ import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
+import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+
+type CollectLinkedCellSyncsHost = {
+  collectLinkedCellSyncs(
+    value: unknown,
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    cfc: ContextualFlowControl,
+    promises: Promise<unknown>[],
+    seen: Set<unknown>,
+  ): void;
+  trackPendingProviderSync(
+    address: unknown,
+    start: () => Promise<unknown>,
+  ): Promise<unknown>;
+};
 
 describe("$defs propagation in array item schema extraction", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -68,12 +84,12 @@ describe("$defs propagation in array item schema extraction", () => {
 
     const base: NormalizedLink = {
       space: signer.did(),
-      id: "of:test-doc" as any,
+      id: "of:test-doc" as URI,
       path: [],
     };
-    const promises: Promise<any>[] = [];
+    const promises: Promise<unknown>[] = [];
     const cfc = new ContextualFlowControl();
-    const seen = new Set<any>();
+    const seen = new Set<unknown>();
 
     // Array value containing a cell link — this triggers the sync path
     // where the item schema (with or without $defs) gets passed to
@@ -90,14 +106,15 @@ describe("$defs propagation in array item schema extraction", () => {
     // The sync call itself won't find data (fake ID), but it will
     // call pull() which calls joinSchema() on the schema — and that's
     // where the crash happens.
-    (storageManager as any).collectLinkedCellSyncs(
-      value,
-      base,
-      arraySchema,
-      cfc,
-      promises,
-      seen,
-    );
+    (storageManager as unknown as CollectLinkedCellSyncsHost)
+      .collectLinkedCellSyncs(
+        value,
+        base,
+        arraySchema,
+        cfc,
+        promises,
+        seen,
+      );
 
     // The promises contain sync calls. If $defs weren't carried,
     // the sync → pull → joinSchema chain will reject with the $ref error.
@@ -120,14 +137,16 @@ describe("$defs propagation in array item schema extraction", () => {
     };
     const base: NormalizedLink = {
       space: signer.did(),
-      id: "of:test-doc" as any,
+      id: "of:test-doc" as URI,
       path: [],
     };
     const capturedSchemas: unknown[] = [];
+    const v2StorageManagerPrototype = V2StorageManager
+      .prototype as unknown as CollectLinkedCellSyncsHost;
     const collectLinkedCellSyncs =
-      (V2StorageManager.prototype as any).collectLinkedCellSyncs;
+      v2StorageManagerPrototype.collectLinkedCellSyncs;
     const trackPendingProviderSync =
-      (V2StorageManager.prototype as any).trackPendingProviderSync;
+      v2StorageManagerPrototype.trackPendingProviderSync;
     const fakeStorage = {
       collectLinkedCellSyncs,
       trackPendingProviderSync,
