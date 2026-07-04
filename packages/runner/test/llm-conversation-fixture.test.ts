@@ -61,6 +61,8 @@ describe("conversation fixtures", () => {
   >["commonfabric"]["generateObject"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
 
+  const llmTool = (tool: BuiltInLLMTool): BuiltInLLMTool => tool;
+
   beforeEach(() => {
     clearMockResponses();
     storageManager = StorageManager.emulate({ as: signer });
@@ -156,9 +158,7 @@ describe("conversation fixtures", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(
-              getWeatherTool,
-            ) as unknown as BuiltInLLMTool,
+            getWeather: llmTool(patternTool(getWeatherTool)),
           },
         });
         return {

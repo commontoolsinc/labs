@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/llm-conversation-fixture.test.ts": [
-    "161:14:1dqidfy",
-  ],
   "packages/runner/test/llm-dialog.test.ts": [
     "305:14:1dqidfy",
     "424:14:1j55uxz",
