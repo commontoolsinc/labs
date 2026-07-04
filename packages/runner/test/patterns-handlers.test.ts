@@ -7,7 +7,6 @@ import { spy } from "@std/testing/mock";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -312,8 +311,12 @@ describe("Pattern Runner - Handlers", () => {
   });
 
   it("should execute handlers with schemas", async () => {
-    const incHandler = handler<{ amount: number }, { counter: number }>(
-      { type: "object", properties: { amount: { type: "number" } } },
+    const incHandler = handler(
+      {
+        type: "object",
+        properties: { amount: { type: "number" } },
+        required: ["amount"],
+      } as const,
       {
         type: "object",
         properties: {
@@ -322,10 +325,10 @@ describe("Pattern Runner - Handlers", () => {
             asCell: ["cell"],
           },
         },
-      },
+        required: ["counter"],
+      } as const,
       ({ amount }, { counter }) => {
-        const counterCell = counter as unknown as Cell<number>;
-        counterCell.send(counterCell.get() + amount);
+        counter.send(counter.get() + amount);
       },
     );
 
