@@ -7,6 +7,10 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-unsupported-ifc-keys");
 
+type UnsupportedIfc = {
+  [claimKey: string]: unknown;
+};
+
 // Regression guard for unimplemented ifc.* claims (audit S10).
 //
 // Several ifc keys are defined by the spec but unimplemented in the runner.
@@ -40,16 +44,17 @@ describe("CFC unsupported ifc claims fail closed", () => {
       });
       try {
         const tx = runtime.edit();
+        const ifc: UnsupportedIfc = { [claimKey]: claimValue };
         const schema = {
           type: "object",
           properties: {
             value: {
               type: "string",
-              ifc: { [claimKey]: claimValue },
+              ifc,
             },
           },
           required: ["value"],
-        } as unknown as JSONSchema;
+        } satisfies JSONSchema;
         const cell = runtime.getCell(
           signer.did(),
           `cfc-unsupported-${claimKey}`,

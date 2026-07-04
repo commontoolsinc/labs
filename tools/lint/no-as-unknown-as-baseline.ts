@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-unsupported-ifc-keys.test.ts": [
-    "51:10:1ksv5oi",
-  ],
   "packages/runner/test/cfc-wildcard-link-applicability.test.ts": [
     "49:6:rgrh0f",
     "71:6:1oc7g4l",
