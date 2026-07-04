@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/content-addressed-identity.test.ts": [
-    "147:44:ew550m",
-    "164:34:15xxca7",
-    "167:45:1vwanwk",
-    "376:47:15xxca7",
-  ],
   "packages/runner/test/data-updating.test.ts": [
     "1654:8:1xdlqt5",
   ],

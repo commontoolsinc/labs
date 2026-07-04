@@ -28,6 +28,28 @@ import { trustModule } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("content-addressed-identity");
 
+const MODULE_TYPES = new Set<Module["type"]>([
+  "ref",
+  "javascript",
+  "pattern",
+  "raw",
+  "isolated",
+  "passthrough",
+]);
+
+function isModuleType(value: unknown): value is Module["type"] {
+  return typeof value === "string" && MODULE_TYPES.has(value as Module["type"]);
+}
+
+function moduleRecordFromJson(
+  value: Record<string, unknown>,
+): Module & Record<string, unknown> {
+  if (!isModuleType(value.type)) {
+    throw new Error("Serialized module record is missing a module type.");
+  }
+  return { ...value, type: value.type };
+}
+
 const PROGRAM = {
   main: "/main.tsx",
   files: [{
@@ -124,8 +146,10 @@ describe("content-addressed action identity", () => {
   it("a $implRef-only module survives artifact-index eviction (engine implementation index)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
-    const json = (module as Module & { toJSON: () => unknown })
-      .toJSON() as Record<string, unknown>;
+    const json = moduleRecordFromJson(
+      (module as Module & { toJSON: () => unknown })
+        .toJSON() as Record<string, unknown>,
+    );
     const ref = json.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
     expect("implementation" in json).toBe(false);
@@ -143,12 +167,16 @@ describe("content-addressed action identity", () => {
     // Simulate the bounded artifact index rolling the module out mid-session
     // (FIFO eviction after ~1000 other identities) — the worst case for a
     // `$implRef`-only stored graph, which has no legacy ref and no body.
-    const manager = runtime!.patternManager as unknown as {
-      addressableByIdentity: Map<string, unknown>;
-      modulesByIdentity: Map<string, unknown>;
-    };
-    manager.addressableByIdentity.clear();
-    manager.modulesByIdentity.clear();
+    const addressableByIdentity: Map<string, unknown> = Reflect.get(
+      runtime!.patternManager,
+      "addressableByIdentity",
+    );
+    const modulesByIdentity: Map<string, unknown> = Reflect.get(
+      runtime!.patternManager,
+      "modulesByIdentity",
+    );
+    addressableByIdentity.clear();
+    modulesByIdentity.clear();
     expect(
       runtime!.patternManager.artifactFromIdentitySync(
         ref.identity,
@@ -160,10 +188,10 @@ describe("content-addressed action identity", () => {
     const nodes = pattern.nodes.map((node) =>
       (node.module as Module).type === "javascript" &&
         (node.module as Module).wrapper === "handler"
-        ? { ...node, module: json as unknown as Module }
+        ? { ...node, module: json }
         : node
     );
-    const rehydrated = { ...pattern, nodes } as unknown as Pattern;
+    const rehydrated: Pattern = { ...pattern, nodes };
     const tx = runtime!.edit();
     const resultCell = runtime!.getCell<{ name: string }>(
       signer.did(),
@@ -356,10 +384,11 @@ export default pattern<{ value: number }>(({ value }) => ({
     );
     expect(node).toBeDefined();
     const live = node!.module as Module & { toJSON?: () => unknown };
-    const json =
+    const json = moduleRecordFromJson(
       (live.toJSON
         ? live.toJSON()
-        : JSON.parse(JSON.stringify(live))) as Record<string, unknown>;
+        : JSON.parse(JSON.stringify(live))) as Record<string, unknown>,
+    );
     const ref = json.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
     delete json.implementationRef;
@@ -375,7 +404,7 @@ export default pattern<{ value: number }>(({ value }) => ({
       runtime.patternManager.artifactFromIdentitySync(ref.identity, ref.symbol),
     ).toBeDefined();
 
-    const stripped = trustModule(runtime, json as unknown as Module);
+    const stripped = trustModule(runtime, json);
     const tx = runtime.edit();
     const resultCell = runtime.getCell<number>(
       signer.did(),
