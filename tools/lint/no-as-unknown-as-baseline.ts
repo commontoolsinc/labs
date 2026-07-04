@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-sink-request-policy.test.ts": [
-    "35:6:is0eu1",
-  ],
   "packages/runner/test/cfc-sqlite-paramless-relabel.test.ts": [
     "20:2:5w3cjx",
     "24:2:z2dunx",

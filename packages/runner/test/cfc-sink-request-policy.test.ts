@@ -9,6 +9,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { WritePolicyInput } from "../src/cfc/types.ts";
 
 const signer = await Identity.fromPassphrase("test cfc sink request policy");
 describe("CFC sink request policy", () => {
@@ -30,17 +31,8 @@ describe("CFC sink request policy", () => {
           effectId: "fetchJson:abc123",
           sink: "fetchJson",
           request,
-        }],
+        }] satisfies WritePolicyInput[],
       }),
-    } as unknown as {
-      getCfcState(): {
-        writePolicyInputs: readonly [{
-          kind: "sink-request";
-          effectId: string;
-          sink: string;
-          request: typeof request;
-        }];
-      };
     };
 
     expect(
