@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-multi-space-write.test.ts": [
-    "108:57:f26zpa",
-    "126:57:busz1f",
-    "156:57:1oky54",
-  ],
   "packages/runner/test/memory-v2-native-commit.test.ts": [
     "537:23:1320vlx",
   ],

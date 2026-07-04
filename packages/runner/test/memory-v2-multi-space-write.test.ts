@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { AuthorizationError } from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -16,6 +17,10 @@ const addr = (space: MemorySpace, id: `${string}:${string}`) => ({
   id,
   path: [] as string[],
 });
+
+class InjectedAuthorizationError extends Error implements AuthorizationError {
+  override name = "AuthorizationError" as const;
+}
 
 describe("multi-space write transactions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -105,9 +110,7 @@ describe("multi-space write transactions", () => {
     // A replica without commitNative() makes runSplitCommits throw (rather than
     // return an error). The split commit must still settle the transaction with
     // an error result instead of leaving it stuck at "pending".
-    const replicaB = storageManager.open(spaceB).replica as unknown as {
-      commitNative?: unknown;
-    };
+    const replicaB = storageManager.open(spaceB).replica;
     replicaB.commitNative = undefined;
 
     const result = await tx.commit();
@@ -123,15 +126,10 @@ describe("multi-space write transactions", () => {
     tx.writeValueOrThrow(addr(spaceB, "of:partial-b"), { v: 2 });
 
     // Space B's native commit returns an error after space A is already durable.
-    const replicaB = storageManager.open(spaceB).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replicaB = storageManager.open(spaceB).replica;
     replicaB.commitNative = () =>
       Promise.resolve({
-        error: {
-          name: "StorageTransactionRejected",
-          message: "space B failed",
-        },
+        error: new InjectedAuthorizationError("space B failed"),
       });
 
     const result = await tx.commit();
@@ -153,15 +151,10 @@ describe("multi-space write transactions", () => {
     tx.writeValueOrThrow(addr(spaceA, "of:stop-a"), { v: 1 });
     tx.writeValueOrThrow(addr(spaceB, "of:stop-b"), { v: 2 });
 
-    const replicaA = storageManager.open(spaceA).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replicaA = storageManager.open(spaceA).replica;
     replicaA.commitNative = () =>
       Promise.resolve({
-        error: {
-          name: "StorageTransactionRejected",
-          message: "space A failed",
-        },
+        error: new InjectedAuthorizationError("space A failed"),
       });
 
     const result = await tx.commit();
