@@ -285,15 +285,11 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
-      tx,
-      testPattern,
-      {
-        url: "http://mock-test-server.local/exfil",
-        token: secret.key("secret"),
-      } as unknown as { url: string; token: string },
-      resultCell,
-    );
+    const input = {
+      url: "http://mock-test-server.local/exfil",
+      token: secret.key("secret"),
+    };
+    const result = runtime.run(tx, testPattern, input, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
 

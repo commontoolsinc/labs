@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-sink-ceiling-link-read.test.ts": [
-    "294:8:gf4r6d",
-  ],
   "packages/runner/test/cfc-sink-release-reject-surfaced.test.ts": [
     "29:6:dscwrv",
     "68:6:ljp8hm",
