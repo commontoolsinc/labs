@@ -306,7 +306,7 @@ describe("Pattern Runner - Regressions", () => {
         resultRecipe: resultRecipe as unknown,
       },
       nodes: [],
-    } as unknown as Pattern;
+    } as Pattern;
 
     const resultCell = runtime.getCell<{
       internalRecipe: { name: string };

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/patterns-regressions.test.ts": [
-    "309:6:750awm",
-  ],
   "packages/runner/test/reactive-dependencies.test.ts": [
     "599:4:16mb0bc",
     "2094:56:ls399x",
