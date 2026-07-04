@@ -7,6 +7,22 @@ import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-exact-copy");
 
+type StoredCfcDocument = {
+  value?: unknown;
+  cfc?: {
+    labelMap?: {
+      entries: Array<{
+        path: string[];
+        label: {
+          confidentiality?: string[];
+          integrity?: string[];
+        };
+        origin?: string;
+      }>;
+    };
+  };
+};
+
 describe("CFC exact copy claims", () => {
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
@@ -54,23 +70,9 @@ describe("CFC exact copy claims", () => {
       expect(result.ok).toBeDefined();
 
       const persistedId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: unknown;
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: string[];
-                  integrity?: string[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(persistedId);
+      const persisted = storageManager.open(signer.did()).replica.getDocument(
+        persistedId,
+      ) as StoredCfcDocument | undefined;
       expect(persisted?.value).toEqual({
         emailAddress: "alice@example.com",
         confirmedEmail: "alice@example.com",

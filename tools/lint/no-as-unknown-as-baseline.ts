@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-exact-copy.test.ts": [
-    "57:64:1pxbkwv",
-  ],
   "packages/runner/test/cfc-external-ingest.test.ts": [
     "51:55:1n5qe5z",
   ],
