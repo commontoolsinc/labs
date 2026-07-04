@@ -44,6 +44,10 @@ export const profileLinkSchema = (): any => ({
   asCell: ["cell"],
 });
 
+type WithSchemaReader<T> = T & {
+  asSchema(schema: unknown): { get(): unknown };
+};
+
 export type CreateProfileEvent = {
   detail?: { message?: string };
   key?: string;
@@ -113,7 +117,7 @@ export const setDefaultProfile = handler<
   }
 >((_, { defaultProfile, profile }) => {
   if (profile) {
-    defaultProfile.set(profile as any);
+    defaultProfile.set(profile as never);
   }
 });
 
@@ -132,10 +136,13 @@ export const setMruProfile = handler<
   // Read existing entries as link cells (not inlined values) so an entry that
   // links into an unloaded space doesn't collapse the whole read to `undefined`
   // and silently wipe MRU history. Dedup by link identity via `equals`.
-  const current = ((mru as any).asSchema(profileLinkListSchema()).get() ??
-    []) as ProfileHomeOutput[];
+  const current =
+    ((mru as WithSchemaReader<Writable<ProfileHomeOutput[]>>).asSchema(
+      profileLinkListSchema(),
+    ).get() ??
+      []) as ProfileHomeOutput[];
   const filtered = current.filter((entry) => !equals(entry, profile));
-  mru.set([profile, ...filtered] as any);
+  mru.set([profile, ...filtered] as never);
 });
 
 // A single owner-protected link to a profile pattern in its own space, created
@@ -243,7 +250,7 @@ export type ProfileCreateOutput = {
 export default pattern<ProfileCreateInput, ProfileCreateOutput>(
   ({ profiles, inputId, defaultName }) => {
     const createProfile = submitProfileCreation({
-      profiles: profiles as any,
+      profiles: profiles as never,
     });
     return {
       [NAME]: "Create Profile",
