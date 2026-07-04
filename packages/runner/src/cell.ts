@@ -66,6 +66,7 @@ import {
   type Schema,
   SELF,
   type Stream,
+  type StripCell,
   type StripDefaultBrand,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
@@ -173,10 +174,16 @@ export type RawCellReadOptions = IReadOptions & {
   lastNode?: LastNode;
 };
 
+type JSONSchemaDefault = Exclude<JSONSchema, boolean>["default"];
+
 // Shared factory instances for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+
+type StreamInspectionCell = {
+  isStream(resolvedToValueLink?: NormalizedFullLink): boolean;
+};
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
@@ -1408,8 +1415,9 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Now update each property
+    const cell = this as unknown as Cell<Record<string, unknown>>;
     for (const [key, value] of Object.entries(values)) {
-      (this as unknown as Cell<any>).key(key).set(value);
+      cell.key(key).set(value);
     }
 
     return this as unknown as Cell<T>;
@@ -1558,7 +1566,7 @@ export class CellImpl<T extends FabricValue>
           ? areLinksSame(
             element,
             candidate,
-            this as unknown as Cell<any>,
+            this as unknown as Cell<unknown>,
             true,
             this.tx!,
             this.runtime,
@@ -1666,7 +1674,7 @@ export class CellImpl<T extends FabricValue>
         ? areLinksSame(
           element,
           ref,
-          this as unknown as Cell<any>,
+          this as unknown as Cell<unknown>,
           true,
           this.tx!,
           this.runtime,
@@ -1734,7 +1742,7 @@ export class CellImpl<T extends FabricValue>
         areLinksSame(
           item,
           ref,
-          this as unknown as Cell<any>,
+          this as unknown as Cell<unknown>,
           true, // resolveBeforeComparing
           this.tx,
           this.runtime,
@@ -1767,7 +1775,7 @@ export class CellImpl<T extends FabricValue>
         ? !areLinksSame(
           item,
           ref,
-          this as unknown as Cell<any>,
+          this as unknown as Cell<unknown>,
           true, // resolveBeforeComparing
           this.tx,
           this.runtime,
@@ -1850,7 +1858,7 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer,
       kind,
       rebaseCfcLabelView(this._cfcLabelView, childPath),
-    ) as unknown as Cell<any>;
+    ) as unknown as Cell<unknown>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -1876,7 +1884,7 @@ export class CellImpl<T extends FabricValue>
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
       this._cfcLabelView,
-    ) as unknown as Cell<any>;
+    ) as unknown as Cell<unknown>;
   }
 
   /**
@@ -2353,7 +2361,7 @@ export class CellImpl<T extends FabricValue>
           }
         }
         // Delegate everything else to orignal target
-        return (target as any)[prop];
+        return Reflect.get(target, prop);
       },
     });
     return proxy as unknown as Reactive<T>;
@@ -2456,10 +2464,12 @@ export class CellImpl<T extends FabricValue>
     ) => S,
     initialValue: S,
   ): Reactive<S> {
-    return lift((list: any[]) => {
+    type ElemT = T extends Array<infer U> ? U : T;
+    const list = this as unknown as FactoryInput<StripCell<ElemT>[]>;
+    return lift((list: ElemT[]) => {
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
-    })(this as unknown as Reactive<any>);
+    })(list);
   }
 
   /**
@@ -2483,12 +2493,14 @@ export class CellImpl<T extends FabricValue>
     // short-circuits naturally and the predicate receives unwrapped values,
     // so normal JS comparisons work. Tradeoff: reruns the full search on any
     // array change. For per-element reactivity, use filter(pred)[0] instead.
-    return lift((list: any[]) => {
+    type ElemT = T extends Array<infer U> ? U : T;
+    const list = this as unknown as FactoryInput<StripCell<ElemT>[]>;
+    return lift((list: ElemT[]) => {
       if (!Array.isArray(list)) {
         throw new TypeError("findIndex called on non-array value");
       }
       return list.findIndex(fn);
-    })(this as unknown as Reactive<any>);
+    })(list);
   }
 
   /**
@@ -3008,10 +3020,7 @@ export function recursivelyAddIDIfNeeded<T>(
   const convertedDiffers = converted !== value;
 
   if (Array.isArray(converted)) {
-    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
-    // looser inference inside the iteration body, where `{...v}` and
-    // `ID in v` operate post-narrowing without explicit casts.
-    const sourceArray = converted as any[];
+    const sourceArray: unknown[] = converted;
     const result = new Array<unknown>(sourceArray.length);
     let changed = convertedDiffers;
 
@@ -3024,12 +3033,13 @@ export function recursivelyAddIDIfNeeded<T>(
       // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
       // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
       // a `FabricEpochNsec` to `{[ID]: …}`), so it must be left intact.
+      const objectValue = v as Record<PropertyKey, unknown>;
       if (
-        isObject(v) && !isCellLink(v) && !(ID in v) &&
+        isObject(v) && !isCellLink(v) && !(ID in objectValue) &&
         !(v instanceof FabricSpecialObject)
       ) {
         changed = true;
-        const withId = { [ID]: frame.generatedIdCounter++, ...v };
+        const withId = { [ID]: frame.generatedIdCounter++, ...objectValue };
         // The ID-wrapped object is a freshly-built container that must also be
         // deep-frozen.
         Object.freeze(withId);
@@ -3188,7 +3198,8 @@ export function isAnyCell(value: any): value is AnyCell<any> {
  * @returns True if the value is a Stream
  */
 export function isStream<T = any>(value: any): value is Stream<T> {
-  return (value instanceof CellImpl && (value as any).isStream?.());
+  return value instanceof CellImpl &&
+    (value as unknown as StreamInspectionCell).isStream();
 }
 
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
@@ -3237,7 +3248,7 @@ function schemaWithDefaultAndScope<T>(
   if (value !== undefined && !isCell(value)) {
     return {
       ...ContextualFlowControl.toSchemaObj(scopedSchema),
-      default: value as any,
+      default: value as unknown as JSONSchemaDefault,
     };
   }
   return scopedSchema;
