@@ -782,10 +782,11 @@ export function processDefaultValue(
     // TODO(@ubik2): Need to handle prefixItems
     // Handle boolean items values
     let itemSchema: JSONSchema;
-    if (resolvedSchema.items === true) {
+    const itemsSchema = resolvedSchema.items as JSONSchema;
+    if (itemsSchema === true) {
       // items: true means allow any item type
       itemSchema = {};
-    } else if ((resolvedSchema.items as any) === false) {
+    } else if (itemsSchema === false) {
       // items: false means no additional items allowed (empty arrays only)
       // For default value processing, we'll treat this as an error
       throw new Error(
@@ -794,7 +795,7 @@ export function processDefaultValue(
       );
     } else {
       // items is a JSONSchema object
-      itemSchema = resolvedSchema.items as JSONSchema;
+      itemSchema = itemsSchema;
     }
 
     const result = defaultValue.map((item, i) =>
@@ -1162,7 +1163,7 @@ class TransformObjectCreator
           // schema will have just removed one level from asCell and returned
           // that instead. However, I include it here for completeness.
           const unwrappedSchema = unwrapAsCellSchema(schema);
-          return cellMatch.asSchema(unwrappedSchema) as any;
+          return cellMatch.asSchema(unwrappedSchema) as T;
         } else {
           // at least one of the entries should have had an asCell or we
           // wouldn't have a cell. We will use the asCell used for creating
@@ -1176,7 +1177,7 @@ class TransformObjectCreator
             : undefined;
           if (cacheKey !== undefined) {
             const cached = combinedCellSchemaCache.get(schema)?.get(cacheKey);
-            if (cached !== undefined) return cellMatch.asSchema(cached) as any;
+            if (cached !== undefined) return cellMatch.asSchema(cached) as T;
           }
           const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
           const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
@@ -1196,7 +1197,7 @@ class TransformObjectCreator
             }
             byKey.set(cacheKey, combinedSchema);
           }
-          return cellMatch.asSchema(combinedSchema) as any;
+          return cellMatch.asSchema(combinedSchema) as T;
         }
       }
     }
@@ -1342,7 +1343,7 @@ class TransformObjectCreator
         ][];
         for (const [propName, propSchema] of propertyEntries) {
           if (isRecord(propSchema) && propSchema.default !== undefined) {
-            const valueObj = value as Record<string, any>;
+            const valueObj = value as Record<string, unknown>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
                 this.runtime,
