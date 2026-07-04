@@ -19,6 +19,11 @@ import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
 } from "./multi-runtime-harness.ts";
+import type {
+  ChatProfile,
+  ChatRoom,
+  PlainChatMessage,
+} from "../cfc-group-chat-demo/logic.ts";
 
 // Trusted surface/action names from cfc-group-chat-demo/trusted.tsx (inlined
 // so the test does not compile the pattern module into the test process).
@@ -38,6 +43,14 @@ const PROGRAM_PATH = join(
   "main.tsx",
 );
 const ROOT_PATH = join(import.meta.dirname!, "..");
+
+type ResolvedProfile = Pick<ChatProfile, "name">;
+type ResolvedMessage = PlainChatMessage<ResolvedProfile>;
+type ResolvedRoom = Pick<ChatRoom<ResolvedMessage>, "name">;
+
+interface ResolvedProfileEntry {
+  profile?: ResolvedProfile;
+}
 
 async function createGroupChatHarness(): Promise<MultiRuntimeHarness> {
   const alice = await Identity.fromPassphrase("group-chat alice", {
@@ -90,14 +103,21 @@ async function addRoom(
   });
 }
 
-async function messages(session: MultiRuntimeSession): Promise<any[]> {
-  return ((await session.read(["messages"])) as any[]) ?? [];
+async function messages(
+  session: MultiRuntimeSession,
+): Promise<ResolvedMessage[]> {
+  const value = await session.read(["messages"]);
+  if (value === undefined || value === null) return [];
+  assert(Array.isArray(value), "messages resolved to a non-array value");
+  return value as ResolvedMessage[];
 }
 
 // `rooms` defaults to `{}`, so reading the path ["rooms", "list"] would throw
 // before the first room is added; read the parent and pluck the list instead.
-async function rooms(session: MultiRuntimeSession): Promise<any[]> {
-  const value = (await session.read(["rooms"])) as { list?: any[] } | undefined;
+async function rooms(session: MultiRuntimeSession): Promise<ResolvedRoom[]> {
+  const value = (await session.read(["rooms"])) as
+    | { list?: ResolvedRoom[] }
+    | undefined;
   return value?.list ?? [];
 }
 
@@ -219,7 +239,10 @@ describe("cfc group chat demo across runtimes", () => {
     );
 
     // The shared profile registry must expose both names to everyone.
-    const profilesFromAlice = ((await alice.read(["profiles"])) as any[]) ?? [];
+    const profilesFromAlice = ((await alice.read(["profiles"])) as
+      | ResolvedProfileEntry[]
+      | undefined) ??
+      [];
     const namesFromAlice = profilesFromAlice
       .map((entry) => entry?.profile?.name)
       .toSorted();
