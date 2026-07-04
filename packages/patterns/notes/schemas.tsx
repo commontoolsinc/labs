@@ -105,7 +105,7 @@ export interface NoteInput {
   content?: Writable<string | Default<"">>;
   isHidden?: boolean | Default<false>;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Writable<string | Default<"">>;
+  linkPattern?: string | Writable<string | Default<"">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }

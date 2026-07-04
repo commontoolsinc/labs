@@ -7,6 +7,7 @@ import {
   FS,
   type FsProjection,
   generateText,
+  getEntityId,
   handler,
   NAME,
   navigateTo,
@@ -110,6 +111,20 @@ const handleBacklinkClick = handler<
 );
 
 // ===== Utility functions =====
+
+type ReadableValue<T> = {
+  get(): T;
+};
+
+const isReadableValue = <T,>(value: unknown): value is ReadableValue<T> => {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as { get?: unknown };
+  return typeof candidate.get === "function";
+};
+
+const readMaybeCell = <T,>(
+  value: T | ReadableValue<T> | undefined,
+): T | undefined => isReadableValue<T>(value) ? value.get() : value;
 
 // Grep sub-pattern for patternTool - filters content lines by query
 const grepPattern = pattern<
@@ -256,7 +271,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           isHidden: !!notebook,
           parentNotebook: notebook,
         });
-        allPieces.push(note as any);
+        allPieces.push(note as MinimalPiece);
         return navigateTo(note);
       }
     });
@@ -295,8 +310,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     const appendLink = action(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
-        const resolved = (piece as any).resolveAsCell();
-        const ref = resolved?.entityId;
+        const ref = getEntityId(piece.resolveAsCell());
         const entityId = ref ? entityRefToString(ref) : undefined;
         if (!name || !entityId) return;
 
@@ -326,7 +340,7 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Link pattern for wiki-links
     const patternJson = computed(() => {
-      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const lpValue = readMaybeCell<string | Default<"">>(linkPattern);
       const custom = typeof lpValue === "string" ? lpValue.trim() : "";
       return custom || JSON.stringify(Note);
     });
