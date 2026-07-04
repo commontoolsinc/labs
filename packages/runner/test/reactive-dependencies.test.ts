@@ -38,6 +38,12 @@ const createAddresses = (
 ): IMemorySpaceAddress[] =>
   paths.map((path) => createAddress(path, space, id, type));
 
+const createAction = (name: string): Action => {
+  const action: Action = () => {};
+  Object.defineProperty(action, "name", { value: name });
+  return action;
+};
+
 describe("arraysOverlap", () => {
   it("returns true when arrays are identical", () => {
     expect(arraysOverlap(["a", "b", "c"], ["a", "b", "c"])).toBe(true);
@@ -592,12 +598,6 @@ describe("addresssesToPathByEntity", () => {
 });
 
 describe("determineTriggeredActions", () => {
-  // Helper to create mock actions
-  const createAction = (id: string): Action => ({
-    schedule: () => {},
-    name: id,
-  } as unknown as Action);
-
   describe("basic functionality", () => {
     it("returns empty array when no dependencies", () => {
       const dependencies = new Map<Action, SortedAndCompactPaths>();
@@ -2091,7 +2091,7 @@ Deno.bench("sortAndCompactPaths - multiple spaces/ids/types", () => {
 });
 
 Deno.bench("determineTriggeredActions - simple change", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
@@ -2104,7 +2104,7 @@ Deno.bench("determineTriggeredActions - simple change", () => {
 });
 
 Deno.bench("determineTriggeredActions - no changes", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
@@ -2119,10 +2119,7 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
   const after: Record<string, number> = {};
 
   for (let i = 0; i < 100; i++) {
-    const action = {
-      schedule: () => {},
-      name: `action${i}`,
-    } as unknown as Action;
+    const action = createAction(`action${i}`);
     dependencies.set(action, [[`field${i}`]]);
     before[`field${i}`] = i;
     after[`field${i}`] = i;
@@ -2138,7 +2135,7 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 });
 
 Deno.bench("determineTriggeredActions - deep nesting", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const deepPath = Array.from({ length: 10 }, (_, i) => `level${i}`);
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [deepPath]],
@@ -2161,7 +2158,7 @@ Deno.bench("determineTriggeredActions - deep nesting", () => {
 });
 
 Deno.bench("determineTriggeredActions - multiple paths per action", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const paths: SortedAndCompactPaths = Array.from(
     { length: 20 },
     (_, i) => [`field${i}`],
@@ -2199,7 +2196,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
   ];
 
   for (const { paths, name } of actions) {
-    const action = { schedule: () => {}, name } as unknown as Action;
+    const action = createAction(name);
     dependencies.set(action, paths);
   }
 

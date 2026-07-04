@@ -1,13 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/reactive-dependencies.test.ts": [
-    "599:4:16mb0bc",
-    "2094:56:ls399x",
-    "2107:56:ls399x",
-    "2125:6:59es5a",
-    "2141:56:ls399x",
-    "2164:56:ls399x",
-    "2202:48:130htlh",
-  ],
   "packages/runner/test/rehydrate-internal-default.test.ts": [
     "199:40:v0lnh0",
   ],
