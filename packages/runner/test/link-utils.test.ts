@@ -428,7 +428,7 @@ describe("link-utils", () => {
       // error message, which throws on BigInt and masks the original "not a
       // link" failure. Using `toCompactDebugString` instead handles BigInt
       // safely.
-      expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
+      expect(() => parseLinkOrThrow(123n)).toThrow(
         "Cannot parse value as link",
       );
     });

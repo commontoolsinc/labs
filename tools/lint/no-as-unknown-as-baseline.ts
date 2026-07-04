@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/link-utils.test.ts": [
-    "431:41:cr2hmb",
-  ],
   "packages/runner/test/mergeable-append-multispace-conflict.test.ts": [
     "194:49:1mecz9i",
     "258:49:1mecz9i",
