@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/system/default-app.tsx",
   "packages/patterns/system/home-ben.tsx",
   "packages/patterns/system/home.tsx",
   "packages/patterns/system/profile-create.tsx",

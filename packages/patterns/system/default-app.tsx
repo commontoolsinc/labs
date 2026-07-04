@@ -24,6 +24,10 @@ type MinimalPiece = {
   isHidden?: boolean;
 };
 
+type NotebookDropTarget = {
+  notes?: NotePiece[];
+};
+
 type PiecesListInput = void;
 
 // Pattern returns only UI, no data outputs (only symbol properties)
@@ -53,9 +57,7 @@ const removePiece = handler<
   }
 >((_, state) => {
   const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex(
-    (c: any) => c && state.piece.equals(c),
-  );
+  const index = allPiecesValue.findIndex((c) => c && state.piece.equals(c));
 
   if (index !== -1) {
     const pieceListCopy = [...allPiecesValue];
@@ -69,7 +71,7 @@ const removePiece = handler<
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
   { detail: { sourceCell: Writable<NotePiece> } },
-  { notebook: Writable<{ notes?: NotePiece[] }> }
+  { notebook: Writable<NotebookDropTarget> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
@@ -132,12 +134,12 @@ const addPiece = handler<
 
 // Handler: Track piece as recently used (add to front, maintain max)
 const trackRecent = handler<
-  { piece: unknown },
-  { recentPieces: Writable<unknown[]> }
+  { piece: MentionablePiece },
+  { recentPieces: Writable<MentionablePiece[]> }
 >(({ piece }, { recentPieces }) => {
   const current = recentPieces.get();
   // Remove if already present
-  const filtered = current.filter((c) => !equals(c as any, piece as any));
+  const filtered = current.filter((c) => !equals(c, piece));
   // Add to front and limit to max
   const updated = [piece, ...filtered].slice(0, MAX_RECENT_PIECES);
   recentPieces.set(updated);
@@ -281,7 +283,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   </cf-hstack>
                   <cf-table full-width hover>
                     <tbody>
-                      {recentPieces.map((piece: any) => (
+                      {recentPieces.map((piece) => (
                         <tr>
                           <td>
                             <cf-cell-context $cell={piece}>
@@ -328,7 +330,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                               <cf-drop-zone
                                 accept="note"
                                 oncf-drop={dropOntoNotebook({
-                                  notebook: piece as any,
+                                  notebook: piece as NotebookDropTarget,
                                 })}
                               >
                                 {link}
