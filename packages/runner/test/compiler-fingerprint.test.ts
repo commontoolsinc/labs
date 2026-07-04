@@ -55,6 +55,15 @@ async function importFreshCellCacheModule(): Promise<CellCacheModule> {
   return await import(moduleUrl.href);
 }
 
+function setDenoStatForTesting(stat: typeof Deno.stat | undefined): void {
+  Object.defineProperty(Deno, "stat", {
+    value: stat,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 describe("computeCompilerFingerprint", () => {
   it("is stable: identical inputs hash to the same value", async () => {
     const root = await makeTree({
@@ -186,12 +195,12 @@ describe("compile-cache version axis", () => {
     const originalStat = Deno.stat;
     const freshCellCache = await importFreshCellCacheModule();
     try {
-      Deno.stat = undefined as unknown as typeof Deno.stat;
+      setDenoStatForTesting(undefined);
       expect(await freshCellCache.getCompileCacheRuntimeVersion()).toBe(
         undefined,
       );
     } finally {
-      Deno.stat = originalStat;
+      setDenoStatForTesting(originalStat);
     }
   });
 
@@ -202,13 +211,13 @@ describe("compile-cache version axis", () => {
     const freshCellCache = await importFreshCellCacheModule();
     const definedVersion = `${VERSION_NAMESPACE}/defined-test`;
     try {
-      Deno.stat = undefined as unknown as typeof Deno.stat;
+      setDenoStatForTesting(undefined);
       global.__cfCompileCacheRuntimeVersion = definedVersion;
       expect(await freshCellCache.getCompileCacheRuntimeVersion()).toBe(
         definedVersion,
       );
     } finally {
-      Deno.stat = originalStat;
+      setDenoStatForTesting(originalStat);
       if (previousDefinedVersion === undefined) {
         delete global.__cfCompileCacheRuntimeVersion;
       } else {

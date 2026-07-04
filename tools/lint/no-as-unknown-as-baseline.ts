@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/compiler-fingerprint.test.ts": [
-    "189:28:2cuvue",
-    "205:28:2cuvue",
-  ],
   "packages/runner/test/content-addressed-identity-adversarial.test.ts": [
     "210:8:ig528j",
     "332:8:tgcyny",
