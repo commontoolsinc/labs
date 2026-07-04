@@ -235,7 +235,7 @@ function sendValueToBindingInner<T>(
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(
             cell.runtime.cfc,
-            getDerivedInternalCellLink(cell as any, descriptor),
+            getDerivedInternalCellLink(cell as AnyCell<unknown>, descriptor),
             alias.path,
             alias.schema,
           ),
