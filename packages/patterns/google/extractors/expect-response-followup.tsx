@@ -741,15 +741,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
     : "You are a helpful assistant that drafts professional follow-up emails.";
 
   const draftLlmResult = generateText({
-    prompt: computed((): string | undefined => {
+    prompt: computed((): string => {
       const threadId = generatingDraftFor.get();
-      if (!threadId) return undefined; // No thread selected, skip generation
+      if (!threadId) return ""; // No thread selected, skip generation
 
       // Find the thread
       const currentThread = (threads || []).find((t) =>
         t.threadId === threadId
       );
-      if (!currentThread) return undefined;
+      if (!currentThread) return "";
 
       const emailArray = Array.from(currentThread.emails || []);
       const threadSummary = emailArray
@@ -791,7 +791,7 @@ Original context:
 ${threadSummary}
 
 Write only the email body, no subject line or greeting line (the greeting will be auto-added):`;
-    }) as any,
+    }),
     system: draftSystemPrompt,
     model: "anthropic:claude-sonnet-4-5",
   });
