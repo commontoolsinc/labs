@@ -58,7 +58,9 @@ type TestMemoryServer = {
 function emulatedServer(
   storageManager: SchedulerTestStorageManager,
 ): TestMemoryServer {
-  return (storageManager as unknown as { server(): TestMemoryServer }).server();
+  const server = Reflect.get(storageManager, "server");
+  expect(typeof server).toBe("function");
+  return server.call(storageManager);
 }
 
 /**

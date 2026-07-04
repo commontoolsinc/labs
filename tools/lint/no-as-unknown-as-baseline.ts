@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-commit-backpressure.test.ts": [
-    "60:25:1y1onvv",
-  ],
   "packages/runner/test/scheduler-convergence.test.ts": [
     "387:48:12r5e40",
   ],
