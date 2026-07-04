@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-wildcard-link-applicability.test.ts": [
-    "49:6:rgrh0f",
-    "71:6:1oc7g4l",
-  ],
   "packages/runner/test/cfc-write-floor.test.ts": [
     "269:27:1x3ca4o",
     "347:26:1x3ca4o",

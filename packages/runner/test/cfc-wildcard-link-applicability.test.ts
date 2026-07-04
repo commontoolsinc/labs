@@ -2,8 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { wildcardPolicyMatchesValue } from "../src/cfc/prepare.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import type { URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 // Regression guard for wildcard policy applicability on unresolvable links
 // (audit S17).
@@ -27,13 +27,14 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
     ifc: { writeAuthorizedBy: ["trusted-handler"] },
   } as const satisfies JSONSchema;
   const target = { space, id: "of:guarded" as const, scope: "space" as const };
+  const linkedTargetId = "of:unresolvable-target" as URI;
 
   // A link whose embedded schema (string) deliberately mismatches the object
   // policy schema, pointing at a target the transaction cannot resolve.
   const linkValue = {
     "/": {
       [LINK_V1_TAG]: {
-        id: "of:unresolvable-target",
+        id: linkedTargetId,
         path: [] as string[],
         space,
         scope: "space",
@@ -46,7 +47,7 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
     const tx = {
       getWriteDetails: () => [],
       readValueOrThrow: () => undefined,
-    } as unknown as IExtendedStorageTransaction;
+    };
 
     expect(wildcardPolicyMatchesValue(tx, target, policySchema, linkValue))
       .toBe(true);
@@ -60,15 +61,16 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
       getWriteDetails: () => [
         {
           address: {
-            id: "of:unresolvable-target",
-            scope: "space",
+            space,
+            id: linkedTargetId,
+            scope: "space" as const,
             path: ["value"],
           },
           value: "a string, not an object",
         },
       ],
       readValueOrThrow: () => undefined,
-    } as unknown as IExtendedStorageTransaction;
+    };
 
     expect(wildcardPolicyMatchesValue(tx, target, policySchema, linkValue))
       .toBe(false);
