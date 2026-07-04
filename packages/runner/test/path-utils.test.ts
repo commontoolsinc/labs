@@ -49,6 +49,11 @@ describe("Path operations", () => {
     it("should return undefined for non-existent paths", () => {
       expect(getValueAtPath(obj, ["a", "b", "d"])).toBeUndefined();
     });
+
+    it("should stop when traversal reaches a nullish parent", () => {
+      expect(getValueAtPath({ a: null }, ["a", "b"])).toBeUndefined();
+      expect(getValueAtPath({ a: undefined }, ["a", "b"])).toBeUndefined();
+    });
   });
 
   describe("hasValueAtPath", () => {

@@ -40,6 +40,17 @@ type ProfilePickerInput = {
   mru: Writable<ProfileHomeOutput[]>;
 };
 
+type WithNormalizedFullLinkReader = {
+  getAsNormalizedFullLink?: () => { space?: unknown };
+};
+
+type WithSchemaReader<T> = T & {
+  asSchema(schema: unknown): { get(): unknown };
+};
+
+const asSchemaReader = <T,>(cell: T): WithSchemaReader<T> =>
+  cell as WithSchemaReader<T>;
+
 // Whether two profile cells name the SAME profile — compared by the profile's
 // own SPACE, NOT by `equals` / entity id (CT-1843; mirrors the runner-side
 // `sameProfileCell` in wish.ts landed by CT-1842 #4534).
@@ -57,18 +68,17 @@ type ProfilePickerInput = {
 // `mru` container links live in the home space, so an unmaterialized / invalid
 // entry that still resolves into the home space must never match.
 //
-// Uses `getAsNormalizedFullLink().space` via the `as any` escape hatch — the
-// pattern-facing surface has no typed space accessor (precedent:
-// home-ben.tsx). Defensive: any throw / missing space ⇒ no match.
+// Uses `getAsNormalizedFullLink().space` when present. A thrown error or
+// missing space gives no match.
 
 // A cell's own space DID, or undefined if it isn't a resolvable link. Module
-// scope (not pattern context), so the `as any` escape hatch + `?.` are fine.
-// deno-lint-ignore no-explicit-any
+// scope (not pattern context), so optional access keeps unresolved values from
+// throwing.
 const linkSpace = (cell: unknown): string | undefined => {
   try {
-    return (cell as any)?.getAsNormalizedFullLink?.()?.space as
-      | string
-      | undefined;
+    const space = (cell as WithNormalizedFullLinkReader)
+      .getAsNormalizedFullLink?.()?.space;
+    return typeof space === "string" ? space : undefined;
   } catch {
     return undefined;
   }
@@ -95,7 +105,7 @@ export default pattern<
   const homeSpace = linkSpace(profiles);
 
   const profileCreate = ProfileCreate({
-    profiles: profiles as any,
+    profiles,
     inputId: "wish-profile-picker-name-input",
   });
 
@@ -118,7 +128,7 @@ export default pattern<
                   identity idiom is cf-profile-badge), not the generic piece
                   chip variant. */
               }
-              <cf-cell-link $cell={p as any} />
+              <cf-cell-link $cell={p as never} />
             </div>
             {ifElse(
               computed(() => {
@@ -126,7 +136,7 @@ export default pattern<
                 // profile not yet loaded here doesn't collapse to `undefined`,
                 // then match by the profile's own SPACE (CT-1843) — `equals`
                 // returns false cross-space (different entity id + scope).
-                const def = (defaultProfile as any).asSchema(
+                const def = asSchemaReader(defaultProfile).asSchema(
                   profileLinkSchema(),
                 ).get();
                 return def ? sameProfileCell(def, p, homeSpace) : false;
@@ -137,8 +147,8 @@ export default pattern<
                 variant="ghost"
                 data-ui-action={TRUSTED_PROFILE_SET_DEFAULT_ACTION}
                 onClick={setDefaultProfile({
-                  defaultProfile: defaultProfile as any,
-                  profile: p,
+                  defaultProfile: defaultProfile as never,
+                  profile: p as never,
                 })}
               >
                 Set default
@@ -147,7 +157,10 @@ export default pattern<
             <cf-button
               size="sm"
               data-ui-action={TRUSTED_PROFILE_SET_MRU_ACTION}
-              onClick={setMruProfile({ mru: mru as any, profile: p })}
+              onClick={setMruProfile({
+                mru: mru as never,
+                profile: p as never,
+              })}
             >
               Use
             </cf-button>
