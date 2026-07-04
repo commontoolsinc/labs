@@ -19,6 +19,7 @@ import {
   lift,
   NAME,
   pattern,
+  type RenderNode,
   safeDateNow,
   SELF,
   str,
@@ -37,7 +38,10 @@ import Note from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
-import { getResultSchema } from "./record/extraction/schema-utils.ts";
+import {
+  getResultSchema,
+  type JSONSchema,
+} from "./record/extraction/schema-utils.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -47,6 +51,75 @@ const STANDARD_LABELS: Record<string, string[]> = {
   phone: ["Mobile", "Home", "Work", "Other"],
   address: ["Home", "Work", "Billing", "Shipping", "Other"],
 };
+
+type PieceFields = Record<string, unknown> & {
+  label?: unknown;
+  settingsUI?: RenderNode;
+};
+
+type SettableField = {
+  set?: (value: unknown) => void;
+  key?: (...path: unknown[]) => unknown;
+};
+
+type ExtractorParentInput = {
+  parentSubPieces: Writable<SubPieceEntry[]>;
+  parentTrashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+  parentTitle: Writable<string>;
+};
+type ExtractorModuleCallInput = Parameters<typeof ExtractorModule>[0];
+
+const SUMMARY_FIELDS = [
+  "label",
+  "value",
+  "content",
+  "address",
+  "email",
+  "phone",
+  "rating",
+  "tags",
+  "status",
+  "nickname",
+  "icon",
+  "birthDate",
+  "birthYear",
+  "url",
+  "notes",
+  "occurrences",
+] as const;
+
+function pieceFields(piece: unknown): PieceFields | undefined {
+  if (piece === null || piece === undefined) return undefined;
+  if (typeof piece !== "object" && typeof piece !== "function") {
+    return undefined;
+  }
+  return piece as PieceFields;
+}
+
+function pieceField(piece: unknown, field: string): unknown {
+  return pieceFields(piece)?.[field];
+}
+
+function pieceStringField(piece: unknown, field: string): string | undefined {
+  const value = pieceField(piece, field);
+  return typeof value === "string" ? value : undefined;
+}
+
+function trimmedPieceStringField(
+  piece: unknown,
+  field: string,
+): string | undefined {
+  const value = pieceStringField(piece, field)?.trim();
+  return value ? value : undefined;
+}
+
+function settableField(value: unknown): SettableField | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object" && typeof value !== "function") {
+    return undefined;
+  }
+  return value as SettableField;
+}
 
 // Helper to get next unused standard label for a module type
 function getNextUnusedLabel(
@@ -63,10 +136,8 @@ function getNextUnusedLabel(
       try {
         // Access the label field from the piece pattern output
         // Property access is reactive - framework handles Cell unwrapping
-        // deno-lint-ignore no-explicit-any
-        const piece = entry.piece as any;
-        const labelValue = piece?.label;
-        if (typeof labelValue === "string" && labelValue) {
+        const labelValue = pieceStringField(entry.piece, "label");
+        if (labelValue) {
           usedLabels.add(labelValue);
         }
       } catch {
@@ -106,10 +177,10 @@ export interface RecordOutput {
 
 // Inner lift: stores the initial pieces (receives pieces as input)
 const storeInitialPieces = lift<{
-  notesPiece: any;
-  notesSchema: any;
-  typePickerPiece: any;
-  typePickerSchema: any;
+  notesPiece: unknown;
+  notesSchema: JSONSchema | undefined;
+  typePickerPiece: unknown;
+  typePickerSchema: JSONSchema | undefined;
   subPieces: Writable<SubPieceEntry[]>;
   isInitialized: Writable<boolean>;
 }>(({
@@ -182,10 +253,9 @@ const initializeRecord = lift<{
 
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
-  // deno-lint-ignore no-explicit-any
-  ({ piece }: { piece?: any }) => {
+  ({ piece }: { piece?: unknown }) => {
     // Check if the piece exports a settingsUI
-    return !!piece?.settingsUI;
+    return !!pieceFields(piece)?.settingsUI;
   },
 );
 
@@ -281,11 +351,13 @@ const addSubPiece = handler<
   const piece = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
     : type === "extractor"
-    ? ExtractorModule({
-      parentSubPieces: sc,
-      parentTrashedSubPieces: trash,
-      parentTitle: title,
-    } as any)
+    ? ExtractorModule(
+      ({
+        parentSubPieces: sc,
+        parentTrashedSubPieces: trash,
+        parentTitle: title,
+      } satisfies ExtractorParentInput) as ExtractorModuleCallInput,
+    )
     : createSubPiece(type, initialValues);
 
   // Capture schema at creation time for dynamic discovery
@@ -507,34 +579,15 @@ const handleGetSummary = handler<
     modules: modules.map((entry, index) => {
       const def = getDefinition(entry.type);
       // Extract data from piece - access common fields reactively
-      // deno-lint-ignore no-explicit-any
-      const piece = entry.piece as any;
+      const piece = pieceFields(entry.piece);
       const moduleData: Record<string, unknown> = {};
 
       // Try to extract common fields based on module type
       try {
         // Most modules have a primary value field
-        if (piece?.label !== undefined) moduleData.label = piece.label;
-        if (piece?.value !== undefined) moduleData.value = piece.value;
-        if (piece?.content !== undefined) moduleData.content = piece.content;
-        if (piece?.address !== undefined) moduleData.address = piece.address;
-        if (piece?.email !== undefined) moduleData.email = piece.email;
-        if (piece?.phone !== undefined) moduleData.phone = piece.phone;
-        if (piece?.rating !== undefined) moduleData.rating = piece.rating;
-        if (piece?.tags !== undefined) moduleData.tags = piece.tags;
-        if (piece?.status !== undefined) moduleData.status = piece.status;
-        if (piece?.nickname !== undefined) moduleData.nickname = piece.nickname;
-        if (piece?.icon !== undefined) moduleData.icon = piece.icon;
-        if (piece?.birthDate !== undefined) {
-          moduleData.birthDate = piece.birthDate;
-        }
-        if (piece?.birthYear !== undefined) {
-          moduleData.birthYear = piece.birthYear;
-        }
-        if (piece?.url !== undefined) moduleData.url = piece.url;
-        if (piece?.notes !== undefined) moduleData.notes = piece.notes;
-        if (piece?.occurrences !== undefined) {
-          moduleData.occurrences = piece.occurrences;
+        for (const field of SUMMARY_FIELDS) {
+          const value = piece?.[field];
+          if (value !== undefined) moduleData[field] = value;
         }
       } catch {
         // Ignore errors from pieces without expected fields
@@ -616,12 +669,13 @@ const handleAddModule = handler<
     return;
   } else if (type === "extractor") {
     // ExtractorModule needs parent Cells and title
-    piece = ExtractorModule({
-      parentSubPieces: sc,
-      parentTrashedSubPieces: trash,
-      parentTitle: title,
-      // deno-lint-ignore no-explicit-any
-    } as any);
+    piece = ExtractorModule(
+      ({
+        parentSubPieces: sc,
+        parentTrashedSubPieces: trash,
+        parentTitle: title,
+      } satisfies ExtractorParentInput) as ExtractorModuleCallInput,
+    );
   } else {
     piece = createSubPiece(type, initialValues);
   }
@@ -670,8 +724,7 @@ const handleUpdateModule = handler<
   }
 
   const entry = current[index];
-  // deno-lint-ignore no-explicit-any
-  const piece = entry.piece as any;
+  const piece = pieceFields(entry.piece);
 
   if (!piece) {
     if (result) result.set({ success: false, error: "Module piece not found" });
@@ -680,7 +733,7 @@ const handleUpdateModule = handler<
 
   try {
     // Try to access the field as a Cell and set it
-    const fieldCell = piece[field];
+    const fieldCell = settableField(piece[field]);
     if (fieldCell && typeof fieldCell.set === "function") {
       fieldCell.set(value);
       if (result) {
@@ -900,8 +953,7 @@ const Record = pattern<RecordInput, RecordOutput>(
         // This works because CTS transforms .map() to properly unwrap reactive values
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          pieceStringField(entry.piece, "label"),
         );
         return {
           entry,
@@ -973,12 +1025,7 @@ const Record = pattern<RecordInput, RecordOutput>(
     const manualIcon = computed(() => {
       const iconModule = subPieces.find((e) => e?.type === "record-icon");
       if (!iconModule) return null;
-      // deno-lint-ignore no-explicit-any
-      const iconValue = (iconModule.piece as any)?.icon;
-      if (!iconValue) return null;
-      return typeof iconValue === "string" && iconValue.trim()
-        ? iconValue.trim()
-        : null;
+      return trimmedPieceStringField(iconModule.piece, "icon") || null;
     });
 
     // Extract icon: manual icon takes precedence over inferred type
@@ -994,10 +1041,9 @@ const Record = pattern<RecordInput, RecordOutput>(
       const nicknames: string[] = [];
       for (const mod of nicknameModules) {
         try {
-          // deno-lint-ignore no-explicit-any
-          const nicknameValue = (mod.piece as any)?.nickname;
-          if (typeof nicknameValue === "string" && nicknameValue.trim()) {
-            nicknames.push(nicknameValue.trim());
+          const nicknameValue = trimmedPieceStringField(mod.piece, "nickname");
+          if (nicknameValue) {
+            nicknames.push(nicknameValue);
           }
         } catch {
           // Ignore errors
@@ -1023,8 +1069,7 @@ const Record = pattern<RecordInput, RecordOutput>(
         // Get display info using plain helper function
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          pieceStringField(entry.piece, "label"),
         );
         return { entry, trashIndex, displayInfo };
       });
@@ -1044,8 +1089,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       if (idx === undefined) return null;
       const entry = subPieces[idx];
       if (!entry) return null;
-      // deno-lint-ignore no-explicit-any
-      return (entry.piece as any)?.settingsUI || null;
+      return pieceFields(entry.piece)?.settingsUI || null;
     });
 
     // Get display info for the module whose settings are open
@@ -1057,8 +1101,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       // Use plain helper function to get display info
       return getDisplayInfo(
         entry.type,
-        // deno-lint-ignore no-explicit-any
-        (entry.piece as any)?.label,
+        pieceStringField(entry.piece, "label"),
       );
     });
 
