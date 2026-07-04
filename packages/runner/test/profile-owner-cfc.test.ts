@@ -2,11 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 
 const alice = await Identity.fromPassphrase(
   "runner-profile-owner-cfc-alice",
@@ -14,6 +16,10 @@ const alice = await Identity.fromPassphrase(
 const bob = await Identity.fromPassphrase("runner-profile-owner-cfc-bob");
 
 const PROFILE_WRITER = "system.profile-home";
+const PROFILE_LINK_CELL_SCHEMA: JSONSchema = {
+  type: "unknown",
+  asCell: ["cell"],
+};
 
 const ownerAtom = (ownerDid: string) => ({
   kind: "represents-principal",
@@ -119,6 +125,23 @@ const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {
     schema;
 };
 
+const resolveSchemaWithRootDefs = (
+  root: JSONSchema,
+  schema: JSONSchema,
+): JSONSchema => {
+  const resolved = resolveLocalSchemaRef(root, schema);
+  if (
+    typeof resolved !== "object" || resolved === null ||
+    typeof root !== "object" || root === null
+  ) {
+    return resolved;
+  }
+  return {
+    ...resolved,
+    $defs: (root as { $defs?: Record<string, JSONSchema> }).$defs,
+  };
+};
+
 const setTrustedProfileWriter = (
   tx: IExtendedStorageTransaction,
   actingPrincipal?: string,
@@ -160,6 +183,41 @@ const recordTrustedEdit = (
       },
     },
   });
+};
+
+const verifiedIdentityForBinding = (
+  runtime: Runtime,
+  bindingPath: string[],
+) => {
+  const registry = (runtime.harness as unknown as {
+    executableRegistry: {
+      verifiedImplementationsByEntryRef: Map<string, Map<string, unknown>>;
+    };
+  }).executableRegistry;
+  for (const bucket of registry.verifiedImplementationsByEntryRef.values()) {
+    for (const implementation of bucket.values()) {
+      const provenance = getVerifiedProvenance(implementation);
+      if (provenance === undefined) {
+        continue;
+      }
+      const identity = provenance.bindingIdentity;
+      if (
+        identity !== undefined &&
+        identity.bindingPath.length === bindingPath.length &&
+        identity.bindingPath.every((entry, index) =>
+          entry === bindingPath[index]
+        )
+      ) {
+        return {
+          kind: "verified" as const,
+          moduleIdentity: provenance.identity,
+          sourceFile: identity.sourceFile,
+          bindingPath: identity.bindingPath,
+        };
+      }
+    }
+  }
+  throw new Error(`Verified binding not found: ${bindingPath.join(".")}`);
 };
 
 describe("profile owner CFC policy", () => {
@@ -525,6 +583,49 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("marks the home default profile as picker-protected data", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const rootSchema = homePattern.resultSchema as JSONSchema;
+      const properties =
+        (rootSchema as { properties?: Record<string, JSONSchema> })
+          .properties ?? {};
+      const defaultProfileSchema = resolveLocalSchemaRef(
+        rootSchema,
+        properties.defaultProfile ?? {},
+      ) as {
+        anyOf?: JSONSchema[];
+        ifc?: {
+          addIntegrity?: unknown[];
+          writeAuthorizedBy?: unknown;
+          uiContract?: unknown;
+        };
+      };
+      expect(
+        defaultProfileSchema.anyOf?.some((branch) =>
+          (branch as { type?: unknown }).type === "undefined"
+        ),
+      ).toBe(true);
+      expect(defaultProfileSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(defaultProfileSchema.ifc?.writeAuthorizedBy).toEqual({
+        __ctWriterIdentityOf: {
+          file: "/packages/patterns/system/profile-create.tsx",
+          path: ["setDefaultProfile"],
+        },
+      });
+      expect(defaultProfileSchema.ifc?.uiContract).toEqual({
+        helper: "UiAction",
+        action: "SetDefaultProfile",
+        trustedPattern: "ProfilePickerSurface",
+        requiredEventIntegrity: ["ProfilePickerSurface"],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks production profile fields as owner-protected data", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -635,6 +736,197 @@ describe("profile owner CFC policy", () => {
       writeTx.prepareCfc();
       const result = await writeTx.commit();
       expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects direct untrusted writes to the home default profile", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const tx = runtime.edit();
+      runtime.getCell(
+        alice.did(),
+        "home-default-profile-untrusted",
+        homePattern.resultSchema,
+        tx,
+      );
+      const profileDefault = runtime.getCell(
+        alice.did(),
+        "home-default-profile-untrusted-target",
+        undefined,
+        tx,
+      );
+      profileDefault.set({
+        name: "Ada",
+        avatar: "",
+        bio: "",
+        elements: [],
+      });
+      await tx.commit();
+
+      const writeTx = runtime.edit();
+      const protectedHomeDefault = runtime.getCell(
+        alice.did(),
+        "home-default-profile-untrusted",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHomeDefault.key("defaultProfile").set(profileDefault);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit();
+      expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects direct untrusted clears of the home default profile", async () => {
+    const storageManager = StorageManager.emulate({ as: alice });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const rootSchema = homePattern.resultSchema as JSONSchema;
+      const properties =
+        (rootSchema as { properties?: Record<string, JSONSchema> })
+          .properties ?? {};
+      const trustedDefaultProfileSchema = resolveSchemaWithRootDefs(
+        rootSchema,
+        properties.defaultProfile ?? {},
+      );
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("observe");
+      const initializedHome = runtime.getCell(
+        alice.did(),
+        "home-default-profile-clear",
+        homePattern.resultSchema,
+        seed,
+      );
+      runtime.runner.run(
+        seed,
+        homePattern,
+        {},
+        initializedHome,
+      );
+      seed.prepareCfc();
+      const seedResult = await seed.commit();
+      expect(seedResult.error).toBeUndefined();
+
+      const seedDefault = runtime.edit();
+      seedDefault.setCfcEnforcementMode("enforce-explicit");
+      seedDefault.setCfcTrustSnapshot({
+        id: "trusted-default-profile-seed",
+        actingPrincipal: alice.did(),
+      });
+      seedDefault.setCfcImplementationIdentity(
+        verifiedIdentityForBinding(runtime, ["setDefaultProfile"]),
+      );
+      const profileDefault = runtime.getCell(
+        alice.did(),
+        "home-default-profile-clear-target",
+        undefined,
+        seedDefault,
+      );
+      profileDefault.set({
+        name: "Ada",
+        avatar: "",
+        bio: "",
+        elements: [],
+      });
+      const home = runtime.getCell(
+        alice.did(),
+        "home-default-profile-clear",
+        homePattern.resultSchema,
+        seedDefault,
+      );
+      const trustedDefaultProfile = home.key("defaultProfile")
+        .resolveAsCell()
+        .asSchema(trustedDefaultProfileSchema);
+      trustedDefaultProfile.set(profileDefault);
+      const trustedDefaultTarget = trustedDefaultProfile
+        .getAsNormalizedFullLink();
+      seedDefault.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: trustedDefaultTarget.space,
+          scope: trustedDefaultTarget.scope,
+          id: trustedDefaultTarget.id,
+          path: [],
+        },
+        eventId: "trusted-default-profile-seed-event",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "ProfilePickerSurface",
+            eventIntegrity: ["ProfilePickerSurface"],
+            uiContractDataset: { uiAction: "SetDefaultProfile" },
+          },
+        },
+      });
+      seedDefault.prepareCfc();
+      const seedDefaultResult = await seedDefault.commit();
+      expect(seedDefaultResult.error).toBeUndefined();
+
+      const trustedSchemaWriteTx = runtime.edit();
+      trustedSchemaWriteTx.setCfcEnforcementMode("enforce-explicit");
+      trustedSchemaWriteTx.setCfcTrustSnapshot({
+        id: "untrusted-default-profile-clear",
+        actingPrincipal: alice.did(),
+      });
+      const trustedSchemaDefaultProfile = runtime.getCellFromLink(
+        trustedDefaultTarget,
+        trustedDefaultProfileSchema,
+        trustedSchemaWriteTx,
+      );
+      expect(
+        runtime.getCellFromLink(
+          trustedDefaultTarget,
+          PROFILE_LINK_CELL_SCHEMA,
+          trustedSchemaWriteTx,
+        ).get(),
+      ).toBeDefined();
+      const trustedSchemaAndHash = internSchema(
+        trustedDefaultProfileSchema,
+        true,
+      );
+      trustedSchemaWriteTx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: trustedDefaultTarget.space,
+          scope: trustedDefaultTarget.scope,
+          id: trustedDefaultTarget.id,
+          path: [...trustedDefaultTarget.path],
+        },
+        schemaHash: trustedSchemaAndHash.taggedHashString,
+        schema: trustedSchemaAndHash.schema,
+      });
+      trustedSchemaDefaultProfile.set(undefined);
+      trustedSchemaWriteTx.prepareCfc();
+      const trustedSchemaResult = await trustedSchemaWriteTx.commit();
+      expect(trustedSchemaResult.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted verified binding identity",
+      );
+
+      const genericWriteTx = runtime.edit();
+      genericWriteTx.setCfcEnforcementMode("enforce-explicit");
+      const genericDefaultProfile = runtime.getCellFromLink(
+        trustedDefaultTarget,
+        PROFILE_LINK_CELL_SCHEMA,
+        genericWriteTx,
+      );
+      expect(genericDefaultProfile.get()).toBeDefined();
+      genericDefaultProfile.set(undefined);
+      genericWriteTx.prepareCfc();
+      const genericResult = await genericWriteTx.commit();
+      expect(genericResult.error?.message).toContain("missing schema");
     } finally {
       await runtime.dispose();
       await storageManager.close();

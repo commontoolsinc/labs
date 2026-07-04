@@ -186,13 +186,23 @@ type PickerProfileLink<Binding, Action extends string> = Cfc<
   }
 >;
 
-// The home `defaultProfile` link: write authorized by `setDefaultProfile`.
-export type TrustedDefaultProfile =
-  | PickerProfileLink<
-    typeof setDefaultProfile,
-    typeof TRUSTED_PROFILE_SET_DEFAULT_ACTION
-  >
-  | undefined;
+// The home `defaultProfile` field: write authorized by `setDefaultProfile`.
+// The CFC envelope covers both a profile link and the empty state.
+export type TrustedDefaultProfile = Cfc<
+  WriteAuthorizedBy<
+    Cell<ProfileHomeOutput> | undefined,
+    typeof setDefaultProfile
+  >,
+  {
+    addIntegrity: ["profile-link"];
+    uiContract: {
+      helper: "UiAction";
+      action: typeof TRUSTED_PROFILE_SET_DEFAULT_ACTION;
+      trustedPattern: typeof TRUSTED_PROFILE_PICKER_SURFACE;
+      requiredEventIntegrity: [typeof TRUSTED_PROFILE_PICKER_SURFACE];
+    };
+  }
+>;
 
 // The home `mru` list: elements carry the picker `uiContract`; the array
 // container carries `writeAuthorizedBy: setMruProfile` to gate structural

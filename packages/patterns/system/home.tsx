@@ -168,31 +168,34 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const journal = new Writable<JournalEntry[]>([]).for("journal");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
-  // NOTE(CT-1628): the `as any` casts around the profile cells below are
-  // required because the CFC wrapper types (TrustedProfile*) don't yet compose
-  // with Writable/the pattern factory output type. Tracked for a proper type
-  // fix.
-  //
   // Multi-profile model: a user has many profiles, each in its own `inSpace`
   // space. `profiles` is the durable list (appended on create). `defaultProfile`
   // is the one `#profile` resolves to in headless mode and orders first in the
   // picker; `mru` is the recency-ordered list driving the rest of the ordering.
   const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
-  const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
+  const trustedDefaultProfileCell = new Writable<TrustedDefaultProfile>(
+    undefined,
+  )
     .for("defaultProfile");
+  const defaultProfile: Writable<ProfileHomeOutput | undefined> =
+    trustedDefaultProfileCell as never;
   const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
+  const trustedProfiles: TrustedProfileList = profiles as never;
+  const trustedDefaultProfile: TrustedDefaultProfile =
+    trustedDefaultProfileCell as never;
+  const trustedMru: TrustedProfileMru = mru as never;
   // Untrusted-write regression surface: this stream is exported so tests can
   // verify that sending it from outside the trusted create surface does NOT
   // create a profile. The actual create UI lives in the profile picker below.
   const createProfileStream = submitProfileCreation({
-    profiles: profiles as any,
+    profiles,
   });
   // The home Profile tab IS the profile picker: it lists profiles natively,
   // sets the default, stamps MRU on selection, and creates more inline.
   const profilePicker = ProfilePicker({
-    profiles: profiles as any,
-    defaultProfile: defaultProfile as any,
-    mru: mru as any,
+    profiles,
+    defaultProfile,
+    mru,
   });
 
   // Child components
@@ -317,9 +320,9 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     journal,
     spaces,
     defaultAppUrl,
-    profiles: profiles as any,
-    defaultProfile: defaultProfile as any,
-    mru: mru as any,
+    profiles: trustedProfiles,
+    defaultProfile: trustedDefaultProfile,
+    mru: trustedMru,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
