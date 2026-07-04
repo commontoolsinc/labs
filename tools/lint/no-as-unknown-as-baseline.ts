@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfreg-builder-identity.test.ts": [
-    "112:25:1h049y8",
-  ],
   "packages/runner/test/compiler-fingerprint.test.ts": [
     "189:28:2cuvue",
     "205:28:2cuvue",

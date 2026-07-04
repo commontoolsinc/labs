@@ -109,9 +109,9 @@ export default pattern<State>((state) => {
       const { identity } = entryRef!;
 
       // Reach into the reverse index to enumerate what this module registered.
-      const hoists = (pm as unknown as {
-        addressableByIdentity: Map<string, Map<string, unknown>>;
-      }).addressableByIdentity.get(identity);
+      const addressableByIdentity: Map<string, Map<string, unknown>> = Reflect
+        .get(pm, "addressableByIdentity");
+      const hoists = addressableByIdentity.get(identity);
       const symbols = [...(hoists?.keys() ?? [])];
 
       // A pattern (map op) and a non-pattern artifact (lift) were both hoisted
