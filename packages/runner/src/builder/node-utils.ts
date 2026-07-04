@@ -21,7 +21,7 @@ export function connectInputAndOutputs(node: NodeRef) {
           : undefined;
         const sourceLocation = typeof implementation === "function"
           ? resolveLocationFromFunctionSource(
-            implementation as (...args: any[]) => unknown,
+            implementation as (...args: unknown[]) => unknown,
             node.frame,
           )
           : null;
