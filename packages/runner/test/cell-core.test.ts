@@ -170,9 +170,11 @@ describe("Cell", () => {
       undefined,
       localTx,
     );
-    parent.setRawUntyped({
-      slot: target.getAsWriteRedirectLink(),
-    } as unknown as FabricValue);
+    parent.setRawUntyped(
+      {
+        slot: target.getAsWriteRedirectLink(),
+      } satisfies FabricValue,
+    );
 
     // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
     // into `FabricError`) through the redirect must land at the target,
@@ -418,9 +420,7 @@ describe("Cell", () => {
     );
     cell.set(42);
 
-    expect(
-      (cell as unknown as { __debugValue: number }).__debugValue,
-    ).toBe(42);
+    expect(cell.__debugValue).toBe(42);
     expect("value" in cell).toBe(false);
   });
 

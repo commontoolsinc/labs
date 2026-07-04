@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cell-core.test.ts": [
-    "175:6:1v4fyfc",
-    "422:13:kkkrdw",
-  ],
   "packages/runner/test/cell-get-slow-warning.test.ts": [
     "52:41:1yjlkjh",
   ],
