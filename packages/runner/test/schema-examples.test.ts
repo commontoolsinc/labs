@@ -20,6 +20,14 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+function expectString(value: unknown): string {
+  expect(typeof value).toBe("string");
+  if (typeof value !== "string") {
+    throw new Error("Expected a string");
+  }
+  return value;
+}
+
 describe("Schema - Examples", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -167,7 +175,7 @@ describe("Schema - Examples", () => {
       cell.key("current")
         .key("label")
         .sink((value) => {
-          currentByKeyValues.push(value as unknown as string);
+          currentByKeyValues.push(expectString(value));
         });
 
       // .get() the currently selected cell
@@ -341,7 +349,7 @@ describe("Schema - Examples", () => {
       // Querying for a value tied to the currently selected sub-document
       const current = root.key("current").key("label");
       current.sink((value) => {
-        currentByKeyValues.push(value as unknown as string);
+        currentByKeyValues.push(expectString(value));
       });
 
       // Make sure the schema is correct and it is still anchored at the root
