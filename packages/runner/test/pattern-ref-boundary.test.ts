@@ -16,7 +16,6 @@ import {
   resolveStoredPattern,
   resolveStoredPatternAsync,
 } from "../src/builtins/op-pattern-ref.ts";
-import type { FactoryInput } from "../src/builder/types.ts";
 
 /**
  * Identity E4 (docs/specs/content-addressed-action-identity.md §7): the JSON
@@ -102,12 +101,12 @@ describe("refs-only pattern JSON at the boundary", () => {
   it("a pattern with no entry ref still serializes its full graph", () => {
     // Manually constructed / dynamic patterns are never indexed; the boundary
     // must keep them loadable, so they fall back to the graph form.
-    const fake = {
+    const fake: Pattern = {
       argumentSchema: true,
       resultSchema: true,
       result: {},
       nodes: [],
-    } as unknown as Pattern;
+    };
     const serialized = patternToJSON(fake);
     expect("$patternRef" in serialized).toBe(false);
     expect(Array.isArray((serialized as { nodes: unknown }).nodes)).toBe(true);
@@ -117,12 +116,12 @@ describe("refs-only pattern JSON at the boundary", () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
     expect(runtime.patternManager.getArtifactEntryRef(compiled)).toBeDefined();
 
-    const internal = serializePatternGraph(compiled as unknown as Pattern);
+    const internal = serializePatternGraph(compiled);
     expect("$patternRef" in internal).toBe(false);
     expect(Array.isArray((internal as { nodes: unknown }).nodes)).toBe(true);
 
     const viaLegacyAliases = toJSONWithLegacyAliases(
-      compiled as unknown as FactoryInput<unknown>,
+      compiled,
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);
     expect(Array.isArray(viaLegacyAliases.nodes)).toBe(true);
@@ -130,7 +129,7 @@ describe("refs-only pattern JSON at the boundary", () => {
 
   it("nodes of a freshly compiled pattern embed bare op graphs (no $patternRef)", async () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
-    const json = JSON.stringify((compiled as unknown as Pattern).nodes);
+    const json = JSON.stringify(compiled.nodes);
     expect(json.includes("$patternRef")).toBe(false);
   });
 

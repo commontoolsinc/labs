@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/pattern-ref-boundary.test.ts": [
-    "110:6:uwxdf3",
-    "120:52:4f6ebu",
-    "125:15:kt04eq",
-    "133:42:4f6ebu",
-  ],
   "packages/runner/test/pattern-scope.test.ts": [
     "140:35:162myyr",
     "141:33:13pycyk",
