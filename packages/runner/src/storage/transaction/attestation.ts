@@ -1,8 +1,8 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   type FabricPlainObject,
   type FabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
@@ -154,14 +154,14 @@ export const claim = (
     : read(source, address)?.ok?.value;
 
   // Fast path: reference equality check avoids expensive comparison
-  // when the replica state hasn't changed since the original read
-  // TODO(danfuzz): This compares a stored document value (the read/attested
-  // value) with `deepEqual`, which mishandles `FabricValue`: two same-class
-  // `FabricPrimitive` values (state in private `#fields`, zero own-props)
-  // compare equal regardless of value, so a changed Fabric value can be
-  // mis-detected as unchanged. Use a Fabric-aware equality for stored-value
-  // comparison.
-  if (expected === actual || deepEqual(expected, actual)) {
+  // when the replica state hasn't changed since the original read.
+  // Otherwise compare the stored document value (the read/attested value) with
+  // `valueEqual`, the `Fabric`-aware content equality: `deepEqual` walks
+  // enumerable own-props, of which a `FabricPrimitive` (state in private
+  // `#fields`) has none, so it conflates every distinct same-class instance and
+  // would mis-detect a changed Fabric value as unchanged (CT-1770), masking the
+  // very `StateInconsistency` this check exists to raise.
+  if (expected === actual || valueEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {

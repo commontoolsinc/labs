@@ -828,6 +828,76 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("rejects a uiContract field whose Fabric write differs from its Fabric default (CT-1770)", async () => {
+    // The schema default and the written value are distinct `FabricBytes`
+    // (interned from the `Uint8Array`s) that differ only in byte content, so the
+    // write does NOT install the default -- it must be rejected exactly like the
+    // "not default" string case above. `deepEqual` sees two zero-own-prop
+    // instances of the same class and calls them equal, so the write-policy gate
+    // wrongly treats this as an initial-default install and lets the differing
+    // value through; `valueEqual` compares by content hash and rejects it.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      // A schema whose `savedBytes` default is a `Uint8Array` cannot be authored
+      // as a plain literal (schema interning deep-freezes it and a raw
+      // `Uint8Array` cannot be frozen). Instead, round-trip the schema through a
+      // cell read as a query result, which interns the native `Uint8Array`
+      // default into a `FabricBytes` -- the realistic way a Fabric value reaches
+      // `schema.default` (see query-result-proxy-fabric-primitive.test.ts).
+      const schemaSource = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedBytes: {
+                default: new Uint8Array([1, 2, 3]),
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedBytes"],
+          },
+        },
+      };
+
+      const schemaTx = runtime.edit();
+      const schemaCell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-fabric-schema-source",
+        undefined,
+        schemaTx,
+      );
+      schemaCell.set(schemaSource);
+      const schema = schemaCell.getAsQueryResult() as JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-fabric-non-default-setup",
+        schema,
+        tx,
+      );
+      // Write bytes that DIFFER from the default's bytes.
+      cell.set({ argument: { savedBytes: new Uint8Array([4, 5, 6]) } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing trusted-event policy input",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects relevant unprepared commits in enforcing modes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

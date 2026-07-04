@@ -11,6 +11,7 @@ import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -2601,12 +2602,20 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-  // `utils/deep-equal.ts`); `schema.default` can hold a `FabricValue`, so this
-  // CFC write-policy check can compare wrong. Migrate to a `Fabric`-aware
-  // equality once available.
+  // `schema.default` can hold a `FabricValue` (a native `Uint8Array`/`Date`
+  // default interns to `FabricBytes`/`FabricEpoch*`), so this write-policy check
+  // must use `valueEqual`, the `Fabric`-aware content equality: `deepEqual`
+  // walks enumerable own-props, of which a `FabricPrimitive` has none, so it
+  // conflates every distinct same-class instance and would treat a write that
+  // differs from the default only in Fabric content as an initial-default
+  // install (CT-1770). The `default` is statically `ImmutableJSONValue` (a
+  // subset of `FabricValue`); the cast bridges the deeply-`readonly` JSON type
+  // to the `FabricValue` the comparison operates over.
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
-    deepEqual(writeValueForTarget(tx, pathTarget), schema.default);
+    valueEqual(
+      writeValueForTarget(tx, pathTarget),
+      schema.default as FabricValue,
+    );
 };
 
 const linkedWriteValueForPolicy = (

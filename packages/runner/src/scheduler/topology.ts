@@ -1,4 +1,7 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
@@ -35,18 +38,18 @@ export function collectTransitiveEffects(state: {
 }
 
 export function mapsEqual(
-  a: Map<string, unknown>,
-  b: Map<string, unknown>,
+  a: Map<string, FabricValue>,
+  b: Map<string, FabricValue>,
 ): boolean {
   if (a.size !== b.size) return false;
   for (const [key, val] of a) {
     if (!b.has(key)) return false;
-    // TODO(danfuzz): `mapsEqual` compares map values with `deepEqual`, which
-    // mishandles `FabricValue`; this helper is used on stored read-value maps,
-    // so two same-class `FabricPrimitive`s (state in private `#fields`, zero
-    // own-props) compare equal regardless of value. Use a Fabric-aware
-    // equality.
-    if (!deepEqual(val, b.get(key))) return false;
+    // `valueEqual` is the `Fabric`-aware content equality these stored
+    // read-value maps need: `deepEqual` walks enumerable own-props, of which a
+    // `FabricPrimitive` (`FabricBytes`/`FabricHash`/...) has none, so it
+    // conflates every distinct same-class instance and would mask a real value
+    // change (CT-1770).
+    if (!valueEqual(val, b.get(key))) return false;
   }
   return true;
 }
