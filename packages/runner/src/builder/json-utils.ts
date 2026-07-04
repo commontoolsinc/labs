@@ -66,7 +66,7 @@ export function toJSONWithLegacyAliases(
     // Otherwise it's an internal reference. Ask the pattern builder how this
     // cell should be represented in the serialized pattern.
     const alias = resolveCellAlias?.(
-      value as Reactive<any>,
+      value as Reactive<unknown>,
       path,
       ignoreSelfAliases,
     );
@@ -109,12 +109,12 @@ export function toJSONWithLegacyAliases(
 
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
-    return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
+    return value.map((v: FactoryInput<unknown>, i: number) =>
       toJSONWithLegacyAliases(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
         i,
       ], seen)
-    );
+    ) as JSONValue;
   }
 
   // If this is an object or a pattern, process each key recursively.
@@ -132,21 +132,18 @@ export function toJSONWithLegacyAliases(
     // sub-pattern graphs must stay bare — no boundary `$patternRef`.
     const valueToProcess = (isPattern(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
-      ? serializePatternGraph(value as unknown as Pattern) as Record<
-        string,
-        any
-      >
-      : (value as Record<string, any>);
+      ? serializePatternGraph(value as unknown as Pattern)
+      : (value as Record<string, unknown>);
 
-    const result: any = {};
+    const result: Record<string, JSONValue> = {};
     // TODO(danfuzz): This `isRecord`-gated `for...in` walk has no
     // `FabricSpecialObject` guard, so a `FabricPrimitive` (state in private
     // fields, zero enumerable own-props) flattens to `{}` and a
     // `FabricInstance` is walked by its internal slots instead of its codec
     // contents.
-    for (const key in valueToProcess as any) {
+    for (const key in valueToProcess) {
       const jsonValue = toJSONWithLegacyAliases(
-        valueToProcess[key],
+        valueToProcess[key] as FactoryInput<unknown>,
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
@@ -343,7 +340,7 @@ export function moduleToJSON(module: Module) {
     bind: _bind,
     ...rest
   } = module as Module & {
-    toJSON: () => any;
+    toJSON: () => unknown;
     with?: unknown;
     bind?: unknown;
   };
@@ -368,7 +365,7 @@ export function moduleToJSON(module: Module) {
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
     implementation = toJSONWithLegacyAliases(
-      implementation as unknown as FactoryInput<any>,
+      implementation as unknown as FactoryInput<unknown>,
     ) as unknown as Pattern;
     return {
       ...rest,
