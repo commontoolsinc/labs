@@ -543,12 +543,12 @@ describe("Address Module", () => {
 
     it("should return false for empty id", () => {
       const address = {
-        id: "",
+        id: "" as IMemoryAddress["id"],
         type: "application/json",
         path: [],
       } as const;
 
-      const result = Address.isInline(address as any as IMemoryAddress);
+      const result = Address.isInline(address);
 
       expect(result).toBe(false);
     });
