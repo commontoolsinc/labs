@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -15,16 +16,18 @@ type StoredEntry = {
   origin?: string;
 };
 
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+};
+
 const replicaEntries = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  id: string,
+  id: URI,
 ): StoredEntry[] => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      cfc?: { labelMap?: { entries: StoredEntry[] } };
-    } | undefined;
-  };
-  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const document = storageManager.open(signer.did()).replica.getDocument(id) as
+    | StoredCfcDocument
+    | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
 };
 
 // labelMap v2 components (S16 design): persisted entries carry their

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-labelmap-components.test.ts": [
-    "22:60:1ba73op",
-  ],
   "packages/runner/test/cfc-labelmap-monotone.test.ts": [
     "89:64:wstf5q",
     "188:64:wstf5q",
