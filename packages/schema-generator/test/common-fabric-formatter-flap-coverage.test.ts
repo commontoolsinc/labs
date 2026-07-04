@@ -15,6 +15,14 @@ import {
   getTypeFromFiles,
 } from "./utils.ts";
 
+type PropertySchema = Record<string, unknown> & {
+  type?: unknown;
+  ifc?: {
+    uiContract?: unknown;
+    confidentiality?: unknown;
+  };
+};
+
 function findInterfaceMemberTypeNode(
   sourceFile: ts.SourceFile,
   interfaceName: string,
@@ -92,7 +100,7 @@ describe("Common Fabric formatter flap coverage", () => {
         createSchemaTransformerV2().generateSchema(type, checker),
       );
 
-      const save = schema.properties?.save as any;
+      const save = schema.properties?.save as PropertySchema;
       expect(save.type).toBe("string");
       expect(save.ifc?.uiContract).toEqual({
         helper: "UiAction",
@@ -137,7 +145,7 @@ describe("Common Fabric formatter flap coverage", () => {
         createSchemaTransformerV2().generateSchema(type, checker),
       );
 
-      const save = schema.properties?.save as any;
+      const save = schema.properties?.save as PropertySchema;
       expect(save.type).toBe("string");
       expect(save.ifc?.uiContract).toEqual({
         helper: "UiAction",
@@ -180,7 +188,7 @@ describe("Common Fabric formatter flap coverage", () => {
         createSchemaTransformerV2().generateSchema(type, checker),
       );
 
-      const body = schema.properties?.body as any;
+      const body = schema.properties?.body as PropertySchema;
       expect(body.type).toBe("string");
       expect(body.ifc?.confidentiality).toEqual([
         { kind: "prompt-influence", allowed: false, owner: null },
@@ -218,7 +226,7 @@ describe("Common Fabric formatter flap coverage", () => {
         wrapperNode,
         undefined,
         schemaHints,
-      ) as Record<string, any>;
+      ) as Record<string, unknown>;
 
       expect(result).toEqual({
         type: "array",
@@ -253,7 +261,7 @@ describe("Common Fabric formatter flap coverage", () => {
         wrapperNode,
         undefined,
         schemaHints,
-      ) as Record<string, any>;
+      ) as Record<string, unknown>;
 
       expect(result).toEqual({
         type: "array",
@@ -293,7 +301,7 @@ describe("Common Fabric formatter flap coverage", () => {
         wrapperNode,
         undefined,
         schemaHints,
-      ) as Record<string, any>;
+      ) as Record<string, unknown>;
 
       expect(result).toEqual({
         type: "object",

@@ -14,8 +14,8 @@ import {
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import {
-  commitPreconditionValueHash,
   type ClientCommit,
+  commitPreconditionValueHash,
   type EntityDocument,
   toDocumentPath,
 } from "../v2.ts";

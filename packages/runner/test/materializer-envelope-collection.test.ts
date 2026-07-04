@@ -18,6 +18,15 @@ import { Runtime } from "../src/runtime.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 
+type RunnerWithWritableCellArgumentLinks = {
+  collectWritableCellArgumentLinks(
+    argumentSchema: unknown,
+    inputs: unknown,
+    processCell: unknown,
+    writeInputPaths?: readonly (readonly string[])[],
+  ): NormalizedFullLink[];
+};
+
 const signer = await Identity.fromPassphrase(
   "materializer envelope collection",
 );
@@ -46,13 +55,13 @@ describe("materializer envelope collection", () => {
     processCell: unknown,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] =>
-    // deno-lint-ignore no-explicit-any
-    (runtime.runner as any).collectWritableCellArgumentLinks(
-      argumentSchema,
-      inputs,
-      processCell,
-      writeInputPaths,
-    );
+    (runtime.runner as unknown as RunnerWithWritableCellArgumentLinks)
+      .collectWritableCellArgumentLinks(
+        argumentSchema,
+        inputs,
+        processCell,
+        writeInputPaths,
+      );
 
   const setup = () => {
     const processCell = runtime.getCell(space, "envelope-process");

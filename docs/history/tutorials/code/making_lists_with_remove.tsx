@@ -23,14 +23,14 @@ const removeItem = handler<
   // (_, { names, friend }) => {
   //   const currentNames = names.get();
   //   const filtered = currentNames.filter((f, i) =>
-  //     !names.key(i).equals(friend as any)
+  //     !names.key(i).equals(friend)
   //   );
   //   names.set(filtered);
   // },
   (_, { names, friend }) => {
     const currentNames = names.get();
     const filtered = currentNames.reduce((acc, _, i) => {
-      if (!names.key(i).equals(friend as any)) {
+      if (!names.key(i).equals(friend)) {
         acc.push({ name: currentNames[i].name });
       }
       return acc;

@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-runtime-stats");
 const space = signer.did();
@@ -88,19 +89,20 @@ describe("CFC runtime stats", () => {
     const rejectTx = runtime.edit();
     rejectTx.setCfcEnforcementMode("enforce-explicit");
     rejectTx.markCfcRelevant("stats-reject");
+    const rejectSchema = {
+      type: "object",
+      properties: {
+        value: {
+          type: "string",
+          ifc: { collection: ["unsupported"] },
+        },
+      },
+      required: ["value"],
+    } as unknown as JSONSchema;
     const rejectCell = runtime.getCell(
       space,
       "cfc-runtime-stats-reject",
-      {
-        type: "object",
-        properties: {
-          value: {
-            type: "string",
-            ifc: { collection: ["unsupported"] } as any,
-          },
-        },
-        required: ["value"],
-      },
+      rejectSchema,
       rejectTx,
     );
     rejectCell.set({ value: "blocked" });

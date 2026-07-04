@@ -329,7 +329,12 @@ describe("asCell with schema", () => {
     } as const satisfies JSONSchema;
 
     const cell = c.asSchema(schema);
-    const value = cell.get() as any;
+    const value = cell.get() as {
+      name: string;
+      age: number;
+      tags: string[];
+      nested: { value: number };
+    };
 
     expect(value.name).toBe("test");
     expect(value.age).toBe(42);
@@ -897,7 +902,11 @@ describe("asCell with schema", () => {
       },
     });
 
-    const value = cell.get() as any;
+    const value = cell.get() as {
+      context: {
+        nested: { get(): { value: number } };
+      };
+    };
 
     // The nested reference should be followed all the way to the inner value
     expect(isCell(value.context.nested)).toBe(true);

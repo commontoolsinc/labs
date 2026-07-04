@@ -46,6 +46,20 @@ const newSharedServer = () =>
 const signer = await Identity.fromPassphrase("writeback conflict test");
 const space = signer.did();
 
+type StoredDocument = {
+  value?: {
+    imports?: unknown;
+  };
+};
+
+type MemoryProviderReader = {
+  get(uri: string): StoredDocument | undefined;
+};
+
+type MemoryProviderSyncOverride = {
+  sync(uri: string): Promise<unknown>;
+};
+
 // CT-1824 regression: a runtime-version bump sends loads through the
 // cold-load recovery path (recompile + write-back). The write-back re-writes
 // version-independent source docs whose cell-layer-derived documents (link/
@@ -234,8 +248,8 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
       await edgeCell.sync();
       const parentUri = edgeCell.getAsNormalizedFullLink().id;
       const providerB = smB.open(space);
-      // deno-lint-ignore no-explicit-any
-      const rawParent = (providerB as any).get(parentUri);
+      const providerBReader = providerB as unknown as MemoryProviderReader;
+      const rawParent = providerBReader.get(parentUri);
       expect(rawParent).toBeDefined();
       const importsRaw = rawParent?.value?.imports;
       expect(Array.isArray(importsRaw)).toBe(true);
@@ -246,9 +260,11 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
       ) {
         const id = el?.["/"]?.["link@1"]?.id;
         expect(typeof id).toBe("string");
-        elementIds.push(id!);
-        // deno-lint-ignore no-explicit-any
-        expect((providerB as any).get(id)).toBeDefined();
+        if (typeof id !== "string") {
+          throw new Error("expected import link id");
+        }
+        elementIds.push(id);
+        expect(providerBReader.get(id)).toBeDefined();
       }
 
       // Arm 2 — another COLD replica, schema-less sync (the pre-fix
@@ -262,11 +278,10 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
       const bareCell = runtimeC.getCell(space, sourceDocKey(ref.identity));
       await bareCell.sync();
       const providerC = smC.open(space);
-      // deno-lint-ignore no-explicit-any
-      expect((providerC as any).get(parentUri)).toBeDefined();
+      const providerCReader = providerC as unknown as MemoryProviderReader;
+      expect(providerCReader.get(parentUri)).toBeDefined();
       for (const id of elementIds) {
-        // deno-lint-ignore no-explicit-any
-        expect((providerC as any).get(id)).toBeUndefined();
+        expect(providerCReader.get(id)).toBeUndefined();
       }
     } finally {
       restoreVersion();
@@ -314,10 +329,12 @@ describe("editWithRetry conflict catch-up", () => {
         return Promise.resolve({});
       },
     });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
+    const runtimeHooks = runtime as unknown as {
+      edit: () => ReturnType<typeof fakeTx>;
+      prepareTxForCommit: () => void;
+    };
+    runtimeHooks.edit = () => fakeTx();
+    runtimeHooks.prepareTxForCommit = () => {};
     try {
       const result = await runtime.editWithRetry(() => {
         events.push(`attempt-${commits + 1}`);
@@ -353,8 +370,8 @@ describe("editWithRetry sequential conflict discovery", () => {
     const CONFLICTS = 8;
     const pulls: string[] = [];
     const provider = sm.open(space);
-    // deno-lint-ignore no-explicit-any
-    (provider as any).sync = (uri: string) => {
+    const providerHooks = provider as unknown as MemoryProviderSyncOverride;
+    providerHooks.sync = (uri: string) => {
       pulls.push(uri);
       // Round 3's pull fails; the round must still proceed to its retry.
       if (uri === "of:doc-3") {
@@ -398,10 +415,12 @@ describe("editWithRetry sequential conflict discovery", () => {
         return Promise.resolve({});
       },
     });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
+    const runtimeHooks = runtime as unknown as {
+      edit: () => ReturnType<typeof fakeTx>;
+      prepareTxForCommit: () => void;
+    };
+    runtimeHooks.edit = () => fakeTx();
+    runtimeHooks.prepareTxForCommit = () => {};
     try {
       const result = await runtime.editWithRetry(() => {}, 64);
       expect(result.error).toBeUndefined();
@@ -426,8 +445,8 @@ describe("editWithRetry sequential conflict discovery", () => {
       storageManager: sm,
     });
     const provider = sm.open(space);
-    // deno-lint-ignore no-explicit-any
-    (provider as any).sync = () => Promise.resolve({ ok: {} });
+    const providerHooks = provider as unknown as MemoryProviderSyncOverride;
+    providerHooks.sync = () => Promise.resolve({ ok: {} });
     let commits = 0;
     const fakeTx = () => ({
       tx: {},
@@ -453,10 +472,12 @@ describe("editWithRetry sequential conflict discovery", () => {
         });
       },
     });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
+    const runtimeHooks = runtime as unknown as {
+      edit: () => ReturnType<typeof fakeTx>;
+      prepareTxForCommit: () => void;
+    };
+    runtimeHooks.edit = () => fakeTx();
+    runtimeHooks.prepareTxForCommit = () => {};
     try {
       // With the general default (5 retries = 6 attempts), a write set with
       // more never-read derived docs than that cannot converge — the CT-1824

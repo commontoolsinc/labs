@@ -41,12 +41,12 @@ function integrityAtomsAt(cell: unknown): unknown[] {
 }
 
 /** The persisted integrity on a builtin's model-output `result` field. */
-function resultIntegrity(result: Cell<any>): unknown[] {
+function resultIntegrity(result: Cell<unknown>): unknown[] {
   return integrityAtomsAt(result.key("result").resolveAsCell());
 }
 
 /** The persisted integrity on a builtin's model-output `partial` field. */
-function partialIntegrity(result: Cell<any>): unknown[] {
+function partialIntegrity(result: Cell<unknown>): unknown[] {
   return integrityAtomsAt(result.key("partial").resolveAsCell());
 }
 
@@ -60,7 +60,7 @@ function partialIntegrity(result: Cell<any>): unknown[] {
  */
 function childDocIntegrity(
   runtime: Runtime,
-  childCell: Cell<any>,
+  childCell: Cell<unknown>,
 ): unknown[] {
   const rtx = runtime.edit();
   try {
@@ -80,7 +80,7 @@ function childDocIntegrity(
   }
 }
 
-function waitForPendingToBecomeFalse(result: Cell<any>) {
+function waitForPendingToBecomeFalse(result: Cell<unknown>) {
   const liveResult = result.withTx();
   const timeoutMs = 5000;
   return new Promise<void>((resolve, reject) => {
@@ -459,9 +459,9 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     });
 
     // Each item is its own document; read the model bytes' OWN persisted label.
-    const items = result.key("result").key("items") as unknown as Cell<any>;
-    const firstItem = items.key(0) as unknown as Cell<any>;
-    const secondItem = items.key(1) as unknown as Cell<any>;
+    const items = result.key("result").key("items") as unknown as Cell<unknown>;
+    const firstItem = items.key(0) as unknown as Cell<unknown>;
+    const secondItem = items.key(1) as unknown as Cell<unknown>;
 
     // Sanity: the items really do split into their own documents.
     expect(parseLink(firstItem.withTx().getRaw())?.id).toBeDefined();
@@ -565,13 +565,15 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       tree: { label: "root", children: [{ label: "leaf", children: [] }] },
     });
 
-    const tagged = result.key("result").key("tagged") as unknown as Cell<any>;
-    const taggedFirst = tagged.key(0) as unknown as Cell<any>;
-    const taggedSecond = tagged.key(1) as unknown as Cell<any>;
+    const tagged = result.key("result").key("tagged") as unknown as Cell<
+      unknown
+    >;
+    const taggedFirst = tagged.key(0) as unknown as Cell<unknown>;
+    const taggedSecond = tagged.key(1) as unknown as Cell<unknown>;
     const treeChild =
-      ((result.key("result").key("tree") as unknown as Cell<any>)
-        .key("children") as unknown as Cell<any>).key(0) as unknown as Cell<
-          any
+      ((result.key("result").key("tree") as unknown as Cell<unknown>)
+        .key("children") as unknown as Cell<unknown>).key(0) as unknown as Cell<
+          unknown
         >;
 
     // Sanity: every asserted element really split into its own document.

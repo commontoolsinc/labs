@@ -23,6 +23,13 @@ import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
+type ToolCatalogCell = Parameters<
+  typeof llmToolExecutionHelpers.buildToolCatalog
+>[0];
+type ToolCallParts = Parameters<
+  typeof llmToolExecutionHelpers.executeToolCalls
+>[3];
+
 const signer = await Identity.fromPassphrase("runner-cfc-concept-floor");
 enableMockMode();
 
@@ -603,22 +610,24 @@ describe("CFC concept-level integrity floors (D5)", () => {
       await tx.commit();
       await runtime.idle();
 
+      const toolsCell = result.key("tools") as ToolCatalogCell;
       const catalog = llmToolExecutionHelpers.buildToolCatalog(
-        result.key("tools") as any,
+        toolsCell,
         false,
       );
 
       const sendCall = async (recipient: unknown) => {
+        const toolCallParts: ToolCallParts = [{
+          type: "tool-call",
+          toolCallId: "call-under-test",
+          toolName: "sendMail",
+          input: { recipient, body: "hi" },
+        }];
         await llmToolExecutionHelpers.executeToolCalls(
           runtime,
           space,
           catalog,
-          [{
-            type: "tool-call",
-            toolCallId: "call-under-test",
-            toolName: "sendMail",
-            input: { recipient, body: "hi" },
-          }] as any,
+          toolCallParts,
         );
         await runtime.idle();
       };

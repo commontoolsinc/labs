@@ -164,7 +164,7 @@ describe("RuntimeInternals", () => {
   it("resolves named spaces through the worker client", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();
-    const runtime = new RuntimeInternals(client as any);
+    const runtime = new RuntimeInternals(mockRuntimeClient(client));
     try {
       await expect(runtime.resolveSpaceName("notebook")).resolves.toBe(
         "did:key:z6Mk-notebook",
@@ -278,7 +278,7 @@ describe("RuntimeInternals", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();
     const received: unknown[] = [];
-    const runtime = new RuntimeInternals(client as any, {
+    const runtime = new RuntimeInternals(mockRuntimeClient(client), {
       onVersionSkew: (event) => received.push(event),
     });
     try {

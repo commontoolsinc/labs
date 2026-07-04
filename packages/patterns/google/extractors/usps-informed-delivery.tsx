@@ -165,11 +165,11 @@ interface MailPieceAnalysisItem {
   imageUrl: string;
   analysis: {
     pending: boolean;
-    error?: unknown;
+    error?: string;
     result?: MailAnalysis;
   };
   pending: boolean;
-  error?: unknown;
+  error?: string;
   result?: MailAnalysis;
 }
 
