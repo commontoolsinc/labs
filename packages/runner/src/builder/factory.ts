@@ -119,29 +119,21 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     return value;
   };
 
-  const trustedPattern = ((...args: any[]) =>
-    trustValue(
-      (pattern as (...args: any[]) => unknown)(...args),
-    )) as typeof pattern;
-  const trustedLift = ((...args: any[]) =>
-    trustValue(
-      (lift as (...args: any[]) => unknown)(...args),
-    )) as typeof lift;
-  const trustedHandler = ((...args: any[]) =>
-    trustValue(
-      (handler as (...args: any[]) => unknown)(...args),
-    )) as typeof handler;
-  const trustedComputed = ((...args: any[]) =>
-    trustValue(
-      (computed as (...args: any[]) => unknown)(...args),
-    )) as typeof computed;
+  const trustCallable = <F extends (...args: never[]) => unknown>(
+    fn: F,
+  ): F => {
+    const call = fn as (...args: Parameters<F>) => ReturnType<F>;
+    return ((...args: Parameters<F>) => trustValue(call(...args))) as F;
+  };
+
+  const trustedPattern = trustCallable(pattern);
+  const trustedLift = trustCallable(lift);
+  const trustedHandler = trustCallable(handler);
+  const trustedComputed = trustCallable(computed);
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
-  const trustedPatternTool = ((...args: any[]) =>
-    trustValue(
-      (patternTool as (...args: any[]) => unknown)(...args),
-    )) as typeof patternTool;
+  const trustedPatternTool = trustCallable(patternTool);
 
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
