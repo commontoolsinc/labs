@@ -219,8 +219,10 @@ export class TraverseCaptureRecorder {
         if (prop === "read" || prop === "readOrThrow") {
           return (address: IMemorySpaceAddress, options?: IReadOptions) => {
             recorder.captureDoc(target, address);
-            // deno-lint-ignore no-explicit-any
-            return (target as any)[prop](address, options);
+            const readMethod = prop === "read"
+              ? target.read
+              : target.readOrThrow;
+            return readMethod.call(target, address, options);
           };
         }
         if (prop === "trackReadPaths" && target.trackReadPaths !== undefined) {
@@ -239,8 +241,7 @@ export class TraverseCaptureRecorder {
             return target.trackReadPaths!(address, paths, options);
           };
         }
-        // deno-lint-ignore no-explicit-any
-        const value = (target as any)[prop];
+        const value = Reflect.get(target, prop, target);
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
