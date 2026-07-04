@@ -10,6 +10,17 @@ import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
+function callbackCreatorCacheSize(runtime: SESRuntime): number {
+  const callbackEvaluator = Reflect.get(runtime, "callbackEvaluator");
+  expect(callbackEvaluator).toBeDefined();
+  const callbackCreatorCache = Reflect.get(
+    callbackEvaluator,
+    "callbackCreatorCache",
+  );
+  expect(callbackCreatorCache).toBeInstanceOf(Map);
+  return callbackCreatorCache.size;
+}
+
 describe("SESRuntime", () => {
   it("creates distinct isolates per key and resets them on clear", () => {
     const runtime = new SESRuntime({ lockdown: true });
@@ -33,19 +44,11 @@ describe("SESRuntime", () => {
     ) as (x: number) => number;
 
     expect(next(1)).toBe(2);
-    expect(
-      (runtime as unknown as {
-        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
-      }).callbackEvaluator.callbackCreatorCache.size,
-    ).toBe(1);
+    expect(callbackCreatorCacheSize(runtime)).toBe(1);
 
     runtime.clear();
 
-    expect(
-      (runtime as unknown as {
-        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
-      }).callbackEvaluator.callbackCreatorCache.size,
-    ).toBe(0);
+    expect(callbackCreatorCacheSize(runtime)).toBe(0);
   });
 });
 

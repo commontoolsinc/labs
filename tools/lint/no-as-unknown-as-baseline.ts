@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/runtime.test.ts": [
-    "37:15:q62apu",
-    "45:15:q62apu",
-  ],
   "packages/runner/test/scheduler-cfc-trigger-reads.test.ts": [
     "394:42:1tahh7d",
   ],
