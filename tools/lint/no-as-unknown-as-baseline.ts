@@ -1,20 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/llm-dialog.test.ts": [
-    "305:14:1dqidfy",
-    "424:14:1j55uxz",
-    "899:14:b5r96i",
-    "926:47:zgr2yv",
-    "1072:14:o9tzj4",
-    "1086:14:1loso82",
-    "1144:14:159slo8",
-    "1152:17:10scl43",
-    "1167:14:1hdi3bm",
-    "1308:14:1hkyerx",
-    "1309:48:hd79r9",
-    "1868:40:uhcd5w",
-    "1957:40:uhcd5w",
-    "2196:16:1ltq6dt",
-  ],
   "packages/runner/test/memory-v2-emulation.test.ts": [
     "59:48:19gxezt",
     "69:48:19gxezt",
