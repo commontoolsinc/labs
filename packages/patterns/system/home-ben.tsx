@@ -43,6 +43,19 @@ type SpaceEntry = {
   did?: string;
 };
 
+type SchemaReadableCell = Writable<unknown> & {
+  asSchemaFromLinks?: () => {
+    getAsNormalizedFullLink?: () => { schema?: unknown };
+  };
+  asSchema: (schema: unknown) => SchemaReadableCell;
+};
+
+function isSchemaReadableCell(
+  cell: Writable<unknown>,
+): cell is SchemaReadableCell {
+  return "asSchema" in cell && typeof cell.asSchema === "function";
+}
+
 /**
  * Capture a snapshot of a cell's current state for journaling.
  * Extracts name, schema tag, and a value excerpt.
@@ -67,15 +80,17 @@ function captureSnapshot(
 
   try {
     // Try to get the schema from the cell to properly resolve nested data
-    let schemaCell = cell as any;
-    try {
-      const { schema } =
-        schemaCell.asSchemaFromLinks?.()?.getAsNormalizedFullLink?.() || {};
-      if (schema) {
-        schemaCell = schemaCell.asSchema(schema);
+    let schemaCell: Writable<unknown> = cell;
+    if (isSchemaReadableCell(cell)) {
+      try {
+        const { schema } =
+          cell.asSchemaFromLinks?.()?.getAsNormalizedFullLink?.() || {};
+        if (schema) {
+          schemaCell = cell.asSchema(schema);
+        }
+      } catch {
+        // Ignore schema errors, fall back to direct get
       }
-    } catch {
-      // Ignore schema errors, fall back to direct get
     }
 
     const value = schemaCell.get();
@@ -251,7 +266,7 @@ Write in past tense, personal style. Focus on:
   const writeNarrative = computed(() => {
     const result = narrativeGen.result;
     const pending = narrativeGen.pending;
-    const error = (narrativeGen as any).error;
+    const error = narrativeGen.error;
     const entry = pendingEntry;
 
     // Guard: only proceed when not pending and we have an entry
