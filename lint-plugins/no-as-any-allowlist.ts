@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/src/link-utils.ts",
   "packages/runner/src/pattern-binding.ts",
   "packages/runner/src/query-result-proxy.ts",
   "packages/runner/src/runner.ts",

@@ -627,14 +627,10 @@ function recursiveStripAsCellFromSchema(
     if (key === "$ref") continue;
 
     if (value && typeof value === "object") {
-      if (key === "$defs") {
+      if (key === "$defs" && isRecord(value)) {
         // Process each definition in $defs (they contain schemas that may have asCell/asStream)
-        const processedDefs: Record<string, any> = {};
-        for (
-          const [defName, defSchema] of Object.entries(
-            value as Record<string, any>,
-          )
-        ) {
+        const processedDefs: Record<string, unknown> = {};
+        for (const [defName, defSchema] of Object.entries(value)) {
           if (defSchema && typeof defSchema === "object") {
             processedDefs[defName] = recursiveStripAsCellFromSchema(
               defSchema,
