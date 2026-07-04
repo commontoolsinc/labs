@@ -76,10 +76,12 @@ import {
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
-export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
+export const ID: typeof IDSymbol = Symbol(
+  "ID, unique to the context",
+) as typeof IDSymbol;
 export const ID_FIELD: typeof IDFieldSymbol = Symbol(
   "ID_FIELD, name of sibling that contains id",
-) as any;
+) as typeof IDFieldSymbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -94,7 +96,7 @@ export const CHIP_UI = "$CHIP_UI";
 export const FS = "$FS";
 
 // Symbol for accessing self-reference in patterns
-export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
+export const SELF: typeof SELFSymbol = Symbol("SELF") as typeof SELFSymbol;
 
 export const schema: typeof schemaFunction = (schema) => schema;
 
@@ -169,9 +171,19 @@ export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 export const isReactiveMarker = Symbol("isReactive");
 
-export function isReactive<T = any>(
+export type ReactiveRuntimeValue = {
+  export(): {
+    cell?: unknown;
+    value?: unknown;
+    nodes: Set<NodeRef>;
+  };
+};
+
+export function isReactive(value: unknown): value is ReactiveRuntimeValue;
+export function isReactive<T>(
   value: unknown,
-): value is Reactive<T> {
+): value is Reactive<T> & ReactiveRuntimeValue;
+export function isReactive(value: unknown): value is ReactiveRuntimeValue {
   return !!value &&
     typeof (value as { [isReactiveMarker]: true })[isReactiveMarker] ===
       "boolean";
@@ -179,8 +191,8 @@ export function isReactive<T = any>(
 
 export type NodeRef = {
   module: Module | Pattern | Reactive<Module | Pattern>;
-  inputs: FactoryInput<any>;
-  outputs: Reactive<any>;
+  inputs: FactoryInput<unknown>;
+  outputs: Reactive<unknown>;
   frame: Frame | undefined;
 };
 
@@ -195,7 +207,7 @@ export function isStreamValue(value: unknown): value is StreamValue {
 declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
-    implementation?: ((...args: any[]) => any) | Pattern | string;
+    implementation?: ((...args: never[]) => unknown) | Pattern | string;
     /**
      * Content-addressed reference to the module-scope builder artifact whose
      * implementation this module runs: the defining module's content identity
@@ -283,7 +295,7 @@ export function isPattern(value: unknown): value is Pattern {
 
 export type UnsafeBinding = {
   pattern: Pattern;
-  materialize: (path: readonly PropertyKey[]) => any;
+  materialize: (path: readonly PropertyKey[]) => unknown;
   space: MemorySpace;
   tx: IExtendedStorageTransaction;
   parent?: UnsafeBinding;
@@ -304,7 +316,7 @@ export type Frame = {
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
-  reactives: Set<Reactive<any>>;
+  reactives: Set<Reactive<unknown>>;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
   /**
@@ -427,13 +439,13 @@ export interface BuilderFunctionsAndConstants {
 export interface BuilderRuntime {
   getCell<T>(
     space: MemorySpace,
-    cause: any,
+    cause: unknown,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
-    cause: any,
+    cause: unknown,
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
@@ -442,5 +454,5 @@ export interface BuilderRuntime {
 // Factory function to create builder with runtime
 export type CreateBuilder = (
   runtime: BuilderRuntime,
-  getCellOrThrow?: (value: any) => any,
+  getCellOrThrow?: (value: unknown) => Cell<unknown>,
 ) => BuilderFunctionsAndConstants;

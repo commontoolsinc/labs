@@ -4703,9 +4703,22 @@ export class Runner {
       : undefined;
     let builtinResult: RawBuiltinReturnType;
     try {
-      builtinResult = module.implementation(
+      const builtinImplementation = module.implementation as (
+        inputs: unknown,
+        sendResult: (
+          tx: IExtendedStorageTransaction,
+          result: unknown,
+        ) => void,
+        addCancel: AddCancel,
+        cause: unknown,
+        processCell: unknown,
+        runtime: Runtime,
+        outputBinding: unknown,
+        deferInitialRunUntilSynced: boolean,
+      ) => RawBuiltinReturnType;
+      builtinResult = builtinImplementation(
         inputsCell,
-        (tx: IExtendedStorageTransaction, result: any) => {
+        (tx: IExtendedStorageTransaction, result: unknown) => {
           const outputBindingSchema = schemaForRawBuiltinRootOutputBinding(
             tx,
             this.runtime,

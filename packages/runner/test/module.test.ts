@@ -168,7 +168,8 @@ describe("module", () => {
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
-      expect([...nodes][0].inputs.$event).toBe(stream);
+      const nodeInputs = [...nodes][0].inputs as { $event: unknown };
+      expect(nodeInputs.$event).toBe(stream);
     });
 
     it("serializes stream causes without losing the stream marker", () => {
@@ -344,7 +345,10 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
       expect((handlerNode.module as Module).wrapper).toBe("handler");
-      expect(handlerNode.inputs.$ctx.elements).toBe(elements);
+      const handlerInputs = handlerNode.inputs as {
+        $ctx: { elements: unknown };
+      };
+      expect(handlerInputs.$ctx.elements).toBe(elements);
     });
 
     it("creates a opaque ref with stream when with is called", () => {
@@ -361,7 +365,8 @@ describe("module", () => {
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
-      expect([...nodes][0].inputs.$event).toBe(stream);
+      const nodeInputs = [...nodes][0].inputs as { $event: unknown };
+      expect(nodeInputs.$event).toBe(stream);
     });
   });
 
