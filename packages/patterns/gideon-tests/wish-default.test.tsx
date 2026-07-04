@@ -24,11 +24,13 @@ export default pattern(() => {
 
   // Push a piece to allPieces
   const action_push_piece = action(() => {
-    allPieces.push({ [NAME]: "Test Piece 1" } as any);
+    const piece: MinimalPiece = { [NAME]: "Test Piece 1" };
+    allPieces.push(piece);
   });
 
   const action_push_another = action(() => {
-    allPieces.push({ [NAME]: "Test Piece 2" } as any);
+    const piece: MinimalPiece = { [NAME]: "Test Piece 2" };
+    allPieces.push(piece);
   });
 
   // Assertions

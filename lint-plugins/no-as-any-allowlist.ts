@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/gideon-tests/wish-default.test.tsx",
   "packages/patterns/google/core/experimental/gmail-agentic-search.tsx",
   "packages/patterns/google/core/gmail-extractor.tsx",
   "packages/patterns/google/extractors/bam-school-dashboard.tsx",
