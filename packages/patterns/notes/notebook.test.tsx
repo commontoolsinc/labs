@@ -213,14 +213,14 @@ export default pattern(() => {
   const assert_created_note_has_parent = computed(() => {
     const notesList = notebook.notes;
     if (notesList.length < 3) return false;
-    const createdNote = notesList[2] as any; // Cast to any to access parentNotebook
+    const createdNote = notesList[2];
     return !!createdNote?.parentNotebook;
   });
 
   const assert_created_note_parent_title = computed(() => {
     const notesList = notebook.notes;
     if (notesList.length < 3) return false;
-    const createdNote = notesList[2] as any; // Cast to any to access parentNotebook
+    const createdNote = notesList[2];
     return createdNote?.parentNotebook?.title === notebook.title;
   });
 
@@ -350,8 +350,8 @@ export default pattern(() => {
     const notesList = dupNotebook.notes;
     if (notesList.length < 4) return false;
     // Notes at index 2 and 3 are the duplicates
-    const dup1 = notesList[2] as any;
-    const dup2 = notesList[3] as any;
+    const dup1 = notesList[2];
+    const dup2 = notesList[3];
     return !!dup1?.parentNotebook && !!dup2?.parentNotebook;
   });
 

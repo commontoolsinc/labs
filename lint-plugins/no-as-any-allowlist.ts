@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/notes/notebook.test.tsx",
   "packages/patterns/record-backup.tsx",
   "packages/patterns/record.tsx",
   "packages/patterns/record/extraction/extractor-module.tsx",
