@@ -111,6 +111,19 @@ type WatchSetCounterServer = {
   evaluateWatchSet: (...args: unknown[]) => unknown;
 };
 
+const watchSetCounterServer = (
+  storageManager: ReturnType<
+    typeof createSchedulerTestRuntime
+  >["storageManager"],
+): WatchSetCounterServer => {
+  const serverMethod = Reflect.get(storageManager, "server");
+  expect(typeof serverMethod).toBe("function");
+  const server = Reflect.apply(serverMethod, storageManager, []);
+  expect(typeof (server as { evaluateWatchSet?: unknown }).evaluateWatchSet)
+    .toBe("function");
+  return server as WatchSetCounterServer;
+};
+
 const resultCellPieceId = (cell: Cell<unknown>): string => {
   const { scope, id } = cell.getAsNormalizedFullLink();
   return `${scope}:${id}`;
@@ -2312,9 +2325,7 @@ describe("persistent scheduler observations", () => {
       });
       runtimeA.scheduler.dispose();
 
-      const server = (storageManager as unknown as {
-        server(): WatchSetCounterServer;
-      }).server();
+      const server = watchSetCounterServer(storageManager);
       const evaluateWatchSet = server.evaluateWatchSet.bind(server);
       let cellDataReads = 0;
       server.evaluateWatchSet = (...args: unknown[]) => {
