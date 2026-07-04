@@ -56,7 +56,7 @@ export function freezeSandboxValue<T>(
   }
 
   if (typeof value === "function") {
-    hardenVerifiedFunction(value as (...args: any[]) => unknown);
+    hardenVerifiedFunction(value as (...args: unknown[]) => unknown);
     return value;
   }
 
