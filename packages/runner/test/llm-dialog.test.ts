@@ -1566,6 +1566,251 @@ describe("llmDialog", () => {
     expect(pinnedCells?.length).toBe(0);
   });
 
+  it("should support manual control streams", async () => {
+    const pinEventSchema = {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["path", "name"],
+    } as const satisfies JSONSchema;
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        cancelGeneration: { asCell: ["stream"] },
+        pinCell: { ...pinEventSchema, asCell: ["stream"] },
+        unpinAllCells: { asCell: ["stream"] },
+        pending: { type: "boolean" },
+        pinnedCells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+      },
+      required: ["cancelGeneration", "pinCell", "unpinAllCells"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({ messages });
+        return {
+          cancelGeneration: dialog.cancelGeneration,
+          pinCell: dialog.pinCell,
+          unpinAllCells: dialog.unpinAllCells,
+          pending: dialog.pending,
+          pinnedCells: dialog.pinnedCells,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-manual-control-streams-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const cancelGeneration = await result.key("cancelGeneration").pull();
+    cancelGeneration.send();
+    await runtime.idle();
+    expect(await result.key("pending").pull()).toBe(false);
+
+    const pinCell = await result.key("pinCell").pull();
+    pinCell.send({ path: "/of:manual", name: "Manual Cell" });
+    await expect(waitForPinnedCells(result, 1)).resolves.toBeUndefined();
+
+    let pinnedCells = await result.key("pinnedCells").pull();
+    expect(pinnedCells).toEqual([{
+      path: "/of:manual",
+      name: "Manual Cell",
+    }]);
+
+    pinCell.send({ path: "/of:manual", name: "Manual Cell" });
+    await runtime.idle();
+    pinnedCells = await result.key("pinnedCells").pull();
+    expect(pinnedCells).toHaveLength(1);
+
+    const unpinAllCells = await result.key("unpinAllCells").pull();
+    unpinAllCells.send();
+    await expect(waitForPinnedCells(result, 0)).resolves.toBeUndefined();
+
+    pinnedCells = await result.key("pinnedCells").pull();
+    expect(pinnedCells).toEqual([]);
+  });
+
+  it("should record presentResult suggestions on the suggestions queue", async () => {
+    loadConversationFixture({
+      description: "llmDialog suggestions queue records structured result",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: {
+            hasTools: ["presentResult"],
+            messageCount: 1,
+          },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "call_suggestion_present",
+              toolName: "presentResult",
+              input: {
+                cell: { title: "Suggestion" },
+                note: "Recorded",
+              },
+            }],
+            id: "suggestion-r1",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: "Suggestion recorded.",
+            id: "suggestion-r2",
+          },
+        },
+      ],
+    });
+
+    const recordedSuggestions: Array<{
+      result: unknown;
+      messages: unknown;
+      timestamp: string;
+    }> = [];
+    const originalGetCell = runtime.getCell;
+    const callOriginalGetCell = originalGetCell.bind(runtime) as (
+      targetSpace: string,
+      cause: unknown,
+      schema?: JSONSchema,
+      cellTx?: IExtendedStorageTransaction,
+      scope?: never,
+    ) => unknown;
+    runtime.getCell = ((
+      targetSpace: string,
+      cause: unknown,
+      schema?: JSONSchema,
+      cellTx?: IExtendedStorageTransaction,
+      scope?: never,
+    ) => {
+      if (targetSpace === space && cause === space) {
+        return {
+          key(name: string) {
+            expect(name).toBe("defaultPattern");
+            return {
+              key(childName: string) {
+                expect(childName).toBe("recordSuggestion");
+                return {
+                  send(event: {
+                    result: unknown;
+                    messages: unknown;
+                    timestamp: string;
+                  }) {
+                    recordedSuggestions.push(event);
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      return callOriginalGetCell(targetSpace, cause, schema, cellTx, scope);
+    }) as Runtime["getCell"];
+
+    try {
+      const suggestionSchema = {
+        type: "object",
+        properties: {
+          cell: {
+            type: "object",
+            additionalProperties: true,
+          },
+          note: { type: "string" },
+        },
+        required: ["cell", "note"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema;
+
+      const resultSchema = {
+        type: "object",
+        properties: {
+          addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+          pending: { type: "boolean" },
+          result: {
+            type: "object",
+            additionalProperties: true,
+          },
+          messages: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+        },
+        required: ["addMessage"],
+      } as const satisfies JSONSchema;
+
+      const testPattern = pattern(
+        () => {
+          const messages = Cell.of<BuiltInLLMMessage[]>([]);
+          const dialog = llmDialog({
+            messages,
+            queue: "suggestions",
+            resultSchema: suggestionSchema,
+          });
+          return {
+            addMessage: dialog.addMessage,
+            pending: dialog.pending,
+            result: dialog.result,
+            messages,
+          };
+        },
+        false,
+        resultSchema,
+      );
+
+      const resultCell = runtime.getCell(
+        space,
+        "llmDialog-suggestion-record-test",
+        resultSchema,
+        tx,
+      );
+
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      tx.commit();
+
+      const addMessage = await result.key("addMessage").pull();
+      addMessage.send({ role: "user", content: "Create a suggestion." });
+
+      await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+
+      expect(await result.key("result").pull()).toEqual({
+        cell: { title: "Suggestion" },
+        note: "Recorded",
+      });
+      expect(recordedSuggestions).toHaveLength(1);
+      expect(recordedSuggestions[0].result).toEqual({ title: "Suggestion" });
+      expect(Array.isArray(recordedSuggestions[0].messages)).toBe(true);
+      expect(recordedSuggestions[0].timestamp).toMatch(
+        /^\d{4}-\d{2}-\d{2}T/,
+      );
+    } finally {
+      runtime.getCell = originalGetCell;
+    }
+  });
+
   it("should include context cells in system prompt", async () => {
     const initialMessage = "What context do you have?";
 
@@ -2260,6 +2505,24 @@ function waitForMessages(result: any, expectedCount: number) {
     }, 5000);
     cancel = result.sink(({ pending, messages }: any = {}) => {
       if (pending === false && messages?.length === expectedCount) {
+        resolve();
+      }
+    });
+  }).finally(() => {
+    clearTimeout(timeout);
+    cancel();
+  });
+}
+
+function waitForPinnedCells(result: any, expectedCount: number) {
+  let cancel: () => void;
+  let timeout: ReturnType<typeof setTimeout>;
+  return new Promise<void>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`Timeout waiting for ${expectedCount} pinned cells`));
+    }, 5000);
+    cancel = result.sink(({ pinnedCells }: any = {}) => {
+      if (Array.isArray(pinnedCells) && pinnedCells.length === expectedCount) {
         resolve();
       }
     });

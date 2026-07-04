@@ -7,8 +7,17 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { closureCaptureErrorMessage } from "../src/builder/closure-capture-diagnostic.ts";
+import { connectInputAndOutputs } from "../src/builder/node-utils.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import type { NodeRef } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
+
+const signer = await Identity.fromPassphrase("test closure capture diagnostic");
+const space = signer.did();
 
 describe("closureCaptureErrorMessage (CT-1626)", () => {
   it("describes the captured cell's name, path, and scope", () => {
@@ -52,5 +61,47 @@ describe("closureCaptureErrorMessage (CT-1626)", () => {
   it("degrades gracefully with no cell info", () => {
     const message = closureCaptureErrorMessage();
     expect(message).toContain("Reactive cell from an outer scope");
+  });
+
+  it("reports construction-time captures through node inputs", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+
+    try {
+      const capturedCell = runtime.getCell(
+        space,
+        "construction-time capture",
+        undefined,
+        tx,
+      );
+      const nodeFrame = pushFrame({ runtime, space, tx });
+      try {
+        const node = {
+          module: {
+            type: "javascript",
+            implementation: function captureInput() {
+              return undefined;
+            },
+          },
+          inputs: { capturedCell },
+          outputs: {},
+          frame: nodeFrame,
+        } as NodeRef;
+
+        expect(() => connectInputAndOutputs(node)).toThrow(
+          "captured by a closure",
+        );
+      } finally {
+        popFrame(nodeFrame);
+      }
+    } finally {
+      await tx.commit();
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });

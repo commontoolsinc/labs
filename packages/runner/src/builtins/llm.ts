@@ -17,7 +17,6 @@ import {
   BuiltInLLMParams,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema } from "../builder/types.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -34,7 +33,7 @@ import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import { scopedCell } from "./scope-policy.ts";
 import {
@@ -212,8 +211,22 @@ function setStampedObjectResult(
   target.withTx(tx).set(object);
 }
 
+type GenerateObjectMessages = NonNullable<
+  Schema<typeof GenerateObjectResultSchema>["messages"]
+>;
+
 function logGenerateObject(stage: string, details: Record<string, unknown>) {
   console.warn("[generateObject]", stage, details);
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function cloneGenerateObjectMessages(
+  messages: readonly BuiltInLLMMessage[],
+): GenerateObjectMessages {
+  return jsonClone(messages) as GenerateObjectMessages;
 }
 
 function summarizeGenerateObjectRequest(details: {
@@ -1342,7 +1355,7 @@ export function generateObject<T extends Record<string, unknown>>(
       ? llmToolExecutionHelpers.buildAvailableCellsDocumentationWithObservation(
         runtime,
         parentCell.space,
-        context as Record<string, Cell<any>>,
+        context,
         runtime.getCell(
           parentCell.space,
           { generateObject: { pinnedCells: [] } },
@@ -1357,15 +1370,16 @@ export function generateObject<T extends Record<string, unknown>>(
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
-    const validationSchema = schemaSanitizePromptInjection
-      ? toDeepFrozenSchema(schema)
-      : undefined;
+    const validationSchema: JSONSchema | undefined =
+      schemaSanitizePromptInjection
+        ? toDeepFrozenSchema(schema) as JSONSchema
+        : undefined;
     const resultSchemaForObserved = (
       observedConfidentiality: readonly unknown[],
     ) =>
-      schemaSanitizePromptInjection
+      validationSchema !== undefined
         ? schemaWithInjectionSafeAnnotations(
-          validationSchema as any,
+          validationSchema,
           observedConfidentiality,
         )
         : undefined;
@@ -1492,7 +1506,7 @@ export function generateObject<T extends Record<string, unknown>>(
       // point this JSON round-trip silently loses any `FabricPrimitive`/
       // `FabricInstance` (class instances don't survive JSON). Mark ahead of
       // that.
-      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
+      messagesWithLog.set(cloneGenerateObjectMessages(requestMessages));
       pendingWithLog.set(true);
 
       const { callback: updatePartial, cleanup: cleanupPartial } =
@@ -1530,7 +1544,7 @@ export function generateObject<T extends Record<string, unknown>>(
                   .buildAvailableCellsDocumentationWithObservation(
                     runtime,
                     parentCell.space,
-                    liveContext as Record<string, Cell<any>>,
+                    liveContext,
                     runtime.getCell(
                       parentCell.space,
                       { generateObject: { pinnedCells: [] } },
@@ -1725,7 +1739,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 // `FabricPrimitive`/`FabricInstance` (class instances don't
                 // survive JSON). Mark ahead of that.
                 resultCell.key("messages").withTx(tx).set(
-                  JSON.parse(JSON.stringify(objectResponse.messages)) as any,
+                  cloneGenerateObjectMessages(objectResponse.messages),
                 );
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
@@ -1845,7 +1859,7 @@ export function generateObject<T extends Record<string, unknown>>(
       // point this JSON round-trip silently loses any `FabricPrimitive`/
       // `FabricInstance` (class instances don't survive JSON). Mark ahead of
       // that.
-      messagesWithLog.set(JSON.parse(JSON.stringify(requestMessages)) as any);
+      messagesWithLog.set(cloneGenerateObjectMessages(requestMessages));
       pendingWithLog.set(true);
 
       const isRunCancelled = queueName
@@ -1874,7 +1888,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 .buildAvailableCellsDocumentationWithObservation(
                   runtime,
                   parentCell.space,
-                  liveContext as Record<string, Cell<any>>,
+                  liveContext,
                   runtime.getCell(
                     parentCell.space,
                     { generateObject: { pinnedCells: [] } },
@@ -1972,10 +1986,12 @@ export function generateObject<T extends Record<string, unknown>>(
                 // future; at that point these JSON round-trips silently lose any
                 // `FabricPrimitive`/`FabricInstance` (class instances don't
                 // survive JSON). Mark ahead of that.
-                resultCell.key("messages").withTx(tx).set([
-                  ...JSON.parse(JSON.stringify(requestMessages)),
-                  JSON.parse(JSON.stringify(assistantMessage)),
-                ] as any);
+                resultCell.key("messages").withTx(tx).set(
+                  cloneGenerateObjectMessages([
+                    ...requestMessages,
+                    assistantMessage,
+                  ]),
+                );
                 resultCell.key("error").withTx(tx).set(undefined);
                 resultCell.key("requestHash").withTx(tx).set(hash);
               });
