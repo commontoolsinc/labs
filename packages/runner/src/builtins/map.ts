@@ -181,15 +181,15 @@ export function map(
     // all.
     const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
-    const list: Cell<any>[] | undefined = rawList === undefined
-      ? undefined
-      : !Array.isArray(rawList)
-      ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
-      : rawList.map((slot, i) => {
+    const rawListIsArray = Array.isArray(rawList);
+    const listIsInvalid = rawList !== undefined && !rawListIsArray;
+    const list: Cell<any>[] | undefined = rawListIsArray
+      ? rawList.map((slot, i) => {
         const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
-      });
+      })
+      : undefined;
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern. The raw value is either a compact
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
@@ -309,7 +309,8 @@ export function map(
     const priorLen = Array.isArray(priorSlots) ? priorSlots.length : 0;
     if (
       elementAwaitSync && priorLen > 0 &&
-      (list === undefined || (Array.isArray(list) && list.length === 0))
+      !listIsInvalid &&
+      (list === undefined || list.length === 0)
     ) {
       awaitInputThenSettle(listCell);
       return;
@@ -322,6 +323,9 @@ export function map(
     if (priorSlots === undefined) {
       probeScoped(() => resultWithLog.set([]));
     }
+    if (listIsInvalid) {
+      throw new Error("map currently only supports arrays");
+    }
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
@@ -332,10 +336,6 @@ export function map(
       }
       elementRuns.clear();
       return;
-    }
-
-    if (!Array.isArray(list)) {
-      throw new Error("map currently only supports arrays");
     }
 
     // The resume batch has now been observed; later reconciles are post-resume.
