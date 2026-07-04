@@ -9,7 +9,11 @@ import { Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
-(Error as any).stackTraceLimit = 100;
+type ErrorConstructorWithStackTraceLimit = ErrorConstructor & {
+  stackTraceLimit: number;
+};
+
+(Error as ErrorConstructorWithStackTraceLimit).stackTraceLimit = 100;
 
 const TOTAL_COUNT = 20;
 const TIMEOUT_MS = 180000;
