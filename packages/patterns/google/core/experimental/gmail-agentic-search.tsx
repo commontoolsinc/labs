@@ -52,6 +52,7 @@ import {
 } from "../util/gmail-client.ts";
 import GmailSearchRegistry from "./gmail-search-registry.tsx";
 import type {
+  AgentTypeRegistry,
   GmailSearchRegistryOutput,
   SharedQuery,
 } from "./gmail-search-registry.tsx";
@@ -97,6 +98,43 @@ export interface DebugLogEntry {
 // Type for the refresh token stream from google-auth
 // NOTE: Stream.send() only takes 1 argument (the event), no onCommit callback
 type RefreshStreamType = Stream<Record<string, never>>;
+type RefreshCommitTransaction = {
+  status?: () => { status?: string; error?: unknown };
+};
+type RefreshSendWithCommit = (
+  event: Record<string, never>,
+  onCommit?: (tx: RefreshCommitTransaction) => void,
+) => void;
+
+type WishedAuthPiece = {
+  refreshToken?: RefreshStreamType | null;
+};
+
+type RegistryWishResultCell = {
+  key?: (key: "registries") => {
+    key: (agentTypeUrl: string) => {
+      get?: () => AgentTypeRegistry | undefined;
+    };
+  };
+};
+
+type RegistrySubmitQuery = (
+  input: { agentTypeUrl: string; query: string },
+) => unknown;
+
+type AgentResultSummary = Record<string, unknown> & {
+  summary?: string;
+};
+
+interface PiiScreeningData {
+  hasPII: boolean;
+  piiFound: string[];
+  isGeneralizable: boolean;
+  generalizabilityIssues: string[];
+  sanitizedQuery: string;
+  confidence: number;
+  recommendation: "share" | "share_with_edits" | "do_not_share";
+}
 
 export interface ToolDefinition {
   description: string;
@@ -543,13 +581,10 @@ const searchGmailHandler = handler<
             );
           }
           await new Promise<void>((resolve, reject) => {
-            // Cast to bypass TS types - runtime supports onCommit (verified in cell.ts:105-108)
-            (refreshStream.send as (
-              event: Record<string, never>,
-              onCommit?: (tx: any) => void,
-            ) => void)(
+            // Runtime stream sends support an onCommit callback.
+            (refreshStream.send as RefreshSendWithCommit)(
               {},
-              (tx: any) => {
+              (tx) => {
                 // onCommit fires after the handler's transaction commits
                 const status = tx?.status?.();
                 if (status?.status === "error") {
@@ -1038,7 +1073,7 @@ const GmailAgenticSearch = pattern<
     // Use input cells directly - Default<> types handle writability and defaults.
     // Cannot call .get() on input cells at build time (causes "space is required" error).
     // Input cells from T[] | Default<D> are OpaqueCell types that have writable methods at runtime.
-    // Use 'any' to avoid double-casting (as unknown as) which is disallowed by the compiler.
+    // These aliases keep the writable runtime methods available below.
     // See: patterns/jkomoros/util/agentic-tools.ts for similar pattern
     const localQueries: any = localQueriesInput;
     const pendingSubmissions: any = pendingSubmissionsInput;
@@ -1122,7 +1157,8 @@ const GmailAgenticSearch = pattern<
     });
 
     // For compatibility with existing code - project piece from authInfo
-    const wishedAuthPiece = (authInfo as any)?.piece || null;
+    const wishedAuthPiece = (authInfo?.piece as WishedAuthPiece | undefined) ??
+      null;
     const hasWishedAuth = wishedAuthReady;
 
     // Access auth via property path to maintain writability
@@ -1241,14 +1277,13 @@ const GmailAgenticSearch = pattern<
     // Extract community queries for this agent type (with IDs for upvoting)
     // Conditional enablement is handled here, not in the wish call
     const communityQueryRefs = computed((): CommunityQueryRef[] => {
-      const wishResult = registryWish as any;
       const typeUrl = agentTypeUrl;
       const enabled = enableCommunityQueries;
       // Guard: skip if community queries disabled or no agent type URL
       if (!enabled || !typeUrl) return [];
-      if (!wishResult?.result) return [];
+      if (!registryWish.result) return [];
       // wishResult.result is a Cell reference, use .key() for dynamic access
-      const registryCell = wishResult.result;
+      const registryCell = registryWish.result as RegistryWishResultCell;
       const registriesCell = registryCell?.key?.("registries");
       if (!registriesCell) return [];
       const agentRegistry = registriesCell.key(typeUrl)?.get?.();
@@ -1381,7 +1416,7 @@ When you're done searching, STOP calling tools and produce your final structured
     });
 
     // Create the agent
-    const agent = generateObject({
+    const agent = generateObject<AgentResultSummary>({
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
@@ -1413,14 +1448,13 @@ When you're done searching, STOP calling tools and produce your final structured
 
     // Detect auth errors from agent result or token validation
     const hasAuthError = computed(() => {
-      const r = agentResult as any;
       const progress = searchProgress as SearchProgress;
       // Check progress status first (from token validation)
       if (progress?.status === "auth_error") {
         return true;
       }
       // Check agent result
-      const summary = r?.summary || "";
+      const summary = agentResult?.summary || "";
       return (
         summary.includes("401") ||
         summary.toLowerCase().includes("authentication error")
@@ -1430,11 +1464,10 @@ When you're done searching, STOP calling tools and produce your final structured
     // Get the specific auth error message
     const authErrorMessage = computed(() => {
       const progress = searchProgress as SearchProgress;
-      const result = agentResult as any;
       if (progress?.authError) {
         return progress.authError;
       }
-      const summary = result?.summary || "";
+      const summary = agentResult?.summary || "";
       if (summary.includes("401")) {
         return "Token expired. Please re-authenticate.";
       }
@@ -1903,7 +1936,7 @@ When you're done searching, STOP calling tools and produce your final structured
                 }}
               >
                 <cf-markdown>
-                  {(agentResult as any)?.summary || ""}
+                  {agentResult?.summary || ""}
                 </cf-markdown>
               </div>
               <cf-button
@@ -2317,7 +2350,7 @@ Return a sanitized version that:
     // Only run PII screening when there's a prompt
     const piiScreeningResult = computed(() => {
       if (!piiScreeningPrompt) return null;
-      return generateObject({
+      return generateObject<PiiScreeningData>({
         prompt: piiScreeningPrompt,
         schema: piiScreeningSchema,
         system:
@@ -2338,18 +2371,10 @@ Be conservative: when in doubt, recommend "do_not_share".`,
     // Update pending submissions with screening results
     // This is a side effect that runs when screening completes
     computed(() => {
-      const result = piiScreeningResult as any;
+      const result = piiScreeningResult;
       if (!result || !result.result) return;
 
-      const screeningData = result.result as {
-        hasPII: boolean;
-        piiFound: string[];
-        isGeneralizable: boolean;
-        generalizabilityIssues: string[];
-        sanitizedQuery: string;
-        confidence: number;
-        recommendation: "share" | "share_with_edits" | "do_not_share";
-      };
+      const screeningData = result.result;
 
       const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((
@@ -2686,12 +2711,15 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                     {/* Submit all approved button */}
                     {computed(() => {
                       const subs = pendingSubmissions as PendingSubmission[];
-                      const registry = registryWish as any;
+                      const registry = registryWish.result as
+                        | GmailSearchRegistryOutput
+                        | undefined;
                       const typeUrl = agentTypeUrl as string;
                       const approvedCount = (subs || []).filter((s) =>
                         s.userApproved && !s.submittedAt
                       ).length;
-                      const hasRegistry = !!registry?.result?.submitQuery;
+                      const hasRegistry =
+                        typeof registry?.submitQuery === "function";
 
                       return approvedCount > 0
                         ? (
@@ -2705,7 +2733,11 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                               variant="default"
                               disabled={!hasRegistry}
                               onClick={() => {
-                                if (!hasRegistry || !typeUrl) {
+                                const submitHandler = registry?.submitQuery;
+                                if (
+                                  typeof submitHandler !== "function" ||
+                                  !typeUrl
+                                ) {
                                   return;
                                 }
                                 const approved = (subs || []).filter((
@@ -2713,8 +2745,8 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 ) =>
                                   s.userApproved && !s.submittedAt
                                 );
-                                const submitHandler = registry?.result
-                                  ?.submitQuery;
+                                const submitQuery =
+                                  submitHandler as RegistrySubmitQuery;
                                 const pendingWritable: Writable<
                                   PendingSubmission[]
                                 > = pendingSubmissions;
@@ -2725,12 +2757,10 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 // Submit each approved query
                                 approved.forEach(
                                   (submission: PendingSubmission) => {
-                                    if (submitHandler) {
-                                      submitHandler({
-                                        agentTypeUrl: typeUrl,
-                                        query: submission.sanitizedQuery,
-                                      });
-                                    }
+                                    submitQuery({
+                                      agentTypeUrl: typeUrl,
+                                      query: submission.sanitizedQuery,
+                                    });
 
                                     // Mark as submitted in pendingSubmissions
                                     const currentSubs = pendingWritable.get() ||
