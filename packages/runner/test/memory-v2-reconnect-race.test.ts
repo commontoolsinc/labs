@@ -45,6 +45,27 @@ type TestProvider = IStorageProviderWithReplica & {
   ): Promise<unknown>;
 };
 
+type EmulatedServerAccess = {
+  server(): MemoryV2Server.Server;
+};
+
+function isEmulatedServerAccess(
+  candidate: unknown,
+): candidate is EmulatedServerAccess {
+  if (typeof candidate !== "object" || candidate === null) return false;
+  return typeof (candidate as Partial<EmulatedServerAccess>).server ===
+    "function";
+}
+
+function emulatedServer(
+  storageManager: ReturnType<typeof CutoverStorageManager.emulate>,
+): MemoryV2Server.Server {
+  if (!isEmulatedServerAccess(storageManager)) {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  return storageManager.server();
+}
+
 class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   connectionCount = 0;
   onConnectionCount?: (connectionCount: number) => void;
@@ -554,13 +575,7 @@ Deno.test("memory v2 runner confirms its own watched commit without an integrate
     assertEquals(result, { ok: {} });
     await storageManager.synced();
 
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server.Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
-    await candidate.server().idle();
+    await emulatedServer(storageManager).idle();
 
     const state = provider.replica.get(address) as
       | { since?: number }
@@ -614,14 +629,8 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
 
   let remoteClient: MemoryV2Client.Client | undefined;
   try {
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server.Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
     remoteClient = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(candidate.server()),
+      transport: MemoryV2Client.loopback(emulatedServer(storageManager)),
     });
     const remoteSession = await remoteClient.mount(
       space,

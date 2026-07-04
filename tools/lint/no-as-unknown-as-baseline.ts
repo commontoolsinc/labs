@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-reconnect-race.test.ts": [
-    "584:37:1q8a53v",
-    "644:37:1q8a53v",
-  ],
   "packages/runner/test/memory-v2-root-delete.test.ts": [
     "41:34:adhn6r",
     "87:35:adhn6r",
