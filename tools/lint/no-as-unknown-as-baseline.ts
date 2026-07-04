@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-native-commit.test.ts": [
-    "537:23:1320vlx",
-  ],
   "packages/runner/test/memory-v2-pull-reactivity.test.ts": [
     "54:37:1gs5cuw",
     "150:48:ibbsvq",

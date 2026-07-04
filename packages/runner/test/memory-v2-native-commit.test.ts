@@ -534,7 +534,8 @@ Deno.test("memory v2 transactions elide transient nested patches from composed h
     assertEquals(draftContainsTransientStagePatch, false);
 
     const value = await result.key("value").pull();
-    assertEquals(value as unknown as number, 14);
+    assert(typeof value === "number");
+    assertEquals(value, 14);
     assertEquals(runtimeErrors, []);
 
     cancelSink();
