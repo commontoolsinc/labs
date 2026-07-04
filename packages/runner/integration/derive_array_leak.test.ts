@@ -15,7 +15,11 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { compileAndSavePattern, Runtime } from "../src/index.ts";
 import { PieceManager } from "@commonfabric/piece";
 
-(Error as any).stackTraceLimit = 100;
+type ErrorConstructorWithStackTraceLimit = ErrorConstructor & {
+  stackTraceLimit: number;
+};
+
+(Error as ErrorConstructorWithStackTraceLimit).stackTraceLimit = 100;
 
 const { API_URL } = env;
 const SPACE_NAME_PREFIX = "runner_integration";
