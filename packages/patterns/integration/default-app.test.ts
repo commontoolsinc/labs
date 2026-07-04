@@ -59,6 +59,51 @@ type BrowserTriggerTraceEntry = {
   }>;
 };
 
+type BrowserGraphNode = {
+  id?: string;
+  isPending?: boolean;
+  isDirty?: boolean;
+  isDemanded?: boolean;
+  isConditionallyScheduled?: boolean;
+  isDebouncedWaiting?: boolean;
+  reads?: string[];
+  shallowReads?: string[];
+  writes?: string[];
+};
+
+type BrowserAppState = {
+  view?: unknown;
+};
+
+type BrowserAppApi = {
+  serialize?: () => BrowserAppState | undefined;
+  element?: () => {
+    getRuntimeSpaceDID?: () => string;
+  };
+};
+
+type BrowserCommonFabricApi = {
+  rt?: {
+    idle?: () => Promise<void>;
+    getActionRunTrace?: () => Promise<BrowserActionRunTraceEntry[]>;
+    getTriggerTrace?: () => Promise<BrowserTriggerTraceEntry[]>;
+    getGraphSnapshot?: () => Promise<{ nodes?: BrowserGraphNode[] }>;
+  };
+  readCell?: (options: {
+    id: string;
+    path?: string[];
+    meta?: "argument" | "internal";
+  }) => Promise<unknown>;
+  __eventInvocationTrace?: unknown[];
+};
+
+type BrowserGlobal = typeof globalThis & {
+  app?: BrowserAppApi;
+  commonfabric?: BrowserCommonFabricApi;
+};
+
+type PageElementHandle = Awaited<ReturnType<Page["$"]>>;
+
 const { FRONTEND_URL, SPACE_NAME } = env;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
@@ -1933,23 +1978,11 @@ async function collectActionRunSummary(page: Page): Promise<unknown> {
 
 async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: {
-        idle?: () => Promise<void>;
-        getActionRunTrace?: () => Promise<BrowserActionRunTraceEntry[]>;
-        getTriggerTrace?: () => Promise<BrowserTriggerTraceEntry[]>;
-        getGraphSnapshot?: () => Promise<{ nodes?: unknown[] }>;
-      };
-      readCell?: (options: {
-        id: string;
-        path?: string[];
-        meta?: "argument" | "internal";
-      }) => Promise<unknown>;
-      __eventInvocationTrace?: unknown[];
-    } | undefined;
+    const global = globalThis as BrowserGlobal;
+    const api = global.commonfabric;
     const rt = api?.rt;
     await rt?.idle?.();
-    const appState = (globalThis as any).app?.serialize?.();
+    const appState = global.app?.serialize?.();
     const resultPieceId = appState?.view &&
         typeof appState.view === "object" &&
         "pieceId" in appState.view &&
@@ -2081,7 +2114,7 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
     const finalNotebookNotesTriggers = notebookNotesTriggers.slice(-2);
     const graph = await rt?.getGraphSnapshot?.();
     const notebookCoreNodes = (graph?.nodes ?? [])
-      .filter((node: any) =>
+      .filter((node) =>
         typeof node.id === "string" &&
         node.id.includes("/api/patterns/notes/notebook.tsx") &&
         (
@@ -2100,7 +2133,7 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           )
         )
       )
-      .map((node: any) => ({
+      .map((node) => ({
         id: node.id,
         isPending: node.isPending,
         isDirty: node.isDirty,
@@ -3337,7 +3370,7 @@ async function clickButtonWithTitle(
 async function findButtonWithText(
   page: Page,
   searchText: string,
-): Promise<any | null> {
+): Promise<PageElementHandle> {
   try {
     // Search cf-button, button, and a elements with piercing selector
     const buttons = await page.$$("cf-button, button, a", {
@@ -3368,14 +3401,15 @@ async function collectNotebookRenderState(page: Page): Promise<{
   renderedNoteLabels: string[];
 }> {
   return await page.evaluate(async () => {
-    const commonfabric = globalThis.commonfabric as any;
-    const appState = globalThis.app?.serialize?.();
+    const global = globalThis as BrowserGlobal;
+    const commonfabric = global.commonfabric;
+    const appState = global.app?.serialize?.();
     const view = appState?.view;
     const pieceId = view && typeof view === "object" && "pieceId" in view &&
         typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
-    let current: any;
+    let current: unknown;
     if (pieceId) {
       const originalLog = console.log;
       try {
@@ -3385,9 +3419,14 @@ async function collectNotebookRenderState(page: Page): Promise<{
         console.log = originalLog;
       }
     }
-    const notes = Array.isArray(current?.notes) ? current.notes : [];
-    const mentionable = Array.isArray(current?.mentionable)
-      ? current.mentionable
+    const currentRecord = current && typeof current === "object"
+      ? current as Record<string, unknown>
+      : undefined;
+    const notes = Array.isArray(currentRecord?.notes)
+      ? currentRecord.notes
+      : [];
+    const mentionable = Array.isArray(currentRecord?.mentionable)
+      ? currentRecord.mentionable
       : [];
     const collectStoredNoteLabels = (value: unknown) => {
       const labels: string[] = [];
@@ -3426,7 +3465,10 @@ async function collectNotebookRenderState(page: Page): Promise<{
       function collect(currentRoot: Document | ShadowRoot): void {
         for (const el of currentRoot.querySelectorAll("*")) {
           if (el.localName === "cf-chip") {
-            const label = ((el as any).label ?? el.getAttribute("label") ?? "")
+            const chip = el as Element & { label?: unknown };
+            const label = (typeof chip.label === "string"
+              ? chip.label
+              : el.getAttribute("label") ?? "")
               .trim();
             if (label.startsWith("📝 New Note")) {
               labels.push(label);
@@ -3442,21 +3484,22 @@ async function collectNotebookRenderState(page: Page): Promise<{
       return labels;
     };
     const noteLabels = collectRenderedNoteLabels(document);
-    const storedUiNoteLabels = collectStoredNoteLabels(current?.["$UI"]);
+    const storedUiNoteLabels = collectStoredNoteLabels(currentRecord?.["$UI"]);
 
     return {
-      isNotebook: current?.isNotebook === true,
-      noteCount: typeof current?.noteCount === "number"
-        ? current.noteCount
+      isNotebook: currentRecord?.isNotebook === true,
+      noteCount: typeof currentRecord?.noteCount === "number"
+        ? currentRecord.noteCount
         : -1,
       notesLength: notes.length,
       mentionableLength: mentionable.length,
-      showNewNotePrompt: typeof current?.showNewNotePrompt === "boolean"
-        ? current.showNewNotePrompt
+      showNewNotePrompt: typeof currentRecord?.showNewNotePrompt === "boolean"
+        ? currentRecord.showNewNotePrompt
         : undefined,
-      usedCreateAnotherNote: typeof current?.usedCreateAnotherNote === "boolean"
-        ? current.usedCreateAnotherNote
-        : undefined,
+      usedCreateAnotherNote:
+        typeof currentRecord?.usedCreateAnotherNote === "boolean"
+          ? currentRecord.usedCreateAnotherNote
+          : undefined,
       storedUiNoteChips: storedUiNoteLabels.length,
       storedUiNoteLabels,
       renderedNoteChips: noteLabels.length,
@@ -3467,8 +3510,9 @@ async function collectNotebookRenderState(page: Page): Promise<{
 
 async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const commonfabric = globalThis.commonfabric as any;
-    const appState = globalThis.app?.serialize?.();
+    const global = globalThis as BrowserGlobal;
+    const commonfabric = global.commonfabric;
+    const appState = global.app?.serialize?.();
     const view = appState?.view;
     const pieceId = view && typeof view === "object" && "pieceId" in view &&
         typeof view.pieceId === "string"
@@ -3476,6 +3520,9 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       : undefined;
     const current = pieceId
       ? await commonfabric?.readCell?.({ id: pieceId })
+      : undefined;
+    const currentRecord = current && typeof current === "object"
+      ? current as Record<string, unknown>
       : undefined;
     const buttonTexts: string[] = [];
     const renderedButtonTexts: string[] = [];
@@ -3505,12 +3552,10 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
     return {
       location: globalThis.location.href,
       appState,
-      currentName: current?.$NAME,
-      currentIsNotebook: current?.isNotebook === true,
-      currentKeys: current && typeof current === "object"
-        ? Object.keys(current).slice(0, 30)
-        : [],
-      runtimeSpace: globalThis.app.element().getRuntimeSpaceDID(),
+      currentName: currentRecord?.$NAME,
+      currentIsNotebook: currentRecord?.isNotebook === true,
+      currentKeys: currentRecord ? Object.keys(currentRecord).slice(0, 30) : [],
+      runtimeSpace: global.app?.element?.().getRuntimeSpaceDID?.(),
       buttonTexts: buttonTexts.slice(0, 40),
       renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };
