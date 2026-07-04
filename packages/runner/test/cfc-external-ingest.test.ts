@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -15,6 +16,10 @@ type StoredEntry = {
   path: string[];
   label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
+};
+
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
 };
 
 // The Vouched Ingest Channel split-mint: a builtin-authored ExternalIngest
@@ -49,19 +54,17 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
 
   const entriesOf = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
-    id: string,
+    id: URI,
   ): StoredEntry[] => {
-    const replica = storageManager.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    const document = storageManager.open(space).replica.getDocument(id) as
+      | StoredCfcDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
   const ingestEntries = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
-    id: string,
+    id: URI,
   ): StoredEntry[] =>
     entriesOf(storageManager, id).filter((e) => e.origin === "external-ingest");
 

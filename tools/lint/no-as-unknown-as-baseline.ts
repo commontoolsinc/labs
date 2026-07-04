@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-external-ingest.test.ts": [
-    "51:55:1n5qe5z",
-  ],
   "packages/runner/test/cfc-flow-integrity.test.ts": [
     "68:55:1n5qe5z",
   ],
