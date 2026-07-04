@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-llm-derived-stamp.test.ts": [
-    "153:8:1on2hvn",
-  ],
   "packages/runner/test/cfc-nonexported-binding-identity.test.ts": [
     "89:53:1emg3g0",
   ],

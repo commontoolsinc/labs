@@ -146,11 +146,12 @@ describe("CFC LlmDerived stamping mechanism", () => {
         stampingMessagesSchema,
         modelTx,
       );
-      stamping.push({
+      const splitMessage = {
         [ID]: { llmDialog: { message: "m", id: "id-split-1" } },
         role: "assistant",
         content: "model bytes",
-      } as unknown as { role: string; content: string });
+      };
+      stamping.push(splitMessage);
       modelTx.prepareCfc();
       expect((await modelTx.commit()).ok).toBeDefined();
 
