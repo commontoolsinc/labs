@@ -8,7 +8,7 @@ import {
 import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { type Cell } from "../cell.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -539,6 +539,12 @@ type HashtagSearchResult = {
   loaded: boolean;
 };
 
+type MentionableEntry = Cell<any> | null | undefined | false | 0 | "";
+
+function isMentionableEntry(value: unknown): value is MentionableEntry {
+  return !value || isCell(value);
+}
+
 /**
  * Search mentionables in current space for pieces matching a hashtag.
  * Synchronous: reads cell.get() which returns undefined if data isn't loaded
@@ -571,13 +577,19 @@ function searchMentionablesForHashtag(
     // Data not loaded yet — reactive system will re-trigger when it arrives
     return { matches: [], loaded: false };
   }
-  const mentionables = (raw || []) as Cell<any>[];
+  if (!Array.isArray(raw)) {
+    throw new WishError("Mentionable backlinks are not an array.");
+  }
+  if (!raw.every(isMentionableEntry)) {
+    throw new WishError("Mentionable backlinks must contain cells.");
+  }
+  const mentionables = raw;
 
   const matches = measureWishPhase(
     "mentionable-filter",
     queryKey,
     () =>
-      mentionables.filter((pieceCell: Cell<any>) => {
+      mentionables.filter((pieceCell): pieceCell is Cell<any> => {
         if (!pieceCell) return false;
 
         const piece = measureWishPhase(
