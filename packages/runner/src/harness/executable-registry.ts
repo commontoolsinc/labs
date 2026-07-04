@@ -103,7 +103,7 @@ export class ExecutableRegistry {
     const identity = `host:${this.nextHostModuleId++}`;
     fresh.forEach((implementation, index) => {
       const symbol = `fn${index}`;
-      hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
+      hardenVerifiedFunction(implementation);
       this.registerVerifiedImplementation(identity, symbol, implementation);
       // First-write-wins in the entry-ref table keeps a re-trusted function's
       // serialized ref stable; the WeakSet below prevents re-registration
