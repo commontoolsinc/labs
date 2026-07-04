@@ -24,6 +24,7 @@
  */
 
 import {
+  type BuiltInLLMContent,
   computed,
   generateText,
   handler,
@@ -49,9 +50,7 @@ const DEFAULT_MAX_TEXT_FILE_SIZE = 1 * 1024 * 1024; // 1MB limit for text files
 
 export interface SmartTextInputInput {
   // Required: Target text cell (bidirectional binding)
-  // Accepts both Writable<string> and pattern input types (OpaqueCell)
-  // deno-lint-ignore no-explicit-any
-  $value: any; // Writable<string> | OpaqueCell - framework handles type coercion
+  $value: Writable<string>;
 
   // Optional configuration
   placeholder?: string;
@@ -196,8 +195,7 @@ const handleCommitPreview = handler<
     previewSource: Writable<"file" | "image" | null>;
     previewFileName: Writable<string | null>;
     uploadedImage: Writable<ImageData[]>;
-    // deno-lint-ignore no-explicit-any
-    ocrResult: any; // The ocr.result reactive value
+    ocrResult: string | undefined;
   }
 >(
   (
@@ -218,8 +216,7 @@ const handleCommitPreview = handler<
     if (fileSource) {
       preview = previewText.get();
     } else if (hasImage && ocrResult) {
-      // ocrResult is already the string value from generateText
-      preview = ocrResult as string;
+      preview = ocrResult;
     }
 
     if (preview) {
@@ -350,7 +347,7 @@ export const SmartTextInput = pattern<
   // OCR using generateText with vision model
   const ocr = generateText({
     system: OCR_SYSTEM_PROMPT,
-    prompt: ocrPrompt as any,
+    prompt: ocrPrompt as BuiltInLLMContent,
     model: "anthropic:claude-sonnet-4-5",
   });
 
@@ -378,7 +375,7 @@ export const SmartTextInput = pattern<
     }
     // If we have an OCR result and it's done processing, use it
     if (source === "image" && ocrResult && !ocrPending && image) {
-      return ocrResult as string;
+      return ocrResult;
     }
     return null;
   });
