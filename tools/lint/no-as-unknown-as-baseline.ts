@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/schema-to-ts.test.ts": [
-    "939:41:1osrdr8",
-  ],
   "packages/runner/test/security.test.ts": [
     "328:14:19l2es7",
     "345:22:1aj50v",

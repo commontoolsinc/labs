@@ -918,9 +918,10 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Create a type from the schema
     type User = Schema<typeof schema>;
+    type Settings = User["settings"] extends Cell<infer Value> ? Value : never;
 
     // Create a cell with data matching the schema
-    const settingsCell = runtime.getCell(
+    const settingsCell = runtime.getCell<Settings>(
       space,
       "settings-cell",
       undefined,
@@ -936,9 +937,7 @@ describe("Schema-to-TS Type Conversion", () => {
       name: "John",
       age: 30,
       tags: ["developer", "typescript"],
-      settings: settingsCell.getAsLink() as unknown as Cell<
-        Schema<typeof schema.properties.settings>
-      >,
+      settings: settingsCell,
     };
 
     const userCell = runtime.getImmutableCell(
