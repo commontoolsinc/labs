@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/patterns/google/extractors/usps-informed-delivery.tsx",
   "packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts",
   "packages/patterns/integration/default-app.test.ts",
   "packages/patterns/integration/multi-runtime-worker.ts",

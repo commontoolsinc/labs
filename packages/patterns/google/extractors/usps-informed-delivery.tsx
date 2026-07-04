@@ -17,8 +17,10 @@
  * 3. Link: cf piece link google-auth/auth usps/overrideAuth
  */
 import {
+  type BuiltInLLMMessage,
   computed,
   Default,
+  equals,
   generateObject,
   handler,
   JSONSchema,
@@ -263,13 +265,13 @@ const analyzeMailPiece = pattern<
   MailPieceAnalysisItem
 >((imageInfo) => {
   const analysis = generateObject<MailAnalysis>({
-    prompt: computed(() => {
+    messages: computed((): BuiltInLLMMessage[] => {
       if (!imageInfo.imageUrl) {
         if (DEBUG_USPS) {
           console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
         }
 
-        return undefined;
+        return [];
       }
       const url = imageInfo.imageUrl;
 
@@ -287,12 +289,14 @@ const analyzeMailPiece = pattern<
         );
       }
 
-      return [
-        { type: "image" as const, image: url },
-        {
-          type: "text" as const,
-          text:
-            `Analyze this scanned mail piece image from USPS Informed Delivery. Extract:
+      return [{
+        role: "user",
+        content: [
+          { type: "image", image: url },
+          {
+            type: "text",
+            text:
+              `Analyze this scanned mail piece image from USPS Informed Delivery. Extract:
 1. The recipient name (who the mail is addressed to)
 2. The sender or company name (from return address if visible)
 3. The type of mail - use these categories:
@@ -318,9 +322,10 @@ const analyzeMailPiece = pattern<
 IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritten correspondence - NOT for business mail.
 
 If you cannot read the image clearly, make your best guess based on what you can see.`,
-        },
-      ];
-    }) as any,
+          },
+        ],
+      }];
+    }),
     schema: MAIL_ANALYSIS_SCHEMA,
     model: "anthropic:claude-sonnet-4-5",
   });
@@ -344,26 +349,29 @@ const extractMailPieceResult = pattern<
 // HANDLERS
 // =============================================================================
 
-// Handler to confirm a household member
-// Uses cell reference with .equals() - idiomatic approach
 const confirmMember = handler<
   unknown,
-  { member: Writable<HouseholdMember> }
->((_event, { member }) => {
-  const current = member.get();
-  member.set({ ...current, isConfirmed: true });
+  { householdMembers: Writable<HouseholdMember[]>; member: HouseholdMember }
+>((_event, { householdMembers, member }) => {
+  const current = householdMembers.get() || [];
+  const index = current.findIndex((entry) => equals(member, entry));
+  if (index < 0) return;
+
+  householdMembers.key(index).update({ isConfirmed: true });
 });
 
-// Handler to delete a household member
-// Uses cell reference - pass householdMembers array and the member cell
 const deleteMember = handler<
   unknown,
   {
     householdMembers: Writable<HouseholdMember[]>;
-    member: Writable<HouseholdMember>;
+    member: HouseholdMember;
   }
 >((_event, { householdMembers, member }) => {
-  householdMembers.remove(member);
+  const current = householdMembers.get() || [];
+  const index = current.findIndex((entry) => equals(member, entry));
+  if (index < 0) return;
+
+  householdMembers.remove(current[index]);
 });
 
 // NOTE: No triggerAnalysis handler needed!
@@ -375,7 +383,7 @@ const deleteMember = handler<
 // =============================================================================
 
 interface PatternInput {
-  householdMembers?: HouseholdMember[] | Default<[]>;
+  householdMembers?: Writable<HouseholdMember[] | Default<[]>>;
   // Optional: Link auth directly from a Google Auth piece
   // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
   overrideAuth?: GoogleAuthCell;
@@ -400,7 +408,7 @@ export interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  (({ householdMembers, overrideAuth }: any) => {
+  ({ householdMembers, overrideAuth }) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
@@ -524,7 +532,13 @@ export default pattern<PatternInput, PatternOutput>(
 
     // Unconfirmed members count
     const unconfirmedCount = computed(
-      () => householdMembers?.filter((m: any) => !m.isConfirmed)?.length || 0,
+      () =>
+        householdMembers.filter((member: HouseholdMember) =>
+          !member.isConfirmed
+        )?.length || 0,
+    );
+    const householdMemberCount = computed(() =>
+      householdMembers.get()?.length || 0
     );
 
     // Get top 3 categories for preview summary
@@ -927,7 +941,7 @@ export default pattern<PatternInput, PatternOutput>(
                   </summary>
 
                   <cf-vstack gap="2">
-                    {!householdMembers?.length
+                    {!householdMemberCount
                       ? (
                         <div style={{ color: "#666", fontSize: "14px" }}>
                           No household members learned yet. Analyze some mail to
@@ -935,68 +949,79 @@ export default pattern<PatternInput, PatternOutput>(
                         </div>
                       )
                       : null}
-                    {/* Use .map() directly on cell array to get cell references */}
-                    {householdMembers.map((member: any) => (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          padding: "8px 12px",
-                          backgroundColor: member.isConfirmed
-                            ? "#f0fdf4"
-                            : "#fefce8",
-                          borderRadius: "6px",
-                          border: `1px solid ${
-                            member.isConfirmed ? "#86efac" : "#fde047"
-                          }`,
-                        }}
-                      >
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "500" }}>{member.name}</div>
-                          <div style={{ fontSize: "12px", color: "#666" }}>
-                            {member.mailCount} pieces
-                            {member.aliases?.length > 0
-                              ? ` • Also: ${member.aliases.join(", ")}`
-                              : ""}
-                          </div>
-                        </div>
-                        {!member.isConfirmed
-                          ? (
-                            <button
-                              type="button"
-                              onClick={confirmMember({ member })}
-                              style={{
-                                padding: "4px 8px",
-                                fontSize: "12px",
-                                backgroundColor: "#22c55e",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                              }}
-                            >
-                              Confirm
-                            </button>
-                          )
-                          : null}
-                        <button
-                          type="button"
-                          onClick={deleteMember({ householdMembers, member })}
+                    {householdMembers.map((
+                      member: HouseholdMember,
+                    ) => {
+                      return (
+                        <div
                           style={{
-                            padding: "4px 8px",
-                            fontSize: "12px",
-                            backgroundColor: "#ef4444",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "8px 12px",
+                            backgroundColor: member.isConfirmed
+                              ? "#f0fdf4"
+                              : "#fefce8",
+                            borderRadius: "6px",
+                            border: `1px solid ${
+                              member.isConfirmed ? "#86efac" : "#fde047"
+                            }`,
                           }}
                         >
-                          Delete
-                        </button>
-                      </div>
-                    ))}
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: "500" }}>
+                              {member.name}
+                            </div>
+                            <div style={{ fontSize: "12px", color: "#666" }}>
+                              {member.mailCount} pieces
+                              {member.aliases?.length > 0
+                                ? ` • Also: ${member.aliases.join(", ")}`
+                                : ""}
+                            </div>
+                          </div>
+                          {!member.isConfirmed
+                            ? (
+                              <button
+                                type="button"
+                                onClick={confirmMember({
+                                  householdMembers,
+                                  member,
+                                })}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  backgroundColor: "#22c55e",
+                                  color: "white",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Confirm
+                              </button>
+                            )
+                            : null}
+                          <button
+                            type="button"
+                            onClick={deleteMember({
+                              householdMembers,
+                              member,
+                            })}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              backgroundColor: "#ef4444",
+                              color: "white",
+                              border: "none",
+                              borderRadius: "4px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      );
+                    })}
                   </cf-vstack>
                 </details>
               )}
@@ -1263,5 +1288,5 @@ export default pattern<PatternInput, PatternOutput>(
         </cf-screen>
       ),
     };
-  }) as any,
+  },
 );
