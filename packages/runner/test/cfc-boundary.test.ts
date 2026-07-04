@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -29,11 +29,14 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
+  type PreparedDigestInput,
+  type TrustSnapshot,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import type { CellScope, JSONSchema, Pattern } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setResultCell } from "../src/result-utils.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
@@ -41,6 +44,52 @@ import {
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
+
+type StoredCfcLabelEntry = {
+  path: string[];
+  label: Record<string, unknown> & {
+    confidentiality?: unknown[];
+    integrity?: unknown[];
+  };
+  origin?: string;
+};
+
+type StoredCfcDocument = {
+  value?: unknown;
+  cfc?: {
+    schemaHash: string;
+    labelMap?: { entries: StoredCfcLabelEntry[] };
+  };
+};
+
+type StoredMessagesDocument = StoredCfcDocument & {
+  value?: { messages?: unknown[] };
+};
+
+type StoredStageDocument = StoredCfcDocument & {
+  value?: { internal?: { stage?: string } };
+};
+
+const getStoredDocumentForTest = <
+  T extends StoredCfcDocument = StoredCfcDocument,
+>(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  id: URI,
+  scope?: CellScope,
+): T | undefined =>
+  storageManager.open(signer.did()).replica.getDocument(id, scope) as
+    | T
+    | undefined;
+
+const buildPreparedDigestInputForTest = (
+  tx: IExtendedStorageTransaction,
+): PreparedDigestInput => {
+  const buildPreparedDigestInput = Reflect.get(tx, "buildPreparedDigestInput");
+  if (typeof buildPreparedDigestInput !== "function") {
+    throw new Error("buildPreparedDigestInput is not a function");
+  }
+  return buildPreparedDigestInput.call(tx) as PreparedDigestInput;
+};
 
 // Seed stored CFC metadata via an ungated path-[] full-document write (the
 // shape hydration delivers it), reading the current doc first so the value
@@ -308,19 +357,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(savedTitleLink?.id).toBe(savedTitleDerivedLink?.id);
       expect(savedTitleLink?.path).toEqual([]);
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: Record<string, unknown>;
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(
+      const persisted = getStoredDocumentForTest(
+        storageManager,
         parseLink(resultCell.getAsLink()).id!,
       );
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
@@ -395,19 +433,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(internalManifest).toBeDefined();
       expect(savedTitleLink?.path).toEqual([]);
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: Record<string, unknown>;
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(
+      const persisted = getStoredDocumentForTest(
+        storageManager,
         parseLink(resultCell.getAsLink()).id!,
       );
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
@@ -1420,20 +1447,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         }),
       ).toBe(true);
 
-      const readActivities = [...(metadataTx as unknown as {
-        getReadActivities(): Iterable<{ meta?: unknown }>;
-      }).getReadActivities()];
+      const readActivities = [...(metadataTx.getReadActivities?.() ?? [])];
       expect(readActivities).toContainEqual(
         expect.objectContaining({
           path: ["cfc"],
         }),
       );
 
-      const digestInput = (
-        metadataTx as unknown as {
-          buildPreparedDigestInput(): { consumedReads: unknown[] };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = buildPreparedDigestInputForTest(metadataTx);
       expect(digestInput.consumedReads).toEqual([]);
       expect(metadataTx.getCfcState().relevant).toBe(false);
 
@@ -1710,20 +1731,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       cell.key("secret").set("same");
       expect(tx.getCfcState().relevant).toBe(true);
 
-      const digestInput = (
-        tx as unknown as {
-          buildPreparedDigestInput(): {
-            attemptedWrites: Array<{
-              space: string;
-              scope: "space";
-              id: string;
-              type: string;
-              path: string[];
-            }>;
-            writes: Array<unknown>;
-          };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = buildPreparedDigestInputForTest(tx);
       expect(digestInput.attemptedWrites).toContainEqual({
         space: signer.did(),
         scope: "space",
@@ -1860,13 +1868,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
       const persistedId = parseLink(cell.getAsLink()).id!;
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: unknown;
-          cfc?: { schemaHash: string; labelMap?: { entries: unknown[] } };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(persistedId);
+      const persisted = getStoredDocumentForTest(storageManager, persistedId);
       expect(persisted?.value).toEqual({ secret: "hello" });
       expect(persisted?.cfc?.schemaHash).toBeDefined();
       expect(persisted?.cfc?.labelMap?.entries.length).toBeGreaterThan(0);
@@ -1879,7 +1881,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         origin: "declared",
       });
 
-      const schemaDoc = replica.getDocument(
+      const schemaDoc = getStoredDocumentForTest(
+        storageManager,
         `cid:${persisted!.cfc!.schemaHash}`,
       );
       expect(schemaDoc?.value).toBeDefined();
@@ -1936,12 +1939,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
 
       const persistedId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: { labelMap?: { entries: unknown[] } };
-        } | undefined;
-      };
-      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries;
+      const entries = getStoredDocumentForTest(storageManager, persistedId)?.cfc
+        ?.labelMap?.entries;
       expect(entries).toContainEqual({
         path: ["first"],
         label: { integrity: ["shared-ref-integrity"] },
@@ -2052,14 +2051,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
       const persistedId = parseLink(scopedCell.getAsLink()).id!;
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string, scope?: "space" | "user" | "session"): {
-          value?: unknown;
-          cfc?: { schemaHash: string; labelMap?: { entries: unknown[] } };
-        } | undefined;
-      };
-      const scopedPersisted = replica.getDocument(persistedId, "user");
-      const spacePersisted = replica.getDocument(persistedId, "space");
+      const scopedPersisted = getStoredDocumentForTest(
+        storageManager,
+        persistedId,
+        "user",
+      );
+      const spacePersisted = getStoredDocumentForTest(
+        storageManager,
+        persistedId,
+        "space",
+      );
 
       expect(scopedPersisted?.value).toEqual({ secret: "hello" });
       expect(scopedPersisted?.cfc?.schemaHash).toBeDefined();
@@ -3264,30 +3265,19 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
 
       const rootId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: unknown;
-          cfc?: {
-            schemaHash: string;
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: unknown[];
-                  integrity?: unknown[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const rootDoc = replica.getDocument(rootId);
+      const rootDoc = getStoredDocumentForTest<StoredMessagesDocument>(
+        storageManager,
+        rootId,
+      );
       const nestedLink = parseLink(
-        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+        rootDoc?.value?.messages?.[0],
       );
       expect(nestedLink?.id).toBeDefined();
 
-      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      const nestedDoc = getStoredDocumentForTest(
+        storageManager,
+        nestedLink!.id!,
+      );
       expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
         path: ["piece"],
         label: {
@@ -3377,30 +3367,19 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
 
       const rootId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: unknown;
-          cfc?: {
-            schemaHash: string;
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: unknown[];
-                  integrity?: unknown[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const rootDoc = replica.getDocument(rootId);
+      const rootDoc = getStoredDocumentForTest<StoredMessagesDocument>(
+        storageManager,
+        rootId,
+      );
       const nestedLink = parseLink(
-        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+        rootDoc?.value?.messages?.[0],
       );
       expect(nestedLink?.id).toBeDefined();
 
-      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      const nestedDoc = getStoredDocumentForTest(
+        storageManager,
+        nestedLink!.id!,
+      );
       expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
         path: ["piece"],
         label: {
@@ -3528,30 +3507,19 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
 
       const rootId = parseLink(cell.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: { messages?: unknown[] };
-          cfc?: {
-            schemaHash: string;
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: unknown[];
-                  integrity?: unknown[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const rootDoc = replica.getDocument(rootId);
+      const rootDoc = getStoredDocumentForTest<StoredMessagesDocument>(
+        storageManager,
+        rootId,
+      );
       const nestedLink = parseLink(
-        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+        rootDoc?.value?.messages?.[0],
       );
       expect(nestedLink?.id).toBeDefined();
 
-      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      const nestedDoc = getStoredDocumentForTest(
+        storageManager,
+        nestedLink!.id!,
+      );
       expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
         path: ["piece"],
         label: {
@@ -3630,22 +3598,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.ok).toBeDefined();
 
       const persistedId = parseLink(output.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: string[];
-                  integrity?: string[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(persistedId);
+      const persisted = getStoredDocumentForTest(storageManager, persistedId);
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: [],
         label: {
@@ -3691,14 +3644,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const firstResult = await firstTx.commit();
       expect(firstResult.ok).toBeDefined();
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: unknown;
-          cfc?: { schemaHash: string };
-        } | undefined;
-      };
       const persistedId = parseLink(firstCell.getAsLink()).id!;
-      const before = replica.getDocument(persistedId);
+      const before = getStoredDocumentForTest(storageManager, persistedId);
       expect(before?.cfc?.schemaHash).toBeDefined();
 
       const secondTx = runtime.edit();
@@ -3727,11 +3674,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const secondResult = await secondTx.commit();
       expect(secondResult.ok).toBeDefined();
 
-      const after = replica.getDocument(persistedId);
+      const after = getStoredDocumentForTest(storageManager, persistedId);
       expect(after?.cfc?.schemaHash).toBeDefined();
       expect(after?.cfc?.schemaHash).not.toEqual(before?.cfc?.schemaHash);
 
-      const schemaDoc = replica.getDocument(`cid:${after!.cfc!.schemaHash}`);
+      const schemaDoc = getStoredDocumentForTest(
+        storageManager,
+        `cid:${after!.cfc!.schemaHash}`,
+      );
       expect(schemaDoc?.value).toMatchObject({
         type: "object",
         required: ["secret", "title"],
@@ -3863,17 +3813,13 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const result = await update.commit();
       expect(result.ok).toBeDefined();
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          value?: {
-            internal?: { stage?: string };
-          };
-          cfc?: { schemaHash: string };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(documentId);
+      const persisted = getStoredDocumentForTest<StoredStageDocument>(
+        storageManager,
+        documentId,
+      );
       expect(persisted?.value?.internal?.stage).toBe("saved");
-      const schemaDoc = replica.getDocument(
+      const schemaDoc = getStoredDocumentForTest(
+        storageManager,
         `cid:${persisted!.cfc!.schemaHash}`,
       );
       expect(schemaDoc?.value).toMatchObject({
@@ -3969,15 +3915,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         const secondResult = await secondTx.commit();
         expect(secondResult.ok).toBeDefined();
 
-        const replica = storageManager.open(signer.did())
-          .replica as unknown as {
-            getDocument(id: string): {
-              value?: unknown;
-              cfc?: { schemaHash: string };
-            } | undefined;
-          };
-        const persisted = replica.getDocument(persistedId);
-        const schemaDoc = replica.getDocument(
+        const persisted = getStoredDocumentForTest(storageManager, persistedId);
+        const schemaDoc = getStoredDocumentForTest(
+          storageManager,
           `cid:${persisted!.cfc!.schemaHash}`,
         );
         expect(schemaDoc?.value).toMatchObject({
@@ -4991,22 +4931,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
 
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: string[];
-                  integrity?: string[];
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const persisted = replica.getDocument(parseLink(output.getAsLink()).id!);
+      const persisted = getStoredDocumentForTest(
+        storageManager,
+        parseLink(output.getAsLink()).id!,
+      );
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["value"],
         label: {
@@ -5050,10 +4978,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
-        resultSchema: undefined,
+        resultSchema: undefined as never,
         result: { title: "Untyped" },
         nodes: [],
-      } as unknown as Pattern;
+      } satisfies Pattern;
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
       tx.markCfcRelevant("untyped-pattern-result");
@@ -5466,7 +5394,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.setCfcTrustSnapshot(
         {
           actingPrincipal: signer.did(),
-        } as unknown as Parameters<typeof tx.setCfcTrustSnapshot>[0],
+        } as TrustSnapshot,
       );
 
       const cell = runtime.getCell(
