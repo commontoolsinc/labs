@@ -44,6 +44,34 @@ import type { HarnessedFunction } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("ca-identity-adversarial");
 
+type VerifiedBindingClaim = {
+  readonly __ctWriterIdentityOf?: {
+    readonly bundleId?: string;
+    readonly moduleIdentity?: string;
+    readonly file?: string;
+    readonly path?: readonly string[];
+  };
+};
+
+const ownedFieldSchema = (
+  writeAuthorizedBy: VerifiedBindingClaim,
+): JSONSchema =>
+  ({
+    type: "object",
+    properties: {
+      owned: { type: "string", ifc: { writeAuthorizedBy } },
+    },
+    required: ["owned"],
+  }) as JSONSchema;
+
+type ModuleWithDebugName = Module & { debugName?: string };
+
+const moduleWithDebugName = (debugName: string): ModuleWithDebugName => {
+  const module: ModuleWithDebugName = { type: "javascript" };
+  module.debugName = debugName;
+  return module;
+};
+
 // A handler program with TWO module-scope handlers, so we have two distinct
 // genuine artifacts/identities to cross-wire in the $implRef-confusion attacks.
 const PROGRAM = {
@@ -205,10 +233,10 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       // Forge module A's serialized graph so its $implRef borrows B's
       // {identity, symbol} (the classic authority-borrow). State graphs are
       // attacker-influençable — assume the attacker rewrote the ref freely.
-      const forgedModuleA = {
+      const forgedModuleA: Module = {
         ...modA,
-        $implRef: { identity: provB.identity, symbol: provB.symbol },
-      } as unknown as Module;
+        $implRef: { identity: provB.identity, symbol: provB.symbol! },
+      };
 
       // CFC identity is resolved from the function actually invoked (fnA), never
       // from the ref in the data: the resolver reads fnA's provenance, so the
@@ -312,25 +340,14 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         }),
       });
       const tx = runtime.edit();
-      const schema = {
-        type: "object",
-        properties: {
-          owned: {
-            type: "string",
-            ifc: {
-              writeAuthorizedBy: {
-                __ctWriterIdentityOf: {
-                  // Claim is owned by VICTIM module + path.
-                  moduleIdentity: "victim-module-identity",
-                  file: "/victim.tsx",
-                  path: ["victimOwnedField"],
-                },
-              },
-            },
-          },
+      const schema = ownedFieldSchema({
+        __ctWriterIdentityOf: {
+          // Claim is owned by VICTIM module + path.
+          moduleIdentity: "victim-module-identity",
+          file: "/victim.tsx",
+          path: ["victimOwnedField"],
         },
-        required: ["owned"],
-      } as unknown as JSONSchema;
+      });
       const cell = runtime.getCell(signer.did(), "attack4-binding", schema, tx);
 
       // Attacker's verified identity claims a DIFFERENT module/path (their own).
@@ -361,24 +378,13 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         }),
       });
       const tx = runtime.edit();
-      const schema = {
-        type: "object",
-        properties: {
-          owned: {
-            type: "string",
-            ifc: {
-              writeAuthorizedBy: {
-                __ctWriterIdentityOf: {
-                  moduleIdentity: "shared-module-identity",
-                  file: "/shared.tsx",
-                  path: ["ownerHandler"],
-                },
-              },
-            },
-          },
+      const schema = ownedFieldSchema({
+        __ctWriterIdentityOf: {
+          moduleIdentity: "shared-module-identity",
+          file: "/shared.tsx",
+          path: ["ownerHandler"],
         },
-        required: ["owned"],
-      } as unknown as JSONSchema;
+      });
       const cell = runtime.getCell(
         signer.did(),
         "attack4b-binding",
@@ -419,25 +425,14 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         }),
       });
       const tx = runtime.edit();
-      const schema = {
-        type: "object",
-        properties: {
-          owned: {
-            type: "string",
-            ifc: {
-              writeAuthorizedBy: {
-                __ctWriterIdentityOf: {
-                  // ALREADY stamped to the owner module — not unstamped.
-                  moduleIdentity: "owner-module",
-                  file: "/owner.tsx",
-                  path: ["ownerHandler"],
-                },
-              },
-            },
-          },
+      const schema = ownedFieldSchema({
+        __ctWriterIdentityOf: {
+          // ALREADY stamped to the owner module — not unstamped.
+          moduleIdentity: "owner-module",
+          file: "/owner.tsx",
+          path: ["ownerHandler"],
         },
-        required: ["owned"],
-      } as unknown as JSONSchema;
+      });
       const cell = runtime.getCell(
         signer.did(),
         "attack4d-binding",
@@ -470,24 +465,13 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         }),
       });
       const tx = runtime.edit();
-      const schema = {
-        type: "object",
-        properties: {
-          owned: {
-            type: "string",
-            ifc: {
-              writeAuthorizedBy: {
-                __ctWriterIdentityOf: {
-                  moduleIdentity: "match-module-identity",
-                  file: "/match.tsx",
-                  path: ["ownerHandler"],
-                },
-              },
-            },
-          },
+      const schema = ownedFieldSchema({
+        __ctWriterIdentityOf: {
+          moduleIdentity: "match-module-identity",
+          file: "/match.tsx",
+          path: ["ownerHandler"],
         },
-        required: ["owned"],
-      } as unknown as JSONSchema;
+      });
       const cell = runtime.getCell(
         signer.did(),
         "attack4c-binding",
@@ -517,7 +501,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   // ---------------------------------------------------------------------------
   describe("attack 5: forged stored writeAuthorizedBy claims", () => {
     const driveClaim = async (
-      claim: Record<string, unknown>,
+      claim: VerifiedBindingClaim,
       identity: Record<string, unknown>,
       name: string,
     ) => {
@@ -532,13 +516,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         }),
       });
       const tx = runtime.edit();
-      const schema = {
-        type: "object",
-        properties: {
-          owned: { type: "string", ifc: { writeAuthorizedBy: claim } },
-        },
-        required: ["owned"],
-      } as unknown as JSONSchema;
+      const schema = ownedFieldSchema(claim);
       const cell = runtime.getCell(signer.did(), name, schema, tx);
       tx.setCfcImplementationIdentity(identity as never);
       cell.set({ owned: "x" });
@@ -806,15 +784,12 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         type: "javascript" as const,
         implementation: dyn,
         implementationRef: "dyn-ref",
-        toJSON: undefined as unknown,
-      };
+        toJSON: undefined,
+      } satisfies Module & { implementationRef: string; toJSON?: undefined };
       // moduleToJSON is reached via the builder; call the same path the real
       // module uses. We re-import it lazily to avoid widening the import surface.
       const { moduleToJSON } = await import("../src/builder/json-utils.ts");
-      const json = moduleToJSON(dynModule as unknown as Module) as Record<
-        string,
-        unknown
-      >;
+      const json = moduleToJSON(dynModule) as Record<string, unknown>;
       expect(json.$implRef).toBeUndefined();
     });
   });
@@ -830,7 +805,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   // A claim/identity driver matching attack 5's, lifted to the outer scope so
   // the E2 bundleId-arm attacks can reuse it.
   const driveE2Claim = async (
-    claim: Record<string, unknown>,
+    claim: VerifiedBindingClaim,
     identity: Record<string, unknown>,
     name: string,
   ) => {
@@ -845,13 +820,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       }),
     });
     const tx = runtime.edit();
-    const schema = {
-      type: "object",
-      properties: {
-        owned: { type: "string", ifc: { writeAuthorizedBy: claim } },
-      },
-      required: ["owned"],
-    } as unknown as JSONSchema;
+    const schema = ownedFieldSchema(claim);
     const cell = runtime.getCell(signer.did(), name, schema, tx);
     tx.setCfcImplementationIdentity(identity as never);
     cell.set({ owned: "x" });
@@ -927,12 +896,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       const mod = handlerModules(pattern)[0];
       const fn = mod.implementation as HarnessedFunction;
       const prov = getVerifiedProvenance(fn)!;
-      const harness = runtime!.harness as unknown as {
-        getVerifiedImplementation?: (
-          identity: string,
-          symbol: string,
-        ) => unknown;
-      };
+      const harness = runtime!.harness;
       // Never-evaluated identity → miss.
       expect(
         harness.getVerifiedImplementation?.("forged-identity", prov.symbol!),
@@ -967,7 +931,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
   describe("attack 11: host pseudo-module registration grants execution, never verification", () => {
     it("a host entry resolves by { identity, symbol } but carries no provenance", () => {
       const reg = new ExecutableRegistry();
-      const fn = (() => {}) as unknown as HarnessedFunction;
+      const fn: HarnessedFunction = () => {};
       reg.trustHostValue({ implementation: fn }, { reason: "adversarial" });
 
       const resolved = reg.getVerifiedImplementation("host:0", "fn0");
@@ -977,14 +941,14 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
     it("a forged $implRef naming a host identity cannot manufacture verification", () => {
       const reg = new ExecutableRegistry();
-      const fn = (() => {}) as unknown as HarnessedFunction;
+      const fn: HarnessedFunction = () => {};
       reg.trustHostValue({ implementation: fn }, { reason: "adversarial" });
       // The attacker writes `$implRef: { identity: "host:0", symbol: "fn0" }`
       // into stored data: resolution executes the host fn, but its CFC
       // identity stays undefined — `writeAuthorizedBy` sees `unsupported`.
       const resolved = reg.getVerifiedImplementation("host:0", "fn0");
       const identity = resolvePolicyFacingImplementationIdentity(
-        { type: "javascript" } as unknown as Module,
+        { type: "javascript" } satisfies Module,
         { implementation: resolved },
       );
       expect(identity).toBeUndefined();
@@ -1003,7 +967,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         src: "cf:module/SOME_MODULE/main.tsx:1:1",
       });
       const identity = resolvePolicyFacingImplementationIdentity(
-        { type: "javascript", debugName: "" } as unknown as Module,
+        moduleWithDebugName(""),
         { implementation: hostFn },
       );
       // No provenance WeakMap entry → undefined, NOT verified — the canonical
@@ -1016,7 +980,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         src: "cf:module/SOME_MODULE/main.tsx:1:1",
       });
       const identity = resolvePolicyFacingImplementationIdentity(
-        { type: "javascript", debugName: "forgedBuiltin" } as unknown as Module,
+        moduleWithDebugName("forgedBuiltin"),
         { implementation: hostFn },
       );
       expect(identity?.kind).toBe("builtin");

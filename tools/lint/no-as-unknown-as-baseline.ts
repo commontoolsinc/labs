@@ -1,20 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/content-addressed-identity-adversarial.test.ts": [
-    "210:8:ig528j",
-    "332:8:tgcyny",
-    "380:8:2u89m8",
-    "439:8:1jtqybo",
-    "489:8:13xjzig",
-    "540:8:1vxpfjp",
-    "791:42:wigxuq",
-    "831:6:kve45",
-    "907:39:1ul0om2",
-    "947:28:1nbrgqr",
-    "957:28:1nbrgqr",
-    "964:31:j8ljjg",
-    "983:46:s5xc5g",
-    "996:59:157koyq",
-  ],
   "packages/runner/test/content-addressed-identity.test.ts": [
     "147:44:ew550m",
     "164:34:15xxca7",
