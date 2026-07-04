@@ -40,6 +40,18 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 const signer = await Identity.fromPassphrase("effect-conflict-recovery");
 const space = signer.did();
 
+type StorageNotificationWithChanges = Extract<
+  StorageNotification,
+  { changes: unknown }
+>;
+
+const withoutChanges = (
+  notification: StorageNotificationWithChanges,
+): StorageNotificationWithChanges => ({
+  ...notification,
+  changes: [],
+});
+
 class SharedServerStorageManager extends EmulatedStorageManager {
   static connectTo(
     server: MemoryV2Server.Server,
@@ -66,9 +78,7 @@ class SharedServerStorageManager extends EmulatedStorageManager {
     super.subscribe({
       next: (n: StorageNotification) =>
         this.suppressReaderDirty && "changes" in n
-          ? subscription.next(
-            { ...n, changes: [] } as unknown as StorageNotification,
-          )
+          ? subscription.next(withoutChanges(n))
           : subscription.next(n),
     });
   }
