@@ -75,6 +75,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .filter((e) => e.origin === "derived")
       .flatMap((e) => e.label.confidentiality ?? []);
 
+  // confidentiality of the container's STRUCTURE label (origin structure at the
+  // container root) — the membership/order taint (§8.5.6.1).
+  const structureConfidentiality = (id: string): string[] =>
+    entriesOf(id)
+      .filter((e) => e.origin === "structure" && e.path.length === 0)
+      .flatMap((e) => e.label.confidentiality ?? []);
+
   // Element ops run in their own transactions reading only their element,
   // so per-element precision is structural — for elements that arrive in
   // separate reconciles. A batch first-instantiation evaluates all new
@@ -446,5 +453,240 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     );
     expect(probeConf).toContainEqual("alice-secret");
     expect(probeConf).toContainEqual("bob-secret");
+  });
+
+  const resolvedContainerId = (keptCell: any): string => {
+    const rtx = runtime!.edit();
+    const id =
+      keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
+    rtx.commit();
+    return id;
+  };
+
+  // The dual of membership taint: when the predicate decides membership WITHOUT
+  // reading element content (here: by index), the result container's structure
+  // must carry NO member content. This is the over-taint the input-read
+  // identity-only materialization removes — the old asCell `.get()` on the input
+  // list dereferenced every element into the coordinator's J (§8.5.6.1 keeps
+  // member confidentiality separate from structural).
+  it("filter: index-only predicate keeps member content out of the structure label", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "ix-el-0", { n: 1 }, "alice-secret");
+    await seedLabeledDoc(runtime, "ix-el-1", { n: 2 }, "bob-secret");
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, lift } = commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
+    };
+    const keepFirst = lift((i: number) => i < 1);
+    let filteredRef: any;
+
+    const setup = runtime.edit();
+    const el0 = runtime.getCell(space, "ix-el-0", undefined, setup);
+    const el1 = runtime.getCell(space, "ix-el-1", undefined, setup);
+    const listCell = runtime.getCell(
+      space,
+      "ix-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      setup,
+    );
+    listCell.set([el0, el1]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
+      filteredRef = (values as any).filterWithPattern(
+        // reads only `index`, never element content
+        pattern(({ index }: FactoryInput<any>) => keepFirst(index)),
+        {},
+      );
+      return { kept: filteredRef };
+    });
+
+    const tx = runtime.edit();
+    const valuesIn = runtime.getCell(space, "ix-list", undefined, tx);
+    const resultCell = runtime.getCell(
+      space,
+      "ix-filter-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      collectionPattern,
+      { values: valuesIn },
+      resultCell,
+    );
+    await tx.commit();
+    await result.pull();
+    await runtime.idle();
+
+    const sc = structureConfidentiality(
+      resolvedContainerId(result.key("kept")),
+    );
+    expect(sc).not.toContainEqual("alice-secret");
+    expect(sc).not.toContainEqual("bob-secret");
+  });
+
+  // The membership taint must RE-STAMP (replace, not duplicate or go stale) when
+  // the list changes across reconciles: the structure label is re-derived from
+  // each reconcile's J, even though the container's root value is not rewritten
+  // (only a slot is appended). Without the re-stamp the late-arriving member's
+  // taint would never reach the container shape.
+  it("filter: structure label re-stamps from J when the list grows", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "grow-el-0", { n: 1 }, "alice-secret");
+    await seedLabeledDoc(runtime, "grow-el-1", { n: 2 }, "bob-secret");
+    await seedLabeledDoc(runtime, "grow-el-2", { n: 3 }, "carol-secret");
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, lift } = commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
+    };
+    const isPositive = lift((value: { n: number }) => value.n > 0);
+    let filteredRef: any;
+
+    const setup = runtime.edit();
+    const el0 = runtime.getCell(space, "grow-el-0", undefined, setup);
+    const el1 = runtime.getCell(space, "grow-el-1", undefined, setup);
+    const el2 = runtime.getCell(space, "grow-el-2", undefined, setup);
+    const listCell = runtime.getCell(
+      space,
+      "grow-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      setup,
+    );
+    listCell.set([el0, el1]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
+      filteredRef = (values as any).filterWithPattern(
+        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+        {},
+      );
+      return { kept: filteredRef };
+    });
+
+    const tx = runtime.edit();
+    const valuesIn = runtime.getCell(space, "grow-list", undefined, tx);
+    const resultCell = runtime.getCell(space, "grow-result", undefined, tx);
+    const result = runtime.run(
+      tx,
+      collectionPattern,
+      { values: valuesIn },
+      resultCell,
+    );
+    await tx.commit();
+    await result.pull();
+    await runtime.idle();
+
+    const containerId = resolvedContainerId(result.key("kept"));
+    const before = structureConfidentiality(containerId);
+    expect(before).toContainEqual("alice-secret");
+    expect(before).toContainEqual("bob-secret");
+
+    // Grow the list: a re-reconcile re-stamps the container structure from the
+    // new J (now including carol), replacing the prior structure entry rather
+    // than leaving it stale or duplicating it.
+    const gtx = runtime.edit();
+    const lc = runtime.getCell(
+      space,
+      "grow-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      gtx,
+    );
+    lc.set([el0, el1, el2]);
+    expect((await gtx.commit()).ok).toBeDefined();
+    await result.pull();
+    await runtime.idle();
+
+    const after = structureConfidentiality(containerId);
+    expect(after).toContainEqual("alice-secret");
+    expect(after).toContainEqual("bob-secret");
+    expect(after).toContainEqual("carol-secret");
+    // re-stamped, not duplicated: exactly one structure entry at the root
+    const structureEntries = entriesOf(containerId).filter(
+      (e) => e.origin === "structure" && e.path.length === 0,
+    );
+    expect(structureEntries.length).toBe(1);
+  });
+
+  // flatMap gets the same structural-taint treatment as filter: the result
+  // container's structure carries the op outputs' taint (membership/multiplicity
+  // depend on every element the op considered), not via the input deref.
+  it("flatMap: result structure carries the op outputs' taint", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "fm-el-0", { n: 1 }, "alice-secret");
+    await seedLabeledDoc(runtime, "fm-el-1", { n: 2 }, "bob-secret");
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, lift } = commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
+    };
+    // op reads element content and emits a one-element segment
+    const toSegment = lift((value: { n: number }) => [value.n]);
+    let flattenedRef: any;
+
+    const setup = runtime.edit();
+    const el0 = runtime.getCell(space, "fm-el-0", undefined, setup);
+    const el1 = runtime.getCell(space, "fm-el-1", undefined, setup);
+    const listCell = runtime.getCell(
+      space,
+      "fm-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      setup,
+    );
+    listCell.set([el0, el1]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
+      flattenedRef = (values as any).flatMapWithPattern(
+        pattern(({ element }: FactoryInput<any>) => toSegment(element)),
+        {},
+      );
+      return { flattened: flattenedRef };
+    });
+
+    const tx = runtime.edit();
+    const valuesIn = runtime.getCell(space, "fm-list", undefined, tx);
+    const resultCell = runtime.getCell(space, "fm-result", undefined, tx);
+    const result = runtime.run(
+      tx,
+      collectionPattern,
+      { values: valuesIn },
+      resultCell,
+    );
+    await tx.commit();
+    await result.pull();
+    await runtime.idle();
+
+    const sc = structureConfidentiality(
+      resolvedContainerId(result.key("flattened")),
+    );
+    expect(sc).toContainEqual("alice-secret");
+    expect(sc).toContainEqual("bob-secret");
   });
 });

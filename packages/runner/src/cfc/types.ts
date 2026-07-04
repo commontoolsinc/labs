@@ -395,6 +395,16 @@ export type CfcTxState = {
   triggerReadGating: CfcTriggerReadGating;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
+  // Result containers a list coordinator (filter/flatMap) declares each
+  // reconcile: their `structure` label (membership/order, §8.5.6.1) must be
+  // re-derived from the per-tx join J — the selection criteria the coordinator
+  // read (predicate results) — EVERY reconcile, decoupled from value writes.
+  // The membership taint settles on a later pass than the container's root
+  // value write, and incremental changes are slot/no-op writes that never
+  // re-stamp the root, so without this the taint never lands (S16 over-taint
+  // fix, the dual of the input-read over-taint). map does NOT declare: it is
+  // length-preserving with no membership secret, so its container stays clean.
+  structureContainers: CfcAddress[];
   // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
   // reads): the decision to run *now* was influenced by their values, so
   // they join the flow-label derivation even when the run never re-reads
