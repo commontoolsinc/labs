@@ -1,13 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-write-floor.test.ts": [
-    "269:27:1x3ca4o",
-    "347:26:1x3ca4o",
-    "378:26:1x3ca4o",
-    "485:26:1x3ca4o",
-    "538:26:1trppa",
-    "588:26:1trppa",
-    "632:22:1x3ca4o",
-  ],
   "packages/runner/test/cfc-write-reconstruction.test.ts": [
     "30:5:axn26",
     "196:40:hy5uzs",

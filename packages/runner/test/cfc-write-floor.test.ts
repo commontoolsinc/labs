@@ -254,7 +254,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         integrity: [ADMIN_ATOM, "extra-endorsement"],
       });
       const seedTx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<string>(
         signer.did(),
         "wf-overwrite-src",
         undefined,
@@ -266,7 +266,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         MINT_SCHEMA,
         seedTx,
       );
-      first.set({ out: src as unknown as string });
+      first.set({ out: src });
       seedTx.prepareCfc();
       expect((await seedTx.commit()).ok).toBeDefined();
 
@@ -332,7 +332,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         integrity: [ADMIN_ATOM],
       });
       const tx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<string>(
         signer.did(),
         "wf-link-src-good",
         undefined,
@@ -344,7 +344,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         FLOOR_SCHEMA,
         tx,
       );
-      sink.set({ out: src as unknown as string });
+      sink.set({ out: src });
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
@@ -363,7 +363,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       // check that rejects — which is the point of this test.
       await seedLabeledDoc(runtime, "wf-link-src-bad", "unendorsed-value", {});
       const tx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<string>(
         signer.did(),
         "wf-link-src-bad",
         undefined,
@@ -375,7 +375,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         FLOOR_SCHEMA,
         tx,
       );
-      sink.set({ out: src as unknown as string });
+      sink.set({ out: src });
       tx.prepareCfc();
       const result = await tx.commit();
       expect(String((result.error as Error | undefined)?.message)).toContain(
@@ -470,7 +470,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {
       const tx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<string>(
         signer.did(),
         "wf-link-nometa-src",
         undefined,
@@ -482,7 +482,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         FLOOR_SCHEMA,
         tx,
       );
-      sink.set({ out: src as unknown as string });
+      sink.set({ out: src });
       tx.prepareCfc();
       const result = await tx.commit();
       // Underivable link source => the commit rejects (missing link source
@@ -523,7 +523,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         },
       } as const satisfies JSONSchema;
       const tx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<{ secret: string }>(
         signer.did(),
         "wf-anc-src-bad",
         undefined,
@@ -535,7 +535,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         nestedFloor,
         tx,
       );
-      sink.set({ out: src as unknown as { secret: string } });
+      sink.set({ out: src });
       tx.prepareCfc();
       const result = await tx.commit();
       expect(String((result.error as Error | undefined)?.message)).toContain(
@@ -573,7 +573,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         },
       } as const satisfies JSONSchema;
       const tx = runtime.edit();
-      const src = runtime.getCell(
+      const src = runtime.getCell<{ secret: string }>(
         signer.did(),
         "wf-anc-src-good",
         undefined,
@@ -585,7 +585,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         nestedFloor,
         tx,
       );
-      sink.set({ out: src as unknown as { secret: string } });
+      sink.set({ out: src });
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
@@ -621,7 +621,12 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         },
       } as const satisfies JSONSchema;
       const tx = runtime.edit();
-      const src = runtime.getCell(signer.did(), "wf-mixed-src", undefined, tx);
+      const src = runtime.getCell<string>(
+        signer.did(),
+        "wf-mixed-src",
+        undefined,
+        tx,
+      );
       const sink = runtime.getCell(
         signer.did(),
         "wf-mixed-sink",
@@ -629,7 +634,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         tx,
       );
       sink.set({
-        out: { a: src as unknown as string, b: "plain-unendorsed" },
+        out: { a: src, b: "plain-unendorsed" },
       });
       // An unrelated doc written in the same tx: the floor's write enumeration
       // must scope to the floored target, not sweep the whole transaction.
