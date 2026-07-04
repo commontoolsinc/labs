@@ -20,8 +20,13 @@ import {
   type SigilLink,
   type URI,
 } from "./sigil-types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
+import {
+  type EntityRef,
+  entityRefFromString,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
+import { fromURI, getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
   CellResultInternals,
@@ -753,12 +758,19 @@ export function getMetaCell(
   return resultCell.runtime.getCellFromLink(metaLink, undefined, tx);
 }
 
+export type DerivedInternalCellLinkSource = {
+  getAsNormalizedFullLink(): NormalizedFullLink;
+  readonly entityId?: EntityRef;
+};
+
 export function getDerivedInternalCellLink(
-  resultCell: AnyCell<unknown>,
+  resultCell: DerivedInternalCellLinkSource,
   descriptor: DerivedInternalCellDescriptor,
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
-  const parent = resultCell.entityId ?? resultCell;
+  const parent = resultCell.entityId ?? entityRefFromString(
+    fromURI(resultCellLink.id),
+  );
   return {
     space: resultCellLink.space,
     id: toURI(createRef({}, {

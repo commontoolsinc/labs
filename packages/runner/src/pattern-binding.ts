@@ -12,6 +12,7 @@ import { diffAndUpdate } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
+  type DerivedInternalCellLinkSource,
   getDerivedInternalCellLink,
   getMetaLink,
   isCellLink,
@@ -60,6 +61,10 @@ type UnwrapOneLevelOptions = {
   sourceSchemas?: {
     argument?: JSONSchema;
   };
+};
+
+export type ResultCellForBinding = DerivedInternalCellLinkSource & {
+  export(): { scope?: CellScope };
 };
 
 /**
@@ -235,7 +240,7 @@ function sendValueToBindingInner<T>(
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(
             cell.runtime.cfc,
-            getDerivedInternalCellLink(cell as any, descriptor),
+            getDerivedInternalCellLink(cell, descriptor),
             alias.path,
             alias.schema,
           ),
@@ -401,7 +406,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink,
-  resultCell: AnyCell<unknown>,
+  resultCell: ResultCellForBinding,
   options?: UnwrapOneLevelOptions,
 ): T {
   const resultCellLink = resultCell.getAsNormalizedFullLink();

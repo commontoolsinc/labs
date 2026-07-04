@@ -23,9 +23,11 @@
 // Run directly (study):  deno run  -A packages/runner/test/pattern-binding.bench.ts
 //                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
 
-import { unwrapOneLevelAndBindtoDoc } from "../src/pattern-binding.ts";
+import {
+  type ResultCellForBinding,
+  unwrapOneLevelAndBindtoDoc,
+} from "../src/pattern-binding.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
-import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -74,16 +76,17 @@ function link(
 function cell(
   id: string,
   schema: JSONSchema | undefined,
-): AnyCell<unknown> {
+): ResultCellForBinding {
   const cellLink = link(id, schema);
-  return {
+  const methods = {
     getAsNormalizedFullLink: () => cellLink,
     export: () => ({
       cell: cellLink.id,
       path: cellLink.path,
       scope: cellLink.scope,
     }),
-  } as unknown as AnyCell<unknown>;
+  } satisfies ResultCellForBinding;
+  return methods;
 }
 
 // A $ref/$defs schema as the CTS transformer actually emits (recursive piece
@@ -115,7 +118,7 @@ const REF_SCHEMA: JSONSchema = {
       },
     },
   },
-} as unknown as JSONSchema;
+} as const satisfies JSONSchema;
 
 const withSchema = {
   arg: link("argument", ARG_SCHEMA),

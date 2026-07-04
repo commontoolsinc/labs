@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/pattern-binding.bench.ts": [
-    "86:4:1f1bpmj",
-    "118:2:1nl4wf9",
-  ],
   "packages/runner/test/pattern-object-member-storage.test.ts": [
     "97:8:102s642",
     "125:8:vod90c",
