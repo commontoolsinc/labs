@@ -1,14 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/pattern-scope.test.ts": [
-    "140:35:162myyr",
-    "141:33:13pycyk",
-    "340:31:jjiu6l",
-    "345:31:jjiu6l",
-    "346:29:3wtpm8",
-    "1554:37:162myyr",
-    "1959:46:1yku6cj",
-    "2035:51:195qn6n",
-  ],
   "packages/runner/test/pattern.test.ts": [
     "335:47:srt226",
   ],

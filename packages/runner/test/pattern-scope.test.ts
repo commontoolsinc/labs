@@ -15,6 +15,9 @@ import { type FactoryInput } from "../src/builder/types.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+const patternInputCell = <T>(value: T | Cell<T>): Cell<T> => value as Cell<T>;
+const boxedCellReference = <T>(cell: Cell<T>): T => cell as T;
+
 Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
@@ -137,8 +140,8 @@ Deno.test("handler bindings preserve scoped cells selected from pattern input sc
       conversation,
       newRoomName,
       addRoom: addRoom({
-        conversation: conversation as unknown as Cell<Conversation>,
-        newRoomName: newRoomName as unknown as Cell<string>,
+        conversation: patternInputCell<Conversation>(conversation),
+        newRoomName: patternInputCell<string>(newRoomName),
       }),
     }), {
       type: "object",
@@ -335,17 +338,13 @@ Deno.test("per-user pointer can create and update a space-scoped profile cell", 
     }>(({ myProfile, messages }) => ({
       myProfile,
       messages,
-      saveName: saveName(
-        ({
-          myProfile: myProfile as unknown as Cell<MyProfile>,
-        }) as any,
-      ),
-      sendMessage: sendMessage(
-        ({
-          myProfile: myProfile as unknown as Cell<MyProfile>,
-          messages: messages as unknown as Cell<Message[]>,
-        }) as any,
-      ),
+      saveName: saveName({
+        myProfile: patternInputCell<MyProfile>(myProfile),
+      }),
+      sendMessage: sendMessage({
+        myProfile: patternInputCell<MyProfile>(myProfile),
+        messages: patternInputCell<Message[]>(messages),
+      }),
     }), {
       type: "object",
       properties: {
@@ -1551,7 +1550,7 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
         messages,
         bodies,
         setConversation: setConversation({
-          conversation: conversation as unknown as Cell<Conversation>,
+          conversation: patternInputCell<Conversation>(conversation),
         }),
       };
     });
@@ -1956,7 +1955,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
 
     const Root = pattern<{ selectedRoom: SelectedRoom }>(
       ({ selectedRoom }) => {
-        const selectedRoomRef = (selectedRoom as unknown as Cell<SelectedRoom>)
+        const selectedRoomRef = patternInputCell<SelectedRoom>(selectedRoom)
           .key("room") as Cell<Room>;
         const selectedRoomRefInputSchema = {
           type: "object",
@@ -2032,7 +2031,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
     await result.pull();
 
     const updateTx = runtime.edit();
-    selectedRoom.withTx(updateTx).set({ room: room as unknown as Room });
+    selectedRoom.withTx(updateTx).set({ room: boxedCellReference(room) });
     await updateTx.commit();
     await runtime.idle();
     await runtime.storageManager.synced();
