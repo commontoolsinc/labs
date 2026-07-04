@@ -23,6 +23,23 @@ type TestProvider = {
   sync(uri: string, selector?: unknown, scope?: CellScope): Promise<unknown>;
 };
 
+function isTestProvider(provider: unknown): provider is TestProvider {
+  if (typeof provider !== "object" || provider === null) return false;
+  return typeof (provider as Partial<TestProvider>).get === "function" &&
+    typeof (provider as Partial<TestProvider>).send === "function" &&
+    typeof (provider as Partial<TestProvider>).sync === "function";
+}
+
+function testProvider(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): TestProvider {
+  const provider = storageManager.open(space);
+  if (!isTestProvider(provider)) {
+    throw new Error("memory v2 test provider does not expose get() and send()");
+  }
+  return provider;
+}
+
 const signer = await Identity.fromPassphrase("memory-v2-emulation");
 const space = signer.did();
 
@@ -56,7 +73,7 @@ describe("Memory v2 emulation", () => {
     await tx.commit();
     await runtime.idle();
 
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     await provider.sync(cell.getAsNormalizedFullLink().id);
     await storageManager.synced();
 
@@ -66,7 +83,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("preserves raw provider documents, including non-value metadata", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const uri = `of:memory-v2-labels-${Date.now()}` as const;
 
     const result = await provider.send([{
@@ -85,7 +102,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("passes declared cell scope to provider syncs", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const originalSync = provider.sync.bind(provider);
     const syncs: Array<{ uri: string; scope?: CellScope }> = [];
     provider.sync = async (uri, selector, scope) => {
@@ -109,7 +126,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("preserves root objects whose data is exactly a value key on provider sends", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const uri = `of:memory-v2-value-only-${Date.now()}` as const;
 
     const result = await provider.send([{
@@ -130,7 +147,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("preserves root objects whose data includes a value key plus siblings", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const uri = `of:memory-v2-value-siblings-${Date.now()}` as const;
 
     const result = await provider.send([{
@@ -153,7 +170,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("stores source-only provider sends as source-only documents", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const uri = `of:memory-v2-source-only-${Date.now()}` as const;
 
     const result = await provider.send([{
@@ -170,7 +187,7 @@ describe("Memory v2 emulation", () => {
   });
 
   it("deletes provider documents only when the batch value is undefined", async () => {
-    const provider = storageManager.open(space) as unknown as TestProvider;
+    const provider = testProvider(storageManager);
     const uri = `of:memory-v2-delete-${Date.now()}` as const;
 
     const seed = await provider.send([{

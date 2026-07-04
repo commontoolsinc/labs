@@ -1,13 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-emulation.test.ts": [
-    "59:48:19gxezt",
-    "69:48:19gxezt",
-    "88:48:19gxezt",
-    "112:48:19gxezt",
-    "133:48:19gxezt",
-    "156:48:19gxezt",
-    "173:48:19gxezt",
-  ],
   "packages/runner/test/memory-v2-multi-space-write.test.ts": [
     "108:57:f26zpa",
     "126:57:busz1f",
