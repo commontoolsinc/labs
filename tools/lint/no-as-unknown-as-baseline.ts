@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/data-updating.test.ts": [
-    "1654:8:1xdlqt5",
-  ],
   "packages/runner/test/effect-conflict-recovery.test.ts": [
     "70:34:1xkuria",
   ],

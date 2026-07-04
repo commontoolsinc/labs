@@ -51,6 +51,7 @@ import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
+  IWriteOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
@@ -388,6 +389,19 @@ export type ChangeSet = {
    */
   delete?: boolean;
 }[];
+
+export type ChangeSetWriter = {
+  writeValueOrThrow(
+    address: NormalizedFullLink,
+    value: FabricValue,
+    options?: IWriteOptions,
+  ): void;
+  writeValuesOrThrow?(
+    writes: Iterable<
+      { address: NormalizedFullLink; value: FabricValue; delete?: boolean }
+    >,
+  ): void;
+};
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -1541,7 +1555,7 @@ export function compactChangeSet(changes: ChangeSet): ChangeSet {
  * @param log - The log to write to.
  */
 export function applyChangeSet(
-  tx: IExtendedStorageTransaction,
+  tx: ChangeSetWriter,
   changes: ChangeSet,
 ) {
   // CT-1123: Removed compactChangeSet - structural sharing makes redundant writes

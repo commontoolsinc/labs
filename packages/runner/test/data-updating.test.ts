@@ -5,6 +5,7 @@ import {
   addCommonIDfromObjectID,
   applyChangeSet,
   type ChangeSet,
+  type ChangeSetWriter,
   compactChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
@@ -1681,7 +1682,7 @@ describe("compactChangeSet", () => {
       const batches: Array<
         Array<{ address: ChangeSet[0]["location"]; value: unknown }>
       > = [];
-      const txWithBatch = {
+      const txWithBatch: ChangeSetWriter = {
         writeValueOrThrow() {
           throw new Error("applyChangeSet should use writeValuesOrThrow");
         },
@@ -1693,7 +1694,7 @@ describe("compactChangeSet", () => {
         ) {
           batches.push([...writes]);
         },
-      } as unknown as IExtendedStorageTransaction;
+      };
 
       applyChangeSet(txWithBatch, [
         makeBatchChange(["profile", "name"], "Ada"),
