@@ -6,7 +6,6 @@ import {
   enqueueSinkRequestPostCommitEffect,
 } from "../src/cfc/sink-request.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 // Regression guard for sink-release reject observability (audit W3.23).
 //
@@ -26,7 +25,7 @@ describe("CFC sink-release reject surfacing", () => {
         captured = e;
       },
       recordCfcWritePolicyInput: () => {},
-    } as unknown as IExtendedStorageTransaction;
+    };
 
     let flushed = false;
     enqueueSinkRequestPostCommitEffect(
@@ -65,7 +64,7 @@ describe("CFC sink-release reject surfacing", () => {
       ) => {
         noted.push(info);
       },
-    } as unknown as IExtendedStorageTransaction;
+    };
 
     await captured!.flush!(committedTx);
 

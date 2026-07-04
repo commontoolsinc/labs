@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-sink-release-reject-surfaced.test.ts": [
-    "29:6:dscwrv",
-    "68:6:ljp8hm",
-  ],
   "packages/runner/test/cfc-sink-request-policy.test.ts": [
     "35:6:is0eu1",
   ],
