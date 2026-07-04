@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
@@ -101,6 +102,17 @@ describe("labelResultSchema (pure)", () => {
 
 const signer = await Identity.fromPassphrase("read-labeling test");
 const space = signer.did();
+type SqliteReadLabelingColumnSchema = JSONSchemaObj & {
+  readonly sqlType?: string;
+};
+type SqliteReadLabelingTables = Record<
+  string,
+  Omit<JSONSchemaObj, "properties"> & {
+    readonly properties?: Readonly<
+      Record<string, SqliteReadLabelingColumnSchema>
+    >;
+  }
+>;
 
 describe("writing rows under the label schema persists per-field confidentiality", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -175,7 +187,7 @@ const labeledTables = {
     },
     required: [],
   },
-} as unknown as SqliteDbRef["tables"];
+} satisfies SqliteReadLabelingTables;
 
 describe({
   // FFI loads the column-metadata lib (process-lifetime by design); exempt this
@@ -247,7 +259,7 @@ describe({
           },
           required: [],
         },
-      } as unknown as SqliteDbRef["tables"],
+      } satisfies SqliteReadLabelingTables,
     };
     await seed(db, "INSERT INTO emails (subject) VALUES (?)", ["hi"]);
     const provider = storageManager.open(space);

@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/sqlite-read-labeling.test.ts": [
-    "178:2:1echq16",
-    "250:8:1enubjt",
-  ],
   "packages/runner/test/src-garble-identity-invariant.test.ts": [
     "189:28:1nbrgqr",
   ],
