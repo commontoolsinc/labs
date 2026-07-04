@@ -158,7 +158,7 @@ describe("verifyModuleGraph", () => {
   it("rejects a record with a non-function execute", () => {
     const g = graph([[
       "cf:module/main",
-      { imports: [], exports: [], execute: undefined as unknown as () => void },
+      rec({ execute: undefined }),
     ]]);
     expect(() => verifyModuleGraph(g, "cf:module/main")).toThrow(/execute/i);
   });

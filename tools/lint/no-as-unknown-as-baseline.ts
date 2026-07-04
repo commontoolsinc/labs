@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/module-record-verifier.test.ts": [
-    "161:53:dmdisb",
-  ],
   "packages/runner/test/module.test.ts": [
     "101:27:17sx5wc",
     "129:27:17sx5wc",
