@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-convergence.test.ts": [
-    "387:48:12r5e40",
-  ],
   "packages/runner/test/scheduler-event-lineage.test.ts": [
     "40:25:1y1onvv",
   ],

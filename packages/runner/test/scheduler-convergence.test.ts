@@ -24,6 +24,34 @@ import {
   PASS_RUN_BUDGET,
 } from "../src/scheduler/constants.ts";
 
+function schedulerExecuteInternals(scheduler: Runtime["scheduler"]): {
+  clearPendingQueueTaskTimer(clearScheduled?: boolean): void;
+  execute(): Promise<void>;
+} {
+  expect("execute" in scheduler).toBe(true);
+  expect("pendingQueueTaskTimer" in scheduler).toBe(true);
+  expect("scheduled" in scheduler).toBe(true);
+  const execute = Reflect.get(scheduler, "execute");
+  expect(typeof execute).toBe("function");
+  return {
+    clearPendingQueueTaskTimer(clearScheduled = false) {
+      const timer = Reflect.get(scheduler, "pendingQueueTaskTimer");
+      expect(
+        timer === null || typeof timer === "number" ||
+          typeof timer === "object",
+      ).toBe(true);
+      if (timer === null) return;
+      clearTimeout(timer);
+      expect(Reflect.set(scheduler, "pendingQueueTaskTimer", null)).toBe(true);
+      if (clearScheduled) {
+        expect(typeof Reflect.get(scheduler, "scheduled")).toBe("boolean");
+        expect(Reflect.set(scheduler, "scheduled", false)).toBe(true);
+      }
+    },
+    execute: () => Promise.resolve(execute.call(scheduler)),
+  };
+}
+
 describe("bounded convergence", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -454,11 +482,7 @@ describe("bounded convergence", () => {
   });
 
   it("should preserve dirty effects after pass budget exhaustion", async () => {
-    const schedulerInternal = runtime.scheduler as unknown as {
-      execute: () => Promise<void>;
-      pendingQueueTaskTimer: number | null;
-      scheduled: boolean;
-    };
+    const schedulerInternal = schedulerExecuteInternals(runtime.scheduler);
     const staleSchedulerInternal = getStaleSchedulerInternals(
       runtime.scheduler,
     );
@@ -478,18 +502,9 @@ describe("bounded convergence", () => {
       { isEffect: true },
     );
 
-    if (schedulerInternal.pendingQueueTaskTimer !== null) {
-      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
-      schedulerInternal.pendingQueueTaskTimer = null;
-    }
-
+    schedulerInternal.clearPendingQueueTaskTimer();
     await schedulerInternal.execute();
-
-    if (schedulerInternal.pendingQueueTaskTimer !== null) {
-      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
-      schedulerInternal.pendingQueueTaskTimer = null;
-      schedulerInternal.scheduled = false;
-    }
+    schedulerInternal.clearPendingQueueTaskTimer(true);
 
     expect(effectRuns).toBe(PASS_RUN_BUDGET);
     expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
