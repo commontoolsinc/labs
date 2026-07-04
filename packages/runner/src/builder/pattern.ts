@@ -238,7 +238,7 @@ function factoryFromPattern<T, R>(
   // Capture selfRef before collectCellsAndNodes transforms inputs from Reactive to Cell
   // (collectCellsAndNodes replaces Reactive proxies with their underlying Cells,
   // and SELF access only works through the Reactive proxy)
-  const selfRef = (inputs as unknown as { [SELF]: Reactive<any> })[SELF];
+  const selfRef = (inputs as unknown as { [SELF]: Reactive<unknown> })[SELF];
 
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<ICell<unknown>>();
