@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/src-garble-identity-invariant.test.ts": [
-    "189:28:1nbrgqr",
-  ],
   "packages/runner/test/storage-mixed-query-refresh.bench.ts": [
     "147:46:19gxezt",
   ],

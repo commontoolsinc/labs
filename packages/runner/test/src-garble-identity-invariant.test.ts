@@ -194,7 +194,7 @@ Deno.test(
     // change the resolved identity — that is exactly what makes lazy/debug-only
     // `.src` (skipped at boot) safe for authorized writes. If a future change
     // re-introduces a `.src` dependency in CFC identity, this test trips.
-    const impl = (() => {}) as unknown as HarnessedFunction;
+    const impl: HarnessedFunction & { src?: string } = () => {};
     recordVerifiedProvenance(impl, { identity: "HASH", symbol: "__cfLift_1" });
 
     const resolve = () =>
@@ -203,7 +203,7 @@ Deno.test(
       });
 
     // Canonical `.src` pointing into the provenance module => verified.
-    (impl as { src?: string }).src = "cf:module/HASH/main.tsx:3:20";
+    impl.src = "cf:module/HASH/main.tsx:3:20";
     const canonical = resolve();
     expect(canonical?.kind).toBe("verified");
     expect((canonical as { moduleIdentity?: string }).moduleIdentity).toBe(
@@ -211,7 +211,7 @@ Deno.test(
     );
 
     // Garbled `.src` => STILL verified, same identity (`.src` is identity-inert).
-    (impl as { src?: string }).src = "GARBLED-SRC";
+    impl.src = "GARBLED-SRC";
     const garbled = resolve();
     expect(garbled?.kind).toBe("verified");
     expect((garbled as { moduleIdentity?: string }).moduleIdentity).toBe(
@@ -219,7 +219,7 @@ Deno.test(
     );
 
     // Absent `.src` (the lazy/debug-only boot state) => STILL verified.
-    delete (impl as { src?: string }).src;
+    delete impl.src;
     const absent = resolve();
     expect(absent?.kind).toBe("verified");
     expect((absent as { moduleIdentity?: string }).moduleIdentity).toBe("HASH");
