@@ -928,9 +928,9 @@ const WeeklyCalendar = pattern<Input, Output>(
                       );
 
                       const current = events.get();
-                      const evtId = (evt as any)?.eventId;
+                      const evtId = evt?.eventId;
                       const evtIdx = current.findIndex(
-                        (a: any) => a?.eventId === evtId,
+                        (a) => a?.eventId === evtId,
                       );
                       if (evtIdx < 0) return;
 
