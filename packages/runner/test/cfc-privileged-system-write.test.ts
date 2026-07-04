@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -28,7 +29,7 @@ const forgedMetadata = {
       label: { integrity: [{ kind: "InjectionSafe" }] },
     }],
   },
-};
+} satisfies FabricValue;
 
 describe("CFC privileged system write (S18)", () => {
   it("rejects a non-privileged ['cfc'] metadata write in enforce mode", async () => {
@@ -53,7 +54,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata);
 
       const result = await tx.commit();
       expect(result.error).toBeDefined();
@@ -87,7 +88,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata);
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
@@ -115,12 +116,9 @@ describe("CFC privileged system write (S18)", () => {
     });
     try {
       const tx = runtime.edit();
-      const escalate = (tx as unknown as Record<string, unknown>)
-        .runPrivilegedSystemWrite;
-      expect(escalate).toBeUndefined();
+      expect("runPrivilegedSystemWrite" in tx).toBe(false);
       // And nothing under the tx wrapper exposes it either.
-      const inner = (tx as unknown as { tx?: Record<string, unknown> }).tx;
-      expect(inner?.runPrivilegedSystemWrite).toBeUndefined();
+      expect("runPrivilegedSystemWrite" in tx.tx).toBe(false);
       await tx.commit();
     } finally {
       await runtime.dispose();
@@ -194,7 +192,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata);
       // The forgery is recorded even though enforcement is disabled.
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
 
@@ -235,7 +233,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata);
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
@@ -313,7 +311,7 @@ describe("CFC privileged system write (S18)", () => {
       const base = current && typeof current === "object" ? current : {};
       tx.writeOrThrow(
         docAddress,
-        { ...base, cfc: forgedMetadata } as unknown as Record<string, unknown>,
+        { ...base, cfc: forgedMetadata },
       );
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
 

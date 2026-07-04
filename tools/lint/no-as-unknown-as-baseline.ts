@@ -1,13 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-privileged-system-write.test.ts": [
-    "56:24:1pumtjx",
-    "90:24:1pumtjx",
-    "118:27:1roz0at",
-    "122:24:1281i7q",
-    "197:24:1pumtjx",
-    "238:24:1pumtjx",
-    "316:41:ut5p9w",
-  ],
   "packages/runner/test/cfc-required-integrity-provenance.test.ts": [
     "258:64:30mg0f",
   ],
