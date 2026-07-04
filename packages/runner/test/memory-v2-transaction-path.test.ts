@@ -491,7 +491,7 @@ describe("memory v2 transaction path semantics", () => {
       scope: "space",
       id: "of:path-length-undefined",
       path: ["items", "length"],
-    }, undefined as unknown as number);
+    }, undefined);
 
     tx.abort();
   });

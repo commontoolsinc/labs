@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-transaction-path.test.ts": [
-    "350:17:8mlgki",
-  ],
   "packages/runner/test/module-record-verifier.test.ts": [
     "161:53:dmdisb",
   ],
