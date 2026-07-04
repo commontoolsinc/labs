@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/src/builder/traverse-utils.ts",
   "packages/runner/src/builder/types.ts",
   "packages/runner/src/builtins/llm-dialog.ts",
   "packages/runner/src/builtins/llm.ts",

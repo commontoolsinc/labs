@@ -248,7 +248,7 @@ function factoryFromPattern<T, R>(
   // we go. Our traverseValue doesn't descend into cells, but we'll recurse on
   // the cell's nodes ourselves. We'll also add any cells we see to allCells,
   // and any nodes to allNodes.
-  const collectCellsAndNodes = (value: FactoryInput<unknown>) =>
+  const collectCellsAndNodes = <T>(value: T): T =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {

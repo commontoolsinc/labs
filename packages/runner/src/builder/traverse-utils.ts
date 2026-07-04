@@ -4,6 +4,9 @@ import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
+type TraversalValue = FactoryInput<unknown>;
+type TraversalCallback = (value: TraversalValue) => TraversalValue | undefined;
+
 /**
  * Traverse a value, _not_ entering cells
  *
@@ -17,17 +20,19 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * and walks `FabricInstance` values by their internal slots instead of their
  * codec contents.
  */
-export function traverseValue(
-  unprocessedValue: FactoryInput<any>,
-  fn: (value: any) => any,
-  seen: Set<FactoryInput<any>> = new Set(),
-): any {
+export function traverseValue<T>(
+  unprocessedValue: T,
+  fn: TraversalCallback,
+  seen: Set<unknown> = new Set(),
+): T {
   // Perform operation, replaces value if non-undefined is returned
-  const result = fn(unprocessedValue);
+  const result = fn(unprocessedValue as TraversalValue);
   const value = result !== undefined ? result : unprocessedValue;
 
   // Prevent infinite recursion
-  if (seen.has(value) || seen.has(result)) return value;
+  if (seen.has(value) || seen.has(result)) {
+    return value as T;
+  }
   if (isRecord(result)) seen.add(result);
   else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
 
@@ -39,12 +44,14 @@ export function traverseValue(
     (isRecord(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {
-      return (value as Array<any>).map((v) => traverseValue(v, fn, seen));
+      return (value as readonly TraversalValue[]).map((v) =>
+        traverseValue(v, fn, seen)
+      ) as T;
     } else {
       const copy = Object.fromEntries(
         Object.entries(value).map((
           [key, v],
-        ) => [key, traverseValue(v, fn, seen)]),
+        ) => [key, traverseValue(v as TraversalValue, fn, seen)]),
       );
       // A pattern copied here must keep its link back to the original
       // (branded, content-addressed) factory — otherwise
@@ -53,9 +60,9 @@ export function traverseValue(
       // `{ identity, symbol }`. Mirrors the registration in
       // `toJSONWithLegacyAliases`.
       if (isPattern(value)) noteDerivedCopy(copy, value);
-      return copy;
+      return copy as T;
     }
   } else {
-    return value;
+    return value as T;
   }
 }
