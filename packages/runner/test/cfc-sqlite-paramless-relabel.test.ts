@@ -2,6 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { checkSqliteWriteCeiling } from "../src/builtins/sqlite/write-ceiling.ts";
 
+const tables = <T extends Parameters<typeof checkSqliteWriteCeiling>[2]>(
+  value: T,
+): T => value;
+
 // Regression guard for paramless intra-db relabeling (audit S6 / W3.19).
 //
 // checkSqliteWriteCeiling skipped entirely when params === undefined, so a
@@ -9,7 +13,7 @@ import { checkSqliteWriteCeiling } from "../src/builtins/sqlite/write-ceiling.ts
 // db copied a labeled column's data into a column whose declared label is weaker
 // — the data re-emerged under the destination column's (weaker) read-label. A
 // labeled db must fail closed on these unverifiable relabeling shapes.
-const labeledTables = {
+const labeledTables = tables({
   notes: {
     properties: {
       secret_col: { ifc: { confidentiality: ["secret"] } },
@@ -17,11 +21,11 @@ const labeledTables = {
     },
   },
   plain: { properties: { body: {} } },
-} as unknown as Parameters<typeof checkSqliteWriteCeiling>[2];
+});
 
-const unlabeledTables = {
+const unlabeledTables = tables({
   plain: { properties: { body: {}, other: {} } },
-} as unknown as Parameters<typeof checkSqliteWriteCeiling>[2];
+});
 
 const noConf = () => [];
 

@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-sqlite-paramless-relabel.test.ts": [
-    "20:2:5w3cjx",
-    "24:2:z2dunx",
-  ],
   "packages/runner/test/cfc-tool-ceiling-empty.test.ts": [
     "23:7:1f7zahp",
   ],
