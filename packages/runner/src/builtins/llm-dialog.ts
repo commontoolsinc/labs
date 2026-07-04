@@ -1141,14 +1141,14 @@ function extractStringField(
   throw new Error(`${field} must be a non-empty string, e.g. "${example}".`);
 }
 
-function extractRunArguments(input: unknown): Record<string, any> {
+function extractRunArguments(input: unknown): Record<string, unknown> {
   if (input && typeof input === "object") {
     const obj = input as Record<string, unknown>;
-    if (obj.args && typeof obj.args === "object") {
-      return obj.args as Record<string, any>;
+    if (isRecord(obj.args)) {
+      return obj.args;
     }
     const { path: _path, ...rest } = obj;
-    return rest as Record<string, any>;
+    return rest;
   }
   return {};
 }
@@ -1330,7 +1330,7 @@ function buildToolCatalog(
     const handlerValue = toolValue.handler ?? cellToolValue.handler;
     const handler =
       (isCell(handlerValue) ? handlerValue.resolveAsCell() : undefined) as
-        | Cell<any>
+        | Cell<unknown>
         | undefined;
     const inputSchema = pattern?.argumentSchema ?? toolValue?.inputSchema ??
       handler?.schema;
@@ -1339,8 +1339,13 @@ function buildToolCatalog(
       continue;
     }
     const normalizedInputSchema = normalizeInputSchema(inputSchema);
-    const description: string = toolValue.description ??
-      (normalizedInputSchema as any)?.description ?? "";
+    const schemaDescription = isRecord(normalizedInputSchema) &&
+        typeof normalizedInputSchema.description === "string"
+      ? normalizedInputSchema.description
+      : "";
+    const description = typeof toolValue.description === "string"
+      ? toolValue.description
+      : schemaDescription;
     llmTools[entry.name] = {
       description,
       inputSchema: stripFrameworkProvidedFields(normalizedInputSchema),
@@ -1757,7 +1762,7 @@ type ResolvedToolCall =
     call: LLMToolCall;
     // Implementation details for how to invoke the target
     pattern?: Readonly<Pattern>;
-    handler?: Stream<any>;
+    handler?: Stream<unknown>;
     extraParams?: Record<string, unknown>;
     piece?: Cell<any>;
   };
@@ -1891,7 +1896,7 @@ function resolveToolCall(
     if (isStream(cellRef.resolveAsCell())) {
       return {
         type: "invoke",
-        handler: cellRef as unknown as Stream<any>,
+        handler: cellRef as unknown as Stream<unknown>,
         call: {
           id,
           name,
@@ -2678,14 +2683,14 @@ async function handleInvoke(
     identityCell,
   );
 
-  const { resolve, promise } = Promise.withResolvers<any>();
+  const { resolve, promise } = Promise.withResolvers<unknown>();
 
   // Create result cell reference that will be set in the transaction
-  let result: Cell<any> = null as any;
+  let result!: Cell<unknown>;
 
   await runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
-    result = runtime.getCell<any>(
+    result = runtime.getCell<unknown>(
       space,
       toolCall.id,
       pattern ? pattern.resultSchema : undefined,
@@ -3103,7 +3108,7 @@ export function llmDialog(
 
       // Declare `cancelGeneration` handler and register
       createHandler<void>(
-        result.key("cancelGeneration") as unknown as Stream<any>,
+        result.key("cancelGeneration") as unknown as Stream<void>,
         (tx: IExtendedStorageTransaction, _event: void) => {
           // Cancel request by setting pending to false. This will trigger the
           // code below to be executed in all tabs.
@@ -3135,10 +3140,11 @@ export function llmDialog(
           pinnedCells.withTx(tx).set(updated);
           // Merge with existing result pins (which include context-derived
           // pins) so we don't clobber them. Deduplicate by path.
-          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
-            [];
+          const existingResult = (
+            result.withTx(tx).key("pinnedCells").get() ?? []
+          ) as PinnedCell[];
           const existingPaths = new Set(
-            existingResult.map((p: any) => p.path),
+            existingResult.map((p) => p.path),
           );
           if (!existingPaths.has(event.path)) {
             result
@@ -3147,7 +3153,7 @@ export function llmDialog(
               .set([
                 ...existingResult,
                 { path: event.path, name: event.name },
-              ] as any);
+              ]);
           }
         },
       );
@@ -3164,15 +3170,16 @@ export function llmDialog(
           );
           pinnedCells.withTx(tx).set([]);
           // Keep context-derived pins in result, remove only user pins
-          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
-            [];
+          const existingResult = (
+            result.withTx(tx).key("pinnedCells").get() ?? []
+          ) as PinnedCell[];
           result
             .withTx(tx)
             .key("pinnedCells")
             .set(
               existingResult.filter(
-                (p: any) => !userPaths.has(p.path),
-              ) as any,
+                (p) => !userPaths.has(p.path),
+              ),
             );
         },
       );
@@ -3363,7 +3370,7 @@ async function startRequest(
 
   // Write to result cell using editWithRetry since we're outside handler tx
   await runtime.editWithRetry((tx) => {
-    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells);
   });
 
   const toolCatalog = capturedRequest?.toolCatalog ?? buildToolCatalog(
@@ -3694,8 +3701,11 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               const handler = spaceCell
                 .key("defaultPattern")
                 .key("recordSuggestion");
+              const suggestionResult = isRecord(cellifiedResult)
+                ? cellifiedResult.cell ?? cellifiedResult
+                : cellifiedResult;
               handler.send({
-                result: (cellifiedResult as any)?.cell ?? cellifiedResult,
+                result: suggestionResult,
                 messages: messagesCell.get() ?? [],
                 timestamp: new Date().toISOString(),
               });
