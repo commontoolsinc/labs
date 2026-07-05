@@ -328,8 +328,9 @@ Capability propagation is intentionally asymmetric:
 
 ## C-012 Explicit Type Guidance For Empty Array Cell Factories
 
-Empty array literals passed to cell-factory `.of()` calls should require an
-explicit element type argument to avoid accidental `never[]` cell types.
+Empty array literals passed to cell factories (constructor forms like
+`new Cell([])` / `new Writable([])`, plus legacy `.of()` calls) should require
+an explicit element type argument to avoid accidental `never[]` cell types.
 
 ## 7. Success Criteria
 

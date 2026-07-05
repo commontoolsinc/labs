@@ -589,17 +589,17 @@ the relevant phase lands.
   single source of truth.
 - **[DONE — PR #3707, registry architecture]** Consolidated the cross-stage
   registries into a single `CrossStageState` object (audit:
-  `docs/scratch/07-registry-audit.md`, design:
-  `12-registry-unification-design.md`). Outcome differed from the original
-  tiered plan in two evidence-driven ways: (1) the `typeRegistry` three-way
-  split was investigated and **dropped** — the three uses are isolated by key
-  node-kind (replacement-Expr / TypeNode / CallExpression never coincide), so
-  the split fixed no reachable bug; the invariant is documented instead. (2)
-  `syntheticLiftAppliedCallRegistry` was **removed** as verified-inert. The
-  remaining channels (which at the time of #3707 still included
-  `narrowedWrapperTypeRegistry` — see postscript) now live in `CrossStageState`,
-  accessed via record/lookup/mark methods; cache-invalidation stays on the
-  context. `typeRegistry` + `schemaHints` remain plain maps at the
+  `docs/scratch/07-registry-audit.md` — scratch dir since deleted, see git
+  history; design: `12-registry-unification-design.md`). Outcome differed from
+  the original tiered plan in two evidence-driven ways: (1) the `typeRegistry`
+  three-way split was investigated and **dropped** — the three uses are isolated
+  by key node-kind (replacement-Expr / TypeNode / CallExpression never
+  coincide), so the split fixed no reachable bug; the invariant is documented
+  instead. (2) `syntheticLiftAppliedCallRegistry` was **removed** as
+  verified-inert. The remaining channels (which at the time of #3707 still
+  included `narrowedWrapperTypeRegistry` — see postscript) now live in
+  `CrossStageState`, accessed via record/lookup/mark methods; cache-invalidation
+  stays on the context. `typeRegistry` + `schemaHints` remain plain maps at the
   schema-generator package boundary.
 
   _Postscript (post-#3788):_ `narrowedWrapperTypeRegistry` was subsequently

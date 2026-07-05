@@ -88,6 +88,7 @@ one handles the branded wrapper types:
 | `Cell<T>` / `Writable<T>` | schema of `T` + `asCell: ["cell"]` |
 | `Stream<T>` | schema of `T` + `asCell: ["stream"]` |
 | `OpaqueCell<T>` | schema of `T` + `asCell: ["opaque"]` |
+| `Reactive<T>` | schema of `T`, no wrapper marker (read-only semantics come from the type, not the schema) |
 | `T \| Default<V>` | schema of `T` + `default: V` |
 | `PerSpace<T>` / `PerUser<T>` / `PerSession<T>` | schema of `T` + `scope: "space" \| "user" \| "session"` (folded into the `asCell` entry when the inner type is cell-wrapped) |
 

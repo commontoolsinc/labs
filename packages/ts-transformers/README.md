@@ -54,10 +54,11 @@ than the retired `derive(...)` helper.
 
 ## Review First
 
-For the current branch shape, start here instead of inferring architecture from
-older implementation notes:
+For the current shape, start at the spec-corpus map instead of inferring
+architecture from older implementation notes:
 
-- `docs/specs/ts-transformer/ts_transformers_review_guide.md`
+- `docs/specs/ts-transformer/README.md` — corpus map, authority rules, read
+  order
 - `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
 - `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
@@ -80,9 +81,9 @@ Tests are driven by input/expected file pairs in `test/fixtures/`:
 ```
 test/fixtures/closures/
 ├── map-single-capture.input.tsx      # What the pattern author writes
-├── map-single-capture.expected.tsx   # What the transformer produces
+├── map-single-capture.expected.jsx   # What the transformer produces
 ├── handler-event-param.input.tsx
-├── handler-event-param.expected.tsx
+├── handler-event-param.expected.jsx
 └── ... (many more closure fixtures)
 ```
 
@@ -90,6 +91,13 @@ To run a specific fixture:
 
 ```bash
 env FIXTURE=map-single-capture deno task test
+```
+
+To regenerate expected files after an intentional behavior change (this is a
+spec change — see the current-behavior spec §21):
+
+```bash
+env UPDATE_GOLDENS=1 deno task test
 ```
 
 To see transformed output:
@@ -119,37 +127,25 @@ not printed-text substrings.
 
 1. Create `test/fixtures/closures/my-new-case.input.tsx` with the natural
    TypeScript
-2. Create `test/fixtures/closures/my-new-case.expected.tsx` with the desired
-   output
+2. Create `test/fixtures/closures/my-new-case.expected.jsx` with the desired
+   output (the driver derives `.expected.jsx` / `.expected.js` — not `.tsx`)
 3. Run `env FIXTURE=my-new-case deno task test` to iterate until it passes
 
 ## Architecture
 
 ### Pipeline
 
-```
-CastValidation
-→ EmptyArrayOfValidation
-→ OpaqueGetValidation
-→ PatternContextValidation
-→ JsxExpressionSiteRouter
-→ LiftLowering
-→ Closure
-→ PatternOwnedExpressionSiteLowering
-→ HelperOwnedExpressionSiteLowering
-→ WriteAuthorizedByValidation
-→ PatternCallbackLowering
-→ SchemaInjection
-→ BuilderCallHoisting
-→ SchemaGenerator
-→ ReactiveVariableFor
-→ ModuleScopeShadowing
-→ ModuleScopeCfData
-→ ModuleScopeFunctionHardening
-```
+An ordered multi-stage pipeline (order is behavior) implementing five jobs:
+validation → JSX routing and early rewriting → lift/closure lowering → schema
+injection, builder hoisting + `__cfReg` registration, and schema generation →
+module-scope finalization (identity naming, `__cf_data` wrapping, coverage, SES
+hardening).
 
-The exact current order and behavior are documented normatively in
-`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`.
+The stage list and order are deliberately **not** restated here: the canonical
+source is `CFC_TRANSFORMER_STAGE_SPECS` in `src/cf-pipeline.ts`, documented
+stage by stage in
+`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` (§3 and
+onward), and pinned to the constant by `test/spec-sync.test.ts`.
 
 ### Representative Rewrites
 
@@ -163,14 +159,13 @@ The exact current order and behavior are documented normatively in
 
 ## Additional Documentation
 
-- `docs/specs/ts-transformer/ts_transformers_review_guide.md` - concise review
-  entrypoint and read order
+- `docs/specs/ts-transformer/README.md` - corpus map, authority rules, and read
+  order (replaces the retired PR-3154 review guide, now in `archive/`)
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` -
   implemented behavior inventory
 - `docs/specs/ts-transformer/ts_transformers_design_deltas.md` - hardening
-  follow-ups and historical deltas
-- `ISSUES_TO_FOLLOW_UP.md` - narrow internal follow-up queue for remaining live
-  schema questions
+  follow-ups and historical deltas (includes the live follow-up queue)
+- `AGENTS.md` - working guide for agents: doc map, instruments, conventions
 
 ## Why This Matters
 

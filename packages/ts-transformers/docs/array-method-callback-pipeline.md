@@ -24,17 +24,18 @@ The stages relevant to array-method callbacks are:
 11. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
                                                 destructuring (ONLY for destructured
                                                 first params)
-12. BuilderCallbackHoistingTransformer       ← hoists handler/pattern/patternTool
-                                                callbacks closing only over module
-                                                scope (NOT lift — see stage 14)
-13. SchemaInjectionTransformer
-14. LiftHoistingTransformer                  ← hoists each whole lift(...) call to
-                                                a module-scope const __cfLift_N
-                                                (after schema injection; CT-1644)
-15. SchemaGeneratorTransformer
-16. ReactiveVariableForTransformer
-17. ModuleScopeShadowingTransformer
-18. ModuleScopeCfDataTransformer
+12. SchemaInjectionTransformer
+13. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
+                                                argument-position pattern(...) to
+                                                module-scope consts, after schema
+                                                injection (CT-1644/CT-1655; replaced
+                                                the former BuilderCallbackHoisting +
+                                                LiftHoisting pair, #3864)
+14. SchemaGeneratorTransformer
+15. ReactiveVariableForTransformer
+16. ModuleScopeShadowingTransformer
+17. ModuleScopeCfDataTransformer
+18. PatternCoverageTransformer               ← no-op unless coverage is enabled
 19. ModuleScopeFunctionHardeningTransformer
 ```
 

@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-07-04).** This was the reviewer entrypoint for PR #3154 (merged 2026-04-02), preserved for historical context. Its live content — read order, construct buckets, schema matrix — was verified accurate as of archiving and lives on in `../README.md` and the current-behavior spec. Do not update this file; start at `docs/specs/ts-transformer/README.md`.
+
 # TS Transformers Review Guide
 
 **Status:** concise reviewer entrypoint for PR 3154 **Audience:** reviewers who
