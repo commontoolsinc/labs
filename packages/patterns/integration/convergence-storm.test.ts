@@ -20,19 +20,22 @@
  * starvation tower measured in the browser investigation
  * (docs/plans/2026-06-30-profile-loading-investigation.md).
  *
- * A third, INDEPENDENT defect — B3, the writer-side integration gap (a writer
- * that interleaves its own append never integrates a peer's concurrent append;
- * same-seq value divergence delta-sync can't repair) — is pinned by
- * deliberately-red tests in a separate follow-up PR, since its fix is an open
- * design decision. This suite asserts only what the B2 fix restores.
+ * B3 (writer-side integration gap, INDEPENDENT of B1/B2): a writer that
+ *     interleaves its own append never integrates a peer's concurrent append —
+ *     a same-seq value divergence the delta-sync protocol can't repair. Pinned
+ *     by array-append-client-convergence.test.ts (deterministic) and the
+ *     "writer integration gap (plain elements)" case here.
  *
- * All cases here are GREEN:
- *  - "reader blackout (minimal)" → fixed by the B2 grace change
+ * Status:
+ *  - "reader blackout (minimal)" → GREEN: fixed by the B2 grace change
  *    (traverse.ts required-exemption for unresolvable links).
- *  - "controls" (PerSpace link / optional field) → pin the two mechanisms.
- *  - "convergence storm — observer converges" → with B2 fixed, a non-writing
- *    participant fully converges under a 40-message storm (was the escalated
- *    blackout/wedge before the fix).
+ *  - "controls" (PerSpace link / optional field) → GREEN, pin the two mechanisms.
+ *  - "convergence storm — observer converges" → GREEN: with B2 fixed, a
+ *    non-writing participant fully converges under a 40-message storm (was the
+ *    escalated blackout/wedge before the fix).
+ *  - "writer integration gap (plain elements)" → RED: the still-open B3,
+ *    deliberately red — it asserts the desired end-state and stays red until
+ *    B3 is fixed (the red-to-green target for whichever fix option lands).
  *
  * Full context + measurements:
  * docs/plans/2026-06-30-profile-loading-investigation.md and
@@ -137,14 +140,84 @@ minimalCase(
   "convergence-chat-optlink",
 );
 
+// FAILS today — B3 (writer-side integration gap, distinct from B1/B2): with
+// PLAIN elements (no links, so no blackout), all sends land durably and a
+// non-writing observer converges — but the writer that lost the interleaving
+// race permanently keeps a stale array holding ONLY ITS OWN appends, through
+// 20 settle rounds and pulling reads (5/5 reproducible via storm-driver.ts
+// `20 2 pipeline 0 convergence-chat-plain`).
+describe("writer integration gap (plain elements, no links)", () => {
+  let harness: MultiRuntimeHarness;
+  let alice: MultiRuntimeSession;
+  let bob: MultiRuntimeSession;
+  let observer: MultiRuntimeSession;
+
+  beforeAll(async () => {
+    harness = await MultiRuntimeHarness.create({
+      programPath: fixture("convergence-chat-plain"),
+      rootPath: ROOT_PATH,
+      sessions: ["plain-alice", "plain-bob", "plain-observer"],
+    });
+    [alice, bob, observer] = harness.sessions;
+    await harness.settle();
+  });
+
+  afterAll(async () => {
+    await harness?.dispose();
+  });
+
+  it("both writers converge after concurrent posting", async () => {
+    const K = 20;
+    const storm = async (session: MultiRuntimeSession, author: string) => {
+      for (let n = 0; n < K; n++) {
+        await session.send(
+          "post",
+          { author, body: `${author}-${n}`, n },
+          undefined,
+          { idle: false },
+        );
+      }
+    };
+    await Promise.all([storm(alice, "alice"), storm(bob, "bob")]);
+    await harness.settle(20);
+
+    const aliceView = await messages(alice);
+    const bobView = await messages(bob);
+    const observerView = await messages(observer);
+    const detail = `alice=${JSON.stringify(summarize(aliceView))} ` +
+      `bob=${JSON.stringify(summarize(bobView))} ` +
+      `observer=${JSON.stringify(summarize(observerView))}`;
+
+    // The observer converges and shows full delivery (passes today) — the
+    // defect is confined to the racing writers' own replicas.
+    assertEquals(
+      observerView.length,
+      2 * K,
+      `observer missed durable sends: ${detail}`,
+    );
+    // One racing writer keeps a stale own-appends-only array (fails today).
+    assertEquals(
+      bodies(aliceView),
+      bodies(observerView),
+      `alice's replica is stale: ${detail}`,
+    );
+    assertEquals(
+      bodies(bobView),
+      bodies(observerView),
+      `bob's replica is stale: ${detail}`,
+    );
+  });
+});
+
 // The B2 fix, exercised at storm scale: a non-writing participant fully
 // converges under a sustained concurrent-write storm and sees every accepted
 // send. Before the fix this observer read `{}` (the reader blackout, escalated
 // by the shared derived reader in `convergence-chat` into the seq-0 commit
 // wedge). The writers' MUTUAL convergence is a SEPARATE, still-open concern
 // (B3 — the interleaving writer keeps only its own appends); it is pinned by
-// deliberately-red tests in the follow-up B3 PR, so this test deliberately
-// asserts only the reader/observer guarantee that B2 restores.
+// `array-append-client-convergence.test.ts` and the "writer integration gap"
+// case above, so this test deliberately asserts only the reader/observer
+// guarantee that B2 restores.
 describe("convergence storm — observer converges under concurrent writes (B2)", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
