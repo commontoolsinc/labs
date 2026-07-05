@@ -2,7 +2,7 @@
 
 TypeScript AST transformer pipeline that compiles the CTS dialect (natural
 TS/JSX pattern source) into explicit, schema-annotated reactive form for the
-Common Fabric runtime. 19 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
+Common Fabric runtime. 20 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
 `src/cf-pipeline.ts`): validation → JSX routing → lift/closure lowering → schema
 injection → builder hoisting + `__cfReg` registration → schema generation →
 module-scope hardening.
@@ -21,6 +21,7 @@ module-scope hardening.
 | Add a type-arg→schema lowering (e.g. `sqliteQuery<Row>`) | `docs/adding-type-arg-schema-lowering.md`                                                                        |
 | Array-method callback internals                          | `docs/array-method-callback-pipeline.md`                                                                         |
 | Fixture test workflow                                    | `test/fixtures/README.md`                                                                                        |
+| Unit-test harnesses + assertion helpers                  | `test/README.md`                                                                                                 |
 | Investigation probes (not tests)                         | `test/diagnostics/README.md`                                                                                     |
 
 Authority rule: the two normative specs win over the implementation (fix the

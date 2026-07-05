@@ -108,3 +108,18 @@ Also from D, folded into tonight's fixes: review_guide all-links-valid (archived
 **Enforcement** — packages/ts-transformers/test/spec-sync.test.ts (green; pins spec §3 to CFC_TRANSFORMER_STAGE_NAMES) + the spec-audit skill for the non-mechanical remainder.
 
 Nothing committed; review via `git status` / `git diff` (renames and deletions are staged so they display as such).
+
+---
+
+## Addendum (post-rebase, same day)
+
+The branch was rebased onto origin/main @ 71a52a530 and the §8 punch-list was
+applied in the follow-up commit: spec §3 now lists 20 stages (MergeablePush at
+position 5) with all stage ordinals shifted; new §6.9 (mergeable-push:read-
+then-push), §10.5 fetchJson<T> injection + fetch-json:missing-type-argument,
+§10.7 imported-wrapper capability contract + capability:unreadable-cell-
+argument (#4486); §20 points at the new test/README.md (#4498). The spec-sync
+test failed on rebase exactly as designed and passes after the update.
+Triage revision: SCHEMA_INJECTION_NOTES.md was deleted per the 7/1-snapshot
+evidence, but #4486 (7/3) added a live design section to it on main — the
+file is restored with a reader banner; fold-into-spec remains open.
