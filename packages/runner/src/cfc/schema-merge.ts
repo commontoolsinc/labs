@@ -244,6 +244,16 @@ const mergeIfc = (
       path,
     );
   }
+  // `observes` (C5) is a scalar consumption class, not a set-like claim:
+  // agreement keeps the class through the merge; any disagreement —
+  // including one covering side — merges to covering, the widest
+  // consumption (over-taint, fail-safe).
+  if (
+    typeof existingIfc.observes === "string" &&
+    existingIfc.observes === candidateIfc.observes
+  ) {
+    merged.observes = existingIfc.observes;
+  }
   return merged as JSONSchemaObj["ifc"];
 };
 

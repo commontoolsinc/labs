@@ -105,6 +105,12 @@ describe(
         identity: identities[0],
       });
 
+      // Pre-create the space-root (default) pattern so each browser's
+      // `pattern:getSpaceRoot` storage-RESUMEs it instead of racing the create
+      // path and cold-compiling default-app inside its worker — see the
+      // beforeAll comment in lunch-poll-vote.test.ts.
+      await cc.ensureDefaultPattern();
+
       const sourcePath = join(
         import.meta.dirname!,
         "..",

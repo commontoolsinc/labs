@@ -1,4 +1,4 @@
-import { type Diagnostic, type Program } from "typescript";
+import { type Diagnostic, type Program, type SourceFile } from "typescript";
 import {
   CompilerError,
   type DiagnosticMessageTransformer,
@@ -32,36 +32,63 @@ export class Checker {
   }
 
   typeCheck() {
-    const errors = this.sources().reduce((output, sourceFile) => {
-      const diagnostics = this.program.getSemanticDiagnostics(sourceFile);
-      for (const diagnostic of diagnostics) {
-        output.push({ diagnostic, source: sourceFile.text });
-      }
-      return output;
-    }, [] as ErrorDetails[]);
-    if (errors.length) {
-      throw new CompilerError(errors, this.messageTransformer);
-    }
+    this.throwIfErrors(
+      this.checkableSources().flatMap((sourceFile) =>
+        this.collectSemanticErrors(sourceFile)
+      ),
+    );
   }
 
   declarationCheck() {
-    const errors = this.sources().reduce((output, sourceFile) => {
-      const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
-      for (const diagnostic of diagnostics) {
-        // Skip "private name" errors for known exported symbols
-        const message = typeof diagnostic.messageText === "string"
-          ? diagnostic.messageText
-          : diagnostic.messageText.messageText;
-        const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
-          message.includes(`private name '${sym}'`) ||
-          message.includes(`name '${sym}' from external module`)
-        );
-        if (!isKnownSymbol) {
-          output.push({ diagnostic, source: sourceFile.text });
-        }
+    this.throwIfErrors(
+      this.checkableSources().flatMap((sourceFile) =>
+        this.collectDeclarationErrors(sourceFile)
+      ),
+    );
+  }
+
+  /**
+   * The source files {@link typeCheck}/{@link declarationCheck} cover, for
+   * callers that step through them one file at a time (e.g. to yield to the
+   * event loop between files) while keeping the same aggregate-then-throw
+   * error semantics via {@link throwIfErrors}.
+   */
+  checkableSources(): SourceFile[] {
+    return this.sources();
+  }
+
+  /** Per-file semantic diagnostics, as the error details typeCheck throws. */
+  collectSemanticErrors(sourceFile: SourceFile): ErrorDetails[] {
+    return this.program.getSemanticDiagnostics(sourceFile).map(
+      (diagnostic) => ({ diagnostic, source: sourceFile.text }),
+    );
+  }
+
+  /**
+   * Per-file declaration diagnostics, filtered exactly as declarationCheck
+   * filters them (known exported-symbol false positives skipped).
+   */
+  collectDeclarationErrors(sourceFile: SourceFile): ErrorDetails[] {
+    const errors: ErrorDetails[] = [];
+    for (
+      const diagnostic of this.program.getDeclarationDiagnostics(sourceFile)
+    ) {
+      // Skip "private name" errors for known exported symbols
+      const message = typeof diagnostic.messageText === "string"
+        ? diagnostic.messageText
+        : diagnostic.messageText.messageText;
+      const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
+        message.includes(`private name '${sym}'`) ||
+        message.includes(`name '${sym}' from external module`)
+      );
+      if (!isKnownSymbol) {
+        errors.push({ diagnostic, source: sourceFile.text });
       }
-      return output;
-    }, [] as ErrorDetails[]);
+    }
+    return errors;
+  }
+
+  throwIfErrors(errors: ErrorDetails[]) {
     if (errors.length) {
       throw new CompilerError(errors, this.messageTransformer);
     }

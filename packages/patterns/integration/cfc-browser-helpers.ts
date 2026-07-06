@@ -1058,13 +1058,15 @@ export async function collectBrowserLoadSummary(
       // default-pattern ensure/resume); `runner.ipc`/`runner.loop` (worker
       // request delivery/handling + event-loop lag) ride the `runner` prefix;
       // `pattern-manager` carries the compile-cache read/evaluate spans that
-      // dominate a storage-resume boot.
+      // dominate a storage-resume boot; `js-compiler` the per-file
+      // program-build/type-check/emit spans that decompose a cold compile.
       const prefixes = [
         "scheduler",
         "runner",
         "storage",
         "piece",
         "pattern-manager",
+        "js-compiler",
       ];
       const includeLogger = (name: string): boolean =>
         name === "runtime-client.cfc-label" ||

@@ -272,7 +272,6 @@ export type ImplementationIdentity =
     symbol?: string;
     sourceFile?: string;
     bindingPath?: string[];
-    sourceLocation?: { line: number; column: number };
     codeHash?: string;
   }
   | { kind: "unsupported"; className: string; reason: string };

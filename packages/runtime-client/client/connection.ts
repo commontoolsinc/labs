@@ -1,5 +1,6 @@
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
+import { unrefTimer } from "@commonfabric/utils/sleep";
 import {
   CellUpdateNotification,
   ClientNotificationType,
@@ -166,12 +167,17 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     // worker-side; a matching mainLag spike says this thread starved the
     // response handling itself.
     let expected = performance.now() + LOOP_LAG_SAMPLE_MS;
-    this.#loopLagTimer = setInterval(() => {
+    // Unref'd so a connection constructed without a matching dispose() (unit
+    // tests exercising notification handling, or an initialize that fails
+    // before the client owns the connection) does not leak this interval or
+    // trip Deno's op-leak sanitizer. In the browser it runs until dispose,
+    // which clears it below.
+    this.#loopLagTimer = unrefTimer(setInterval(() => {
       const now = performance.now();
       const lag = now - expected;
       if (lag > 0) ipcLogger.time(expected, now, "loop", "mainLag");
       expected = now + LOOP_LAG_SAMPLE_MS;
-    }, LOOP_LAG_SAMPLE_MS);
+    }, LOOP_LAG_SAMPLE_MS));
     this.#lifetime.signal.addEventListener("abort", () => {
       if (this.#loopLagTimer !== undefined) {
         clearInterval(this.#loopLagTimer);
