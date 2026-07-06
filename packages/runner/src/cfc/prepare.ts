@@ -4069,6 +4069,14 @@ export const prepareBoundaryCommit = (
       // byte-for-byte (SC-11). Consumed pool indices are tracked so
       // anything not covered by a stamp still lands below.
       const attachedExistence = new Set<number>();
+      // Clause-aware dedup: the fold is where STORED bytes (a peer may have
+      // persisted {anyOf:["B","A"]}) meet this tx's normalized derivation
+      // ({anyOf:["A","B"]}). uniqueCfcAtoms is deepEqual-based, so byte-
+      // permuted forms of one clause would both survive — a doubled clause
+      // list and one spurious envelope rewrite (the SC-11 churn class).
+      // normalizeClause each clause first; non-clause atoms pass through.
+      const foldedUnique = (atoms: readonly unknown[]): unknown[] =>
+        uniqueCfcAtoms(atoms.map((atom) => normalizeClause(atom)));
       const grownConfidentialityFor = (
         path: readonly string[],
       ): unknown[] => {
@@ -4079,7 +4087,7 @@ export const prepareBoundaryCommit = (
             atoms.push(...cleared.confidentiality);
           }
         });
-        return uniqueCfcAtoms(atoms);
+        return foldedUnique(atoms);
       };
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
@@ -4184,7 +4192,7 @@ export const prepareBoundaryCommit = (
       for (const bucket of leftoverByPath.values()) {
         persistedLabelEntries.push({
           path: canonicalizeLogicalPath(bucket.path),
-          label: { confidentiality: uniqueCfcAtoms(bucket.atoms) },
+          label: { confidentiality: foldedUnique(bucket.atoms) },
           origin: "derived",
           observes: "shape",
         });

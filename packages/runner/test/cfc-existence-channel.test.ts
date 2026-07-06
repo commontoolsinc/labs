@@ -478,6 +478,78 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("old-secret");
   });
 
+  // SC-11, clause-aware: a stored existence clause in a byte-permuted form
+  // (a peer wrote {anyOf:["B","A"]}) meeting this tx's normalized
+  // derivation ({anyOf:["A","B"]}) must collapse to ONE clause — deepEqual
+  // dedup alone doubles the clause list and rewrites the envelope once.
+  it("folds byte-permuted clause forms without doubling (SC-11)", async () => {
+    const rt = makeRuntime();
+    const orClause = { anyOf: ["reader-a", "reader-b"] };
+    const sourceId = await seedDoc(rt, "ec-clause-source", { n: 1 }, [
+      { path: [], label: { confidentiality: [orClause] } },
+    ]);
+    const outId = await writeTainted(rt, sourceId, "ec-clause-out", {
+      copied: true,
+    });
+
+    // Flip the stored existence clause to the reversed byte form, as a
+    // peer's view merge could have persisted it.
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): { cfc?: Record<string, unknown> };
+    };
+    const stored = replica.getDocument(outId).cfc! as {
+      labelMap: { entries: StoredEntry[] };
+    };
+    const flipped = {
+      ...stored,
+      labelMap: {
+        version: 1,
+        entries: stored.labelMap.entries.map((e) =>
+          e.observes === "shape"
+            ? {
+              ...e,
+              label: { confidentiality: [{ anyOf: ["reader-b", "reader-a"] }] },
+            }
+            : e
+        ),
+      },
+    };
+    const flip = rt.edit();
+    flip.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      flipped as never,
+    );
+    expect((await flip.commit()).ok).toBeDefined();
+
+    // Re-derive: reads the source again (normalized clause) and overwrites
+    // the root — the fold meets the reversed stored form.
+    const tx = rt.edit();
+    tx.readOrThrow(readAddress(sourceId, []));
+    tx.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { copied: false },
+    );
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, []);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality?.length).toBe(1);
+
+    // And the re-derivation is now canonically idempotent: repeating the
+    // same overwrite leaves the stored metadata byte-identical.
+    const before = JSON.stringify(entriesOf(outId));
+    const again = rt.edit();
+    again.readOrThrow(readAddress(sourceId, []));
+    again.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { copied: 2 },
+    );
+    again.prepareCfc();
+    expect((await again.commit()).ok).toBeDefined();
+    expect(JSON.stringify(entriesOf(outId))).toEqual(before);
+  });
+
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite
   // must not churn the metadata — the grown existence entry re-derives
   // identically.
