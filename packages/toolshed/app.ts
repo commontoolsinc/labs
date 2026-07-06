@@ -1,5 +1,6 @@
 import createApp from "@/lib/create-app.ts";
 import health from "@/routes/health/health.index.ts";
+import telemetry from "@/routes/telemetry/telemetry.index.ts";
 import aiLLM from "@/routes/ai/llm/llm.index.ts";
 import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
@@ -30,6 +31,7 @@ configureOpenAPI(app);
 // Static routes (non-OAuth2, plus non-standard OAuth like Discord and Plaid)
 const routes = [
   health,
+  telemetry,
   aiLLM,
   aiImg,
   aiVoice,
