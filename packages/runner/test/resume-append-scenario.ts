@@ -176,6 +176,10 @@ async function build(scenario: AppendScenario): Promise<void> {
   expect(scenario.read(rc)).toEqual(scenario.buildExpected);
   rt.scheduler.dispose();
   await rt.dispose();
+  // Close the session too (sibling harnesses close their storage managers in
+  // afterEach): an inline-value element resolves to an argument-doc path
+  // whose watch keeps a transport promise pending past process end.
+  await sm.close();
 }
 
 /**
@@ -264,5 +268,6 @@ export async function runResumeAppendScenario(
     return { output: scenario.read(rc2), heldCount };
   } finally {
     await rt2.dispose();
+    await sm2.close();
   }
 }

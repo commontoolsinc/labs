@@ -33,7 +33,11 @@ import {
   outputSpotFromBinding,
   scopedCell,
 } from "../builtins/scope-policy.ts";
-import { toMemorySpaceAddress } from "../link-utils.ts";
+import {
+  isPrimitiveCellLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 import type { Runtime } from "../runtime.ts";
@@ -262,9 +266,12 @@ export function makeInlineMapImplementation(
         return;
       }
 
-      const rawList = probeScoped(() =>
-        listCell.withTx(tx).getRaw() as unknown
-      );
+      // UNMARKED read (legacy map.ts parity): membership/order ARE the
+      // list's content — a value-class read that does NOT consume the
+      // per-slot link-origin labels. Probe-marking this root read would
+      // make it a followRef observation post-C1, joining every element's
+      // source label into the coordinator's J (the pointwise smear).
+      const rawList = listCell.withTx(tx).getRaw() as unknown;
       // RESUME-INPUT guard (legacy awaitInputThenSettle parity): on a resume
       // reconcile the input list may be undefined/transiently empty while
       // its durable value streams in — blanking the persisted container now
@@ -316,16 +323,28 @@ export function makeInlineMapImplementation(
       const len = rawList.length;
       if (len > 0) resumeAwaitSync = false;
 
-      const slotLink = (i: number): NormalizedFullLink =>
-        probeScoped(() => {
-          const elemCell = listCell.key(i as never).withTx(tx).resolveAsCell();
-          return resolveLink(
-            runtime,
-            tx,
-            elemCell.getAsNormalizedFullLink(),
-            "value",
-          );
-        });
+      // Identity-only slot links (legacy map.ts parity, observation classes
+      // C1): build element links from the RAW slots directly — the asCell
+      // traversal's terminal probe at the element root belongs to no
+      // recorded dereference, so post-C1 it becomes a contributing
+      // followRef observation and smears every element's label into the
+      // coordinator's per-tx join. resolveLink's own probes belong to the
+      // dereferences it records; no element value is loaded at all.
+      const listBase = listCell.getAsNormalizedFullLink();
+      const slotLink = (i: number): NormalizedFullLink => {
+        const slot = (rawList as unknown[])[i];
+        // The list's own schema must NOT ride along to an element path (an
+        // array schema applied at an element reads undefined); elements are
+        // read schema-free by the effect.
+        const raw: NormalizedFullLink = isPrimitiveCellLink(slot)
+          ? parseLink(slot, listBase)
+          : {
+            ...listBase,
+            path: [...listBase.path, String(i)],
+            schema: undefined,
+          };
+        return resolveLink(runtime, tx, raw, "value");
+      };
 
       const keyCounts = new Map<string, number>();
       // deno-lint-ignore no-explicit-any
@@ -541,6 +560,13 @@ export function makeInlineFilterImplementation(
           listResultSchema(),
           tx,
         );
+        if (RI2_DEBUG) {
+          console.log(
+            `[ri2] filter-container id=${
+              baseResult.getAsNormalizedFullLink().id.slice(-16)
+            } parent=${String(parentCell.entityId).slice(-16)}`,
+          );
+        }
         result = scopedCell(runtime, tx, baseResult, listScope);
         setResultCell(result, parentCell);
         setPatternCell(result, parentCell.key("pattern"));
@@ -563,16 +589,29 @@ export function makeInlineFilterImplementation(
       }
       const len = rawList.length;
 
-      const slotLink = (i: number): NormalizedFullLink =>
-        probeScoped(() => {
-          const elemCell = listCell.key(i as never).withTx(tx).resolveAsCell();
-          return resolveLink(
-            runtime,
-            tx,
-            elemCell.getAsNormalizedFullLink(),
-            "value",
-          );
-        });
+      // Identity-only slot links, LIKE LEGACY's cellIdentityKey form: for an
+      // inline value the element identity is the LIST DOC PATH (["items",i]),
+      // which is exactly the elementKey the legacy filter derives — so the
+      // predicate cells `{filter: result, elementKey}` are THE SAME DOCS a
+      // degraded/legacy coordinator's children resolve. That identity match
+      // is load-bearing for resume: a degraded coordinator's batch reconcile
+      // is REVERTIBLE (stale withheld-container basis) and legacy never
+      // re-runs deduped children, so the durable predicate values A left
+      // behind are the only copies B can converge from. (The asCell
+      // traversal instead minted content-addressed `data:` identities —
+      // mismatching legacy's keys and stranding the resume at [].)
+      const listBase = listCell.getAsNormalizedFullLink();
+      const slotLink = (i: number): NormalizedFullLink => {
+        const slot = (rawList as unknown[])[i];
+        const raw: NormalizedFullLink = isPrimitiveCellLink(slot)
+          ? parseLink(slot, listBase)
+          : {
+            ...listBase,
+            path: [...listBase.path, String(i)],
+            schema: undefined,
+          };
+        return resolveLink(runtime, tx, raw, "value");
+      };
 
       const keyCounts = new Map<string, number>();
       // deno-lint-ignore no-explicit-any
@@ -612,7 +651,9 @@ export function makeInlineFilterImplementation(
         };
 
         let run = elementRuns.get(elementKey);
+        let freshRun = false;
         if (!run) {
+          freshRun = true;
           // deno-lint-ignore no-explicit-any
           const predicateCell = runtime.getCell<any>(
             parentCell.space,
@@ -655,19 +696,31 @@ export function makeInlineFilterImplementation(
             );
             if (errors.length > 0) throw errors[0].error;
           };
-          run.cancel = runtime.scheduler.subscribe(
-            elementAction,
-            {
-              reads: paramsAddr
-                ? [toMemorySpaceAddress(link), paramsAddr]
-                : [toMemorySpaceAddress(link)],
-              shallowReads: [],
-              writes: [
-                toMemorySpaceAddress(predicateCell.getAsNormalizedFullLink()),
-              ],
-            },
-            { isEffect: true },
-          );
+          const log = {
+            reads: paramsAddr
+              ? [toMemorySpaceAddress(link), paramsAddr]
+              : [toMemorySpaceAddress(link)],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(predicateCell.getAsNormalizedFullLink()),
+            ],
+          };
+          if (freshRun) {
+            // The inline eval above already computed THIS input state —
+            // register triggers for FUTURE changes only, or every
+            // predicate would run twice on first sight (legacy runs each
+            // exactly once).
+            runtime.scheduler.resubscribe(elementAction, log, {
+              isEffect: true,
+            });
+            run.cancel = () => runtime.scheduler.unsubscribe(elementAction);
+          } else {
+            // Index moved on a live run: legacy re-runs exactly then, so
+            // the initial-run subscribe is the parity path.
+            run.cancel = runtime.scheduler.subscribe(elementAction, log, {
+              isEffect: true,
+            });
+          }
           addCancel(run.cancel);
         }
         run.lastIndex = index;
