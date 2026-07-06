@@ -1,9 +1,10 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
@@ -11,11 +12,14 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 // Regression: under the ESM module-record loader, a verified handler's
 // `implementation.src` must resolve back to its ORIGINAL authored source
 // (`/main.tsx:line:col`), not the raw concatenated-bundle coordinate
-// (`<evalId>.js:line:col`). Otherwise the CFC provenance src check fails
-// closed (canonical-source mismatch → kind "unsupported"), which breaks every
-// CFC trusted action. The fix composes a per-evaluation bundle source map
+// (`<evalId>.js:line:col`). The fix composes a per-evaluation bundle source map
 // (see composeBundleSourceMap) and registers it so `mapPosition` can translate
 // the coordinate.
+//
+// `.src` is now DEBUG-ONLY (identity was re-rooted off it — see
+// cfc/implementation-identity.ts), and its eager resolution is off by default
+// (the boot lever). So this suite enables it explicitly (beforeEach) to exercise
+// and guard the resolution's correctness for debug-time / on-demand use.
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -82,7 +86,12 @@ describe("ESM loader: verified-source location resolution", () => {
     });
   };
 
+  // Source-location resolution is now off by default (debug-only; the boot
+  // lever). This suite exercises that resolution, so enable it here.
+  beforeEach(() => setEagerSourceAnnotation(true));
+
   afterEach(async () => {
+    setEagerSourceAnnotation(false);
     await runtime?.dispose();
     await storageManager?.close();
   });
