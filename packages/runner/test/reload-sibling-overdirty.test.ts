@@ -94,9 +94,7 @@ async function mainTsxSnapshots(runtime: Runtime) {
   // prefix selects exactly them.
   return res.snapshots.filter((s) => {
     const id = s.observation.actionId ?? "";
-    return interpreterOn
-      ? id.includes("ri2:seg")
-      : id.startsWith("cf:module/");
+    return interpreterOn ? id.includes("ri2:seg") : id.startsWith("cf:module/");
   });
 }
 

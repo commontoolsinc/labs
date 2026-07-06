@@ -738,9 +738,7 @@ export function makeInlineFilterImplementation(
         const included = run.predicateCell.withTx(tx).get() as unknown;
         if (RI2_DEBUG) {
           console.log(
-            `[ri2] filter-elem ${index}: included=${
-              JSON.stringify(included)
-            }`,
+            `[ri2] filter-elem ${index}: included=${JSON.stringify(included)}`,
           );
         }
         if (included) {

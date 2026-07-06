@@ -220,7 +220,10 @@ export async function runResumeAppendScenario(
     // TEMP-DEBUG (ri2 leak isolation): stage bisect. 1=after start,
     // 2=after firstHeld, 3=after release+settle.
     const stopAt = Number(Deno.env.get("RI2_STOP_AT") ?? "0");
-    const fake = { output: ["a", "b", "c", "d", "e"] as unknown[], heldCount: 1 };
+    const fake = {
+      output: ["a", "b", "c", "d", "e"] as unknown[],
+      heldCount: 1,
+    };
     if (stopAt === 1) return fake;
 
     // Standing effect so `idle()` drives the coordinator without `pull()`. While
