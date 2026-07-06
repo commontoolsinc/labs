@@ -711,6 +711,77 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
   }
 });
 
+Deno.test("memory v2 runner never moves a confirmed doc backwards on a stale watch refresh", async () => {
+  // Watch refreshes can arrive after local confirmations; an upsert whose
+  // seq is below the confirmed base must be skipped (pending replay depends
+  // on monotonic bases). Pins the applySessionSync guard directly — its
+  // only other coverage was an incidental race in unrelated tests.
+  const docA = `of:watch-stale-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-stale-b-${crypto.randomUUID()}` as URI;
+  const transport = new IncrementalEffectTransport(
+    new Map([
+      [docA, { value: { label: docA } }],
+      [docB, { value: { label: docB } }],
+    ]),
+  );
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-stale"),
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    await Promise.all([
+      provider.sync(docA, { path: [], schema: false }),
+      provider.sync(docB, { path: [], schema: false }),
+    ]);
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+
+    let integrations = 0;
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const subscription = {
+      next(notification: { type: string }) {
+        if (notification.type === "integrate") {
+          integrations += 1;
+          if (integrations === 1) first.resolve();
+          if (integrations === 2) second.resolve();
+        }
+        return undefined;
+      },
+    };
+    storageManager.subscribe(subscription);
+
+    // Fresh refresh: moves the confirmed base forward.
+    transport.emitSync(fullSync(4, [doc(docA, 4, {
+      value: { label: "updated" },
+    })]));
+    await first.promise;
+    assertEquals(getObjectValue(provider, docA), { label: "updated" });
+
+    // Stale refresh: a newer sync envelope replaying an OLD snapshot of the
+    // doc. The upsert's seq (2) is below the confirmed base (4) — it must
+    // not move the base backwards or resurface the old value. A guard-
+    // skipped sync changes nothing, so it emits no notification of its own;
+    // the follow-up fresh sync on docB is the barrier — syncs apply in
+    // order, so its integrate proves the stale one was fully processed.
+    transport.emitSync(fullSync(5, [doc(docA, 2, {
+      value: { label: "stale" },
+    })]));
+    transport.emitSync(fullSync(6, [doc(docB, 6, {
+      value: { label: "barrier" },
+    })]));
+    await second.promise;
+    storageManager.unsubscribe(subscription);
+
+    assertEquals(getObjectValue(provider, docB), { label: "barrier" });
+    assertEquals(getObjectValue(provider, docA), { label: "updated" });
+  } finally {
+    await storageManager.close();
+  }
+});
+
 Deno.test("memory v2 runner applies watch remove syncs to confirmed docs", async () => {
   const docA = `of:watch-remove-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-remove-b-${crypto.randomUUID()}` as URI;
