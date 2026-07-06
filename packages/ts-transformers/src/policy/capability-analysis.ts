@@ -2975,6 +2975,18 @@ export function analyzeFunctionCapabilities(
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
               recordMergeableNonAppendWrite(receiver);
+              // set(value, onCommit?) / send(event, onCommit?): the onCommit
+              // callback receives the committed TRANSACTION and can write
+              // arbitrary cells through it — writes invisible to capture-path
+              // tracking (even an inline arrow the nested walk analyzes
+              // writes via `tx`, not via captures). A second argument means
+              // `writes` is not exhaustive; fail closed.
+              if (
+                (methodName === "set" || methodName === "send") &&
+                node.arguments.length > 1
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
               if (mergeablePushMisuseSink && !receiver.dynamic) {

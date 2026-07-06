@@ -3339,3 +3339,60 @@ const fn = (input: Cell<string[]>) => {
     assertEquals(input!.hasUnverifiedCellUse, false);
   },
 );
+
+Deno.test(
+  "Capability analysis marks set() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // The write itself is still recorded...
+    assert(input!.writePaths.map((path) => path.join(".")).includes("count"));
+    // ...but onCommit receives the committed transaction and can write
+    // arbitrary cells through it, so writePaths is not exhaustive.
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks send() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.events.send({ fired: true }, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assert(input!.writePaths.map((path) => path.join(".")).includes("events"));
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps plain set()/send() calls verified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1);
+        input.events.send({ fired: true });
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
