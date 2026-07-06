@@ -2605,15 +2605,11 @@ describe("wish built-in", () => {
       // every pattern that wishes for "the viewer's active profile" (e.g.
       // profile-group-chat's send guard). With a default set, `#profile` must
       // resolve to it directly as a single result.
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-profile-default-among-many",
+      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      const spaceA = (await Identity.fromPassphrase(
+        "wish-profile-default-among-many-a",
       )).did();
-      const profileA = runtime.getCell(
-        profileSpaceDid,
-        "profile-a",
-        undefined,
-        tx,
-      );
+      const profileA = runtime.getCell(spaceA, "profile-a", undefined, tx);
       profileA.set({
         name: "Default Della",
         initialNameApplied: "Default Della",
@@ -2621,12 +2617,13 @@ describe("wish built-in", () => {
         bio: "",
         elements: [],
       });
-      const profileB = runtime.getCell(
-        profileSpaceDid,
-        "profile-b",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const spaceB = (await Identity.fromPassphrase(
+        "wish-profile-default-among-many-b",
+      )).did();
+      const profileB = runtime.getCell(spaceB, "profile-b", undefined, tx);
       profileB.set({
         name: "Other Otto",
         initialNameApplied: "Other Otto",
@@ -2970,30 +2967,25 @@ describe("wish built-in", () => {
     });
 
     it("resolves headless #profile to the default profile (ordered first)", async () => {
-      // Both profiles live in one (non-home) space so the home write opens a
-      // single cross-space writer; the real create flow appends one space per
-      // transaction.
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-multi-profile-space",
+      // Each profile lives in its OWN (non-home) space — its space DID is its
+      // identity (CT-1842). Commit per space (single-space-writer per tx).
+      const p1Space = (await Identity.fromPassphrase(
+        "wish-multi-profile-space-1",
       )).did();
-      const p1 = runtime.getCell(
-        profileSpaceDid,
-        "multi-profile-1",
-        undefined,
-        tx,
-      );
+      const p1 = runtime.getCell(p1Space, "multi-profile-1", undefined, tx);
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "ada.png",
         elements: [],
       });
-      const p2 = runtime.getCell(
-        profileSpaceDid,
-        "multi-profile-2",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const p2Space = (await Identity.fromPassphrase(
+        "wish-multi-profile-space-2",
+      )).did();
+      const p2 = runtime.getCell(p2Space, "multi-profile-2", undefined, tx);
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
@@ -3044,27 +3036,24 @@ describe("wish built-in", () => {
     });
 
     it("orders headless #profile by MRU when no default is set", async () => {
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-mru-profile-space",
+      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      const p1Space = (await Identity.fromPassphrase(
+        "wish-mru-profile-space-1",
       )).did();
-      const p1 = runtime.getCell(
-        profileSpaceDid,
-        "mru-profile-1",
-        undefined,
-        tx,
-      );
+      const p1 = runtime.getCell(p1Space, "mru-profile-1", undefined, tx);
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "",
         elements: [],
       });
-      const p2 = runtime.getCell(
-        profileSpaceDid,
-        "mru-profile-2",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const p2Space = (await Identity.fromPassphrase(
+        "wish-mru-profile-space-2",
+      )).did();
+      const p2 = runtime.getCell(p2Space, "mru-profile-2", undefined, tx);
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
@@ -3498,10 +3487,15 @@ describe("wish built-in", () => {
           headless?: boolean;
         },
       ) {
-        const profileSpaceDid = (await Identity.fromPassphrase(
-          `ct1829-${label}-space`,
-        )).did();
-        const profileCells = opts.names.map((name, i) => {
+        // Each profile lives in its OWN space (an anonymous
+        // `ProfileHome.inSpace()` in production) — the profile's own space DID is
+        // its stable identity (CT-1842). Commit per space: a single tx can only
+        // open one space writer at a time.
+        const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
+        for (let i = 0; i < opts.names.length; i++) {
+          const profileSpaceDid = (await Identity.fromPassphrase(
+            `ct1829-${label}-space-${i}`,
+          )).did();
           const cell = runtime.getCell(
             profileSpaceDid,
             `ct1829-${label}-profile-${i}`,
@@ -3509,18 +3503,17 @@ describe("wish built-in", () => {
             tx,
           );
           cell.set({
-            name,
-            initialNameApplied: name,
+            name: opts.names[i],
+            initialNameApplied: opts.names[i],
             avatar: "",
             bio: "",
             elements: [],
           });
-          return cell;
-        });
-
-        await tx.commit();
-        await runtime.idle();
-        tx = runtime.edit();
+          await tx.commit();
+          await runtime.idle();
+          tx = runtime.edit();
+          profileCells.push(cell);
+        }
 
         const homeSpaceCell = runtime.getHomeSpaceCell(tx);
         const homeDefaultCell = runtime.getCell(
@@ -3801,37 +3794,44 @@ describe("wish built-in", () => {
         }
       });
 
-      // CT-1842: In real deployments each profile lives in its OWN space and the
-      // `mru` / `defaultProfile` links resolve with a DIFFERENT `scope` than the
-      // `profiles` candidates for the same profile (the picker surface stamps its
-      // own scope; the home `profiles` list carries another). `Cell.equals`
-      // (`areNormalizedLinksSame`) compares `scope`, so the MRU/default match
-      // returned false for every candidate and the ordering silently collapsed to
-      // `profiles`-list (creation) order — the switcher was a no-op cross-space.
-      // The builtin now matches by durable link identity (id + space + path), so
-      // the scope skew no longer defeats the match.
-      describe("cross-space scope skew (CT-1842)", () => {
+      // CT-1842: In real deployments each profile lives in its OWN space (an
+      // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile` link
+      // and the `profiles` candidate for the SAME profile point at DIFFERENT
+      // cells WITHIN that profile's space — same space, DIFFERENT entity id (the
+      // picker stores the profile pattern's result cell; the list stores the
+      // pattern cell). So neither `Cell.equals` nor an id-based comparison matches
+      // them; the MRU/default match returned false for every candidate and the
+      // ordering silently collapsed to `profiles`-list (creation) order — the
+      // switcher was a no-op cross-space. The builtin now matches by the profile's
+      // own SPACE (the stable per-profile identity), so the id difference no
+      // longer defeats the match. Verified against live data (switchtest
+      // identity): mru[0].space == profiles[1].space for the same profile, while
+      // the ids differ.
+      describe("cross-space id skew (CT-1842)", () => {
         // Stand up N profiles, each in its OWN space (real cross-space), wire the
-        // home `profiles` list, and OPTIONALLY write `mru` / `defaultProfile` as
-        // links whose stored `scope` differs from the candidate scope — the exact
-        // shape that made `Cell.equals` return false for the same profile.
+        // home `profiles` list from the profiles' CANONICAL cells, and write
+        // `mru` / `defaultProfile` as links pointing at a DIFFERENT cell in the
+        // SAME profile space (a distinct entity id) — the exact production shape
+        // that made id/equals comparison return false for the same profile.
         async function setupCrossSpace(
           label: string,
           opts: {
             names: string[];
-            // Indices into `names`, most-recently-used first. Written with a
-            // `scope` that differs from the profiles-list candidate scope.
+            // Indices into `names`, most-recently-used first.
             mruIndices?: number[];
-            // Index into `names` to set as default, with a differing scope.
+            // Index into `names` to set as default.
             defaultIndex?: number;
-            skewScope?: "user" | "session";
           },
         ) {
-          const scope = opts.skewScope ?? "user";
           // Each profile in a DISTINCT space; commit per space (a single tx can
-          // only open one space writer at a time).
+          // only open one space writer at a time). We create TWO cells per
+          // profile space: the canonical profile cell (goes in `profiles`) and a
+          // sibling "alias" cell with a DIFFERENT id but the SAME `name` (what the
+          // mru/default links point at) — mirroring production's list-cell vs
+          // picker-result-cell id divergence within one profile space.
+          const profileSpaces: string[] = [];
           const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
-          const links: Array<
+          const aliasLinks: Array<
             ReturnType<
               ReturnType<Runtime["getCell"]>["getAsNormalizedFullLink"]
             >
@@ -3840,35 +3840,47 @@ describe("wish built-in", () => {
             const spaceDid = (await Identity.fromPassphrase(
               `ct1842-${label}-space-${i}`,
             )).did();
+            profileSpaces.push(spaceDid);
+            const value = {
+              name: opts.names[i],
+              initialNameApplied: opts.names[i],
+              avatar: "",
+              bio: "",
+              elements: [],
+            };
             const cell = runtime.getCell(
               spaceDid,
               `ct1842-${label}-profile-${i}`,
               undefined,
               tx,
             );
-            cell.set({
-              name: opts.names[i],
-              initialNameApplied: opts.names[i],
-              avatar: "",
-              bio: "",
-              elements: [],
-            });
+            cell.set(value);
+            // Sibling cell in the SAME space, DIFFERENT id — the mru/default link
+            // target.
+            const alias = runtime.getCell(
+              spaceDid,
+              `ct1842-${label}-profile-${i}-alias`,
+              undefined,
+              tx,
+            );
+            alias.set(value);
             await tx.commit();
             await runtime.idle();
             tx = runtime.edit();
             profileCells.push(cell);
-            links.push(cell.getAsNormalizedFullLink());
+            aliasLinks.push(alias.getAsNormalizedFullLink());
           }
 
-          // A scope-skewed sigil link to the same profile entity — the shape a
-          // cross-space `mru` / `defaultProfile` entry resolves to in production.
-          const skewedSigil = (i: number) => ({
+          // A sigil link to the SIBLING cell (same profile space, different id) —
+          // the shape a cross-space `mru` / `defaultProfile` entry resolves to in
+          // production.
+          const aliasSigil = (i: number) => ({
             "/": {
               [LINK_V1_TAG]: {
-                id: links[i].id,
-                space: links[i].space,
+                id: aliasLinks[i].id,
+                space: aliasLinks[i].space,
                 path: [],
-                scope,
+                scope: aliasLinks[i].scope,
               },
             },
           });
@@ -3884,13 +3896,13 @@ describe("wish built-in", () => {
           if (opts.mruIndices) {
             homeDefaultCell.key("mru").setRawUntyped(
               // deno-lint-ignore no-explicit-any
-              opts.mruIndices.map((i) => skewedSigil(i)) as any,
+              opts.mruIndices.map((i) => aliasSigil(i)) as any,
             );
           }
           if (opts.defaultIndex !== undefined) {
             homeDefaultCell.key("defaultProfile").setRawUntyped(
               // deno-lint-ignore no-explicit-any
-              skewedSigil(opts.defaultIndex) as any,
+              aliasSigil(opts.defaultIndex) as any,
             );
           }
           // deno-lint-ignore no-explicit-any
@@ -3916,35 +3928,36 @@ describe("wish built-in", () => {
           return { result };
         }
 
-        it("MRU head resolves cross-space despite scope-skewed mru links (fails on unfixed code)", async () => {
+        it("MRU head resolves cross-space despite different-id mru links (fails on unfixed code)", async () => {
           // Two profiles in two spaces, no default. MRU lists the SECOND-created
-          // profile first, written with a scope that differs from the candidate
-          // scope. Pre-fix, `Cell.equals` rejects every mru↔candidate match, so
-          // ordering falls back to creation order and `.result` = first-created
-          // (Ada). With the identity-based match, `.result` = MRU head (Grace).
-          const { result } = await setupCrossSpace("mru-scope-skew", {
+          // profile first, via a link whose entity id differs from the candidate's
+          // (but shares the profile space). Pre-fix, id/equals matching rejects
+          // every mru↔candidate pair, so ordering falls back to creation order and
+          // `.result` = first-created (Ada). With space-based matching, `.result`
+          // = MRU head (Grace).
+          const { result } = await setupCrossSpace("mru-id-skew", {
             names: ["Ada", "Grace"],
             mruIndices: [1],
           });
           expect(result.key("profile").get()?.result?.name).toBe("Grace");
         });
 
-        it("default resolves cross-space despite scope-skewed default link (guards the default-match fix)", async () => {
-          // defaultProfile points at the SECOND profile via a scope-skewed link.
+        it("default resolves cross-space despite different-id default link (guards the default-match fix)", async () => {
+          // defaultProfile points at the SECOND profile via a different-id link.
           // Pre-fix the default-match (`defaultCell.equals(candidate)`) fails the
           // same way, so the default is ignored; with the fix it resolves to the
           // chosen default.
-          const { result } = await setupCrossSpace("default-scope-skew", {
+          const { result } = await setupCrossSpace("default-id-skew", {
             names: ["Ada", "Grace"],
             defaultIndex: 1,
           });
           expect(result.key("profile").get()?.result?.name).toBe("Grace");
         });
 
-        it("default outranks MRU even under scope skew", async () => {
-          // Default = Ada (index 0), MRU head = Grace (index 1), both skewed.
+        it("default outranks MRU even under id skew", async () => {
+          // Default = Ada (index 0), MRU head = Grace (index 1), both different-id.
           // Default must win.
-          const { result } = await setupCrossSpace("default-over-mru-skew", {
+          const { result } = await setupCrossSpace("default-over-mru-id-skew", {
             names: ["Ada", "Grace"],
             defaultIndex: 0,
             mruIndices: [1],
