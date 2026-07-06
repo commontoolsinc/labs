@@ -83,7 +83,7 @@ const atSegmentEnd = (mappings: string, i: number): boolean =>
  * {@link SourceMapComposeError} — fail loud, no silent degradation.
  */
 function composeBundleSourceMapTextual(
-  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+  modules: ReadonlyArray<ComposeModuleEntry>,
   bundleFilename: string,
   startLineOffset = 0,
 ): SourceMap | undefined {
@@ -102,7 +102,12 @@ function composeBundleSourceMapTextual(
   let any = false;
   let lineOffset = startLineOffset;
 
-  for (const { body, map, source } of modules) {
+  for (const { body, bodyLineCount, map, source } of modules) {
+    if (body === undefined && bodyLineCount === undefined) {
+      throw new SourceMapComposeError(
+        "module entry needs body or bodyLineCount (line extent is required)",
+      );
+    }
     if (map) {
       if (typeof map.sourceRoot === "string" && map.sourceRoot !== "") {
         throw new SourceMapComposeError(
@@ -233,8 +238,11 @@ function composeBundleSourceMapTextual(
       }
     }
     // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.
-    // Robust to trailing newlines, unlike split().length.
-    lineOffset += (body.match(/\n/g)?.length ?? 0) + 1;
+    // Robust to trailing newlines, unlike split().length. Callers that no
+    // longer hold the body pass the precomputed count instead (the lazy
+    // boot-path registration, CT-1819) — the count is the ONLY thing compose
+    // needs from the body text.
+    lineOffset += bodyLineCount ?? ((body!.match(/\n/g)?.length ?? 0) + 1);
   }
   if (!any) return undefined;
   const composed = {
@@ -264,13 +272,34 @@ function composeBundleSourceMapTextual(
  *
  * Returns `undefined` if no module contributed a map.
  */
+/**
+ * A module's contribution to a composed bundle map. Exactly one of `body` /
+ * `bodyLineCount` must describe the module's generated-line extent —
+ * composition only ever needs the LINE COUNT of the body, so callers that
+ * defer composition (the lazy boot-path registration, CT-1819) capture the
+ * precomputed count instead of retaining the body text.
+ */
+export type ComposeModuleEntry = {
+  body?: string;
+  bodyLineCount?: number;
+  map?: SourceMap;
+  source?: string;
+};
+
+// Tests-only observability: cold-boot laziness is asserted by counting
+// compositions (a profile-level claim otherwise only visible on the rig).
+let composeCallsForTesting = 0;
+export function getComposeBundleSourceMapCallsForTesting(): number {
+  return composeCallsForTesting;
+}
+
 export function composeBundleSourceMap(
   // `source`, when set, overrides the map's recorded source path for ALL of that
   // module's mappings. The per-module compiler maps record only the basename
   // (e.g. `main.tsx`), but the CFC verified-source set is keyed by the full
   // module path (e.g. `/<id>/dir/main.tsx`); overriding makes resolved
   // coordinates match the set so verified-source identity holds.
-  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
+  modules: ReadonlyArray<ComposeModuleEntry>,
   bundleFilename: string,
   // Generated-line offset applied to the FIRST module. Use this when the
   // generated text is wrapped by a fixed prefix of N lines (e.g. the ESM
@@ -279,6 +308,7 @@ export function composeBundleSourceMap(
   // (1-based, relative to the eval'd string) map correctly.
   startLineOffset = 0,
 ): SourceMap | undefined {
+  composeCallsForTesting++;
   return composeBundleSourceMapTextual(
     modules,
     bundleFilename,
@@ -303,8 +333,16 @@ export function composeBundleSourceMap(
  * eval'd text under this load), so no positional information is invented — the
  * map only re-labels the bundle coordinate with the per-module source name.
  */
-export function identitySourceMap(body: string, source: string): SourceMap {
-  const lineCount = (body.match(/\n/g)?.length ?? 0) + 1;
+export function identitySourceMap(
+  // The compiled body, or its precomputed line count — the map is a fixed
+  // token per line, so the count is all the body contributes (lets the lazy
+  // boot-path registration avoid retaining body text, CT-1819).
+  body: string | number,
+  source: string,
+): SourceMap {
+  const lineCount = typeof body === "number"
+    ? body
+    : (body.match(/\n/g)?.length ?? 0) + 1;
   // Synthesized directly — the stream is a fixed token per line: line 1 maps
   // column 0 to source 0, line 1, column 0 (`AAAA`); every following line
   // advances only the original line by one (`AACA`). Byte-identical to what a
@@ -371,17 +409,44 @@ export class SourceMapParser {
     capacity: MAX_SOURCE_MAP_CACHE_SIZE,
   });
   private consumers = new WeakMap<SourceMap, SourceMapConsumer>();
+  // Deferred registrations (CT-1819): the boot path registers a PROVIDER
+  // instead of composing eagerly; the first lookup that needs the filename
+  // materializes it. One-shot — the provider is dropped as soon as it runs,
+  // so its captured inputs are released after first use.
+  private pendingProviders = new Map<string, () => SourceMap | undefined>();
 
   load(filename: string, sourceMap: SourceMap) {
+    // An explicit map supersedes any pending provider for the same name.
+    this.pendingProviders.delete(filename);
     this.sourceMaps.put(filename, sourceMap);
   }
 
   /**
-   * Clear all accumulated source maps and consumers.
+   * Register a deferred source map: `provider` runs (once) the first time a
+   * lookup needs `filename`. A provider returning `undefined` (nothing to
+   * compose) simply leaves the name unmapped, matching eager behavior.
+   */
+  loadLazy(filename: string, provider: () => SourceMap | undefined) {
+    this.pendingProviders.set(filename, provider);
+  }
+
+  private materialize(filename: string): void {
+    const provider = this.pendingProviders.get(filename);
+    if (provider === undefined) return;
+    this.pendingProviders.delete(filename);
+    const sourceMap = provider();
+    if (sourceMap !== undefined) {
+      this.sourceMaps.put(filename, sourceMap);
+    }
+  }
+
+  /**
+   * Clear all accumulated source maps, consumers, and pending providers.
    * Used for cleanup when the runtime is disposed.
    */
   clear(): void {
     this.sourceMaps.clear();
+    this.pendingProviders.clear();
   }
 
   // Fixes stack traces to use source map from eval. Strangely, both Deno and
@@ -433,6 +498,7 @@ export class SourceMapParser {
     const lineNum = parseInt(lineStr, 10);
     const columnNum = parseInt(colStr, 10);
 
+    this.materialize(filename);
     const sourceMap = this.sourceMaps.get(filename);
     if (!sourceMap) return originalLine;
 
@@ -464,6 +530,7 @@ export class SourceMapParser {
     line: number,
     column: number,
   ): MappedPosition | null {
+    this.materialize(filename);
     const sourceMap = this.sourceMaps.get(filename);
     if (!sourceMap) return null;
     const consumer = this.getConsumer(sourceMap);

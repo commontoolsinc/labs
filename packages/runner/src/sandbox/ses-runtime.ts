@@ -51,6 +51,10 @@ class SESInternals {
     this.sourceMaps.load(filename, sourceMap);
   }
 
+  loadSourceMapLazy(filename: string, provider: () => SourceMap | undefined) {
+    this.sourceMaps.loadLazy(filename, provider);
+  }
+
   mapPosition(
     filename: string,
     line: number,
@@ -232,6 +236,21 @@ export class SESRuntime extends EventTarget {
    */
   loadSourceMap(filename: string, sourceMap: SourceMap): void {
     this.internals.loadSourceMap(filename, sourceMap);
+  }
+
+  /**
+   * Deferred variant of {@link loadSourceMap}: `provider` runs (once) on the
+   * first lookup that needs `filename`. The ESM boot path registers its
+   * composed bundle/per-module maps this way — composition is a per-segment
+   * VLQ transcode over every module, and its only consumers (error mapping,
+   * debug `fn.src` resolution) are on-demand, so boots that never look up a
+   * frame never pay it (CT-1819).
+   */
+  loadSourceMapLazy(
+    filename: string,
+    provider: () => SourceMap | undefined,
+  ): void {
+    this.internals.loadSourceMapLazy(filename, provider);
   }
 
   parseStack(stack: string): string {
