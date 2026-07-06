@@ -64,6 +64,7 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsumedRead,
@@ -425,6 +426,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return;
     }
     this.#cfcState.policySnapshot = deepFreeze(snapshot);
+  }
+
+  // Deployment trust config for concept-guard satisfaction (Epic B3), same
+  // write-once posture as the policy snapshot above.
+  setCfcTrustConfig(config: CfcTrustConfig | undefined): void {
+    if (this.#cfcState.trustConfig !== undefined || config === undefined) {
+      return;
+    }
+    this.#cfcState.trustConfig = deepFreeze(config);
   }
 
   markCfcRelevant(reason?: string): void {

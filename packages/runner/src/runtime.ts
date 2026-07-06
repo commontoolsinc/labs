@@ -64,11 +64,14 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
+  buildCfcTrustConfig,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
   type CfcPolicyRecordInput,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
+  type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
@@ -273,6 +276,17 @@ export interface RuntimeOptions {
    * configured (evaluation is a no-op).
    */
   cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
+  /**
+   * Deployment trust config for concept-guard satisfaction (Epic B3, spec
+   * §4.8): trust statements, verifier delegations, concept edges. Validated,
+   * digested, and deep-frozen at construction; malformed config throws at
+   * boot. The config digest folds into the DEFAULT trust-snapshot provider's
+   * `revision`, so a config change invalidates prepared digests; hosts
+   * supplying a custom `trustSnapshotProvider` must fold their own trust
+   * versioning into `revision`. Defaults to none configured (every concept
+   * guard fails closed).
+   */
+  cfcTrustConfig?: CfcTrustConfigInput;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
@@ -408,6 +422,8 @@ export class Runtime {
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
+  /** Frozen deployment trust config; undefined = no trust configured. */
+  readonly cfcTrustConfig: CfcTrustConfig | undefined;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
@@ -514,11 +530,19 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.moduleByteCache = options.moduleByteCache;
+    // Validated + digested + frozen before the trust-snapshot provider
+    // default below, whose `revision` covers the config digest (a trust
+    // config change must invalidate prepared digests like any other
+    // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
+    this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
     const actingPrincipal = options.storageManager.as.did() as DID;
+    const trustRevision = this.cfcTrustConfig === undefined
+      ? this.id
+      : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
     this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
       id: `principal:${actingPrincipal}`,
       actingPrincipal,
-      revision: this.id,
+      revision: trustRevision,
     }));
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
@@ -787,6 +811,7 @@ export class Runtime {
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
+    wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }

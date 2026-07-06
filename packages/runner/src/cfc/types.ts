@@ -10,6 +10,7 @@ import type {
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
+import type { CfcTrustConfig } from "./trust.ts";
 
 export type {
   CfcLabelView,
@@ -446,6 +447,12 @@ export type CfcTxState = {
   // ceilings. Undefined = no policies configured (evaluation is a no-op; the
   // B5 gates decide on un-rewritten labels).
   policySnapshot?: PolicySnapshot;
+  // Frozen deployment trust config (Epic B3) backing concept-guard
+  // satisfaction (createTrustResolver), set once by the Runtime at tx
+  // creation. Undefined = no trust configured (every concept guard fails
+  // closed). Config identity is covered by TrustSnapshot.revision, not a
+  // separate digest input.
+  trustConfig?: CfcTrustConfig;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything

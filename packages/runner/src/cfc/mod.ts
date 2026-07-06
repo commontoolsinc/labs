@@ -87,6 +87,19 @@ export type {
   PolicySnapshot,
 } from "./policy.ts";
 export { buildCfcPolicySnapshot } from "./policy.ts";
+export type {
+  CfcConceptEdge,
+  CfcTrustConfig,
+  CfcTrustConfigInput,
+  CfcTrustStatement,
+  CfcVerifierDelegation,
+  TrustResolver,
+} from "./trust.ts";
+export {
+  buildCfcTrustConfig,
+  createTrustResolver,
+  MAX_TRUST_CLOSURE_DEPTH,
+} from "./trust.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
