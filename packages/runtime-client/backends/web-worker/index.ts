@@ -15,6 +15,7 @@ import {
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { unrefTimer } from "@commonfabric/utils/sleep";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -47,12 +48,17 @@ const LOOP_LAG_SAMPLE_MS = 100;
 const loopLagLogger = getLogger("runner.loop", { enabled: false });
 {
   let expected = performance.now() + LOOP_LAG_SAMPLE_MS;
-  setInterval(() => {
+  // Unref'd so that a unit test importing this worker entry to drive the
+  // message handler (e.g. web-worker-console-bridge.test.ts), without
+  // spawning/terminating a real worker, does not leak this interval or trip
+  // Deno's op-leak sanitizer. In a real worker it runs for the worker's
+  // lifetime as before.
+  unrefTimer(setInterval(() => {
     const now = performance.now();
     const lag = now - expected;
     if (lag > 0) loopLagLogger.time(expected, now, "workerLag");
     expected = now + LOOP_LAG_SAMPLE_MS;
-  }, LOOP_LAG_SAMPLE_MS);
+  }, LOOP_LAG_SAMPLE_MS));
 }
 
 let worker: RuntimeProcessor | undefined;
@@ -176,8 +182,12 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      // Count the reply only once it is actually posted: if postMessage throws
+      // (e.g. a non-cloneable payload) the catch below records a
+      // `responded-error/*` instead, so the ledger never double-counts one
+      // request as both a success and an error.
       self.postMessage({ msgId: message.msgId });
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
 
@@ -186,8 +196,8 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
 
@@ -198,19 +208,25 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
+      ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
     }
 
     const handleStart = performance.now();
-    const response = await worker.handleRequest(request);
-    ipcTimingLogger.time(handleStart, "handle", request.type);
+    let response;
+    try {
+      response = await worker.handleRequest(request);
+    } finally {
+      // Record handling latency whether or not the request threw, so
+      // error-heavy periods do not silently underreport it.
+      ipcTimingLogger.time(handleStart, "handle", request.type);
+    }
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    ipcLogger.debug(`responded/${request.type}`, () => []);
     self.postMessage(payload);
+    ipcLogger.debug(`responded/${request.type}`, () => []);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";
