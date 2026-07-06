@@ -1,6 +1,7 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
 import {
   CellHandle,
+  type CellRef,
   isCellHandle,
   type JSONSchema,
 } from "@commonfabric/runtime-client";
@@ -113,6 +114,40 @@ export class CellController<T> implements ReactiveController {
   private _cellUnsubscribe: (() => void) | null = null;
   private _inputTiming?: InputTimingController;
 
+  // --- Pending-local-edit tracking (early-boot wipe guard) -----------------
+  // A locally-edited value that bound state has not yet confirmed. While set,
+  // it wins over stale bound state in getValue(), so a re-render cannot
+  // repaint a pre-write snapshot over what the user just typed. Released when
+  // the echo confirms it (a delivery equal to the edit), when a post-settle
+  // delivery supersedes it, or when the binding moves to a different cell.
+  private _localEdit: { value: T } | undefined;
+  // Number of in-flight cell writes started by the default setter.
+  private _inFlightWrites = 0;
+  // Re-entrancy marker: a subscription delivery firing synchronously from our
+  // own optimistic set() (as opposed to a backend push). A local echo must not
+  // release the edit — only durable/bound state catching up may.
+  private _applyingLocalWrite = false;
+  // All writes settled but bound state never converged (e.g. a rebind swapped
+  // in a pre-write snapshot first): deliveries are FIFO, so the next one
+  // reflects post-write state and is authoritative.
+  private _settledAwaitingRelease = false;
+  // Last authoritative user-visible value. Survives same-cell rebinds so a
+  // replacement handle that has not hydrated yet (get() still undefined)
+  // does not repaint emptiness over it.
+  private _lastKnownValue: T | undefined;
+  // Whether the current subscription has received a real (asynchronous)
+  // delivery. subscribe()'s synchronous initial callback merely echoes the
+  // handle's local cache — for a freshly minted rebound handle that is
+  // "no information yet", NOT an authoritative undefined. Once any real
+  // delivery arrives, an undefined value is an authoritative clear and must
+  // repaint (it may not be masked by _lastKnownValue).
+  private _bindingHydrated = false;
+  // True only while subscribe() runs its synchronous initial callback.
+  private _subscribeEcho = false;
+  // Bumped when binding to a different persistent cell, so settle callbacks
+  // from writes against a previous binding cannot release the new one.
+  private _bindEpoch = 0;
+
   constructor(
     host: ReactiveControllerHost,
     options: CellControllerOptions<T> = {},
@@ -146,6 +181,21 @@ export class CellController<T> implements ReactiveController {
       !(this._currentValue instanceof CellHandle &&
         this._currentValue.equals(value))
     ) {
+      // equals() compares cfcLabelView, so early-boot CFC settling hands us a
+      // *fresh* handle for the same persistent cell (with a stale or
+      // not-yet-hydrated snapshot). Local-edit continuity must follow the
+      // persistent cell, not the handle: keep the tracking across a same-cell
+      // rebind, drop it when the binding moves to a different cell.
+      const samePersistentCell = this._currentValue instanceof CellHandle &&
+        value instanceof CellHandle &&
+        sameCellDoc(this._currentValue.ref(), value.ref());
+      if (!samePersistentCell) {
+        this._bindEpoch++;
+        this._localEdit = undefined;
+        this._settledAwaitingRelease = false;
+        this._lastKnownValue = undefined;
+        this._bindingHydrated = false;
+      }
       this._cleanupCellSubscription();
       // Only apply the component's schema when the CellHandle doesn't already
       // have one. Pattern-compiled $bindings (e.g. $images, $files) arrive with
@@ -168,8 +218,26 @@ export class CellController<T> implements ReactiveController {
    * Get the current value from CellHandle<T> | T
    */
   getValue(): Readonly<T> {
+    // A pending local edit wins over bound state until it is confirmed or
+    // superseded — a re-render in that window must not repaint stale state.
+    if (this._localEdit !== undefined) {
+      return this._localEdit.value as Readonly<T>;
+    }
     if (this._currentValue === undefined || this._currentValue === null) {
       return undefined as T;
+    }
+    // A same-cell rebind can install a handle that has not hydrated yet
+    // (get() still undefined). Keep showing the last known value until its
+    // first real delivery arrives instead of repainting emptiness. Once the
+    // subscription has delivered, an undefined value is an authoritative
+    // clear and must show the component's normal empty fallback.
+    if (
+      !this._bindingHydrated &&
+      isCellHandle(this._currentValue) &&
+      (this._currentValue as CellHandle<T>).get() === undefined &&
+      this._lastKnownValue !== undefined
+    ) {
+      return this._lastKnownValue as Readonly<T>;
     }
     return this.options.getValue(this._currentValue);
   }
@@ -182,12 +250,34 @@ export class CellController<T> implements ReactiveController {
 
     const oldValue = this.getValue();
 
+    if (isCellHandle(this._currentValue)) {
+      // Track the edit so stale bound-state deliveries (late hydration,
+      // partial echoes of earlier keystrokes, pre-write snapshots on rebound
+      // handles) cannot repaint over it while the write is pending.
+      this._localEdit = { value: newValue };
+      this._settledAwaitingRelease = false;
+      this._lastKnownValue = newValue;
+    }
+
     const performUpdate = () => {
-      if (this.options.transactionStrategy === "auto") {
-        this.options.setValue(this._currentValue!, newValue, oldValue);
-      } else {
-        // For manual/batch strategies, just call setValue without transaction handling
-        this.options.setValue(this._currentValue!, newValue, oldValue);
+      this._applyingLocalWrite = true;
+      try {
+        if (this.options.transactionStrategy === "auto") {
+          this.options.setValue(this._currentValue!, newValue, oldValue);
+        } else {
+          // For manual/batch strategies, just call setValue without transaction handling
+          this.options.setValue(this._currentValue!, newValue, oldValue);
+        }
+      } finally {
+        this._applyingLocalWrite = false;
+      }
+
+      // A custom setter gives no in-flight signal, so the local apply is all
+      // the confirmation we will get — release the edit right away (status
+      // quo behavior for such components). The default setter tracks its
+      // write and releases on settle instead.
+      if (this._inFlightWrites === 0) {
+        this._localEdit = undefined;
       }
 
       // Call custom change handler
@@ -233,6 +323,10 @@ export class CellController<T> implements ReactiveController {
    */
   cancel(): void {
     this._inputTiming?.cancel();
+    // A cancelled pending write abandons its local edit; bound state is
+    // authoritative again.
+    this._localEdit = undefined;
+    this._settledAwaitingRelease = false;
   }
 
   /**
@@ -288,7 +382,15 @@ export class CellController<T> implements ReactiveController {
     _oldValue: T,
   ): void {
     if (isCellHandle(value)) {
-      value.set(newValue);
+      const epoch = this._bindEpoch;
+      this._inFlightWrites++;
+      // set() resolves once the write round-trip completes (it never rejects;
+      // failures are logged and swallowed inside set()).
+      value.set(newValue).finally(() => {
+        this._inFlightWrites--;
+        if (epoch !== this._bindEpoch || this._inFlightWrites > 0) return;
+        this._releaseLocalEditAfterSettle();
+      });
     } else {
       // For non-Cell values, we can't directly modify them
       // This should be handled by the component's property system
@@ -296,25 +398,107 @@ export class CellController<T> implements ReactiveController {
     }
   }
 
+  /**
+   * All in-flight writes settled: release the pending local edit if bound
+   * state converged on it. If it did not (a same-cell rebind may have swapped
+   * in a pre-write snapshot first), keep the edit but mark that the next
+   * delivery is authoritative — deliveries are FIFO, so anything arriving
+   * after the write settled reflects post-write state.
+   */
+  private _releaseLocalEditAfterSettle(): void {
+    if (this._localEdit === undefined) return;
+    const raw = isCellHandle(this._currentValue)
+      ? (this._currentValue as CellHandle<T>).get()
+      : undefined;
+    if (raw !== undefined && deepValueEqual(raw, this._localEdit.value)) {
+      this._localEdit = undefined;
+    } else {
+      this._settledAwaitingRelease = true;
+    }
+  }
+
   private _setupCellSubscription(): void {
     if (isCellHandle(this._currentValue)) {
       let previousValue: T | undefined;
-      this._cellUnsubscribe = this._currentValue.subscribe((newValue) => {
-        // Call onChange when the cell value changes from the backend
-        // This ensures components like cf-select can update their DOM state
-        const typedNewValue = newValue as T | undefined;
-        if (typedNewValue !== previousValue) {
-          const oldValue = previousValue;
-          previousValue = typedNewValue;
-          if (oldValue !== undefined || typedNewValue !== undefined) {
-            this.options.onChange(typedNewValue as T, oldValue as T);
+      this._bindingHydrated = false;
+      this._subscribeEcho = true;
+      try {
+        this._cellUnsubscribe = this._currentValue.subscribe((newValue) => {
+          // Call onChange when the cell value changes from the backend
+          // This ensures components like cf-select can update their DOM state
+          const typedNewValue = newValue as T | undefined;
+          if (!this._subscribeEcho) this._bindingHydrated = true;
+          const suppressed = this._classifyDelivery(typedNewValue);
+          if (!suppressed && typedNewValue !== previousValue) {
+            const oldValue = previousValue;
+            previousValue = typedNewValue;
+            if (oldValue !== undefined || typedNewValue !== undefined) {
+              this.options.onChange(typedNewValue as T, oldValue as T);
+            }
+          } else if (suppressed) {
+            // Keep the raw-stream bookkeeping coherent without announcing a
+            // value the UI never showed.
+            previousValue = typedNewValue;
           }
-        }
-        if (this.options.triggerUpdate) {
-          this.host.requestUpdate();
-        }
-      });
+          if (this.options.triggerUpdate) {
+            this.host.requestUpdate();
+          }
+        });
+      } finally {
+        this._subscribeEcho = false;
+      }
     }
+  }
+
+  /**
+   * Decide how a subscription delivery interacts with a pending local edit.
+   * Returns true when the delivery is a stale snapshot that must neither
+   * repaint nor be announced over the user's pending edit.
+   */
+  private _classifyDelivery(value: T | undefined): boolean {
+    if (this._localEdit === undefined) {
+      if (value !== undefined) {
+        this._lastKnownValue = value;
+      } else if (this._bindingHydrated) {
+        // An authoritative clear (a real delivery of undefined, not the
+        // no-information initial echo of a fresh handle): forget the last
+        // known value so a later same-cell rebind cannot resurrect it.
+        this._lastKnownValue = undefined;
+      }
+      return false;
+    }
+    if (this._applyingLocalWrite) {
+      // Our own optimistic apply echoing back synchronously. Deliver it as
+      // before, but a local echo does not confirm the edit — only bound state
+      // catching up (below) or the write settling may release it.
+      if (value !== undefined) this._lastKnownValue = value;
+      return false;
+    }
+    if (value !== undefined && deepValueEqual(value, this._localEdit.value)) {
+      // Bound state caught up with the edit — the echo confirmed it.
+      this._localEdit = undefined;
+      this._settledAwaitingRelease = false;
+      this._lastKnownValue = value;
+      return false;
+    }
+    if (
+      this._settledAwaitingRelease &&
+      (value !== undefined || this._bindingHydrated)
+    ) {
+      // Writes settled without converging; deliveries are FIFO, so this one
+      // reflects post-write state and supersedes the local edit — whether a
+      // genuinely newer remote edit or an authoritative clear (the edit was
+      // lost). A fresh rebound handle's initial undefined echo carries no
+      // information and does not release.
+      this._localEdit = undefined;
+      this._settledAwaitingRelease = false;
+      this._lastKnownValue = value;
+      return false;
+    }
+    // Stale pre-write snapshot: late hydration, the partial echo of an
+    // earlier keystroke, or a rebound handle's initial state. The local edit
+    // wins until the echo confirms or a post-settle value supersedes it.
+    return true;
   }
 
   private _cleanupCellSubscription(): void {
@@ -323,6 +507,49 @@ export class CellController<T> implements ReactiveController {
       this._cellUnsubscribe = null;
     }
   }
+}
+
+/**
+ * Whether two refs address the same persistent cell (same document, space,
+ * scope and path), ignoring schema and cfcLabelView — the ref parts that
+ * drift across re-renders while CFC label views settle. `CellHandle.equals()`
+ * is stricter (it compares cfcLabelView), which is exactly why a drift-driven
+ * rebind replaces the bound handle; local-edit continuity must follow the
+ * persistent cell instead. Scope matters: user-/session-scoped cells are
+ * partitioned storage, so a same-id ref with a different scope is a
+ * different cell.
+ */
+function sameCellDoc(a: CellRef, b: CellRef): boolean {
+  return a.id === b.id && a.space === b.space && a.scope === b.scope &&
+    a.path.length === b.path.length &&
+    a.path.every((segment, index) => segment === b.path[index]);
+}
+
+/**
+ * Structural equality for confirming a local edit against a delivered cell
+ * value (plain JSON-ish data; CellHandles compare by identity only).
+ */
+function deepValueEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a instanceof CellHandle || b instanceof CellHandle) return false;
+  if (
+    a === null || b === null || typeof a !== "object" || typeof b !== "object"
+  ) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((item, index) => deepValueEqual(item, b[index]));
+  }
+  const aKeys = Object.keys(a);
+  const bObj = b as Record<string, unknown>;
+  if (aKeys.length !== Object.keys(bObj).length) return false;
+  return aKeys.every((key) =>
+    Object.hasOwn(bObj, key) &&
+    deepValueEqual((a as Record<string, unknown>)[key], bObj[key])
+  );
 }
 
 /**
