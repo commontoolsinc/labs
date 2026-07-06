@@ -1,7 +1,9 @@
 # Server-Primary Execution
 
 Status: design exercise — approaches explored, decision pending. Author:
-design session 2026-07-06. No implementation in this spec.
+design session 2026-07-06; revised same day after review (dual handler
+execution as the event end-state, scoped derivation on the executor as the
+end-state, state-residency §6.7). No implementation in this spec.
 
 Related specs: `docs/specs/scheduler-v2/`,
 `docs/specs/persistent-scheduler-state.md`, `docs/specs/pull-based-scheduler/`,
@@ -28,7 +30,11 @@ executor**. Clients send only the updates that originate from user intent
 (typically UI events), speculatively execute derived data locally for
 latency, and never push derived results. The server — co-located with the
 SQLite store — keeps every "running" piece current, performs all async work,
-and feeds clients changes.
+and feeds clients changes. A third motivation joins races and cost: **trust
+asymmetry** — the server is more trustworthy than any client, so
+executor-computed results are the basis for downstream integrity guarantees
+about derived data (§5.B.7), which client-computed results can never
+honestly provide.
 
 Four approaches are explored in depth:
 
@@ -38,16 +44,18 @@ Four approaches are explored in depth:
 - **B — Derived-authority split** (the proposed model): clients commit only
   event-driven (source) writes; the server is the sole writer of derived
   data and the sole async executor; clients speculate derived state locally
-  as a presentation-layer overlay.
+  as a never-committed overlay.
 - **C — Event shipping**: clients ship signed event envelopes; the server
-  runs handlers too. Total per-space serialization; largest protocol and
-  identity lift.
+  runs handlers too, authoritatively, while clients keep running them
+  speculatively. Total per-space serialization; largest protocol and
+  identity lift; adopted as the end-state for events.
 - **D — Thin projector**: no client execution at all; the server computes
   everything including VNode docs; clients materialize DOM.
 
 **Recommendation: land A as the enabling milestone, then B as the target
-model, keeping C's event envelope as a later opt-in for contended handlers.**
-B matches the product need (races on derived data disappear structurally;
+model, evolving events to dual execution — the handler runs on the server
+authoritatively and on the client speculatively (C's machinery) — as the
+end-state.** B matches the product need (races on derived data disappear structurally;
 async is reliable; clients keep instant local feedback), reuses today's
 commit/conflict machinery for the remaining genuine contention on source
 writes, and can fall back to today's behavior per space via a flag. D is not
@@ -232,9 +240,10 @@ only externally-reachable cells become docs.
 Caveats that matter here (G8): the cross-space pull-amplification loop
 (~226–270× re-sync on reader-isolated cross-space docs) and the F4 I/O
 coalescing conflict ratchet both currently gate RI default-on; **scoped
-(PerUser/PerSession) outputs are excluded from interpretation by design** —
-which happens to align with this design's split (§5.B.6: user/session-scoped
-derivation stays on clients). RI is an *optimizer* for the executor, not a
+(PerUser/PerSession) outputs are excluded from interpretation today** —
+tolerable during the transitional carve-out (§5.B.6) but a real gap for the
+end-state, where scoped derivation runs on the executor precisely because
+its integrity matters most (G16). RI is an *optimizer* for the executor, not a
 prerequisite: every approach below works with the compiled path first.
 
 ### 3.5 Deliberately not assumed
@@ -335,7 +344,7 @@ cold spaces with pending timers/imports).
 | Direct UI-binding writes (`$value` etc.)      | client commits   | they are user intent |
 | Computation / materializer (derived) writes   | **server only**  | client computes them into a local, never-committed overlay |
 | Async builtin request/result writes           | **server only**  | client renders `pending` state; server writes results |
-| PerSession / PerUser-scoped derived writes    | client commits   | carve-out, see B.6 |
+| PerSession / PerUser-scoped derived writes    | client commits (transitional) | executor-computed in a later phase, see B.6 |
 
 The server executor (§6) is the sole committer of space-scoped derived
 data. Clients keep running the derived graph *locally* for latency, but
@@ -368,27 +377,31 @@ computation/materializer transactions commit through the in-process engine
 action — which is exactly `observedAtSeq` from the persistent-observation
 work, surfaced onto the commit (G4/G10).
 
-#### B.3 Handler reads and the speculation boundary
+#### B.3 Handler reads: today's semantics, then dual execution
 
-The subtle spot in B: what may a *handler* read? Two policies:
+Handlers keep today's optimistic semantics, which are already correct for
+this model: a handler runs against the client's local state; if that state
+was outdated, the commit fails conflict detection, and the client retries
+once caught up, then succeeds. Nothing new is built for B here — the
+existing conflict/retry machinery
+(`packages/runner/src/scheduler/events.ts`, retry budget + `readyToRetry`)
+*is* the speculation guard.
 
-- **B-strict (recommended initially): speculation is presentation-only.**
-  Handler transactions read confirmed state (client's replica of
-  server-committed derived data + its own pending source writes), never the
-  overlay. Consequence: today's conflict machinery remains sound unchanged
-  — a handler that read derived data at seq S conflicts iff the server has
-  since recomputed it, and retries against fresh state. Cost: in chained
-  interactions (click → derived value updates → next click depends on it),
-  the second click sees the derived value only after the server round-trip
-  (~10–50ms in practice: commit + settle + feed push). UI *display* is
-  still instant via the overlay.
-- **B-optimistic (later, optional): handlers may read the overlay.** The
-  commit then carries "assumed derived reads" — (path, value-hash) pairs —
-  and the server parks the event until its own derived computation reaches
-  the client's source watermark, then validates the hashes; mismatch
-  rejects the commit and the client replays the handler (this is
-  event-shipping-lite, and the parking machinery is #4427's). Only worth
-  building if B-strict's chained-interaction latency actually bites.
+One residual window is accepted knowingly: a handler may read an
+overlay-derived value the server has not computed yet (a prediction), and
+its source write can be admitted before the server's recompute lands —
+conflict detection can only compare against *committed* state. This is the
+same class of optimistic bet the system already makes; it self-heals (the
+server's recompute overwrites, downstream re-settles) and is counted, not
+prevented.
+
+The end-state closes the window structurally: **the event ships to the
+server and the handler runs on both sides** — the server's run is
+authoritative (it reads authoritative derived state by construction), the
+client's run is the speculative part, reconciled by the event's durable ID
+(#4088) and its ack. That is approach C's machinery (§5.C), adopted as the
+target for events rather than an escape hatch; B is the intermediate state
+in which only the handler's *writes* ship, not the event itself.
 
 #### B.4 Reconciliation protocol
 
@@ -427,27 +440,46 @@ the request cells so an executor restart resumes or re-issues
 deterministically (G12: streaming partials need either idempotent re-issue
 or durable chunk append; recommend re-issue for v1).
 
-#### B.6 The scope carve-out (PerUser / PerSession)
+#### B.6 Scoped state (PerUser / PerSession): transitional carve-out, not the end-state
 
 Reader isolation is a storage-partition + ACL property (`user:<did>`,
-`session:<id>`), not a CFC-label property. A space executor must not (and
-cannot, without new grants) read user partitions. Therefore:
+`session:<id>`), not a CFC-label property, so a space executor cannot read
+user partitions without new grants. The **end-state is that the executor
+computes scoped derivations too**: the trust-asymmetry goal (§5.B.7) wants
+*all* derived data — including user-scoped — to be executor-computed so
+its integrity can be endorsed for downstream consumers. Leaving scoped
+derivation on clients permanently would put the integrity hole exactly
+where the most personal data lives. That is more machinery, so it phases:
 
-- **PerSession-scoped derivation stays client-executed and
-  client-committed** (its natural home; sessions are client-lifetime).
-- **PerUser-scoped derivation** (v1): stays client-executed, committed by
-  the user's own clients as today. Races within one user's tabs are the
-  only residual derived races, same-user and rare. (v2 option: per-user
-  delegated executor sessions — §9 G3 — only if user-scoped server
-  execution proves necessary, e.g. for a user with zero open clients.)
-- The RI already refuses to interpret scoped outputs, and the scheduler
-  already treats scope as part of the address, so the graph partitions
-  cleanly: the executor's demand roots simply do not include scoped
-  subtrees.
+- **Space-scoped only (initial B).** Scoped derivation stays
+  client-executed and client-committed as today; the executor's demand
+  roots exclude scoped subtrees (the scheduler already treats scope as
+  part of the address, so the graph partitions cleanly). Races within one
+  user's own tabs are the only residual derived races. In this phase the
+  executor's identity story is minimal: one principal + one WRITE grant
+  per space (G1/G2) — no impersonation, no delegation chains, no event
+  signatures.
+- **User-scoped on the executor.** Requires delegated read/write grants on
+  `user:<did>` partitions — granted by the *user*, not the space owner
+  (G3) — and per-user demand roots inside the space worker (or per-user
+  sub-sessions of it). This is where G3's delegation machinery enters B's
+  own roadmap rather than being C-only.
+- **Session-scoped on the executor.** Natural once events ship down
+  (§5.B.3 end-state): the event stream carries session identity, so the
+  executor can maintain live per-session subtrees for connected sessions;
+  session state of *disconnected* sessions has no consumers by
+  construction.
 
-This carve-out is what makes B's identity story small: the executor needs
-one identity + one WRITE grant per space (G1/G2), no impersonation, no
-delegation chains, no event signatures.
+Two consequences elsewhere in the stack:
+
+- The RI currently refuses to interpret scoped outputs. As a client-side
+  fallback that was tolerable; for the executor it is a real gap — scoped
+  derivation is precisely where trusted execution is wanted — so RI
+  scoped-output interpretation graduates from design exclusion to work
+  item (G16).
+- Executor-computed scoped writes need the same endorsement treatment as
+  space-scoped ones (§5.B.7): the integrity claim is "computed by the
+  trusted executor from these inputs", regardless of scope.
 
 #### B.7 Identity and CFC
 
@@ -462,6 +494,17 @@ delegation chains, no event signatures.
 - New: mint a **first-class executor principal** per deployment (precedent:
   the constant `cf-compiler` atom), granted per space by owners on opt-in;
   its writes are attributable and revocable (G1, G2).
+- **Integrity endorsement of computations.** Because the executor is more
+  trustworthy than any client, its derived commits can mint an endorsement
+  atom — *executor-computed* — analogous to `LlmDerived` /
+  `ExternalIngest`, carrying the producing action identity and the input
+  watermark. Downstream consumers (other patterns, egress gates, and
+  verifiable-execution receipts later) can then *require*
+  executor-computed integrity for sensitive flows — a claim
+  client-computed derived data could never honestly make. This is a
+  first-class reason for server-primary execution, not a side effect
+  (G1 extends to cover the atom), and it is why scoped derivation must
+  eventually move to the executor too (§5.B.6).
 - Trusted-event gates (`uiContract`) still fire on clients, where the DOM
   events are — B never needs a serialized event proof.
 
@@ -545,17 +588,23 @@ the event's ack (durable event IDs from #4088 give the ack identity).
   *before* the handler runs; speculation hides it for display, but any
   external effect of the handler (async kick-off) waits.
 - PerSession state referenced by handlers must be readable server-side —
-  contradicts the session partition (would need session-state shipping in
-  the envelope or the B.6 carve-out applied to handlers, i.e. some handlers
-  stay client-run — at which point C degenerates into B + envelopes).
+  solvable once the executor maintains live per-session subtrees for
+  connected sessions (§5.B.6's final phase, which the event stream itself
+  enables by carrying session identity); until then, session-heavy
+  handlers stay client-run.
 
-**Verdict.** Not the next step. C is the right *escape hatch for contended
-handlers* — a handler marked `serialize: "server"` whose events ship as
-envelopes while the rest of the space runs mode B — and the envelope is
-independently valuable for headless/API-driven clients and for
-verifiable-execution receipts later. Design the envelope format alongside B
-(so `queueEvent`'s durable IDs and provenance survive serialization), build
-it when a use case forces it.
+**Verdict.** Not the next step, but the **end-state for events**: the
+target model is dual execution — the event ships to the server, the
+handler runs there authoritatively *and* on the client speculatively, the
+client's run reconciled by the event's durable ID and ack (§5.B.3). Dual
+execution is also what closes B's residual speculation window and, via the
+session identity the event stream carries, unlocks session-scoped
+execution (§5.B.6). Sequencing is unchanged — B first, because dual
+execution needs everything B builds plus the envelope. Design the envelope
+format alongside B (so `queueEvent`'s durable IDs and provenance survive
+serialization); adopt per-handler (`serialize: "server"` for contended
+handlers, headless/API clients) as the on-ramp before it becomes the
+default event path.
 
 ---
 
@@ -695,6 +744,53 @@ executor's own cross-space reads).
   concern; single-writer-per-space makes it embarrassingly shardable by
   space DID (G14 notes the coordination primitive).
 
+### 6.7 State residency: what lives in memory vs on disk
+
+The scheduler state that replaces subscriptions exists in three tiers with
+different residency and different correctness weight:
+
+1. **Live tier — memory, per active space worker.** Node records, trigger
+   index, liveness refcounts, gate timers. Authoritative *while hot*; this
+   is what evaluates invalidations and drives the feed for connected
+   sessions. Lost on worker crash or hibernation, by design.
+2. **Durable tier — SQLite, transaction-coupled.** The observation rows
+   (reads / writes / `observedAtSeq` / gate options per action,
+   `packages/runner/src/scheduler/persistent-observation.ts:22`) plus the
+   doc→action reverse index (G4), written in the same transaction as the
+   commits they describe. Three consumers: rehydration on spin-up,
+   wake-on-commit (the engine answers "does this commit make any parked
+   piece stale?" with one indexed lookup, no worker running), and the
+   derived-from watermark on commits (§5.B.4).
+3. **Session tier.** The delivery cursor (`seenSeq`) is already durable in
+   the session-resume sense. The per-session **interest declaration**
+   (space + piece ids) is persisted with the session; the derived doc-id
+   **closure is deliberately not persisted** — it is recomputed on session
+   open from the declaration plus tier 2 (or the live scheduler when the
+   space is hot), because closures churn with every read-delta and the
+   durable read index is already their source of truth.
+
+Rules that keep this sound:
+
+- **Disk is an index of ground truth, not ground truth.** Commits and
+  revisions remain the durable record; observations are a
+  transaction-coupled projection of them. Because observation writes ride
+  the same commit, the reverse index can never be ahead of or behind the
+  data it indexes.
+- **Fail-open to recompute.** Missing, stale, or corrupt observations
+  degrade to re-running actions (the persistent-scheduler-state spec's
+  invariant: never incorrect cleanliness, at worst wasted recompute). The
+  live tier is therefore always rebuildable: worker crash → rehydrate from
+  tier 2; tier 2 damaged → cold re-run, i.e. today's behavior.
+- **Per-commit work stays memory-resident for hot spaces.** Feed fan-out
+  consults in-memory per-session doc-sets; the disk index is consulted
+  per-commit only on the cold path (no worker, no sessions — the
+  wake-on-commit lookup), a single indexed read (µs-scale; reads are
+  synchronous FFI).
+- **Growth and compaction.** Observations are last-write-wins per
+  `actionId` (keep latest; no history requirement); no-op observations are
+  batch-elided (`schedulerObservationBatch`, planned in the spec); a
+  space's rows drop wholesale with the space.
+
 ---
 
 ## 7. Comparison and recommendation
@@ -705,17 +801,18 @@ executor's own cross-space reads).
 | Removes redundant N× compute | no | yes (client compute optional) | yes | yes |
 | Async reliability | **yes** | yes | yes | yes |
 | Input→display latency | today | today (overlay) | today (speculation) | +RTT |
-| Chained handler reads | today | RTT under B-strict | authoritative | authoritative |
+| Chained handler reads | today | today's retry semantics | authoritative | authoritative |
 | Client cold start | today | fast (server state first, warm later) | fast | **fastest** |
 | Subscription serving cost | today | set-membership feed | set-membership feed | set-membership feed |
-| New identity machinery | WRITE grant | WRITE grant + executor principal | + signed envelopes + delegation | same as C |
+| New identity machinery | WRITE grant | executor principal + WRITE grant (+ user-partition delegation in the scoped phase) | + signed envelopes | same as C |
 | CFC surface touched | none | none new (labels data-derived) | trusted-event + acting-as | same as C |
 | Runner changes | small | **write split + overlay (G5)** | + event serialization | + render split |
 | Offline degradation | today | graceful (flag back per space) | needs envelope queue | poor |
 | Incremental deliverability | **high** | high (per-space flag) | medium | low |
 | Revertibility | trivial | per-space flag | protocol migration | protocol migration |
 
-**Recommendation.** A → B, with C's envelope designed (not built) alongside:
+**Recommendation.** A → B → scoped execution → dual handler execution,
+with C's envelope designed (not built) from the start:
 
 1. **A** builds the executor pool, in-process provider, interest registry,
    executor identity/grants, and async ownership — all §6 — with zero
@@ -723,10 +820,15 @@ executor's own cross-space reads).
 2. **B** flips derived authority per space behind a flag once the §9
    runner gaps close. It removes the races the whole exercise is about
    while keeping today's wire shapes and CFC model essentially intact.
-3. **C-envelope** as a designed format from day one (so durable event IDs
-   and provenance are serialization-ready), implemented later for
-   contended handlers, headless clients, and verifiable-execution receipts.
-4. **D-projector** as a boot *mode* riding B (server-computed state first
+3. **Scoped execution** extends B to user-scoped derivation via delegated
+   grants (G3), then session-scoped once events ship — closing the
+   integrity hole rather than leaving a permanent client-computed
+   carve-out (§5.B.6).
+4. **C — dual handler execution** as the end-state for events: envelope
+   designed from day one (durable event IDs and provenance
+   serialization-ready), adopted per-handler, then as the default event
+   path.
+5. **D-projector** as a boot *mode* riding B (server-computed state first
    paint), contingent on the RI/VNode consolidation landing.
 
 ---
@@ -747,17 +849,21 @@ RI (#4514) accelerates but does not gate any phase.
   latency ≈ today's watch latency.
 - **Phase 2 — Approach B per-space flip.** Runner write split + overlay
   (G5); derived-from watermark on commits (G10); builtin passive mode;
-  scope carve-out enforcement (executor demand roots exclude scoped
-  subtrees). Flip flagged spaces; measure conflict rate (expect ≈0 derived
-  conflicts), multi-client action volume (expect ~1×), divergence counter.
-  Fallback: per-space flag back to legacy mode.
+  transitional scope carve-out enforcement (executor demand roots exclude
+  scoped subtrees). Flip flagged spaces; measure conflict rate (expect ≈0
+  derived conflicts), multi-client action volume (expect ~1×), divergence
+  counter. Fallback: per-space flag back to legacy mode.
 - **Phase 3 — subscriptions retired + projector boot.** Executor-served
   spaces drop `session.watch` graph queries entirely; cold clients paint
   from server state before local warm-up; projector mode where VNode docs
   exist.
-- **Phase 4 — optional C.** Signed event envelopes for `serialize:
-  "server"` handlers; delegation tokens if per-user server execution
-  becomes necessary (G3).
+- **Phase 4 — scoped execution.** User-partition delegation (G3) +
+  per-user demand roots; executor endorsement atom on scoped writes; RI
+  scoped-output interpretation (G16) if RI is the executor engine by then.
+- **Phase 5 — dual handler execution (C).** Signed event envelopes
+  (`serialize: "server"` handlers first, then the default event path);
+  the server runs handlers authoritatively while clients keep running them
+  speculatively; session-scoped execution rides the event stream.
 
 ---
 
@@ -769,9 +875,9 @@ means a design doc/decision is required before implementation.
 | # | Gap | Blocks | Status |
 | --- | --- | --- | --- |
 | G0 | Executor-grade in-process storage provider (engine-thread channel; commit-stream invalidations instead of watch) | A | needs-impl; `loopback` + `emulate` prove the seam |
-| G1 | First-class executor principal (mintable, attributable; `cf-compiler`-atom precedent) | A | needs-spec (small) |
+| G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal), B (atom) | needs-spec (small) |
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
-| G3 | Delegation/capability tokens (user → executor, scoped) | C, per-user server exec only | needs-spec (large); **not needed for B** |
+| G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
 | G4 | Persistent-state memory tables + commit-pipeline wiring + doc→action reverse read/write index (spec §9) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
 | G5 | Runner write split: route tx by originating action kind; speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
 | G6 | Builtin-internal / schema-less writes carry no `patternIdentity`/action provenance on stored results | catch-up completeness | known source-linking gap; needs-impl |
@@ -781,32 +887,35 @@ means a design doc/decision is required before implementation.
 | G10 | Watermark surfacing: `observedAtSeq` onto derived commits; confirmation already returns source seq | B reconciliation | small, rides G4 |
 | G11 | Server-side async policy: per-space egress/throttle (#2659), retry/circuit-breaker, in-flight registry keyed `(actionId, inputHash)`, heartbeat/reclaim | A | partial (idempotency keys, toolshed LLM cache exist); needs-impl |
 | G12 | Durable LLM streaming (re-issue vs chunk append on executor restart) | A polish | needs-decision (recommend re-issue v1) |
-| G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 4 | C | needs-spec; request-proof precedent exists |
+| G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |
 | G14 | Multi-executor coordination (space→executor affinity lease) | multi-machine scale | needs-spec later; single-writer-per-space makes it a lease, not consensus |
 | G15 | Client pending-commit durability (true offline) | orthogonal | out of scope here; noted |
+| G16 | RI scoped-output interpretation (excluded by design today; required once the executor computes scoped derivations) | scoped execution on RI | needs-design in RI v2 |
 
 Cross-engine idempotency (the intent/attempt-cell ledger from
 `cfc-runner-future-work.md` Tier 2) is deliberately *not* listed as a B
 blocker: under B a derived action runs on exactly one engine (the space
 executor), and handler re-execution stays client-side under today's retry
-semantics. It becomes relevant with C and with executor failover (G14).
+semantics. It becomes relevant with executor failover (G14); under dual
+handler execution the client's speculative run never commits, so the
+single authoritative run per event is preserved.
 
 ## 10. Open questions
 
-1. **B-strict vs B-optimistic default (§5.B.3):** accept the round-trip on
-   chained handler reads initially, or invest in assumed-read validation
-   early? Proposal: B-strict, instrument chained-read latency, decide on
-   data.
+1. **When does dual handler execution become the default event path
+   (§5.B.3)?** Per-handler opt-in is the on-ramp; the trigger for flipping
+   the default (contention data, headless-client demand, integrity
+   requirements on handler writes) should be named in advance.
 2. **Interest granularity (§6.3):** per-piece is proposed; is per-space
    ("serve everything running here") acceptable for v1 given typical space
    sizes, or do large spaces need per-piece from day one?
 3. **Executor identity per deployment vs per space (§9 G1):** one principal
    simplifies ops; per-space principals improve blast-radius and audit.
    Proposal: one principal, per-space grants.
-4. **PerUser derivation with zero online clients:** acceptable to leave
-   stale until the user connects (proposed), or does some product surface
-   (notifications, shared views reading through user data) force per-user
-   delegated execution earlier (G3)?
+4. **Shape of user-partition delegation (G3):** a standing grant (user →
+   executor, revocable, per space) vs short-lived tokens minted at session
+   time; and does user-scoped execution get its own sub-worker per user or
+   per-user demand roots inside the space worker?
 5. **Where does the executor pool live long-term:** inside toolshed
    (co-process, simplest) vs a sibling service with the engine extracted
    behind the in-process channel? Phase 1 forces no commitment; the
