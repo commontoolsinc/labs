@@ -162,3 +162,40 @@ coordinator's tx (content read deliberately journaled — it IS the taint),
 handing subsequent changes to the pointwise per-element effects. Coarse
 first stamp, pointwise refinement — exactly legacy's labeling contract,
 plus one-pass first settle.
+
+## D-V2-TRANSIENT-COLLECTIONS — segment-resident map/filter/flatMap for value-consumed outputs (user, 2026-07-06)
+
+A collection op whose output is TRANSIENT — consumed only by interpreted
+ops, never retained (result tree, boundary refs, effect writeTargets,
+transitively-retained constructs) — evaluates IN-MEMORY inside its
+segment: no container doc, no per-element docs, no coordinator. Only
+retained outputs keep the materialized inline coordinators (they are the
+incremental-update path). This is the collection analogue of
+D-V2-PURE-PATTERN-INLINE's consumed-as-value analysis, and the common
+chained case (`items.filter(..).map(..)` where only the final result is
+kept) collapses every intermediate stage to zero documents.
+
+Mechanics:
+- Eligibility: element ROG fully inlinable (same test as the inline
+  coordinators); `usesArray` initially refused (follow-up: in-memory has
+  the whole list, so it becomes supportable later).
+- Retention fixpoint: extend the value-consumed walk to collection
+  candidates; an ADMITTED candidate stops retaining its list input, so
+  chains cascade (recompute until stable — monotone, terminates).
+- evalRog gains the `collection` case (today `NotInterpretedHere`):
+  map = element-ROG result per item; filter = keep ORIGINAL item on
+  truthy predicate; flatMap = concat (UNLOCKED here — the materialized
+  blocker was slot re-keying under data-dependent element lengths; in
+  memory there are no slots).
+- Semantics pinned by differentials, not assumption: undefined list,
+  sparse holes, empty results — the in-memory view must match what a
+  legacy downstream leaf READS from the container doc (doc-normalized),
+  same discipline as non_fixed_point_const.
+- CFC: sound by construction — the segment's journaled deep list read
+  joins element labels into the per-tx J; there is no container shape to
+  stamp (the membership-taint obligation attaches only to MATERIALIZED
+  filter output, which keeps the batch-first-pass coordinator).
+- Reactivity: the segment's deep list read re-runs it wholesale on any
+  element change — the deliberate trade for transient outputs (in-memory
+  recompute, no doc round-trips) vs the materialized path's per-element
+  incrementality for kept outputs.
