@@ -13,6 +13,7 @@ type StoredEntry = {
   path: string[];
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
+  observes?: string;
 };
 
 // S16 phase B: pointwise label precision is a structural fact of the
@@ -619,11 +620,15 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(after).toContainEqual("alice-secret");
     expect(after).toContainEqual("bob-secret");
     expect(after).toContainEqual("carol-secret");
-    // re-stamped, not duplicated: exactly one structure entry at the root
-    const structureEntries = entriesOf(containerId).filter(
-      (e) => e.origin === "structure" && e.path.length === 0,
+    // Re-stamped, not duplicated: exactly one MEMBERSHIP (enumerate) entry
+    // at the root. The frozen existence entry (observes:"shape", #4546)
+    // coexists beside it and is not touched by the re-stamp.
+    const membershipEntries = entriesOf(containerId).filter(
+      (e) =>
+        e.origin === "structure" && e.path.length === 0 &&
+        e.observes === "enumerate",
     );
-    expect(structureEntries.length).toBe(1);
+    expect(membershipEntries.length).toBe(1);
   });
 
   // flatMap gets the same structural-taint treatment as filter: the result
@@ -688,5 +693,110 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     );
     expect(sc).toContainEqual("alice-secret");
     expect(sc).toContainEqual("bob-secret");
+  });
+
+  // Replace-from-criteria, the narrowing direction (§8.12.8-normative per
+  // #4546): when the selection criteria change on a reconcile with NO value
+  // write (result stays []), the membership (enumerate) entry is re-derived
+  // from the new criteria alone — the departed candidate's atom leaves. The
+  // frozen existence entry (observes "shape") keeps the creation join,
+  // untouched by the re-stamp. This is the coordinator-level pin of the
+  // no-write path; #4546's A3 test covers the persist layer.
+  it("filter: membership replaces from criteria on a no-write re-stamp; frozen existence keeps the creation join", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "rp-el-0", { n: 1 }, "dave-secret");
+    await seedLabeledDoc(runtime, "rp-el-1", { n: 2 }, "erin-secret");
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, lift } = commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: (fn: (value: { n: number }) => unknown) => (
+        value: unknown,
+      ) => unknown;
+    };
+    // Reads element content, drops everything: the result stays [] across
+    // membership changes, so the re-stamp rides the declared-container path
+    // (no container value write to piggyback on).
+    const dropAll = lift((value: { n: number }) => value.n < 0);
+
+    const setup = runtime.edit();
+    const d0 = runtime.getCell(space, "rp-el-0", undefined, setup);
+    const d1 = runtime.getCell(space, "rp-el-1", undefined, setup);
+    const listCell = runtime.getCell(
+      space,
+      "rp-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      setup,
+    );
+    listCell.set([d0]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
+      const kept = (values as unknown as {
+        filterWithPattern: (op: unknown, params: unknown) => unknown;
+      }).filterWithPattern(
+        pattern(({ element }: FactoryInput<any>) => dropAll(element)),
+        {},
+      );
+      return { kept };
+    });
+
+    const tx = runtime.edit();
+    const valuesIn = runtime.getCell(space, "rp-list", undefined, tx);
+    const resultCell = runtime.getCell(space, "rp-result", undefined, tx);
+    const result = runtime.run(
+      tx,
+      collectionPattern,
+      { values: valuesIn },
+      resultCell,
+    );
+    await tx.commit();
+    await result.pull();
+    await runtime.idle();
+
+    const containerId = resolvedContainerId(result.key("kept"));
+    const rootEntries = () =>
+      entriesOf(containerId).filter(
+        (e) => e.origin === "structure" && e.path.length === 0,
+      );
+    const membership = () =>
+      rootEntries()
+        .filter((e) => e.observes === "enumerate")
+        .flatMap((e) => e.label.confidentiality ?? []);
+    const frozenShape = () =>
+      rootEntries()
+        .filter((e) => e.observes === "shape")
+        .flatMap((e) => e.label.confidentiality ?? []);
+
+    expect(membership()).toContainEqual("dave-secret");
+    expect(frozenShape()).toContainEqual("dave-secret");
+
+    // Swap the sole candidate: the result stays [] (no container value
+    // write), the predicate now reads erin only.
+    const stx = runtime.edit();
+    const lc = runtime.getCell(
+      space,
+      "rp-list",
+      { type: "array", items: { asCell: ["cell"] } },
+      stx,
+    );
+    lc.set([d1]);
+    expect((await stx.commit()).ok).toBeDefined();
+    await result.pull();
+    await runtime.idle();
+
+    const after = membership();
+    expect(after).toContainEqual("erin-secret");
+    expect(after).not.toContainEqual("dave-secret");
+    // The frozen existence entry is never touched by the re-stamp.
+    expect(frozenShape()).toContainEqual("dave-secret");
+    expect(frozenShape()).not.toContainEqual("erin-secret");
   });
 });
