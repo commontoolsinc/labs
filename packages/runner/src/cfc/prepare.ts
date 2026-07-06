@@ -3930,14 +3930,21 @@ export const prepareBoundaryCommit = (
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
-      // Shape-class (existence) entries survive every overwrite of a
-      // still-existing path (freeze-at-creation): not the flow-clear, not
-      // a link write replacing the slot, not a declared re-mint. Known
-      // residual: deletion leaves the frozen entry in place (over-taint)
-      // and re-creation keeps it instead of re-minting at the re-creating
-      // join — re-mint-on-recreation needs per-path previousValue
-      // plumbing.
-      if (entry.observes === "shape") {
+      // RUNTIME-MINTED shape-class (existence) entries survive every
+      // overwrite of a still-existing path (freeze-at-creation): not the
+      // flow-clear, not a link write replacing the slot, not a declared
+      // re-mint. Origin-scoped to derived/structure: a DECLARED
+      // observes:"shape" entry is policy, not measurement — it keeps the
+      // declared component's own discipline (grow-only re-mint through
+      // the schema walk) and must not be captured by the freeze carry
+      // (review on this PR). Known residual: deletion leaves the frozen
+      // entry in place (over-taint) and re-creation keeps it instead of
+      // re-minting at the re-creating join — re-mint-on-recreation needs
+      // per-path previousValue plumbing.
+      if (
+        (entry.origin === "derived" || entry.origin === "structure") &&
+        entry.observes === "shape"
+      ) {
         persistedLabelEntries.push({
           path: entryPath,
           label: cloneLabel(entry.label),
@@ -4160,7 +4167,12 @@ export const prepareBoundaryCommit = (
         // pushed above wins, and later writes to a still-existing path add
         // no existence information (a writer conditional on existence
         // journals that observation itself, §8.10.1/§8.9.2).
+        // Only a runtime-minted existence entry suppresses the mint: a
+        // DECLARED observes:"shape" entry is store policy for the shape
+        // channel, not a record that creation happened — both coexist as
+        // separate components (review on this PR).
         const hasShapeEntry = persistedLabelEntries.some((entry) =>
+          (entry.origin === "derived" || entry.origin === "structure") &&
           entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
         );
         if (!hasShapeEntry) {
@@ -4213,6 +4225,7 @@ export const prepareBoundaryCommit = (
         // structure confidentiality at-or-below (the one-time migration
         // absorb). Never grown, never cleared; a carried entry above wins.
         const hasFrozenExistence = persistedLabelEntries.some((entry) =>
+          (entry.origin === "derived" || entry.origin === "structure") &&
           entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
         );
         if (!hasFrozenExistence) {
