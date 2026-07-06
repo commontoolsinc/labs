@@ -1,11 +1,19 @@
 import { assertEquals, assertFalse } from "@std/assert";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+// The runtime-facing re-export surface. Importing it here both pins that the
+// helpers stay exported through it and gets the module LOADED under
+// coverage (a never-imported file scores every line as coverage debt).
+import { cfcAtom as cfcAtomViaAtoms } from "@commonfabric/api/cfc-atoms";
 
 // Epic B1: mint helpers for the exchange-rule atom families (spec §15).
 // Every helper is exercised with optionals absent AND present: minted atoms
 // compare by structural equality over canonical JSON, so an absent optional
 // must be truly absent (never an explicit-undefined key), and a supplied one
 // must land verbatim.
+
+Deno.test("cfc-atoms re-export surface serves the same helpers", () => {
+  assertEquals(cfcAtomViaAtoms, cfcAtom);
+});
 
 Deno.test("cfcAtom mints confidentiality principals and Expires", () => {
   assertEquals(cfcAtom.user("did:key:alice"), {
