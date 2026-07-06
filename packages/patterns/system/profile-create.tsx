@@ -112,9 +112,28 @@ export const setDefaultProfile = handler<
     profile: Cell<ProfileHomeOutput>;
   }
 >((_, { defaultProfile, profile }) => {
-  if (profile) {
-    defaultProfile.set(profile as any);
-  }
+  if (!profile) return;
+  // Write only the serialized LINK sigil, never the inlined profile value.
+  // `defaultProfile` is a SINGLE owner-protected slot whose declared schema is
+  // `Cell<ProfileHomeOutput>` — a link. But CFC resolves that `$ref` and walks
+  // ProfileHomeOutput's own fields, each of which is owner-protected
+  // (name/avatar/bio/elements carry their own `writeAuthorizedBy: set…`). CFC
+  // only *enforces* a nested field when the WRITTEN VALUE carries a concrete
+  // value there — so a pure link is fine, but an inlined object trips
+  //   "writeAuthorizedBy failed at /avatar"
+  // because this picker write is authorized by `setDefaultProfile`, not
+  // `setAvatar` (CT-1845).
+  //
+  // A plain `defaultProfile.set(profile)` INLINES: `.set()`'s value walk only
+  // passes through already-serialized link sigils (`recursivelyAddIDIfNeeded`),
+  // not live `Cell` objects, so a `Cell` written into a scalar slot is expanded
+  // to its resolved value (with `/avatar`). `setMruProfile` avoids this only
+  // incidentally — its array elements happen to serialize as links. Here we
+  // make the link explicit: `getAsLink()` returns the `link@1` sigil, which the
+  // value walk passes through verbatim, so the slot stores a pure reference
+  // with no inlined sub-fields. Identity stays the profile's own space
+  // (CT-1842); `#profile` resolves the target on read.
+  defaultProfile.set((profile as any).getAsLink() as any);
 });
 
 // Stamps a profile as most-recently-used: prepend to the MRU list (deduped by
