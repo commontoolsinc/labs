@@ -155,8 +155,13 @@ export async function readWish(
   });
 }
 
-/** Marker substituted for a stream/handle-valued key in projected output. */
+/** Base marker substituted for a stream/handle-valued node in projected output. */
 export const WISH_STREAM_MARKER = "[stream]";
+
+/** Marker for a stripped handle, optionally tagged with the key it hung off. */
+function streamMarker(key?: string): string {
+  return key === undefined ? WISH_STREAM_MARKER : `[stream:${key}]`;
+}
 
 /**
  * Project a resolved wish value to plain, serializable data for output (CT-1844).
@@ -170,27 +175,51 @@ export const WISH_STREAM_MARKER = "[stream]";
  * exists for.
  *
  * This walks the value and replaces every stream/cell/function-valued node with
- * {@link WISH_STREAM_MARKER}, keeping all plain data (including nested arrays
- * like `elements` and the `$UI` VNode tree) intact. Scalar results (a bare
- * string/number/etc. from `#profileName` and friends) pass straight through
- * unchanged, so only the object-target output shape is affected.
+ * a `[stream]` / `[stream:<key>]` marker, keeping all plain data (including
+ * nested arrays like `elements` and the `$UI` VNode tree) intact. Scalar results
+ * (a bare string/number/etc. from `#profileName` and friends) pass straight
+ * through unchanged, so only the object-target output shape is affected.
+ *
+ * The walk memoizes the PROJECTED result per input node in a `Map` (with an
+ * in-progress sentinel so genuine cycles terminate rather than recurse forever).
+ * That is load-bearing correctness, not just efficiency: a plain object reached
+ * by two different paths (a DAG "diamond") must be projected on BOTH — a bare
+ * "already seen → return raw" dedup would leak any handle nested under the
+ * shared subtree on the second path, re-exposing exactly the graph this strips.
  */
-export function projectWishValue(
+export function projectWishValue(value: unknown): unknown {
+  return projectNode(value, undefined, new Map<object, unknown>());
+}
+
+/** In-progress sentinel: a node currently being projected higher in the stack. */
+const IN_PROGRESS = Symbol("wish-projection-in-progress");
+
+function projectNode(
   value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
+  key: string | undefined,
+  memo: Map<object, unknown>,
 ): unknown {
   if (isCell(value) || isStream(value) || typeof value === "function") {
-    return WISH_STREAM_MARKER;
+    return streamMarker(key);
   }
   if (value === null || typeof value !== "object") return value;
-  if (seen.has(value)) return value; // let downstream stringify flag circularity
-  seen.add(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => projectWishValue(item, seen));
+
+  const cached = memo.get(value);
+  if (cached === IN_PROGRESS) {
+    // A genuine cycle: this node is an ancestor of itself. Break it so the walk
+    // terminates; downstream stringify would otherwise flag the same loop.
+    return "[circular]";
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value)) {
-    out[key] = projectWishValue(val, seen);
-  }
-  return out;
+  if (cached !== undefined) return cached; // diamond: reuse the SAME projection.
+
+  memo.set(value, IN_PROGRESS);
+  const projected: unknown = Array.isArray(value)
+    ? value.map((item, i) => projectNode(item, String(i), memo))
+    : Object.fromEntries(
+      Object.entries(value).map((
+        [k, val],
+      ) => [k, projectNode(val, k, memo)]),
+    );
+  memo.set(value, projected);
+  return projected;
 }

@@ -184,8 +184,8 @@ describe("cf wish headless read (resolveWish)", () => {
     expect(projected.elements).toEqual([{ title: "Note" }]);
     expect(projected.$UI).toEqual({ type: "vnode", name: "cf-screen" });
 
-    // The stream handle is replaced by a stable marker — no runtime graph.
-    expect(projected.setName).toBe(WISH_STREAM_MARKER);
+    // The stream handle is replaced by a key-tagged marker — no runtime graph.
+    expect(projected.setName).toBe("[stream:setName]");
 
     // The serialized output stays small and free of the runtime object graph.
     const json = safeStringify(projected);
@@ -195,12 +195,75 @@ describe("cf wish headless read (resolveWish)", () => {
     expect(json).not.toContain("runtime");
   });
 
+  it("strips handles nested in a shared DAG subtree on BOTH paths (CT-1844)", () => {
+    // A "diamond": one plain object referenced by two keys of the result, with a
+    // real stream handle nested inside it. A naive already-seen-return-raw dedup
+    // would project the shared subtree on the first path but return it RAW on
+    // the second — leaking the handle. The memo must project it on both.
+    const tx = runtime.edit();
+    const cell = runtime.getCell<
+      { shared: { label: string; setName: { $stream: boolean } } }
+    >(userIdentity.did(), "ct1844-diamond-fixture", undefined, tx);
+    cell.set({
+      shared: { label: "shared", setName: { $stream: true } },
+    });
+    const schema = {
+      type: "object",
+      properties: {
+        shared: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            setName: { type: "object", asCell: ["stream"] },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const shared = cell.asSchema(schema).get().shared;
+    if (!shared) throw new Error("fixture: shared subtree missing");
+    expect(isStream(shared.setName)).toBe(true);
+
+    // Alias the SAME object under two keys — this is the diamond.
+    const value = { left: shared, right: shared };
+    const projected = projectWishValue(value) as {
+      left: Record<string, unknown>;
+      right: Record<string, unknown>;
+    };
+
+    // Data survives on both branches...
+    expect(projected.left.label).toBe("shared");
+    expect(projected.right.label).toBe("shared");
+    // ...and the nested handle is stripped on BOTH (would leak on `right` under
+    // a raw already-seen dedup).
+    expect(projected.left.setName).toBe("[stream:setName]");
+    expect(projected.right.setName).toBe("[stream:setName]");
+
+    const json = safeStringify(projected);
+    expect(json).not.toContain("scheduler");
+    expect(json).not.toContain("runtime");
+  });
+
+  it("terminates on a genuine cycle without infinite recursion (CT-1844)", () => {
+    // A self-referential plain object (a real cycle, not a diamond) must not
+    // recurse forever; the in-progress sentinel breaks it with a marker.
+    const node: Record<string, unknown> = { name: "loop" };
+    node.self = node;
+
+    const projected = projectWishValue(node) as Record<string, unknown>;
+    expect(projected.name).toBe("loop");
+    expect(projected.self).toBe("[circular]");
+    // Serializes cleanly (no throw, no runaway).
+    expect(safeStringify(projected)).toContain("[circular]");
+  });
+
   it("projectWishValue passes scalar targets through unchanged (CT-1844)", () => {
     // #profileName and friends resolve to a bare scalar — untouched.
     expect(projectWishValue("Ada Lovelace")).toBe("Ada Lovelace");
     expect(projectWishValue(42)).toBe(42);
     expect(projectWishValue(true)).toBe(true);
     expect(projectWishValue(null)).toBe(null);
+    // A handle with no owning key falls back to the untagged base marker.
+    expect(projectWishValue(() => {})).toBe(WISH_STREAM_MARKER);
   });
 
   it("readWish connects through the injected manager and resolves", async () => {

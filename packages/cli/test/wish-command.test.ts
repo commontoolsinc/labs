@@ -246,11 +246,11 @@ describe("cf wish command action", () => {
     expect(parsed.isEditing).toBe(false);
     expect(parsed.elements).toEqual([{ title: "Note" }]);
 
-    // Handle-valued keys are replaced by the stable marker, not omitted, and
+    // Handle-valued keys are replaced by a key-tagged marker, not omitted, and
     // carry none of the runtime object graph.
-    expect(parsed.setName).toBe("[stream]");
-    expect(parsed.addElement).toBe("[stream]");
-    expect(parsed.toggleEditing).toBe("[stream]");
+    expect(parsed.setName).toBe("[stream:setName]");
+    expect(parsed.addElement).toBe("[stream:addElement]");
+    expect(parsed.toggleEditing).toBe("[stream:toggleEditing]");
     expect(out).not.toContain("scheduler");
     expect(out).not.toContain("circular reference");
     expect(out.length).toBeLessThan(600);
