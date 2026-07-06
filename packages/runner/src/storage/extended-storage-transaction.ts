@@ -75,6 +75,7 @@ import {
   flowReadExcluded,
   gatedSinkRequestExists,
   type ImplementationIdentity,
+  type PolicySnapshot,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
   preparedDigestFor,
@@ -410,6 +411,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // let later mutation change the egress policy (review on #3993). Cheap:
     // deepFreeze short-circuits on the Runtime's already-frozen config.
     this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
+  }
+
+  // Deployment policy snapshot for the exchange-rule evaluator (Epic B2a),
+  // set once by the Runtime at tx creation. Same posture as the sink
+  // ceilings above: write-once, off the public tx interface, deep-frozen on
+  // store (`buildCfcPolicySnapshot` already froze it — this deepFreeze is
+  // the cheap short-circuiting backstop for any other caller).
+  setCfcPolicySnapshot(snapshot: PolicySnapshot | undefined): void {
+    if (
+      this.#cfcState.policySnapshot !== undefined || snapshot === undefined
+    ) {
+      return;
+    }
+    this.#cfcState.policySnapshot = deepFreeze(snapshot);
   }
 
   markCfcRelevant(reason?: string): void {

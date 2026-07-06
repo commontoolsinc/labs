@@ -63,9 +63,11 @@ import {
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  buildCfcPolicySnapshot,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcPolicyRecordInput,
   type CfcTriggerReadGating,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
@@ -73,6 +75,7 @@ import {
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
+  type PolicySnapshot,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -262,6 +265,14 @@ export interface RuntimeOptions {
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
    *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+  /**
+   * Deployment policy records for the exchange-rule evaluator (Epic B2a,
+   * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
+   * at construction — malformed records throw at boot (fail-closed config,
+   * mirroring the sink ceilings' freeze discipline). Defaults to none
+   * configured (evaluation is a no-op).
+   */
+  cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
@@ -395,6 +406,8 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
+  /** Frozen deployment policy snapshot; undefined = no policies configured. */
+  readonly cfcPolicySnapshot: PolicySnapshot | undefined;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
@@ -527,6 +540,10 @@ export class Runtime {
         ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
       ),
     );
+    // Validates + digests + deep-freezes; throws on malformed records so a
+    // config error surfaces at boot, not as a silently inert rule (same
+    // eager-validation posture as the spaceHostMap URLs above).
+    this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -769,6 +786,7 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
+    wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
