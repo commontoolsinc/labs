@@ -3269,8 +3269,10 @@ Deno.test("Capability analysis classifies send() as a write", () => {
   const summary = analyzeFunctionCapabilities(fn);
   const input = getPaths(summary, "input");
 
-  // Stream.send() delegates to set() at runtime — an event enqueue is a
-  // write to the stream cell, and must never summarize as write-free.
+  // send() delegates to set() on every receiver: a raw cell takes a
+  // transactional write; a stream enqueues an event whose handler writes in
+  // its own transaction. Either way a sending callback must never summarize
+  // as write-free.
   assert(input.writePaths.includes("events"));
   assertEquals(input.capability, "writeonly");
 });

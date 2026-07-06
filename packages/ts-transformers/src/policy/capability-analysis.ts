@@ -156,10 +156,13 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
   MERGEABLE_OP_METHODS.filter((op) => op.kind === kind).map((op) => op.method);
 
-// `send` is a write: at runtime Stream.send() delegates to set() (an event
-// enqueue is a write to the stream cell). Classifying it here keeps
-// writePaths an honest record of capture writes — a callback that fires
-// events during evaluation must never summarize as write-free.
+// `send` is a write: it delegates to set() on every receiver, but set()
+// forks on the receiver's kind. On a raw cell that is an ordinary
+// transactional write; on a stream the same set() call enqueues the event
+// instead of revising the stream cell, and the dispatched handler's writes
+// commit in their own transaction — effects this analysis cannot see or
+// bound. Either way a callback that sends must never summarize as
+// write-free.
 const WRITER_METHODS = new Set([
   "set",
   "update",
