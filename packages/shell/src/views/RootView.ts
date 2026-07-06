@@ -30,6 +30,7 @@ import {
 } from "../lib/theme-preference.ts";
 import { EXPERIMENTAL } from "../lib/env.ts";
 import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
+import { isCfcRenderCeilingEnabled } from "../lib/render-ceiling.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -109,6 +110,9 @@ export class XRootView extends BaseView {
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
           forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
+          // Epic H3a dogfood flag: populate the default render ceiling
+          // (see lib/render-ceiling.ts). Default off.
+          cfcRenderCeiling: isCfcRenderCeilingEnabled(),
           // lib-shell emits address-shaped targets ({spaceDid, pieceId});
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.

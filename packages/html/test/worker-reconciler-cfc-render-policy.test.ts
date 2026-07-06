@@ -2884,6 +2884,92 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
+    // lib-shell's defaultRenderConfidentialityCeiling) uses the acting user's
+    // DID *string* as the exact-match identity atom. Pin that the string form
+    // gates correctly: the same ceiling admits the acting user's own content
+    // and fail-closes an identity atom it omits (another user's). Exchange
+    // resolution (PersonalSpace/HasRole forms) is H3b.
+    await t.step(
+      "acting-user DID-string ceiling admits own content, blocks another user's",
+      async () => {
+        const otherUserDid = "did:key:z6MkOtherUserOutsideCeiling";
+        const seedTx = runtime.edit();
+        const seedUserScoped = (id: string, value: string, atom: string) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-user-scoped-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { confidentiality: [atom] },
+                }],
+              },
+            },
+          });
+          return cell;
+        };
+        const ownContent = seedUserScoped(
+          "cfc-render-policy-own-user-content",
+          "Acting user's own note",
+          signer.did(),
+        );
+        const otherContent = seedUserScoped(
+          "cfc-render-policy-other-user-content",
+          "Other user's note",
+          otherUserDid,
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // The H3a initial profile shape: acting-user DID string plus the
+        // influence-class caveat-kind allow-list.
+        const h3aProfileCeiling = {
+          atoms: [signer.did()],
+          caveatKinds: [
+            "https://commonfabric.org/cfc/concepts/prompt-influence",
+            "prompt-influence",
+          ],
+        };
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: h3aProfileCeiling,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [ownContent as never, otherContent as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Acting user's own note"), true);
+          assertEquals(renderedText.includes("Other user's note"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
     // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
     // "the label could not be read", so it must never fit a render policy —
     // even one that names the exported marker string — in either the

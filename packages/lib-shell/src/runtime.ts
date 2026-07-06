@@ -1,4 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import { CFC_CONCEPT_KIND } from "@commonfabric/api/cfc-atoms";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
@@ -43,6 +44,45 @@ export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
 
+export type RuntimeRenderConfidentialityCeiling = NonNullable<
+  RuntimeClientOptions["renderConfidentialityCeiling"]
+>;
+
+/**
+ * The §8.10.6 initial display-sink release ceiling (Epic H3a,
+ * docs/plans/cfc-future-work-implementation.md): what a display surface
+ * admits when no authored policy covers it. Exact-match forms only — the
+ * reconciler checks ceiling atoms by structural equality; principal forms
+ * that need exchange resolution (PersonalSpace/Space-via-HasRole) are H3b.
+ * Everything outside the ceiling fails closed at the render gate.
+ *
+ * Tighten-only evolution (spec §8.10.6): removing an entry needs no
+ * ceremony; admitting a new atom family or caveat kind is a release
+ * decision that needs authored policy or verified authority.
+ */
+export function defaultRenderConfidentialityCeiling(
+  actingUser: DID,
+): RuntimeRenderConfidentialityCeiling {
+  return {
+    // Acting-user identity atoms: the audience of a display sink is the
+    // acting user, so atoms naming exactly that audience are admissible by
+    // construction. DID-string form — the exact shape labels carry today.
+    atoms: [actingUser],
+    // Influence-class caveat kinds, whose canonical display release is the
+    // rendered-disclosure rule (§8.10.5). Deliberately excludes
+    // PromptInjectionRiskUnscreened: a material-risk kind that keeps its
+    // ordinary discharge evidence (screening), not display disclosure.
+    caveatKinds: [
+      // The canonical influence-class concept id.
+      CFC_CONCEPT_KIND.PromptInfluence,
+      // Short-form alias minted by shipped example patterns
+      // (cfc-spec-gallery, cfc-trusted-component-examples) and matched by
+      // the cf-cfc-label disclosure UI.
+      "prompt-influence",
+    ],
+  };
+}
+
 export type RuntimeNavigationTarget = { spaceDid: DID; pieceId: string };
 
 export type RuntimeInternalsCallbacks = {
@@ -67,6 +107,15 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * persisting nothing — the measurement stage before "persist".
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  /**
+   * Populate the default render confidentiality ceiling (Epic H3a). When
+   * true, the worker's display sinks gate labeled values against the
+   * §8.10.6 profile for this identity and author-supplied render-boundary
+   * declassification is denied. Dogfood flag, default off (= today's
+   * unbounded rendering). Expect over-blocking while exchange resolution
+   * (H3b) is not implemented.
+   */
+  cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   /**
    * When true, forward the worker runtime's console output to the main
@@ -137,6 +186,16 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
+  // Epic H3a: populate the render confidentiality ceiling. Off by default —
+  // a deployment-posture change to what the shell renders, enabled
+  // deliberately per host (shell dogfood flag). When on, display sinks
+  // admit only the §8.10.6 profile (the acting user's own identity atom
+  // plus display-dischargeable influence-class caveat kinds) and
+  // author-supplied render declassification is denied (audit S15); the
+  // reconciler's fail-closed narrowing does the enforcement. Exact-match
+  // forms only until H3b adds exchange resolution, so over-blocking is
+  // expected — that is the point of the dogfood stage.
+  cfcRenderCeiling = false,
   trustSnapshot,
   forwardWorkerConsole,
 }: {
@@ -146,6 +205,7 @@ export function createRuntimeClientOptions({
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   forwardWorkerConsole?: boolean;
 }) {
@@ -166,6 +226,14 @@ export function createRuntimeClientOptions({
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    ...(cfcRenderCeiling
+      ? {
+        renderDeclassificationPolicy: "deny" as const,
+        renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
+          session.as.did(),
+        ),
+      }
+      : {}),
     trustSnapshot: resolvedTrustSnapshot,
     forwardWorkerConsole,
   };
@@ -494,6 +562,7 @@ export class RuntimeInternals extends EventTarget {
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    cfcRenderCeiling,
     trustSnapshot,
     forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
@@ -536,6 +605,7 @@ export class RuntimeInternals extends EventTarget {
         experimental,
         cfcEnforcementMode,
         cfcFlowLabels,
+        cfcRenderCeiling,
         trustSnapshot,
         forwardWorkerConsole,
       }),

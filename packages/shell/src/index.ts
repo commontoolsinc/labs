@@ -3,6 +3,7 @@ import "core-js/proposals/async-explicit-resource-management";
 import "@commonfabric/ui";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { setupWorkerConsoleToggle } from "./lib/worker-console.ts";
+import { setupCfcRenderCeilingToggle } from "./lib/render-ceiling.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App, AppElement, AppUpdateEvent, Navigation } from "../shared/mod.ts";
@@ -16,6 +17,7 @@ console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);
 setupWorkerConsoleToggle();
+setupCfcRenderCeilingToggle();
 
 const root = document.querySelector("x-root-view");
 if (!root) throw new Error("No root view found.");
