@@ -54,6 +54,18 @@ async function runTest(base: URL) {
     const send = (key: string) =>
       runtime.editWithRetry((tx) => result.key(key).withTx(tx).send({}));
 
+    // A handler whose commit the server REFUSES re-runs through the
+    // scheduler's bounded retry budget before giving up loudly (~1s of
+    // requeue timers `settled()` cannot see). Drain that churn before
+    // sending the next handler, so the doomed re-runs' speculative rev bumps
+    // don't contend with — and starve — the successor's commit.
+    const drainDoomed = async () => {
+      for (let round = 0; round < 12; round++) {
+        await runtime.settled();
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+
     const dumpQ = (k: string) => ({
       pending: result.key(k).key("pending").getRaw(),
       error: result.key(k).key("error").getRaw(),
@@ -107,6 +119,7 @@ async function runTest(base: URL) {
       // advertised 3.c); the server evaluates the two committed rows, the
       // violating one refuses, and the WHOLE statement rolls back. ---
       await send("copyBad");
+      await drainDoomed();
       // The failed commit rolls back the db-handle rev bump too, so `q` does
       // not re-run for it; the next SUCCESSFUL write re-queries server truth.
       await send("copyGood");
@@ -130,13 +143,17 @@ async function runTest(base: URL) {
       // --- Upsert, violating post-image: row 2's sender flips to junk ->
       // the server re-derives the post-image, refuses, rolls back. ---
       await send("upsertBad");
-      // --- Upsert, valid post-image: row 1's sender flips to carol2. ---
+      await drainDoomed();
+      // --- Upsert, valid post-image: row 1's sender flips to carol2. Its
+      // successful commit bumps the handle rev, forcing a FRESH query cycle
+      // against server truth (no dependency on rolled-back speculation). ---
       await send("upsertGood");
       await waitFor(
         "upserts settled",
         () =>
           qRowCount() === 2 &&
           qRows()[0]?.from_addr === "carol2@c.example",
+        60000,
       );
       const afterUpserts = qRows();
       if (afterUpserts[1].from_addr !== "carol@c.example") {
