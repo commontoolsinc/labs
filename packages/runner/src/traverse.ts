@@ -3187,23 +3187,23 @@ export class SchemaObjectTraverser<V extends FabricValue>
       });
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
-      // TODO(danfuzz): a `FabricInstance` is still walked by `Object.entries`
-      // over internal slots rather than descended by its codec contents; the
-      // same gap applies to the schema-`default` fallback path
+      // TODO(danfuzz): a `FabricInstance` is walked by `Object.entries` over
+      // internal slots rather than descended by its codec contents; the same
+      // gap applies to the schema-`default` fallback path
       // (`traverseDAG`/`applyDefault`), since a schema `default` can carry a
       // `FabricValue`. A correct fix descends a `FabricInstance` by codec
       // contents, not own-props.
     } else if (doc.value instanceof FabricSpecialObject) {
-      // A `FabricSpecialObject` (e.g. `FabricBytes`) is an opaque host value:
-      // the fabric type system treats it like a primitive — always frozen,
-      // passes through conversion unchanged. Without this arm it fell into
-      // the record branch below and was decomposed by `Object.entries` over
-      // its (empty) own props, so it failed structural schemas — e.g. the
-      // schema-generator's object schema for `FetchBinaryResult.bytes` — and
-      // the containing field was silently dropped from the materialized
-      // value, permanently gating every lift consuming a `fetchBinary`
-      // result (CT-1836). Validate as "object" (the shape the generator
-      // emits for these types today) and pass the value through as a leaf.
+      // A `FabricSpecialObject` (e.g. `FabricBytes`) is an opaque host value
+      // the fabric type system treats like a primitive — always frozen,
+      // passing through conversion unchanged — so it materializes as a LEAF:
+      // its `typeof` is "object", so this arm must precede the record branch
+      // below, which would otherwise decompose it via `Object.entries` over
+      // its own props (empty for e.g. `FabricBytes`, whose surface lives on
+      // the prototype). Type-validate as "object" — the shape the
+      // schema-generator emits for these types today — but do not consult
+      // the schema's structural details: leaves are not property-walked
+      // (CT-1836).
       return this.isValidType(schemaObj, "object") !== TypeValidity.False
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
