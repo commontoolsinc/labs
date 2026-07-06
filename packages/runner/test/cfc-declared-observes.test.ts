@@ -189,7 +189,9 @@ describe("CFC declared observation classes (C5)", () => {
             ifc: { confidentiality: ["content-secret"], observes: "vlaue" },
           },
         },
-      } as JSONSchema,
+        // Deliberately invalid class value — the narrowed ifc type rejects
+        // it, which is the point of the runtime fallback under test.
+      } as unknown as JSONSchema,
       true,
     );
     const tx = rt.edit();

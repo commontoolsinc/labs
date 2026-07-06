@@ -1658,6 +1658,10 @@ export type JSONSchemaObj = {
     readonly exactCopyOf?: readonly string[];
     readonly projection?: readonly string[];
     readonly collection?: readonly string[];
+    // Observation class of the declared label (Epic C, C5): which read
+    // observations consume it. Absent or invalid = covering (consumed by
+    // every content read class — over-taint, fail-safe).
+    readonly observes?: "value" | "shape" | "enumerate" | "followRef";
     readonly uiContract?: {
       readonly helper?: "UiAction" | "UiPromptSlot" | "UiDisclosure";
       readonly action?: string;
