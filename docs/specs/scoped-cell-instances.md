@@ -121,6 +121,16 @@ Writing follows the target cell's effective scope. Writing to a broader scoped
 cell from a narrower scoped computation is allowed by the scope system and is
 the explicit mechanism for moving data from narrow to wide scopes.
 
+Moving data from narrow to wide scopes means writing the **value** (or a link
+to a broader-scoped cell). Storing a narrower-scoped **link** in a
+broader-scoped slot is rejected at the write site unless the slot's schema
+declares that scope (a scoped `asCell` entry or schema `scope`): because links
+do not encode the DID or session id, such a link resolves to a different
+instance for every reader, so data "shared" that way can never propagate — it
+reads as a permanent hole for everyone but the writer. A schema-declared scoped
+slot is the opt-in for deliberate per-reader resolution (this is what the
+broad-output-to-narrow-result machinery uses).
+
 ## Link Semantics
 
 ### Scope Types

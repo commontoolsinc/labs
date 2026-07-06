@@ -71,7 +71,16 @@ describe("Schema - Link Resolution", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      source.set({ current: sessionCell as any });
+      // Write the narrower-scoped link via raw tx: the scope-isolation write
+      // guard (data-updating.ts) rejects storing a session link in a
+      // scope-silent space slot, but such data can exist at rest (written
+      // before the guard, or by another writer) — this test verifies the
+      // read-side defense against exactly that data.
+      source.set({});
+      tx.writeValueOrThrow(
+        source.key("current").getAsNormalizedFullLink(),
+        sessionCell.getAsLink() as any,
+      );
 
       const cappedSchema = {
         type: "object",
@@ -133,7 +142,14 @@ describe("Schema - Link Resolution", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      source.set({ current: sessionCell as any });
+      // Raw-tx write: models the illegal at-rest state (see the sibling test
+      // above) that the read-side warn defends against; the write guard in
+      // data-updating.ts rejects creating it through normal writes.
+      source.set({});
+      tx.writeValueOrThrow(
+        source.key("current").getAsNormalizedFullLink(),
+        sessionCell.getAsLink() as any,
+      );
 
       const cappedSchema = {
         type: "object",

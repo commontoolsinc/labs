@@ -1753,3 +1753,145 @@ describe("compactChangeSet", () => {
     });
   });
 });
+
+// Scope-isolation write guard (docs/specs/scoped-cell-instances.md;
+// pitfall 6 in docs/development/debugging/gotchas/scoped-cell-pitfalls.md):
+// links do not carry a principal, so a narrower-scoped link stored in a
+// broader-scoped slot resolves to a DIFFERENT instance for every reader —
+// shared data written that way can never propagate (the B2 reader-blackout
+// investigation, #4457). Such writes must fail loudly at the write site
+// unless the slot's schema declares the scope (per-reader semantics opted
+// into by the author).
+describe("scope-isolation write guard", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  function scopedLinkValue(
+    name: string,
+    scope: "user" | "session",
+  ): unknown {
+    const base = runtime.getCell<string>(
+      space,
+      name,
+      { type: "string" },
+      tx,
+    ).getAsNormalizedFullLink();
+    return createSigilLinkFromParsedLink({ ...base, scope });
+  }
+
+  it("rejects a user-scoped link written into a scope-silent space slot", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-silent-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    expect(() =>
+      diffAndUpdate(
+        runtime,
+        tx,
+        dest.key("profile").getAsNormalizedFullLink(),
+        scopedLinkValue("scope-guard-user-target", "user"),
+      )
+    ).toThrow(/Cannot store a user-scoped link in space-scoped data/);
+  });
+
+  it("allows the same link when the slot's schema declares the scope", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-declared-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object", scope: "user" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-declared-target", "user"),
+    );
+    const stored = tx.readValueOrThrow(
+      dest.key("profile").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
+    expect(parseLink(stored as any, dest.getAsNormalizedFullLink())?.scope)
+      .toBe("user");
+  });
+
+  it("rejects a session link even when the slot declares only user scope", () => {
+    const dest = runtime.getCell<{ draft?: unknown }>(
+      space,
+      "scope-guard-under-declared-dest",
+      {
+        type: "object",
+        properties: { draft: { type: "object", scope: "user" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    expect(() =>
+      diffAndUpdate(
+        runtime,
+        tx,
+        dest.key("draft").getAsNormalizedFullLink(),
+        scopedLinkValue("scope-guard-session-target", "session"),
+      )
+    ).toThrow(/Cannot store a session-scoped link in space-scoped data/);
+  });
+
+  it("allows same-scope links (space into space) untouched", () => {
+    const dest = runtime.getCell<{ item?: unknown }>(
+      space,
+      "scope-guard-same-scope-dest",
+      {
+        type: "object",
+        properties: { item: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const base = runtime.getCell<string>(
+      space,
+      "scope-guard-space-target",
+      { type: "string" },
+      tx,
+    ).getAsNormalizedFullLink();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("item").getAsNormalizedFullLink(),
+      createSigilLinkFromParsedLink(base),
+    );
+    const stored = tx.readValueOrThrow(
+      dest.key("item").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
+  });
+});

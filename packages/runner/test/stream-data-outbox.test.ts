@@ -290,7 +290,15 @@ describe("stream-data outbox mechanism", () => {
       linkTx,
     );
     userUrl.set("http://mock-test-server.local/stream-scope-change");
-    inputsCell.withTx(linkTx).key("url").set(userUrl);
+    // Raw-tx write: the scope-isolation write guard (data-updating.ts)
+    // rejects storing a user-scoped link in a scope-silent space slot; this
+    // test needs the state to exist (however it arose — e.g. written by the
+    // scoped-output machinery or before the guard) to verify streamData
+    // detects the scope move and restarts.
+    linkTx.writeValueOrThrow(
+      inputsCell.withTx(linkTx).key("url").getAsNormalizedFullLink(),
+      userUrl.getAsLink() as any,
+    );
     const linkResult = await linkTx.commit();
     expect(linkResult.ok).toBeDefined();
 

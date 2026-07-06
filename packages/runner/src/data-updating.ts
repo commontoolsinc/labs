@@ -809,6 +809,41 @@ export function normalizeAndDiff(
       }
       return [];
     } else {
+      // Scope-isolation guard (spec: docs/specs/scoped-cell-instances.md,
+      // "the runtime must not read across effective scope keys"; pitfall #6 in
+      // docs/development/debugging/gotchas/scoped-cell-pitfalls.md): a link
+      // whose scope is NARROWER than the slot it's written into resolves to a
+      // DIFFERENT instance for every reader — links deliberately do not encode
+      // the principal, so e.g. a `user`-scoped link stored in `space`-scoped
+      // shared data hands every other participant a link to their own (empty)
+      // instance. The data can never propagate; readers see a permanent hole
+      // (the B2 reader-blackout investigation, #4457/#4532). Writing narrow
+      // data into a broader slot is legitimate ONLY when the slot's schema
+      // declares that scope (the narrowing branch above and scoped asCell
+      // entries — the author opted into per-reader semantics). Otherwise the
+      // write is a silent footgun: fail loudly at the write site, where the
+      // author can fix it, instead of as a permanent silent hole for every
+      // other reader. Share the value, or a space-scoped cell with a PerUser
+      // pointer to "mine" (pitfall #6 shows the idiom).
+      if (scopeRank(parsedLink.scope) > scopeRank(link.scope)) {
+        const declared = declaredCellScope(link.schema);
+        if (
+          declared === undefined ||
+          scopeRank(declared) < scopeRank(parsedLink.scope)
+        ) {
+          throw new Error(
+            `Cannot store a ${parsedLink.scope}-scoped link in ` +
+              `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
+              `do not carry a principal, so every reader would resolve it ` +
+              `to their own ${parsedLink.scope} instance and the data can ` +
+              `never propagate. Share the value itself, or a space-scoped ` +
+              `cell (keep a PerUser pointer to "mine"), or declare the ` +
+              `slot's schema with scope "${parsedLink.scope}" if per-reader ` +
+              `resolution is intended. See docs/development/debugging/` +
+              `gotchas/scoped-cell-pitfalls.md (pitfall 6).`,
+          );
+        }
+      }
       diffLogger.debug(
         "diff",
         () =>
