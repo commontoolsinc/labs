@@ -610,6 +610,104 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shapeConf).toEqual(["alice"]);
   });
 
+  // Legacy migration through the OTHER carry-forward skips: a pre-class
+  // covering entry at a slot replaced by a LINK write pools through the
+  // link-path skip and lands as a frozen shape entry at its own path (the
+  // leftover anchor — link-covered paths get no stamps).
+  it("legacy entry at a link-replaced slot freezes via the leftover anchor", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-legacy-link-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["old-secret"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-legacy-link-out", {
+      slot: 0,
+    });
+    const taint = rt.edit();
+    taint.readOrThrow(readAddress(sourceId, []));
+    taint.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "slot"] },
+      { copied: true },
+    );
+    taint.prepareCfc();
+    expect((await taint.commit()).ok).toBeDefined();
+    // Rewrite stored metadata: ONE legacy covering derived entry at the slot.
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): { cfc?: Record<string, unknown> };
+    };
+    const stored = replica.getDocument(outId).cfc! as Record<string, unknown>;
+    const legacy = rt.edit();
+    legacy.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      {
+        ...stored,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["slot"],
+            label: { confidentiality: ["old-secret"] },
+            origin: "derived",
+          }],
+        },
+      },
+    );
+    expect((await legacy.commit()).ok).toBeDefined();
+
+    // Replace the slot with a LINK in a clean tx: the legacy entry pools
+    // through the link-path skip; no stamp path covers a link write, so
+    // the leftover anchors the frozen shape entry at the slot itself.
+    await seedDoc(rt, "ec-legacy-link-target", { n: 2 }, []);
+    const linkTx = rt.edit();
+    const outCell = rt.getCell(space, "ec-legacy-link-out", undefined, linkTx);
+    const otherCell = rt.getCell(
+      space,
+      "ec-legacy-link-target",
+      undefined,
+      linkTx,
+    );
+    outCell.key("slot").set(otherCell);
+    linkTx.prepareCfc();
+    expect((await linkTx.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["slot"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toContainEqual("old-secret");
+  });
+
+  // A mixed write — plain content at the root and a pure-link container in
+  // the same transaction — collapses the container's membership stamp
+  // against the covering derived ancestor (exact-path structure stamps
+  // only collapse against derived ancestors-or-equal).
+  it("structure stamps collapse under a derived ancestor stamp", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-mixed-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret"] } },
+    ]);
+    await seedDoc(rt, "ec-mixed-el", { n: 2 }, []);
+
+    const tx = rt.edit();
+    tx.readOrThrow(readAddress(sourceId, []));
+    const out = rt.getCell(space, "ec-mixed-out", undefined, tx);
+    const outId = out.getAsNormalizedFullLink().id;
+    tx.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { text: "x" },
+    );
+    const el = rt.getCell(space, "ec-mixed-el", undefined, tx);
+    out.key("list").withTx(tx).set([el]);
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const entries = entriesOf(outId);
+    expect(
+      entries.some((e) => e.origin === "derived" && e.path.join("/") === ""),
+    ).toBe(true);
+    expect(
+      entries.filter((e) =>
+        e.origin === "structure" && e.observes === "enumerate"
+      ),
+    ).toEqual([]);
+  });
+
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite
   // must not churn the metadata — the grown existence entry re-derives
   // identically.
