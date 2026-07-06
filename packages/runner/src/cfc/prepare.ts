@@ -63,6 +63,7 @@ import {
   type IFCLabel,
   type ImplementationIdentity,
   type LabelMapEntry,
+  type LabelObservationClass,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -1723,6 +1724,22 @@ const storedSchemaClaimsForLinkWrites = (
       : mergeCfcSchemaEnvelopes(result, envelope);
   }
   return result ?? {};
+};
+
+// The consumption class an authored schema declares for its ifc label (C5).
+// Only the four class values count; anything else (including absence) is
+// covering — the over-taint direction, so a typo'd class can only widen
+// consumption, never narrow it (fail-safe).
+const declaredObservesClass = (
+  schema: JSONSchema,
+): LabelObservationClass | undefined => {
+  const observes = isRecord(schema) && isRecord(schema.ifc)
+    ? (schema.ifc as { observes?: unknown }).observes
+    : undefined;
+  return observes === "value" || observes === "shape" ||
+      observes === "enumerate" || observes === "followRef"
+    ? observes
+    : undefined;
 };
 
 const unsupportedTrustSensitiveReason = (
@@ -3860,11 +3877,18 @@ export const prepareBoundaryCommit = (
               confidentiality: mergeLabelValues(derived.confidentiality, prior),
             }
             : derived;
+          // C5: an authored `ifc.observes` classes the declared entry (the
+          // sqlite null-origin merge declares `observes:"value"` this way).
+          // Anything but the four class values — including the absent
+          // default — mints a covering entry: over-taint, fail-safe, and
+          // wire-identical for pre-C readers.
+          const observes = declaredObservesClass(entry.schema);
           return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
             ? [{
               path: entry.path,
               label,
               origin: "declared" as const,
+              ...(observes !== undefined ? { observes } : {}),
             }]
             : [];
         });

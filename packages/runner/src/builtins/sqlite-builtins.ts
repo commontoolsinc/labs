@@ -253,7 +253,9 @@ type LabelTables =
  * and it returns fresh arrays (no frozen-proxy aliasing). Returns undefined when
  * the db declares no confidentiality/integrity at all.
  */
-function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
+function deriveNullOriginIfc(
+  tables: LabelTables,
+): (IFCLabel & { observes?: "value" }) | undefined {
   let merged: IFCLabel = {};
   for (const table of Object.values(tables ?? {})) {
     for (const col of Object.values(table?.properties ?? {})) {
@@ -267,8 +269,19 @@ function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
   // evidence. Unioning integrity would let it falsely claim an atom held by a
   // single column (§8.17.1: class-aware meet, never union; propagation classes
   // pending, so conservatively empty). [CT-1668]
+  //
+  // C5 (observation classes): the merge is declared `observes:"value"` — an
+  // expression/aggregate computed FROM column values labels the result
+  // column's CONTENT channel. Shape/enumerate consumers of the result rows
+  // (length, membership — a COUNT consumer counting result rows) no longer
+  // inherit the whole-schema content union; the declared entry the result
+  // schema mints carries the class through (prepare.ts
+  // `declaredObservesClass`). Row membership itself stays governed by the
+  // per-row rule machinery (row-label-read.ts), not by column content
+  // labels. Class-unaware readers treat the entry as covering — the exact
+  // pre-C5 behavior.
   return merged.confidentiality?.length
-    ? { confidentiality: merged.confidentiality }
+    ? { confidentiality: merged.confidentiality, observes: "value" }
     : undefined;
 }
 
