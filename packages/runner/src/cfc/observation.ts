@@ -70,23 +70,53 @@ export const joinCfcObservedConfidentiality = (
   return uniqueCfcAtoms(joined);
 };
 
+// Per-class node consumption (C4, C0 §4/§7). What an observation of the
+// node at `logicalPath` consumes from a class-carrying label view:
+//
+// - a `value` observation (serializing the node's content) consumes content
+//   labels — covering and `value`-class entries — at-or-above the node
+//   (ancestor content contains the node), plus `shape`/`enumerate` entries
+//   AT the node itself: enumerating the node's own members reveals its
+//   membership, but an ADDRESSED child does not inherit the container's
+//   membership label (the C4 precision win — the caller named the path).
+//   `followRef` entries are never content.
+// - a `followRef` observation (rendering an opaque link handle: WHICH
+//   reference sits here, without following it) consumes followRef-class
+//   entries at-or-above the node and nothing else — the pointer's label,
+//   not the target's content (C0 §7).
+//
+// Entries without a class (legacy views, carried views) stay covering for
+// content — byte-identical to the pre-C4 join for value observations.
 export const cfcConfidentialityForObservationNode = (
   options: {
     schema?: JSONSchema;
     labelView?: CfcLabelView;
     logicalPath?: readonly string[];
+    observes?: "value" | "followRef";
   },
 ): CfcObservedConfidentiality => {
   const joined: unknown[] = [];
   const logicalPath = options.logicalPath ?? [];
+  const observes = options.observes ?? "value";
 
-  if (isRecord(options.schema) && isRecord(options.schema.ifc)) {
+  if (
+    observes === "value" && isRecord(options.schema) &&
+    isRecord(options.schema.ifc)
+  ) {
     joined.push(...(options.schema.ifc.confidentiality ?? []));
   }
 
   if (options.labelView !== undefined) {
     for (const entry of options.labelView.entries) {
-      if (cfcLabelPathPrefixMatches(entry.path, logicalPath)) {
+      if (!cfcLabelPathPrefixMatches(entry.path, logicalPath)) {
+        continue;
+      }
+      const consumed = observes === "followRef"
+        ? entry.observes === "followRef"
+        : entry.observes === undefined || entry.observes === "value" ||
+          ((entry.observes === "shape" || entry.observes === "enumerate") &&
+            entry.path.length === logicalPath.length);
+      if (consumed) {
         joined.push(...(entry.label.confidentiality ?? []));
       }
     }

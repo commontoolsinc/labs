@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
@@ -226,6 +227,146 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("the enabled gate cannot be disabled mid-transaction (anti-downgrade pin)", async () => {
+    // The runtime enables the gate at tx creation; handler code that can
+    // reach the transaction via `cell.tx` must not be able to dial it back
+    // off before `prepareCfc()` — that would empty triggerReadSources and
+    // skip both H5 gates the deployment enabled (mirrors the write-floor
+    // enforce pin).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-pin-secret");
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-pin-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id: secretId as `${string}:${string}`,
+        type: "application/json",
+        path: ["value", "secret"],
+      }]);
+      // The malicious downgrade throws...
+      expect(() => tx.setCfcTriggerReadGating(false)).toThrow(
+        "cannot be disabled",
+      );
+      // ...re-asserting the enabled state is permitted...
+      tx.setCfcTriggerReadGating(true);
+      expect(tx.getCfcState().triggerReadGating).toBe(true);
+      // ...and even with the throw swallowed the gate still enforces: the
+      // scheduled egress is rejected by the sink ceiling.
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:h5-pin",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message)).toContain(
+        "exceeds ceiling for fetchJson",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("getCfcState() is a read-only view — direct state mutation cannot bypass the pin", async () => {
+    // `Readonly<CfcTxState>` is compile-time only: without a runtime guard,
+    // handler code reaching the tx via `cell.tx` could skip the pinned
+    // setter and flip the gate (or truncate the trigger set, or un-mark
+    // relevance, or forge the prepare status) directly on the object
+    // `getCfcState()` returns (cubic/codex review on #4517).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcTriggerReadGating: true,
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const secretId = await seedConfidential(runtime, "h5-view-secret");
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "h5-view-out", OUT_SCHEMA.schema, tx).set({
+        v: "computed",
+      });
+      tx.addCfcTriggerReads([{
+        space: signer.did(),
+        id: secretId as `${string}:${string}`,
+        type: "application/json",
+        path: ["value", "secret"],
+      }]);
+      const state = tx.getCfcState() as unknown as {
+        triggerReadGating: boolean;
+        relevant: boolean;
+        triggerReads: unknown[];
+        prepare: { status: string };
+      };
+      expect(() => {
+        state.triggerReadGating = false;
+      }).toThrow("read-only");
+      expect(() => {
+        state.triggerReads.length = 0;
+      }).toThrow("read-only");
+      expect(() => {
+        state.triggerReads.pop();
+      }).toThrow("read-only");
+      expect(() => {
+        state.relevant = false;
+      }).toThrow("read-only");
+      expect(() => {
+        state.prepare.status = "prepared";
+      }).toThrow("read-only");
+      // The backing state is not reachable around the view either: the field
+      // is ECMAScript-private, so `(tx as any).cfcState` finds nothing.
+      expect((tx as unknown as Record<string, unknown>).cfcState)
+        .toBeUndefined();
+      // The Map facade forwards reads bound to the real Map and rejects
+      // mutators.
+      const identities = tx.getCfcState().writePolicyInputIdentities;
+      expect(identities.size).toBe(0);
+      expect(identities.get({} as never)).toBeUndefined();
+      expect(() => identities.set({} as never, {} as never)).toThrow(
+        "read-only",
+      );
+      expect(() => identities.clear()).toThrow("read-only");
+      // The child-cell wrapper's diagnostics seam delegates to the wrapped
+      // transaction.
+      new TransactionWrapper(tx, {}).noteCfcDiagnostic("h5-view-wrapper-note");
+      expect(tx.getCfcState().diagnostics).toContainEqual(
+        "h5-view-wrapper-note",
+      );
+      // Nothing stuck: the state is intact and the gate still enforces.
+      expect(tx.getCfcState().triggerReadGating).toBe(true);
+      expect(tx.getCfcState().triggerReads.length).toBe(1);
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:h5-view",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(String((result.error as Error).message)).toContain(
+        "exceeds ceiling for fetchJson",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

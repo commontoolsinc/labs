@@ -1402,7 +1402,12 @@ const forEachFlowObservation = (
   return false;
 };
 
-const deriveFlowJoin = (
+// Exported for tests: the trigger-read cid: guard above defends
+// construction paths that bypass the addCfcTriggerReads ingest filter, and
+// with the tx state sealed (getCfcState() is a read-only view) the only way
+// to exercise it is to hand deriveFlowJoin a state carrying a smuggled
+// entry directly.
+export const deriveFlowJoin = (
   tx: IExtendedStorageTransaction,
 ): { confidentiality: unknown[]; integrity: unknown[] } => {
   const atoms: unknown[] = [];
@@ -3565,7 +3570,7 @@ export const prepareBoundaryCommit = (
     flowTargets.size > 0 &&
     flowHasLabels
   ) {
-    state.diagnostics.push(
+    tx.noteCfcDiagnostic(
       `flow-labels(observe): would derive ${flowConfidentiality.length} ` +
         `confidentiality / ${flowIntegrity.length} integrity atom(s) onto ` +
         `${flowTargets.size} written doc(s)`,
@@ -3776,7 +3781,7 @@ export const prepareBoundaryCommit = (
           ingestVerificationFailed = true;
         } else {
           for (const failure of floorFailures) {
-            state.diagnostics.push(`write-floor(observe): ${failure}`);
+            tx.noteCfcDiagnostic(`write-floor(observe): ${failure}`);
           }
         }
       }
