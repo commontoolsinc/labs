@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { readOnlyCfcView } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-state-contracts");
 
@@ -128,6 +129,62 @@ describe("CFC tx state contracts", () => {
       ).toContainEqual("write-after-prepare");
       await tx.commit();
     });
+  });
+
+  it("the read-only view closes the descriptor and Map-iteration bypasses", () => {
+    // Cubic round-3 findings on #4517: without a getOwnPropertyDescriptor
+    // trap, `Object.getOwnPropertyDescriptor(view, k).value` recovers the
+    // raw nested object; and Map read APIs (forEach's third argument,
+    // get/entries/values results) leaked the mutable backing map and its
+    // values.
+    const backing = {
+      arr: [{ n: 1 }],
+      map: new Map<object, { id: string }>([[{ k: 1 }, { id: "x" }]]),
+      nested: { flag: true },
+    };
+    const view = readOnlyCfcView(backing);
+    // Descriptor values are re-wrapped, through both Object and Reflect.
+    const desc = Object.getOwnPropertyDescriptor(view, "arr")!;
+    expect(() => (desc.value as unknown[]).push(0)).toThrow("read-only");
+    expect(() => {
+      (desc.value as { n: number }[])[0].n = 2;
+    }).toThrow("read-only");
+    const rdesc = Reflect.getOwnPropertyDescriptor(view, "nested")!;
+    expect(() => {
+      (rdesc.value as { flag: boolean }).flag = false;
+    }).toThrow("read-only");
+    // Map.forEach receives the view as its third argument, not the backing
+    // map; values arrive wrapped.
+    let visited = 0;
+    view.map.forEach((v, _k, m) => {
+      visited++;
+      expect(() => (m as Map<object, object>).clear()).toThrow("read-only");
+      expect(() => {
+        (v as { id: string }).id = "y";
+      }).toThrow("read-only");
+    });
+    expect(visited).toBe(1);
+    // get/entries/values results are wrapped; keys keep reference identity.
+    for (const [k, v] of view.map) {
+      expect(() => {
+        (v as { id: string }).id = "y";
+      }).toThrow("read-only");
+      expect(view.map.get(k)).toBeDefined();
+      expect(() => {
+        (view.map.get(k) as { id: string }).id = "y";
+      }).toThrow("read-only");
+    }
+    for (const v of view.map.values()) {
+      expect(() => {
+        (v as { id: string }).id = "y";
+      }).toThrow("read-only");
+    }
+    // The backing state never moved.
+    expect(backing.arr.length).toBe(1);
+    expect(backing.arr[0].n).toBe(1);
+    expect(backing.map.size).toBe(1);
+    expect([...backing.map.values()][0].id).toBe("x");
+    expect(backing.nested.flag).toBe(true);
   });
 
   it("noteCfcSinkReleaseReject lands in diagnostics", async () => {

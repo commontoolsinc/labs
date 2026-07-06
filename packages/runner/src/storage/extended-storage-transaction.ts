@@ -130,19 +130,51 @@ const throwCfcReadOnly = (): never => {
   );
 };
 
-const readOnlyCfcView = <T>(value: T): T => {
+// Exported for tests: the bypass vectors (descriptor recovery, Map
+// iteration leaks) are pinned by unit-testing the helper directly.
+export const readOnlyCfcView = <T>(value: T): T => {
   if (value === null || typeof value !== "object") return value;
   if (Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;
-  const view = value instanceof Map
-    ? new Proxy(value, {
-      // Map methods work on an internal slot, so they must be called on the
-      // real Map, not the proxy — read methods are forwarded bound, the
-      // mutating ones throw.
-      get(target, prop) {
-        if (prop === "set" || prop === "delete" || prop === "clear") {
-          return throwCfcReadOnly;
+  let view: object;
+  if (value instanceof Map) {
+    // Map methods work on an internal slot, so they must be called on the
+    // real Map, not the proxy. Read results are re-wrapped, and every API
+    // that would surface the backing map or its values raw is intercepted:
+    // forEach's third callback argument is the view, and get / entries /
+    // values / iteration yield wrapped values (cubic round 3 on #4517).
+    // Keys pass raw on purpose — they are the frozen records whose
+    // reference identity callers key on.
+    const target = value as Map<unknown, unknown>;
+    const mapView: Map<unknown, unknown> = new Proxy(target, {
+      get(_t, prop) {
+        switch (prop) {
+          case "set":
+          case "delete":
+          case "clear":
+            return throwCfcReadOnly;
+          case "get":
+            return (key: unknown) => readOnlyCfcView(target.get(key));
+          case "forEach":
+            return (
+              cb: (v: unknown, k: unknown, m: unknown) => void,
+              thisArg?: unknown,
+            ) =>
+              target.forEach((v, k) =>
+                cb.call(thisArg, readOnlyCfcView(v), k, mapView)
+              );
+          case "entries":
+          case Symbol.iterator:
+            return function* () {
+              for (const [k, v] of target.entries()) {
+                yield [k, readOnlyCfcView(v)];
+              }
+            };
+          case "values":
+            return function* () {
+              for (const v of target.values()) yield readOnlyCfcView(v);
+            };
         }
         const member = Reflect.get(target, prop, target);
         return typeof member === "function"
@@ -153,17 +185,32 @@ const readOnlyCfcView = <T>(value: T): T => {
       defineProperty: throwCfcReadOnly,
       deleteProperty: throwCfcReadOnly,
       setPrototypeOf: throwCfcReadOnly,
-    })
-    : new Proxy(value, {
+    });
+    view = mapView;
+  } else {
+    view = new Proxy(value, {
       get(target, prop, receiver) {
         const member = Reflect.get(target, prop, receiver);
         return typeof member === "function" ? member : readOnlyCfcView(member);
+      },
+      // Without this trap, Object/Reflect.getOwnPropertyDescriptor(view, k)
+      // hands back a descriptor whose `value` is the raw nested object
+      // (cubic round 3 on #4517). Re-wrap it. Allowed by the proxy
+      // invariants: the state's own properties are configurable, and a
+      // configurable data property may report a different value.
+      getOwnPropertyDescriptor(target, prop) {
+        const desc = Reflect.getOwnPropertyDescriptor(target, prop);
+        if (desc !== undefined && "value" in desc) {
+          return { ...desc, value: readOnlyCfcView(desc.value) };
+        }
+        return desc;
       },
       set: throwCfcReadOnly,
       defineProperty: throwCfcReadOnly,
       deleteProperty: throwCfcReadOnly,
       setPrototypeOf: throwCfcReadOnly,
     });
+  }
   readOnlyCfcViews.set(value, view);
   return view as T;
 };
