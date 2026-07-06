@@ -198,4 +198,57 @@ describe("sqlite read-time clearance across runtimes", () => {
       "baseline request hash stays reader-blind",
     );
   });
+
+  it("releases nothing about withheld rows beyond the declared surface", async () => {
+    // §6 E3 (docs/plans/cfc-future-work-implementation.md): "the
+    // withheld-count is not observable in the result shape beyond the
+    // declared release". The raw stored doc — read with NO result-schema
+    // shaping, so it is the query's ENTIRE observable surface — must carry
+    // exactly the declared release: the kept rows, the withheld count, and
+    // the request bookkeeping. Withheld rows leave no artifacts: no
+    // placeholder slots, no index gaps, no ids, no content.
+    const bobRaw = await bob.readRaw(["qClear"]) as Record<string, unknown>;
+    assertEquals(
+      Object.keys(bobRaw).sort(),
+      ["pending", "requestHash", "result", "withheld"],
+      "the cleared result doc carries ONLY the declared surface",
+    );
+    const bobRows = bobRaw.result as unknown[];
+    assertEquals(bobRows.length, 1, "kept rows only — no per-withheld slots");
+    assert(
+      bobRows.every((r) => r !== null && r !== undefined),
+      "the kept-row array is dense — no placeholder gaps",
+    );
+    // Content opacity: nothing reachable in bob's raw doc mentions a
+    // withheld row (kept rows split into per-row link docs, so the doc
+    // itself holds no row content — a leak would surface right here).
+    const bobFlat = JSON.stringify(bobRaw);
+    for (const leaked of ["alice-1", "alice-2"]) {
+      assert(
+        !bobFlat.includes(leaked),
+        `withheld row content "${leaked}" leaked into bob's raw result doc`,
+      );
+    }
+
+    const aliceRaw = await alice.readRaw(["qClear"]) as Record<string, unknown>;
+    assertEquals(
+      Object.keys(aliceRaw).sort(),
+      ["pending", "requestHash", "result", "withheld"],
+      "the cleared result doc carries ONLY the declared surface",
+    );
+    assertEquals((aliceRaw.result as unknown[]).length, 2);
+    assert(
+      !JSON.stringify(aliceRaw).includes("bob-only"),
+      "withheld row content leaked into alice's raw result doc",
+    );
+
+    // The boundary in the other direction: a NON-clearance query result
+    // carries no clearance artifact at all — `withheld` is absent, not 0.
+    const allRaw = await alice.readRaw(["qAll"]) as Record<string, unknown>;
+    assertEquals(
+      Object.keys(allRaw).sort(),
+      ["pending", "requestHash", "result"],
+      "a non-clearance result must not carry a withheld field",
+    );
+  });
 });
