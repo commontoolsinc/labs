@@ -113,6 +113,7 @@ function installWsDelay(delayMs: number): void {
       : new Native(url);
     const listeners = new Set<EventListenerOrEventListenerObject>();
     const nativeAdd = ws.addEventListener.bind(ws);
+    const nativeRemove = ws.removeEventListener.bind(ws);
     ws.addEventListener = (
       type: string,
       listener: EventListenerOrEventListenerObject | null,
@@ -120,6 +121,16 @@ function installWsDelay(delayMs: number): void {
     ) => {
       if (type === "message" && listener) listeners.add(listener);
       else if (listener) nativeAdd(type, listener, options);
+    };
+    // Mirror removal for the diverted message listeners, preserving
+    // WebSocket semantics for callers that unsubscribe/re-subscribe.
+    ws.removeEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | EventListenerOptions,
+    ) => {
+      if (type === "message" && listener) listeners.delete(listener);
+      else if (listener) nativeRemove(type, listener, options);
     };
     let onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null =
       null;
