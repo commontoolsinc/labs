@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import {
   atomEntails,
+  atomPatternBindingsEqual,
   EMPTY_ATOM_PATTERN_BINDINGS,
   instantiateAtomPattern,
   isAtomVarPlaceholder,
@@ -235,6 +236,25 @@ describe("CFC atom patterns", () => {
     });
   });
 
+  describe("atomPatternBindingsEqual", () => {
+    it("compares environments by variable set and structural value", () => {
+      expect(atomPatternBindingsEqual({ "$a": userA }, { "$a": { ...userA } }))
+        .toBe(true);
+      expect(atomPatternBindingsEqual({ "$a": userA }, { "$a": userB }))
+        .toBe(false);
+      // Different variable sets — including a strict subset — are unequal.
+      expect(
+        atomPatternBindingsEqual({ "$a": userA }, {
+          "$a": userA,
+          "$b": userB,
+        }),
+      ).toBe(false);
+      expect(atomPatternBindingsEqual({ "$a": userA }, { "$b": userA }))
+        .toBe(false);
+      expect(atomPatternBindingsEqual({}, {})).toBe(true);
+    });
+  });
+
   describe("instantiateAtomPattern", () => {
     it("substitutes bound placeholders recursively (§4.4.5)", () => {
       expect(
@@ -270,6 +290,22 @@ describe("CFC atom patterns", () => {
           {},
         ),
       ).toEqual({ value: { type: "t", kept: 1 } });
+    });
+
+    it("instantiates array-bearing patterns elementwise", () => {
+      expect(
+        instantiateAtomPattern(
+          { type: "t", items: [{ var: "$a" }, 2] },
+          { "$a": 1 },
+        ),
+      ).toEqual({ value: { type: "t", items: [1, 2] } });
+      // An unbound placeholder inside an array fails the whole instantiation.
+      expect(
+        instantiateAtomPattern(
+          { type: "t", items: [{ var: "$missing" }] },
+          {},
+        ),
+      ).toBeNull();
     });
   });
 
@@ -354,6 +390,11 @@ describe("CFC atom patterns", () => {
       ) {
         expect(atomPropagationClass({ type })).toBe("provenance");
       }
+      // String atoms and kind-shaped records have no registered class —
+      // fail-safe value-bound.
+      expect(atomPropagationClass("string-atom")).toBe("value-bound");
+      expect(atomPropagationClass({ kind: "authored-by" }))
+        .toBe("value-bound");
     });
   });
 });

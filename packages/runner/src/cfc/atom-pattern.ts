@@ -132,7 +132,12 @@ export const matchAtomPattern = (
   bindings: AtomPatternBindings = EMPTY_ATOM_PATTERN_BINDINGS,
 ): AtomPatternBindings | null => matchPatternValue(pattern, atom, bindings);
 
-const bindingsEqual = (
+/**
+ * Structural equality of binding environments: same variable set, deepEqual
+ * values. Used to dedup the environments a multi-binding enumeration yields
+ * (below) and by B4 to detect that a firing changed nothing.
+ */
+export const atomPatternBindingsEqual = (
   left: AtomPatternBindings,
   right: AtomPatternBindings,
 ): boolean => {
@@ -147,7 +152,9 @@ const pushUniqueBindings = (
   collected: AtomPatternBindings[],
   candidate: AtomPatternBindings,
 ): void => {
-  if (!collected.some((existing) => bindingsEqual(existing, candidate))) {
+  if (
+    !collected.some((existing) => atomPatternBindingsEqual(existing, candidate))
+  ) {
     collected.push(candidate);
   }
 };
