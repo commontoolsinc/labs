@@ -2676,9 +2676,8 @@ const verifyInputRequirements = (
   // consumed, and over-inclusive quantification is the fail-safe direction
   // for it; per-class narrowing of consumers is C4.
   //
-  // Provenance-only reads are NOT filtered here (unlike before D4): the
-  // exemption is applied per entry inside the prefix, and the #14 arm needs
-  // to distinguish "no labeled input at all" from "only provenance plumbing".
+  // Provenance-only reads are NOT filtered here (unlike before D4): the S7
+  // exemption is applied per entry, inside that entry's prefix.
   const gatedReads = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
@@ -2786,16 +2785,14 @@ const verifyInputRequirements = (
         maxConfidentiality !== undefined
       ? prefixBounds.boundFor(target, entry.path)
       : -Infinity;
-    const prefixLabeled = gatedReads.filter((read) =>
-      read.journalIndex < bound
-    );
     // Provenance-only reads (link/origin/current-principal, no
     // confidentiality) are structural plumbing, not endorsable inputs —
     // exempting them stops the quantification from false-rejecting unrelated
     // protected writes (audit S7), now only ever needed for reads WITHIN the
     // prefix. Confidentiality- or endorsement-bearing reads stay, keeping
     // the prompt-injection screen sound.
-    const gating = prefixLabeled.filter((read) =>
+    const gating = gatedReads.filter((read) =>
+      read.journalIndex < bound &&
       !isProvenanceOnlyConsumedLabel(read.label!)
     );
     // An empty gating set passes here — but it is NOT the pre-D4 vacuous
@@ -2828,7 +2825,7 @@ const verifyInputRequirements = (
     // Quantifies over the same prefix-scoped gating set as requiredIntegrity
     // (a read past the last overlapping write cannot have fed this value);
     // an empty set passes — a ceiling over nothing consumed is genuinely
-    // satisfied, unlike the floor's #14 arm above.
+    // satisfied.
     if (maxConfidentiality !== undefined && gating.length > 0) {
       const ok = gating.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
