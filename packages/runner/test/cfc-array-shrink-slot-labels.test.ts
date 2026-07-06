@@ -1,0 +1,133 @@
+import { afterEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+
+const signer = await Identity.fromPassphrase("runner-cfc-shrink-slot-labels");
+const space = signer.did();
+
+type StoredEntry = {
+  path: string[];
+  label: { confidentiality?: string[]; integrity?: unknown[] };
+  origin?: string;
+  observes?: string;
+};
+
+// An array-diff shrink truncates slots by writing `length` alone; without an
+// explicit delete write per truncated slot, the removed slots' per-slot link
+// entries survive in the labelMap. Any later read/diff of such a slot (e.g. a
+// list growing back) consumes the stale entry as a followRef observation
+// (SC-8) and re-imports the departed member's taint into the reader's flow
+// join — the echo behind the #4525 probe's A3 step. The diff layer now emits
+// the same explicit slot deletes the direct `length`-write path always has,
+// and the flow-clear drops the stale entries like any other covered write.
+describe("CFC: array shrink clears truncated slots' link labels", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  const seedLabeledDoc = async (
+    rt: Runtime,
+    cause: string,
+    value: unknown,
+    atom: string,
+  ): Promise<string> => {
+    const seed = rt.edit();
+    const cell = rt.getCell(space, cause, undefined, seed);
+    const id = cell.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({
+      space,
+      scope: "space",
+      id,
+      path: [],
+    }, {
+      value,
+      cfc: {
+        version: 1,
+        schemaHash: "seed-schema",
+        labelMap: {
+          version: 1,
+          entries: [{ path: [], label: { confidentiality: [atom] } }],
+        },
+      },
+    });
+    expect((await seed.commit()).ok).toBeDefined();
+    return id;
+  };
+
+  const entriesOf = (id: string): StoredEntry[] => {
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): {
+        cfc?: { labelMap?: { entries: StoredEntry[] } };
+      } | undefined;
+    };
+    return replica!.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  };
+
+  const linkConfidentialityAt = (id: string, slot: string): string[] =>
+    entriesOf(id)
+      .filter((e) =>
+        e.origin === "link" && e.path.length === 1 &&
+        e.path[0] === slot
+      )
+      .flatMap((e) => e.label.confidentiality ?? []);
+
+  it("drops the truncated slot's link entry on shrink; survivors keep theirs", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+
+    await seedLabeledDoc(runtime, "shrink-el-0", { n: 1 }, "alice-secret");
+    await seedLabeledDoc(runtime, "shrink-el-1", { n: 2 }, "bob-secret");
+    await seedLabeledDoc(runtime, "shrink-el-2", { n: 3 }, "carol-secret");
+
+    const listSchema = {
+      type: "array",
+      items: { asCell: ["cell"] },
+    } as const;
+
+    const setup = runtime.edit();
+    const el0 = runtime.getCell(space, "shrink-el-0", undefined, setup);
+    const el1 = runtime.getCell(space, "shrink-el-1", undefined, setup);
+    const listCell = runtime.getCell(space, "shrink-list", listSchema, setup);
+    listCell.set([el0, el1]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const listId = listCell.getAsNormalizedFullLink().id;
+    // Precondition: both slots carry their element's link label.
+    expect(linkConfidentialityAt(listId, "0")).toEqual(["alice-secret"]);
+    expect(linkConfidentialityAt(listId, "1")).toEqual(["bob-secret"]);
+
+    // Shrink: bob's slot is truncated by the array diff (a `length` write —
+    // slot 1 itself is not overwritten by any surviving element).
+    const shrinkTx = runtime.edit();
+    const lc = runtime.getCell(space, "shrink-list", listSchema, shrinkTx);
+    lc.set([el0]);
+    expect((await shrinkTx.commit()).ok).toBeDefined();
+
+    expect(linkConfidentialityAt(listId, "0")).toEqual(["alice-secret"]);
+    // The truncated slot's stale entry is the echo carrier — it must go.
+    expect(linkConfidentialityAt(listId, "1")).toEqual([]);
+
+    // Growth re-uses the slot: its label is the new occupant's alone, with
+    // no residue of the departed member to re-import via followRef.
+    const growTx = runtime.edit();
+    const el2 = runtime.getCell(space, "shrink-el-2", undefined, growTx);
+    const lc2 = runtime.getCell(space, "shrink-list", listSchema, growTx);
+    lc2.set([el0, el2]);
+    expect((await growTx.commit()).ok).toBeDefined();
+
+    expect(linkConfidentialityAt(listId, "1")).toEqual(["carol-secret"]);
+  });
+});

@@ -315,14 +315,25 @@ describe("data-updating", () => {
       const current = testCell.key("items").getAsNormalizedFullLink();
       const changes = normalizeAndDiff(runtime, tx, current, [1, 2]);
 
-      expect(changes.length).toBe(1);
+      // A shrink is explicit deletes of the truncated slots PLUS a length
+      // change — deletes first, so they hit still-present slots (a delete
+      // after truncation is a no-op the write layer elides).
+      expect(changes.length).toBe(2);
       expect(
         areNormalizedLinksSame(
           changes[0].location,
+          testCell.key("items").key("2").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(changes[0].value).toBe(undefined);
+      expect(changes[0].delete).toBe(true);
+      expect(
+        areNormalizedLinksSame(
+          changes[1].location,
           testCell.key("items").key("length").getAsNormalizedFullLink(),
         ),
       ).toBe(true);
-      expect(changes[0].value).toBe(2);
+      expect(changes[1].value).toBe(2);
     });
 
     it("should generate correct paths when setting array length to 0", () => {
