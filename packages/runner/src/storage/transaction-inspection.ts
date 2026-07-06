@@ -3,6 +3,7 @@ import type {
   IMemorySpaceAddress,
   IReadActivity,
   IStorageTransaction,
+  IWriteAttempt,
   MemorySpace,
   TransactionReactivityLog,
   TransactionReadDetail,
@@ -41,13 +42,54 @@ export function getTransactionReadActivities(
   if (direct) {
     return direct;
   }
+  // Journal fallback: the activity stream is the temporal read|write
+  // interleaving, so the stream position doubles as the activity-clock
+  // stamp V2 transactions record natively (see IReadActivity.journalIndex).
+  // getTransactionWriteAttempts derives write indices from the same
+  // enumeration, keeping both on one clock.
   return (function* () {
+    let journalIndex = 0;
     for (const activity of tx.journal.activity()) {
       if ("read" in activity && activity.read) {
-        yield activity.read;
+        yield { ...activity.read, journalIndex };
       }
+      journalIndex += 1;
     }
   })();
+}
+
+/**
+ * Ordered log of the transaction's applied write attempts, on the same
+ * per-transaction activity clock as `getTransactionReadActivities`. Prefers
+ * the transaction's native log (V2); falls back to deriving positional
+ * indices from the journal activity stream. Returns undefined when neither
+ * source exists — callers must treat that as "order unknown" and fail toward
+ * transaction-global gating (docs/specs/cfc-write-prefix-provenance.md §4).
+ */
+export function getTransactionWriteAttempts(
+  tx: TxLike,
+): readonly IWriteAttempt[] | undefined {
+  const direct = tx.getWriteAttemptLog?.() ??
+    unwrap(tx).getWriteAttemptLog?.();
+  if (direct) {
+    return direct;
+  }
+  try {
+    const attempts: IWriteAttempt[] = [];
+    let journalIndex = 0;
+    for (const activity of tx.journal.activity()) {
+      if ("write" in activity && activity.write) {
+        attempts.push({ ...activity.write, journalIndex });
+      }
+      journalIndex += 1;
+    }
+    return attempts;
+  } catch {
+    // V2 journals throw on activity(); a V2 transaction always provides the
+    // native log above, so reaching here means a custom transaction with
+    // neither source.
+    return undefined;
+  }
 }
 
 export function getTransactionReadDetails(

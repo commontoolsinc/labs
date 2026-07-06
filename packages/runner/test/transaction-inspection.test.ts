@@ -16,6 +16,7 @@ import {
 import { reactivityLogFromActivities } from "../src/storage/reactivity-log.ts";
 import {
   getTransactionReadActivities,
+  getTransactionWriteAttempts,
   getTransactionWriteDetails,
 } from "../src/storage/transaction-inspection.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -348,7 +349,76 @@ describe("transaction inspection", () => {
         path: ["value", "count"],
         meta: { source: "direct-hook" },
         nonRecursive: true,
+        // The per-tx activity clock (shared with write attempts), stamped
+        // natively by the V2 transaction at record time.
+        journalIndex: 0,
       }]);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("stamps reads and write attempts on one shared activity clock (D4)", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+    });
+
+    try {
+      const tx = storageManager.edit();
+      const id = "test:transaction-inspection-activity-clock-v2" as const;
+      // read | write | read | write — the write-prefix provenance gate
+      // depends on this interleaving being recoverable, so the clock is one
+      // monotonic counter across BOTH record points, and the attempt log
+      // keeps one entry per applied write in temporal order (unlike the
+      // per-path upserts in write details).
+      tx.read({ space, scope: "space", id, path: ["value", "count"] });
+      tx.write({ space, scope: "space", id, path: [] }, {
+        value: { count: 1 },
+      });
+      tx.read({ space, scope: "space", id, path: ["value", "count"] });
+      tx.write({ space, scope: "space", id, path: ["value", "count"] }, 2);
+
+      assertEquals(
+        [...getTransactionReadActivities(tx)].map((read) => read.journalIndex),
+        [0, 2],
+      );
+      const attempts = getTransactionWriteAttempts(tx);
+      assertEquals(
+        attempts?.map((attempt) => ({
+          path: attempt.path,
+          journalIndex: attempt.journalIndex,
+        })),
+        [
+          { path: [], journalIndex: 1 },
+          { path: ["value", "count"], journalIndex: 3 },
+        ],
+      );
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("elides value-equal writes from the attempt log like the rest of the inspection surface", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+    });
+
+    try {
+      const seed = storageManager.edit();
+      const id = "test:transaction-inspection-attempt-elision-v2" as const;
+      seed.write({ space, scope: "space", id, path: [] }, {
+        value: { count: 1 },
+      });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      // A value-equal write is elided storage-wide (no write details, no
+      // reactivity) — the attempt log matches, so the CFC prefix gate sees
+      // exactly the write set every other enforcement source sees.
+      tx.write({ space, scope: "space", id, path: ["value", "count"] }, 1);
+      assertEquals(getTransactionWriteAttempts(tx)?.length, 0);
+      tx.write({ space, scope: "space", id, path: ["value", "count"] }, 2);
+      assertEquals(getTransactionWriteAttempts(tx)?.length, 1);
     } finally {
       await storageManager.close();
     }

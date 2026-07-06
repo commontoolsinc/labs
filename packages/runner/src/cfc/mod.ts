@@ -38,6 +38,7 @@ export type {
   EntityDocumentWithCfc,
   IFCLabel,
   ImplementationIdentity,
+  OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
   TrustSnapshot,
