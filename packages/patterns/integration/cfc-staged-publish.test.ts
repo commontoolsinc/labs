@@ -33,6 +33,12 @@ describe("cfc staged publish integration test", () => {
       identity,
     });
 
+    // Pre-create the space-root (default) pattern so the browser's
+    // `pattern:getSpaceRoot` storage-RESUMEs it instead of taking the create
+    // path and cold-compiling default-app inside its worker — see the
+    // beforeAll comment in lunch-poll-vote.test.ts.
+    await cc.ensureDefaultPattern();
+
     const sourcePath = join(
       import.meta.dirname!,
       "..",

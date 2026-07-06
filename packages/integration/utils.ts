@@ -270,12 +270,14 @@ function installWaiter(
     stopped = true;
     hub.listeners.delete(pulse);
     registry.delete(bindingName);
+    clearInterval(backstop);
   };
 
   const onConditionMet = () => {
     if (stopped) return;
     stopped = true;
     hub.listeners.delete(pulse);
+    clearInterval(backstop);
     // The binding is added and awaited before this script installs, so the
     // bound function is normally present; retry a bounded number of times on the
     // macrotask queue in case it has not yet attached to this execution context.
@@ -330,6 +332,12 @@ function installWaiter(
 
   registry.set(bindingName, stop);
   hub.listeners.add(pulse);
+  // Mutation pulses are the fast path, but a condition can flip true with no
+  // mutation record at all — e.g. a Lit `.value=` binding writing a committed
+  // cell value back into an input sets only the element property. A coarse
+  // timer backstop re-evaluates so such waits converge instead of starving
+  // until the outer timeout.
+  const backstop = setInterval(evaluate, 500);
   // Check immediately; the condition may already hold.
   evaluate();
 }

@@ -847,7 +847,10 @@ export interface IExtendedStorageTransaction
   setCfcFlowLabelsMode(mode: CfcFlowLabelsMode): void;
   /** Set the write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18). */
   setCfcWriteFloorMode(mode: CfcWriteFloorMode): void;
-  /** Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3). */
+  /**
+   * Enable trigger-read gating on the enforcement side (§8.9.2 / SC-3).
+   * Anti-downgrade pinned: once enabled, disabling throws.
+   */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
@@ -946,6 +949,13 @@ export interface IExtendedStorageTransaction
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
   ): void;
+
+  /**
+   * Appends a CFC diagnostic message. The sanctioned write path for the CFC
+   * machinery's observe-mode notes — getCfcState() returns a read-only view.
+   * Diagnostics are advisory and never feed an enforcement decision.
+   */
+  noteCfcDiagnostic(message: string): void;
 
   /**
    * Enqueues a side effect to run from the CFC outbox after a successful

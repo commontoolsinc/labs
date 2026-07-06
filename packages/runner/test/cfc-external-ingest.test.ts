@@ -35,7 +35,10 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
       {
         apiUrl: new URL("https://example.com"),
         storageManager,
-        // Match the operator/toolshed posture unless a test overrides it.
+        // Explicitly-disabled mode — the mint's hardest case (nothing else
+        // marks the tx relevant) — unless a test overrides it. Not any shipped
+        // host's posture: toolshed passes no CFC options and runs the
+        // enforce-explicit Runtime default.
         cfcEnforcementMode: "disabled",
         cfcFlowLabels: "off",
         ...overrides,

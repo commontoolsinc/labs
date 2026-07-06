@@ -40,6 +40,12 @@ describe("shared profile integration test", () => {
     });
     sharedSpaceDid = cc.manager().getSpace();
 
+    // Pre-create the space-root (default) pattern so each browser boot's
+    // `pattern:getSpaceRoot` storage-RESUMEs it instead of taking the create
+    // path and cold-compiling default-app inside its worker — see the
+    // beforeAll comment in lunch-poll-vote.test.ts.
+    await cc.ensureDefaultPattern();
+
     // Resolve the demo through the harness (content-addressed program) and
     // create from that, mirroring the other CFC integration tests. Passing raw
     // source text with a random suffix instead produced a flaky piece-load race

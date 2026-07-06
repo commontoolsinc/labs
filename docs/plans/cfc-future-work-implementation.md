@@ -560,6 +560,13 @@ floor-declaring schema + integrity-less write commits today under
 
 **D4 — per-write read-prefix provenance (the deferred end-state of
 `runner_cfc_implementation.md` "Potential and Final Write Sets").**
+_Design superseded by the soundness review
+[`docs/specs/cfc-write-prefix-provenance.md`](../specs/cfc-write-prefix-provenance.md):
+the bound below ("first attempt") is unsound under write re-attempts — the
+sound bound is the **last write overlapping the protected path** (both prefix
+directions), and consumed-read journal positions must join the digest
+alongside the write-attempt log. The review's §7 constraints are the contract
+for the code PR; the paragraph below is kept as the original sketch._
 Record a write-attempt log in `CfcTxState`: `{ target: CfcAddress,
 journalIndex: number }` per attempted write (the journal already orders
 activity). Gate scoping: `requiredIntegrity`/floor checks quantify over reads
@@ -735,12 +742,16 @@ here (completing B5's substrate).
 Define the mode matrix in a short doc section first (which combinations of
 enforcement × flow dial are conforming deployment states; rollout ordering:
 propagation-observe → persist → strict). Implement strict-only rejects at the
-ladder ([extended-storage-transaction.ts:1016-1033](../../packages/runner/src/storage/extended-storage-transaction.ts)):
-missing-policy fail-closed (a write touching a labeled doc with no resolvable
-schema/policy input rejects under strict, flags under explicit) and the
-writer-fit reject variant (SC-18b: `canWrite` confidentiality misfit rejects
-under strict instead of persist-and-flag), each with its error contract
-(SC-18c: stable reason strings naming rule id + path).
+ladder ([extended-storage-transaction.ts:1016-1033](../../packages/runner/src/storage/extended-storage-transaction.ts)).
+Missing-policy is **not** part of the strict delta: `enforce-explicit` already
+fail-closes it (prepare records `missing schema write-policy input`, the
+ladder rejects any reasoned tx under both enforcing modes, asserted in
+explicit mode by `cfc-boundary.test.ts`) — do not move that check behind the
+strict gate. The strict-only reject is the writer-fit variant (SC-18b:
+`canWrite` confidentiality misfit rejects under strict instead of
+persist-and-flag; not yet in code), plus any new fail-closed cases that want
+an explicit-mode grace, each with its error contract (SC-18c: stable reason
+strings naming rule id + path).
 
 **H5 — trigger reads on the enforcement side (SC-3 completion).**
 `CfcTxState.triggerReads` ([types.ts:339-345](../../packages/runner/src/cfc/types.ts))
@@ -776,6 +787,7 @@ depends on it.
 | `cfcSinkMaxConfidentiality` | per-sink ceilings | none | exists |
 | `cfcPolicyEvaluation` | off/observe/enforce | off | B5 |
 | `cfcWriteFloor` | off/observe/enforce | off | D3 |
+| `cfcTriggerReadGating` | false/true | false | H5 |
 | `renderConfidentialityCeiling` | atoms + caveatKinds | unset → §8.10.6 profile | exists; populated in H3a |
 | sqlite 3.c server capability | handshake | absent | E4 |
 
