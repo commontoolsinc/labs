@@ -3562,11 +3562,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // array — the reader blackout). Consumed (read-and-clear) by the first
         // traverseObjectWithSchema call, i.e. the element object itself.
         this.pendingElementRequiredGrace = true;
-        const { ok: val, error } = this.traverseWithSelector(
-          curDoc,
-          curSelector,
-        );
-        this.pendingElementRequiredGrace = false;
+        let val: Immutable<FabricValue> | undefined;
+        let error: TraverseFailure | undefined;
+        try {
+          ({ ok: val, error } = this.traverseWithSelector(
+            curDoc,
+            curSelector,
+          ));
+        } finally {
+          // The traversal machinery can throw (path-mismatch invariants,
+          // malformed schemas); never leak an armed flag to an unrelated
+          // object traversal on this instance.
+          this.pendingElementRequiredGrace = false;
+        }
         if (error !== undefined) {
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
@@ -3589,6 +3597,37 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return true;
     });
     return valid ? arrayObj : undefined;
+  }
+
+  /**
+   * Whether a link-valued property's target is ABSENT for this reader — the
+   * resolved value is `undefined` (unwritten, cross-space not yet loaded, or
+   * scoped to another principal's partition). Distinguishes "reference cannot
+   * be resolved" (eligible for the element-level required grace) from "target
+   * exists but fails the schema" (a genuine schema error that must keep
+   * strict semantics). Absence cannot be read off the failure code: both
+   * cases surface as INVALID_TYPE, because an absent target's `undefined`
+   * fails the target schema's type check. Resolution mirrors the
+   * array-element link handling in traverseArrayWithSchema; a throw from
+   * malformed link data counts as not-absent so strict stays the default.
+   */
+  private linkTargetAbsent(
+    propDoc: IMemorySpaceValueAttestation,
+    propSchema: JSONSchema | undefined,
+  ): boolean {
+    try {
+      const selector = { path: propDoc.address.path, schema: propSchema };
+      const [redirDoc, redirSelector] = this.getDocAtPath(
+        propDoc,
+        [],
+        selector,
+        "writeRedirect",
+      );
+      const [targetDoc] = this.nextLink(redirDoc, redirSelector ?? selector);
+      return targetDoc.value === undefined;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -3691,13 +3730,24 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const { ok: val, error } = SchemaObjectTraverser.hasAsCell(propSchema)
           ? this.tx.runWithAmbientReadMeta(excludeReadFromConflict, descend)
           : descend();
-        if (elementGrace && error !== undefined && isSigilLink(propValue)) {
+        // The grace below is only for link targets that are ABSENT for this
+        // reader (unwritten / cross-space not loaded / another principal's
+        // partition). A target that EXISTS but fails the schema keeps strict
+        // semantics — exempting it would mask a genuine schema error as a
+        // silently-missing field. Absence is checked by resolving the link,
+        // not by error code: an absent target surfaces as INVALID_TYPE (the
+        // undefined value fails the target schema's type check), the same
+        // code a present-but-wrong-shaped target produces.
+        const absentLinkTarget = elementGrace && error !== undefined &&
+          isSigilLink(propValue) &&
+          this.linkTargetAbsent(propDoc, propSchema);
+        if (absentLinkTarget) {
           unresolvableLinkProps.add(propKey);
         }
         if (error === undefined) {
           filteredObj[propKey] = val;
         } else if (
-          elementGrace &&
+          absentLinkTarget &&
           !this.traverseCells &&
           SchemaObjectTraverser.hasAsCell(propSchema)
         ) {
