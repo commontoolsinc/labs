@@ -63,6 +63,7 @@ import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcPolicyEvaluationMode,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -70,6 +71,7 @@ import {
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
@@ -243,6 +245,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
+    policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     triggerReads: [],
@@ -266,6 +269,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcFlowLabelsPinned = false;
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
+  #cfcPolicyEvaluationPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -377,6 +381,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.triggerReadGating = enabled;
     if (enabled) {
       this.#cfcTriggerReadGatingPinned = true;
+    }
+  }
+
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — code reaching the tx cannot weaken it
+    // to `observe`/`off` so the boundary gates decide on un-rewritten labels
+    // again (or skip the exhaustion fail-close). Strengthening is allowed.
+    if (this.#cfcPolicyEvaluationPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC policy-evaluation mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    this.#cfcState.policyEvaluationMode = mode;
+    if (mode === "enforce") {
+      this.#cfcPolicyEvaluationPinned = true;
     }
   }
 
@@ -743,6 +764,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
       implementationIdentity: this.#cfcState.implementationIdentity,
       trustSnapshot: this.#cfcState.trustSnapshot,
+      // Digest-only projection: the decision-relevant identity of the policy
+      // set (Epic B5). The snapshot itself is frozen Runtime config; only its
+      // identity needs to invalidate.
+      policySnapshot: this.#cfcState.policySnapshot === undefined
+        ? undefined
+        : { digest: this.#cfcState.policySnapshot.digest },
     };
   }
 
@@ -1356,6 +1383,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
     this.wrapped.setCfcTriggerReadGating(enabled);
+  }
+
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    this.wrapped.setCfcPolicyEvaluationMode(mode);
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {

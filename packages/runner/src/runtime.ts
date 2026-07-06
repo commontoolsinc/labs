@@ -68,6 +68,7 @@ import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
@@ -263,6 +264,14 @@ export interface RuntimeOptions {
    * metadata resolution per prepare).
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
+  /**
+   * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
+   * `off` (gates decide on raw labels, byte-identical to before the dial).
+   * `observe` evaluates gated labels to fixpoint and emits diagnostics while
+   * still deciding on the un-rewritten label; `enforce` decides on the
+   * rewritten label and fails closed on fuel exhaustion.
+   */
+  cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -419,6 +428,7 @@ export class Runtime {
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
+  readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
@@ -554,6 +564,7 @@ export class Runtime {
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -809,6 +820,7 @@ export class Runtime {
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
+    wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
