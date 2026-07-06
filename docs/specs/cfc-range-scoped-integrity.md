@@ -167,11 +167,18 @@ type LabelMapEntry = {
   channel-splitting C2 did for existence entries.
 - **inv-F3 — mint authority: runtime-authored, verified-evidence-only.**
   Range side-data and every §5/§6 atom are minted exclusively by the trusted
-  integrator through the runtime-minted path, and stripped by the existing
-  runtime-minted evidence gate when carried on author-influenceable labels.
-  A range's `authored-by` subject is the **verified signer of the commit
-  that appended the op** (Epic E), never a payload field — sqlite's
-  `authoredBy(sender)` self-mint is the named counterexample.
+  integrator through the runtime-minted path. The existing runtime-minted
+  evidence gate ([prepare.ts](../../packages/runner/src/cfc/prepare.ts))
+  filters flat `IFCLabel.integrity` arrays only — it cannot see nested range
+  side-data — so F3 MUST extend it to the `view` refinement, and the sound
+  extension is wholesale: an author-influenceable channel (a carried label
+  view or link schema, a direct write at the cfc metadata path) never
+  contributes a `view` at all — dropped, not atom-filtered — since
+  re-derivation from integrated history (inv-F4) is always available and
+  dropping is the fail-safe under-claim. A range's `authored-by` subject is
+  the **verified signer of the commit that appended the op** (Epic E), never
+  a payload field — sqlite's `authoredBy(sender)` self-mint is the named
+  counterexample.
 
 **Alternative considered and rejected — the sqlite split move (one doc per
 range).** Phase 3.a attaches per-row labels by writing each row as its own
@@ -333,9 +340,20 @@ Per materialization it mints, whole-field:
 - **A partial read is a `value` observation refined by a span** — the Epic C
   frame absorbs it; no new observation class. At F3 a partial read consumes
   the covering entry (whole-field) — a sound over-approximation. At F5,
-  consumption narrows: the overlapping ranges' confidentiality joined with
-  the field's `shape` (span *positions* are membership facts — knowing where
-  spans fall is observing structure, the §8.5.6.1 asymmetry again).
+  consumption narrows **in the derived content component only**. inv-F1 does
+  not put declared/root labels or structural taint into ranges, so a literal
+  "overlapping ranges only" rule would under-taint. The F5 rule: a partial
+  read still consumes the covering entry's declared, link, and structure
+  components and the field's path/root taint unchanged; plus the field's
+  `shape` (span *positions* are membership facts — knowing where spans fall
+  is observing structure, the §8.5.6.1 asymmetry again); plus the
+  overlapping ranges' confidentiality; plus the **derived residual**. The
+  integrator maintains the field's derived content confidentiality as
+  join(range confidentiality) ⊔ residual, where the residual carries what is
+  not attributable to surviving spans (e.g. deleted-span taint until
+  checkpoint compaction, §6), and a partial read always consumes the
+  residual. What a partial read sheds is therefore only ever *other spans'*
+  decomposed labels — never a whole-field component.
 - **Integrity of a partial read** is the meet of the overlapping ranges'
   integrity, scoped as a projection of the field (§4.5.3) — valid as a
   component of the field, not as a standalone value.
@@ -408,15 +426,21 @@ plan's cross-cutting test infrastructure) keeps honest.
    labels yet.
 3. **F3 — side-data + whole-field mints.** Integrity-only ranges from
    verified op authorship; `TransformedBy` + summaries + the uniform-covering
-   lift; label-view exposure. Red-first: a mixed-author doc MUST NOT carry
-   either author's direct claim whole-field (§14.4.8.3's MUST NOT) while a
+   lift; label-view exposure; the runtime-minted gate extended to the `view`
+   refinement (inv-F3). Red-first: a mixed-author doc MUST NOT carry either
+   author's direct claim whole-field (§14.4.8.3's MUST NOT) while a
    single-author doc keeps its lifted claim; side-data must re-derive
-   byte-identically from the op log (inv-F4).
+   byte-identically from the op log (inv-F4); a forged `view` with nested
+   `TransformedBy`/`IntegritySummary`/`authored-by` atoms carried on an
+   author-influenceable label view or link schema is dropped wholesale — it
+   survives today's flat-array gate, so the test is red by construction.
 4. **F4 — covered-by families.** Signature-style per-span claim verification;
    until it lands the integrator mints `contributors` only.
 5. **F5 — anchors + partial reads.** The anchor-mapping surface; partial-read
-   consumption narrows to overlapping ranges; per-range confidentiality
-   becomes mintable and consumable (closing §3's channel split).
+   consumption narrows per the §7 component-precise rule (only other spans'
+   decomposed labels are shed, never a whole-field component); per-range
+   confidentiality becomes mintable and consumable (closing §3's channel
+   split).
 
 F1 and F2 are parallel; F3 needs both; F4/F5 need F3. Nothing in Epics A–E
 waits on any stage. F consumes what already landed: Epic A's clause profile,
