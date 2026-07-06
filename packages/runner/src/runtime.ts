@@ -41,6 +41,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  URI,
 } from "./storage/interface.ts";
 import {
   type Cell,
@@ -914,9 +915,52 @@ export class Runtime {
       });
     }
     this.prepareTxForCommit(tx);
-    return tx.commit().then(({ error }) => {
+    return tx.commit().then(async ({ error }) => {
       if (error) {
         if (maxRetries > 0) {
+          // A CONFLICT means this replica is behind the authoritative
+          // version: re-running immediately re-reads the same stale local
+          // state and fails identically, so without waiting the retries all
+          // burn on one deterministic conflict (CT-1824 — the compile-cache
+          // write-back looped this way and stale-version pieces recompiled
+          // on every cold boot). The conflict carries the catch-up gate;
+          // await it so the retry runs against fresh state — same protocol
+          // as the scheduler's conflict handling (scheduler/action-run.ts).
+          // A readiness gate that rejects (session closed/replaced while
+          // waiting) is control flow, not an error: retry anyway and let
+          // commit produce the definitive outcome.
+          const readyToRetry =
+            (error as { readyToRetry?: () => unknown }).readyToRetry;
+          if (typeof readyToRetry === "function") {
+            try {
+              await readyToRetry();
+            } catch {
+              // Readiness aborted — the retry's commit decides.
+            }
+          }
+          // The catch-up gate advances the session past the conflicting
+          // commit, but a doc this replica never READ does not arrive with
+          // it — and a conflicted blind WRITE means exactly that (the
+          // compile-cache write-back rewrites derived docs a cold replica
+          // has never seen). Pull the named doc so the retry's write
+          // carries its true version instead of re-asserting seq 0.
+          const conflict = (error as {
+            conflict?: { space?: MemorySpace; of?: string };
+          }).conflict;
+          if (
+            conflict?.space !== undefined &&
+            typeof conflict.of === "string" &&
+            conflict.of !== "of:unknown"
+          ) {
+            try {
+              await this.storageManager.open(conflict.space).sync(
+                conflict.of as unknown as URI,
+                { path: [], schema: false },
+              );
+            } catch {
+              // Pull failed — the retry's commit decides.
+            }
+          }
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };

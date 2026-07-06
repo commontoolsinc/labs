@@ -1357,10 +1357,26 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
+    // The write-back re-writes source docs whose values carry quote-cell
+    // indirections (one derived doc per import edge). On a cold replica those
+    // derived docs are unknown, and each commit attempt discovers exactly ONE
+    // of them: the engine rejects on the first stale read, editWithRetry
+    // pulls that doc, and only then does the next attempt's diff reach the
+    // following one (CT-1824, live-traced on the browser rig — the system-app
+    // closure re-write conflicts on ~24 pre-existing edge docs, one per
+    // round). Convergence therefore needs one retry per pre-existing derived
+    // doc; the general DEFAULT_MAX_RETRIES (5) exhausts long before that and
+    // the cache never heals, so every later cold boot recompiles. Budget by
+    // the write set's edge count (source + compiled edge docs) with slack.
+    // Rounds are bounded by actual conflicts — a conflict-free write-back
+    // still commits on the first attempt — so the ceiling is only paid during
+    // recovery after a compiler-version bump.
+    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
+    const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
     const { error } = await this.runtime.editWithRetry((tx) => {
       writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
       writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
-    });
+    }, writebackMaxRetries);
     logger.time(writebackStart, "compile-cache", "writeback");
     if (error) {
       logger.error("compile-cache-writeback-failed", () => [
