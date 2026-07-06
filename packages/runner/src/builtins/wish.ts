@@ -382,8 +382,11 @@ function subscribeProfileName(cell: Cell<unknown>): void {
 /**
  * Enumerate the user's profile candidate cells from the home `profiles` list,
  * ordered: default first, then by most-recently-used (MRU), then remaining list
- * order. Identity is by link equality (`Cell.equals`); there is no synthetic
- * key. Returns [] when no valid profile exists yet.
+ * order. Identity is by the profile's own SPACE — each profile is a distinct
+ * `ProfileHome.inSpace()` space, so the `defaultProfile` / `mru` links are
+ * matched to candidates by space, not `Cell.equals` (see `sameProfileCell`;
+ * CT-1842). There is no synthetic key. Returns [] when no valid profile exists
+ * yet.
  */
 function getProfileCandidateCells(
   ctx: WishContext,
