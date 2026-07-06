@@ -24,7 +24,8 @@ type StoredEntry = {
 
 // custodyIngest is the one durable-write path for a vouched ingest channel: a
 // governed write that mints the ExternalIngest mark by construction. These
-// tests run a default (CFC-disabled) runtime, the operator/toolshed posture.
+// tests run a default runtime (enforce-explicit, flow off) — the posture
+// toolshed itself inherits by passing no CFC options.
 describe("custodyIngest", () => {
   let signer: Identity;
   let space: ReturnType<Identity["did"]>;

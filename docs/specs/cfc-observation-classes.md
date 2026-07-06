@@ -138,6 +138,30 @@ This is the crux of SC-4: separating the two classes lets `value` replace (the
 precision win) while `shape` grows (the soundness fix), where today one label
 does both and the existence bit leaks.
 
+**C2 note (2026-07-03): existence entries carry confidentiality only.** "The
+join of the old and new derivation's flow labels" above is a
+confidentiality-channel rule. The persisted `observes:"shape"` entry does not
+carry J's integrity: integrity composes by meet, never join, so growing an
+existence entry's integrity across writers would *union* certification claims
+— an over-claim. The `value` entry keeps the full J (confidentiality +
+integrity, replace-on-overwrite); this matches the existing `structure`
+stamps, which have always been confidentiality-only. Consequence: a
+`nonRecursive` (shape) read of a split-labeled path taints with the existence
+confidentiality but no longer inherits content certification into the
+hereditary meet — an intended under-claim (SC-9's fail-safe direction).
+
+**C3 note (2026-07-03): the grow landed.** On overwrite the flow-clear folds
+the confidentiality of every dropped `derived` (any class, covering
+included — pre-C2 data) and `structure` entry into the covering written
+path's `observes:"shape"` entry: new J first, then the cleared atoms, so
+re-derivation stays byte-identical (SC-11). The grown entry is written even
+when the overwriting transaction consumed nothing (the red SC-4 case — a
+clean overwrite previously made the existence bit public). Cleared `link`
+entries are excluded (pointer labels; folding them into content shape would
+re-smear the pointer/content split), and cleared existence not covered by
+any stamp path (e.g. a link write replacing the slot) lands as a bare shape
+entry at the shallowest covering written path.
+
 ## 6. What `deriveFlowJoin` consumes per read shape
 
 `forEachFlowObservation` (`prepare.ts`) already visits each read with its

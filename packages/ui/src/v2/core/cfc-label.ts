@@ -31,6 +31,37 @@ const canResolveAsCell = (value: unknown): value is CfcLabelResolvable =>
   typeof (value as { resolveAsCell?: unknown }).resolveAsCell === "function";
 
 /**
+ * Egress check (host-embedding seam — see `docs/development/HOST_EMBEDDING.md`
+ * §4). An embedder that persists profile (or any) data *outside the runtime* —
+ * a host-side cache, an LLM prompt assembled from cell fields — has left the CFC
+ * enforcement boundary and must fail closed on non-public data. This predicate
+ * is that check: a label is public iff **no entry carries a non-empty
+ * `confidentiality` clause**. An absent label (`undefined`) and an empty
+ * `entries` array are both public; `integrity` atoms (provenance such as
+ * `represents-principal`) are orthogonal and do NOT make a value confidential.
+ *
+ * As `Confidential<T, X>` / `ProjectionOf<…>` land structurally (CT-1658 /
+ * CT-1660), those `confidentiality` clauses become populated; a check written
+ * against this predicate keeps failing closed, whereas a hard-coded
+ * "always public" assumption would silently start leaking. Any change to CFC
+ * label semantics or granularity must keep this egress seam correct.
+ */
+export const cfcLabelViewIsPublic = (
+  view: CfcLabelView | undefined,
+): boolean => {
+  if (!view) {
+    return true;
+  }
+  for (const entry of view.entries) {
+    const confidentiality = entry.label?.confidentiality;
+    if (Array.isArray(confidentiality) && confidentiality.length > 0) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * Reads a cell's CFC label view, resolving the cell first if the handle itself
  * doesn't expose `getCfcLabel` (e.g. an unresolved link). Returns undefined if
  * no label can be read.

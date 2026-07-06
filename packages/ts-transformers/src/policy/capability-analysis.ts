@@ -21,6 +21,11 @@ import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import {
+  createMergeablePushClassifier,
+  type MergeableCollectionSite,
+  type MergeablePushMisuse,
+} from "./mergeable-push-classification.ts";
 
 type CapabilityAnalyzableFunction =
   | ts.ArrowFunction
@@ -44,28 +49,17 @@ export interface CapabilityAnalysisOptions {
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /**
    * Optional sink for the read-then-mergeable-`push` misuse check. When set,
-   * the analysis reports every `Cell.push` whose receiver collection path the
-   * same function also reads explicitly (a `.get()` or an iteration). A handler
-   * that reads a collection and then mergeable-`push`es to it keeps
-   * conflicting-and-retrying under write contention; the intent is usually
-   * better expressed as an identity-addressed `addUnique` or a read-modify-write
-   * `set`. Left unset (the default), the analysis records no push sites.
+   * the analysis reports each `Cell.push` whose receiver collection path the
+   * same function also reads explicitly (a `.get()` or an iteration), classified
+   * by how that read relates to the push (see
+   * {@link MergeablePushMisuse.kind}): a push that depends on the read through
+   * a guard or its value is the dedup-then-push shape, better expressed as an
+   * identity-addressed `addUnique` or a read-modify-write `set`; a read that
+   * instead feeds an independent write to the same collection keeps the append
+   * conflict-prone and belongs in its own handler. A read unrelated to both is
+   * not reported. Left unset (the default), the analysis records no push sites.
    */
   readonly mergeablePushMisuseSink?: (finding: MergeablePushMisuse) => void;
-}
-
-/**
- * A `Cell.push(...)` whose receiver collection is also read explicitly within
- * the same analyzed function. Reported through
- * {@link CapabilityAnalysisOptions.mergeablePushMisuseSink}.
- */
-export interface MergeablePushMisuse {
-  /** The `push(...)` call to point the diagnostic at. */
-  readonly node: ts.Node;
-  /** The collection path that is both read and pushed, relative to its root. */
-  readonly path: readonly string[];
-  /** The analyzed parameter/root the collection belongs to. */
-  readonly rootName: string;
 }
 
 interface MutableCapabilityState {
@@ -1379,15 +1373,31 @@ export function analyzeFunctionCapabilities(
     const includeNestedCallbacks = !!options?.includeNestedCallbacks;
     const summarySourceFile = fn.getSourceFile();
 
-    // Mergeable `push` call sites, collected only when a misuse sink is given.
-    // After the walk, a site whose receiver path the function also reads is a
-    // read-then-push and is reported through the sink.
+    // Mergeable `push` call sites, explicit read sites (`.get()` and `for..of`
+    // iterables), and non-append same-collection write paths, collected only
+    // when a misuse sink is given. After the walk, a push site whose receiver
+    // path the function also reads is classified by how that read relates to
+    // the push and reported through the sink.
     const mergeablePushMisuseSink = options?.mergeablePushMisuseSink;
-    const mergeablePushSites: Array<{
-      readonly root: string;
-      readonly encodedPath: string;
-      readonly node: ts.Node;
-    }> = [];
+    const mergeablePushSites: MergeableCollectionSite[] = [];
+    const mergeableReadSites: MergeableCollectionSite[] = [];
+    const mergeableNonAppendWriteKeys = new Set<string>();
+    const mergeableWriteKey = (root: string, encodedPath: string): string =>
+      JSON.stringify([root, encodedPath]);
+    const recordMergeableReadSite = (ref: SourceRef, node: ts.Node): void => {
+      if (!mergeablePushMisuseSink || ref.dynamic) return;
+      mergeableReadSites.push({
+        root: ref.root,
+        encodedPath: encodePath(ref.path),
+        node,
+      });
+    };
+    const recordMergeableNonAppendWrite = (ref: SourceRef): void => {
+      if (!mergeablePushMisuseSink || ref.dynamic) return;
+      mergeableNonAppendWriteKeys.add(
+        mergeableWriteKey(ref.root, encodePath(ref.path)),
+      );
+    };
 
     if (!fn.body) {
       const empty = { params: [] };
@@ -2936,18 +2946,19 @@ export function analyzeFunctionCapabilities(
               });
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
+              recordMergeableNonAppendWrite(receiver);
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
-              if (
-                mergeablePushMisuseSink &&
-                MERGEABLE_APPEND_METHODS.has(methodName) &&
-                !receiver.dynamic
-              ) {
-                mergeablePushSites.push({
-                  root: receiver.root,
-                  encodedPath: encodePath(receiver.path),
-                  node,
-                });
+              if (mergeablePushMisuseSink && !receiver.dynamic) {
+                if (MERGEABLE_APPEND_METHODS.has(methodName)) {
+                  mergeablePushSites.push({
+                    root: receiver.root,
+                    encodedPath: encodePath(receiver.path),
+                    node,
+                  });
+                } else {
+                  recordMergeableNonAppendWrite(receiver);
+                }
               }
               let hasIdentityArgument = false;
               for (const argument of node.arguments) {
@@ -2973,6 +2984,7 @@ export function analyzeFunctionCapabilities(
               // ["notes", "length"]), skip the blanket read.
               if (!resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
+                recordMergeableReadSite(receiver, node);
               }
             } else if (
               OPAQUE_DERIVATION_METHODS.has(methodName) &&
@@ -3123,6 +3135,7 @@ export function analyzeFunctionCapabilities(
             markPassthrough(iterableRef.root);
           } else {
             trackReadRef(iterableRef);
+            recordMergeableReadSite(iterableRef, node.expression);
           }
           if (ts.isCallExpression(iterableExpression)) {
             visit(node.expression);
@@ -3202,13 +3215,39 @@ export function analyzeFunctionCapabilities(
       visit(fn.body);
     }
 
-    if (mergeablePushMisuseSink) {
+    if (mergeablePushMisuseSink && mergeablePushSites.length > 0) {
+      // A push whose collection the function also reads explicitly is
+      // classified by how the read relates to the push: a push that depends on
+      // the read (guard or value) is the dedup-then-push shape; a read that
+      // instead feeds another write to the same collection is an independent
+      // read-modify-write sharing the handler; a read related to neither is
+      // not reported. Influence tracking is name-based and conservative in the
+      // noisy direction — ambiguity promotes to the dependent-push finding.
+      const classifier = createMergeablePushClassifier({
+        fn,
+        readSites: mergeableReadSites,
+        resolveAliasTarget: (name) => {
+          const binding = aliases.get(name);
+          if (!binding || binding.dynamic || binding.arrayElement) {
+            return undefined;
+          }
+          return { root: binding.root, encodedPath: encodePath(binding.path) };
+        },
+      });
       for (const site of mergeablePushSites) {
-        if (states.get(site.root)?.reads.has(site.encodedPath)) {
+        if (!states.get(site.root)?.reads.has(site.encodedPath)) continue;
+        const kind = classifier.classify(
+          site,
+          mergeableNonAppendWriteKeys.has(
+            mergeableWriteKey(site.root, site.encodedPath),
+          ),
+        );
+        if (kind) {
           mergeablePushMisuseSink({
             node: site.node,
             path: decodePath(site.encodedPath),
             rootName: site.root,
+            kind,
           });
         }
       }

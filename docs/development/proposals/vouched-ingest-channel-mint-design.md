@@ -75,8 +75,11 @@ the ingest stamp, independent of the `flowLabels` dial:
 
 ## Running prepare in an otherwise-CFC-disabled runtime
 
-Toolshed defaults `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`, and
-`prepareTxForCommit` early-returns when disabled — so the mint would never run.
+A runtime can be explicitly configured with `cfcEnforcementMode: "disabled"`
+(the types-level `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` is only the
+bare-transaction fallback — toolshed itself passes no CFC options and runs the
+`Runtime` constructor's `enforce-explicit` default), and `prepareTxForCommit`
+early-returns when disabled — so the mint would never run there.
 Rather than abuse `enforcement = "observe"` to force prepare (a smell: it's not
 observing anything, and it desyncs ingest txs from the operator's real mode), the
 ingest path adds an **explicit carve-out**: `prepareTxForCommit` also proceeds
