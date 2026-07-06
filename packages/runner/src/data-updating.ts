@@ -271,6 +271,27 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 };
 
 /**
+ * Sanctioned-machinery suppression for the scope-isolation warn (see
+ * BRANCH_CELL_LINK below): the runtime itself writes narrower-scoped links
+ * into scope-silent broader slots in a few known places (piece argument setup
+ * wiring, pattern result-cell wiring for scoped outputs, navigateTo results,
+ * cold-resume re-scope walks). Those writes wrap themselves in
+ * `withScopeIsolationWarnSuppressed` — the wrapper call sites are the
+ * greppable checklist for eventually declaring those slots' scopes and
+ * flipping the author-facing warn to an error. Synchronous-only (the write
+ * path is synchronous); do not use from user-land code.
+ */
+let scopeIsolationWarnSuppressionDepth = 0;
+export function withScopeIsolationWarnSuppressed<T>(fn: () => T): T {
+  scopeIsolationWarnSuppressionDepth++;
+  try {
+    return fn();
+  } finally {
+    scopeIsolationWarnSuppressionDepth--;
+  }
+}
+
+/**
  * The scope at which a slot's content is stored (the write target scope). It
  * shares its precedence with the read follow-cap (see
  * `ContextualFlowControl.getSchemaScopeCap`) so writes and reads agree on which
@@ -835,21 +856,26 @@ export function normalizeAndDiff(
           declared === undefined ||
           scopeRank(declared) < scopeRank(parsedLink.scope)
         ) {
-          diffLogger.warn(
-            "diff",
-            () => [
-              `Storing a ${parsedLink.scope}-scoped link in ` +
-              `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
-              `do not carry a principal, so every reader resolves it to ` +
-              `their own ${parsedLink.scope} instance. If this write meant ` +
-              `to SHARE data, it cannot propagate — share the value itself, ` +
-              `or a space-scoped cell (keep a PerUser pointer to "mine"), ` +
-              `or declare the slot's schema with scope ` +
-              `"${parsedLink.scope}" if per-reader resolution is intended. ` +
-              `See docs/development/debugging/gotchas/` +
-              `scoped-cell-pitfalls.md (pitfall 6).`,
-            ],
-          );
+          if (scopeIsolationWarnSuppressionDepth > 0) {
+            // Sanctioned machinery write (see withScopeIsolationWarnSuppressed
+            // call sites) — stays silent until those slots declare their scope.
+          } else {
+            diffLogger.warn(
+              "diff",
+              () => [
+                `Storing a ${parsedLink.scope}-scoped link in ` +
+                `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
+                `do not carry a principal, so every reader resolves it to ` +
+                `their own ${parsedLink.scope} instance. If this write meant ` +
+                `to SHARE data, it cannot propagate — share the value itself, ` +
+                `or a space-scoped cell (keep a PerUser pointer to "mine"), ` +
+                `or declare the slot's schema with scope ` +
+                `"${parsedLink.scope}" if per-reader resolution is intended. ` +
+                `See docs/development/debugging/gotchas/` +
+                `scoped-cell-pitfalls.md (pitfall 6).`,
+              ],
+            );
+          }
         }
       }
       diffLogger.debug(
