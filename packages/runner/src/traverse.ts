@@ -2579,6 +2579,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private uniquePaths = new Set<string>();
   private maxDepth = 0;
   private currentDepth = 0;
+  // Armed by traverseArrayWithSchema just before traversing an element,
+  // consumed (read-and-clear) by the first traverseObjectWithSchema call —
+  // i.e. active exactly for the immediate element object of an array. See the
+  // B2 reader-blackout grace in traverseObjectWithSchema.
+  private pendingElementRequiredGrace = false;
   // Memoization cache for traverseWithSchema: key → result
   // Only used when traverseCells=true (query path) where the link
   // parameter doesn't affect the result (StandardObjectCreator ignores it).
@@ -3551,10 +3556,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
         // modified link.
+        // Arm the element-object grace: if this element is an object with a
+        // required property holding an unresolvable link, degrade that
+        // property instead of voiding the element (which would void the whole
+        // array — the reader blackout). Consumed (read-and-clear) by the first
+        // traverseObjectWithSchema call, i.e. the element object itself.
+        this.pendingElementRequiredGrace = true;
         const { ok: val, error } = this.traverseWithSelector(
           curDoc,
           curSelector,
         );
+        this.pendingElementRequiredGrace = false;
         if (error !== undefined) {
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
@@ -3604,11 +3616,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): Record<string, Immutable<FabricValue>> | undefined {
     this.traverseObjectCalls++;
     const filteredObj: Record<string, Immutable<FabricValue>> = {};
-    // SPIKE (B2 grace, PR #4457): properties whose value is a LINK that cannot
-    // be resolved for THIS reader (target unwritten / cross-space not loaded /
-    // scoped to another principal). They are exempted from the `required`
-    // check below: an unresolvable reference degrades that field, it must not
-    // void the whole object (and thereby the containing array/read).
+    // B2 grace (reader blackout): ONLY when this object is the immediate
+    // element of an array (flag armed by traverseArrayWithSchema, consumed
+    // here), properties whose value is a LINK that cannot be resolved for
+    // THIS reader (target unwritten / cross-space not loaded / scoped to
+    // another principal) are exempted from the `required` check below: an
+    // unresolvable reference degrades that element field, it must not void
+    // the element and thereby the whole array read. Non-element object reads
+    // keep strict `required` semantics — the scheduler relies on those
+    // invalidations to defer actions until their arguments materialize.
+    const elementGrace = this.pendingElementRequiredGrace;
+    this.pendingElementRequiredGrace = false;
     const unresolvableLinkProps = new Set<string>();
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
@@ -3673,21 +3691,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const { ok: val, error } = SchemaObjectTraverser.hasAsCell(propSchema)
           ? this.tx.runWithAmbientReadMeta(excludeReadFromConflict, descend)
           : descend();
-        if (error !== undefined && isSigilLink(propValue)) {
+        if (elementGrace && error !== undefined && isSigilLink(propValue)) {
           unresolvableLinkProps.add(propKey);
         }
         if (error === undefined) {
           filteredObj[propKey] = val;
         } else if (
+          elementGrace &&
           !this.traverseCells &&
           SchemaObjectTraverser.hasAsCell(propSchema)
         ) {
-          // SPIKE (B2 grace, see PR #4457): an asCell property is an opaque
-          // boundary — if its link target is not resolvable for THIS reader
-          // (not written yet, cross-space not yet loaded, or scoped to another
-          // principal's partition), still return a cell for it instead of
-          // dropping the property. Dropping it made the `required` check below
-          // void the whole object, which voided the containing array
+          // B2 grace (element objects only, see above): an asCell property is
+          // an opaque boundary — if its link target is not resolvable for THIS
+          // reader (not written yet, cross-space not yet loaded, or scoped to
+          // another principal's partition), still return a cell for it instead
+          // of dropping the property. Dropping it made the `required` check
+          // below void the whole element, which voided the containing array
           // (traverseArrayWithSchema), blacking out the entire read for every
           // non-authoring session. This mirrors the existing policy for array
           // elements ("If the target is not written yet, still return a cell
