@@ -77,11 +77,19 @@ interface MutableCapabilityState {
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
   /**
-   * An unrecognized method was called on a cell-like receiver rooted in this
-   * parameter. The call could be a mutator this analysis does not know, so
-   * `writes` cannot be treated as exhaustive — consumers asserting write
-   * exhaustiveness must fail closed on this, like `wildcard`; recognized
-   * reads/derivations are unaffected.
+   * Write-exhaustiveness is unverifiable for this parameter. Set by an
+   * unrecognized or dynamic (`cell[m]()`) method call on a cell-like
+   * receiver (the call could be a mutator this analysis does not know), and
+   * by recognized `set`/`send` calls carrying an onCommit callback (which
+   * receives the committed transaction and can write arbitrary cells
+   * through it). Consumers asserting write exhaustiveness must fail closed
+   * on this, like `wildcard`; recognized reads/derivations are unaffected.
+   *
+   * Syntactic boundary: detection is per method-CALL dispatch. An extracted
+   * method reference (`const f = cell.send; f(x)`) bypasses it — marginal
+   * in practice (unbound cell methods break at runtime), but consumers
+   * treating `!wildcard && !hasUnverifiedCellUse` as a soundness
+   * certificate should know the contract's edge.
    */
   hasUnverifiedCellUse: boolean;
 }
@@ -2938,6 +2946,16 @@ export function analyzeFunctionCapabilities(
             const shouldTrackFullShape = !directReceiver &&
               (!methodName || !PRECISE_CHAIN_METHODS.has(methodName));
             if (!methodName) {
+              // A dynamic method name (`cell[m]()`) on a cell-like receiver
+              // is the open-world case par excellence: the method could be
+              // any mutator, so write-exhaustiveness fails closed exactly
+              // like the unknown-named fallback below.
+              if (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
               if (shouldTrackFullShape) {
                 trackFullShapeReadRef(receiver);
               } else {

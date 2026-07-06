@@ -3398,3 +3398,63 @@ Deno.test(
     assertEquals(input!.hasUnverifiedCellUse, false);
   },
 );
+
+Deno.test(
+  "Capability analysis marks dynamic cell-method calls as unverified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<{ items: string[] }>, m: string) => {
+  // Unresolvable method name on a cell-like receiver: could be any mutator.
+  input[m]();
+  return null;
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps value-level dynamic method calls verified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<Record<string, () => number>>, m: string) => {
+  const value = input.get();
+  // Dynamic method on a .get() snapshot: cannot write through the cell.
+  return value[m]();
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis fails closed on dynamic methods without a checker",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, m) => input.items[m]();`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
