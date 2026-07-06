@@ -1,4 +1,5 @@
 import { isBrowser } from "@commonfabric/utils/env";
+import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 
 /**
  * Whether cold pattern compilation should yield real macrotask turns between
@@ -19,3 +20,20 @@ import { isBrowser } from "@commonfabric/utils/env";
  * Evaluated once at module load; the runtime environment does not change.
  */
 export const COMPILE_INTERLEAVES_EVENT_LOOP = isBrowser();
+
+/**
+ * One compile-pipeline yield point: a real macrotask turn where compilation
+ * interleaves the event loop ({@link COMPILE_INTERLEAVES_EVENT_LOOP}), and a
+ * plain microtask completion — zero added event-loop turns — everywhere else.
+ * Call sites mark the seams between CPU-bound compile steps (per-body SES
+ * verify, pre-evaluate); keeping the predicate here keeps them one-liners.
+ *
+ * `interleave` is injectable so tests can pin both behaviors from Deno: the
+ * browser arm (yield behind queued tasks) and the batch arm (no macrotask —
+ * the sync-driver contract the pattern unit suites rely on).
+ */
+export async function interleaveCompileYield(
+  interleave: boolean = COMPILE_INTERLEAVES_EVENT_LOOP,
+): Promise<void> {
+  if (interleave) await yieldToEventLoop();
+}

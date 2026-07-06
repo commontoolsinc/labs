@@ -29,8 +29,10 @@ import {
   ensureCompilerStack,
 } from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { yieldToEventLoop } from "@commonfabric/utils/sleep";
-import { COMPILE_INTERLEAVES_EVENT_LOOP } from "./compile-interleave.ts";
+import {
+  COMPILE_INTERLEAVES_EVENT_LOOP,
+  interleaveCompileYield,
+} from "./compile-interleave.ts";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
@@ -493,7 +495,7 @@ export class Engine extends EventTarget implements Harness {
             specifier,
           );
           if (hasHoistRegistration) graph.registrationApproved.add(specifier);
-          if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
+          await interleaveCompileYield();
         }
       } else {
         // Trusted integrity-gated bytes: SES verification — and its registration
@@ -1211,7 +1213,7 @@ export class Engine extends EventTarget implements Harness {
           specifier,
         );
         if (hasHoistRegistration) graph.registrationApproved.add(specifier);
-        if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
+        await interleaveCompileYield();
       }
     } else {
       // Trusted integrity-gated bytes: registration approval was sealed at
@@ -1231,7 +1233,7 @@ export class Engine extends EventTarget implements Harness {
     // The SES evaluation below is a single synchronous stretch (~100ms+ for a
     // system pattern); in the browser worker, yield first so IPC queued behind
     // the load runs before it rather than after (no-op in Deno).
-    if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
+    await interleaveCompileYield();
 
     return this.evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,
