@@ -936,7 +936,9 @@ with C's envelope designed (not built) from the start:
 ## 8. Phased plan
 
 Phases assume #4288 and the persistent-scheduler-state wiring land first;
-RI (#4514) accelerates but does not gate any phase.
+RI (#4514) accelerates but does not gate any phase. Executable work
+orders with per-step success criteria and review checklists:
+[implementation-plan.md](./implementation-plan.md).
 
 - **Phase 0 — foundations (gap closure).** Persistent-state memory tables +
   commit wiring + doc→readers index (G4); tx-provenance source stamping
