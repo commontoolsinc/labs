@@ -1,6 +1,8 @@
 import type { DID } from "@commonfabric/identity";
 import {
   createBuilder,
+  isCell,
+  isStream,
   type JSONSchema,
   type MemorySpace,
   type Runtime,
@@ -151,4 +153,44 @@ export async function readWish(
     schema: config.schema,
     scope: config.scope,
   });
+}
+
+/** Marker substituted for a stream/handle-valued key in projected output. */
+export const WISH_STREAM_MARKER = "[stream]";
+
+/**
+ * Project a resolved wish value to plain, serializable data for output (CT-1844).
+ *
+ * A `#profile` object result is a materialized pattern result: alongside the
+ * data fields (`$NAME`, `name`, `avatar`, `bio`, `elements`, `isEditing`, …) it
+ * carries the pattern's stream handles (`addElement`, `setName`, `setAvatar`,
+ * …). Those handles are live `Cell`/`Stream` objects; JSON-serializing them
+ * drags in the entire runtime object graph (scheduler, circular refs) — ~50KB
+ * of noise that defeats the agent/script/offline-cache audience this read path
+ * exists for.
+ *
+ * This walks the value and replaces every stream/cell/function-valued node with
+ * {@link WISH_STREAM_MARKER}, keeping all plain data (including nested arrays
+ * like `elements` and the `$UI` VNode tree) intact. Scalar results (a bare
+ * string/number/etc. from `#profileName` and friends) pass straight through
+ * unchanged, so only the object-target output shape is affected.
+ */
+export function projectWishValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
+  if (isCell(value) || isStream(value) || typeof value === "function") {
+    return WISH_STREAM_MARKER;
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return value; // let downstream stringify flag circularity
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => projectWishValue(item, seen));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value)) {
+    out[key] = projectWishValue(val, seen);
+  }
+  return out;
 }

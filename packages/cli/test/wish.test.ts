@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { isStream, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { readWish, resolveWish } from "../lib/wish.ts";
+import {
+  projectWishValue,
+  readWish,
+  resolveWish,
+  WISH_STREAM_MARKER,
+} from "../lib/wish.ts";
+import { safeStringify } from "../lib/render.ts";
 
 // Exercises the headless wish read core (`resolveWish`) against an emulated
 // runtime — no live server. The full `readWish` (which adds a session-backed
@@ -128,6 +134,73 @@ describe("cf wish headless read (resolveWish)", () => {
     });
     expect(error).toBeUndefined();
     expect((result as { name?: string })?.name).toBe("Ada Lovelace");
+  });
+
+  it("projectWishValue strips stream handles but keeps profile data (CT-1844)", () => {
+    // Build a profile-shaped result carrying a REAL stream handle alongside its
+    // data fields, exactly as a materialized #profile object does.
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{
+      name: string;
+      avatar: string;
+      bio: string;
+      isEditing: boolean;
+      elements: { title: string }[];
+      $UI: { type: string; name: string };
+      setName: { $stream: boolean };
+    }>(userIdentity.did(), "ct1844-projection-fixture", undefined, tx);
+    cell.set({
+      name: "Ada Lovelace",
+      avatar: "ada.png",
+      bio: "Mathematician & first programmer.",
+      isEditing: false,
+      elements: [{ title: "Note" }],
+      $UI: { type: "vnode", name: "cf-screen" },
+      setName: { $stream: true },
+    });
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        avatar: { type: "string" },
+        bio: { type: "string" },
+        isEditing: { type: "boolean" },
+        elements: { type: "array" },
+        $UI: { type: "object" },
+        setName: { type: "object", asCell: ["stream"] },
+      },
+    } as const satisfies JSONSchema;
+    const value = cell.asSchema(schema).get();
+    // Sanity: the raw value really does carry a live stream handle.
+    expect(isStream(value.setName)).toBe(true);
+
+    const projected = projectWishValue(value) as Record<string, unknown>;
+
+    // Data fields survive, including the nested `elements` array and $UI VNode.
+    expect(projected.name).toBe("Ada Lovelace");
+    expect(projected.avatar).toBe("ada.png");
+    expect(projected.bio).toBe("Mathematician & first programmer.");
+    expect(projected.isEditing).toBe(false);
+    expect(projected.elements).toEqual([{ title: "Note" }]);
+    expect(projected.$UI).toEqual({ type: "vnode", name: "cf-screen" });
+
+    // The stream handle is replaced by a stable marker — no runtime graph.
+    expect(projected.setName).toBe(WISH_STREAM_MARKER);
+
+    // The serialized output stays small and free of the runtime object graph.
+    const json = safeStringify(projected);
+    expect(json.length).toBeLessThan(2000);
+    expect(json).not.toContain("scheduler");
+    expect(json).not.toContain("circular reference");
+    expect(json).not.toContain("runtime");
+  });
+
+  it("projectWishValue passes scalar targets through unchanged (CT-1844)", () => {
+    // #profileName and friends resolve to a bare scalar — untouched.
+    expect(projectWishValue("Ada Lovelace")).toBe("Ada Lovelace");
+    expect(projectWishValue(42)).toBe(42);
+    expect(projectWishValue(true)).toBe(true);
+    expect(projectWishValue(null)).toBe(null);
   });
 
   it("readWish connects through the injected manager and resolves", async () => {

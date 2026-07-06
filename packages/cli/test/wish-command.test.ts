@@ -216,6 +216,47 @@ describe("cf wish command action", () => {
     });
   });
 
+  it("projects an object result to plain data, dropping handle-valued keys (CT-1844)", async () => {
+    // A materialized #profile object carries the pattern's stream handles
+    // alongside its data. render() must not serialize those (they drag in the
+    // whole runtime graph). Here a function stands in for a handle: it triggers
+    // the same projection branch (isStream/isCell/function → marker) without a
+    // live runtime, and asserts the data fields survive.
+    const { deps, exits } = stubDeps({
+      result: {
+        $NAME: "Ada",
+        name: "Ada",
+        avatar: "",
+        bio: "First programmer.",
+        isEditing: false,
+        elements: [{ title: "Note" }],
+        setName: () => {},
+        addElement: () => {},
+        toggleEditing: () => {},
+      },
+    });
+    const out = await captureStdout(() =>
+      wishAction({ ...BASE_OPTIONS, quiet: true }, "#profile", deps)
+    );
+    const parsed = JSON.parse(out);
+
+    // Data fields present and intact (including the nested elements array).
+    expect(parsed.name).toBe("Ada");
+    expect(parsed.bio).toBe("First programmer.");
+    expect(parsed.isEditing).toBe(false);
+    expect(parsed.elements).toEqual([{ title: "Note" }]);
+
+    // Handle-valued keys are replaced by the stable marker, not omitted, and
+    // carry none of the runtime object graph.
+    expect(parsed.setName).toBe("[stream]");
+    expect(parsed.addElement).toBe("[stream]");
+    expect(parsed.toggleEditing).toBe("[stream]");
+    expect(out).not.toContain("scheduler");
+    expect(out).not.toContain("circular reference");
+    expect(out.length).toBeLessThan(600);
+    expect(exits).toEqual([]);
+  });
+
   it("--allow-empty prints null and does not exit on an empty result", async () => {
     const { deps, exits } = stubDeps({
       result: null,
