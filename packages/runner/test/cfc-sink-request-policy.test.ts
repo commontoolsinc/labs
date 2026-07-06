@@ -129,16 +129,22 @@ describe("CFC sink request policy", () => {
 
     tx.prepareCfc();
 
+    // Post-prepare tampering with the live tx state is rejected at the
+    // source: getCfcState() is a read-only view (#4517), so the swap this
+    // test used to simulate never lands — and the prepared snapshot still
+    // releases the request.
     const state = tx.getCfcState() as {
       writePolicyInputs: ReturnType<typeof createSinkRequestPolicyInput>[];
     };
-    state.writePolicyInputs[0] = createSinkRequestPolicyInput(
-      "fetchJson",
-      "fetchJson:prepared-snapshot",
-      createFrozenRequestSnapshot({
-        url: "https://example.com/mutated-state",
-      }),
-    );
+    expect(() => {
+      state.writePolicyInputs[0] = createSinkRequestPolicyInput(
+        "fetchJson",
+        "fetchJson:prepared-snapshot",
+        createFrozenRequestSnapshot({
+          url: "https://example.com/mutated-state",
+        }),
+      );
+    }).toThrow("read-only");
 
     const result = await tx.commit();
     expect(result.error).toBeUndefined();

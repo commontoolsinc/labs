@@ -458,6 +458,274 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
+  // SC-11's equality is over the CANONICAL form (§4.1.3 c14n; spec-changes
+  // SC-11): the prepare-side skip must elide the envelope write even when the
+  // stored form differs BYTE-wise from the rebuild — top-level entry order
+  // and OR-clause alternative order are serialization freedom, not label
+  // changes. The storage layer's raw deep-equal write elision is
+  // order-sensitive and cannot catch these, so this pins the prepare.ts skip
+  // itself: a stored-form permutation (a raw seed, an older writer, a peer
+  // whose view merge ordered alternatives differently) must not be rewritten
+  // by every re-derivation.
+  it("SC-11: skips the envelope write for a canonically-equal but byte-different stored form", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const getDocument = (id: string) =>
+        (storageManager.open(signer.did()).replica as unknown as {
+          getDocument(id: string): Record<string, unknown> | undefined;
+        }).getDocument(id);
+
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-canon-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              // An OR-clause: its alternative order is one of the two
+              // serialization freedoms permuted below.
+              label: { confidentiality: [{ anyOf: ["s1", "s2"] }] },
+            }],
+          },
+        },
+      });
+      const targetId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-canon-target",
+          {
+            type: "object",
+            properties: { a: { type: "string" }, b: { type: "string" } },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, { value: { a: "a0", b: "b0" } });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // One derivation shape, run twice with fresh values: read the labeled
+      // source, write two sibling leaves (two derived stamps, so the entry
+      // LIST order is exercised, not just one entry's interior).
+      const derive = (suffix: string) => {
+        const tx = runtime.edit();
+        const raw = runtime.getCell(
+          signer.did(),
+          "cfc-flow-canon-source",
+          undefined,
+          tx,
+        ).getRaw() as { secret?: string };
+        expect(raw.secret).toBe("s3cr3t");
+        for (const field of ["a", "b"]) {
+          tx.writeOrThrow({
+            space: signer.did(),
+            scope: "space",
+            id: targetId,
+            path: ["value", field],
+          }, `${field}-${suffix}`);
+        }
+        tx.prepareCfc();
+        const wroteCfc = [...(tx.getWriteDetails?.(signer.did()) ?? [])].some(
+          (w) => w.address.id === targetId && w.address.path[0] === "cfc",
+        );
+        return { tx, wroteCfc };
+      };
+
+      const first = derive("1");
+      expect(first.wroteCfc).toBe(true);
+      expect((await first.tx.commit()).ok).toBeDefined();
+      const stored = getDocument(targetId) as {
+        cfc: {
+          labelMap: {
+            entries: {
+              path: string[];
+              label: { confidentiality?: unknown[] };
+              origin?: string;
+              observes?: string;
+            }[];
+          };
+        };
+      };
+      // Two written paths (a, b), each carrying a `value` + a `shape`
+      // (existence) derived entry since C3 — four entries total.
+      expect(stored.cfc.labelMap.entries.length).toBe(4);
+
+      // Re-serialize the stored envelope into a canonically-equal but
+      // byte-DIFFERENT form by reversing the ENTRY LIST ORDER (across paths).
+      // `canonicalizeCfcMetadata` sorts entries by (path, origin, observes),
+      // so the reordering washes out under canonicalization — while the
+      // storage layer's order-sensitive `valueEqual` on the `["cfc"]` doc
+      // sees a different array and would NOT elide the rewrite. So this is
+      // exactly a byte-difference the skip must absorb and the storage
+      // elision cannot: a peer, an older writer, or a hand-authored seed
+      // whose entry order differs must not be rewritten every recompute.
+      //
+      // The clause INTERIORS are left stable on purpose. Permuting an
+      // OR-clause's alternative order in the STORED form would defeat
+      // idempotence through C3's existence-grow, not through this skip:
+      // the grow folds the cleared entry's clause back in via
+      // `uniqueCfcAtoms` (deepEqual dedup, not clause-aware), so a
+      // reversed-`anyOf` stored clause and the fresh canonical-order join
+      // clause both survive as a doubled clause list. That is a narrow
+      // grow-side limitation, orthogonal to the canonical-compare skip
+      // under test here.
+      const permuted = {
+        ...stored.cfc,
+        labelMap: {
+          version: 1,
+          entries: [...stored.cfc.labelMap.entries].reverse(),
+        },
+      };
+      expect(permuted).not.toEqual(stored.cfc);
+      const reseed = runtime.edit();
+      reseed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, { ...stored, cfc: permuted } as never);
+      expect((await reseed.commit()).ok).toBeDefined();
+      expect((getDocument(targetId) as { cfc: unknown }).cfc).toEqual(
+        permuted,
+      );
+
+      // Identical re-derivation, fresh values: the rebuild differs from the
+      // stored form byte-wise (sorted entries, normalized clause) — the
+      // storage-layer elision would NOT absorb this write — but is
+      // canonically equal, so the SC-11 skip must elide it.
+      const second = derive("2");
+      expect(second.wroteCfc).toBe(false);
+      expect((await second.tx.commit()).ok).toBeDefined();
+
+      // Storage-layer contract: the stored envelope is byte-untouched while
+      // the value writes landed.
+      const after = getDocument(targetId) as {
+        value: { a?: string; b?: string };
+        cfc: unknown;
+      };
+      expect(after.cfc).toEqual(permuted);
+      expect(after.value).toEqual({ a: "a-2", b: "b-2" });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
+  // measure under `observe` before a host flips to `persist`): the join IS
+  // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
+  // write in the transaction, no envelope on the stored target at all.
+  it("observe mode derives the join as a diagnostic and persists nothing", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "observe",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-observe-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // The same laundering shape the persist tests use: read the secret,
+      // write a derived plain value to an unlabeled doc.
+      const tx = runtime.edit();
+      const raw = runtime.getCell(
+        signer.did(),
+        "cfc-flow-observe-source",
+        undefined,
+        tx,
+      ).getRaw() as { secret?: string };
+      expect(raw.secret).toBe("s3cr3t");
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-flow-observe-target",
+        undefined,
+        tx,
+      );
+      target.set({ copied: `${raw.secret}!` });
+      tx.prepareCfc();
+
+      // The join was derived and reported...
+      expect(
+        tx.getCfcState().diagnostics.some((d) =>
+          /^flow-labels\(observe\): would derive 1 confidentiality \/ 0 integrity atom\(s\) onto \d+ written doc\(s\)$/
+            .test(d)
+        ),
+      ).toBe(true);
+      // ...but nothing was persisted: no ["cfc"] write in this transaction...
+      const targetId = target.getAsNormalizedFullLink().id;
+      expect(
+        [...(tx.getWriteDetails?.(signer.did()) ?? [])].some(
+          (w) => w.address.id === targetId && w.address.path[0] === "cfc",
+        ),
+      ).toBe(false);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      // ...and the stored doc carries no envelope at all (no version bump
+      // from label persistence — the doc has exactly its value).
+      const storedTarget = (storageManager.open(signer.did())
+        .replica as unknown as {
+          getDocument(id: string): { cfc?: unknown } | undefined;
+        }).getDocument(targetId);
+      expect(storedTarget).toBeDefined();
+      expect(storedTarget!.cfc).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   // A2: trigger reads (§8.9.2). The decision to run was influenced by the
   // triggering change even when the run never reads the changed value, so
   // its labels join the derivation.

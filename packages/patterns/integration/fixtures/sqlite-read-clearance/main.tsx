@@ -55,11 +55,11 @@ export default pattern(() => {
       reader: "text",
       body: "text",
     },
-    // A BARE term (no all() list): a rule term LIST is an array of objects,
-    // which splits into per-element linked docs on the handle value — and a
-    // second runtime's schema-less deep read of the handle can see that link
-    // unresolved (null), destabilizing the request hash across runtimes. The
-    // bare term stays inline, so every runtime reads the identical rule.
+    // A bare term (no all() wrapper) — the simplest form for a single
+    // alternative. (Term LISTS used to split into per-element linked docs on
+    // the stored handle and destabilize the request hash across runtimes;
+    // fixed in #4509 — the handle is stored self-contained — and guarded by
+    // packages/runner/test/sqlite-handle-multi-runtime.test.ts.)
     (f) => ({
       confidentiality: principal("key", match(f.reader, KEY, { min: 1 })),
     }),
