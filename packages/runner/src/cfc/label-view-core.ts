@@ -1,6 +1,7 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
+import { normalizeClause } from "./clause.ts";
 
 export type IFCLabel = {
   confidentiality?: unknown[];
@@ -130,6 +131,20 @@ export const mergeLabel = (
       ...(Array.isArray(left?.[key]) ? left[key] : []),
       ...(Array.isArray(right[key]) ? right[key] : []),
     ];
+    // Confidentiality is CNF clauses (Epic A3): the join is clause
+    // CONCATENATION — `[[A∨B]] ⊔ [C] = [[A∨B], C]` — the OR stays clause-local
+    // and `C` remains an independent gate. Normalizing each clause on ingest
+    // (dedup + canonical alternative order + singleton unwrap) makes two
+    // equivalent OR-clauses that differ only in alternative order coalesce
+    // through the structural dedup below. It MUST NOT merge distinct clauses
+    // or union their alternative sets — `normalizeClause` only rewrites a
+    // clause's own interior, so concatenation + clause-granular dedup upholds
+    // the §3.1.8 normalization prohibitions. Integrity carries no OR-clauses,
+    // and `normalizeClause` is identity on non-clause atoms, so it is applied
+    // only to confidentiality to keep intent explicit.
+    const normalized = key === "confidentiality"
+      ? values.map(normalizeClause)
+      : values;
     // Dedup structurally via `uniqueCfcAtoms()` rather than by reference
     // (`new Set()`). Atoms can be fabric-converted clones (each call to
     // `cloneIfNecessary()` produces a fresh frozen object), so two
@@ -138,7 +153,7 @@ export const mergeLabel = (
     // observe as both `confidentiality` bloat and -- since downstream
     // entry-merging compares labels structurally -- as label entries
     // failing to coalesce at the right path.
-    const unique = uniqueCfcAtoms(values);
+    const unique = uniqueCfcAtoms(normalized);
     if (unique.length > 0) {
       merged[key] = unique;
     }

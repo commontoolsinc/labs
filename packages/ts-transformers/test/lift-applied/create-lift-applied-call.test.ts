@@ -1,9 +1,10 @@
-import { assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { createLiftAppliedCall } from "../../src/transformers/builtins/lift-applied.ts";
 import { CFHelpers } from "../../src/core/cf-helpers.ts";
 import { CrossStageState } from "../../src/core/mod.ts";
+import { callsNamed, parseModule } from "../transformed-ast.ts";
 
 Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide", () => {
   const source = ts.createSourceFile(
@@ -99,5 +100,28 @@ Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide",
     throw new Error("derive call not printed");
   }
 
-  assertStringIncludes(printed, "=> _v1_1");
+  // The colliding fallback binding is renamed: the lift callback destructures
+  // `v1__` under the fresh name `_v1_1` and returns that same identifier.
+  const root = parseModule(printed);
+  const liftCall = callsNamed(root, "lift").at(0);
+  assert(liftCall, "expected a lift call");
+  const callback = liftCall.arguments[0];
+  assert(callback && ts.isArrowFunction(callback), "expected a lift callback");
+  const binding = callback.parameters[0]?.name;
+  assert(
+    binding && ts.isObjectBindingPattern(binding),
+    "expected a destructuring parameter",
+  );
+  const renamed = binding.elements.find((element) =>
+    element.propertyName !== undefined &&
+    ts.isIdentifier(element.propertyName) &&
+    element.propertyName.text === "v1__"
+  );
+  assert(renamed, "expected a `v1__` binding element");
+  assert(ts.isIdentifier(renamed.name));
+  assertEquals(renamed.name.text, "_v1_1");
+  assert(
+    ts.isIdentifier(callback.body) && callback.body.text === "_v1_1",
+    "expected the callback body to return the renamed binding",
+  );
 });

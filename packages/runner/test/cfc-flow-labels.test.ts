@@ -267,7 +267,7 @@ describe("CFC flow labels (default transition)", () => {
   // path from a transaction that read nothing labeled replaces the derived
   // component, so the label tracks the current value (the old, tainted value
   // is gone; reads of it journaled its label at read time).
-  it("replaces the derived component when the value is overwritten by an untainted write", async () => {
+  it("untainted overwrite replaces the value channel and grows the existence channel", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -332,11 +332,14 @@ describe("CFC flow labels (default transition)", () => {
       ).toContainEqual("secret");
 
       // Untainted overwrite: a write whose journal contains no reads (raw
-      // root write). The derived component is replaced (cleared — this tx
-      // derived nothing), not unioned forever. Note that `cell.set()` is
-      // NOT such a write: it journals a read of the prior value, so a
-      // set-overwrite of a tainted doc conservatively re-derives the taint
-      // — by the journal it consumed the old value.
+      // root write). The VALUE channel is replaced (cleared — this tx
+      // derived nothing): §8.12.8 replace-on-overwrite is a value-class
+      // rule. The EXISTENCE (shape) channel grows instead of vanishing
+      // (SC-4, C3): "this path was once written under secret" must not
+      // become a public bit. Note that `cell.set()` is NOT an untainted
+      // write: it journals a read of the prior value, so a set-overwrite
+      // of a tainted doc conservatively re-derives the taint — by the
+      // journal it consumed the old value.
       const clean = runtime.edit();
       clean.writeOrThrow({
         space: signer.did(),
@@ -348,7 +351,107 @@ describe("CFC flow labels (default transition)", () => {
       expect((await clean.commit()).ok).toBeDefined();
 
       const entriesAfter = replicaEntries(storageManager, targetId);
-      expect(entriesAfter.find((e) => e.origin === "derived")).toBeUndefined();
+      const derivedAfter = entriesAfter.filter((e) => e.origin === "derived");
+      expect(
+        derivedAfter.filter((e) =>
+          (e as { observes?: string }).observes !== "shape"
+        ),
+      ).toEqual([]);
+      expect(derivedAfter.length).toBe(1);
+      expect((derivedAfter[0] as { observes?: string }).observes).toBe(
+        "shape",
+      );
+      expect(derivedAfter[0].label.confidentiality).toEqual(["secret"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("SC-11: re-deriving an unchanged label writes no envelope (idempotent)", async () => {
+    // The load-bearing prereq for cfcFlowLabels:"persist" — a rerun that reads
+    // the same inputs derives the same labels and must NOT rewrite the ["cfc"]
+    // doc (which would bump the revision and churn sync/conflict every
+    // recompute). Observed directly: the second, identical derivation records
+    // no write to the target's ["cfc"] path.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["secret"], label: { confidentiality: ["x"] } }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const deriveOnce = () => {
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const target = runtime.getCell(
+          signer.did(),
+          "cfc-flow-idem-target",
+          undefined,
+          tx,
+        );
+        target.set({ note: raw.secret });
+        tx.prepareCfc();
+        const targetId = target.getAsNormalizedFullLink().id;
+        const wroteCfc = [...(tx.getWriteDetails?.(signer.did()) ?? [])].some(
+          (w) => w.address.id === targetId && w.address.path[0] === "cfc",
+        );
+        return { tx, targetId, wroteCfc };
+      };
+
+      // First derivation: the envelope IS written (a real derived component).
+      const first = deriveOnce();
+      expect(first.wroteCfc).toBe(true);
+      expect((await first.tx.commit()).ok).toBeDefined();
+      expect(
+        replicaEntries(storageManager, first.targetId).find((e) =>
+          e.origin === "derived"
+        )?.label.confidentiality,
+      ).toContainEqual("x");
+
+      // Identical re-derivation: the envelope write is SKIPPED (idempotent).
+      const second = deriveOnce();
+      expect(second.wroteCfc).toBe(false);
+      expect((await second.tx.commit()).ok).toBeDefined();
+      // ...and the stored label is unchanged.
+      expect(
+        replicaEntries(storageManager, second.targetId).find((e) =>
+          e.origin === "derived"
+        )?.label.confidentiality,
+      ).toContainEqual("x");
     } finally {
       await runtime.dispose();
       await storageManager.close();

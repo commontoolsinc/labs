@@ -40,18 +40,9 @@ const program: RuntimeProgram = {
 interface HandlerIdentityProbe {
   src: string | undefined;
   kind: string | undefined;
-  /**
-   * The scheduler's content-addressed implementation hash for this handler,
-   * derived from `fn.src` via `harness.implementationHashForSource`. This is the
-   * SECOND consumer of ESM source-location fidelity (the first is CFC
-   * verified-source above): the scheduler keys reload-stable action identity on
-   * it, so it must resolve under the ESM loader.
-   */
-  implHash: string | undefined;
 }
 
 function probeHandlerIdentity(
-  runtime: Runtime,
   compiled: Pattern,
 ): HandlerIdentityProbe {
   const nodes = (compiled as Pattern & { nodes: { module: Module }[] }).nodes;
@@ -73,13 +64,9 @@ function probeHandlerIdentity(
   const identity = resolvePolicyFacingImplementationIdentity(handlerModule, {
     implementation: fn as never,
   });
-  const implHash = typeof src === "string"
-    ? runtime.harness.implementationHashForSource?.(src)
-    : undefined;
   return {
     src,
     kind: identity?.kind,
-    implHash,
   };
 }
 
@@ -103,7 +90,7 @@ describe("ESM loader: verified-source location resolution", () => {
   it("resolves a handler's src to its original source under the ESM loader", async () => {
     makeRuntime();
     const compiled = await runtime.patternManager.compilePattern(program);
-    const r = probeHandlerIdentity(runtime, compiled);
+    const r = probeHandlerIdentity(compiled);
 
     // src maps back to the authored file, not a `<loadId>.js` / `:esm:` bundle.
     expect(r.src).toMatch(/(?:^|\/)main\.tsx:\d+:\d+$/);
@@ -113,10 +100,5 @@ describe("ESM loader: verified-source location resolution", () => {
     // normalization — they both gain the same leading slash).
     expect(r.src).toMatch(/^cf:module\//);
     expect(r.kind).toBe("verified");
-    // The scheduler's content-addressed implementation hash also resolves:
-    // `fn.src` reduces to the pure per-module code identity
-    // `cf:module/<hash>:line:col` (no `/path` segment). Without it,
-    // reload-stable action identity breaks.
-    expect(r.implHash).toMatch(/^cf:module\/[^/]+:\d+:\d+$/);
   });
 });

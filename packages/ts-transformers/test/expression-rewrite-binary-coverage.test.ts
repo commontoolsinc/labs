@@ -1,5 +1,7 @@
-import { assert, assertStringIncludes, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import ts from "typescript";
+
+import { callsNamed, parseModule } from "./transformed-ast.ts";
 
 import { createDataFlowAnalyzer } from "../src/ast/mod.ts";
 import { CrossStageState, TransformationContext } from "../src/core/mod.ts";
@@ -160,7 +162,8 @@ Deno.test(
       },
     );
     assert(printed, "expected the && to be lowered");
-    assertStringIncludes(printed, "__cfHelpers.when(");
+    const root = parseModule(printed);
+    assertEquals(callsNamed(root, "when").length, 1);
   },
 );
 
@@ -180,7 +183,8 @@ Deno.test(
       },
     );
     assert(printed, "expected the || to be lowered");
-    assertStringIncludes(printed, "__cfHelpers.unless(");
+    const root = parseModule(printed);
+    assertEquals(callsNamed(root, "unless").length, 1);
   },
 );
 
@@ -200,10 +204,11 @@ Deno.test(
       },
     );
     assert(printed, "expected the && to be lowered");
-    assertStringIncludes(printed, "__cfHelpers.when(");
+    const root = parseModule(printed);
+    assertEquals(callsNamed(root, "when").length, 1);
     // The complex left operand is wrapped as a reactive condition rather than
     // passed through verbatim.
-    assertStringIncludes(printed, "__cfHelpers.lift(");
+    assertEquals(callsNamed(root, "lift").length, 1);
   },
 );
 
@@ -223,8 +228,9 @@ Deno.test(
       },
     );
     assert(printed, "expected the || to be lowered");
-    assertStringIncludes(printed, "__cfHelpers.unless(");
-    assertStringIncludes(printed, "__cfHelpers.lift(");
+    const root = parseModule(printed);
+    assertEquals(callsNamed(root, "unless").length, 1);
+    assertEquals(callsNamed(root, "lift").length, 1);
   },
 );
 
@@ -312,7 +318,7 @@ Deno.test(
       },
     );
     assert(printed, "expected arithmetic to be wrapped");
-    assertStringIncludes(printed, "__cfHelpers.lift(");
+    assertEquals(callsNamed(parseModule(printed), "lift").length, 1);
   },
 );
 
@@ -406,7 +412,7 @@ Deno.test(
     // (which would otherwise throw for a compute-owned node) and still emits a
     // lift wrapper.
     assert(printed, "expected the synthetic array receiver to be wrapped");
-    assertStringIncludes(printed, "__cfHelpers.lift(");
+    assertEquals(callsNamed(parseModule(printed), "lift").length, 1);
   },
 );
 

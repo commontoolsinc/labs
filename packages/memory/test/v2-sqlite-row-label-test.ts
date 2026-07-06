@@ -18,6 +18,8 @@ import {
   match,
   principal,
   type RowLabelSpec,
+  ruleCommonAlternatives,
+  ruleConstrainsConfidentiality,
   validateRowLabelSpec,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
@@ -131,18 +133,190 @@ Deno.test("match() forces the global flag so split-on-match works", () => {
 // Fail-closed at authoring (table() throws)
 // ---------------------------------------------------------------------------
 
-Deno.test("any() errors at table() time until the clause-aware profile lands", () => {
+Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
+  // any() no longer throws at table() time — it produces an authored OR-clause
+  // the runner's clause-aware profile enforces by subsumption.
+  const schema = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  }));
+  const spec = schema.rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(spec, Object.keys(EMAIL_COLUMNS)),
+    undefined,
+  );
+  // An any() with no alternatives is rejected.
+  assert(
+    typeof validateRowLabelSpec(
+      { version: 1, confidentiality: { anyOf: [] } } as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ) === "string",
+  );
+});
+
+Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B∨C widening (Epic E1)", () => {
+  // A direct all() as an any() alternative is rejected: union-flattening it
+  // would make the row readable by A alone even though the author required
+  // A AND B.
   assertThrows(
     () =>
       table(EMAIL_COLUMNS, (f) => ({
         confidentiality: any(
-          principal("mailto", match(f.from, ADDR)),
+          all(
+            principal("mailto", match(f.from, ADDR)),
+            principal("mailto", match(f.to, ADDR)),
+          ),
           dbOwner(),
         ),
       })),
-    TypeError,
-    "any(",
+    Error,
+    "all()/any()",
   );
+  // ...and a when() gating an all() is rejected too (recursive check).
+  assertThrows(
+    () =>
+      table(EMAIL_COLUMNS, (f) => ({
+        confidentiality: any(
+          whenMatches(
+            f.auth,
+            /dmarc=pass/,
+            all(
+              principal("mailto", match(f.from, ADDR)),
+              principal("mailto", match(f.to, ADDR)),
+            ),
+          ),
+          dbOwner(),
+        ),
+      })),
+    Error,
+  );
+});
+
+Deno.test("ruleCommonAlternatives: the static readers of EVERY clause (Epic E2)", () => {
+  const OWNER = "did:key:zOwner";
+  // An unconditional dbOwner() in a single OR-clause → the owner is common.
+  const orRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(orRule, { dbOwner: OWNER }), [OWNER]);
+
+  // dbOwner in every conjunct's OR-clause → still common.
+  const cnfRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(cnfRule, { dbOwner: OWNER }), [OWNER]);
+
+  // The CONJUNCTIVE email rule (all(principal, …, dbOwner)) has NO common
+  // reader — a principal() conjunct is data-dependent, so nobody reads every
+  // row. This is why an aggregate over it must still refuse.
+  assertEquals(ruleCommonAlternatives(emailSpec(), { dbOwner: OWNER }), []);
+
+  // dbOwner unconditional as a top-level conjunct is NOT a common reader of
+  // the OTHER conjuncts (a principal clause it doesn't satisfy).
+  const mixed = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      principal("mailto", match(f.from, ADDR)),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(mixed, { dbOwner: OWNER }), []);
+
+  // constant() is a static reader too.
+  const constRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      constant("did:key:public"),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(constRule, { dbOwner: OWNER }), [
+    "did:key:public",
+  ]);
+
+  // A NESTED all(...) must not hide a clause: all(all(anyA, anyB), anyC) has
+  // dbOwner() in every leaf clause, so the owner is still common. A one-level
+  // flatten would treat the inner all(...) as an opaque term with no static
+  // reader and wrongly return [] (a false aggregate refusal).
+  const nestedRule = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(
+        any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+        any(dbOwner(), principal("mailto", match(f.to, ADDR))),
+      ),
+      any(dbOwner(), constant("did:key:public")),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(nestedRule, { dbOwner: OWNER }), [OWNER]);
+
+  // An integrity-only rule has no confidentiality clause → no common
+  // alternative to compute (the aggregate is public, decided by the caller).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleCommonAlternatives(integrityOnly, { dbOwner: OWNER }), []);
+
+  // Two conjuncts each with a DIFFERENT static reader → the running
+  // intersection empties, so there is no reader of every row.
+  const disjointConjuncts = table(EMAIL_COLUMNS, () => ({
+    confidentiality: all(constant("did:key:A"), constant("did:key:B")),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(disjointConjuncts, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a degenerate empty conjunction (rejected at table() time, but
+  // reachable via a hand-built wire spec) yields no common alternative.
+  const emptyConjunction = {
+    version: 1,
+    confidentiality: { allOf: [] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(emptyConjunction, { dbOwner: OWNER }),
+    [],
+  );
+
+  // Defensive: a non-record conjunct (malformed wire spec) contributes no
+  // static reader rather than throwing — fail closed to no common alternative.
+  const malformedConjunct = {
+    version: 1,
+    confidentiality: { allOf: ["not-a-node"] },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(malformedConjunct, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("ruleConstrainsConfidentiality: confidentiality present vs integrity-only (Epic E2)", () => {
+  // An integrity-only rule imposes NO confidentiality constraint — an aggregate
+  // over it is public, not a refusal. Distinguished from a rule that DOES
+  // constrain (any nesting of at least one clause).
+  const integrityOnly = table(EMAIL_COLUMNS, (f) => ({
+    integrity: authoredBy(principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(integrityOnly), false);
+
+  const withConf = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(withConf), true);
+
+  // Nested all(all(...)) still counts as constraining.
+  const nested = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      all(principal("mailto", match(f.from, ADDR))),
+      dbOwner(),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(nested), true);
 });
 
 Deno.test("a rule referencing an unknown column throws", () => {
@@ -235,13 +409,34 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
     validateRowLabelSpec(good, Object.keys(EMAIL_COLUMNS)),
     undefined,
   );
-  // anyOf smuggled over the wire is rejected, not silently flattened.
-  const smuggled = JSON.parse(JSON.stringify(good)) as RowLabelSpec;
-  (smuggled as { confidentiality: unknown }).confidentiality = {
-    anyOf: [{ dbOwner: true }],
-  };
+  // A well-formed anyOf over the wire now validates (Epic E1)...
+  const withClause = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(
+      dbOwner(),
+      principal("mailto", match(f.from, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  assertEquals(
+    validateRowLabelSpec(
+      JSON.parse(JSON.stringify(withClause)) as RowLabelSpec,
+      Object.keys(EMAIL_COLUMNS),
+    ),
+    undefined,
+  );
+  // ...but a malformed alternative (unknown column) is still rejected.
+  const badClause = {
+    version: 1,
+    confidentiality: {
+      anyOf: [{
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "nonesuch", source: ADDR.source, flags: "g" } },
+        },
+      }],
+    },
+  } as unknown as RowLabelSpec;
   assert(
-    typeof validateRowLabelSpec(smuggled, Object.keys(EMAIL_COLUMNS)) ===
+    typeof validateRowLabelSpec(badClause, Object.keys(EMAIL_COLUMNS)) ===
       "string",
   );
   // Unknown column in a wire spec is rejected.
@@ -469,12 +664,74 @@ Deno.test("dbOwner() with no owner in ctx fails closed", () => {
   );
 });
 
-Deno.test("an anyOf node reaching the evaluator fails closed (never silently flattened)", () => {
-  const spec: RowLabelSpec = {
+Deno.test("an anyOf node evaluates to a structural OR-clause (Epic E1)", () => {
+  // any(dbOwner ∨ from-participants): the row is readable by the owner OR any
+  // sender — ONE OR-clause, not flattened into bare atoms.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(spec, { from: "alice@a.example" }, {
+    dbOwner: OWNER,
+  });
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+  ]);
+});
+
+Deno.test("evalConf fails closed on a conjunctive any() alternative that bypassed validation (Epic E1)", () => {
+  // A raw wire spec (not built through table(), so validation was skipped)
+  // with a conjunction as an any() alternative must fail closed at eval —
+  // never union-flatten (A∧B)∨C into A∨B∨C. Both the direct all() and the
+  // when()-wrapped all() shapes are rejected.
+  const direct: RowLabelSpec = {
     version: 1,
-    confidentiality: { anyOf: [{ dbOwner: true }] } as never,
+    confidentiality: {
+      anyOf: [
+        { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        { dbOwner: true },
+      ],
+    } as never,
   };
-  expectError(spec, {}, { dbOwner: OWNER }, "anyOf");
+  const dRes = evaluateRowLabel(direct, {}, { dbOwner: OWNER });
+  assert("error" in dRes && dRes.error.includes("conjunction"));
+
+  const gated: RowLabelSpec = {
+    version: 1,
+    confidentiality: {
+      anyOf: [
+        {
+          when: { match: { field: "from", source: ADDR.source, flags: "" } },
+          then: { allOf: [{ dbOwner: true }, { constant: "x" }] },
+        },
+        { dbOwner: true },
+      ],
+    } as never,
+  };
+  const gRes = evaluateRowLabel(gated, { from: "a@b.example" }, {
+    dbOwner: OWNER,
+  });
+  assert("error" in gRes && gRes.error.includes("conjunction"));
+});
+
+Deno.test("an all() of any()-clauses is proper CNF (Epic E1)", () => {
+  // all(any(owner ∨ from), to-participants) → (owner∨from) ∧ to.
+  const spec = table(EMAIL_COLUMNS, (f) => ({
+    confidentiality: all(
+      any(dbOwner(), principal("mailto", match(f.from, ADDR))),
+      principal("mailto", match(f.to, ADDR)),
+    ),
+  })).rowLabel as RowLabelSpec;
+  const res = evaluateRowLabel(
+    spec,
+    { from: "alice@a.example", to: "bob@example.com" },
+    { dbOwner: OWNER },
+  );
+  if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
+  assertEquals(res.confidentiality, [
+    { anyOf: [OWNER, "did:mailto:alice@a.example"] },
+    "did:mailto:bob@example.com",
+  ]);
 });
 
 Deno.test("an unknown op reaching the evaluator fails closed", () => {
@@ -582,6 +839,205 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
   };
   const reason = validateRowLabelSpec(spec, ["from"]);
   assert(typeof reason === "string");
+});
+
+// ---------------------------------------------------------------------------
+// Ambiguous dual-op nodes: a node carrying TWO recognized op keys must refuse
+// everywhere. The validator, the evaluator, and the static common-alternative
+// analysis each dispatch by their own key precedence, so a hand-crafted
+// {principal, dbOwner} node used to validate as a principal, evaluate to only
+// the principal, and STATICALLY count the owner as a common reader — labeling
+// a COUNT(*) [owner] although the owner is not an alternative in any row's
+// label (CFC spec §8.17.4 violation).
+// ---------------------------------------------------------------------------
+
+const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
+  version: 1,
+  confidentiality: {
+    principal: {
+      protocol: "mailto",
+      of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+    },
+    dbOwner: true,
+  } as never,
+};
+
+Deno.test("a dual-op confidentiality node in a wire spec is rejected (ambiguous, fail closed)", () => {
+  // The probe from the report: {principal, dbOwner}.
+  const reason = validateRowLabelSpec(DUAL_PRINCIPAL_OWNER, ["from"]);
+  assert(typeof reason === "string", "a dual-op node must not validate");
+  assert(reason.includes("ambiguous"), `unexpected reason: ${reason}`);
+
+  // The other class: {constant, principal} (eval picks the principal, static
+  // analysis used to count the constant).
+  const constantPrincipal = {
+    version: 1,
+    confidentiality: {
+      constant: "did:key:public",
+      principal: {
+        protocol: "mailto",
+        of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assert(
+    typeof validateRowLabelSpec(constantPrincipal, ["from"]) === "string",
+  );
+
+  // The validateConfExpr entry point (top level / under all()): an allOf node
+  // smuggling a sibling op key is just as ambiguous.
+  const allOfConstant = {
+    version: 1,
+    confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(allOfConstant, ["from"]) === "string");
+
+  // The anyOf-alternative entry point: a when-gated alternative that ALSO
+  // carries a principal key — the validator used to follow the when gate
+  // while the evaluator dispatches on the principal.
+  const whenPrincipalAlt = {
+    version: 1,
+    confidentiality: {
+      anyOf: [{
+        when: { match: { field: "from", source: ADDR.source, flags: "" } },
+        then: { dbOwner: true },
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      }],
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(whenPrincipalAlt, ["from"]) === "string");
+});
+
+Deno.test("a dual-op integrity node in a wire spec is rejected (ambiguous, fail closed)", () => {
+  const authoredConstant = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      constant: "x",
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(authoredConstant, ["from"]) === "string");
+
+  const authoredEndorsed = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      endorsedBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "to", source: ADDR.source, flags: "g" } },
+        },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assert(
+    typeof validateRowLabelSpec(authoredEndorsed, ["from", "to"]) === "string",
+  );
+
+  const intersectAllOf = {
+    version: 1,
+    integrity: {
+      intersect: [{ constant: "a" }],
+      allOf: [{ constant: "b" }],
+    },
+  } as unknown as RowLabelSpec;
+  assert(typeof validateRowLabelSpec(intersectAllOf, ["from"]) === "string");
+});
+
+Deno.test("ruleCommonAlternatives never counts a dual-op node's owner as a common reader", () => {
+  // The exact unsoundness: eval labels each row with ONLY the extracted
+  // principal, so the owner is not an alternative in ANY row's label — the
+  // static analysis must not report it (an ambiguous node contributes no
+  // static reader; the aggregate refuses).
+  assertEquals(
+    ruleCommonAlternatives(DUAL_PRINCIPAL_OWNER, { dbOwner: OWNER }),
+    [],
+  );
+  // Same for a smuggled constant.
+  const constantPrincipal = {
+    version: 1,
+    confidentiality: {
+      constant: "did:key:public",
+      principal: {
+        protocol: "mailto",
+        of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+      },
+    },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(constantPrincipal, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("an ambiguous allOf wrapper is opaque to the static analysis (no unwrap past the guard)", () => {
+  // {allOf: [...], constant: X} — flattenConfConjuncts must NOT dispatch on
+  // the allOf key alone and unwrap it: that silently drops the smuggled
+  // sibling op and hands the inner conjuncts to the static analysis, which
+  // would report a guaranteed reader for a node the evaluator refuses.
+  const ambiguousWrapper = {
+    version: 1,
+    confidentiality: { allOf: [{ dbOwner: true }], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(
+    ruleCommonAlternatives(ambiguousWrapper, { dbOwner: OWNER }),
+    [],
+  );
+  // ...and the wrapper still COUNTS as a confidentiality constraint: an
+  // ambiguous {allOf: [], constant} must not read as the degenerate empty
+  // conjunction (which would make the aggregate public).
+  const emptyAllOfConstant = {
+    version: 1,
+    confidentiality: { allOf: [], constant: "x" },
+  } as unknown as RowLabelSpec;
+  assertEquals(ruleConstrainsConfidentiality(emptyAllOfConstant), true);
+  assertEquals(
+    ruleCommonAlternatives(emptyAllOfConstant, { dbOwner: OWNER }),
+    [],
+  );
+});
+
+Deno.test("evaluateRowLabel fails closed on a dual-op node that bypassed validation", () => {
+  // Defense in depth (like the conjunctive-anyOf-alternative check): a wire
+  // spec that skipped validation must refuse at eval, never silently pick one
+  // op by precedence.
+  expectError(
+    DUAL_PRINCIPAL_OWNER,
+    { from: "alice@a.example" },
+    { dbOwner: OWNER },
+    "ambiguous",
+  );
+  const authoredConstant = {
+    version: 1,
+    integrity: {
+      authoredBy: {
+        principal: {
+          protocol: "mailto",
+          of: { match: { field: "from", source: ADDR.source, flags: "g" } },
+        },
+      },
+      constant: "x",
+    },
+  } as unknown as RowLabelSpec;
+  expectError(
+    authoredConstant,
+    { from: "alice@a.example" },
+    { dbOwner: OWNER },
+    "ambiguous",
+  );
 });
 
 Deno.test("a wire match without the global flag still evaluates (forced, no throw)", () => {

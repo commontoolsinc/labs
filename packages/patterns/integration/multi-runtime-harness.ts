@@ -40,6 +40,13 @@ export interface MultiRuntimeSessionSpec {
    * one user with two concurrent sessions (e.g. two browser tabs).
    */
   identity?: Identity;
+  /**
+   * Test-only network shaping: delay every storage WebSocket frame (both
+   * directions) in this session's realm by this many milliseconds. Reproduces
+   * multiplayer contention (optimistic pipelining, conflict storms) that
+   * near-zero in-process latency hides.
+   */
+  wsDelayMs?: number;
 }
 
 export interface MultiRuntimeHarnessOptions {
@@ -154,8 +161,14 @@ export class MultiRuntimeSession {
     handler: string,
     event: unknown = {},
     trustedUi?: TrustedUiDescriptor,
+    opts: { idle?: boolean } = {},
   ): Promise<void> {
-    await this.#client.call("send", { handler, event, trustedUi });
+    await this.#client.call("send", {
+      handler,
+      event,
+      trustedUi,
+      idle: opts.idle,
+    });
   }
 
   /**
@@ -200,6 +213,13 @@ export class MultiRuntimeSession {
     return await this.#client.call("read", { path });
   }
 
+  /** Read the RAW stored value at `path` (links resolved to the target cell,
+   *  no result-schema shaping) — for state the declared schema does not
+   *  carry, e.g. a query result's `requestHash`. */
+  async readRaw(path: (string | number)[] = []): Promise<unknown> {
+    return await this.#client.call("readRaw", { path });
+  }
+
   /** Inspect the normalized link (id, space, scope) at `path` in the result. */
   async link(
     path: (string | number)[] = [],
@@ -209,6 +229,26 @@ export class MultiRuntimeSession {
       space: string;
       scope: string;
       path: string[];
+    };
+  }
+
+  /**
+   * Raw replica read at an explicit storage address — bypasses the piece
+   * result / schema / link resolution. Distinguishes "replica lacks the doc"
+   * from "schema-aware read fails to resolve it".
+   */
+  async rawRead(
+    address: {
+      id: string;
+      space: string;
+      path?: (string | number)[];
+      scope?: unknown;
+    },
+  ): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+    return await this.#client.call("rawRead", address) as {
+      ok: boolean;
+      value?: unknown;
+      error?: string;
     };
   }
 
@@ -290,6 +330,9 @@ export class MultiRuntimeHarness {
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
+          ...(normalized.wsDelayMs !== undefined
+            ? { wsDelayMs: normalized.wsDelayMs }
+            : {}),
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),

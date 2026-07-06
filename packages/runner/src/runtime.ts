@@ -66,6 +66,8 @@ import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcTriggerReadGating,
+  type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
   flowLabelWorkExists,
@@ -212,7 +214,7 @@ export interface ModuleByteCache {
    */
   putAll(
     runtimeVersion: string,
-    modules: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void;
 }
 
@@ -244,6 +246,22 @@ export interface RuntimeOptions {
    * boundary; it derives and persists labels but never rejects by itself.
    */
   cfcFlowLabels?: CfcFlowLabelsMode;
+  /**
+   * Write-side `requiredIntegrity` floor dial (§8.12.4.1 / SC-18, Epic D3).
+   * Defaults to `off`. `observe` evaluates the floor and emits diagnostics;
+   * `enforce` records a prepare reason on a floor miss (rejecting the commit
+   * under the enforcing enforcement modes). The floor tests the written
+   * value's integrity, never the consumed-read set.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
+  /**
+   * Trigger-read gating on the enforcement side (§8.9.2 / SC-3, Epic H5).
+   * Defaults to `false`. When true, the addresses whose invalidating writes
+   * scheduled a reactive rerun join the consumed set the sink-request egress
+   * ceiling and input-requirement gates quantify over (fail-closed; extra
+   * metadata resolution per prepare).
+   */
+  cfcTriggerReadGating?: CfcTriggerReadGating;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -379,6 +397,8 @@ export class Runtime {
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
+  readonly cfcWriteFloor: CfcWriteFloorMode;
+  readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -516,6 +536,8 @@ export class Runtime {
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
+    this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
+    this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -765,6 +787,8 @@ export class Runtime {
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
+    wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
+    wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;

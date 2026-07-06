@@ -35,6 +35,10 @@ export type RuntimeCfcEnforcementMode = NonNullable<
   RuntimeClientOptions["cfcEnforcementMode"]
 >;
 
+export type RuntimeCfcFlowLabelsMode = NonNullable<
+  RuntimeClientOptions["cfcFlowLabels"]
+>;
+
 export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
@@ -57,6 +61,12 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+  /**
+   * Flow-label propagation dial (S16). Shell hosts default to "observe"
+   * (Epic H1): derive the per-tx conservative join and emit diagnostics,
+   * persisting nothing — the measurement stage before "persist".
+   */
+  cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   /**
    * When true, forward the worker runtime's console output to the main
@@ -116,6 +126,17 @@ export function createRuntimeClientOptions({
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
+  // Epic H2 (docs/plans/cfc-future-work-implementation.md): shell hosts run the
+  // flow-label dial at "persist" — the per-tx conservative join is derived AND
+  // written as a `derived` label component on every value write. This
+  // activates inv-9 (flow-path confidentiality) in real shell deployments:
+  // reading labeled data and writing a derived value no longer launders the
+  // label away. Safe to persist because re-derivation is idempotent (SC-11:
+  // an unchanged label writes no envelope — see prepare.ts) so a rerun that
+  // reads the same inputs does not churn the ["cfc"] doc; replace-on-overwrite
+  // (§8.12.8) keeps the derived component tracking the current value rather
+  // than ratcheting forever. H1 shipped "observe" as the measurement stage.
+  cfcFlowLabels = "persist",
   trustSnapshot,
   forwardWorkerConsole,
 }: {
@@ -124,6 +145,7 @@ export function createRuntimeClientOptions({
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
+  cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   forwardWorkerConsole?: boolean;
 }) {
@@ -143,6 +165,7 @@ export function createRuntimeClientOptions({
     spaceName: session.spaceName,
     experimental,
     cfcEnforcementMode,
+    cfcFlowLabels,
     trustSnapshot: resolvedTrustSnapshot,
     forwardWorkerConsole,
   };
@@ -470,6 +493,7 @@ export class RuntimeInternals extends EventTarget {
     spaceHostMap,
     experimental,
     cfcEnforcementMode,
+    cfcFlowLabels,
     trustSnapshot,
     forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
@@ -511,6 +535,7 @@ export class RuntimeInternals extends EventTarget {
         spaceHostMap,
         experimental,
         cfcEnforcementMode,
+        cfcFlowLabels,
         trustSnapshot,
         forwardWorkerConsole,
       }),

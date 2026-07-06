@@ -1,7 +1,14 @@
-import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertGreater,
+  assertStringIncludes,
+} from "@std/assert";
+import ts from "typescript";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { collect, hasKeyPathRead, parseModule } from "./transformed-ast.ts";
 
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
@@ -4396,11 +4403,13 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
           errors.map((e) => e.message).join("; ")
         })`,
       );
-      assertStringIncludes(
-        output,
-        "result: ResultShape",
-        "The `as { result: ResultShape }` cast should survive the chain rewrite",
-      );
+      // The `as { result: ResultShape }` cast should survive the chain rewrite,
+      // so a `ResultShape` type reference remains in the emitted output.
+      const hasResultShapeRef = collect(
+        parseModule(output),
+        ts.isTypeReferenceNode,
+      ).some((ref) => ref.typeName.getText() === "ResultShape");
+      assert(hasResultShapeRef, "expected the ResultShape cast to survive");
     },
   );
 });
@@ -4437,16 +4446,11 @@ Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
           errors.map((e) => e.message).join("; ")
         })`,
       );
-      assertStringIncludes(
-        output,
-        'fooWish.key("result")',
-        'fooWish.result! inside computed() should lower to fooWish.key("result")',
-      );
-      assertStringIncludes(
-        output,
-        'foo.key("0")',
-        'foo[0] inside computed() should lower to foo.key("0")',
-      );
+      // `fooWish.result!` inside computed() lowers to `fooWish.key("result")`
+      // and `foo[0]` lowers to `foo.key("0")`.
+      const root = parseModule(output);
+      assert(hasKeyPathRead(root, "result", "fooWish"));
+      assert(hasKeyPathRead(root, "0", "foo"));
     },
   );
 });

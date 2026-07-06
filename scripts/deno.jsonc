@@ -1,5 +1,6 @@
 {
+  // This directory is explicitly excluded from coverage checking.
   "tasks": {
-    "test": "deno test -A"
+    "test": "deno test -A --permit-no-files"
   }
 }

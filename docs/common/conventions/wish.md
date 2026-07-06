@@ -46,6 +46,15 @@ When multiple pieces match, a picker UI is rendered via `wishResult[UI]`. The
 user browses candidates and clicks "Confirm Selection". Until confirmed,
 `result` reactively reflects the currently highlighted candidate.
 
+> **Exception — well-known profile targets.** `wish({ query: "#profile" })` does
+> _not_ follow the "result reflects the highlighted candidate" rule. Its
+> `.result` is **always the single current profile** (default → MRU → first) in
+> every mode; the picker there is only a switching affordance, and selecting a
+> profile changes `.result` by reordering candidates (MRU/default writes), not by
+> a confirm gesture. See [Well-Known Profile Targets](#well-known-profile-targets)
+> (CT-1829). Generalizing this "single-best by default; picker opt-in" shape to
+> all wishes is a future step.
+
 You can render the built-in UI directly:
 
 ```tsx
@@ -106,26 +115,41 @@ wish({ query: "#portfolio", scope: ["profile"] })
 A user may have multiple profiles, stored on the home default pattern at
 `homeSpaceCell.defaultPattern.profiles` (a list), with `defaultProfile` and a
 recency-ordered `mru`. The well-known wishes enumerate that list and resolve,
-ordered **default first, then by MRU**:
+ordered **default first, then by MRU, then list order**:
 
 ```tsx
 // Shown at module scope.
-wish({ query: "#profile" }) // the default profile (headless); see [UI] below
+wish({ query: "#profile" }) // the single current profile; see [UI] below
 wish({ query: "#profileName" }) // default profile's initialNameApplied
 wish({ query: "#profileAvatar" }) // default profile's avatar
 wish({ query: "#profileBio" }) // default profile's bio (free-text description)
 wish({ query: "#profileSpace" }) // default profile's space cell
 ```
 
-Headless / single-profile callers get the default profile. The optional `[UI]`
+`wish({ query: "#profile" }).result` is **always the single current profile** —
+the best of the ordered candidates (default → MRU → first) — in **every** mode
+(interactive, headless, and the blessed read). It is never `undefined` while a
+profile exists, and it never depends on the picker sidecar pattern running, so
+consumers can gate on `.result` without stranding in the multi-profile case
+(CT-1829). The `candidates` array holds all ordered profiles.
+
+The picker is the **switching affordance**, not the source of `.result`:
+selection is _state_, not a channel. When the picker's "Use" writes `mru` or
+"Set default" writes `defaultProfile`, it reorders the candidates, so
+`ordered[0]` — and therefore `.result` — updates reactively. The optional `[UI]`
 for `wish({ query: "#profile" })`:
 
 - **0 profiles:** the trusted profile-create surface (same input as the home
   Profile tab). Submitting a name creates the viewer's first profile and leaves
-  the current view in place; the wish reacts once the link exists.
+  the current view in place; the wish reacts once the link exists. `.result` is
+  `undefined` and `error` is set until the first profile exists.
 - **1 profile:** a link to that profile.
-- **2+ profiles:** the **profile picker** (`profile-picker.tsx`) — lists
-  profiles, selects the default, stamps MRU, and creates more inline.
+- **2+ profiles, a valid default set:** a link to the default profile.
+- **2+ profiles, no valid default:** the **profile picker**
+  (`profile-picker.tsx`) — lists profiles, sets the default, stamps MRU, and
+  creates more inline — rendered purely as the switcher. `.result` still
+  resolves to the ordered best (MRU-or-first) immediately; picking a profile is
+  what changes it.
 
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.

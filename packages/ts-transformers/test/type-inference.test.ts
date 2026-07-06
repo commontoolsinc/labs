@@ -1,5 +1,7 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
+
+import { parseModule } from "./transformed-ast.ts";
 
 import {
   ensureTypeNodeRegistered,
@@ -132,6 +134,34 @@ function typeText(
   return type ? checker.typeToString(type) : "undefined";
 }
 
+// Reparse a printed type (the checker's `typeToString` output) into a real
+// type node by wrapping it in `type __T = …;`. Assertions then read the
+// parsed structure instead of matching a substring of the printed string,
+// which a wider type (`{ title: string } & X`) could otherwise satisfy.
+function reparseType(printed: string): ts.TypeNode {
+  const root = parseModule(`type __T = ${printed};`);
+  const alias = root.statements[0];
+  assert(
+    ts.isTypeAliasDeclaration(alias),
+    `expected a type alias for ${printed}`,
+  );
+  return alias.type;
+}
+
+// The property names of a printed object type, as a set.
+function objectMemberNames(printed: string): Set<string> {
+  const node = reparseType(printed);
+  assert(ts.isTypeLiteralNode(node), `expected an object type for ${printed}`);
+  const names = new Set<string>();
+  for (const member of node.members) {
+    assert(ts.isPropertySignature(member));
+    const name = member.name;
+    assert(ts.isIdentifier(name) || ts.isStringLiteralLike(name));
+    names.add(name.text);
+  }
+  return names;
+}
+
 Deno.test("type inference helpers classify special types and widen literals", () => {
   const { sourceFile, checker } = createProgram(`
     type Generic<T> = T;
@@ -214,14 +244,16 @@ Deno.test("type inference helpers infer parameters, returns, and contextual type
     getTypeFromTypeNodeWithFallback(explicit.typeNode, checker, registry),
     explicit.type,
   );
-  assertStringIncludes(typeText(explicit.type, checker), "title");
+  assert(objectMemberNames(typeText(explicit.type, checker)).has("title"));
 
   const inferredFromSignature = inferParameterType(
     undefined,
     declaredSignature,
     checker,
   );
-  assertStringIncludes(typeText(inferredFromSignature, checker), "count");
+  assert(
+    objectMemberNames(typeText(inferredFromSignature, checker)).has("count"),
+  );
   assertEquals(
     inferParameterType(typed.parameters[0], typedSignature, checker),
     explicit.type,
@@ -230,9 +262,20 @@ Deno.test("type inference helpers infer parameters, returns, and contextual type
     typeText(inferReturnType(typed, typedSignature, checker), checker),
     "string",
   );
-  assertStringIncludes(
+  // The contextual type is the whole function signature; its first parameter
+  // is the object carrying `count`.
+  const contextualType = reparseType(
     typeText(inferContextualType(contextual, checker), checker),
-    "count",
+  );
+  assert(ts.isFunctionTypeNode(contextualType));
+  const contextualParam = contextualType.parameters[0]?.type;
+  assert(contextualParam && ts.isTypeLiteralNode(contextualParam));
+  assert(
+    contextualParam.members.some((member) =>
+      ts.isPropertySignature(member) &&
+      ts.isIdentifier(member.name) &&
+      member.name.text === "count"
+    ),
   );
   assertEquals(
     typeText(
@@ -283,17 +326,26 @@ Deno.test("type inference helpers register synthetic type nodes", () => {
     getTypeFromTypeNodeWithFallback(existingNode, checker, registry),
     ensureTypeNodeRegistered(existingNode, checker, registry),
   );
-  assertStringIncludes(
-    typeText(ensureTypeNodeRegistered(typeLiteral, checker, registry), checker),
-    "name",
+  assert(
+    objectMemberNames(
+      typeText(
+        ensureTypeNodeRegistered(typeLiteral, checker, registry),
+        checker,
+      ),
+    ).has("name"),
   );
-  assertStringIncludes(
+  const arrayType = reparseType(
     typeText(ensureTypeNodeRegistered(arrayNode, checker, registry), checker),
-    "string[]",
   );
-  assertStringIncludes(
+  assert(ts.isArrayTypeNode(arrayType));
+  assertEquals(arrayType.elementType.kind, ts.SyntaxKind.StringKeyword);
+  const unionType = reparseType(
     typeText(ensureTypeNodeRegistered(unionNode, checker, registry), checker),
-    "string | number",
+  );
+  assert(ts.isUnionTypeNode(unionType));
+  assertEquals(
+    unionType.types.map((member) => member.kind).sort(),
+    [ts.SyntaxKind.StringKeyword, ts.SyntaxKind.NumberKeyword].sort(),
   );
   assertEquals(
     ensureTypeNodeRegistered(parenthesizedNode, checker, registry),
@@ -437,23 +489,24 @@ Deno.test("type inference helpers convert and unwrap types conservatively", () =
   );
   const value = findIdentifier(sourceFile, "value");
 
-  assertStringIncludes(
+  const unwrappedUnion = reparseType(
     typeText(unwrapOpaqueLikeType(unionType, checker), checker),
-    "string | number",
+  );
+  assert(ts.isUnionTypeNode(unwrappedUnion));
+  assertEquals(
+    unwrappedUnion.types.map((member) => member.kind).sort(),
+    [ts.SyntaxKind.StringKeyword, ts.SyntaxKind.NumberKeyword].sort(),
   );
   assertEquals(unwrapCellLikeType(undefined, checker), undefined);
   assertEquals(unwrapCellLikeType(boxType, checker), boxType);
 
   const asTypeNode = typeToTypeNode(boxType, checker, sourceFile);
   assert(asTypeNode);
-  assertStringIncludes(
-    ts.createPrinter().printNode(
-      ts.EmitHint.Unspecified,
-      asTypeNode,
-      sourceFile,
-    ),
-    "NameBox",
-  );
+  // The converted node refers back to the named alias rather than inlining the
+  // object shape.
+  assert(ts.isTypeReferenceNode(asTypeNode));
+  assert(ts.isIdentifier(asTypeNode.typeName));
+  assertEquals(asTypeNode.typeName.text, "NameBox");
   const schemaTypeNode = typeToSchemaTypeNode(
     checker.getTypeAtLocation(value),
     checker,

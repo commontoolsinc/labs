@@ -1,5 +1,6 @@
 export {
   createCompileByteCache,
+  flushCompileByteCache,
   ProcessModuleByteCache,
 } from "./compile-byte-cache.ts";
 export {
@@ -18,6 +19,7 @@ export type {
   FixtureSuiteConfig,
 } from "./fixture-runner.ts";
 export type {
+  CachedPatternCoverageSpan,
   CompiledModuleArtifact,
   ModuleByteCache,
   SerializedModuleBytes,

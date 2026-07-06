@@ -265,13 +265,27 @@ export interface GmailSendClient {
   listLabels(retryCount?: number): Promise<GmailLabel[]>;
 }
 
+// The Writable<Auth> and AuthCell forms are kept as separate overloads rather
+// than a single union parameter. Overload resolution then selects the
+// Writable<Auth> signature for a live handler auth cell, which lets capability
+// analysis see the write the client performs when it persists a refreshed token
+// through that cell. The AuthCell overload covers read-only contexts where
+// refreshes are not persisted.
 type GmailSendClientFactory = {
   new (
-    auth: AuthCell | Writable<Auth>,
+    auth: Writable<Auth>,
+    config?: GmailSendClientConfig,
+  ): GmailSendClient;
+  new (
+    auth: AuthCell,
     config?: GmailSendClientConfig,
   ): GmailSendClient;
   (
-    auth: AuthCell | Writable<Auth>,
+    auth: Writable<Auth>,
+    config?: GmailSendClientConfig,
+  ): GmailSendClient;
+  (
+    auth: AuthCell,
     config?: GmailSendClientConfig,
   ): GmailSendClient;
 };

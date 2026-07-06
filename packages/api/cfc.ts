@@ -35,6 +35,14 @@ export const CFC_ATOM_TYPE = {
   ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest",
   InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe",
   LinkReference: "https://commonfabric.org/cfc/atom/LinkReference",
+  // Runtime-minted LLM-derivation provenance: these bytes were produced by a
+  // model (assistant content, or a tool result entering the dialog
+  // transcript). Makes "untrusted model output" EXPLICIT provenance rather
+  // than mere absence of integrity, so requiredIntegrity floors fail
+  // positively on model-derived values (Epic D1,
+  // docs/specs/cfc-trusted-agent-tool-integrity.md piece B). Evidence — not
+  // authorable in schemas.
+  LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived",
   Origin: "https://commonfabric.org/cfc/atom/Origin",
   // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
   // via the class-aware meet — present on an output only when present on
@@ -112,6 +120,14 @@ export type CfcUserSurfaceInputAtom = CfcAtomObject & {
   readonly user: string;
   readonly surface: string;
   readonly valueDigest: string;
+};
+
+export type CfcLlmDerivedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.LlmDerived;
+  // The model that produced the bytes, when known. Audit/display metadata —
+  // policies match on the atom type, so the default mint omits it to keep
+  // the persisted atom canonical across models.
+  readonly model?: string;
 };
 
 export type CfcExternalIngestAtom = CfcAtomObject & {
@@ -206,6 +222,12 @@ export const cfcAtom = {
     return {
       type: CFC_ATOM_TYPE.InjectionSafe,
     };
+  },
+
+  llmDerived(model?: string): CfcLlmDerivedAtom {
+    return model === undefined
+      ? { type: CFC_ATOM_TYPE.LlmDerived }
+      : { type: CFC_ATOM_TYPE.LlmDerived, model };
   },
 
   userSurfaceInput(

@@ -297,6 +297,11 @@ describe("RuntimeInternals", () => {
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    // Epic H2: shell hosts run the flow-label dial at "persist" by default —
+    // derived label components are written on every value write, activating
+    // inv-9. H1 shipped "observe" (measurement); H2 flips to "persist" now that
+    // re-derivation is idempotent (SC-11).
+    expect(options.cfcFlowLabels).toBe("persist");
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),
@@ -329,10 +334,12 @@ describe("RuntimeInternals", () => {
       session,
       apiUrl: new URL("http://shell.test/"),
       cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
       trustSnapshot,
     });
 
     expect(options.cfcEnforcementMode).toBe("observe");
+    expect(options.cfcFlowLabels).toBe("off");
     expect(options.trustSnapshot).toBe(trustSnapshot);
 
     const withoutTrust = createRuntimeClientOptions({

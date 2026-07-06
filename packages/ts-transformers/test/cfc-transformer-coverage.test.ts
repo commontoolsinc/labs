@@ -1,9 +1,15 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals } from "@std/assert";
+import ts from "typescript";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { collect, emittedSchemas, parseModule } from "./transformed-ast.ts";
 
-function normalizeOutput(output: string): string {
-  return output.replace(/\s+/g, " ");
+/** The single emitted schema literal, evaluated to its JS value. */
+async function schemaValue(source: string): Promise<Record<string, unknown>> {
+  const out = await transformSource(source, { types: COMMONFABRIC_TYPES });
+  const schemas = emittedSchemas(parseModule(out));
+  assertEquals(schemas.length, 1, `expected one emitted schema in:\n${out}`);
+  return schemas[0]!;
 }
 
 Deno.test("transformer coverage: nested aliases expand to canonical metadata", async () => {
@@ -22,13 +28,11 @@ Deno.test("transformer coverage: nested aliases expand to canonical metadata", a
     export default schema;
   `;
 
-  const output = normalizeOutput(
-    await transformSource(source, { types: COMMONFABRIC_TYPES }),
-  );
-
-  assertStringIncludes(output, "confidentiality: [");
-  assertStringIncludes(output, '"secret"');
-  assertStringIncludes(output, 'value: { type: "string" }');
+  const schema = await schemaValue(source);
+  const secret = (schema.properties as Record<string, any>).secret;
+  assertEquals(secret.type, "object");
+  assertEquals(secret.properties.value, { type: "string" });
+  assertEquals(secret.ifc, { confidentiality: ["secret"] });
 });
 
 Deno.test("transformer coverage: projection paths lower as canonical pointers", async () => {
@@ -47,15 +51,12 @@ Deno.test("transformer coverage: projection paths lower as canonical pointers", 
     export default schema;
   `;
 
-  const output = normalizeOutput(
-    await transformSource(source, { types: COMMONFABRIC_TYPES }),
-  );
-
-  assertStringIncludes(
-    output,
-    'projection: { from: "/", path: "/nested/path" }',
-  );
-  assertStringIncludes(output, 'title: { type: "string" }');
+  const schema = await schemaValue(source);
+  const projection = (schema.properties as Record<string, any>).projection;
+  assertEquals(projection.properties.title, { type: "string" });
+  assertEquals(projection.ifc, {
+    projection: { from: "/", path: "/nested/path" },
+  });
 });
 
 Deno.test("transformer coverage: opaque inputs lower to ifc.opaque", async () => {
@@ -73,12 +74,10 @@ Deno.test("transformer coverage: opaque inputs lower to ifc.opaque", async () =>
     export default schema;
   `;
 
-  const output = normalizeOutput(
-    await transformSource(source, { types: COMMONFABRIC_TYPES }),
-  );
-
-  assertStringIncludes(output, "ifc: { opaque: true }");
-  assertStringIncludes(output, 'token: { type: "string"');
+  const schema = await schemaValue(source);
+  const token = (schema.properties as Record<string, any>).token;
+  assertEquals(token.type, "string");
+  assertEquals(token.ifc, { opaque: true });
 });
 
 Deno.test("transformer coverage: imported Cfc metadata survives Writable.of type arguments", async () => {
@@ -102,16 +101,14 @@ Deno.test("transformer coverage: imported Cfc metadata survives Writable.of type
     export default body;
   `;
 
-  const output = normalizeOutput(
-    await transformSource(source, { types: COMMONFABRIC_TYPES }),
-  );
-
-  assertStringIncludes(output, 'type: "string"');
-  assertStringIncludes(
-    output,
-    'ifc: { integrity: [{ kind: "authored-by", subject: "alice" }] }',
-  );
-  assertEquals(output.includes("Unsupported intersection pattern"), false);
+  // The exact evaluated schema pins both the "string" base type and the
+  // integrity metadata, and its success proves the intersection was resolved
+  // rather than falling back to an "Unsupported intersection pattern" marker.
+  const schema = await schemaValue(source);
+  assertEquals(schema.type, "string");
+  assertEquals(schema.ifc, {
+    integrity: [{ kind: "authored-by", subject: "alice" }],
+  });
 });
 
 Deno.test("transformer coverage: UI helpers rewrite to intrinsic tags and data-ui markers", async () => {
@@ -126,12 +123,17 @@ Deno.test("transformer coverage: UI helpers rewrite to intrinsic tags and data-u
   const output = await transformSource(source, {
     types: COMMONFABRIC_TYPES,
   });
+  const root = parseModule(output);
 
-  assertStringIncludes(
-    output,
-    '<ct-button data-ui-action="SubmitDirectCommand">Go</ct-button>',
+  const buttons = collect(root, ts.isJsxElement).filter((element) =>
+    ts.isIdentifier(element.openingElement.tagName) &&
+    element.openingElement.tagName.text === "ct-button"
   );
-  assertEquals(output.includes("<UiAction"), false);
+  assertEquals(buttons.length, 1);
+  assertEquals(jsxStringAttr(buttons[0]!.openingElement, "data-ui-action"), {
+    value: "SubmitDirectCommand",
+  });
+  assertEquals(jsxTagNames(root).includes("UiAction"), false);
 });
 
 Deno.test("transformer coverage: WriteAuthorizedBy emits diagnostics for invalid forms", async () => {
@@ -162,3 +164,38 @@ Deno.test("transformer coverage: WriteAuthorizedBy emits diagnostics for invalid
     true,
   );
 });
+
+/** Every JSX tag name (opening/self-closing) appearing under `root`. */
+function jsxTagNames(root: ts.Node): string[] {
+  const names: string[] = [];
+  const add = (tagName: ts.JsxTagNameExpression): void => {
+    if (ts.isIdentifier(tagName)) names.push(tagName.text);
+  };
+  for (const element of collect(root, ts.isJsxElement)) {
+    add(element.openingElement.tagName);
+  }
+  for (const element of collect(root, ts.isJsxSelfClosingElement)) {
+    add(element.tagName);
+  }
+  return names;
+}
+
+/**
+ * The string-literal value of attribute `name` on a JSX opening/self-closing
+ * element, wrapped as `{ value }` when present so a missing attribute (`{}`) is
+ * distinguishable from an attribute whose value is empty or dynamic.
+ */
+function jsxStringAttr(
+  element: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+  name: string,
+): { value: string } | Record<string, never> {
+  for (const attr of element.attributes.properties) {
+    if (!ts.isJsxAttribute(attr) || attr.name.getText() !== name) continue;
+    const initializer = attr.initializer;
+    if (initializer && ts.isStringLiteral(initializer)) {
+      return { value: initializer.text };
+    }
+    return {};
+  }
+  return {};
+}

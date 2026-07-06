@@ -4,6 +4,12 @@ import { expect } from "@std/expect";
 import type { Program } from "@commonfabric/js-compiler";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync parse internals directly (below the async flow
+// boundaries that normally load the deferred compiler stack), so load it here.
+await ensureCompilerStack();
+
 function program(main: string, files: Record<string, string>): Program {
   return {
     main,

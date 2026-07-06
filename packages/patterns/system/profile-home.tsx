@@ -329,6 +329,13 @@ const setName = handler<SetProfileNameEvent, { name: Writable<string> }>(
     }
     const name = (event.name ?? event.detail?.message ??
       event.target?.value ?? "").trim();
+    // CT-1828: an empty (or whitespace-only) send is a no-op, not a clear.
+    // The canonical name display falls back to the literal "Profile" once
+    // empty, so blanking it here would erase it product-wide. Unlike bio,
+    // clearing a name is never intentional through this handler.
+    if (!name) {
+      return;
+    }
     state.name.set(name);
   },
 );
@@ -340,6 +347,10 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
     }
     const avatar = (event.avatar ?? event.detail?.message ??
       event.target?.value ?? "").trim();
+    // CT-1828: same empty-after-trim guard as setName — see comment above.
+    if (!avatar) {
+      return;
+    }
     state.avatar.set(avatar);
   },
 );

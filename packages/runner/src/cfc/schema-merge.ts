@@ -2,6 +2,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { normalizeClause } from "./clause.ts";
 
 const IFC_KEYS = [
   "confidentiality",
@@ -148,8 +149,21 @@ const mergeSetLikeIfcArray = (
         }
         return existing;
       }
-      const existingArray = existing as readonly unknown[];
-      const candidateArray = candidate as readonly unknown[];
+      // Confidentiality is CNF clauses (Epic A4): normalize each clause before
+      // the subset/merge comparison so two order-differing OR-clauses
+      // (`{anyOf:[A,B]}` vs `{anyOf:[B,A]}`) presented across schema inputs or
+      // successive writes compare EQUAL — otherwise the raw-`deepEqual` subset
+      // check would reject the re-presented clause as a weakening. This runs
+      // before `derivePersistedLabel`'s persist-time normalization, closing
+      // the same-transaction / two-input reorder gap. `normalizeClause` is
+      // identity on flat atoms and integrity carries no OR-clauses, so the
+      // other keys are untouched.
+      const existingArray = key === "confidentiality"
+        ? (existing as readonly unknown[]).map(normalizeClause)
+        : existing as readonly unknown[];
+      const candidateArray = key === "confidentiality"
+        ? (candidate as readonly unknown[]).map(normalizeClause)
+        : candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
         throw new Error(`${key} cannot be weakened at ${path || "/"}`);
       }

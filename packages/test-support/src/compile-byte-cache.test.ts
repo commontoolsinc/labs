@@ -3,12 +3,23 @@ import { expect } from "@std/expect";
 
 import {
   createCompileByteCache,
+  flushCompileByteCache,
+  type ModuleByteCache,
   ProcessModuleByteCache,
   restoreCompileByteCacheForTesting,
   writeCompileByteCacheForTesting,
 } from "./compile-byte-cache.ts";
 
 const RT = "rtv";
+const SPAN = {
+  fileName: "/subject.tsx",
+  id: 1,
+  kind: "runtime" as const,
+  startLine: 3,
+  endLine: 4,
+  startColumn: 5,
+  endColumn: 6,
+};
 
 describe("ProcessModuleByteCache", () => {
   it("returns stored bytes by identity and reports a full set", () => {
@@ -35,9 +46,19 @@ describe("ProcessModuleByteCache", () => {
     const cache = new ProcessModuleByteCache();
     cache.putAll(RT, [
       { identity: "a", js: "JS_A" },
-      { identity: "b", js: "JS_B", sourceMap: "MAP_B" },
+      {
+        identity: "b",
+        js: "JS_B",
+        sourceMap: "MAP_B",
+        patternCoverageSpans: [SPAN],
+      },
     ]);
     expect(cache.getCompleteSet(RT, ["a", "b"])?.size).toBe(2);
+    expect(cache.get(RT, "b")).toEqual({
+      js: "JS_B",
+      sourceMap: "MAP_B",
+      patternCoverageSpans: [SPAN],
+    });
     cache.clear();
     expect(cache.getCompleteSet(RT, ["a", "b"])).toBeUndefined();
     expect(cache.stats().entries).toBe(0);
@@ -56,7 +77,11 @@ describe("ProcessModuleByteCache", () => {
   it("round-trips through snapshot/restore into a fresh cache", () => {
     const a = new ProcessModuleByteCache();
     a.put(RT, "x", { js: "JS_X" });
-    a.put(RT, "y", { js: "JS_Y", sourceMap: "MAP_Y" });
+    a.put(RT, "y", {
+      js: "JS_Y",
+      sourceMap: "MAP_Y",
+      patternCoverageSpans: [SPAN],
+    });
     a.put("v2", "z", { js: "JS_Z" });
 
     const serialized = JSON.parse(JSON.stringify(a.snapshot())); // survives JSON
@@ -64,9 +89,37 @@ describe("ProcessModuleByteCache", () => {
     b.restore(serialized);
 
     expect(b.get(RT, "x")).toEqual({ js: "JS_X" });
-    expect(b.get(RT, "y")).toEqual({ js: "JS_Y", sourceMap: "MAP_Y" });
+    expect(b.get(RT, "y")).toEqual({
+      js: "JS_Y",
+      sourceMap: "MAP_Y",
+      patternCoverageSpans: [SPAN],
+    });
     expect(b.get("v2", "z")).toEqual({ js: "JS_Z" });
     expect(b.getCompleteSet(RT, ["x", "y"])?.size).toBe(2);
+  });
+
+  it("put replaces an existing artifact for the same key", () => {
+    const cache = new ProcessModuleByteCache();
+    cache.restore([{ key: `${RT}\0id`, js: "OLD" }]);
+
+    cache.put(RT, "id", { js: "NEW", patternCoverageSpans: [SPAN] });
+
+    expect(cache.get(RT, "id")).toEqual({
+      js: "NEW",
+      patternCoverageSpans: [SPAN],
+    });
+  });
+
+  it("restore preserves an existing in-memory artifact for the same key", () => {
+    const cache = new ProcessModuleByteCache();
+    cache.put(RT, "id", { js: "NEW", patternCoverageSpans: [SPAN] });
+
+    cache.restore([{ key: `${RT}\0id`, js: "OLD" }]);
+
+    expect(cache.get(RT, "id")).toEqual({
+      js: "NEW",
+      patternCoverageSpans: [SPAN],
+    });
   });
 
   it("restore skips malformed entries and tolerates junk", () => {
@@ -75,6 +128,8 @@ describe("ProcessModuleByteCache", () => {
       { key: `${RT}\0ok`, js: "GOOD" },
       { key: 42, js: "no" }, // bad key
       { key: `${RT}\0nojs` }, // missing js
+      { key: `${RT}\0badspans`, js: "NO", patternCoverageSpans: ["bad"] },
+      { key: `${RT}\0badspanstype`, js: "NO", patternCoverageSpans: "bad" },
       null,
       "garbage",
     ] as unknown[]);
@@ -84,6 +139,16 @@ describe("ProcessModuleByteCache", () => {
 });
 
 describe("createCompileByteCache", () => {
+  it("does not flush caches without disk persistence", () => {
+    const fakeCache: ModuleByteCache = {
+      getCompleteSet: () => undefined,
+      putAll: () => {},
+    };
+
+    expect(flushCompileByteCache(fakeCache)).toBeUndefined();
+    expect(flushCompileByteCache(new ProcessModuleByteCache())).toBeUndefined();
+  });
+
   it("creates an in-memory cache when CF_COMPILE_CACHE_FILE is unset", () => {
     const previous = Deno.env.get("CF_COMPILE_CACHE_FILE");
     try {

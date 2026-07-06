@@ -11,12 +11,7 @@ import {
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
-import {
-  appViewToUrlPath,
-  navigate,
-  preserveAppViewMode,
-  urlToAppView,
-} from "@commonfabric/shell/shared";
+import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import { ownerPrincipalFromLabel } from "../../core/cfc-label.ts";
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
@@ -710,19 +705,13 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    * cell is a navigable root piece. Mirrors cf-cell-link's navigation; Cmd/Ctrl
    * opens in a new tab.
    */
-  private _navigateToProfile(openInNewTab: boolean): void {
+  private _navigateToProfile(newTab: boolean): void {
     if (this.noNavigate) return;
     const cell = this._resolvedCell;
     if (!cell || cell.ref().path.length > 0) return;
     const view = { spaceDid: cell.space(), pieceId: cell.id() };
-    if (openInNewTab) {
-      const url = appViewToUrlPath(
-        preserveAppViewMode(
-          urlToAppView(new URL(globalThis.location.href)),
-          view,
-        ),
-      );
-      globalThis.open(url, "_blank", "noopener");
+    if (newTab) {
+      openInNewTab(view);
     } else {
       navigate(view);
     }

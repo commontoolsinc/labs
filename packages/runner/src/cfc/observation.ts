@@ -5,6 +5,12 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
+import {
+  clauseAlternatives,
+  clausesEqual,
+  clauseSubsumes,
+  normalizeClause,
+} from "./clause.ts";
 
 export type CfcObservedConfidentiality = readonly unknown[];
 export type CfcObservationMaxConfidentiality =
@@ -19,6 +25,17 @@ export type CfcObservationMaxConfidentiality =
 // UNGRANTABLE — an observation carrying it never fits a ceiling, even one that
 // names the marker, so it cannot be allow-listed by an author-supplied ceiling.
 export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
+
+// A clause "bears" the ungrantable read-failed marker if the marker is the
+// clause itself OR any of its alternatives. Checking alternatives (not just
+// whole-clause equality) is load-bearing: a marker wrapped in an OR-clause —
+// `{anyOf:[MARKER, …]}` — must still be ungrantable, otherwise a ceiling that
+// names the marker would subsume the wrapping clause and admit it, reopening
+// the allow-list bypass the marker exists to prevent (audit item 22).
+const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
+  clauseAlternatives(clause).some((alternative) =>
+    deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM)
+  );
 
 export interface CfcOpaqueLink {
   "@link": string;
@@ -94,12 +111,10 @@ export const cfcObservationFitsCeiling = (
   // exported string, so an author-supplied ceiling could otherwise allow-list it
   // and defeat the fail-closed redaction (audit item 22). atomsOutsideCeiling
   // already forces the marker outside every declared ceiling; keep this explicit
-  // rejection too as defense in depth for the redaction path.
-  if (
-    confidentiality.some((value) =>
-      deepEqual(value, CFC_LABEL_READ_FAILED_ATOM)
-    )
-  ) {
+  // rejection too as defense in depth for the redaction path. Inspect clause
+  // alternatives, not just whole-clause equality, so a wrapped marker
+  // (`{anyOf:[MARKER]}`) cannot slip past into subsumption.
+  if (confidentiality.some(clauseBearsReadFailedMarker)) {
     return false;
   }
 
@@ -108,10 +123,37 @@ export const cfcObservationFitsCeiling = (
 };
 
 /**
- * The confidentiality atoms in `confidentiality` that fall OUTSIDE `ceiling`
- * (the membership complement that makes `cfcObservationFitsCeiling` false). An
- * `undefined` ceiling means "no ceiling" — nothing is outside it. A declared but
- * empty ceiling is "public only", so every confidential atom is outside it.
+ * Integrity-floor membership (§8.10.3 / §8.12.4.1): every required atom must
+ * be structurally present in the carried integrity. Exact-match today — this
+ * is THE single shared predicate for the read-side gate
+ * (`verifyInputRequirements`), the write-side floor (`verifyWriteFloor`, Epic
+ * D3), and the tool-input floor (llm-dialog, Epic D2), so D5's upgrade to
+ * pattern/concept matching (`matchAtomPattern` + `conceptSatisfied`) lands in
+ * ONE place instead of diverging across three inlined copies.
+ */
+export const cfcIntegritySatisfiesFloor = (
+  integrity: readonly unknown[],
+  requiredIntegrity: readonly unknown[],
+): boolean =>
+  requiredIntegrity.every((required) =>
+    integrity.some((actual) => deepEqual(actual, required))
+  );
+
+/**
+ * The confidentiality CLAUSES in `confidentiality` that fall OUTSIDE `ceiling`
+ * (the complement that makes `cfcObservationFitsCeiling` false). Fit is CNF
+ * clause subsumption (spec §8.10.3, Epic A2): a label clause `l` is admitted
+ * iff SOME ceiling clause `c` subsumes it — `alts(c) ⊆ alts(l)` — so a reader
+ * the ceiling admits (satisfying `c`) is entitled to data guarded by `l`.
+ *
+ * On flat labels (every clause a singleton) this is byte-for-byte the previous
+ * membership check: `clauseSubsumes(a, l)` reduces to `deepEqual(a, l)`, so
+ * `∃ c ∈ ceiling: deepEqual(c, l)` ≡ "the atom is in the allowlist". The
+ * clause form additionally makes a **reader-enumeration** ceiling clause
+ * `{anyOf:[r₁,…,rₖ]}` require EVERY listed reader to satisfy each label clause
+ * (`∀reader ∀clause`) — closing the quantifier hole where a multi-party label
+ * `[User(A),User(B)]` (nobody alone may read) wrongly fit a flat `[A,B]`
+ * ceiling and was then shown to A alone.
  *
  * `CFC_LABEL_READ_FAILED_ATOM` is UNGRANTABLE (audit item 22): it is always
  * outside a DECLARED ceiling, even one that explicitly lists it, so a config
@@ -122,7 +164,7 @@ export const cfcObservationFitsCeiling = (
  *
  * Shared by the prepare-time sink-request ceiling check so the gate and the
  * fits-test agree on membership semantics — including the ungrantable marker —
- * by construction (deep-equal over structured atoms).
+ * by construction.
  */
 export const atomsOutsideCeiling = (
   confidentiality: readonly unknown[],
@@ -131,24 +173,59 @@ export const atomsOutsideCeiling = (
   if (ceiling === undefined) {
     return [];
   }
-  return confidentiality.filter((value) =>
-    deepEqual(value, CFC_LABEL_READ_FAILED_ATOM) ||
-    !ceiling.some((allowed) => deepEqual(allowed, value))
+  return confidentiality.filter((clause) =>
+    clauseBearsReadFailedMarker(clause) ||
+    !ceiling.some((allowed) => clauseSubsumes(allowed, clause))
   ) as ImmutableJSONValue[];
 };
 
 /**
  * Meet two confidentiality ceilings (allowlists) into the effective bound that
- * satisfies BOTH: a value fits the result iff it fits each input. Since fitting
- * means "every atom is a ceiling member" (`cfcObservationFitsCeiling`), fitting
- * both means the atom set sits within the set INTERSECTION of the two
- * allowlists.
+ * satisfies BOTH: a label fits the result iff it fits each input — the
+ * both-direction property `fits(L, meet(C1,C2)) ⟺ fits(L,C1) ∧ fits(L,C2)`,
+ * tested exhaustively in `cfc-clause-meet.test.ts`.
+ *
+ * The clause meet is the pairwise alternative-set UNION (plan decision 6,
+ * corrected 2026-07-02): for every pair `(c₁ ∈ a, c₂ ∈ b)` emit the clause
+ * with alternatives `alts(c₁) ∪ alts(c₂)`. Ceiling clauses sit on the
+ * demanding side of subsumption (`alts(c) ⊆ alts(l)`, see
+ * `atomsOutsideCeiling`), so the union demands what both parents demand:
+ * `alts(c₁) ∪ alts(c₂) ⊆ alts(l)` holds iff both `c₁` and `c₂` subsume `l`
+ * (soundness), and any label clause fitting both ceilings has witnesses
+ * `c₁, c₂` whose union subsumes it (completeness). Do NOT intersect
+ * alternative sets — fewer alternatives is a WEAKER demand, so intersection
+ * loosens: `meet([{anyOf:[A,B]}], [{anyOf:[B,C]}])` as intersection gives
+ * `[B]`, admitting label `[B]` that ceiling `[{anyOf:[A,B]}]` alone rejects.
+ *
+ * Flat/flat behavior: an equal-atom pair unions to a singleton that
+ * `normalizeClause` unwraps back to the bare atom, so shared atoms survive
+ * exactly as under the previous atom intersection; a cross pair of distinct
+ * atoms becomes `{anyOf:[a,b]}` — decision-equivalent for flat labels (a bare
+ * label atom is never subsumed by a two-alternative clause) but strictly more
+ * precise for OR-labels, which the plain intersection wrongly rejected. The
+ * result is O(|a|·|b|) clauses; fine for the sole production consumer
+ * (`effectiveObservationCeiling` in builtins/llm-dialog.ts: pattern bound ∧
+ * per-sink deployment ceiling, both tiny). Should a large-ceiling consumer
+ * appear, dropping cross pairs is a sound over-restriction (it only
+ * tightens); intersecting alternative sets never is.
+ *
+ * Each union clause is normalized (`normalizeClause`: dedup + canonical
+ * order + singleton unwrap) and result clauses dedup via `clausesEqual`, so
+ * order-differing spellings of the same clause coalesce. No absorption pass:
+ * a redundant wider clause may sit beside a narrower one that subsumes
+ * strictly more — harmless, it admits only a subset of what the narrower
+ * clause admits (decision 4: measure before optimizing).
  *
  * Edge cases (each preserves `cfcObservationFitsCeiling` semantics):
  * - `undefined` ceiling = "no ceiling" = allow everything, so it is the
  *   identity: `meet(undefined, x) === x` and `meet(x, undefined) === x`.
- * - A declared empty ceiling is "public only", and intersection with anything
- *   stays empty, so `meet([], x)` is public-only — the strict bound wins.
+ * - A declared empty ceiling is "public only"; it forms no pairs, so
+ *   `meet([], x)` is `[]` — the strict bound wins.
+ * - A malformed empty-alternative clause `{anyOf:[]}` never subsumes
+ *   (`clauseSubsumes` fails closed), so it contributes nothing to its own
+ *   ceiling and must form no pairs either — pairing it would emit its
+ *   partner clause verbatim and loosen the meet past the empty-clause
+ *   parent.
  *
  * Used to fold a deployment per-sink ceiling into a pattern-supplied observation
  * bound so post-commit LLM tool-loop reads cannot exceed the deployment ceiling
@@ -160,7 +237,22 @@ export const meetCfcObservationCeilings = (
 ): CfcObservationMaxConfidentiality => {
   if (a === undefined) return b;
   if (b === undefined) return a;
-  return a.filter((value) => b.some((other) => deepEqual(other, value)));
+  const met: unknown[] = [];
+  for (const clauseA of a) {
+    const alternativesA = clauseAlternatives(clauseA);
+    if (alternativesA.length === 0) continue;
+    for (const clauseB of b) {
+      const alternativesB = clauseAlternatives(clauseB);
+      if (alternativesB.length === 0) continue;
+      const union = normalizeClause({
+        anyOf: [...alternativesA, ...alternativesB],
+      });
+      if (!met.some((existing) => clausesEqual(existing, union))) {
+        met.push(union);
+      }
+    }
+  }
+  return met;
 };
 
 export const cfcJsonPointerForPath = (

@@ -440,6 +440,47 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
 }
 
 /**
+ * How the pattern transformer classifies a mergeable write: an
+ * `array-identity-writer` takes element arguments whose identity is tracked
+ * (`push` / `addUnique` / `removeByValue`); a `scalar-writer` does not
+ * (`increment`).
+ */
+export type MergeableOpMethodKind = "scalar-writer" | "array-identity-writer";
+
+/**
+ * One mergeable Cell mutation method: the {@link IWritable} method name, the
+ * patch-op tag its write records, and its transformer classification.
+ */
+export interface MergeableOpMethod {
+  readonly method: string;
+  readonly wireOp: string;
+  readonly kind: MergeableOpMethodKind;
+}
+
+/**
+ * The canonical list of mergeable Cell mutation methods — the {@link IWritable}
+ * methods whose write is carried to the store as a merge-aware patch operation
+ * (resolved against durable state) rather than a whole-value diff, so concurrent
+ * edits of one collection combine instead of clobbering.
+ *
+ * This is the single registration point for that set. The runtime op registry
+ * (`runner storage/mergeable-ops.ts`, keyed by `wireOp`) and the pattern
+ * transformer's method classification both derive from it, so adding a mergeable
+ * op is one entry here plus its behavior descriptor — the transformer picks up
+ * the new method with no edit, and a consistency test cross-checks the wire tags.
+ */
+export const MERGEABLE_OP_METHODS: readonly MergeableOpMethod[] = [
+  { method: "push", wireOp: "append", kind: "array-identity-writer" },
+  { method: "addUnique", wireOp: "add-unique", kind: "array-identity-writer" },
+  {
+    method: "removeByValue",
+    wireOp: "remove-by-value",
+    kind: "array-identity-writer",
+  },
+  { method: "increment", wireOp: "increment", kind: "scalar-writer" },
+];
+
+/**
  * Streamable cells can send events.
  */
 export interface IStreamable<T> {
@@ -890,6 +931,9 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
   /**
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
+   *
+   * Record causes may not use the top-level key `$generated` — it is
+   * reserved for system-generated causes and setting one throws.
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
@@ -2330,8 +2374,15 @@ export interface ISqliteQueryable {
       maxConfidentiality?: ReadonlyArray<unknown>;
       /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
       onExceed?: "fail" | "skip";
+      /** CFC Phase 3.b: filter rows to those the acting reader may read (a
+       *  declared existence release). Requires the table to opt in via
+       *  `table(…, { allowReadClearance: true })`; never for aggregates. The
+       *  count of withheld rows is reported as `withheld`. */
+      readClearance?: boolean;
     },
-  ): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+  ): Reactive<
+    { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+  >;
 }
 
 /**
@@ -2387,10 +2438,18 @@ export type SqliteQueryParams = {
    *  refuse the whole query) or `"skip"` (drop the offending rows; a declared
    *  existence release, row-returning queries only — never aggregates). */
   onExceed?: "fail" | "skip";
+  /** CFC Phase 3.b read-time clearance: when `true`, filter rows to those the
+   *  acting reader may read (a declared existence release under §8.17/inv-14).
+   *  Requires the touched rule-bearing table to opt in via
+   *  `table(…, { allowReadClearance: true })`; never for aggregates. The number
+   *  of withheld rows is reported back as `withheld`. */
+  readClearance?: boolean;
 };
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
-) => Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+) => Reactive<
+  { pending: boolean; result?: Row[]; error?: any; withheld?: number }
+>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
@@ -2414,6 +2473,10 @@ export type SqliteRowLabelRule = (
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
   rule?: SqliteRowLabelRule,
+  /** CFC Phase 3.b: `{ allowReadClearance: true }` opts the table into
+   *  read-time clearance (reader-filtered `db.query({ readClearance: true })`).
+   *  Needs a `rule` — throws at `table()` time without one. */
+  opts?: { allowReadClearance?: boolean },
 ) => JSONSchema;
 
 /**

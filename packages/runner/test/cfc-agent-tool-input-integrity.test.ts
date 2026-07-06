@@ -1,67 +1,443 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { enableMockMode } from "@commonfabric/llm/client";
 import type { JSONSchema } from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { CfcEnforcementMode } from "../src/cfc/types.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 
 const signer = await Identity.fromPassphrase("cfc agent tool-input integrity");
 const space = signer.did();
 enableMockMode();
 
-// The CFC agent prompt-injection demo's central claim is structural: a routing
-// field (`sendMail.recipient`) declares
-// `ifc.requiredIntegrity: [agent-kernel, UserSurfaceInput, PromptSlotBound]`, so
-// a recipient the model lifted out of a hostile briefing — a plain model-output
+// Epic D2 (docs/specs/cfc-trusted-agent-tool-integrity.md piece A/C): the CFC
+// agent prompt-injection demo's central claim is structural. A routing field
+// (`sendMail.recipient`) declares `ifc.requiredIntegrity: [agent-kernel]`, so a
+// recipient the model lifted out of a hostile briefing — a plain model-output
 // string carrying none of that integrity — must be REFUSED by the runtime
-// (spec §13.6 / demos/01-agent-prompt-injection.md).
-//
-// As of this commit that invariant is NOT enforced: the dialog tool path uses a
-// tool's `inputSchema` only to validate/strip input STRUCTURE, never to check
-// CFC `requiredIntegrity` on the model-supplied input; the handler then writes
-// `recipient` into targets whose schemas carry no `requiredIntegrity`, so
-// `verifyInputRequirements` never sees it (and an unlabeled literal would
-// vacuously pass even if it did — audit #14). The test below is therefore
-// `it.ignore` and documents the DESIRED behavior. Un-ignore it when tool-input
-// requiredIntegrity enforcement lands (the "trusted agent" work scoped in
-// docs/specs/cfc-trusted-agent-tool-integrity.md).
-describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope B)", () => {
-  const KERNEL_TYPE = "https://commonfabric.org/cfc/atom/Builtin";
-  const recipientRequiredIntegrity = [
-    { type: KERNEL_TYPE, name: "agent-kernel-demo-v1" },
-  ] as const;
+// before the handler runs (spec §13.6 / demos/01-agent-prompt-injection.md).
+// The dialog tool path now validates each model-supplied input field against
+// its inputSchema's requiredIntegrity at invoke time.
 
-  it.ignore(
-    "refuses a sendMail whose recipient lacks the required integrity (injected)",
-    async () => {
-      const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-        cfcEnforcementMode: "enforce-explicit",
-      });
-      const tx = runtime.edit();
-      const { commonfabric } = createTrustedBuilder(runtime);
-      const { pattern, handler, Writable } = commonfabric;
+const KERNEL_ATOM = {
+  type: "https://commonfabric.org/cfc/atom/Builtin",
+  name: "agent-kernel-demo-v1",
+} as const;
 
-      // Mirrors the demo's sendMailInputSchema: requiredIntegrity on recipient.
-      const sendMailInputSchema = {
-        type: "object",
-        properties: {
-          recipient: {
-            type: "string",
-            ifc: { requiredIntegrity: recipientRequiredIntegrity },
-          },
-          subject: { type: "string" },
-          body: { type: "string" },
+// A sendMail tool. `withFloor` toggles the requiredIntegrity floor on
+// `recipient` so we can prove the gate fires only for floor-declaring fields.
+async function setupSendMail(
+  cfcEnforcementMode: CfcEnforcementMode,
+  withFloor: boolean,
+) {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    cfcEnforcementMode,
+  });
+  const tx = runtime.edit();
+  const { commonfabric } = createTrustedBuilder(runtime);
+  const { pattern, handler, Writable } = commonfabric;
+
+  const recipientSchema = withFloor
+    ? { type: "string", ifc: { requiredIntegrity: [KERNEL_ATOM] } }
+    : { type: "string" };
+  const sendMailInputSchema = {
+    type: "object",
+    properties: {
+      recipient: recipientSchema,
+      subject: { type: "string" },
+      body: { type: "string" },
+    },
+    required: ["recipient", "subject", "body"],
+    additionalProperties: false,
+  } as JSONSchema;
+
+  const sendMail = handler<
+    { recipient: string; subject: string; body: string },
+    { emails: any }
+  >(
+    {
+      type: "object",
+      properties: {
+        recipient: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["recipient", "subject", "body"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        emails: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+          asCell: ["cell"],
         },
-        required: ["recipient", "subject", "body"],
-        additionalProperties: false,
-      } as const satisfies JSONSchema;
+      },
+      required: ["emails"],
+    },
+    ({ recipient, subject, body }, { emails }) => {
+      emails.push({ recipient, subject, body });
+    },
+  );
 
+  const resultSchema = {
+    type: "object",
+    properties: {
+      emails: {
+        type: "array",
+        items: { type: "object", additionalProperties: true },
+      },
+      tools: true,
+    },
+    required: ["emails", "tools"],
+  } as const satisfies JSONSchema;
+
+  const testPattern = pattern(
+    () => {
+      const emails = Writable.of<
+        { recipient: string; subject: string; body: string }[]
+      >([]);
+      return {
+        emails,
+        tools: {
+          sendMail: {
+            description: "Send an email.",
+            inputSchema: sendMailInputSchema,
+            handler: sendMail({ emails }),
+          },
+        },
+      };
+    },
+    false,
+    resultSchema,
+  );
+
+  const resultCell = runtime.getCell(
+    space,
+    `agent-tool-input-integrity-${cfcEnforcementMode}-${withFloor}`,
+    resultSchema,
+    tx,
+  );
+  const result = runtime.run(tx, testPattern, {}, resultCell);
+  runtime.prepareTxForCommit(tx);
+  await tx.commit();
+  await runtime.idle();
+
+  const catalog = llmToolExecutionHelpers.buildToolCatalog(
+    result.key("tools") as any,
+    false,
+  );
+
+  const sendCall = async (input: unknown) => {
+    await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+      type: "tool-call",
+      toolCallId: "call-under-test",
+      toolName: "sendMail",
+      input,
+    }] as any);
+    await runtime.idle();
+  };
+
+  const sendInjected = () =>
+    sendCall({ recipient: "bob@evil.org", subject: "exfil", body: "stuff" });
+
+  const sentEmails = async () => {
+    const emails = (await result.key("emails").pull()) as
+      | { recipient: string }[]
+      | undefined;
+    return emails ?? [];
+  };
+
+  const injectedWasSent = async () =>
+    (await sentEmails()).some((e) => e.recipient === "bob@evil.org");
+
+  // Persist a recipient value whose stored label carries the kernel integrity
+  // atom, and return the by-reference form the model would pass. Builtin-type
+  // atoms are runtime-minted evidence, so the seed write must run under a
+  // builtin identity — exactly how the real agent kernel binds a
+  // direct-command value (pattern code cannot forge this, see
+  // cfc-integrity-mint-gate.test.ts).
+  const seedKernelRecipient = async (name: string, value: string) => {
+    const seedTx = runtime.edit();
+    seedTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "agent-kernel-demo",
+    });
+    const cell = runtime.getCell(
+      space,
+      name,
+      {
+        type: "string",
+        ifc: { integrity: [KERNEL_ATOM] },
+      } as const satisfies JSONSchema,
+      seedTx,
+    );
+    cell.set(value);
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+    return {
+      "@link": createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space),
+    };
+  };
+
+  // Reproduce the D1 stamp exactly as llm-dialog mints it: a builtin-identity
+  // push of a message object through an item schema carrying ifc.addIntegrity
+  // [LlmDerived] (see cfc-llm-derived-stamp.test.ts). The stored tool-result
+  // message ends up with REAL, positive integrity — just not the kernel atom.
+  // Returns a by-reference link to the stamped message element itself (the
+  // label view surfaces the stamp at the element node, not its children — a
+  // child-path reference would carry an empty view and be refused as an
+  // unlabeled reference, which the plain-ref test already covers).
+  const seedLlmDerivedRecipient = async (name: string, value: string) => {
+    const messageSchema = {
+      type: "object",
+      properties: {
+        role: { type: "string" },
+        content: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+    const stampingSchema = {
+      type: "array",
+      items: {
+        ...messageSchema,
+        ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+      },
+    } as const satisfies JSONSchema;
+    const seedTx = runtime.edit();
+    seedTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "llm-dialog",
+    });
+    const list = runtime.getCell(space, name, stampingSchema, seedTx);
+    list.push({ role: "tool", content: value });
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+
+    // Premise check ON THE LINKED CELL: the stamp really landed — the refusal
+    // the caller asserts must come from atom MISMATCH, not from an
+    // accidentally-empty label (which the plain-literal tests already cover).
+    const readTx = runtime.edit();
+    const messageCell = runtime.getCell(
+      space,
+      name,
+      { type: "array", items: messageSchema } as const satisfies JSONSchema,
+      readTx,
+    ).key(0);
+    const view = cfcLabelViewForCell(messageCell);
+    const integrity = (view?.entries ?? []).flatMap(
+      (entry) => entry.label.integrity ?? [],
+    );
+    expect(integrity).toContainEqual(cfcAtom.llmDerived());
+    const link = createLLMFriendlyLink(
+      messageCell.getAsNormalizedFullLink(),
+      space,
+    );
+    readTx.commit();
+    return { "@link": link };
+  };
+
+  // The integrity-less twin of seedKernelRecipient: a plain stored value with
+  // no label at all, referenced the same way.
+  const seedPlainRecipient = async (name: string, value: string) => {
+    const seedTx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      name,
+      { type: "string" } as const satisfies JSONSchema,
+      seedTx,
+    );
+    cell.set(value);
+    seedTx.prepareCfc();
+    const commit = await seedTx.commit();
+    expect(commit.ok).toBeDefined();
+    await runtime.idle();
+    return {
+      "@link": createLLMFriendlyLink(cell.getAsNormalizedFullLink(), space),
+    };
+  };
+
+  const dispose = async () => {
+    await runtime.dispose();
+    await storageManager.close();
+  };
+
+  return {
+    sendCall,
+    sendInjected,
+    sentEmails,
+    injectedWasSent,
+    seedKernelRecipient,
+    seedLlmDerivedRecipient,
+    seedPlainRecipient,
+    dispose,
+  };
+}
+
+describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
+  it("refuses a sendMail whose recipient lacks the required integrity (injected)", async () => {
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      await t.sendInjected();
+      expect(await t.injectedWasSent()).toBe(false);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("allows a by-reference recipient carrying the required integrity", async () => {
+    // The legitimate path (plan D2 / spec test-plan item 2): the model passes
+    // the recipient BY REFERENCE — a `{"@link": …}` object naming a cell whose
+    // stored label carries the kernel atom — instead of re-emitting it as
+    // text. The floor is satisfied by the referenced cell's integrity and the
+    // tool executes. This proves the gate doesn't over-block the direct-command
+    // route the demo's safe agent uses.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const recipientRef = await t.seedKernelRecipient(
+        "direct-command-recipient",
+        "john@example.org",
+      );
+      await t.sendCall({
+        recipient: recipientRef,
+        subject: "approved",
+        body: "summary",
+      });
+      const emails = await t.sentEmails();
+      expect(emails.map((e) => e.recipient)).toEqual(["john@example.org"]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("a tool result stamped LlmDerived cannot satisfy a requiredIntegrity floor (D1↔D2)", async () => {
+    // The composition guard (spec test-plan item 3): D1 gives model output
+    // POSITIVE integrity — the LlmDerived provenance stamp — and that stamp
+    // must not satisfy a D2 floor. Guards against the gate degrading into
+    // "carries any integrity" membership: a model-laundered value passed by
+    // reference to its own stamped tool-result doc is refused exactly like a
+    // literal, because LlmDerived is not the required kernel atom.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const llmDerivedRef = await t.seedLlmDerivedRecipient(
+        "llm-derived-tool-result",
+        "bob@evil.org",
+      );
+      await t.sendCall({
+        recipient: llmDerivedRef,
+        subject: "exfil",
+        body: "stuff",
+      });
+      expect(await t.sentEmails()).toEqual([]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("refuses a by-reference recipient whose cell lacks the kernel atom", async () => {
+    // The discriminating negative for the allowed path: being a reference is
+    // NOT enough — the gate must read the referenced cell's stored label. A
+    // link to an integrity-less cell (e.g. one the injected briefing text was
+    // copied into) fails the floor exactly like a literal.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const plainRef = await t.seedPlainRecipient(
+        "unlabeled-recipient",
+        "bob@evil.org",
+      );
+      await t.sendCall({
+        recipient: plainRef,
+        subject: "exfil",
+        body: "stuff",
+      });
+      expect(await t.sentEmails()).toEqual([]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("allows the JSON-string form of a by-reference recipient", async () => {
+    // Models frequently serialize the link object into a string — the
+    // resolver (traverseAndCellify) accepts a JSON-encoded `{"@link": …}`
+    // string as the same reference, so the gate must too.
+    const t = await setupSendMail("enforce-explicit", true);
+    try {
+      const recipientRef = await t.seedKernelRecipient(
+        "direct-command-recipient-string-form",
+        "john@example.org",
+      );
+      await t.sendCall({
+        recipient: JSON.stringify(recipientRef),
+        subject: "approved",
+        body: "summary",
+      });
+      const emails = await t.sentEmails();
+      expect(emails.map((e) => e.recipient)).toEqual(["john@example.org"]);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("does not gate tools without a requiredIntegrity floor (no over-block)", async () => {
+    // A plain-literal recipient is fine for a field that declares no floor —
+    // the gate is opt-in and must not perturb ordinary tools.
+    const t = await setupSendMail("enforce-explicit", false);
+    try {
+      await t.sendInjected();
+      expect(await t.injectedWasSent()).toBe(true);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("does not gate when CFC enforcement is disabled", async () => {
+    const t = await setupSendMail("disabled", true);
+    try {
+      await t.sendInjected();
+      expect(await t.injectedWasSent()).toBe(true);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("observe mode is diagnostic — it does not deny the call", async () => {
+    // observe is the dry-run mode: a floor failure must not block the handler.
+    const t = await setupSendMail("observe", true);
+    try {
+      await t.sendInjected();
+      expect(await t.injectedWasSent()).toBe(true);
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("closes the invoke-builtin bypass (a literal routed through invoke is refused)", async () => {
+    // Routing through the generic `invoke` builtin must be checked against the
+    // RESOLVED handler's argument schema (which carries the floor), not the
+    // invoke tool's own path/args schema — otherwise the D2 gate is bypassable.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
       const sendMail = handler<
         { recipient: string; subject: string; body: string },
         { emails: any }
@@ -69,7 +445,10 @@ describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope
         {
           type: "object",
           properties: {
-            recipient: { type: "string" },
+            recipient: {
+              type: "string",
+              ifc: { requiredIntegrity: [KERNEL_ATOM] },
+            },
             subject: { type: "string" },
             body: { type: "string" },
           },
@@ -91,7 +470,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope
           emails.push({ recipient, subject, body });
         },
       );
-
       const resultSchema = {
         type: "object",
         properties: {
@@ -99,23 +477,131 @@ describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope
             type: "array",
             items: { type: "object", additionalProperties: true },
           },
-          tools: true,
+          sendMail: { asCell: ["stream"] },
         },
-        required: ["emails", "tools"],
+        required: ["emails", "sendMail"],
       } as const satisfies JSONSchema;
-
       const testPattern = pattern(
         () => {
           const emails = Writable.of<
             { recipient: string; subject: string; body: string }[]
           >([]);
+          return { emails, sendMail: sendMail({ emails }) };
+        },
+        false,
+        resultSchema,
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "agent-invoke-bypass",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+
+      // builtinTools=true → the generic `invoke` tool is available.
+      const catalog = llmToolExecutionHelpers.buildToolCatalog(
+        result.key("tools") as any,
+        true,
+      );
+      const handlerLink = createLLMFriendlyLink(
+        result.key("sendMail").getAsNormalizedFullLink(),
+        space,
+      );
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-invoke-bypass",
+        toolName: "invoke",
+        input: {
+          path: handlerLink,
+          args: { recipient: "bob@evil.org", subject: "x", body: "y" },
+        },
+      }] as any);
+      await runtime.idle();
+
+      const emails = (await result.key("emails").pull()) as
+        | { recipient: string }[]
+        | undefined;
+      expect(
+        (emails ?? []).some((e) => e.recipient === "bob@evil.org"),
+      ).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not over-block when an optional floor-field is omitted", async () => {
+    // A floor-declaring field the model did not supply carries no value to
+    // gate — the call must proceed (the gate protects injected VALUES, not
+    // omissions).
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
+      const note = handler<{ text: string; cc?: string }, { notes: any }>(
+        {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            cc: { type: "string", ifc: { requiredIntegrity: [KERNEL_ATOM] } },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            notes: {
+              type: "array",
+              items: { type: "string" },
+              asCell: ["cell"],
+            },
+          },
+          required: ["notes"],
+        },
+        ({ text }, { notes }) => {
+          notes.push(text);
+        },
+      );
+      const resultSchema = {
+        type: "object",
+        properties: {
+          notes: { type: "array", items: { type: "string" } },
+          tools: true,
+        },
+        required: ["notes", "tools"],
+      } as const satisfies JSONSchema;
+      const testPattern = pattern(
+        () => {
+          const notes = Writable.of<string[]>([]);
           return {
-            emails,
+            notes,
             tools: {
-              sendMail: {
-                description: "Send an email.",
-                inputSchema: sendMailInputSchema,
-                handler: sendMail({ emails }),
+              note: {
+                description: "Note.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                    cc: {
+                      type: "string",
+                      ifc: { requiredIntegrity: [KERNEL_ATOM] },
+                    },
+                  },
+                  required: ["text"],
+                  additionalProperties: false,
+                },
+                handler: note({ notes }),
               },
             },
           };
@@ -123,10 +609,9 @@ describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope
         false,
         resultSchema,
       );
-
       const resultCell = runtime.getCell(
         space,
-        "agent-tool-input-integrity",
+        "agent-optional-floor",
         resultSchema,
         tx,
       );
@@ -139,37 +624,139 @@ describe("CFC trusted agent: tool-input requiredIntegrity (BLOCKED — see scope
         result.key("tools") as any,
         false,
       );
-
-      // The injected tool call: recipient is a plain string the model copied
-      // from the hostile briefing — it carries no UserSurfaceInput /
-      // PromptSlotBound integrity.
-      await llmToolExecutionHelpers.executeToolCalls(
-        runtime,
-        space,
-        catalog,
-        [{
-          type: "tool-call",
-          toolCallId: "call-injected",
-          toolName: "sendMail",
-          input: {
-            recipient: "bob@evil.org",
-            subject: "exfil",
-            body: "stuff",
-          },
-        }] as any,
-      );
+      // `cc` (the floor field) is omitted → the call proceeds.
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-omit",
+        toolName: "note",
+        input: { text: "hello" },
+      }] as any);
       await runtime.idle();
+      expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
 
-      // DESIRED: the injected recipient is refused, so no email is sent.
-      const emails = (await result.key("emails").pull()) as
-        | { recipient: string }[]
-        | undefined;
-      expect(
-        (emails ?? []).some((entry) => entry.recipient === "bob@evil.org"),
-      ).toBe(false);
-
+      // ...but supplying `cc` as a literal still fails its floor.
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-cc",
+        toolName: "note",
+        input: { text: "again", cc: "bob@evil.org" },
+      }] as any);
+      await runtime.idle();
+      expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
+    } finally {
       await runtime.dispose();
       await storageManager.close();
-    },
-  );
+    }
+  });
+
+  it("descends into array-items floors", async () => {
+    // A floor under `items` must gate every model-supplied element.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
+      const broadcast = handler<{ recipients: string[] }, { sent: any }>(
+        {
+          type: "object",
+          properties: {
+            recipients: {
+              type: "array",
+              items: {
+                type: "string",
+                ifc: { requiredIntegrity: [KERNEL_ATOM] },
+              },
+            },
+          },
+          required: ["recipients"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            sent: {
+              type: "array",
+              items: { type: "string" },
+              asCell: ["cell"],
+            },
+          },
+          required: ["sent"],
+        },
+        ({ recipients }, { sent }) => {
+          for (const r of recipients) sent.push(r);
+        },
+      );
+      const resultSchema = {
+        type: "object",
+        properties: {
+          sent: { type: "array", items: { type: "string" } },
+          tools: true,
+        },
+        required: ["sent", "tools"],
+      } as const satisfies JSONSchema;
+      const testPattern = pattern(
+        () => {
+          const sent = Writable.of<string[]>([]);
+          return {
+            sent,
+            tools: {
+              broadcast: {
+                description: "Broadcast.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    recipients: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                        ifc: { requiredIntegrity: [KERNEL_ATOM] },
+                      },
+                    },
+                  },
+                  required: ["recipients"],
+                  additionalProperties: false,
+                },
+                handler: broadcast({ sent }),
+              },
+            },
+          };
+        },
+        false,
+        resultSchema,
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "agent-items-floor",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+
+      const catalog = llmToolExecutionHelpers.buildToolCatalog(
+        result.key("tools") as any,
+        false,
+      );
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-items",
+        toolName: "broadcast",
+        input: { recipients: ["evil@x.org"] },
+      }] as any);
+      await runtime.idle();
+
+      const sent = (await result.key("sent").pull()) as string[] | undefined;
+      expect((sent ?? []).includes("evil@x.org")).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

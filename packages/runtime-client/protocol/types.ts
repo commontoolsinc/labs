@@ -159,6 +159,13 @@ export interface InitializationData {
     | "observe"
     | "enforce-explicit"
     | "enforce-strict";
+  // Flow-label propagation dial for the worker runtime (S16 default
+  // transition; docs/plans/cfc-future-work-implementation.md Epic H1):
+  // "off" = no derivation; "observe" = compute the per-tx conservative
+  // join and emit diagnostics, persist nothing; "persist" = write derived
+  // label components. Propagation never rejects by itself. Absent =
+  // the runner's default ("off").
+  cfcFlowLabels?: "off" | "observe" | "persist";
   // Whether author-supplied render-boundary declassification is honored.
   // Defaults to "allow" (current behavior). "deny" ignores author-supplied
   // `declassifyConfidentiality` so a pattern can't release a secret upward

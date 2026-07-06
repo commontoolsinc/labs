@@ -1,7 +1,37 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
+import ts from "typescript";
 
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { transformSource } from "./utils.ts";
+import { callsNamed, collect, parseModule } from "./transformed-ast.ts";
+
+/** True when a `<receiver>.key(...)` call reads the exact segment path. */
+function hasKeyPath(root: ts.Node, receiver: string, ...segments: string[]) {
+  return callsNamed(root, "key").some((call) => {
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return false;
+    const base = callee.expression;
+    if (!ts.isIdentifier(base) || base.text !== receiver) return false;
+    if (call.arguments.length !== segments.length) return false;
+    return call.arguments.every((arg, index) =>
+      ts.isStringLiteralLike(arg) && arg.text === segments[index]
+    );
+  });
+}
+
+/** Every call whose callee is `<object>.<name>(...)` with `object` as base. */
+function memberCalls(
+  root: ts.Node,
+  object: string,
+  name: string,
+): ts.CallExpression[] {
+  return callsNamed(root, name).filter((call) => {
+    const callee = call.expression;
+    return ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === object;
+  });
+}
 
 Deno.test(
   "Transform guards: nested block shadowing does not leak opaque alias roots",
@@ -18,10 +48,19 @@ const p = pattern((input: { user: { name: string }; value: { foo: number } }) =>
 `;
 
     const output = await transformSource(source);
+    const root = parseModule(output);
 
-    assertStringIncludes(output, 'const value = input.key("user");');
-    assertStringIncludes(output, "return <div>{value.foo}</div>;");
-    assert(!output.includes('value.key("foo")'));
+    // The inner block's `value` aliases input.user, so it lowers to key reads;
+    // the outer `value` is a plain object and its `.foo` read stays structural.
+    assert(hasKeyPath(root, "input", "user"));
+    assert(hasKeyPath(root, "value", "name"));
+    assert(!hasKeyPath(root, "value", "foo"));
+    const plainFooReads = collect(root, ts.isPropertyAccessExpression).filter(
+      (access) =>
+        access.name.text === "foo" && ts.isIdentifier(access.expression) &&
+        access.expression.text === "value",
+    );
+    assertEquals(plainFooReads.length, 1);
   },
 );
 
@@ -36,9 +75,10 @@ const p = pattern((input: { ok: boolean }) => {
 `;
 
     const output = await transformSource(source);
+    const root = parseModule(output);
 
-    assertStringIncludes(output, "arr.map((x) => x + 1)");
-    assert(!output.includes(".mapWithPattern("));
+    assertEquals(memberCalls(root, "arr", "map").length, 1);
+    assertEquals(callsNamed(root, "mapWithPattern").length, 0);
   },
 );
 
@@ -50,12 +90,10 @@ const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <di
 `;
 
     const output = await transformSource(source);
+    const root = parseModule(output);
 
-    assertStringIncludes(output, ".mapWithPattern(");
-    assertStringIncludes(
-      output,
-      'const name = __cf_pattern_input.key("element", "name");',
-    );
+    assertEquals(callsNamed(root, "mapWithPattern").length, 1);
+    assert(hasKeyPath(root, "__cf_pattern_input", "element", "name"));
   },
 );
 
@@ -66,11 +104,11 @@ Deno.test(
       const { property, extraAssert } of [
         {
           property: "filter",
-          extraAssert: (output: string) =>
-            assert(!output.includes("filterWithPattern")),
+          extraAssert: (root: ts.Node) =>
+            assertEquals(callsNamed(root, "filterWithPattern").length, 0),
         },
-        { property: "map", extraAssert: (_output: string) => {} },
-        { property: "set", extraAssert: (_output: string) => {} },
+        { property: "map", extraAssert: (_root: ts.Node) => {} },
+        { property: "set", extraAssert: (_root: ts.Node) => {} },
       ]
     ) {
       const source = `import { pattern, UI } from "commonfabric";
@@ -82,8 +120,9 @@ const p = pattern<State>((state) => ({
       const output = await transformSource(source, {
         types: COMMONFABRIC_TYPES,
       });
-      assertStringIncludes(output, `state.key("${property}")`);
-      extraAssert(output);
+      const root = parseModule(output);
+      assert(hasKeyPath(root, "state", property));
+      extraAssert(root);
     }
   },
 );
@@ -100,12 +139,15 @@ const p = pattern((input: { groups: Group[] }) =>
 `;
 
     const output = await transformSource(source);
+    const root = parseModule(output);
 
-    assertStringIncludes(
-      output,
-      'input.key("groups", "100", "items").mapWithPattern(',
+    // The 1e2 element index canonicalizes to the string key "100".
+    assert(hasKeyPath(root, "input", "groups", "100", "items"));
+    assertEquals(callsNamed(root, "mapWithPattern").length, 1);
+    const keyArgs = callsNamed(root, "key").flatMap((call) =>
+      call.arguments.filter(ts.isStringLiteralLike).map((arg) => arg.text)
     );
-    assert(!output.includes('"1e2"'));
+    assertEquals(keyArgs.includes("1e2"), false);
   },
 );
 
@@ -121,8 +163,10 @@ const p = pattern<State>((state) => ({
 `;
 
     const output = await transformSource(source, { types: COMMONFABRIC_TYPES });
+    const root = parseModule(output);
 
-    assert(!output.includes("findWithPattern"));
+    assertEquals(callsNamed(root, "find").length, 1);
+    assertEquals(callsNamed(root, "findWithPattern").length, 0);
   },
 );
 
@@ -168,16 +212,16 @@ export default pattern<Input>(({ habits, logs, todayDate }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(output, "const logList = logs.get();");
-    assertStringIncludes(
-      output,
-      "return logList.some((log) => log.habitName === habit.name &&",
-    );
-    assert(
-      !output.includes("return logList.some((log) => __cfHelpers.when("),
-      "aliased plain array some() callback should stay plain inside computed()/derive()",
-    );
+    // The get-result alias keeps its `.get()` and its `.some()` predicate stays
+    // a plain arrow: the transformer wraps no `when(...)` around it.
+    assertEquals(memberCalls(root, "logs", "get").length, 1);
+    const someCalls = memberCalls(root, "logList", "some");
+    assertEquals(someCalls.length, 1);
+    const predicate = someCalls[0]!.arguments[0]!;
+    assert(ts.isArrowFunction(predicate));
+    assertEquals(callsNamed(root, "when").length, 0);
   },
 );
 
@@ -218,14 +262,20 @@ export default pattern<State>((state) => ({
 
     // After CT-1615 Phase 1, synthesized derives lower to lift-applied:
     //   __cfHelpers.lift<...>(cb)(input)
-    // Match `__cfHelpers.lift<` since the synthesized form always has
-    // type arguments.
-    assertEquals(output.match(/__cfHelpers\.lift</g)?.length ?? 0, 2);
-    assertStringIncludes(output, "item.price * (1 - state.discount)");
-    assert(
-      !output.includes("item.price * (__cfHelpers.lift<"),
-      "expected ternary branch lift-applied to absorb inner arithmetic instead of nesting a second lift",
+    // The predicate lift and the discount-arithmetic lift make exactly two.
+    const root = parseModule(output);
+    assertEquals(callsNamed(root, "lift").length, 2);
+    const multiplies = collect(root, ts.isBinaryExpression).filter((node) =>
+      node.operatorToken.kind === ts.SyntaxKind.AsteriskToken
     );
+    // The arithmetic sits inside a lift body verbatim, and its left operand
+    // stays `item.price` rather than nesting another lift call.
+    const priceMultiply = multiplies.find((node) =>
+      ts.isPropertyAccessExpression(node.left) &&
+      node.left.name.text === "price"
+    );
+    assert(priceMultiply, "expected an `item.price * (...)` multiplication");
+    assertEquals(callsNamed(priceMultiply, "lift").length, 0);
   },
 );
 
@@ -259,9 +309,19 @@ export default pattern<{ fields: Field[] }>((state) => ({
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(output, "ifElse(");
-    assertStringIncludes(output, "=> field.validationIssue !== undefined");
+    assert(callsNamed(root, "ifElse").length >= 1);
+    // The predicate `field.validationIssue !== undefined` lowers into a lift
+    // arrow whose body is that inequality, not a pattern-owned branch.
+    const predicateArrows = collect(root, ts.isArrowFunction).filter((arrow) =>
+      ts.isBinaryExpression(arrow.body) &&
+      arrow.body.operatorToken.kind ===
+        ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+      ts.isPropertyAccessExpression(arrow.body.left) &&
+      arrow.body.left.name.text === "validationIssue"
+    );
+    assertEquals(predicateArrows.length, 1);
   },
 );
 
@@ -292,14 +352,13 @@ export default pattern<State>((state) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(output, "lookup.get(");
-    assert(
-      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
-        output,
-      ),
-      "expected non-cell helper-owned get() calls to remain plain method calls",
-    );
+    // The non-cell `lookup.get(...)` stays a plain method call: the transformer
+    // wraps no computed/derive around it.
+    assertEquals(memberCalls(root, "lookup", "get").length, 1);
+    assertEquals(callsNamed(root, "computed").length, 0);
+    assertEquals(callsNamed(root, "derive").length, 0);
   },
 );
 
@@ -349,21 +408,14 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, 'left: leftChild.key("value")');
-    assertStringIncludes(output, 'right: rightChild.key("value")');
-    assertStringIncludes(output, 'increment: rightChild.key("increment")');
-    assert(
-      !output.includes(
-        '__cfHelpers.computed((): any => leftChild.key("value"))',
-      ),
-      "expected child value cell reference to stay structural inside helper-owned arguments",
-    );
-    assert(
-      !output.includes(
-        '__cfHelpers.computed((): any => rightChild.key("increment"))',
-      ),
-      "expected child stream reference to stay structural inside helper-owned arguments",
-    );
+    const root = parseModule(output);
+
+    // The child cell and stream references stay structural key reads; none is
+    // wrapped in a computed inside the helper-owned argument objects.
+    assert(hasKeyPath(root, "leftChild", "value"));
+    assert(hasKeyPath(root, "rightChild", "value"));
+    assert(hasKeyPath(root, "rightChild", "increment"));
+    assertEquals(callsNamed(root, "computed").length, 0);
   },
 );
 
@@ -405,17 +457,16 @@ export default pattern<{ child: Default<number, 0> }>(({ child }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    const root = parseModule(output);
 
-    assertStringIncludes(
-      output,
-      'childIncrement: asIncrementStream(childState.key("increment"))',
-    );
-    assert(
-      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
-        .test(
-          output,
-        ),
-      "expected child stream key reference to stay structural inside ordinary helper call arguments",
-    );
+    // The ordinary helper call `asIncrementStream(...)` receives the structural
+    // key read directly, not a computed/derive-wrapped value.
+    const wrapperCalls = callsNamed(root, "asIncrementStream");
+    assertEquals(wrapperCalls.length, 1);
+    const arg = wrapperCalls[0]!.arguments[0]!;
+    assert(ts.isCallExpression(arg));
+    assert(hasKeyPath(arg, "childState", "increment"));
+    assertEquals(callsNamed(root, "computed").length, 0);
+    assertEquals(callsNamed(root, "derive").length, 0);
   },
 );

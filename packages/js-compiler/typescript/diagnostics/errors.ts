@@ -1,5 +1,35 @@
-import ts, { type Diagnostic, DiagnosticMessageChain } from "typescript";
+// Type-only: this module is boot-eager in the runtime worker (CompilerError is
+// the `instanceof` contract for compile failures, imported by runner builtins),
+// so it must not carry a value edge into the TypeScript compiler.
+import type { Diagnostic, DiagnosticMessageChain } from "typescript";
 import { renderInline } from "./render.ts";
+
+/**
+ * Mirror of `ts.flattenDiagnosticMessageText` (same output, byte for byte):
+ * a chain node renders its text at two spaces per indent level, children one
+ * level deeper. Local so this module stays typescript-value-free (above).
+ */
+function flattenDiagnosticMessageText(
+  diag: string | DiagnosticMessageChain | undefined,
+  newLine: string,
+  indent = 0,
+): string {
+  if (typeof diag === "string") return diag;
+  if (diag === undefined) return "";
+  let result = "";
+  if (indent) {
+    result += newLine;
+    for (let i = 0; i < indent; i++) result += "  ";
+  }
+  result += diag.messageText;
+  indent++;
+  if (diag.next) {
+    for (const kid of diag.next) {
+      result += flattenDiagnosticMessageText(kid, newLine, indent);
+    }
+  }
+  return result;
+}
 
 /**
  * Interface for transforming diagnostic error messages.
@@ -73,7 +103,7 @@ export class CompilationError {
     input: string | DiagnosticMessageChain,
     messageTransformer?: DiagnosticMessageTransformer,
   ): { type: CompilationErrorType; message: string } {
-    const message = ts.flattenDiagnosticMessageText(input, "\n");
+    const message = flattenDiagnosticMessageText(input, "\n");
 
     // Apply custom message transformer if configured
     if (messageTransformer) {

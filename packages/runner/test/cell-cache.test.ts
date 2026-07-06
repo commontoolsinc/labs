@@ -29,6 +29,12 @@ import {
 } from "../src/compilation-cache/cell-cache.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+
+// These tests drive the sync parse internals directly (below the async flow
+// boundaries that normally load the deferred compiler stack), so load it here.
+await ensureCompilerStack();
+
 // ---------------------------------------------------------------------------
 // Shared-server helper: two managers with DIFFERENT signers over ONE in-process
 // memory server. Modelled after cross-space-value-read.test.ts. The shared

@@ -7,6 +7,7 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
+import { isOrClause, normalizeClause } from "./clause.ts";
 import { resolveCfcSchemaRefs } from "./schema-refs.ts";
 
 export const INJECTION_SAFE_ATOM = {
@@ -59,10 +60,33 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
     PROMPT_INJECTION_RISK_KINDS.has(atom.kind);
 };
 
+// Strip material-risk caveats from ONE confidentiality clause. A bare
+// material-risk atom is dropped; inside an OR-clause the scan descends into
+// alternatives and removes the material-risk ones (unwrapping/dropping the
+// clause if it collapses). Descending is load-bearing: a material-risk caveat
+// hidden as an alternative (`{anyOf:[risk, A]}`) is NOT more-restrictive when
+// preserved — a ceiling naming the sibling `A` subsumes the whole clause
+// (clause-subsumption fit), so the caveat would neither gate nor get stripped.
+// Returns undefined when the clause is entirely material-risk (fully
+// discharged for this instruction-inert path).
+const stripMaterialRiskFromClause = (clause: unknown): unknown | undefined => {
+  if (!isOrClause(clause)) {
+    return isPromptInjectionMaterialRiskAtom(clause) ? undefined : clause;
+  }
+  const kept = clause.anyOf.filter(
+    (alternative) => !isPromptInjectionMaterialRiskAtom(alternative),
+  );
+  return kept.length === 0 ? undefined : normalizeClause({ anyOf: kept });
+};
+
 const filterMaterialRiskAtoms = (
   atoms: readonly unknown[],
 ): ImmutableJSONValue[] =>
-  uniqueAtoms(atoms.filter((atom) => !isPromptInjectionMaterialRiskAtom(atom)));
+  uniqueAtoms(
+    atoms
+      .map(stripMaterialRiskFromClause)
+      .filter((clause) => clause !== undefined),
+  );
 
 const mergeIfc = (
   schema: Record<string, unknown>,

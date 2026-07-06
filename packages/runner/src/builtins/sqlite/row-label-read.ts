@@ -7,13 +7,17 @@
 // attach, ceiling"; "Fail-closed rules").
 
 import {
+  atomKey,
   evaluateRowLabel,
   type RowLabelSpec,
+  ruleCommonAlternatives,
+  ruleConstrainsConfidentiality,
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
+import { clauseAlternatives } from "../../cfc/clause.ts";
 
 interface ResultColumn {
   output: string;
@@ -43,6 +47,11 @@ export interface RowLabelReadArgs {
   ceiling?: readonly unknown[];
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+  /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
+   *  reader may read (a declared existence release, §8.17/inv-14). Requires the
+   *  rule-bearing table to opt in (`rowLabelReadClearance`); never for
+   *  aggregates. `reader` is the acting principal (undefined → refuse). */
+  readClearance?: { reader: string | undefined };
 }
 
 export type RowLabelReadResult =
@@ -51,12 +60,78 @@ export type RowLabelReadResult =
     /** Per kept-order row: the per-row label for its row entity doc, or
      *  undefined when the row carries no per-row label. */
     labels: (PerRowIfc | undefined)[];
-    /** Row keep-mask under a declared ceiling (undefined: no ceiling). */
+    /** Row keep-mask under a declared ceiling and/or read-time clearance
+     *  (undefined: neither declared). */
     keep: boolean[] | undefined;
+    /** CFC Phase 3.b: rows withheld because the acting reader could not read
+     *  them (a declared, audited existence release). 0/undefined when no
+     *  clearance was requested. */
+    withheld?: number;
   };
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
+
+// The common-alternative outcome for a null-origin (aggregate) projection over
+// the rule-bearing tables. `unconstrained`: no rule imposes any confidentiality
+// (all integrity-only or degenerate), so the aggregate is public — carry no
+// label. `readers`: every confidentiality-bearing table shares this non-empty
+// set of guaranteed readers, so the aggregate is readable by them (an
+// OR-clause). `refuse`: some confidentiality-bearing table has no reader in the
+// intersection, so no principal is guaranteed to read every contributing row.
+type AggregateCommon =
+  | { kind: "unconstrained" }
+  | { kind: "readers"; atoms: unknown[] }
+  | { kind: "refuse" };
+
+// Intersect the common alternatives of every CONFIDENTIALITY-BEARING
+// rule-bearing table (CFC spec §8.17.4, Epic E2). A reader in the intersection
+// is a guaranteed reader of every row of every such table, so it soundly reads
+// an aggregate no matter which of them it ranged over. Integrity-only rules
+// impose no confidentiality, so they are skipped rather than treated as a
+// refusal (an aggregate over an integrity-only table is public) — the
+// distinction `ruleCommonAlternatives` returning `[]` alone cannot make. Uses
+// the canonical `atomKey` so structurally-equal atoms (e.g. object constants
+// whose keys differ only in order across two rules) intersect correctly.
+function intersectCommonAlternatives(
+  rules: readonly { spec: RowLabelSpec }[],
+  owner: string | undefined,
+): AggregateCommon {
+  let acc: Map<string, unknown> | undefined;
+  let anyConfidentiality = false;
+  for (const r of rules) {
+    if (!ruleConstrainsConfidentiality(r.spec)) continue; // integrity-only
+    anyConfidentiality = true;
+    const alts = new Map<string, unknown>();
+    for (const a of ruleCommonAlternatives(r.spec, { dbOwner: owner })) {
+      alts.set(atomKey(a), a);
+    }
+    if (alts.size === 0) return { kind: "refuse" }; // constrains, no reader
+    acc = acc === undefined
+      ? alts
+      : new Map([...acc].filter(([k]) => alts.has(k)));
+    if (acc.size === 0) return { kind: "refuse" }; // no shared reader
+  }
+  if (!anyConfidentiality) return { kind: "unconstrained" };
+  return { kind: "readers", atoms: acc === undefined ? [] : [...acc.values()] };
+}
+
+// CFC Phase 3.b — whether the acting reader may read a row carrying this
+// confidentiality label: EVERY conjunctive clause must list the reader among
+// its alternatives (an AND of ORs). A public row (no confidentiality) is
+// readable by all. Per-row labels store concrete principals (dbOwner() is
+// resolved to the owner at eval time), so an alternative admits the reader iff
+// it is exactly the reader principal; a non-principal alternative
+// (Caveat/Expires/material-risk marker) never admits a plain reader, so the row
+// is withheld — fail closed.
+function readerAdmitsLabel(
+  confidentiality: readonly unknown[],
+  reader: string,
+): boolean {
+  return confidentiality.every((clause) =>
+    clauseAlternatives(clause).some((alt) => alt === reader)
+  );
+}
 
 /**
  * Compute each result row's per-row label from the declared rules and the
@@ -85,8 +160,13 @@ export function computeRowLabelRead(
   const onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
 
   // Discover + re-validate rule-bearing tables (db.tables is wire-supplied;
-  // "couldn't validate" is never "no label").
-  const rules: { name: string; spec: RowLabelSpec }[] = [];
+  // "couldn't validate" is never "no label"). `allowReadClearance` is the
+  // per-table policy opt-in for Phase 3.b read-time clearance.
+  const rules: {
+    name: string;
+    spec: RowLabelSpec;
+    allowReadClearance: boolean;
+  }[] = [];
   for (const [name, t] of Object.entries(tables ?? {})) {
     if (!tableDeclaresRowLabel(t)) continue;
     const spec = (t as { rowLabel: RowLabelSpec }).rowLabel;
@@ -100,7 +180,13 @@ export function computeRowLabelRead(
           reason,
       };
     }
-    rules.push({ name, spec });
+    rules.push({
+      name,
+      spec,
+      allowReadClearance:
+        (t as { rowLabelReadClearance?: unknown }).rowLabelReadClearance ===
+          true,
+    });
   }
 
   const nullOrigin =
@@ -116,72 +202,100 @@ export function computeRowLabelRead(
       };
     }
     if (nullOrigin) {
-      return {
-        error: "sqlite: an aggregate/expression column has no single source " +
-          "— its per-row contributors cannot be re-labeled on a " +
-          "row-rule-bearing db; refusing (fail closed). Query the rows " +
-          "directly, or move the aggregate to a rule-less table",
-      };
-    }
-    const applicable = rules.filter((r) =>
-      columns.some((c) => c.table === r.name)
-    );
-    if (applicable.length > 1) {
-      return {
-        error: "sqlite: a query may touch at most one rule-bearing table " +
-          `(found ${
-            applicable.map((r) => `"${r.name}"`).join(", ")
-          }) — cross-rule joins are deferred; refusing (fail closed)`,
-      };
-    }
-    if (applicable.length === 1) {
-      const { name, spec } = applicable[0];
-      // Locate every rule input by TRUE origin — never by output name.
-      const inputOutputs = new Map<string, string>();
-      for (const field of ruleInputFields(spec)) {
-        const hits = columns.filter((c) =>
-          c.table === name && c.column === field
-        );
-        if (hits.length === 0) {
-          return {
-            error: `sqlite: the rowLabel rule needs column "${field}" of ` +
-              `table "${name}", but the projection does not include it (by ` +
-              "true origin) — refusing (fail closed); add it to the SELECT",
-          };
-        }
-        if (hits.length > 1) {
-          return {
-            error: `sqlite: rule input "${name}.${field}" is ambiguous — ` +
-              `${hits.length} result columns share that origin; alias all ` +
-              "but one away or drop the duplicates",
-          };
-        }
-        inputOutputs.set(field, hits[0].output);
+      // Epic E2 (common-alternative property, CFC spec §8.17.4): an
+      // aggregate/expression column has no single source, so its per-row
+      // contributors cannot be attributed. But a reader that is a COMMON
+      // ALTERNATIVE of every confidentiality-bearing table — a static,
+      // unconditional reader of every row of every such table (e.g. an
+      // unconditional `dbOwner()` alternative) — satisfies the join of all
+      // those rows, so it soundly reads the aggregate with NO declassification.
+      // Intersect the common alternatives across the rule-bearing tables and
+      // let the declared output ceiling decide:
+      //   - unconstrained: no table imposes confidentiality (all integrity-only
+      //     or degenerate) — the aggregate is public, carry no per-row label.
+      //   - readers: label the aggregate rows by that reader set (an OR-clause).
+      //   - refuse: some table constrains but shares no guaranteed reader.
+      const common = intersectCommonAlternatives(rules, owner);
+      if (common.kind === "refuse") {
+        return {
+          error: "sqlite: an aggregate/expression column has no single " +
+            "source and the rule has no common reader — its per-row " +
+            "contributors cannot be re-labeled on a row-rule-bearing db; " +
+            "refusing (fail closed). Query the rows directly, add an " +
+            "unconditional reader (e.g. dbOwner()) the aggregate can be read " +
+            "by, or move the aggregate to a rule-less table",
+        };
       }
-      labels = [];
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (!isRecord(row)) {
-          return { error: `sqlite: result row ${i} is not an object` };
+      if (common.kind === "readers") {
+        const clause = common.atoms.length === 1
+          ? common.atoms[0]
+          : { anyOf: common.atoms };
+        labels = rows.map(() => ({ confidentiality: [clause] }));
+      }
+      // kind === "unconstrained": no confidentiality on the aggregate — leave
+      // labels undefined. Either way no per-row eval (no origins to attribute);
+      // fall through to the shared ceiling check below.
+    } else {
+      const applicable = rules.filter((r) =>
+        columns.some((c) => c.table === r.name)
+      );
+      if (applicable.length > 1) {
+        return {
+          error: "sqlite: a query may touch at most one rule-bearing table " +
+            `(found ${
+              applicable.map((r) => `"${r.name}"`).join(", ")
+            }) — cross-rule joins are deferred; refusing (fail closed)`,
+        };
+      }
+      if (applicable.length === 1) {
+        const { name, spec } = applicable[0];
+        // Locate every rule input by TRUE origin — never by output name.
+        const inputOutputs = new Map<string, string>();
+        for (const field of ruleInputFields(spec)) {
+          const hits = columns.filter((c) =>
+            c.table === name && c.column === field
+          );
+          if (hits.length === 0) {
+            return {
+              error: `sqlite: the rowLabel rule needs column "${field}" of ` +
+                `table "${name}", but the projection does not include it (by ` +
+                "true origin) — refusing (fail closed); add it to the SELECT",
+            };
+          }
+          if (hits.length > 1) {
+            return {
+              error: `sqlite: rule input "${name}.${field}" is ambiguous — ` +
+                `${hits.length} result columns share that origin; alias all ` +
+                "but one away or drop the duplicates",
+            };
+          }
+          inputOutputs.set(field, hits[0].output);
         }
-        const rowValues: Record<string, unknown> = {};
-        for (const [field, output] of inputOutputs) {
-          rowValues[field] = row[output];
+        labels = [];
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!isRecord(row)) {
+            return { error: `sqlite: result row ${i} is not an object` };
+          }
+          const rowValues: Record<string, unknown> = {};
+          for (const [field, output] of inputOutputs) {
+            rowValues[field] = row[output];
+          }
+          const res = evaluateRowLabel(spec, rowValues, { dbOwner: owner });
+          if ("error" in res) {
+            return {
+              error: `sqlite: rowLabel rule failed on row ${i}: ${res.error}`,
+            };
+          }
+          const ifc: PerRowIfc = {};
+          if (res.confidentiality.length > 0) {
+            ifc.confidentiality = res.confidentiality;
+          }
+          if (res.integrity.length > 0) ifc.integrity = res.integrity;
+          labels.push(
+            ifc.confidentiality || ifc.integrity ? ifc : undefined,
+          );
         }
-        const res = evaluateRowLabel(spec, rowValues, { dbOwner: owner });
-        if ("error" in res) {
-          return {
-            error: `sqlite: rowLabel rule failed on row ${i}: ${res.error}`,
-          };
-        }
-        const ifc: PerRowIfc = {};
-        if (res.confidentiality.length > 0) {
-          ifc.confidentiality = res.confidentiality;
-        }
-        if (res.integrity.length > 0) ifc.integrity = res.integrity;
-        labels.push(
-          ifc.confidentiality || ifc.integrity ? ifc : undefined,
-        );
       }
     }
   }
@@ -217,7 +331,67 @@ export function computeRowLabelRead(
     }
   }
 
-  return { labels, keep };
+  // CFC Phase 3.b — read-time clearance (§8.17/inv-14). A declared existence
+  // release: keep only rows the acting reader may read. Requires (a) the query
+  // opted in (readClearance), (b) the touched rule-bearing table permits it
+  // (rowLabelReadClearance), (c) it is audited (withheld count). Never for
+  // aggregates — an aggregate has no per-row reader test.
+  let withheld: number | undefined;
+  if (args.readClearance !== undefined) {
+    if (nullOrigin) {
+      return {
+        error: "sqlite: read-time clearance never applies to an aggregate/" +
+          "expression projection — there is no per-row reader to test; remove " +
+          "readClearance or query the underlying rows directly",
+      };
+    }
+    const applicable = rules.filter((r) =>
+      columns?.some((c) => c.table === r.name)
+    );
+    if (applicable.length === 0) {
+      return {
+        error: "sqlite: read-time clearance needs a rule-bearing table with " +
+          "per-row labels to filter, but this query touches none — remove " +
+          "readClearance",
+      };
+    }
+    const forbidden = applicable.filter((r) => !r.allowReadClearance);
+    if (forbidden.length > 0) {
+      return {
+        error:
+          "sqlite: read-time clearance is not permitted by the governing " +
+          `policy of table ${
+            forbidden.map((r) => `"${r.name}"`).join(", ")
+          } — pass { allowReadClearance: true } to table() to opt in`,
+      };
+    }
+    const reader = args.readClearance.reader;
+    if (reader === undefined) {
+      return {
+        error: "sqlite: read-time clearance needs the acting reader, but no " +
+          "acting principal is available — refusing (fail closed)",
+      };
+    }
+    const staticConf = args.staticConfidentiality ?? [];
+    const clearanceKeep: boolean[] = [];
+    withheld = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const effective = [
+        ...(labels[i]?.confidentiality ?? []),
+        ...staticConf,
+      ];
+      const admits = readerAdmitsLabel(effective, reader);
+      if (!admits) withheld++;
+      clearanceKeep.push(admits);
+    }
+    // Intersect with any ceiling keep-mask: a row survives iff BOTH the declared
+    // contract admits it and the reader may read it.
+    keep = keep === undefined
+      ? clearanceKeep
+      : keep.map((k, i) => k && clearanceKeep[i]);
+  }
+
+  return { labels, keep, withheld };
 }
 
 /**

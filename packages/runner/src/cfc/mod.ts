@@ -31,7 +31,9 @@ export type {
   CfcStreamChannel,
   CfcStreamObservation,
   CfcStreamSegment,
+  CfcTriggerReadGating,
   CfcTxState,
+  CfcWriteFloorMode,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
@@ -47,9 +49,12 @@ export {
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_TRIGGER_READ_GATING,
+  DEFAULT_CFC_WRITE_FLOOR_MODE,
   isCfcEnforcementMode,
 } from "./types.ts";
 export {
+  canonicalizeCfcLabel,
   canonicalizeCfcMetadata,
   canonicalizeDereferenceTrace,
   canonicalizeLogicalPath,
@@ -58,6 +63,14 @@ export {
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";
+export type { CfcConfClause, CfcOrClause } from "./clause.ts";
+export {
+  clauseAlternatives,
+  clausesEqual,
+  clauseSubsumes,
+  isOrClause,
+  normalizeClause,
+} from "./clause.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,

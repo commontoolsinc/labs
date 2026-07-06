@@ -38,11 +38,17 @@ facet of that one representational distance. Most of the flat model's narrowness
 *fail-closed* (it over-restricts — safe), but a few edges are genuine soundness
 holes, called out explicitly.
 
-**Default posture.** Enforcement mode defaults to `disabled`
-([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) and flow-labels to `off`
-([`types.ts:331`](../../packages/runner/src/cfc/types.ts)); hosts opt into
-`enforce-explicit`. So several protections below are *built but dormant* until a
-host turns them on — see Epic H.
+**Default posture.** The commit gate is on by default: the Runtime constructor
+defaults `cfcEnforcementMode` to `enforce-explicit`
+([`runtime.ts:495`](../../packages/runner/src/runtime.ts)), as does lib-shell's
+`createRuntimeClientOptions` — the types-level
+`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
+([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
+bare-transaction fallback. What *is* dormant: flow-labels default `off`
+([`types.ts:331`](../../packages/runner/src/cfc/types.ts)) everywhere, the render
+confidentiality ceiling is plumbed end-to-end but no host populates it, and
+`enforce-strict` has no distinct behavior. So the flow-taint and display
+protections below are *built but dormant* until a host turns them on — see Epic H.
 
 ---
 
@@ -244,9 +250,11 @@ Not new machinery so much as turning the system on:
   (§10's own worked example) is not stamped by default. Move deployments to
   propagation `persist`; note trigger-read confidentiality (SC-3) currently never
   reaches the enforcement side or the egress ceiling even when the dial is on.
-- **Enforcement defaults `disabled`; `enforce-strict` undifferentiated.** The strict
-  rung is rankable but has no additional reject behavior in the commit gate
-  (SC-13). Finish the ladder and pick conforming default deployment states.
+- **`enforce-strict` undifferentiated.** The effective deployment default is
+  already `enforce-explicit` (Runtime + lib-shell; the types-level `disabled` is
+  the bare-transaction fallback), but the strict rung is rankable with no
+  additional reject behavior in the commit gate (SC-13). Finish the ladder and
+  pick conforming default deployment states.
 - **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
   **no host populates it**, and it admits atoms by raw structural equality rather
   than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).

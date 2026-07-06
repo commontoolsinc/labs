@@ -11,6 +11,7 @@ import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
 import { view } from "./view.ts";
+import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { cliName, cliText } from "../lib/cli-name.ts";
 
@@ -155,6 +156,7 @@ export const main = new Command()
   .command("id", identity)
   .command("init", init)
   .command("test", test)
+  .command("wish", wish)
   .command(
     "deploy",
     new Command()

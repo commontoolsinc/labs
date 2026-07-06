@@ -171,6 +171,31 @@ function schedulerActionLinkIdentity(link: NormalizedFullLink) {
   };
 }
 
+/**
+ * A source-location-INDEPENDENT, per-instance discriminator for a scheduler
+ * action: a short hash of the action's `{ process, reads, writes }` cell links.
+ * Two instances of the same hoisted op (e.g. one `lift` called twice) differ in
+ * their reads/writes, so this distinguishes them; the links are reload-stable,
+ * so it is too. Unlike `schedulerJavaScriptActionName`/`schedulerRawActionName`
+ * it folds in NO source-derived name, so it is independent of `fn.src` and the
+ * debug annotation. It is appended to the content-addressed action id
+ * (`cf:module/<hash>:<symbol>:<instanceKey>`, `getSchedulerActionId`) so that the
+ * per-symbol content address stays the implementation *fingerprint* while the
+ * action id — the `actionStats` key and the durable observation key — stays
+ * per-*instance*. Without it, N instances of one symbol collide on a single id.
+ */
+function schedulerActionInstanceKey(parts: {
+  process?: NormalizedFullLink;
+  reads?: readonly NormalizedFullLink[];
+  writes?: readonly NormalizedFullLink[];
+}): string {
+  return hashOf({
+    process: parts.process ? schedulerActionLinkIdentity(parts.process) : null,
+    reads: (parts.reads ?? []).map(schedulerActionLinkIdentity),
+    writes: (parts.writes ?? []).map(schedulerActionLinkIdentity),
+  }).hashString.slice(0, 12);
+}
+
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
@@ -1326,7 +1351,15 @@ export class Runner {
     // Determine initial pattern
     if (givenPattern) {
       currentPatternKey = initialRef ? patternIdentityKey(initialRef) : KEYLESS;
-      instantiatePattern(givenPattern, tx);
+      try {
+        instantiatePattern(givenPattern, tx);
+      } catch (error) {
+        // Without cleanup the piece stays registered in `this.cancels`, so
+        // every later start() reports "already running" for a piece that has
+        // no nodes or event handlers — events sent to it are then dropped.
+        cleanup();
+        throw error;
+      }
       if (!doNotUpdateOnPatternChange) {
         setupPatternWatcher();
       }
@@ -2557,26 +2590,37 @@ export class Runner {
   }
 
   /**
-   * Attach a stable, content-addressed implementation identity to an action,
-   * derived from its bundle-relative source location. No-op when the harness
-   * cannot resolve the location (built-in or unmapped sources); the scheduler
-   * then falls back to the raw source location for its implementation
-   * fingerprint. See docs/specs/module-loading.md.
+   * Attach a stable, content-addressed implementation identity
+   * (`cf:module/<identity>:<symbol>`) to an action, derived from its module
+   * implementation's verified provenance — NOT from the source location. This
+   * keeps action identity / fingerprints independent of `.src` and its (broken)
+   * source-map resolution: the discriminator is the hoisted `__cfReg`/export
+   * `symbol`, not `:line:col`. No-op for implementations with no verified
+   * provenance (host / dynamic / test builders); the scheduler then resolves
+   * `getVerifiedProvenance` live or falls to a generated id.
+   * See docs/specs/content-addressed-action-identity.md.
    */
   private applyImplementationHash(
     action: Action,
-    sourceLocation: string,
+    implementation: unknown,
   ): void {
-    const implementationHash = this.runtime.harness
-      .implementationHashForSource?.(sourceLocation);
-    if (implementationHash) {
+    const provenance = typeof implementation === "function"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    if (provenance?.identity) {
       (action as { implementationHash?: string }).implementationHash =
-        implementationHash;
+        provenance.symbol
+          ? `cf:module/${provenance.identity}:${provenance.symbol}`
+          : `cf:module/${provenance.identity}`;
     }
   }
 
   /**
-   * If the final target of the link chain is a stream, return the first link.
+   * If the final target of the link chain is a stream, return the first link
+   * as `streamLink`. When the inputs carry a `$event` key — i.e. the node was
+   * authored as a handler — but the chain does not end in a stream marker,
+   * return what it resolved to instead (`eventTarget`), so the caller can
+   * report why the node cannot be instantiated as a handler.
    *
    * @param inputs
    * @param base
@@ -2587,21 +2631,27 @@ export class Runner {
     inputs: FabricValue,
     base: NormalizedFullLink,
     tx: IExtendedStorageTransaction,
-  ): NormalizedFullLink | undefined {
-    if (!isRecord(inputs) || !("$event" in inputs)) return undefined;
+  ): {
+    streamLink?: NormalizedFullLink;
+    eventTarget?: { link?: NormalizedFullLink; value: FabricValue };
+  } {
+    if (!isRecord(inputs) || !("$event" in inputs)) return {};
 
     let value: FabricValue = inputs.$event as FabricValue;
+    let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
-      const maybeStreamLink = resolveLink(
+      lastLink = resolveLink(
         this.runtime,
         tx,
         parseLink(value, base),
         "writeRedirect",
       );
-      value = tx.readValueOrThrow(maybeStreamLink);
+      value = tx.readValueOrThrow(lastLink);
     }
 
-    return isStreamValue(value) ? parseLink(inputs.$event, base) : undefined;
+    return isStreamValue(value)
+      ? { streamLink: parseLink(inputs.$event, base) }
+      : { eventTarget: { link: lastLink, value } };
   }
 
   private createPatternFrame(
@@ -3574,7 +3624,18 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
-      this.applyImplementationHash(action, name);
+      // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
+      // not `module.implementation`: an `$implRef`-resolved module (reloaded from
+      // a serialized graph) carries the ref, not the live function, so reading
+      // provenance off `module.implementation` would drop the content-addressed
+      // scheduler identity on reload.
+      this.applyImplementationHash(action, fn);
+      (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+        schedulerActionInstanceKey({
+          process: processCell.getAsNormalizedFullLink(),
+          reads,
+          writes,
+        });
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3679,7 +3740,7 @@ export class Runner {
       ...io,
     };
 
-    const streamLink = this.resolveJavaScriptStreamLink(
+    const { streamLink, eventTarget } = this.resolveJavaScriptStreamLink(
       io.inputs,
       processCell.getAsNormalizedFullLink(),
       tx,
@@ -3687,6 +3748,14 @@ export class Runner {
     if (streamLink) {
       this.instantiateJavaScriptHandlerNode({ ...context, streamLink });
       return;
+    }
+    if (eventTarget) {
+      // The node was authored as a handler ($event input), but its stream
+      // marker did not resolve. Report what actually happened instead of
+      // misclassifying the node as a lift.
+      throw new Error(
+        describeHandlerStreamFailure(name, eventTarget, resultCell),
+      );
     }
 
     this.instantiateJavaScriptActionNode(context);
@@ -4038,9 +4107,9 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
-    if (impl.src) {
-      this.applyImplementationHash(action, impl.src);
-    }
+    this.applyImplementationHash(action, impl);
+    (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+      schedulerActionInstanceKey({ reads: inputCells, writes: outputCells });
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
@@ -4321,6 +4390,61 @@ function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
   return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
+}
+
+/**
+ * Explain why a node authored as a handler ($event input) could not be
+ * instantiated as one. The historical error here ("$stream: true was
+ * overwritten") was misleading: the by-far most common cause is that the
+ * marker read returned undefined because nothing was ever written at the
+ * derived location — e.g. piece state persisted before the internal-cell
+ * manifest format (#3911) keeps its markers elsewhere — not that anything
+ * overwrote it.
+ */
+function describeHandlerStreamFailure(
+  name: string | undefined,
+  eventTarget: { link?: NormalizedFullLink; value: FabricValue },
+  resultCell: Cell<any>,
+): string {
+  const prefix = `Handler used as lift: ${
+    name ? `node "${name}"` : "node"
+  }'s $event input`;
+
+  if (eventTarget.link === undefined) {
+    return `${prefix} is not a stream reference (got: ${
+      toCompactDebugString(eventTarget.value, 80)
+    })`;
+  }
+
+  const where = `${eventTarget.link.id}${
+    eventTarget.link.path.length > 0
+      ? ` at path [${eventTarget.link.path.join(", ")}]`
+      : ""
+  }`;
+
+  if (eventTarget.value === undefined) {
+    let hint = "";
+    try {
+      const internalMeta = resultCell.getMetaRaw("internal", {
+        meta: ignoreReadForScheduling,
+      });
+      if (internalMeta !== undefined && !Array.isArray(internalMeta)) {
+        hint = " This piece's internal metadata is a single-cell link " +
+          "(pre-manifest format), so its persisted state predates the " +
+          "current runtime's internal-cell layout; recreate the piece to " +
+          "repair it.";
+      }
+    } catch {
+      // Diagnostic only — never mask the primary error.
+    }
+    return `${prefix} resolves to ${where}, which reads undefined — the ` +
+      `{ "$stream": true } marker was never written there.${hint}`;
+  }
+
+  return `${prefix} resolves to ${where}, whose value is not a stream ` +
+    `marker — { "$stream": true } was overwritten (found: ${
+      toCompactDebugString(eventTarget.value, 80)
+    })`;
 }
 
 /**

@@ -154,8 +154,16 @@ export class CFHelpers {
   }
 }
 
-const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
-  /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
+// The disable-directive check lives in runtime-contract.ts (typescript-free,
+// runtime-importable); re-exported here for the existing compile-side callers.
+export {
+  findFirstContentLineIndex,
+  sourceDisablesCfTransform,
+} from "./runtime-contract.ts";
+import {
+  findFirstContentLineIndex,
+  sourceDisablesCfTransform,
+} from "./runtime-contract.ts";
 
 // Rewrite a leading transform directive line, or inject helpers by default,
 // so the AST transformer pipeline has access to helpers like `lift`.
@@ -220,26 +228,6 @@ export function injectCfDataHelper(source: string): string {
     source,
     CF_DATA_HELPER_USED_STMT,
   ].join("\n");
-}
-
-export function sourceDisablesCfTransform(source: string): boolean {
-  const lines = source.split("\n");
-  const firstContentLineIndex = findFirstContentLineIndex(lines);
-  return firstContentLineIndex !== null &&
-    isCFTransformDisabled(lines[firstContentLineIndex]!);
-}
-
-function isCFTransformDisabled(line: string) {
-  return CF_DISABLE_TRANSFORM_DIRECTIVE_RE.test(line);
-}
-
-function findFirstContentLineIndex(lines: readonly string[]): number | null {
-  for (const [index, line] of lines.entries()) {
-    if (line.trim().length > 0) {
-      return index;
-    }
-  }
-  return null;
 }
 
 // Throws if `__cfHelpers` was found as an Identifier

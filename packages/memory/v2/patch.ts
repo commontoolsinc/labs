@@ -66,34 +66,8 @@ export const applyPatch = (
   return deepFreeze(current);
 };
 
-const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
-  switch (op.op) {
-    case "replace":
-      return replaceAtPath(state, parsePointer(op.path), op.value);
-    case "add":
-      return addAtPath(state, parsePointer(op.path), op.value);
-    case "remove":
-      return removeAtPath(state, parsePointer(op.path));
-    case "move":
-      return moveValue(state, parsePointer(op.from), parsePointer(op.path));
-    case "splice":
-      return spliceAtPath(
-        state,
-        parsePointer(op.path),
-        op.index,
-        op.remove,
-        op.add,
-      );
-    case "append":
-      return appendAtPath(state, parsePointer(op.path), op.values);
-    case "add-unique":
-      return addUniqueAtPath(state, parsePointer(op.path), op.values);
-    case "remove-by-value":
-      return removeByValueAtPath(state, parsePointer(op.path), op.value);
-    case "increment":
-      return incrementAtPath(state, parsePointer(op.path), op.by);
-  }
-};
+const applyOp = (state: FabricValue, op: PatchOp): FabricValue =>
+  patchOpDescriptors[op.op].apply(state, op);
 
 /**
  * Copy-on-write thaw of the spine of `root` down to `thawPath`, returning the
@@ -474,3 +448,157 @@ const isPatchObject = (value: FabricValue): value is PatchObject =>
 
 const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);
+
+/**
+ * The single definition of one patch operation kind. Every site that must
+ * answer a per-op question reads it from here instead of re-deriving it from a
+ * switch:
+ *
+ * - `apply` is the mutation the durable store performs for the op (used by
+ *   {@link applyPatch} above).
+ * - `pointerFields` names the fields whose value is a JSON Pointer into the
+ *   document (`["path"]` for most ops, `["from", "path"]` for `move`). It is the
+ *   source for every "which paths does this op touch" computation: the
+ *   commit-conflict and scheduler reader-dirty matchers in `engine.ts` and the
+ *   client-side pending-replay path computation in `runner storage/v2.ts` all
+ *   derive from it (see {@link touchedPointerPaths}).
+ * - `structural` is true for ops that UNCONDITIONALLY restructure a container's
+ *   key set — `add`, `remove`, `move` — which add, drop, or relocate a child key
+ *   on every apply. For those, a shape-only (nonRecursive) reader of the parent
+ *   must be invalidated at the parent path (the parent injection in
+ *   `touchedPathsForPatch`), and the client replay resolves the target against
+ *   live state. `replace` / `splice` / `append` / `add-unique` /
+ *   `remove-by-value` / `increment` are false: they touch the leaf/array path
+ *   itself, which a reader of that path already prefixes.
+ *
+ *   `append` / `add-unique` / `increment` DO change the parent's key set in one
+ *   case — when they materialize a previously-absent path (their apply creates
+ *   the array/scalar and the path to it). That is conditional on the pre-state,
+ *   which this static flag cannot express, so it is carried per-instance by the
+ *   op's `createsKey` field (stamped by the writer that saw the path absent) and
+ *   folded in by {@link patchOpChangesParentKeySet}, which is what the shape-read
+ *   conflict matcher uses instead of `structural`. Marking these ops structural
+ *   unconditionally would instead over-conflict every parent shape reader against
+ *   an ordinary append to an already-present child — the write-contention the
+ *   mergeable ops exist to avoid. See
+ *   docs/specs/memory-v2/08-conflict-granularity.md.
+ *
+ * Adding a new wire op is a single new entry here: the `Record<PatchOp["op"],
+ * …>` type makes a missing entry (or an entry for a tag not in the `PatchOp`
+ * union) a compile error, so `apply` and the path matchers can never silently
+ * fall out of step with the union.
+ */
+export interface PatchOpDescriptor<Op extends PatchOp = PatchOp> {
+  readonly op: Op["op"];
+  readonly pointerFields: readonly string[];
+  readonly structural: boolean;
+  readonly apply: (state: FabricValue, op: Op) => FabricValue;
+}
+
+const descriptor = <Op extends PatchOp>(
+  d: PatchOpDescriptor<Op>,
+): PatchOpDescriptor => d as unknown as PatchOpDescriptor;
+
+export const patchOpDescriptors: Record<PatchOp["op"], PatchOpDescriptor> = {
+  replace: descriptor<Extract<PatchOp, { op: "replace" }>>({
+    op: "replace",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) => replaceAtPath(state, parsePointer(op.path), op.value),
+  }),
+  add: descriptor<Extract<PatchOp, { op: "add" }>>({
+    op: "add",
+    pointerFields: ["path"],
+    structural: true,
+    apply: (state, op) => addAtPath(state, parsePointer(op.path), op.value),
+  }),
+  remove: descriptor<Extract<PatchOp, { op: "remove" }>>({
+    op: "remove",
+    pointerFields: ["path"],
+    structural: true,
+    apply: (state, op) => removeAtPath(state, parsePointer(op.path)),
+  }),
+  move: descriptor<Extract<PatchOp, { op: "move" }>>({
+    op: "move",
+    pointerFields: ["from", "path"],
+    structural: true,
+    apply: (state, op) =>
+      moveValue(state, parsePointer(op.from), parsePointer(op.path)),
+  }),
+  splice: descriptor<Extract<PatchOp, { op: "splice" }>>({
+    op: "splice",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) =>
+      spliceAtPath(state, parsePointer(op.path), op.index, op.remove, op.add),
+  }),
+  append: descriptor<Extract<PatchOp, { op: "append" }>>({
+    op: "append",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) => appendAtPath(state, parsePointer(op.path), op.values),
+  }),
+  "add-unique": descriptor<Extract<PatchOp, { op: "add-unique" }>>({
+    op: "add-unique",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) =>
+      addUniqueAtPath(state, parsePointer(op.path), op.values),
+  }),
+  "remove-by-value": descriptor<Extract<PatchOp, { op: "remove-by-value" }>>({
+    op: "remove-by-value",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) =>
+      removeByValueAtPath(state, parsePointer(op.path), op.value),
+  }),
+  increment: descriptor<Extract<PatchOp, { op: "increment" }>>({
+    op: "increment",
+    pointerFields: ["path"],
+    structural: false,
+    apply: (state, op) => incrementAtPath(state, parsePointer(op.path), op.by),
+  }),
+};
+
+/**
+ * The JSON-Pointer paths a patch op names, parsed to segment arrays: `["path"]`
+ * for most ops, `["from", "path"]` for `move`. These are the op's exact changed
+ * leaf paths — with no parent injection. This is the shared source for the
+ * leaf-only conflict/reactivity matchers (`engine.ts`
+ * `touchedLeafPathsForPatch`), and the base from which the parent-injecting
+ * (shape-read) and client pending-replay path computations are built.
+ */
+export const touchedPointerPaths = (op: PatchOp): string[][] =>
+  patchOpDescriptors[op.op].pointerFields.map((field) =>
+    parsePointer((op as unknown as Record<string, string>)[field])
+  );
+
+/**
+ * Whether the op adds, removes, or reorders a container's keys (`add`, `remove`,
+ * `move`). Callers that must invalidate a shape-only reader of the container, or
+ * resolve the target against live state, key off this flag.
+ */
+export const patchOpIsStructural = (op: PatchOp): boolean =>
+  patchOpDescriptors[op.op].structural;
+
+/**
+ * Whether the op changes its parent container's key set, so a shape-only
+ * (nonRecursive) reader of the parent must be invalidated. True for the
+ * unconditionally-structural ops (`patchOpIsStructural`) AND for a mergeable op
+ * instance that materialized a previously-absent path (its `createsKey` flag —
+ * a value-dependent fact the writer records, since the static op kind cannot
+ * express it; see the `structural` doc above and the `createsKey` field in
+ * `../v2.ts`). Used only by the shape-read conflict matcher; the replay and
+ * indexed-array-guard sites use the static `patchOpIsStructural`.
+ */
+export const patchOpChangesParentKeySet = (op: PatchOp): boolean =>
+  patchOpDescriptors[op.op].structural ||
+  (op as { createsKey?: boolean }).createsKey === true;
+
+/**
+ * The names of the op's JSON-Pointer-valued fields (`["path"]`, or
+ * `["from", "path"]` for `move`), so a caller can read the raw pointer strings
+ * an op carries without knowing which op it is.
+ */
+export const patchOpPointerFields = (op: PatchOp): readonly string[] =>
+  patchOpDescriptors[op.op].pointerFields;

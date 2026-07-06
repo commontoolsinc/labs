@@ -38,10 +38,15 @@ import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
+import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 type SqliteDbRef = {
@@ -55,6 +60,11 @@ type SqliteDbRef = {
   // once at handle creation (CFC Phase 3: resolves the row rule's dbOwner()
   // and the ceiling's __ctDbOwner placeholder; never the acting reader).
   owner?: string;
+  // db.exec's optimistic-concurrency revision (bumped per write, cell.ts). A
+  // handle re-derivation must carry it forward: deleting it changes the handle
+  // value, which every consumer hashing the handle (e.g. sqliteQuery's
+  // reactOn) sees as "new inputs".
+  rev?: number;
 };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
@@ -99,10 +109,11 @@ function readDbRef(value: unknown): SqliteDbRef {
     const ref = value as SqliteDbRef;
     return {
       id: ref.id,
-      // Materialize to plain JSON: a rowLabel rule's term LISTS (arrays of
-      // objects) split into per-element entity docs when the handle value is
-      // stored, so the stored form holds doc LINKS — the wire (server
-      // provenance gate) and every local consumer need the resolved spec.
+      // Materialize to plain JSON: sqliteDatabase stores the handle value
+      // inline (self-contained), but a handle written before that fix (or a
+      // proxy-carried read) can still hold doc LINKS where the rule's AST
+      // nodes should be — the wire (server provenance gate) and every local
+      // consumer need the resolved spec.
       tables: ref.tables
         ? cloneIfNecessary(
           ref.tables as Parameters<typeof cloneIfNecessary>[0],
@@ -116,6 +127,33 @@ function readDbRef(value: unknown): SqliteDbRef {
     };
   }
   throw new TypeError("sqlite: invalid database handle");
+}
+
+/**
+ * Whether a materialized `tables` value is fully RESOLVED in this runtime — no
+ * table (or rule) read through a not-yet-loaded linked doc. A rowLabel rule's
+ * term LIST (array of objects) splits into per-element entity docs wherever it
+ * passes through a builder-frame write (e.g. pattern static data), and no
+ * schema-driven sync loads those splits, so a runtime that merely LOADED the
+ * pattern can deep-resolve them to `null` (the #3830 class). Materializing
+ * that read would bake `allOf: [null]` into the handle — a different value
+ * (and request hash) than the creator wrote. Validation is the resolution
+ * probe: a resolved rule always validates; a null-riddled one never does.
+ */
+function dbTablesResolved(
+  tables: Record<string, unknown> | undefined,
+): boolean {
+  if (tables === undefined) return true;
+  for (const t of Object.values(tables)) {
+    if (!t || typeof t !== "object") return false; // an unresolved table doc
+    const spec = (t as { rowLabel?: unknown }).rowLabel;
+    if (spec === undefined) continue;
+    const columns = Object.keys(
+      (t as { properties?: Record<string, unknown> }).properties ?? {},
+    );
+    if (validateRowLabelSpec(spec, columns) !== undefined) return false;
+  }
+  return true;
 }
 
 /** Union of the per-column (Phase 2) confidentiality atoms a labeled result
@@ -482,24 +520,62 @@ export function sqliteDatabase(
       const id = (isEntityRef(handle.entityId)
         ? entityRefToString(handle.entityId)
         : undefined) ?? JSON.stringify(handle.getAsLink());
-      // The db's owner: the principal creating this handle (CFC Phase 3 —
-      // resolves the row rule's dbOwner(); a FIXED property of the db, not
-      // the acting reader). "creator" would be wrong for linked dbs; the
-      // handle's creation is where ownership is minted.
-      const owner = runtime.trustSnapshotProvider()?.actingPrincipal;
       // Grow-only merge the per-column `ifc` against any prior committed handle
       // value at this (causally-stable) id: the store's effective label is
       // monotone, so a re-derivation reading a weaker `tables` input cannot lower
       // a column's read label or widen its write ceiling (audit S8). First
       // creation (no prior) passes the declared tables through unchanged.
       const prior = handle.withTx(tx).get() as SqliteDbRef | undefined;
-      const tables = growOnlyMergeDbTables(prior?.tables, options?.tables);
-      handle.withTx(tx).set({
-        id,
-        tables,
-        scope,
-        ...(owner !== undefined && { owner }),
-      });
+      const merged = growOnlyMergeDbTables(prior?.tables, options?.tables);
+      // The db's owner: the principal creating this handle (CFC Phase 3 —
+      // resolves the row rule's dbOwner(); a FIXED property of the db, not
+      // the acting reader). Minted ONLY when there is no prior committed
+      // handle: this init re-runs in every runtime that opens the piece (the
+      // `initialized` guard is per-runtime-instance), and re-minting would
+      // rotate ownership to the last opener — dbOwner() row rules and
+      // {__ctDbOwner} ceiling placeholders would then admit the wrong
+      // principal. An ownerless prior handle stays ownerless (dbOwner()
+      // fails closed) rather than adopting a later opener.
+      const owner = prior !== undefined
+        ? prior.owner
+        : runtime.trustSnapshotProvider()?.actingPrincipal;
+      // Materialize to plain JSON: the stored handle must be SELF-CONTAINED.
+      // A raw `set` of the inputs proxy would capture `tables` as a LINK into
+      // this pattern's doc graph — whose rule-term splits no schema-driven
+      // sync loads — so a second runtime deep-resolves parts of it to null and
+      // hashes a DIFFERENT request for the same shared query cell: each
+      // runtime sees the other's hash as "new inputs" and re-issues forever.
+      // Inline, every runtime that can read the handle doc has the full spec.
+      const tables = merged !== undefined
+        ? cloneIfNecessary(
+          merged as Parameters<typeof cloneIfNecessary>[0],
+          { frozen: false },
+        ) as Record<string, unknown>
+        : undefined;
+      // Fail closed on an UNRESOLVED materialization (this runtime loaded the
+      // pattern but not every linked doc under `tables`): writing it would
+      // bake nulls over a good prior value. The prior handle stays; a runtime
+      // that resolves fully (the creator, at least) writes the inline form.
+      if (prior === undefined || dbTablesResolved(tables)) {
+        // RAW write, not `.set()`: this first action run can execute inside
+        // the pattern's builder frame, where `set` [ID]-anchors every object
+        // in an array — splitting a rule's term list into per-element entity
+        // docs (the very shape the materialization above exists to avoid).
+        // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps
+        // an unchanged re-derivation write-free (no hash churn per runtime).
+        handle.withTx(tx).setRawUntyped(
+          fabricFromNativeValue({
+            id,
+            ...(tables !== undefined && { tables }),
+            scope,
+            ...(owner !== undefined && { owner }),
+            // Carry db.exec's write revision forward — dropping it would make
+            // this re-derivation look like "new inputs" to every handle hasher.
+            ...(typeof prior?.rev === "number" && { rev: prior.rev }),
+          }) as FabricValue,
+          true,
+        );
+      }
       sendResult(tx, handle);
       initialized = true;
     }
@@ -512,6 +588,10 @@ type QueryState = {
   result?: unknown[];
   error?: unknown;
   requestHash?: string;
+  /** CFC Phase 3.b read-time clearance audit: how many rows the acting reader
+   *  could not read were withheld (a declared existence release). Absent when
+   *  no clearance was requested. */
+  withheld?: number;
 };
 
 /** sqliteQuery: reactive server-side read. */
@@ -543,6 +623,10 @@ export function sqliteQuery(
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
       maxConfidentiality?: unknown[];
       onExceed?: unknown;
+      // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
+      // acting reader may read (a declared existence release). Requires the
+      // touched rule-bearing table to permit it (rowLabelReadClearance).
+      readClearance?: unknown;
     } | undefined;
 
     // The query result holds rows from a scope-partitioned db, so it must be at
@@ -552,7 +636,19 @@ export function sqliteQuery(
         typeof (inputs.db as SqliteDbRef).id === "string")
       ? (inputs.db as SqliteDbRef).scope
       : undefined;
-    const scope = narrowestScope([outputBinding?.scope, dbScope]);
+    // CFC Phase 3.b: a read-time-clearance result is filtered to the ACTING
+    // READER, so it must never be shared across readers. Force it to (at least)
+    // per-`user` scope so each reader gets an isolated result cell — otherwise a
+    // space-scoped result cell would let one reader observe another's filtered
+    // rows (the shared cell + reader-independent request hash both leak).
+    const clearanceScope: CellScope | undefined = inputs?.readClearance
+      ? "user"
+      : undefined;
+    const scope = narrowestScope([
+      outputBinding?.scope,
+      dbScope,
+      clearanceScope,
+    ]);
 
     if (!initialized || resultScope !== scope) {
       result = makeResultCell<QueryState>(
@@ -588,6 +684,14 @@ export function sqliteQuery(
       // them re-issues the query (pre-existing queries re-hash once — benign).
       maxConfidentiality: inputs.maxConfidentiality ?? null,
       onExceed: inputs.onExceed ?? null,
+      readClearance: inputs.readClearance ?? null,
+      // Phase 3.b: a cleared result depends on WHO is asking, so the acting
+      // reader is part of the query identity (belt-and-suspenders with the
+      // per-user result scope above — a cleared result is never keyed only by
+      // the boolean). Absent for non-clearance queries so they do not re-hash.
+      clearanceReader: inputs.readClearance
+        ? (runtime.trustSnapshotProvider()?.actingPrincipal ?? null)
+        : null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
@@ -685,11 +789,17 @@ export function sqliteQuery(
             staticConfidentiality: staticConfidentialityOf(labelSchema),
             ceiling,
             onExceed: inputs.onExceed,
+            // Phase 3.b read-time clearance: the reader is the acting principal
+            // (same identity the ceiling placeholders resolve against).
+            readClearance: inputs.readClearance
+              ? { reader: runtime.trustSnapshotProvider()?.actingPrincipal }
+              : undefined,
           });
           if ("error" in rowLabels) {
             await failQuery(rowLabels.error);
             return;
           }
+          const withheld = rowLabels.withheld;
           // onExceed:"skip" — drop rows the declared ceiling does not admit
           // (a declared, observable existence release; 06-cfc.md ceiling).
           const keep = rowLabels.keep;
@@ -724,6 +834,7 @@ export function sqliteQuery(
               pending: false,
               result: resultRows,
               requestHash: hash,
+              ...(withheld !== undefined ? { withheld } : {}),
             });
             // Per-row label attachment (CFC Phase 3): each row split into its
             // own entity doc above; write each labeled row doc DIRECTLY (its

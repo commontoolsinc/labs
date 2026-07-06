@@ -93,4 +93,35 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
       )
     ).toThrow(/mutable/i);
   });
+
+  it("classifies a bracket-notation member reference against a known root", () => {
+    // Pins the quoted-bracket branch of the member-reference parser
+    // (`greet["helper"]`), which compiled bundles only reach when a pattern
+    // happens to emit bracket access — CI coverage of it was flapping
+    // run-to-run. The root binding is known, so classification succeeds.
+    const body =
+      `function () { const greet = (n) => n + 1; exports.greet = greet; exports.alias = greet["helper"]; }`;
+    const { source, statements } = bodyStatements(body);
+    const env = new Map<string, BindingInfo>();
+    expect(() =>
+      classifyModuleItems(source, "<m>", statements, env, ESM_OPTIONS)
+    ).not.toThrow();
+  });
+
+  it("rejects bracket notation with a non-string or unterminated key", () => {
+    // The parser only admits quoted keys; a computed index falls out of the
+    // member grammar and the reference is rejected as a top-level value.
+    const body =
+      `function () { const greet = (n) => n + 1; exports.greet = greet; exports.alias = greet[0]; }`;
+    const { source, statements } = bodyStatements(body);
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        ESM_OPTIONS,
+      )
+    ).toThrow(/SES mode/);
+  });
 });

@@ -9,7 +9,8 @@ import type {
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
-import { cloneCfcLabelView } from "./label-view-core.ts";
+import { cloneCfcLabelView, type IFCLabel } from "./label-view-core.ts";
+import { isOrClause, normalizeClause } from "./clause.ts";
 
 /**
  * Returns a canonical-form logical path: any leading `"value"` element
@@ -157,8 +158,24 @@ export const canonicalizeWritePolicyInput = (
       };
     case "trusted-event":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
+    // Clause-canonicalization coverage note: the digest hashes label-bearing
+    // material in two places beyond the labelMap. Carried `link-write` label
+    // views are RUNTIME-DERIVED (view merges can order alternatives
+    // differently across derivations), so their clause interiors are
+    // canonicalized here. `schema` inputs are deliberately NOT touched: a
+    // schema is a content-addressed authored artifact whose bytes are its
+    // identity (`schemaHash`) — rewriting `ifc` clause interiors inside the
+    // digest view would diverge it from the schema's own hash, and a single
+    // artifact's internal ordering is stable by construction anyway.
     case "link-write": {
-      const cfcLabelView = cloneCfcLabelView(input.cfcLabelView);
+      const cloned = cloneCfcLabelView(input.cfcLabelView);
+      const cfcLabelView = cloned === undefined ? undefined : {
+        version: cloned.version,
+        entries: cloned.entries.map((entry) => ({
+          path: entry.path,
+          label: canonicalizeCfcLabel(entry.label),
+        })),
+      };
       return {
         ...input,
         target: canonicalizeAttemptedWrite(input.target),
@@ -175,6 +192,29 @@ export const canonicalizeWritePolicyInput = (
   }
 };
 
+/**
+ * Canonical form of a label for digest purposes. Clause-INTERIOR
+ * canonicalization only: each confidentiality entry that is an OR-clause gets
+ * its alternatives deduped/sorted (and singletons unwrapped) via
+ * `normalizeClause`, so two labels differing only in alternative insertion
+ * order digest identically. The top-level entry lists (clause list, integrity
+ * set) keep their given order — flat labels pass through byte-identical, and
+ * persisted forms are never reordered by canonicalization (SC-11 idempotence
+ * comparisons stay stable).
+ */
+export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
+  const confidentiality = label.confidentiality;
+  if (
+    !Array.isArray(confidentiality) || !confidentiality.some(isOrClause)
+  ) {
+    return label;
+  }
+  return {
+    ...label,
+    confidentiality: confidentiality.map(normalizeClause),
+  };
+};
+
 export const canonicalizeCfcMetadata = (
   metadata: CfcMetadata,
 ): CfcMetadata => ({
@@ -184,8 +224,9 @@ export const canonicalizeCfcMetadata = (
     version: 1,
     entries: [...metadata.labelMap.entries].map((entry) => ({
       path: canonicalizeLogicalPath(entry.path),
-      label: entry.label,
+      label: canonicalizeCfcLabel(entry.label),
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+      ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     })).sort((left, right) => {
       const leftKey = logicalPathToPointer(left.path);
       const rightKey = logicalPathToPointer(right.path);
@@ -194,7 +235,19 @@ export const canonicalizeCfcMetadata = (
       }
       const leftOrigin = left.origin ?? "";
       const rightOrigin = right.origin ?? "";
-      return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
+      if (leftOrigin !== rightOrigin) {
+        return leftOrigin < rightOrigin ? -1 : 1;
+      }
+      // Same (path, origin) can legitimately hold per-class entries (the C2
+      // persist split writes `value` and `shape` siblings) — order by class
+      // so canonicalization stays deterministic.
+      const leftObserves = left.observes ?? "";
+      const rightObserves = right.observes ?? "";
+      return leftObserves < rightObserves
+        ? -1
+        : leftObserves > rightObserves
+        ? 1
+        : 0;
     }),
   },
 });

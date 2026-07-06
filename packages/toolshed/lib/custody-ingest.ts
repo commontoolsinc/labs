@@ -13,12 +13,16 @@ import type { FabricValue } from "@commonfabric/api";
  *
  * This replaces the per-route, hand-rolled durable-write blocks
  * (`oauth2-common.utils.ts` persistTokens/clearAuthData, the divergent
- * non-retry `plaid-oauth.utils.ts` saveAuthData) and the webhook's
- * fire-and-forget `sendToStream` (a transient overwrite, not a durable append)
- * with a single governed write. `custodyIngest.*` adds the provenance mark for
- * the ingest edges; `durableSet` / `durableUpdate` are the same governed write
- * for operator actions that are NOT ingest (clearing tokens, removing an item),
- * which must not carry the mark.
+ * non-retry `plaid-oauth.utils.ts` saveAuthData) with a single governed write.
+ * `custodyIngest.*` adds the provenance mark for the ingest edges; `durableSet`
+ * / `durableUpdate` are the same governed write for operator actions that are
+ * NOT ingest (clearing tokens, removing an item), which must not carry the mark.
+ *
+ * NOT yet migrated: the webhook path still hand-rolls its own fire-and-forget
+ * `sendToStream` (a transient, unmarked overwrite — see `webhooks.utils.ts`).
+ * Moving webhooks onto a marked, durable trail is the planned `stream`-sink
+ * follow-on of the ingest-channel work, not something this file already does —
+ * see docs/development/proposals/ingest-channels-journal-sink.md.
  *
  * The split-mint runs here: the payload is written under the ordinary member
  * identity (so the runtime gate strips any provenance atom an attacker smuggled
@@ -35,10 +39,15 @@ export type VouchedChannel = {
   /** The ingest channel — its dedicated space DID. Recorded on every mark. */
   readonly channel: string;
   /**
-   * The presenter the grant was vouched to (the external service's DID, or a
-   * stable channel-scoped identifier where the presenter has none). Recorded
-   * for audit/display; NOT enforced (audience-binding is the federation PR5
+   * The stable per-source identifier the grant was vouched to. Recorded for
+   * audit/display; NOT enforced (audience-binding is the federation PR5
    * dependency).
+   *
+   * Two conventions coexist at rest, and a new channel must follow one: a
+   * minted, token-bearing ingest channel uses its per-install `installId`
+   * (`ingest.utils.ts`); a token-less integration channel uses a fixed
+   * `did:web:commonfabric.org#<integration>` URI (OAuth:
+   * `oauth2-common.utils.ts` `oauthIngestChannel`; Plaid equivalent).
    */
   readonly audience: string;
 };

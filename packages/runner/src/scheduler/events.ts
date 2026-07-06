@@ -16,7 +16,9 @@ import type {
 import {
   isConflictRejection,
   isPermanentRejection,
+  isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { getDirectTransactionMergeableOpAddresses } from "../storage/transaction-inspection.ts";
 import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
@@ -137,6 +139,38 @@ export interface SchedulerEventQueueState {
   ) => void;
 }
 
+/**
+ * Settle an event that will never be dispatched. The onCommit contract is that
+ * it runs after the final outcome of the event, including failure — a dropped
+ * event is such an outcome. Callers awaiting onCommit (e.g. stream.send with a
+ * commit callback) would otherwise wait forever; that is how a space whose
+ * default pattern fails to instantiate turned `cf piece new` into an
+ * indefinite hang. The callback receives an aborted transaction so
+ * `tx.status()` reports `error` with the drop reason.
+ */
+function notifyEventDropped(
+  state: Pick<SchedulerEventQueueState, "runtime">,
+  args: {
+    readonly eventLink: NormalizedFullLink;
+    readonly onCommit?: QueuedEvent["onCommit"];
+  },
+  reason: string,
+): void {
+  logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  if (!args.onCommit) return;
+  const tx = state.runtime.edit();
+  tx.abort(new Error(reason));
+  try {
+    args.onCommit(tx);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in event commit callback:",
+      callbackError,
+    );
+  }
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -188,12 +222,29 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           true,
           { eventId: id, originTx: args.originTx },
         );
+      } else {
+        notifyEventDropped(
+          state,
+          args,
+          `Event dropped: no handler registered for ${args.eventLink.id} ` +
+            `and its piece could not be started`,
+        );
       }
     })();
     state.backgroundTasks.add(startTask);
     startTask.finally(() => {
       state.backgroundTasks.delete(startTask);
     });
+  } else if (!handlerFound) {
+    // Second pass after a piece start that still registered no handler for
+    // this stream (e.g. the piece "started" but its nodes failed to
+    // instantiate). Trying again won't change this, so settle the event now.
+    notifyEventDropped(
+      state,
+      args,
+      `Event dropped: no handler registered for ${args.eventLink.id} ` +
+        `after starting its piece`,
+    );
   }
 }
 
@@ -329,6 +380,15 @@ export function preflightQueuedEventDependencies(state: {
   } catch (error) {
     state.eventQueue.shift();
     state.handleError(error as Error, handler);
+    // Dropping the event here is its final outcome — settle the commit
+    // callback like the other drop paths instead of leaving callers that
+    // await it hanging.
+    notifyEventDropped(
+      state,
+      queuedEvent,
+      `Event dropped: populateDependencies threw during dependency ` +
+        `preflight for ${queuedEvent.eventLink.id}`,
+    );
     shouldSkipEvent = true;
   } finally {
     logger.timeEnd(
@@ -638,6 +698,10 @@ export async function dispatchQueuedEvent(state: {
         if (tx.status().status === "ready") {
           tx.abort(error);
         }
+        // A throwing handler is a final outcome for this event — settle the
+        // commit callback (with the aborted tx) instead of leaving callers
+        // that await it hanging.
+        runFinalCommitCallback();
       }
       return;
     }
@@ -645,6 +709,13 @@ export async function dispatchQueuedEvent(state: {
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
     const changedWrites = collectChangedWritesForTransaction(tx, log);
+    // A commit that carries a mergeable op (append/add-unique/increment/
+    // remove-by-value) represents durable, commutative user intent that cannot
+    // truly conflict. A stale-basis inconsistency — the same-replica race the
+    // space-rehydration storm produces — must not exhaust the fixed retry budget
+    // and drop that intent; it is retried within the retry window like a
+    // conflict instead (see classifyCommitDisposition).
+    const hasMergeableOps = transactionHasMergeableOps(tx);
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
@@ -673,6 +744,7 @@ export async function dispatchQueuedEvent(state: {
         result.error,
         queuedEvent,
         state.backpressure,
+        hasMergeableOps,
       );
 
       state.runtime.telemetry.submit({
@@ -840,6 +912,13 @@ function formatEventCommitAddress(address: {
   return `${address.space}/${address.id}/${address.path.join("/")}`;
 }
 
+function transactionHasMergeableOps(tx: IExtendedStorageTransaction): boolean {
+  for (const _ of getDirectTransactionMergeableOpAddresses(tx) ?? []) {
+    return true;
+  }
+  return false;
+}
+
 type CommitDisposition =
   | { kind: "success" }
   | { kind: "permanent" }
@@ -860,17 +939,28 @@ type CommitDisposition =
  *  - success: nothing more to do.
  *  - permanent: a precondition failure; never retried.
  *  - backoff / convergence-failed: a stale-basis ConflictError under
- *    contention. It backs off and retries until it lands or the retry window
- *    elapses, after which it fails terminally rather than being silently
- *    dropped. This is the backpressure path.
+ *    contention, or a stale-basis StorageTransactionInconsistent on a commit
+ *    that carries a mergeable op. It backs off and retries until it lands or the
+ *    retry window elapses, after which it fails terminally rather than being
+ *    silently dropped. This is the backpressure path.
  *  - bounded-retry / give-up: any other transient error (a handler-initiated
- *    abort, a system error). These are not contention, so backpressure would
- *    not help; they keep the fixed retriesLeft budget and stop after it.
+ *    abort, a system error). These are not a stale basis, so re-running against
+ *    fresh state would not help; they keep the fixed retriesLeft budget and stop
+ *    after it.
+ *
+ * The extra windowing for a mergeable-op commit is scoped to the stale-basis
+ * StorageTransactionInconsistent — the same-replica race the rehydration storm
+ * produces, which re-running resolves. A mergeable op is add-wins and
+ * commutative, so retrying it against fresh state is always safe and its durable
+ * intent must not be dropped when the fixed budget runs out. A non-stale-basis
+ * rejection (authorization, malformed store op, transport) still keeps the fixed
+ * budget even with a mergeable op present, since retrying cannot resolve it.
  */
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,
   policy: CommitBackpressurePolicy,
+  hasMergeableOps: boolean,
 ): CommitDisposition {
   if (!error) {
     return { kind: "success" };
@@ -878,7 +968,9 @@ function classifyCommitDisposition(
   if (isPermanentRejection(error)) {
     return { kind: "permanent" };
   }
-  if (!isConflictRejection(error)) {
+  const windowed = isConflictRejection(error) ||
+    (hasMergeableOps && isStorageTransactionInconsistent(error));
+  if (!windowed) {
     return queuedEvent.retriesLeft > 0
       ? { kind: "bounded-retry" }
       : { kind: "give-up" };

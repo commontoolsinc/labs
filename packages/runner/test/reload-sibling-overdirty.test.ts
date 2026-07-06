@@ -88,11 +88,16 @@ async function mainTsxSnapshots(runtime: Runtime) {
     ownerSpace: space,
     limit: 1000,
   });
-  return res.snapshots.filter((s) =>
-    (s.observation.actionId ?? "").includes(
-      interpreterOn ? "ri2:seg" : "main.tsx",
-    )
-  );
+  // Action ids are content-addressed (`cf:module/<hash>:<symbol>`) and path-free
+  // — the source path now lives only in the debug `.src`/`location`. This
+  // isolated runtime persists only this pattern's computeds, so the module
+  // prefix selects exactly them.
+  return res.snapshots.filter((s) => {
+    const id = s.observation.actionId ?? "";
+    return interpreterOn
+      ? id.includes("ri2:seg")
+      : id.startsWith("cf:module/");
+  });
 }
 
 function rehydrationCounts() {
