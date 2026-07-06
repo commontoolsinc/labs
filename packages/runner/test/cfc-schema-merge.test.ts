@@ -4,6 +4,52 @@ import type { JSONSchemaObj } from "../src/builder/types.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
+  // C5: `observes` is a scalar consumption class, not a set-like claim.
+  // Agreement keeps the class through a merge; any disagreement (including
+  // one covering side) merges to covering — the widest consumption, the
+  // over-taint direction (fail-safe). Dropping it on every merge would
+  // silently defeat the C5 narrowing on the common re-write path.
+  it("keeps observes when both sides agree", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        rows: {
+          type: "string",
+          ifc: { confidentiality: ["a"], observes: "value" },
+        },
+      },
+    }, {
+      type: "object",
+      properties: {
+        rows: {
+          type: "string",
+          ifc: { confidentiality: ["a"], observes: "value" },
+        },
+      },
+    }) as JSONSchemaObj;
+    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+    expect((rows.ifc as { observes?: string }).observes).toBe("value");
+  });
+
+  it("merges disagreeing observes to covering", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        rows: {
+          type: "string",
+          ifc: { confidentiality: ["a"], observes: "value" },
+        },
+      },
+    }, {
+      type: "object",
+      properties: {
+        rows: { type: "string", ifc: { confidentiality: ["a"] } },
+      },
+    }) as JSONSchemaObj;
+    const rows = (merged.properties as Record<string, JSONSchemaObj>).rows;
+    expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
+  });
+
   it("allows additive required fields when a default preserves old documents", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
