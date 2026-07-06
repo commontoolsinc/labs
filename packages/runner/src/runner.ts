@@ -1995,6 +1995,10 @@ export class Runner {
     if (isModule(pattern)) return false;
 
     const cells: Cell<any>[] = [];
+    // Argument documents (node inputs + the pattern's own argument meta doc)
+    // whose VALUES may hold links to documents nothing in this tree owns —
+    // scanned after the main sync wave (see below).
+    const argumentCells: Cell<any>[] = [];
 
     // Sync all the inputs and outputs of the pattern nodes.
     for (const node of pattern.nodes) {
@@ -2006,6 +2010,13 @@ export class Runner {
       [...inputs, ...outputs].forEach((link) => {
         cells.push(this.runtime.getCellFromLink(link));
       });
+      inputs.forEach((link) => {
+        argumentCells.push(this.runtime.getCellFromLink(link));
+      });
+    }
+    const argumentMetaLink = getMetaLink(resultCell, "argument");
+    if (argumentMetaLink) {
+      argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
     }
 
     // Sync the owned (derived internal) cells of this pattern and every nested
@@ -2057,6 +2068,69 @@ export class Runner {
         logger.time(cellSyncStart, "start", "resumeCellSync")
       );
     }));
+
+    // Second wave: argument LINK TARGETS. An argument document synced above
+    // may hold a link to a document nothing in this pattern tree owns (the
+    // profile picker's `defaultProfile` container links to a per-user doc
+    // from another lineage). A resumed computed's first run reads THROUGH
+    // those links; v2 commits first runs, so a cold target enters the commit
+    // basis at seq 0 — a guaranteed ConflictError against the durable server
+    // state (the home-rehydration reload-churn regression; v1's populate
+    // pass subscribed such targets in aborted transactions before any
+    // commit). Two levels deep — argument value → container doc → target doc
+    // is the measured chain (defaultProfile → container → per-user profile
+    // doc); deeper or wider walks were measured to add loads without
+    // removing further conflicts. Deduped, values only, schema-less doc
+    // syncs; an unloadable target is skipped rather than failing the resume.
+    const seenTargets = new Set<string>();
+    let frontier: Cell<any>[] = argumentCells;
+    for (let depth = 0; depth < 2 && frontier.length > 0; depth++) {
+      const targets: Cell<any>[] = [];
+      const targetPromises: Promise<any>[] = [];
+      const collectLinkTargets = (value: any, base: Cell<any>) => {
+        const link = parseLink(value, base);
+        if (link) {
+          const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
+          if (seenTargets.has(key)) return;
+          seenTargets.add(key);
+          const target = this.runtime.getCellFromLink(link);
+          targets.push(target);
+          const targetSyncStart = performance.now();
+          targetPromises.push(
+            Promise.resolve(target.sync())
+              .catch((error) => {
+                logger.warn("resume-argument-link-targets", () => [
+                  "argument link target sync failed; resuming without it",
+                  error,
+                ]);
+              })
+              .finally(() =>
+                logger.time(
+                  targetSyncStart,
+                  "start",
+                  "resumeArgumentLinkTargetSync",
+                )
+              ),
+          );
+        } else if (isRecord(value)) {
+          for (const key in value) collectLinkTargets(value[key], base);
+        }
+      };
+      for (const cell of frontier) {
+        try {
+          collectLinkTargets(cell.getRawUntyped(), cell);
+        } catch (error) {
+          // A shape the raw read cannot resolve contributes nothing rather
+          // than breaking the resume; log so a skipped target is diagnosable.
+          logger.warn("resume-argument-link-targets", () => [
+            "skipping a document whose raw value did not resolve",
+            error,
+          ]);
+        }
+      }
+      await Promise.all(targetPromises);
+      frontier = targets;
+    }
 
     return true;
   }
