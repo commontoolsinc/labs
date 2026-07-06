@@ -288,24 +288,36 @@ Two further responses make the keyed case cheaper and catch misuse (see
   analysis already tracks per-handler reads and the mergeable write methods. The
   `MergeablePushValidationTransformer`
   ([packages/ts-transformers/src/transformers/mergeable-push-validation.ts](../../packages/ts-transformers/src/transformers/mergeable-push-validation.ts))
-  runs that analysis over each handler and flags a handler that both reads a
-  collection (an explicit `.get()` or an iteration) and mergeable-`push`es to the
-  same collection path. The diagnostic (`mergeable-push:read-then-push`) points at
-  the identity-addressed `elementById` + `addUnique` for a uniqueness condition,
-  or at a read-modify-write `set` for other content-dependent conditions. It is a
-  warning, not an error: the kept read keeps the shape safe today (it forces the
+  runs that analysis over each handler, finds a handler that both reads a
+  collection (an explicit `.get()` or an iteration) and mergeable-`push`es to
+  the same collection path, and classifies how the read relates to the push
+  ([packages/ts-transformers/src/policy/mergeable-push-classification.ts](../../packages/ts-transformers/src/policy/mergeable-push-classification.ts)).
+  A push that *depends* on the read — through a guard (the dedup-then-push
+  shape: an enclosing condition or an earlier early-return derived from the
+  read) or through the pushed value — gets the diagnostic
+  (`mergeable-push:read-then-push`) pointing at the identity-addressed
+  `elementById` + `addUnique` for a uniqueness condition, or at a
+  read-modify-write `set` for other content-dependent appends. A read that
+  instead feeds an *independent* write to the same collection — for example
+  appending an entry and then trimming the list to a maximum length — still
+  costs the append its mergeability, so the same diagnostic fires with the
+  matching remedy: keep the independent read-modify-write in its own handler so
+  the append stays mergeable. A read related to neither the push nor another
+  write of the collection is not reported — the append forfeits merging, but
+  there is usually no better expression to point at, so warning would be noise.
+  Read influence is tracked by name through variable initializers, assignments,
+  and loop bindings, without scope analysis: over-approximation only promotes a
+  site to the dependent-push diagnosis (the diagnosis every flagged site got
+  before classification), while a missed influence demotes toward the softer
+  message or silence, never toward a wrong remedy. It is a warning, not an
+  error: the kept read keeps every flagged shape safe today (it forces the
   conflict-and-retry), so the check nudges toward the better expression without
   failing the build. A bare push with no read of that path, or a read of a
-  different path, is left alone. The analysis exposes the findings through an
-  optional `mergeablePushMisuseSink`; the read-vs-push correlation lives next to
-  the read/write classification in `capability-analysis.ts`. The lunch poll's
-  `addUser` read-then-push is the worked example the warning fires on. The check
-  is path-correlated but order- and purpose-blind: a handler that mergeable-
-  `push`es and *also* runs an independent read-modify-write on the same list —
-  for example appending an entry and then trimming the list to a maximum length —
-  trips the warning too, because the trimming read keeps the append in the
-  conflict set. The remedy there is to keep the independent read-modify-write in
-  its own handler so the append stays mergeable.
+  different path, is left alone. The analysis exposes the classified findings
+  through an optional `mergeablePushMisuseSink`; the read-vs-push correlation
+  lives next to the read/write classification in `capability-analysis.ts`. The
+  lunch poll's `addUser` read-then-push is the worked example the dependent-push
+  warning fires on: its push is both dedup-guarded and built from the read.
 
 ## Scope
 

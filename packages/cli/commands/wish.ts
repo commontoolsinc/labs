@@ -6,7 +6,7 @@ import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
 import { normalizeApiUrl, setQuietMode } from "./piece.ts";
-import { readWish } from "../lib/wish.ts";
+import { projectWishValue, readWish } from "../lib/wish.ts";
 
 /** Options the `cf wish` action receives (cliffy-parsed flags + env). */
 export interface WishCommandOptions {
@@ -91,7 +91,12 @@ export async function wishAction(
     return; // Reached only when a test injects a non-terminating exit.
   }
 
-  render(result, { json: true });
+  // Project away stream/cell handles before serializing. An object target
+  // (#profile) otherwise drags its pattern's stream handles — and through them
+  // the whole runtime object graph — into JSON (~50KB of noise). Scalar targets
+  // (#profileName etc.) and the null / --allow-empty result pass through
+  // unchanged. See projectWishValue (CT-1844).
+  render(projectWishValue(result), { json: true });
 }
 
 const description = cliText(

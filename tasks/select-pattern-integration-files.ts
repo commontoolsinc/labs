@@ -28,6 +28,7 @@ const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
   "nested-counter.test.ts": 1,
   "chat-note.test.ts": 1,
   "fetch-json.test.ts": 1,
+  "profile-embed.test.ts": 1,
 
   // shard 2
   "cfc-group-chat-demo-two-browsers.test.ts": 2,

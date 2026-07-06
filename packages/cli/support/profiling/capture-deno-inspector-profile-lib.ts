@@ -446,6 +446,10 @@ export async function captureDenoInspectorProfile(
     const text = detail.args
       .map((arg) => stringifyRemoteObject(arg))
       .join(" ");
+    if (stopReasonSent || profileStopState.ended) {
+      state.consoleMessages.push(text);
+      return;
+    }
     const profileMessage = recordConsoleProfileMessage(
       state,
       text,
