@@ -7,4 +7,6 @@ export * from "./columns.ts";
 export * from "./guard.ts";
 export * from "./schema.ts";
 export * from "./row-label.ts";
+export * from "./write-targets.ts";
 export * from "./exec.ts";
+export * from "./commit-eval.ts";

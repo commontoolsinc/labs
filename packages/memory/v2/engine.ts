@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { runWrite } from "./sqlite/exec.ts";
+import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
   patchOpChangesParentKeySet,
@@ -3291,7 +3291,8 @@ const applyCommitTransaction = (
  * Apply a folded `sqlite` op inside the commit transaction. The target cell-db
  * must already be ATTACHed by the caller (server, before applyCommit) under the
  * alias in `attachments`; unqualified names in the SQL resolve to it. Throwing
- * here (e.g. the guard rejecting DDL) rolls back the whole commit.
+ * here (e.g. the guard rejecting DDL, or a commit-time row-label violation)
+ * rolls back the whole commit.
  */
 const applySqliteOperation = (
   engine: Engine,
@@ -3308,7 +3309,11 @@ const applySqliteOperation = (
       `sqlite op for db ${op.db.id} has no attachment (server must attach before applyCommit)`,
     );
   }
-  runWrite(engine.database, op.sql, op.params);
+  // Plain guarded write — except when the db declares a per-row label rule, in
+  // which case the affected rows are read back and re-derived through the
+  // shared evaluator, rolling back the commit on any violation (CFC Phase 3.c;
+  // see sqlite/commit-eval.ts).
+  applySqliteCommitWrite(engine.database, op);
 };
 
 const writeOperation = (

@@ -13,7 +13,7 @@ import {
   blankWriteSql,
   parseWriteParamColumns,
   parseWriteTable,
-} from "./write-targets.ts";
+} from "@commonfabric/memory/sqlite/write-targets";
 
 interface ColumnIfc {
   maxConfidentiality?: readonly unknown[];

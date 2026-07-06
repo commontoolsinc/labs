@@ -7,7 +7,7 @@ import { expect } from "@std/expect";
 import {
   parseWriteParamColumns,
   parseWriteTable,
-} from "../src/builtins/sqlite/write-targets.ts";
+} from "../v2/sqlite/write-targets.ts";
 
 describe("parseWriteParamColumns — determinable shapes", () => {
   it("INSERT with explicit column list", () => {

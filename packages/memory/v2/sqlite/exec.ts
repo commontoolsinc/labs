@@ -72,7 +72,9 @@ export interface WriteResult {
 // @db/sqlite binds positional values as a rest list and named values as a single
 // record argument. Our values are already SQLite scalars (cf_link params are
 // pre-encoded to strings by the client), so the cast to BindValue is safe.
-function bindArgs(params?: SqliteParams): BindValue[] {
+// (Exported for the commit-time row-label evaluator, which prepares the same
+// wire params against its RETURNING-instrumented statement.)
+export function bindArgs(params?: SqliteParams): BindValue[] {
   if (params === undefined) return [];
   return (Array.isArray(params) ? [...params] : [params]) as BindValue[];
 }
