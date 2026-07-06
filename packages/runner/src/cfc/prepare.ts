@@ -4118,12 +4118,16 @@ export const prepareBoundaryCommit = (
       // store's DECLARED policy component at each path where it lands. The
       // policy component is the declared + legacy entries only — link/
       // derived/structure entries are per-value data components (§8.12.8),
-      // not store policy — resolved by the same per-component longest-prefix
-      // rule reads use, so the fit test measures exactly the declared floor
-      // a reader of the path is tainted with. Only the CURRENT join is
-      // measured: shape/existence atoms are historical (SC-4
-      // freeze-at-creation) and measuring them would permanently misfit
-      // clean overwrites of a store created under taint.
+      // not store policy — and of those, only the entries a VALUE read
+      // consumes (C0 §4 class selection: covering/value/shape/enumerate; a
+      // declared `observes:"followRef"` entry is pointer policy that value
+      // readers never consume, so it must not admit a value write — bot
+      // review on this PR). Resolution is the same per-component
+      // longest-prefix rule reads use, so the fit test measures exactly the
+      // declared floor a value reader of the path is tainted with. Only the
+      // CURRENT join is measured: shape/existence atoms are historical
+      // (SC-4 freeze-at-creation) and measuring them would permanently
+      // misfit clean overwrites of a store created under taint.
       // A schema declaring a covering policy in this same tx passes by
       // construction — §8.12.5's monotone-safe upgrade route; the other two
       // outs are writing to a fitting store or not writing. Link-covered
@@ -4131,7 +4135,8 @@ export const prepareBoundaryCommit = (
       // outside this v1 check, as is the pure-link-structure shape channel.
       const declaredPolicyEntries = flowConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>
-          entry.origin === undefined || entry.origin === "declared"
+          (entry.origin === undefined || entry.origin === "declared") &&
+          readConsumesEntry("value", entry)
         )
         : [];
       // SC-4, freeze-at-creation form: a path's shape (existence) entry is

@@ -230,6 +230,49 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
+  it("ignores pointer-classed declared policy for a value write under enforce-strict", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSecretSource(runtime, "writer-fit-followref-source");
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-followref-source",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      // The target's ONLY declared confidentiality is classed
+      // `observes: "followRef"` — pointer policy. Value readers never
+      // consume it (C0 §4), so it is not part of the floor a value reader
+      // is tainted with and must not serve as the writer-fit ceiling
+      // (bot review on this PR: pointer policy admitting a secret value
+      // write would under-block exactly the readers the check protects).
+      const pointerOnly = runtime.getCell(
+        signer.did(),
+        "writer-fit-followref-derived",
+        {
+          type: "object",
+          properties: { copied: { type: "string" } },
+          ifc: { confidentiality: ["secret"], observes: "followRef" },
+        },
+        tx,
+      );
+      pointerOnly.set({ copied: `${raw.secret}!` });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("names the offending clause when the declared policy only partially covers", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
