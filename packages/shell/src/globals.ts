@@ -31,7 +31,6 @@ declare global {
       includeCurrentValue?: boolean;
     }) => Promise<unknown>;
     forwardWorkerConsole?: (enabled?: boolean) => void;
-    cfcRenderCeiling?: (enabled?: boolean) => void;
     [key: string]: unknown;
   };
 }
