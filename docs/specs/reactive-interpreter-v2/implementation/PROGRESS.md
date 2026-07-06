@@ -215,3 +215,24 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   clean, needs held-window+flag-ON; suspects exonerated: resubscribe
   cancel, unmarked reads, SM closes; candidate: scheduler
   awaitSpaceSyncedWithTimeout's deliberately-orphaned synced()).
+
+- (2026-07-06) **TRANSIENT COLLECTIONS LANDED** (`cb32e2e10`,
+  D-V2-TRANSIENT-COLLECTIONS — Berni's "inner map/filter" gap, same-day).
+  Value-consumed map/filter/flatMap evaluate SEGMENT-RESIDENT: zero
+  container docs, zero per-element docs, zero coordinator actions; chained
+  pipelines cascade via the fixpoint retention walk (an admitted candidate
+  stops retaining its list input). flatMap UNLOCKED in the transient path
+  (no slots to re-key in memory — amends D-V2-FLATMAP-LEGACY, which now
+  governs only MATERIALIZED flatMap). Legacy contribute parity pinned by
+  differentials (flatMap: array→spread, defined non-array→value itself —
+  the first draft guessed "skip non-arrays" and the differential caught it
+  immediately). Retained outputs keep the materialized inline coordinators
+  (incremental updates). Gates: runner 773/773 ON + 774/774 OFF,
+  pattern-tests 87/87 ON, generated-patterns ON, chat sim 12/0 ON.
+  Also this session: const doc-fixed-point gate (`edb624ab9`, cubic P1
+  refuted+hardened, replied), resumed instantiations keep ORIGINAL legacy
+  collection nodes (dispatch `resumed` refusal), second catch-up merge
+  (C4/C5 observation classes — all three new CFC suites green flag-ON).
+  Remaining gaps: scope flow-tracking (designed, task open), exit-leak in
+  resume-append flag-ON (tracked, isolated), W5b native ops, W6 function
+  lowering, control link-emission.
