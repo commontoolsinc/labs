@@ -2504,6 +2504,105 @@ const ifcEntryAppliesToAttemptedWrite = (
   );
 };
 
+// ---------------------------------------------------------------------------
+// Epic D4 — per-write read-prefix provenance
+// (docs/specs/cfc-write-prefix-provenance.md). Each protected write is gated
+// on only the reads that could have fed it: those whose activity-clock
+// position (journalIndex) precedes the LAST write attempt whose target
+// overlaps the protected path — overlap in EITHER prefix direction, the same
+// match as floor applicability (`ifcEntryAppliesToAttemptedWrite`). This is
+// a structural precision fact of the journal order in the §8.9.1
+// decomposition class, NOT a trusted flow-precision claim: the committed
+// value of the subtree at P is fixed by its last overlapping write, so a
+// read after it provably did not feed that value (doc §4), and dropping it
+// needs no `flow-taint-precision` trust gate. The bound is deliberately NOT
+// the write's first attempt (unsound under re-attempts — doc §3's
+// counterexample: write P, read R, re-write P = f(R) would exclude R) and
+// NOT keyed on the exact address (a later write to P.child re-creates the
+// same escape one level down — doc §4).
+
+type WritePrefixBounds = {
+  /**
+   * Activity-clock bound for a protected path on `target`: the journalIndex
+   * of the last write attempt overlapping `path`, or +Infinity when the
+   * order is unknown for that path — no logged overlapping attempt (e.g. an
+   * attempted-but-unapplied write made the entry applicable) or a backend
+   * without the activity clock. +Infinity degrades to transaction-global
+   * gating: every read gates, today's conservative behavior — the fallback
+   * can only over-gate, never admit a read the sound bound would exclude.
+   */
+  boundFor(
+    target: {
+      space: MemorySpace;
+      id: URI;
+      scope: ReturnType<typeof normalizeCellScope>;
+    },
+    path: readonly string[],
+  ): number;
+};
+
+const buildWritePrefixBounds = (
+  tx: IExtendedStorageTransaction,
+): WritePrefixBounds => {
+  let byTarget:
+    | Map<string, Array<{ path: readonly string[]; journalIndex: number }>>
+    | undefined;
+  const load = () => {
+    if (byTarget !== undefined) return byTarget;
+    byTarget = new Map();
+    for (const attempt of tx.getWriteAttemptLog?.() ?? []) {
+      const raw = attempt.path;
+      // Only value-surface writes finalize user-visible values. A raw
+      // ["cfc"]/["source"] surface write is runtime bookkeeping — it never
+      // rewrites the value at a protected path, so it must not extend the
+      // path's prefix (the CFC label persistence in prepareBoundaryCommit
+      // itself appends ["cfc"] attempts after verification; counting those
+      // would also make the bound depend on prepare-internal activity). A
+      // raw path-[] write replaces the whole envelope, value included; it
+      // canonicalizes to the root path and overlaps every path in the
+      // document.
+      if (raw.length > 0 && raw[0] !== "value") continue;
+      const key = targetKey({
+        space: attempt.space,
+        id: attempt.id as URI,
+        scope: normalizeCellScope(attempt.scope),
+      });
+      let list = byTarget.get(key);
+      if (list === undefined) {
+        list = [];
+        byTarget.set(key, list);
+      }
+      list.push({
+        path: canonicalizeLogicalPath(raw),
+        journalIndex: attempt.journalIndex,
+      });
+    }
+    return byTarget;
+  };
+  return {
+    boundFor(target, path) {
+      const attempts = load().get(targetKey(target));
+      if (attempts === undefined || attempts.length === 0) return Infinity;
+      // Wildcard entries bound at their concrete prefix: every write
+      // overlapping a concrete instantiation of the pattern also overlaps
+      // the concrete prefix, so this can only raise the bound (gate more
+      // reads) — conservative.
+      const wildcardIndex = path.indexOf("*");
+      const probe = wildcardIndex === -1 ? path : path.slice(0, wildcardIndex);
+      let bound = -Infinity;
+      for (const attempt of attempts) {
+        if (
+          concretePathHasPrefix(probe, attempt.path) ||
+          concretePathHasPrefix(attempt.path, probe)
+        ) {
+          if (attempt.journalIndex > bound) bound = attempt.journalIndex;
+        }
+      }
+      return bound === -Infinity ? Infinity : bound;
+    },
+  };
+};
+
 // Structural-link provenance atoms the runtime mints when a value is
 // dereferenced / fetched. They describe HOW a value was obtained, never an
 // endorsement an author can require via requiredIntegrity.
@@ -2523,8 +2622,8 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
 // A consumed read whose label carries no confidentiality and whose integrity is
 // ENTIRELY non-endorsement provenance (a link reference / origin / a
 // current-principal claim) is structural plumbing, not a data input. It must
-// not gate a requiredIntegrity write: the transaction-global quantification
-// would otherwise false-reject an unrelated protected write (audit S7 — e.g.
+// not gate a requiredIntegrity write: the quantification would otherwise
+// false-reject an unrelated protected write (audit S7 — e.g.
 // cfc-group-chat-demo's admin grant reads adminRegistry.bootstrapAdmin.subject,
 // label [represents-principal, LinkReference], and that lookup fails the admins
 // list's requiredIntegrity:[group-chat-admin]). A read carrying ANY
@@ -2532,16 +2631,14 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
 // — that keeps the cross-cell prompt-injection screen sound (its briefing reads
 // carry confidentiality; its endorsement reads carry real integrity).
 //
-// TODO(data-flow): this exemption is an incremental scoping, not the end state
-// (both follow-ons deliberately deferred by #4015): (a) per-write data-flow
-// provenance — gate each protected write on the reads that actually fed it,
-// not the transaction-global consumed set — via the dedicated write-attempt
-// logging sketched in docs/plans/runner_cfc_implementation.md under "Potential
-// and Final Write Sets"; (b) the audit #14 vacuous-pass tightening (a
-// requiredIntegrity gate whose consumed set is empty passes today; see the
-// "vacuous-pass S7 / Wave 2 #14" row in
-// docs/specs/cfc-s16-default-transition-design.md §10), which is unsound to
-// apply without (a) — it would over-reject.
+// D4 scoped this exemption to each write's read prefix (both #4015 follow-ons
+// landed — docs/specs/cfc-write-prefix-provenance.md §5): a provenance read
+// past the last write overlapping a protected path no longer needs exempting
+// (the prefix already excludes it), so the exemption only ever fires for
+// provenance reads that could have fed the write. Provenance-only reads still
+// count as "the write had labeled input" for the #14 empty-prefix arm — the
+// group-chat admin-grant shape (provenance lookup + protected write, no
+// endorsed read, no mint) must keep committing.
 const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
   if ((label.confidentiality?.length ?? 0) > 0) return false;
   const integrity = label.integrity ?? [];
@@ -2562,24 +2659,47 @@ const verifyInputRequirements = (
   // cell). `writeAuthorizedBy` is verified per field against its authoring
   // identity, so two protected fields on the same cell written under different
   // identities are each checked against the correct one.
-  identityForPath?: (
+  identityForPath: (
     path: readonly string[],
   ) => ImplementationIdentity | undefined,
+  // D4 write-prefix provenance (docs/specs/cfc-write-prefix-provenance.md):
+  // the per-path last-overlapping-write bounds each entry's input checks
+  // quantify under.
+  prefixBounds: WritePrefixBounds,
 ): string | undefined => {
-  // The consumed reads this gate quantifies over (provenance-only reads
-  // excluded). Distinct from the egress side's transaction-global consumed
-  // set (collectConsumedConfidentiality), which keeps every labeled read.
-  // Deliberately class-blind (`consumes: "all"`): the gate is a screen over
-  // everything the tx consumed, and over-inclusive quantification is the
-  // fail-safe direction for it; per-class narrowing of consumers is C4.
+  // The labeled reads the per-entry checks below quantify over, each carrying
+  // its activity-clock position. Distinct from the egress side's consumed set
+  // (collectConsumedConfidentiality), which stays transaction-global — a sink
+  // request records no per-write provenance, so the whole consumed set is the
+  // sound over-approximation there (doc §7.4). Deliberately class-blind
+  // (`consumes: "all"`): the gate is a screen over everything the tx
+  // consumed, and over-inclusive quantification is the fail-safe direction
+  // for it; per-class narrowing of consumers is C4.
+  //
+  // Provenance-only reads are NOT filtered here (unlike before D4): the
+  // exemption is applied per entry inside the prefix, and the #14 arm needs
+  // to distinguish "no labeled input at all" from "only provenance plumbing".
   const gatedReads = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
-    ),
+    ).map((read) => ({
+      ...read,
+      // A read without a clock position (journal-less backend) is treated as
+      // preceding every write: it joins every prefix — conservative.
+      journalIndex: read.journalIndex ?? -Infinity,
+    })),
     // §8.9.2 / SC-3 (H5): the trigger reads join the gate when enabled — a
     // handler scheduled by a labeled write must satisfy requiredIntegrity even
     // if its branch never re-reads that write. Empty when the flag is off.
-    ...triggerReadSources(tx),
+    // Trigger reads have no journal position — their invalidating writes
+    // scheduled the run, so they logically precede every write in the attempt
+    // and sit at -Infinity, joining EVERY protected write's prefix (doc §4);
+    // anything else would let the scheduling channel escape the per-write
+    // gate.
+    ...triggerReadSources(tx).map((read) => ({
+      ...read,
+      journalIndex: -Infinity,
+    })),
   ].map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
@@ -2600,13 +2720,7 @@ const verifyInputRequirements = (
     // absent one (excluded above); whether metadata materialized an empty
     // entry is a persistence/sync artifact and must not decide gate
     // membership.
-    hasLabelValues(read.label) &&
-    // Provenance-only reads (link/origin/current-principal, no confidentiality)
-    // are structural plumbing, not endorsable inputs — excluding them stops the
-    // transaction-global quantification from false-rejecting unrelated
-    // protected writes (audit S7). Confidentiality- or endorsement-bearing
-    // reads stay, keeping the prompt-injection screen sound.
-    !isProvenanceOnlyConsumedLabel(read.label)
+    hasLabelValues(read.label)
   );
 
   for (const entry of walkIfcSchema(schema)) {
@@ -2648,7 +2762,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
-      identityForPath?.(entry.path),
+      identityForPath(entry.path),
     );
     const setupProjection = setupProjectionSourceMatchesValue(
       tx,
@@ -2660,8 +2774,45 @@ const verifyInputRequirements = (
       return writeAuthorizedByFailure;
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
-    if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
-      const ok = gatedReads.every((read) =>
+    const maxConfidentiality = ifc?.maxConfidentiality;
+    // D4: quantify this entry's input checks over its own read prefix —
+    // labeled reads whose clock position precedes the last write attempt
+    // overlapping this path. A read at-or-after that write provably did not
+    // feed the committed value here (structural fact, doc §4), so it no
+    // longer gates this entry. A +Infinity bound (order unknown for this
+    // path) keeps every read: transaction-global, the pre-D4 conservative
+    // behavior.
+    const bound = requiredIntegrity.length > 0 ||
+        maxConfidentiality !== undefined
+      ? prefixBounds.boundFor(target, entry.path)
+      : -Infinity;
+    const prefixLabeled = gatedReads.filter((read) =>
+      read.journalIndex < bound
+    );
+    // Provenance-only reads (link/origin/current-principal, no
+    // confidentiality) are structural plumbing, not endorsable inputs —
+    // exempting them stops the quantification from false-rejecting unrelated
+    // protected writes (audit S7), now only ever needed for reads WITHIN the
+    // prefix. Confidentiality- or endorsement-bearing reads stay, keeping
+    // the prompt-injection screen sound.
+    const gating = prefixLabeled.filter((read) =>
+      !isProvenanceOnlyConsumedLabel(read.label!)
+    );
+    // An empty gating set passes here — but it is NOT the pre-D4 vacuous
+    // pass (audit #14, "a requiredIntegrity gate whose consumed set is empty
+    // passes"). The prefix makes the empty case a sound DELEGATION: with no
+    // read that could have fed the write, the only possible endorsement is
+    // the one the written value itself carries, and that is exactly what the
+    // D3 write floor verifies (same schema entry, same derivation —
+    // `verifyWriteFloor` below) under its staged dial. Under
+    // `cfcWriteFloor:"enforce"` an empty-prefix floored write with no
+    // credited value rejects there ("write floor failed"); rejecting here
+    // too would only duplicate that reason, and rejecting UNCONDITIONALLY
+    // (dial off/observe) would break the floor's pinned byte-compat rollout
+    // — the read-side half of #14 rides the same dial as the write-side
+    // half by design.
+    if (requiredIntegrity.length > 0 && gating.length > 0) {
+      const ok = gating.every((read) =>
         cfcIntegritySatisfiesFloor(
           read.label?.integrity ?? [],
           requiredIntegrity,
@@ -2674,9 +2825,12 @@ const verifyInputRequirements = (
 
     // undefined means no ceiling; a declared (even empty) ceiling is enforced.
     // An empty ceiling is "public only": any consumed confidential atom fails.
-    const maxConfidentiality = ifc?.maxConfidentiality;
-    if (maxConfidentiality !== undefined && gatedReads.length > 0) {
-      const ok = gatedReads.every((read) =>
+    // Quantifies over the same prefix-scoped gating set as requiredIntegrity
+    // (a read past the last overlapping write cannot have fed this value);
+    // an empty set passes — a ceiling over nothing consumed is genuinely
+    // satisfied, unlike the floor's #14 arm above.
+    if (maxConfidentiality !== undefined && gating.length > 0) {
+      const ok = gating.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))
         )
@@ -3211,9 +3365,11 @@ export const loadSchemaDocument = (
 
 // Union of confidentiality atoms across every non-internal labeled read in the
 // transaction, resolved from stored labels the same way verifyInputRequirements
-// resolves them. Transaction-global by design: a sink request is built from
-// whatever the handler read, and the sink-request input does not record its own
-// read provenance, so the whole consumed set is the sound over-approximation.
+// resolves them. Transaction-global by design — deliberately NOT scoped to a
+// D4 read prefix: a sink request is built from whatever the handler read, and
+// the sink-request input does not record its own read provenance, so the whole
+// consumed set is the sound over-approximation for the egress ceiling
+// (docs/specs/cfc-write-prefix-provenance.md §7.4).
 const collectConsumedConfidentiality = (
   tx: IExtendedStorageTransaction,
 ): readonly unknown[] => {
@@ -3541,6 +3697,12 @@ export const prepareBoundaryCommit = (
 ): string[] => {
   const reasons: string[] = [];
   const state = tx.getCfcState();
+  // D4: per-target last-overlapping-write bounds over the ordered write-
+  // attempt log, built once for the whole boundary pass. Each protected
+  // write's input checks quantify over the reads in ITS prefix (see
+  // verifyInputRequirements); the egress ceiling deliberately does not
+  // (collectConsumedConfidentiality stays transaction-global).
+  const prefixBounds = buildWritePrefixBounds(tx);
   // A write to a document's ["cfc"] label-map path made outside the runtime's
   // privileged persistence scope forges the metadata that drives CFC derivation
   // for other writes (audit S18). Each was recorded at the extended-tx write
@@ -3733,6 +3895,7 @@ export const prepareBoundaryCommit = (
       verificationSchema,
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
+      prefixBounds,
     );
     // A verification failure records a reason (which rejects the whole commit
     // in enforcing modes) and skips persisting this target's declared label.
