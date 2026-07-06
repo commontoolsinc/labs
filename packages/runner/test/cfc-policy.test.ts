@@ -144,9 +144,76 @@ describe("CFC policy records (B2a)", () => {
   describe("malformed records fail closed at construction", () => {
     const cases: Array<[string, () => unknown, RegExp]> = [
       [
+        "non-array input",
+        () => buildCfcPolicySnapshot({} as unknown as never),
+        /must be an array of policy records/,
+      ],
+      [
         "non-object record",
         () => buildCfcPolicySnapshot(["nope" as unknown as never]),
         /must be an object/,
+      ],
+      [
+        "non-object rule",
+        () => buildCfcPolicySnapshot([record({ rules: ["nope"] as never })]),
+        /must be a rule object/,
+      ],
+      [
+        "non-object preCondition",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                {
+                  ...spaceReaderRule,
+                  preCondition: "nope",
+                } as unknown as never,
+              ],
+            }),
+          ]),
+        /preCondition must be an object/,
+      ],
+      [
+        "non-array guard value",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                {
+                  ...spaceReaderRule,
+                  preCondition: { integrity: "nope" },
+                } as unknown as never,
+              ],
+            }),
+          ]),
+        /preCondition\.integrity must be an array/,
+      ],
+      [
+        "missing post",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                { ...spaceReaderRule, post: undefined } as unknown as never,
+              ],
+            }),
+          ]),
+        /needs a post object/,
+      ],
+      [
+        "non-boolean dropClause",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                {
+                  ...spaceReaderRule,
+                  post: { dropClause: "yes" },
+                } as unknown as never,
+              ],
+            }),
+          ]),
+        /dropClause must be a boolean/,
       ],
       [
         "empty record id",
