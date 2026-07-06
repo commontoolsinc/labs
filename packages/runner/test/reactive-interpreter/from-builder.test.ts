@@ -238,4 +238,51 @@ describe("builder-born ROG (W2)", () => {
       value: { k: "static" },
     } as ValueRef);
   });
+
+  // Consts must be doc-normalization FIXED POINTS: legacy leaves read
+  // statics after a doc round-trip (JSON data model), evalRog feeds them
+  // directly — any value the round-trip can change refuses to legacy.
+  it("non-fixed-point consts refuse the ROG (NaN, Date, Map, holes)", () => {
+    // Prototype-bearing objects (Date, Map, ...) are NOT cases here: the
+    // builder input pipeline flattens them to plain data BEFORE recording
+    // (the same for legacy serialization), so the recorded const is
+    // legacy-equivalent by construction. The divergence class is values
+    // structuredClone would PRESERVE but the doc model would change.
+    const cases: Record<string, unknown> = {
+      nan: NaN,
+      infinity: Infinity,
+      nestedNan: { deep: [1, NaN] },
+      undefinedInArray: [1, undefined, 3],
+    };
+    for (const [name, cfg] of Object.entries(cases)) {
+      const factory = pattern<{ n: number }>((input) => ({
+        out: lift((v: { n: number; cfg: unknown }) => v.n)({
+          n: input.n,
+          cfg,
+        }),
+      }));
+      const built = getBuiltRog(factory);
+      assert(
+        built === undefined || built.rog.incomplete !== undefined,
+        `${name}: expected refusal, got a complete ROG`,
+      );
+    }
+  });
+
+  it("fixed-point consts stay: undefined object props, nested plain JSON", () => {
+    const factory = pattern<{ n: number }>((input) => ({
+      out: lift((v: { n: number; cfg: unknown }) => v.n)({
+        n: input.n,
+        cfg: {
+          a: [1, "x", true, null],
+          b: { nested: 2.5 },
+          // Legacy drops the key at the doc boundary; reads see undefined
+          // either way — a fixed point in effect.
+          dropped: undefined,
+        },
+      }),
+    }));
+    const rog = rogOf(factory);
+    assertEquals(rog.incomplete, undefined);
+  });
 });

@@ -20,7 +20,7 @@
  * a crash records a census error and yields no ROG.
  */
 
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import type {
   ICell,
   JSONSchema,
@@ -311,12 +311,50 @@ function buildRog(input: RogBuildInput): BuiltRog {
   const valueMemo = new Map<object, ValueRef>();
   const building = new Set<object>();
 
+  // Const values must be DOC-NORMALIZATION FIXED POINTS: legacy leaves read
+  // statics AFTER a doc round-trip (the JSON data model), while evalRog
+  // feeds consts to leaf fns DIRECTLY. Anything the round-trip can change —
+  // NaN/±Infinity (JSON → null), Date/Map/Set/RegExp/typed arrays/class
+  // instances (preserved by structuredClone, mangled or rejected by the doc
+  // model), bigint (JSON throws) — would make the interpreted leaf observe
+  // a different input than the legacy leaf. Refuse → the whole pattern runs
+  // legacy (fail-closed). `undefined` is a fixed point in effect only as an
+  // OBJECT PROPERTY (legacy drops the key; reads see undefined either way);
+  // in an ARRAY slot JSON nulls it, so it refuses there.
+  const isFixedPointPrimitive = (v: unknown): boolean =>
+    v === null || typeof v === "string" || typeof v === "boolean" ||
+    (typeof v === "number" && Number.isFinite(v));
+  const isPlainJsonData = (v: unknown, depth = 0): boolean => {
+    if (depth > 64) return false; // deep or cyclic: refuse
+    if (isFixedPointPrimitive(v)) return true;
+    if (Array.isArray(v)) {
+      // Sparse holes / undefined slots are NOT fixed points ([,] → null).
+      for (let i = 0; i < v.length; i++) {
+        if (!(i in v) || !isPlainJsonData(v[i], depth + 1)) return false;
+      }
+      return true;
+    }
+    // isPlainObject (prototype check), NOT isRecord: a Date/Map/class
+    // instance has no own enumerable props, so a key-walk is vacuously
+    // "plain" while the value is anything but.
+    if (isPlainObject(v)) {
+      return Object.values(v as Record<string, unknown>).every((m) =>
+        m === undefined || isPlainJsonData(m, depth + 1)
+      );
+    }
+    return false;
+  };
+
   const refForValue = (value: unknown): ValueRef | undefined => {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isCell(value)) return refForCell(value as unknown as ICell<unknown>);
     if (value === null || typeof value !== "object") {
       if (typeof value === "function") {
         incomplete.push("function_in_input");
+        return undefined;
+      }
+      if (value !== undefined && !isFixedPointPrimitive(value)) {
+        incomplete.push("non_fixed_point_const");
         return undefined;
       }
       return { kind: "const", value };
@@ -333,15 +371,16 @@ function buildRog(input: RogBuildInput): BuiltRog {
       if (!containsMappableRef(obj)) {
         // Pure static data — carry a SNAPSHOT (bot finding: legacy
         // serializes pattern inputs, so post-construction mutation of a
-        // captured object must not leak into evaluation).
-        try {
-          const ref: ValueRef = { kind: "const", value: structuredClone(obj) };
-          valueMemo.set(obj, ref);
-          return ref;
-        } catch {
-          incomplete.push("unclonable_const");
+        // captured object must not leak into evaluation). Gated to plain
+        // JSON fixed points first, so structuredClone below cannot throw
+        // and cannot smuggle values the doc model would normalize.
+        if (!isPlainJsonData(obj)) {
+          incomplete.push("non_fixed_point_const");
           return undefined;
         }
+        const ref: ValueRef = { kind: "const", value: structuredClone(obj) };
+        valueMemo.set(obj, ref);
+        return ref;
       }
       if (Array.isArray(obj)) {
         const items: ValueRef[] = [];
