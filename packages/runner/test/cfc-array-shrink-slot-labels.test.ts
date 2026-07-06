@@ -79,6 +79,14 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
       )
       .flatMap((e) => e.label.confidentiality ?? []);
 
+  const lengthValueConfidentiality = (id: string): string[] =>
+    entriesOf(id)
+      .filter((e) =>
+        e.origin === "derived" && e.observes === "value" &&
+        e.path.length === 1 && e.path[0] === "length"
+      )
+      .flatMap((e) => e.label.confidentiality ?? []);
+
   it("drops the truncated slot's link entry on shrink; survivors keep theirs", async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -124,10 +132,22 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
     // no residue of the departed member to re-import via followRef.
     const growTx = runtime.edit();
     const el2 = runtime.getCell(space, "shrink-el-2", undefined, growTx);
+    el2.get(); // a content read: carol joins the growing tx's flow join
     const lc2 = runtime.getCell(space, "shrink-list", listSchema, growTx);
     lc2.set([el0, el2]);
     expect((await growTx.commit()).ok).toBeDefined();
 
     expect(linkConfidentialityAt(listId, "1")).toEqual(["carol-secret"]);
+
+    // The grow-side twin of the shrink bug: element writes auto-extend the
+    // array, so a trailing length change no-ops and is elided from the
+    // journal — the ["length"] derived entries would then never be cleared
+    // or re-stamped, fossilizing the join that first minted them (which
+    // here was the SHRINK tx's join, containing bob). With the length
+    // change emitted before the element writes, the grow tx re-stamps
+    // ["length"] from its own join: carol present, and not the pure
+    // fossil that lacks her.
+    const lengthConf = lengthValueConfidentiality(listId);
+    expect(lengthConf).toContainEqual("carol-secret");
   });
 });

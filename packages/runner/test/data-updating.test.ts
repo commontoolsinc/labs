@@ -336,6 +336,37 @@ describe("data-updating", () => {
       expect(changes[1].value).toBe(2);
     });
 
+    it("should emit the length change before element writes on growth", () => {
+      const testCell = runtime.getCell<{ items: number[] }>(
+        space,
+        "normalizeAndDiff array growth ordering",
+        undefined,
+        tx,
+      );
+      testCell.set({ items: [1, 2] });
+      const current = testCell.key("items").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, [1, 2, 3]);
+
+      // Length first: a slot write beyond the current end auto-extends the
+      // array, which would turn a trailing length write into a no-op the
+      // write layer elides from the journal.
+      expect(changes.length).toBe(2);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("items").key("length").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(changes[0].value).toBe(3);
+      expect(
+        areNormalizedLinksSame(
+          changes[1].location,
+          testCell.key("items").key("2").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(changes[1].value).toBe(3);
+    });
+
     it("should generate correct paths when setting array length to 0", () => {
       const testCell = runtime.getCell<{ items: number[] }>(
         space,
