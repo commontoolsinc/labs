@@ -32,6 +32,7 @@ export declare const CFC_ATOM_TYPE: {
   readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";
   readonly CaveatAssessment:
     "https://commonfabric.org/cfc/atom/CaveatAssessment";
+  readonly Concept: "https://commonfabric.org/cfc/atom/Concept";
   readonly CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened";
   readonly DisclaimerAttached:
     "https://commonfabric.org/cfc/atom/DisclaimerAttached";
@@ -171,6 +172,10 @@ export type CfcDisclaimerAttachedAtom = CfcAtomObject & {
   readonly disclaimerDigest: string;
   readonly formatter?: CfcAtom;
 };
+export type CfcConceptAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Concept;
+  readonly uri: string;
+};
 export type CfcCaveatAssessmentAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.CaveatAssessment;
   readonly kind: string;
@@ -262,6 +267,7 @@ export declare const cfcAtom: {
     space: string,
     role: "owner" | "writer" | "reader",
   ) => CfcHasRoleAtom;
+  readonly concept: (uri: string) => CfcConceptAtom;
   readonly boundaryContext: (
     key: string,
     value?: string,
