@@ -4193,12 +4193,6 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
-    ensureSchemaDocument(
-      tx,
-      space,
-      schemaAndHash.taggedHashString,
-      schemaAndHash.schema,
-    );
     const metadata: CfcMetadata = {
       version: 1,
       schemaHash: schemaAndHash.taggedHashString,
@@ -4217,7 +4211,16 @@ export const prepareBoundaryCommit = (
     // reads the same inputs and derives the same labels, which must be a no-op.
     // `canonicalizeCfcMetadata` sorts entries + canonicalizes clauses, so the
     // comparison is order-insensitive and matches `cfcLabelViewsEqual`
-    // semantics.
+    // semantics. The storage layer's raw deep-equal write elision does NOT
+    // subsume this: a canonically-equal rebuild can differ from the stored
+    // form byte-wise (entry order, OR-clause alternative order), and SC-11
+    // demands equality over the canonical form (§4.1.3 c14n).
+    //
+    // Checked BEFORE ensureSchemaDocument so a skipped target writes nothing
+    // at all: canonical equality implies metadata.schemaHash ===
+    // existing.schemaHash, and that schema document was already loaded (and
+    // content-verified) via loadSchemaDocument above — it exists, so there is
+    // nothing to ensure.
     if (
       existing !== undefined &&
       deepEqual(
@@ -4228,6 +4231,12 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
+    ensureSchemaDocument(
+      tx,
+      space,
+      schemaAndHash.taggedHashString,
+      schemaAndHash.schema,
+    );
     tx.writeOrThrow({
       space,
       id,
