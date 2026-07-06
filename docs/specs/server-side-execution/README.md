@@ -67,8 +67,9 @@ The load-bearing enablers are exactly the in-flight work: persistent
 scheduler state (cheap spin-up/down of per-piece graphs), scheduler v2
 (bounded settle, static write surfaces, read-delta bookkeeping), source
 linking via the `source`/`pattern` doc annotations + content-addressed
-action identity (stale doc → producing piece → runnable action), and the
-reactive interpreter (execution density on the server). §9 is a register of the gaps that remain even after all of those
+action identity (stale doc → producing piece → runnable action; §3.3.1's
+write-path stamping is what makes the chain universal), and the reactive
+interpreter (execution density on the server). §9 is a register of the gaps that remain even after all of those
 land — the two largest are **executor authority/identity** (§9 G1–G3) and
 **the derived/source write split in the runner** (§9 G5).
 
@@ -186,16 +187,17 @@ markers (compare `observedAtSeq` against branch-head seq); and the
 **doc → readers index** derived from the persisted read sets, which is
 what lets the server answer *"commit touched doc X; which parked pieces
 have stale downstream state?"* without instantiating anything. The
-*producer* direction, by contrast, needs no index at all: it is already
-recorded on the docs themselves as the `source`/`pattern` annotation chain
-(§3.3).
+*producer* direction, by contrast, needs no index at all: it rides the
+docs themselves as the `source`/`pattern` annotation chain — the shape is
+in the data model today, and it becomes universal once §3.3.1's stamping
+ships (G6).
 
 Contribution: spin-up/spin-down becomes cheap. An idle space's graph is a
 set of observation rows; waking it is `rehydrate` + running only actions
 whose inputs moved past their `observedAtSeq`. `observedAtSeq` doubles as
 the **derived-data watermark** the reconciliation protocol needs (§5.B.4).
 
-### 3.3 Source linking (landed on main, small gaps)
+### 3.3 Source linking (identity landed; `source` stamping partial)
 
 Result cells carry `patternIdentity = {identity, symbol}`
 (`packages/runner/src/runner.ts:1014`); serialized modules/handlers carry
@@ -207,17 +209,26 @@ Merkle-verified closure with `loadPatternByIdentity` +
 (`cf:module/<hash>:<symbol>:<instanceKey>`,
 `docs/specs/action-id-per-instance-decision.md`), reload-stable.
 
-Contribution: **doc → producing piece is recorded on the docs themselves.**
-Every document envelope carries provenance annotations
-(`docs/specs/memory-v2/01-data-model.md`): a `source` short-link to the doc
-it derives from, and — on a piece's root docs — the well-known `pattern` /
-`argument` / `result` / `internal` metadata links
-(`packages/runner/src/result-utils.ts:17` writes `pattern`; the raw
-`["source"]` surface is runtime metadata, excluded from CFC flow reads,
-`packages/runner/src/cfc/prepare.ts:1159`). The reverse lookup is
-therefore a walk, not an index: **follow `source` until a doc carries
-`pattern`** — that doc is the piece root, and `pattern` +
-`patternIdentity` name the runnable module. The full catch-up path:
+Contribution: **doc → producing piece lives on the docs themselves, not in
+an index.** The document envelope defines the chain
+(`docs/specs/memory-v2/01-data-model.md`): a `source` short-link to the
+doc it derives from, and — on a piece's root docs — the well-known
+`pattern` / `argument` / `result` / `internal` metadata links. The reverse
+lookup is therefore a walk, not an index: **follow `source` until a doc
+carries `pattern`** — that doc is the piece root, and `pattern` +
+`patternIdentity` name the runnable module.
+
+Status, honestly: the *shape* is landed, the *coverage* is not.
+`pattern`/`argument`/`internal` stamping is real
+(`packages/runner/src/result-utils.ts:17` writes `pattern`), but `source`
+is an optional/legacy field the runner's write paths do not yet stamp on
+newly created docs, and the query layer's metadata traversal follows
+`cfc`/`result`/`pattern`/`argument`/`internal` but **not** `source`
+(`docs/specs/memory-v2/05-queries.md` §5.10.1). Universal `source`
+coverage is exactly what §3.3.1 builds (G6); the stamping slot already
+exists — the raw `["source"]` surface is runtime metadata excluded from
+CFC flow reads (`packages/runner/src/cfc/prepare.ts:1159`). The full
+catch-up path, once stamping ships:
 
 ```
 stale doc ──(follow `source` links)──▶ piece root doc carrying `pattern`
@@ -805,7 +816,8 @@ executor's own cross-space reads).
   piece downstream of a commit, do nothing (the doc is stale but nobody
   cares — pull semantics, now durable). When a stale doc *is* demanded,
   the `source`→`pattern` walk on the doc itself names the piece to wake
-  (§3.3), even with no scheduler state at all.
+  (§3.3), even with no scheduler state at all — contingent on G6 stamping
+  coverage for that doc.
 - **Hibernate** (idle timeout): flush observations, `closeSpace`
   (per-space teardown — landed, extended by #4115), terminate worker. The
   space's whole scheduler state is the observation rows.
@@ -927,9 +939,11 @@ Phases assume #4288 and the persistent-scheduler-state wiring land first;
 RI (#4514) accelerates but does not gate any phase.
 
 - **Phase 0 — foundations (gap closure).** Persistent-state memory tables +
-  commit wiring + doc→readers index (G4); executor principal + per-space
-  grant flow (G1/G2); in-process executor provider stage 1→2 (G0);
-  `session.interest.set` + doc-set feed behind a flag (G7).
+  commit wiring + doc→readers index (G4); tx-provenance source stamping
+  (G6 mechanism, §3.3.1) so producer walks are total before anything
+  relies on them; executor principal + per-space grant flow (G1/G2);
+  in-process executor provider stage 1→2 (G0); `session.interest.set` +
+  doc-set feed behind a flag (G7).
 - **Phase 1 — Approach A.** Executor pool serves opted-in spaces
   reactively; async executor-priority rule; bps registry folds into
   interest sets. Exit criteria: cold space catch-up ≤ seconds; zero
@@ -966,7 +980,7 @@ means a design doc/decision is required before implementation.
 | G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal), B (atom) | needs-spec (small) |
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
 | G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
-| G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no index (`source`/`pattern` chain, landed) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
+| G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no *index* once G6 lands (`source`/`pattern` chain: data-model shape landed, §3.3.1 stamping not yet shipped) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
 | G5 | Runner write split: route tx by originating action kind (rides the §3.3.1 tx provenance envelope); speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
 | G6 | Source attaching in the write path (§3.3.1: tx provenance envelope, transferred to created docs at apply) + one-time legacy audit/backfill of pre-stamping docs | catch-up completeness | needs-impl (mechanism); then audit |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
