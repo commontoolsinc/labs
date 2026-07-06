@@ -158,8 +158,6 @@
     "multiformats": "npm:multiformats@^13.3.2",
     "ses": "npm:ses@^1.15.0",
     "turndown": "npm:turndown@^7.1.2",
-    "zod": "npm:zod@^3.24.1",
-    "@lit/context": "npm:@lit/context@^1.1.5",
-    "@lit/task": "npm:@lit/task@^1.0.2"
+    "zod": "npm:zod@^3.24.1"
   }
 }

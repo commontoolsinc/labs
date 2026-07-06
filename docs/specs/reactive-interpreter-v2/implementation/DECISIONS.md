@@ -137,3 +137,28 @@ path targets the transformer-lowered ternary form.
 
 Segments coalescing around preserved legacy boundary nodes (handlers,
 effects, control) — the engagement unlock and the architecturally deep win.
+
+## D-V2-FLATMAP-LEGACY — flatMap stays a verbatim legacy boundary (2026-07-06)
+
+map and filter run on the inline-coordinator chassis; flatMap does not.
+Rationale: (a) marginal share of reactive collection usage in the corpus
+census (`op_pending` class); (b) its aggregate is a CONCAT over per-element
+ARRAYS — element output length is data-dependent, so slot identity in the
+container is not a per-element key the inline chassis can subscribe on
+(splicing on any one element's length change re-keys every downstream
+slot); (c) the payoff per implementation risk is far below map/filter,
+both of which keep per-element outputs slot-stable. Revisit only if census
+data shows flatMap contributing a non-marginal doc/node share.
+
+## D-V2-FILTER-BATCH-FIRST-PASS — inline filter's first predicate eval is coordinator-inline (2026-07-06)
+
+CFC §8.5.6.1 membership taint requires the container's first write to join
+every considered element's content label (the shape IS the secret — even
+`[]`), and later membership diffs never touch the container root again
+(slot-path writtenPaths; value no-ops skip prepare entirely). Legacy gets
+this from batch first-instantiation inside the pattern-run tx. The inline
+filter therefore evaluates an element's FIRST predicate inline in the
+coordinator's tx (content read deliberately journaled — it IS the taint),
+handing subsequent changes to the pointwise per-element effects. Coarse
+first stamp, pointwise refinement — exactly legacy's labeling contract,
+plus one-pass first settle.
