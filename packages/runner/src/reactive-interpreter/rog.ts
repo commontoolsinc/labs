@@ -232,6 +232,11 @@ export type KindDetail =
      * the fallback identity when `element` is absent). */
     elementRef?: ImplRef;
     listInput: ValueRef;
+    /** The op's `params` input, when the node declares one — needed by
+     * SEGMENT-RESIDENT (transient) evaluation, which has no inputs cell to
+     * read params from (D-V2-TRANSIENT-COLLECTIONS). Materialized
+     * coordinators keep reading params off the node inputs. */
+    params?: ValueRef;
   }
   | {
     kind: "control";
@@ -380,7 +385,10 @@ export const INTERPRETED_KINDS: ReadonlySet<OpKind> = new Set([
 export function inputsOf(op: Op): ValueRef[] {
   const extra: ValueRef[] = [];
   const d = op.detail;
-  if (d.kind === "collection") extra.push(d.listInput);
+  if (d.kind === "collection") {
+    extra.push(d.listInput);
+    if (d.params) extra.push(d.params);
+  }
   if (d.kind === "pattern") extra.push(d.argument);
   if (d.kind === "control") {
     extra.push(d.pred);

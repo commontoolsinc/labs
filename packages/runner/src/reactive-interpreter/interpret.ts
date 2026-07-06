@@ -47,6 +47,19 @@ export interface EvalContext {
   leafImpls: Map<OpId, (input: unknown) => unknown>;
   /** Inlined nested patterns' BuiltRogs by `pattern` op id. */
   children?: Map<OpId, BuiltRog>;
+  /** TRANSIENT collection ops admitted for in-memory evaluation
+   * (D-V2-TRANSIENT-COLLECTIONS): op id → the element's BuiltRog plus which
+   * child-argument fields its ROG actually reads. Absent for an op ⇒ the
+   * op is a boundary here (structural fallback, as before). */
+  collections?: Map<OpId, {
+    elementBuilt: BuiltRog;
+    usage: {
+      usesElement: boolean;
+      usesIndex: boolean;
+      usesArray: boolean;
+      usesParams: boolean;
+    };
+  }>;
   /**
    * SEED of pre-computed op values (segment evaluation): a segment's refs may
    * name producers OUTSIDE the segment (an upstream boundary's output, an
@@ -199,7 +212,10 @@ export function topoOrder(ops: Op[], internals: InternalDecl[]): Op[] {
     };
     for (const r of op.inputs) collect(r);
     const d = op.detail;
-    if (d.kind === "collection") collect(d.listInput);
+    if (d.kind === "collection") {
+      collect(d.listInput);
+      if (d.params) collect(d.params);
+    }
     if (d.kind === "pattern") collect(d.argument);
     if (d.kind === "control") {
       collect(d.pred);
@@ -360,8 +376,77 @@ export function evalRog(
           s === "pred" ? cond : resolve(s);
         return cond ? side(d.then) : side(d.else);
       }
-      case "collection":
-        throw new NotInterpretedHere("collection"); // W4 dispatch path
+      case "collection": {
+        // TRANSIENT (segment-resident) collections only — the dispatch
+        // admits an op here iff its output is value-consumed (never
+        // retained). Everything else stays a boundary node.
+        const inline = ctx.collections?.get(op.id);
+        if (!inline) throw new NotInterpretedHere("collection");
+        if (ctx.probe) return undefined;
+        const rawList = resolve(d.listInput);
+        // Legacy containers SEED [] for an undefined input list — the
+        // downstream reader's view is [], so the in-memory view matches.
+        if (rawList === undefined) return [];
+        if (!Array.isArray(rawList)) {
+          throw new Error(`${d.op} currently only supports arrays`);
+        }
+        const params = d.params !== undefined ? resolve(d.params) : undefined;
+        const { elementBuilt, usage } = inline;
+        const evalElement = (item: unknown, index: number): unknown => {
+          const argument: Record<string, unknown> = {};
+          if (usage.usesElement) argument.element = item;
+          if (usage.usesIndex) argument.index = index;
+          if (usage.usesParams) argument.params = params;
+          if (usage.usesArray) argument.array = rawList;
+          const child = evalRog(elementBuilt.rog, {
+            argument,
+            leafImpls: elementBuilt.leafImpls,
+            children: elementBuilt.children,
+            probe: ctx.probe,
+            unwrapCellForValue: ctx.unwrapCellForValue,
+          });
+          // Element errors isolate PER ELEMENT (legacy child parity) and
+          // surface on THIS op's error channel.
+          for (const err of child.errors) {
+            errors.push({ opId: op.id, error: err.error });
+          }
+          return child.result;
+        };
+        // Sparse holes: legacy coordinators SKIP holes (no run, no slot
+        // write) — the container keeps the hole, and a doc round-trip
+        // renders it as an absent entry. In memory, map preserves the hole
+        // (skipped index), filter/flatMap simply contribute nothing.
+        if (d.op === "map") {
+          const out = new Array<unknown>(rawList.length);
+          for (let i = 0; i < rawList.length; i++) {
+            if (!(i in rawList)) continue;
+            out[i] = evalElement(rawList[i], i);
+          }
+          return out;
+        }
+        if (d.op === "filter") {
+          const out: unknown[] = [];
+          for (let i = 0; i < rawList.length; i++) {
+            if (!(i in rawList)) continue;
+            if (evalElement(rawList[i], i)) out.push(rawList[i]);
+          }
+          return out;
+        }
+        // flatMap (legacy contribute parity): array → spread; defined
+        // non-array → push the value itself; undefined → contributes
+        // nothing (legacy's "pending" has no meaning in a one-pass
+        // in-memory evaluation).
+        {
+          const out: unknown[] = [];
+          for (let i = 0; i < rawList.length; i++) {
+            if (!(i in rawList)) continue;
+            const piece = evalElement(rawList[i], i);
+            if (Array.isArray(piece)) out.push(...piece);
+            else if (piece !== undefined) out.push(piece);
+          }
+          return out;
+        }
+      }
       case "pattern": {
         // INLINED pure-computation nested pattern: evaluate its sub-Rog in
         // this same action against the parent-resolved bound argument — no

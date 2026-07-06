@@ -144,9 +144,15 @@ function boundaryKindOf(
   boundaryLeafOps: ReadonlySet<OpId> | undefined,
   controlAsBoundary: boolean,
   inlinablePatternOps: ReadonlySet<OpId> | undefined,
+  inlinableCollectionOps: ReadonlySet<OpId> | undefined,
 ): Boundary["kind"] | null {
   if (op.kind === "effect") return "effect";
-  if (op.kind === "collection") return "collection";
+  if (op.kind === "collection") {
+    // TRANSIENT collections (D-V2-TRANSIENT-COLLECTIONS): the dispatch
+    // proved the output value-consumed and the element fully inlinable —
+    // segment-resident, zero docs.
+    return inlinableCollectionOps?.has(op.id) ? null : "collection";
+  }
   if (op.kind === "pattern") {
     if (inlinablePatternOps?.has(op.id)) return null;
     return inlinePurePatterns && isPureInlinablePattern(built, op.id)
@@ -203,6 +209,10 @@ export interface PartitionInput {
    * PURE (evalRog inlines the child; zero child docs). Supersedes the
    * all-or-nothing `inlinePurePatterns` for per-op precision. */
   inlinablePatternOps?: ReadonlySet<OpId>;
+  /** SPECIFIC collection ops the dispatch proved TRANSIENT (value-consumed
+   * output + fully-inlinable element): segment-resident in-memory
+   * evaluation, zero docs (D-V2-TRANSIENT-COLLECTIONS). */
+  inlinableCollectionOps?: ReadonlySet<OpId>;
 }
 
 /**
@@ -251,6 +261,7 @@ export function partition(input: PartitionInput): PartitionResult {
       input.boundaryLeafOps,
       controlAsBoundary,
       input.inlinablePatternOps,
+      input.inlinableCollectionOps,
     );
     if (k !== null) {
       isBoundary[i] = true;

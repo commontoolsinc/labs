@@ -37,7 +37,7 @@ import {
   getBuiltRogResolved,
 } from "./from-builder.ts";
 import { partition, type Segment } from "./partition.ts";
-import { evalRog } from "./interpret.ts";
+import { type EvalContext, evalRog } from "./interpret.ts";
 import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
 import {
   elementArgumentUsage,
@@ -73,6 +73,9 @@ export interface DispatchCensus {
   nodeOpsCollapsed: number;
   /** Boundary ops preserved as verbatim legacy nodes, by kind. */
   boundariesByKind: Record<string, number>;
+  /** Collection ops evaluated SEGMENT-RESIDENT (transient, zero docs —
+   * D-V2-TRANSIENT-COLLECTIONS) across interpreted patterns. */
+  transientCollections: number;
 }
 
 const census: DispatchCensus = {
@@ -82,6 +85,7 @@ const census: DispatchCensus = {
   nodeOpsSeen: 0,
   nodeOpsCollapsed: 0,
   boundariesByKind: {},
+  transientCollections: 0,
 };
 
 export function getDispatchCensus(): DispatchCensus {
@@ -95,6 +99,7 @@ export function resetDispatchCensus(): void {
   census.nodeOpsSeen = 0;
   census.nodeOpsCollapsed = 0;
   census.boundariesByKind = {};
+  census.transientCollections = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,25 +217,38 @@ export function planInterpreterDispatch(
     }
   }
 
-  // CONSUMED-AS-VALUE nested patterns inline (zero child docs — the child's
-  // value flows through the parent's existing cells): a `pattern` op whose
-  // child is fully inlinable AND whose output is never RETAINED (no direct
-  // reference from the result tree or any effect/collection/pattern op —
-  // those need the child as an addressable PIECE, the launched-child
-  // contract) evaluates in-segment via evalRog.
-  const inlinablePatternOps = findValueConsumedPatternOps(
+  // CONSUMED-AS-VALUE analysis (W6 patterns + D-V2-TRANSIENT-COLLECTIONS):
+  // a `pattern` op whose child is fully inlinable, or a `collection` op
+  // whose element is fully inlinable, whose output is never RETAINED (no
+  // direct reference from the result tree or any effect/boundary op —
+  // those need an addressable PIECE) evaluates in-segment via evalRog —
+  // zero child/container/per-element docs. Fixpoint: an admitted candidate
+  // stops retaining its own inputs, so chained pipelines
+  // (`items.filter(..).map(..)` feeding a lift) cascade.
+  const { inlinablePatternOps, inlineCollections } = findValueConsumedOps(
     built,
     options.leafTrust,
   );
 
-  const part = partition({ built, boundaryLeafOps, inlinablePatternOps });
+  const part = partition({
+    built,
+    boundaryLeafOps,
+    inlinablePatternOps,
+    inlinableCollectionOps: new Set(inlineCollections.keys()),
+  });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
 
   // Build one synthetic node per segment that collapses ≥1 node-derived op.
   const nodes: SyntheticNode[] = [];
   const collapsed = new Set<OpId>();
   for (const segment of part.segments) {
-    const seg = buildSegmentNode(pattern, built, segment, options);
+    const seg = buildSegmentNode(
+      pattern,
+      built,
+      segment,
+      options,
+      inlineCollections,
+    );
     if (seg === null) continue; // constructs-only segment: nothing to emit
     if (typeof seg === "string") return fallback(seg);
     nodes.push(seg.node);
@@ -274,6 +292,7 @@ export function planInterpreterDispatch(
   census.interpreted++;
   census.nodeOpsSeen += pattern.nodes.length;
   census.nodeOpsCollapsed += collapsed.size;
+  census.transientCollections += inlineCollections.size;
   if (RI2_DEBUG) {
     console.log(
       `[ri2] interpret: nodes=${pattern.nodes.length} ` +
@@ -289,26 +308,64 @@ export function planInterpreterDispatch(
 // Consumed-as-value nested-pattern analysis (W6).
 // ---------------------------------------------------------------------------
 
-/** Nested `pattern` ops that are safe to inline: the child is fully
- * inlinable AND every reference to the op's output is a VALUE consumption
- * by a pure op. Retention sites (→ boundary, the piece contract):
+/** Value-consumed candidates that are safe to inline into segments:
+ *   - nested `pattern` ops with a fully-inlinable child (W6);
+ *   - `collection` ops with a fully-inlinable element
+ *     (D-V2-TRANSIENT-COLLECTIONS — the whole map/filter/flatMap evaluates
+ *     in-memory; zero container/per-element docs).
+ * A candidate survives iff every reference to its output is a VALUE
+ * consumption by a pure op. Retention sites (→ boundary, the piece
+ * contract):
  *   - the result tree (the op's result cell is the pattern's observable);
- *   - any effect/collection/pattern op's refs (a handler can push/retain);
- *   - a construct that is itself retained (transitively: result-tree
- *     constructs, effect-input constructs).
+ *   - any BOUNDARY effect/collection/pattern op's refs (a handler can
+ *     push/retain; a materialized coordinator passes element CELLS);
+ *   - a construct that is itself retained (transitively).
+ * FIXPOINT: an ADMITTED candidate is a pure value consumer — it does NOT
+ * retain its own inputs — so chained pipelines cascade; a candidate that
+ * turns out retained reverts to a boundary (and its refs retain again),
+ * shrinking monotonically until stable.
  */
-function findValueConsumedPatternOps(
+interface InlineTransientCollection {
+  elementBuilt: BuiltRog;
+  usage: ReturnType<typeof elementArgumentUsage>;
+}
+
+function findValueConsumedOps(
   built: BuiltRog,
   leafTrust: DispatchOptions["leafTrust"],
-): Set<OpId> {
+): {
+  inlinablePatternOps: Set<OpId>;
+  inlineCollections: Map<OpId, InlineTransientCollection>;
+} {
   const rog = built.rog;
-  const candidates = new Set<OpId>();
+  const patternCands = new Set<OpId>();
+  const collectionCands = new Map<OpId, InlineTransientCollection>();
   for (const op of rog.ops) {
-    if (op.detail.kind !== "pattern") continue;
-    const child = built.children.get(op.id);
-    if (child && rogFullyInlinable(child, leafTrust)) candidates.add(op.id);
+    if (op.detail.kind === "pattern") {
+      const child = built.children.get(op.id);
+      if (child && rogFullyInlinable(child, leafTrust)) {
+        patternCands.add(op.id);
+      }
+    } else if (op.detail.kind === "collection") {
+      const factory = built.collectionElements.get(op.id);
+      if (factory === undefined) continue;
+      const elementBuilt = getBuiltRogResolved(factory);
+      if (!elementBuilt || !rogFullyInlinable(elementBuilt, leafTrust)) {
+        continue;
+      }
+      collectionCands.set(op.id, {
+        elementBuilt,
+        usage: elementArgumentUsage(elementBuilt),
+      });
+    }
   }
-  if (candidates.size === 0) return candidates;
+  const candidates = new Set<OpId>([
+    ...patternCands,
+    ...collectionCands.keys(),
+  ]);
+  if (candidates.size === 0) {
+    return { inlinablePatternOps: patternCands, inlineCollections: new Map() };
+  }
 
   // Producer of a ref (op id), or undefined for argument/const/result refs.
   const producerOf = (
@@ -321,38 +378,61 @@ function findValueConsumedPatternOps(
     return undefined;
   };
 
-  // RETAINED ops: transitively, anything referenced from the result tree or
-  // from a non-pure op's refs — walked through constructs (a retained
-  // construct retains every op it references).
-  const retained = new Set<OpId>();
-  const retain = (ref: import("./rog.ts").ValueRef) => {
-    const producer = producerOf(ref);
-    if (producer === undefined || retained.has(producer)) return;
-    const op = rog.ops[producer];
-    if (!op) return;
-    if (op.detail.kind === "construct") {
-      // The construct VALUE is retained ⇒ every op it references is too.
-      retained.add(producer);
-      for (const r of dependencyRefsOf(op)) retain(r);
-    } else if (op.detail.kind === "pattern") {
-      retained.add(producer);
+  const computeRetained = (): Set<OpId> => {
+    const retained = new Set<OpId>();
+    const retain = (ref: import("./rog.ts").ValueRef) => {
+      const producer = producerOf(ref);
+      if (producer === undefined || retained.has(producer)) return;
+      const op = rog.ops[producer];
+      if (!op) return;
+      if (op.detail.kind === "construct") {
+        // The construct VALUE is retained ⇒ every op it references is too.
+        retained.add(producer);
+        for (const r of dependencyRefsOf(op)) retain(r);
+      } else if (
+        op.detail.kind === "pattern" || op.detail.kind === "collection"
+      ) {
+        retained.add(producer);
+      }
+      // Other pure producers (leaf/expr/...) already consumed candidate
+      // values — their OUTPUT being retained does not retain the candidate.
+    };
+
+    retain(rog.result);
+    for (const op of rog.ops) {
+      const d = op.detail;
+      const boundaryRetainer = d.kind === "effect" ||
+        ((d.kind === "collection" || d.kind === "pattern") &&
+          !candidates.has(op.id));
+      if (!boundaryRetainer) continue;
+      for (const ref of dependencyRefsOf(op)) retain(ref);
+      if (d.kind === "effect") {
+        for (const ref of d.writeTargets) retain(ref);
+      }
     }
-    // Other pure producers (leaf/expr/...) already consumed candidate
-    // values — their OUTPUT being retained does not retain the candidate.
+    return retained;
   };
 
-  retain(rog.result);
-  for (const op of rog.ops) {
-    const d = op.detail;
-    const nonPure = d.kind === "effect" || d.kind === "collection" ||
-      d.kind === "pattern";
-    if (!nonPure) continue;
-    for (const ref of dependencyRefsOf(op)) retain(ref);
-    if (d.kind === "effect") { for (const ref of d.writeTargets) retain(ref); }
+  while (candidates.size > 0) {
+    const retained = computeRetained();
+    let changed = false;
+    for (const id of [...candidates]) {
+      if (retained.has(id)) {
+        candidates.delete(id);
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
 
-  for (const id of retained) candidates.delete(id);
-  return candidates;
+  return {
+    inlinablePatternOps: new Set(
+      [...patternCands].filter((id) => candidates.has(id)),
+    ),
+    inlineCollections: new Map(
+      [...collectionCands].filter(([id]) => candidates.has(id)),
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -494,6 +574,7 @@ function buildSegmentNode(
   built: BuiltRog,
   segment: Segment,
   options: DispatchOptions,
+  inlineCollections: ReadonlyMap<OpId, InlineTransientCollection>,
 ): SegmentEmission | null | string {
   const rog = built.rog;
   const nodeCount = pattern.nodes.length;
@@ -656,6 +737,7 @@ function buildSegmentNode(
     schemaBoundLeaves,
     segment.id,
     options,
+    inlineCollections,
   );
 
   return {
@@ -686,6 +768,7 @@ function makeSegmentImplementation(
   schemaBoundLeaves: Array<{ id: OpId; schema: unknown }>,
   segmentId: string,
   options: DispatchOptions,
+  inlineCollections: ReadonlyMap<OpId, InlineTransientCollection>,
 ) {
   return function reactiveInterpreterSegment(
     inputsCell: Cell<{
@@ -742,6 +825,7 @@ function makeSegmentImplementation(
           argument: bound.argument,
           leafImpls: built.leafImpls,
           children: built.children,
+          collections: inlineCollections as EvalContext["collections"],
           seed,
           seedByInternal,
           seedByExternal,

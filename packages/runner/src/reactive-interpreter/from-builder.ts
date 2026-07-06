@@ -651,6 +651,17 @@ function buildRog(input: RogBuildInput): BuiltRog {
     if (name !== "map" && name !== "filter" && name !== "flatMap") {
       return boundaryOp(id, outSchema, "io", name, node);
     }
+    // Capture the params ref when the node declares one: transient
+    // (segment-resident) evaluation resolves it in-memory. A declared but
+    // unmappable params keeps the node a BOUNDARY (materialized
+    // coordinators read params off the node inputs regardless).
+    const rawParams = inputField(node, "params");
+    const params = rawParams !== undefined
+      ? refForValue(rawParams)
+      : undefined;
+    if (rawParams !== undefined && !params) {
+      return boundaryOp(id, outSchema, "io", name, node);
+    }
     const opFactory = inputField(node, "op");
     const element = getBuiltRog(opFactory)?.rog;
     if (opFactory !== undefined) collectionElements.set(id, opFactory);
@@ -663,6 +674,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
         kind: "collection",
         op: name,
         listInput,
+        ...(params !== undefined && { params }),
         ...(element !== undefined && { element }),
       },
     };

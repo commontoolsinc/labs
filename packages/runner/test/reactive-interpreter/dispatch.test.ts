@@ -274,4 +274,153 @@ describe("interpreter dispatch differential (W3c)", () => {
       `expected inline filter engagement, census=${JSON.stringify(census)}`,
     );
   });
+
+  const ELEMENT_SCHEMA = {
+    type: "object",
+    properties: {
+      element: {
+        type: "object",
+        properties: { n: { type: "number" } },
+        required: ["n"],
+      },
+    },
+    required: ["element"],
+  } as const;
+
+  it("transient chained filter→map: segment-resident, zero collection boundaries", async () => {
+    // Only `total` is retained; the filter AND map outputs are transient →
+    // both evaluate in-memory inside the segment (no containers, no
+    // per-element docs, no coordinators) — D-V2-TRANSIENT-COLLECTIONS.
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const IsBig = pattern<{ element: { n: number } }>(
+          (i) => lift((v: { n: number }) => v.n > 10)({ n: i.element.n }),
+          ELEMENT_SCHEMA,
+        );
+        const Double = pattern<{ element: { n: number } }>(
+          (i) => ({ d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }) }),
+          ELEMENT_SCHEMA,
+        );
+        const kept = (input.items as unknown as {
+          filterWithPattern: (op: unknown, params: unknown) => unknown;
+        }).filterWithPattern(IsBig as unknown, {});
+        const doubled = (kept as unknown as {
+          mapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).mapWithPattern(Double as unknown, {});
+        const total = lift((v: { xs: { d: number }[] }) =>
+          v.xs.reduce((a, x) => a + x.d, 0)
+        )({ xs: doubled as never });
+        return { total };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 5 }, { n: 20 }, { n: 7 }, { n: 30 }] };
+    // Flip element 0 across the threshold: total 100 → 200.
+    const edit = {
+      path: ["items"],
+      value: [{ n: 50 }, { n: 20 }, { n: 7 }, { n: 30 }],
+    };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { total: 100 });
+    assertEquals(legacy.afterEdit, { total: 200 });
+    assert(
+      census.transientCollections >= 2,
+      `expected both collection ops transient, census=${
+        JSON.stringify(census)
+      }`,
+    );
+    // NO materialized collection boundary of either kind for this pattern.
+    assertEquals(census.boundariesByKind["collection"] ?? 0, 0);
+    assertEquals(census.boundariesByKind["collection-inlined"] ?? 0, 0);
+  });
+
+  it("transient flatMap: unlocked in-memory (materialized stays legacy)", async () => {
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        // The child result IS the per-element array (legacy spreads it).
+        const Fan = pattern<{ element: { n: number } }>(
+          (i) =>
+            lift((v: { n: number }) => [v.n, v.n * 10])({
+              n: i.element.n,
+            }),
+          ELEMENT_SCHEMA,
+        );
+        const fanned = (input.items as unknown as {
+          flatMapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).flatMapWithPattern(Fan as unknown, {});
+        const sum = lift((v: { xs: number[] }) =>
+          v.xs.reduce((a, x) => a + x, 0)
+        )({ xs: fanned as never });
+        return { sum };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 1 }, { n: 2 }] };
+    const edit = { path: ["items"], value: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { sum: 33 });
+    assertEquals(legacy.afterEdit, { sum: 66 });
+    assert(
+      census.transientCollections >= 1,
+      `expected transient flatMap, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  it("retained map output stays MATERIALIZED even when also value-consumed", async () => {
+    // `doubled` is aliased into the result AND consumed by a lift: the
+    // retention walk must keep it a materialized coordinator (the piece
+    // contract) — no transient admission.
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const Double = pattern<{ element: { n: number } }>(
+          (i) => ({ d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }) }),
+          ELEMENT_SCHEMA,
+        );
+        const doubled = (input.items as unknown as {
+          mapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).mapWithPattern(Double as unknown, {});
+        const count = lift((v: { xs: unknown[] }) => v.xs.length)({
+          xs: doubled as never,
+        });
+        return { doubled, count };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 1 }, { n: 2 }] };
+    const edit = { path: ["items"], value: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, {
+      doubled: [{ d: 2 }, { d: 4 }],
+      count: 2,
+    });
+    assertEquals(legacy.afterEdit, {
+      doubled: [{ d: 2 }, { d: 4 }, { d: 6 }],
+      count: 3,
+    });
+    assertEquals(census.transientCollections, 0);
+    assert(
+      (census.boundariesByKind["collection-inlined"] ?? 0) >= 1,
+      `expected the map to stay materialized, census=${
+        JSON.stringify(census)
+      }`,
+    );
+  });
 });
