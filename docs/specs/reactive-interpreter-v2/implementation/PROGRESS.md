@@ -161,3 +161,28 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   green, CI green with the coverage-debt override. Remaining non-marginal:
   filter/flatMap inline (~11% of reactive collection usage), control
   link-emission, W5b native ops, W6 function lowering.
+
+- (2026-07-06) **W5b inline FILTER landed** (`d0d46c7fe` + CFC fix
+  `c304e88db`). Same chassis as inline map, but the coordinator keeps the
+  ORIGINAL element links where a per-element predicate cell settled truthy
+  (undefined = pending, legacy two-pass convergence); resumed coordinators
+  degrade to the legacy builtin immediately; flatMap stays a verbatim
+  legacy boundary (marginal share — record in DECISIONS). Two traps worth
+  remembering: (1) a python string-replace silently failed and dispatch
+  kept wiring the MAP implementation for filter ops — containers full of
+  predicate booleans; always grep after scripted edits. (2) Flag-ON root
+  suite caught a REAL CFC hole the differential test can't see: the two
+  §8.5.6.1 pointwise tests isolating the container's OWN stamp (shape-only
+  reader, empty result) failed because all predicate evaluation was
+  deferred to effects — the coordinator's first container write carried an
+  empty per-tx join, and later membership diffs never touch the root
+  (slot-path-only writtenPaths; `[]`→`[]` is a value no-op). Legacy's
+  guarantee is BATCH FIRST-INSTANTIATION: predicates run inline in the
+  pattern-run tx, so the first root write joins every considered element's
+  label (coarse), refining pointwise afterwards. Fix mirrors that exactly:
+  an element's FIRST predicate evaluation runs inline in the coordinator's
+  tx (content read deliberately journaled), then hands off to the
+  pointwise effect. Side benefit: filter settles in one pass. Post-merge
+  with origin/main (#4436 content-addressed action ids; flag-aware
+  snapshot-filter resolution in the CT-1623 reload test). Gates: interpreter
+  suite 47 steps green, full post-merge sweep running.
