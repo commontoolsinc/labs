@@ -305,3 +305,123 @@ Deno.test(
     assert(input.readPaths.includes("b"));
   },
 );
+
+// --- hasUnverifiedCellUse propagation through callee summaries ---
+
+import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
+
+function createTypedProgram(
+  source: string,
+): { program: ts.Program; sourceFile: ts.SourceFile } {
+  const files: Record<string, string> = {
+    "/test.ts": source,
+    "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+  };
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    noLib: true,
+  };
+  const host: ts.CompilerHost = {
+    fileExists: (name) => files[name] !== undefined,
+    readFile: (name) => files[name],
+    directoryExists: () => true,
+    getDirectories: () => [],
+    getCanonicalFileName: (name) => name,
+    getCurrentDirectory: () => "/",
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => {},
+    getSourceFile: (name, lv) =>
+      files[name] !== undefined
+        ? ts.createSourceFile(name, files[name]!, lv, true, ts.ScriptKind.TS)
+        : undefined,
+    resolveModuleNames: (moduleNames) =>
+      moduleNames.map((name) =>
+        files[`/${name}.d.ts`] !== undefined
+          ? {
+            resolvedFileName: `/${name}.d.ts`,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          }
+          : undefined
+      ),
+  };
+  const program = ts.createProgram(["/test.ts"], options, host);
+  return { program, sourceFile: program.getSourceFile("/test.ts")! };
+}
+
+Deno.test("Interprocedural analysis propagates hasUnverifiedCellUse from callee summaries", () => {
+  const source = `import { type Cell } from "commonfabric";
+const helper = (c: Cell<{ n: number }>) => {
+  c.frobnicate();
+  return null;
+};
+const fn = (input: Cell<{ n: number }>) => {
+  helper(input);
+  return null;
+};`;
+  const { program, sourceFile } = createTypedProgram(source);
+  const checker = program.getTypeChecker();
+  const fn = findArrow(sourceFile, "fn");
+  const summary = analyzeFunctionCapabilities(fn, {
+    checker,
+    interprocedural: true,
+  });
+  const input = summary.params.find((entry) => entry.name === "input");
+  assert(input);
+
+  // The unknown cell-method call happens entirely inside the helper; the
+  // caller sees it only through the callee summary. Wildcard stays false —
+  // this is the unverified mark propagating, not the wildcard channel.
+  assertEquals(input!.hasUnverifiedCellUse, true);
+  assertEquals(input!.wildcard, false);
+});
+
+Deno.test("Interprocedural analysis does not propagate hasUnverifiedCellUse from read-only callees", () => {
+  const source = `import { type Cell } from "commonfabric";
+const helper = (c: Cell<{ n: number }>) => c.get();
+const fn = (input: Cell<{ n: number }>) => {
+  helper(input);
+  return null;
+};`;
+  const { program, sourceFile } = createTypedProgram(source);
+  const checker = program.getTypeChecker();
+  const fn = findArrow(sourceFile, "fn");
+  const summary = analyzeFunctionCapabilities(fn, {
+    checker,
+    interprocedural: true,
+  });
+  const input = summary.params.find((entry) => entry.name === "input");
+  assert(input);
+
+  assertEquals(input!.hasUnverifiedCellUse, false);
+});
+
+Deno.test("Interprocedural analysis lets wildcard subsume the unverified mark for dynamic arguments", () => {
+  const source = `import { type Cell } from "commonfabric";
+const helper = (c: Cell<{ n: number }>) => {
+  c.frobnicate();
+  return null;
+};
+const fn = (input: Cell<{ items: Record<string, { n: number }> }>, k: string) => {
+  helper(input.key("items").key(k));
+  return null;
+};`;
+  const { program, sourceFile } = createTypedProgram(source);
+  const checker = program.getTypeChecker();
+  const fn = findArrow(sourceFile, "fn");
+  const summary = analyzeFunctionCapabilities(fn, {
+    checker,
+    interprocedural: true,
+  });
+  const input = summary.params.find((entry) => entry.name === "input");
+  assert(input);
+
+  // A dynamic argument path takes the wildcard `continue` before the
+  // unverified-mark propagation. That precedence is fine for consumers,
+  // which must fail closed on either flag.
+  assertEquals(input!.wildcard, true);
+});
