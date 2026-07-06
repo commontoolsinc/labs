@@ -23,6 +23,7 @@ import {
   type SchedulerActionSnapshotCursor,
   type SessionId,
   type SqliteOperation,
+  tableDeclaresRowLabel,
 } from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
@@ -3313,7 +3314,33 @@ const applySqliteOperation = (
   // which case the affected rows are read back and re-derived through the
   // shared evaluator, rolling back the commit on any violation (CFC Phase 3.c;
   // see sqlite/commit-eval.ts).
-  applySqliteCommitWrite(engine.database, op);
+  applySqliteCommitWrite(engine.database, resolveSqliteOpOwner(engine, op));
+};
+
+/**
+ * Backfill `db.owner` (the `dbOwner()` evaluation input) for a rule-bearing
+ * sqlite op that arrived without it — a pre-3.c client's `db.exec` never sent
+ * the field, and its writes must not start failing on `dbOwner()` rules under
+ * a server-first rolling upgrade. The db handle CELL (`op.db.id`) carries the
+ * owner stamped at creation — the same value the read side resolves — so a
+ * value read of the committed handle doc recovers it. Best-effort and
+ * fail-closed: a missing doc or owner (e.g. a user/session-scoped handle this
+ * default-scope read can't see) leaves the op unchanged, and a `dbOwner()`
+ * rule then refuses as before.
+ */
+const resolveSqliteOpOwner = (
+  engine: Engine,
+  op: SqliteOperation,
+): SqliteOperation => {
+  if (
+    op.db.owner !== undefined || op.db.tables === undefined ||
+    !Object.values(op.db.tables).some(tableDeclaresRowLabel)
+  ) {
+    return op;
+  }
+  const doc = read(engine, { id: op.db.id });
+  const owner = (doc?.value as { owner?: unknown } | undefined)?.owner;
+  return typeof owner === "string" ? { ...op, db: { ...op.db, owner } } : op;
 };
 
 const writeOperation = (

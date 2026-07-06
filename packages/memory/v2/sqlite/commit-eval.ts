@@ -105,17 +105,10 @@ export function applySqliteCommitWrite(
   // `RETURNING` suffix.
   assertWriteSafe(op.sql);
 
+  // Resolve the TARGET before any shape check, mirroring the runner gate's
+  // order: a write to a rule-less table keeps the plain path whatever its
+  // shape (e.g. a CTE-fronted INSERT into a rule-less table of a mixed db).
   const blanked = blankWriteSql(op.sql);
-  const kw = blanked.match(/^\s*(insert|replace|update|delete)\b/i)?.[1]
-    ?.toUpperCase();
-  if (kw === undefined) {
-    // e.g. a CTE-fronted write — the runner gate rejects the same shape.
-    return fail(
-      "unrecognized write shape on a db that declares row-label rules " +
-        "(use a plain INSERT/UPDATE/DELETE)",
-    );
-  }
-
   const targetName = parseWriteTable(op.sql, blanked);
   if (targetName === undefined) {
     return fail(
@@ -138,6 +131,17 @@ export function applySqliteCommitWrite(
     return runWrite(db, op.sql, op.params); // rule-less target table
   }
 
+  const kw = blanked.match(/^\s*(insert|replace|update|delete)\b/i)?.[1]
+    ?.toUpperCase();
+  if (kw === undefined) {
+    // e.g. a CTE-fronted write targeting the rule-bearing table — the runner
+    // gate rejects the same shape.
+    return fail(
+      `unrecognized write shape targeting rule-bearing table ` +
+        `"${declaredKey}" (use a plain INSERT/UPDATE/DELETE)`,
+    );
+  }
+
   const spec = (declared as { rowLabel: RowLabelSpec }).rowLabel;
   const columnNames = Object.keys(
     (declared as { properties?: Record<string, unknown> }).properties ?? {},
@@ -153,7 +157,12 @@ export function applySqliteCommitWrite(
 
   if (kw === "DELETE") return runWrite(db, op.sql, op.params); // stores nothing
 
-  if (/\breturning\b/i.test(blanked)) {
+  // Scan for a pre-existing RETURNING with quoted identifiers blanked too —
+  // a column literally named `"returning"` is an identifier, not the clause
+  // (blankWriteSql only blanks strings/comments). A BARE `returning`
+  // identifier still trips this and fails closed: over-reject, never admit.
+  const identBlanked = blanked.replace(/"[^"]*"|`[^`]*`|\[[^\]]*\]/g, " ");
+  if (/\breturning\b/i.test(identBlanked)) {
     return fail(
       `a write to rule-bearing table "${declaredKey}" must not carry a ` +
         "RETURNING clause (commit-time evaluation appends its own; db.exec " +

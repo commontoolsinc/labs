@@ -31,6 +31,7 @@ import {
   MAX_ROW_LABEL_EVAL_ROWS,
   RowLabelCommitError,
 } from "../v2/sqlite/commit-eval.ts";
+import * as sqliteBarrel from "../v2/sqlite/mod.ts";
 import type { Operation } from "../v2.ts";
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
@@ -73,7 +74,14 @@ const ownerOnly = table(
   () => ({ confidentiality: all(dbOwner()) }),
 );
 
-const TABLES = { emails, staging, ownerOnly };
+// A rule-bearing table whose column is literally named `returning`: quoted
+// as an identifier it must not trip the RETURNING-clause scan.
+const rtab = table(
+  { id: "integer primary key", returning: "text" },
+  () => ({ confidentiality: all(dbOwner()) }),
+);
+
+const TABLES = { emails, staging, ownerOnly, rtab };
 const DB_ID = "of:commit-eval-db";
 const OWNER = "did:key:owner";
 
@@ -311,6 +319,68 @@ Deno.test("dbOwner() rule: owner present on the op passes, absent fails closed",
   });
 });
 
+Deno.test("a violating write hidden behind an unterminated comment still rolls back", async () => {
+  // SQLite tolerates an unterminated trailing block comment (whitespace to
+  // EOF), which SWALLOWS the appended RETURNING suffix: the DML applies but
+  // returns no rows. The returned-count === changes invariant catches it and
+  // rolls the commit back rather than under-evaluating.
+  await withAttached((engine, commitSqlite) => {
+    assertThrows(
+      () =>
+        commitSqlite(1, [
+          sqliteOp(
+            "INSERT INTO emails (from_addr, to_addrs) VALUES (?, ?) /* oops",
+            ["alice@a.example", "bob@b.example"],
+          ),
+        ]),
+      RowLabelCommitError,
+      "incomplete",
+    );
+    assertEquals(
+      runQuery(engine.database, "SELECT count(*) AS n FROM emails"),
+      [{ n: 0 }],
+    );
+  });
+});
+
+Deno.test("a pre-3.c op without owner backfills dbOwner() from the handle doc", async () => {
+  await withAttached((engine, commitSqlite) => {
+    const ownerlessOp: Operation = {
+      op: "sqlite",
+      db: { id: DB_ID, tables: TABLES }, // no `owner` — an old client's shape
+      sql: "INSERT INTO ownerOnly (note) SELECT ?",
+      params: ["hello"],
+    };
+    // Without a handle doc the owner stays unresolved: fail closed (also
+    // proves the backfill read tolerates a missing doc).
+    assertThrows(() => commitSqlite(1, [ownerlessOp]), RowLabelCommitError);
+    // Seed the db handle cell the way sqliteDatabase stamps it, then the
+    // same ownerless op resolves the owner from the committed doc.
+    commitSqlite(2, [{
+      op: "set",
+      id: DB_ID,
+      value: { value: { id: DB_ID, owner: OWNER } },
+    }]);
+    commitSqlite(3, [ownerlessOp]);
+    assertEquals(
+      runQuery(engine.database, "SELECT note FROM ownerOnly"),
+      [{ note: "hello" }],
+    );
+  });
+});
+
+Deno.test('a quoted identifier named "returning" does not trip the RETURNING scan', async () => {
+  await withAttached((engine, commitSqlite) => {
+    commitSqlite(1, [
+      sqliteOp('INSERT INTO rtab ("returning") VALUES (?)', ["x"]),
+    ]);
+    assertEquals(
+      runQuery(engine.database, 'SELECT "returning" AS r FROM rtab'),
+      [{ r: "x" }],
+    );
+  });
+});
+
 Deno.test("DELETE and rule-less-table writes stay plain on a rule-bearing db", async () => {
   await withAttached((engine, commitSqlite) => {
     commitSqlite(1, [
@@ -359,10 +429,28 @@ const bareOp = (
   params,
 });
 
+Deno.test("a CTE-fronted write to a RULE-LESS table of a mixed db keeps the plain path", () => {
+  // The target resolves BEFORE any shape check (mirroring the runner gate's
+  // order), so only rule-bearing targets pay the recognized-keyword rule.
+  const db = bareDb();
+  try {
+    const result = applySqliteCommitWrite(
+      db,
+      bareOp(
+        "WITH x(v) AS (SELECT 'ok') INSERT INTO staging (from_addr) " +
+          "SELECT v FROM x",
+      ),
+    );
+    assertEquals(result.changes, 1);
+  } finally {
+    db.close();
+  }
+});
+
 Deno.test("commit eval fails closed on the shapes it cannot attribute", () => {
   const db = bareDb();
   try {
-    // CTE-fronted write: unrecognized leading keyword.
+    // CTE-fronted write TARGETING the rule-bearing table.
     assertThrows(
       () =>
         applySqliteCommitWrite(
@@ -375,6 +463,16 @@ Deno.test("commit eval fails closed on the shapes it cannot attribute", () => {
       RowLabelCommitError,
       "unrecognized write shape",
     );
+    // A target the shared parser cannot attribute at all.
+    assertThrows(
+      () =>
+        applySqliteCommitWrite(
+          db,
+          bareOp("INSERT INTO (bad) VALUES (?)", ["x"]),
+        ),
+      RowLabelCommitError,
+      "cannot attribute",
+    );
     // Undeclared target table in a rule-bearing db.
     assertThrows(
       () =>
@@ -384,6 +482,39 @@ Deno.test("commit eval fails closed on the shapes it cannot attribute", () => {
         ),
       RowLabelCommitError,
       "undeclared table",
+    );
+    // Every rowid alias shadowed by declared columns: affected rows cannot
+    // be identified.
+    const shadowed = table(
+      { rowid: "text", _rowid_: "text", oid: "text" },
+      () => ({ confidentiality: all(dbOwner()) }),
+    );
+    assertThrows(
+      () =>
+        applySqliteCommitWrite(
+          db,
+          bareOp("INSERT INTO shadowed (rowid) VALUES (?)", ["x"], {
+            shadowed,
+          }),
+        ),
+      RowLabelCommitError,
+      "shadowed",
+    );
+    // A declared `__cf_rowid` column collides with the evaluation alias.
+    const colliding = table(
+      { id: "integer primary key", __cf_rowid: "text" },
+      () => ({ confidentiality: all(dbOwner()) }),
+    );
+    assertThrows(
+      () =>
+        applySqliteCommitWrite(
+          db,
+          bareOp("INSERT INTO colliding (__cf_rowid) VALUES (?)", ["x"], {
+            colliding,
+          }),
+        ),
+      RowLabelCommitError,
+      "collides",
     );
     // A statement that already carries RETURNING.
     assertThrows(
@@ -473,4 +604,13 @@ Deno.test("a no-op write (UPDATE matching nothing) passes without evaluation", (
   } finally {
     db.close();
   }
+});
+
+Deno.test("the sqlite barrel re-exports the shared parser and the 3.c surface", () => {
+  // `mod.ts` is the server-side aggregation point; keep the shared modules
+  // reachable through it (and their identities intact).
+  assertEquals(sqliteBarrel.MAX_ROW_LABEL_EVAL_ROWS, MAX_ROW_LABEL_EVAL_ROWS);
+  assertEquals(sqliteBarrel.applySqliteCommitWrite, applySqliteCommitWrite);
+  assertEquals(typeof sqliteBarrel.parseWriteTable, "function");
+  assertEquals(typeof sqliteBarrel.blankWriteSql, "function");
 });
