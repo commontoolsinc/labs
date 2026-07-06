@@ -1728,10 +1728,9 @@ const storedSchemaClaimsForLinkWrites = (
 const declaredObservesClass = (
   schema: JSONSchema,
 ): LabelObservationClass | undefined => {
-  if (!isRecord(schema) || !isRecord(schema.ifc)) {
-    return undefined;
-  }
-  const observes = (schema.ifc as { observes?: unknown }).observes;
+  const observes = isRecord(schema) && isRecord(schema.ifc)
+    ? (schema.ifc as { observes?: unknown }).observes
+    : undefined;
   return observes === "value" || observes === "shape" ||
       observes === "enumerate" || observes === "followRef"
     ? observes
