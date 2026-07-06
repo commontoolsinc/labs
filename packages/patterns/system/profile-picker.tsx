@@ -1,16 +1,13 @@
 import {
   computed,
-  equals,
   ifElse,
   NAME,
   pattern,
   UI,
   type VNode,
-  type WishState,
   Writable,
 } from "commonfabric";
 import ProfileCreate, {
-  profileLinkListSchema,
   profileLinkSchema,
   setDefaultProfile,
   setMruProfile,
@@ -33,9 +30,9 @@ import type { ProfileHomeOutput } from "./profile-home.tsx";
 // trusted picker-surface actions (owner-protected; see profile-create); those
 // writes reorder the builtin's candidates, which is what flips `.result`.
 //
-// The `resultIndex`/`result` computeds below duplicate the builtin's ordering
-// and are VESTIGIAL — nothing reads them anymore; kept one release for
-// compatibility, then to be deleted (CT-1829 follow-up).
+// The picker output is only `[UI]` — it does NOT surface a `result` /
+// `candidates` (the wish builtin owns those); its former `resultIndex` / `result`
+// computeds were vestigial after CT-1829 (#4512) and are removed (CT-1843).
 
 type ProfilePickerInput = {
   profiles: Writable<ProfileHomeOutput[]>;
@@ -43,40 +40,59 @@ type ProfilePickerInput = {
   mru: Writable<ProfileHomeOutput[]>;
 };
 
+// Whether two profile cells name the SAME profile — compared by the profile's
+// own SPACE, NOT by `equals` / entity id (CT-1843; mirrors the runner-side
+// `sameProfileCell` in wish.ts landed by CT-1842 #4534).
+//
+// The `defaultProfile` link and a `profiles`-list entry for the SAME profile
+// reach it through DIFFERENT links — different entity `id` (and scope) WITHIN
+// that profile's own space (the list stores one cell, the default link another).
+// `equals` compares id (and scope), so it returns false cross-space and the
+// default badge is mislabeled/omitted. The stable per-profile identity is the
+// profile's own SPACE: each profile is a distinct anonymous
+// `ProfileHome.inSpace()` whose DID is unique per user and per creation event,
+// so equal space ⇒ same profile.
+//
+// `homeSpace` guards the degenerate case: the `profiles` / `defaultProfile` /
+// `mru` container links live in the home space, so an unmaterialized / invalid
+// entry that still resolves into the home space must never match.
+//
+// Uses `getAsNormalizedFullLink().space` via the `as any` escape hatch — the
+// pattern-facing surface has no typed space accessor (precedent:
+// home-ben.tsx). Defensive: any throw / missing space ⇒ no match.
+
+// A cell's own space DID, or undefined if it isn't a resolvable link. Module
+// scope (not pattern context), so the `as any` escape hatch + `?.` are fine.
+// deno-lint-ignore no-explicit-any
+const linkSpace = (cell: unknown): string | undefined => {
+  try {
+    return (cell as any)?.getAsNormalizedFullLink?.()?.space as
+      | string
+      | undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const sameProfileCell = (
+  a: unknown,
+  b: unknown,
+  homeSpace: string | undefined,
+): boolean => {
+  const spaceA = linkSpace(a);
+  const spaceB = linkSpace(b);
+  if (!spaceA || !spaceB) return false;
+  if (spaceA === homeSpace || spaceB === homeSpace) return false;
+  return spaceA === spaceB;
+};
+
 export default pattern<
   ProfilePickerInput,
-  WishState<ProfileHomeOutput> & { [UI]: VNode }
+  { [UI]: VNode }
 >(({ profiles, defaultProfile, mru }) => {
-  // Index (into `profiles`) of the profile the wish should resolve to.
-  // Reads links as cell refs (asCell) and matches by link identity via `equals`,
-  // so a cross-space profile not yet loaded here doesn't collapse the read to
-  // `undefined` (which would mis-resolve to index 0). See profileLinkSchema.
-  const resultIndex = computed(() => {
-    const list = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
-      []) as ProfileHomeOutput[];
-    if (list.length === 0) return -1;
-    const def = (defaultProfile as any).asSchema(profileLinkSchema()).get() as
-      | ProfileHomeOutput
-      | undefined;
-    const mruList = ((mru as any).asSchema(profileLinkListSchema()).get() ??
-      []) as ProfileHomeOutput[];
-    const matchIndex = (target: ProfileHomeOutput | undefined) =>
-      target ? list.findIndex((entry) => equals(entry, target)) : -1;
-
-    // Default wins (matches headless #profile), then most-recently-used.
-    const defIdx = matchIndex(def);
-    if (defIdx >= 0) return defIdx;
-    const mruIdx = mruList.length > 0 ? matchIndex(mruList[0]) : -1;
-    if (mruIdx >= 0) return mruIdx;
-    return 0;
-  });
-
-  // Named computed so the CTS transformer leaves it intact in the return object
-  // and wish.ts can read the resolved profile via `.get()`.
-  const result = computed(() => {
-    const idx = resultIndex;
-    return idx >= 0 ? (profiles.key(idx) as any) : undefined;
-  });
+  // Home space of the `profiles`/`defaultProfile`/`mru` container links — used
+  // to reject entries that resolve into the home space (see sameProfileCell).
+  const homeSpace = linkSpace(profiles);
 
   const profileCreate = ProfileCreate({
     profiles: profiles as any,
@@ -85,8 +101,6 @@ export default pattern<
 
   return {
     [NAME]: "Choose a profile",
-    result,
-    candidates: profiles as any,
     [UI]: (
       <cf-vstack
         id="profile-picker"
@@ -108,10 +122,14 @@ export default pattern<
             </div>
             {ifElse(
               computed(() => {
+                // Read the default link as a cell REF (asCell) so a cross-space
+                // profile not yet loaded here doesn't collapse to `undefined`,
+                // then match by the profile's own SPACE (CT-1843) — `equals`
+                // returns false cross-space (different entity id + scope).
                 const def = (defaultProfile as any).asSchema(
                   profileLinkSchema(),
                 ).get();
-                return def ? equals(def, p) : false;
+                return def ? sameProfileCell(def, p, homeSpace) : false;
               }),
               <span style={{ color: "#0a7", fontSize: "12px" }}>default</span>,
               <cf-button
