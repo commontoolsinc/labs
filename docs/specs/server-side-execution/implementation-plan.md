@@ -93,7 +93,8 @@ Phase 0:  W0.1 ──▶ W0.2 ─────────────▶ W1.3
 
 Phase 1:  W1.1 ──▶ W1.2, W1.3, W1.4
 Phase 2:  W2.1 ──▶ W2.2 ──▶ W2.3 ──▶ W2.6
-                   W2.4, W2.5 (after W2.1; parallel with W2.2/2.3)
+          W2.4 (after W2.1 + W1.2); W2.5 (after W1.1) — both parallel
+          with W2.2/2.3
 ```
 
 Parallelizable start set: W0.1, W0.3, W0.4, W0.5, W0.7.
@@ -310,6 +311,11 @@ document the transaction CREATES, as the doc-level `["source"]` field.
    doc id or null, and a `cf inspect` subcommand (or extend an existing
    one) that reports, for a space: total docs / docs with terminating
    chain / orphans grouped by creator hint. This is the G6 audit tool.
+7. Server-side writers: toolshed ingest handlers (`POST /api/ingest/:id`,
+   `packages/toolshed/routes/ingest/`) populate the commit's provenance
+   with `{ source: <ingest-channel doc id> }` so the engine-side transfer
+   stamps ingest-created docs too. Sqlite-builtin result writebacks ride
+   the builtin action's own tx envelope and need no special handling.
 
 **Success criteria:**
 
@@ -340,6 +346,8 @@ document the transaction CREATES, as the doc-level `["source"]` field.
 - [ ] Audit tool: `cf inspect` walk-coverage subcommand runs against a
       seeded space fixture and prints the coverage report (golden-ish
       test on its output shape, not exact counts).
+- [ ] Ingest anchoring: a doc created through the ingest route walks to
+      the ingest-channel doc (route-handler test).
 
 **Review checklist:**
 
@@ -559,6 +567,10 @@ envelope conventions).
 - [ ] Old server + flagged client: client falls back to watch mode
       gracefully when the server rejects the unknown message (version
       tolerance test — the stale-server skew trap is real).
+- [ ] Ordering: upserts for a space are delivered and applied in
+      nondecreasing seq order under rapid commits (assert the applied
+      seq sequence is sorted). The overlay drop rule (W2.3, README
+      §5.B.4) depends on this guarantee.
 
 **Review checklist:** interest mode must not leak docs the session's ACL
 would not allow (the watch path had per-session scoping — verify the
@@ -616,8 +628,15 @@ README §6.1–§6.5.
    ~270× re-run amplification; reviewers will reject it).
 5. Hibernation: idle timer (no commits, no in-flight async for N min,
    default 10 to match the existing worker timeout) → `runtime.settled()`
-   → `closeSpace` → terminate worker. Wake = W1.3 (until then, workers
-   for registered spaces stay up).
+   → per-space storage teardown (`StorageManager.closeSpace` ships with
+   PR #4115; if unmerged when you get here, implement teardown against
+   the StorageManager seam and say so in the PR) → terminate worker.
+   Drain protocol: record the worker's last-settled seq; mark the space
+   *draining* in the pool until the worker exits; wake decisions treat
+   draining spaces as having no worker and compare incoming commits
+   against last-settled seq (W1.3), so nothing lands unseen between
+   settle and terminate. Wake = W1.3 (until then, workers for registered
+   spaces stay up).
 6. Crash isolation: worker error → report, restart with backoff, other
    spaces unaffected (worker-controller has error events already —
    extend).
@@ -644,6 +663,10 @@ README §6.1–§6.5.
       (grep-level review criterion; also assert re-run counts stay flat
       when an unrelated doc in the space changes — the amplification
       canary).
+- [ ] Drain race: a commit landing between `settled()` and worker
+      terminate triggers a respawn that catches up (force the window
+      with a test hook/delay; assert final derived state correct and
+      exactly one respawn).
 
 **Review checklist:** the demand loop must be pull-based
 (`pull()`-per-wake) as specified; check `settled()` (not `idle()`) gates
@@ -709,10 +732,14 @@ interested piece stale; irrelevant commits don't wake anything.
 
 **Steps:**
 
-1. Host-side hook: on `onSpaceCommit` for a space with no live worker,
-   run `staleReadersFor(space, changedIds, seq)` (W0.2) filtered to the
+1. Host-side hook: on `onSpaceCommit` for a space with no live worker
+   (including *draining* ones — W1.1's drain protocol), run
+   `staleReadersFor(space, changedIds, seq)` (W0.2) filtered to the
    registered piece set; non-empty → `ensureSpace(space)` (W1.1) and
-   hand the worker the stale piece list for targeted pulls.
+   hand the worker the stale piece list for targeted pulls. For a
+   draining space, additionally wake when `seq >` the recorded
+   last-settled seq even before the readers query (cheap guard against
+   losing the race).
 2. Debounce: batch wake decisions per space per refresh tick (reuse the
    5ms dirty-batch cadence; do not add a new timer).
 3. Metrics: counters for wakes, suppressed (no-reader) commits, catch-up
@@ -768,6 +795,12 @@ Phase exit criteria:
 - E2.d Flag-off spaces byte-identical to main behavior (differential CI
   job).
 
+Deliberately NOT a Phase-2 WO: the executor-computed endorsement atom
+(G1's second half). It needs a small CFC-owned spec first
+(`writeAuthorizedBy`/integrity machinery); B's flip does not depend on
+it. Coordinate with CFC owners when Phase 2 starts so the spec is ready
+by Phase 4.
+
 ### W2.1 — Ownership bit + client honoring skeleton
 
 **Depends on:** W0.4.
@@ -805,9 +838,12 @@ client-committed in this phase);
 **Steps:**
 
 1. Overlay structure on the replica: per doc,
-   `{ value, basisLocalSeq, generation }` layered above confirmed state
-   for all local reads; dropped en masse per doc on watermark (W2.3) or
-   on authority flip.
+   `{ value, basis, generation }` layered above confirmed state for all
+   local reads; `basis` = the latest of the client's OWN source commits
+   the recompute consumed (its localSeq until confirmation, then the
+   assigned seq — README §5.B.4 rule 1). Dropped en masse per doc on
+   watermark (W2.3), on basis-commit rejection (§5.B.4 rule 4), or on
+   authority flip.
 2. Routing decision at commit-enqueue time, from
    `tx.provenance.action.kind` + target address scope + the W2.1 getter.
    Scoped-address writes (user/session) bypass routing (commit as
@@ -872,6 +908,13 @@ counter live.
 - [ ] Watermark integrity: W equals the max input seq the producing
       action consumed (assert against the observation row from W0.1 —
       they must be the same number, same source).
+- [ ] Multi-commit basis: two rapid source writes with assigned seqs
+      S1 < S2; overlay reflects both (basis S2); an executor derived
+      commit with S1 ≤ W < S2 does NOT drop the overlay, W ≥ S2 does
+      (pins §5.B.4 rules 1–3).
+- [ ] Rejected basis: a source commit that conflicts and retries →
+      overlay generations based on it are discarded, post-retry state
+      converges to the executor's recompute (pins §5.B.4 rule 4).
 
 **Review checklist:** the drop rule must compare against the
 CONFIRMATION-assigned seq of the client's own source commit (not

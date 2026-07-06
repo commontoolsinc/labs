@@ -117,7 +117,8 @@ per-space ACL `OWNER/WRITE/READ`). Clients register *graph queries* via
 after `SUBSCRIPTION_REFRESH_DELAY_MS = 5` (`packages/memory/v2/server.ts:92`),
 walks all connections × sessions whose watch is affected and **re-runs each
 session's graph query** against live state
-(`refreshTrackedGraph`, `packages/memory/v2/server.ts:2223`). There is no
+(`refreshTrackedGraph`, call site `packages/memory/v2/server.ts:2224`,
+imported at :67). There is no
 query-result caching; cost is O(dirty commits × affected sessions ×
 graph-traversal). This is the cost the redesign wants to remove — and it is
 also *duplicated* state: the query describes the client's dependency
@@ -501,15 +502,28 @@ Client state per doc: `confirmed(seq)` from the feed, `overlay(gen)` from
 local speculation, plus its own pending source commits (localSeq). Rules:
 
 1. Client applies its own source write locally → recomputes derived into
-   overlay generation `g`, tagged "based on my source commit `L`".
-2. Server-derived commits arrive on the feed with watermark `W` = max input
-   seq consumed. The client's source commit `L` was assigned global seq
-   `S(L)` at confirmation (the confirmation already returns this).
+   an overlay generation whose **basis** is the *latest* of the client's
+   own source commits the recompute consumed (with several in-flight
+   source commits, an overlay value reflecting L1 and L2 has basis L2).
+2. Server-derived commits arrive on the feed with watermark `W` = the max
+   input seq the producing action consumed. `W` is per derived commit
+   (per producing tx) and applies to the docs that commit writes. The
+   client's source commit `L` was assigned global seq `S(L)` at
+   confirmation (the confirmation already returns this); an overlay whose
+   basis commit is still unconfirmed cannot be dropped yet — its `S(L)`
+   does not exist until confirmation.
 3. For a derived doc: drop overlay entries whose basis `S(L) ≤ W` — the
    server has seen everything the speculation was predicting. If `W <
    S(L)`, keep the overlay (server hasn't caught up to my write yet); the
    confirmed value updates underneath and the overlay recomputes from it.
-4. Divergence (overlay ≠ confirmed at drop time) is *expected occasionally*
+   Feed application is in nondecreasing seq order (a memory-v2 session
+   guarantee the interest feed must preserve — G7/W0.7), so the rule
+   never observes watermarks out of order.
+4. A source commit that is **rejected** (conflict → handler retry)
+   invalidates overlay generations based on it: discard them; the
+   post-retry recompute creates a fresh generation based on the retried
+   commit's newly assigned seq.
+5. Divergence (overlay ≠ confirmed at drop time) is *expected occasionally*
    (cross-client interleaving, nondeterminism) and resolves in favor of the
    server silently; it is a metrics counter, not an error.
 
@@ -607,7 +621,12 @@ Two consequences elsewhere in the stack:
   per-space runtime switch, not a deploy — it is also the migration lever
   (§8). Anti-flap: the switch is sticky per epoch so clients and executor
   don't disagree about who owns derived data (G5b: the ownership bit lives
-  in space config, versioned by seq like everything else).
+  in space config, versioned by seq like everything else). Flips are
+  eventually consistent: clients act when they *observe* the new config
+  through the feed, so a brief dual-writer window exists in either
+  direction; ordinary conflict resolution plus the executor's recompute
+  make it converge, and v1 adds no server-side epoch fencing on commit
+  admission (revisit only if measured flip churn warrants it).
 - **Client offline:** source writes queue (pending commits), overlay keeps
   the UI coherent; on reconnect the server catches up. True offline
   (persisted pending queue) remains a separate, orthogonal gap — the
@@ -772,7 +791,7 @@ A space is *active* when any of:
 
 1. a client session declares interest — the client already knows its open
    pieces (space root pattern + navigated piece); a new
-   `session.interest.set {space, pieceIds | "*"}` message replaces
+   `session.interest.set {space, pieces: <ids> | "*"}` message replaces
    `session.watch.set` (G7). `.pull()`-driven fine-grained interest is a
    later refinement — pull is one-shot today
    (`packages/runner/src/cell.ts:1032`) and there is no standing pulled-set
@@ -818,9 +837,14 @@ executor's own cross-space reads).
   the `source`→`pattern` walk on the doc itself names the piece to wake
   (§3.3), even with no scheduler state at all — contingent on G6 stamping
   coverage for that doc.
-- **Hibernate** (idle timeout): flush observations, `closeSpace`
-  (per-space teardown — landed, extended by #4115), terminate worker. The
-  space's whole scheduler state is the observation rows.
+- **Hibernate** (idle timeout): flush observations, tear down the space's
+  storage (`StorageManager.closeSpace` — in-flight with PR #4115, not on
+  main), terminate worker. The space's whole scheduler state is the
+  observation rows. Hibernation records the worker's last-settled seq and
+  marks the space *draining* until the worker exits; wake decisions treat
+  draining spaces as having no worker and compare incoming commits
+  against the last-settled seq, so a commit racing the drain triggers an
+  immediate respawn instead of being lost.
 
 ### 6.6 Isolation and resources
 
@@ -979,7 +1003,7 @@ means a design doc/decision is required before implementation.
 | # | Gap | Blocks | Status |
 | --- | --- | --- | --- |
 | G0 | Executor-grade in-process storage provider (engine-thread channel; commit-stream invalidations instead of watch) | A | needs-impl; `loopback` + `emulate` prove the seam |
-| G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal), B (atom) | needs-spec (small) |
+| G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal); atom: Phase 2+ hardening, not a B-flip blocker | principal: needs-spec (small); atom: own CFC-owned mini-spec |
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
 | G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
 | G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no *index* once G6 lands (`source`/`pattern` chain: data-model shape landed, §3.3.1 stamping not yet shipped) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
