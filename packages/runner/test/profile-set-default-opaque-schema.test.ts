@@ -2,9 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { fromFileUrl } from "@std/path";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 
 // CT-1845 (pattern-level guard): the home `defaultProfile` slot must declare an
 // OPAQUE link schema, NOT the walkable `ProfileHomeOutput`.
@@ -41,18 +43,74 @@ const createRuntime = () => {
   return { runtime, storageManager };
 };
 
-const compileHomePattern = async (runtime: Runtime) => {
+const compilePattern = async (runtime: Runtime, rel: string) => {
   const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
     /\/$/,
     "",
   );
-  const sourcePath =
-    new URL("../../patterns/system/home.tsx", import.meta.url).pathname;
+  const sourcePath = new URL(rel, import.meta.url).pathname;
   const program = await runtime.harness.resolve(
     new FileSystemProgramResolver(sourcePath, repoRoot),
   );
   return await runtime.patternManager.compilePattern(program);
 };
+
+const compileHomePattern = (runtime: Runtime) =>
+  compilePattern(runtime, "../../patterns/system/home.tsx");
+
+// A wrapper that imports the REAL `setDefaultProfile` handler from profile-create.tsx and
+// exposes ITS binding as a top-level output node, so the handler's argument
+// schema (the write-authorization schema CFC walks at runtime) lands in
+// `pattern.nodes[].module.argumentSchema` for inspection. This reaches the
+// ACTUAL walked write target — the handler's own declared `defaultProfile` state
+// param — which is NOT a top-level node of the real profile-picker.tsx (there it
+// is created inside the rendered onClick VNode).
+const sysDir = fromFileUrl(new URL("../../patterns/system/", import.meta.url));
+const read = (n: string) => Deno.readTextFileSync(sysDir + n);
+
+// The wrapper deliberately does NOT depend on any fix-only exported type: it
+// binds `setDefaultProfile` with `as any` state, so it compiles on origin/main
+// too. What's inspected is the REAL handler's OWN declared argument schema
+// (profile-create.tsx `setDefaultProfile` state param) — the fix's lever — so
+// the test is ASSERTION-gated (walkable vs opaque), never compile-gated.
+const HANDLER_WRAPPER_SRC = [
+  "import ProfileCreate, {",
+  "  setDefaultProfile,",
+  "} from './profile-create.tsx';",
+  "import { pattern, Writable } from 'commonfabric';",
+  "import type { ProfileHomeOutput } from './profile-home.tsx';",
+  "",
+  "type WrapperOutput = {",
+  "  profiles: Writable<ProfileHomeOutput[]>;",
+  "  defaultProfile: unknown;",
+  "  setDefaultBinding: unknown;",
+  "};",
+  "",
+  "export default pattern<Record<never, never>, WrapperOutput>(() => {",
+  "  const profiles = new Writable<ProfileHomeOutput[]>([]).for('profiles');",
+  "  const defaultProfile = new Writable<Record<never, never> | undefined>(",
+  "    undefined,",
+  "  ).for('defaultProfile');",
+  "  ProfileCreate({ profiles });",
+  "  return {",
+  "    profiles: profiles as any,",
+  "    defaultProfile: defaultProfile as any,",
+  "    setDefaultBinding: setDefaultProfile({",
+  "      defaultProfile: defaultProfile as any,",
+  "      profile: profiles.key(0) as any,",
+  "    }),",
+  "  };",
+  "});",
+].join("\n");
+
+const handlerWrapperProgram = (): RuntimeProgram => ({
+  main: "/main.tsx",
+  files: [
+    { name: "/main.tsx", contents: HANDLER_WRAPPER_SRC },
+    { name: "/profile-create.tsx", contents: read("profile-create.tsx") },
+    { name: "/profile-home.tsx", contents: read("profile-home.tsx") },
+  ],
+});
 
 // Every path (relative to the given root schema) that carries an owner-protected
 // `writeAuthorizedBy` claim, resolving local `$ref`s against `$defs` exactly as
@@ -111,6 +169,71 @@ describe("profile set-default OPAQUE slot schema (REAL home.tsx) — CT-1845", (
       expect(ownerProtected).not.toContain("name");
       expect(ownerProtected).not.toContain("bio");
       expect(ownerProtected.length).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // THE walked site: at RUNTIME CFC derives the write-authorization schema for
+  // the `setDefaultProfile` write from the HANDLER's OWN declared argument schema
+  // — the `defaultProfile` state param — which becomes the `asCell:["writeonly"]`
+  // write target. This compiles a wrapper that exposes the REAL
+  // `setDefaultProfile` binding as a top-level node (so its argument schema lands
+  // in `pattern.nodes[].module.argumentSchema`) and asserts that write target is
+  // opaque — carries NO owner-protected `/avatar`/`name`/`bio` to walk.
+  //
+  // Pre-fix the handler's state param is `Writable<ProfileHomeOutput |
+  // undefined>`, so the write target is `anyOf:[undefined,{$ref:ProfileHomeOutput}]`
+  // — walkable owner-protected `/avatar` present — RED. Post-fix it is the opaque
+  // `DefaultProfileCell` — bare `{asCell:["writeonly"]}` — GREEN. This is the
+  // tightest headless proxy for the in-browser overwrite (which can't run
+  // end-to-end headlessly: the picker `.map` handler binding collapses distinct
+  // rows to one shared argument-cell redirect, so a full overwrite drive silently
+  // no-ops). The wrapper mirrors the picker binding
+  // (`setDefaultProfile({ defaultProfile, profile })`) exactly.
+  it("the setDefaultProfile handler's write target is opaque (no owner-protected /avatar)", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const wrapper = await runtime.patternManager.compilePattern(
+        handlerWrapperProgram(),
+      );
+      // deno-lint-ignore no-explicit-any
+      const nodes = (wrapper as any).nodes as Array<{
+        // deno-lint-ignore no-explicit-any
+        module?: { wrapper?: string; argumentSchema?: any };
+      }>;
+      expect(Array.isArray(nodes)).toBe(true);
+
+      // Every handler node whose `$ctx` (handler state) declares a
+      // `defaultProfile` write target — i.e. the `setDefaultProfile` binding. The
+      // handler's state lives under `argumentSchema.properties.$ctx`; the
+      // `defaultProfile` there is the `asCell:["writeonly"]` write target CFC
+      // walks at runtime.
+      const defaultWriteTargets = nodes
+        .map((n) => n.module?.argumentSchema)
+        .filter((schema) => schema && typeof schema === "object")
+        .map((schema) => ({
+          root: schema,
+          ctx: schema.properties?.$ctx,
+        }))
+        .filter(({ ctx }) =>
+          ctx && typeof ctx === "object" &&
+          ctx.properties?.defaultProfile !== undefined
+        );
+      // The wrapper binds setDefaultProfile exactly once.
+      expect(defaultWriteTargets.length).toBeGreaterThan(0);
+
+      for (const { root, ctx } of defaultWriteTargets) {
+        const slot = ctx.properties.defaultProfile;
+        // Resolve `$ref`s against the ARGUMENT schema's `$defs` (where the
+        // handler's referenced types live).
+        const ownerProtected = collectOwnerProtectedPaths(root, slot);
+        expect(ownerProtected).not.toContain("avatar");
+        expect(ownerProtected).not.toContain("name");
+        expect(ownerProtected).not.toContain("bio");
+        expect(ownerProtected.length).toBe(0);
+      }
     } finally {
       await runtime.dispose();
       await storageManager.close();
