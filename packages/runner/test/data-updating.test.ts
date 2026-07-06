@@ -1759,13 +1759,26 @@ describe("compactChangeSet", () => {
 // links do not carry a principal, so a narrower-scoped link stored in a
 // broader-scoped slot resolves to a DIFFERENT instance for every reader —
 // shared data written that way can never propagate (the B2 reader-blackout
-// investigation, #4457). Such writes must fail loudly at the write site
-// unless the slot's schema declares the scope (per-reader semantics opted
-// into by the author).
+// investigation, #4457). The guard WARNS loudly at the write site unless the
+// slot's schema declares the scope (per-reader semantics opted into by the
+// author). It is a warn, not a throw, because the runtime's own machinery
+// legitimately writes scoped links into scope-silent slots today (.asScope()
+// result links, navigateTo result cells, updateArgument setup wiring); see
+// the enumeration on #4561 for the flip-to-throw checklist.
 describe("scope-isolation write guard", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
+
+  const warnCounts = (): number => {
+    const logger = (globalThis as {
+      commonfabric?: {
+        logger?: Record<string, { counts: { warn: number } }>;
+      };
+    }).commonfabric?.logger?.["normalizeAndDiff"];
+    expect(logger).toBeDefined();
+    return logger!.counts.warn;
+  };
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -1795,7 +1808,7 @@ describe("scope-isolation write guard", () => {
     return createSigilLinkFromParsedLink({ ...base, scope });
   }
 
-  it("rejects a user-scoped link written into a scope-silent space slot", () => {
+  it("warns on a user-scoped link written into a scope-silent space slot (write still lands)", () => {
     const dest = runtime.getCell<{ profile?: unknown }>(
       space,
       "scope-guard-silent-dest",
@@ -1807,17 +1820,21 @@ describe("scope-isolation write guard", () => {
     );
     dest.set({});
 
-    expect(() =>
-      diffAndUpdate(
-        runtime,
-        tx,
-        dest.key("profile").getAsNormalizedFullLink(),
-        scopedLinkValue("scope-guard-user-target", "user"),
-      )
-    ).toThrow(/Cannot store a user-scoped link in space-scoped data/);
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-user-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+    const stored = tx.readValueOrThrow(
+      dest.key("profile").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
   });
 
-  it("allows the same link when the slot's schema declares the scope", () => {
+  it("does not warn when the slot's schema declares the scope", () => {
     const dest = runtime.getCell<{ profile?: unknown }>(
       space,
       "scope-guard-declared-dest",
@@ -1829,12 +1846,14 @@ describe("scope-isolation write guard", () => {
     );
     dest.set({});
 
+    const before = warnCounts();
     diffAndUpdate(
       runtime,
       tx,
       dest.key("profile").getAsNormalizedFullLink(),
       scopedLinkValue("scope-guard-declared-target", "user"),
     );
+    expect(warnCounts()).toBe(before);
     const stored = tx.readValueOrThrow(
       dest.key("profile").getAsNormalizedFullLink(),
     );
@@ -1843,7 +1862,7 @@ describe("scope-isolation write guard", () => {
       .toBe("user");
   });
 
-  it("rejects a session link even when the slot declares only user scope", () => {
+  it("warns on a session link even when the slot declares only user scope", () => {
     const dest = runtime.getCell<{ draft?: unknown }>(
       space,
       "scope-guard-under-declared-dest",
@@ -1855,17 +1874,17 @@ describe("scope-isolation write guard", () => {
     );
     dest.set({});
 
-    expect(() =>
-      diffAndUpdate(
-        runtime,
-        tx,
-        dest.key("draft").getAsNormalizedFullLink(),
-        scopedLinkValue("scope-guard-session-target", "session"),
-      )
-    ).toThrow(/Cannot store a session-scoped link in space-scoped data/);
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("draft").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-session-target", "session"),
+    );
+    expect(warnCounts()).toBe(before + 1);
   });
 
-  it("allows same-scope links (space into space) untouched", () => {
+  it("does not warn for same-scope links (space into space)", () => {
     const dest = runtime.getCell<{ item?: unknown }>(
       space,
       "scope-guard-same-scope-dest",
@@ -1883,12 +1902,14 @@ describe("scope-isolation write guard", () => {
       { type: "string" },
       tx,
     ).getAsNormalizedFullLink();
+    const before = warnCounts();
     diffAndUpdate(
       runtime,
       tx,
       dest.key("item").getAsNormalizedFullLink(),
       createSigilLinkFromParsedLink(base),
     );
+    expect(warnCounts()).toBe(before);
     const stored = tx.readValueOrThrow(
       dest.key("item").getAsNormalizedFullLink(),
     );

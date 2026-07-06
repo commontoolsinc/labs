@@ -184,15 +184,18 @@ cell; use `PerUser` for the pointer, not the shared record. Fixed in
 multi-runtime test
 `packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts`.
 
-The runtime now **rejects this write loudly** instead of letting it become a
-permanent silent hole for other readers: storing a narrower-scoped link in a
-broader-scoped slot throws `Cannot store a <scope>-scoped link in
-<scope>-scoped data …` at the write site (`data-updating.ts`, scope-isolation
-write guard; unit pins in `packages/runner/test/data-updating.test.ts`). If
-per-reader resolution is genuinely intended, opt in by declaring the slot's
-schema scope (e.g. `PerUser<Cell<T>>` on the field type, or `scope: "user"` /
-a scoped `asCell` entry in the schema) — the write is then allowed and every
-reader resolves their own instance.
+The runtime now **warns loudly at the write site** instead of leaving this a
+fully silent hole for other readers: storing a narrower-scoped link in a
+broader-scoped slot logs `Storing a <scope>-scoped link in <scope>-scoped
+data …` (`data-updating.ts`, scope-isolation write guard; unit pins in
+`packages/runner/test/data-updating.test.ts`). If per-reader resolution is
+genuinely intended, opt in by declaring the slot's schema scope (e.g.
+`PerUser<Cell<T>>` on the field type, or `scope: "user"` / a scoped `asCell`
+entry in the schema) — declared slots don't warn, and every reader resolves
+their own instance. It is a warn rather than an error because the runtime's
+own machinery still writes scoped links into scope-silent slots in sanctioned
+places (`.asScope()` result links, `navigateTo` result cells, argument setup
+wiring); once those slots declare their scope, the guard can become an error.
 
 ## 7. `Math.random()` throws under SES
 
