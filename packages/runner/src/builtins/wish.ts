@@ -320,6 +320,33 @@ function profileCellIsValid(
 }
 
 /**
+ * Whether two profile cells name the SAME profile, compared by durable link
+ * identity (entity id + space + path) — NOT `Cell.equals`.
+ *
+ * CT-1842: the `#profile` ordering matches candidates (from the home `profiles`
+ * list) against the `defaultProfile` link and the `mru` list. Those name the
+ * same profiles but reach them through different links — a candidate is read
+ * straight from `profiles`, while an `mru`/`defaultProfile` entry is a link
+ * written by the picker surface (`setMruProfile` / `setDefaultProfile`), which
+ * can carry a write-redirect overwrite flag and its own schema. `Cell.equals`
+ * (`areNormalizedLinksSame`) also compares `scope` and does not collapse those
+ * representation differences, so it returns false for the same profile across
+ * spaces and the MRU/default ordering silently degrades to `profiles`-list
+ * (creation) order. Normalizing both sides with `getAsNormalizedFullLink()`
+ * resolves each link the same way and compares the profile's durable identity
+ * (its own-space entity id), which is stable regardless of how the link was
+ * stored. Reading each cell's normalized link also keeps the ordering reactive
+ * to `mru`/`defaultProfile` changes.
+ */
+function sameProfileCell(a: Cell<unknown>, b: Cell<unknown>): boolean {
+  const la = a.getAsNormalizedFullLink();
+  const lb = b.getAsNormalizedFullLink();
+  return la.id === lb.id && la.space === lb.space &&
+    la.path.length === lb.path.length &&
+    la.path.every((p, i) => p === lb.path[i]);
+}
+
+/**
  * Subscribe to a profile cell's live name so the wish re-runs once a
  * freshly-created profile's name materializes across the space boundary.
  */
@@ -391,16 +418,17 @@ function getProfileCandidateCells(
   for (let j = 0; j < mruLength; j++) {
     mruCells.push(mruCell.key(j).resolveAsCell());
   }
+  // Match by durable link identity, not `Cell.equals` — see sameProfileCell.
   const mruRank = (cell: Cell<unknown>): number => {
-    const idx = mruCells.findIndex((m) => m.equals(cell));
+    const idx = mruCells.findIndex((m) => sameProfileCell(m, cell));
     return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
   };
 
   const ordered = [...candidates];
   ordered.sort((a, b) => {
     if (defaultValid) {
-      const aDef = defaultCell.equals(a);
-      const bDef = defaultCell.equals(b);
+      const aDef = sameProfileCell(defaultCell, a);
+      const bDef = sameProfileCell(defaultCell, b);
       if (aDef && !bDef) return -1;
       if (bDef && !aDef) return 1;
     }

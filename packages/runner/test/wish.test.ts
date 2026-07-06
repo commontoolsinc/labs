@@ -3800,6 +3800,158 @@ describe("wish built-in", () => {
           await runtime.idle();
         }
       });
+
+      // CT-1842: In real deployments each profile lives in its OWN space and the
+      // `mru` / `defaultProfile` links resolve with a DIFFERENT `scope` than the
+      // `profiles` candidates for the same profile (the picker surface stamps its
+      // own scope; the home `profiles` list carries another). `Cell.equals`
+      // (`areNormalizedLinksSame`) compares `scope`, so the MRU/default match
+      // returned false for every candidate and the ordering silently collapsed to
+      // `profiles`-list (creation) order — the switcher was a no-op cross-space.
+      // The builtin now matches by durable link identity (id + space + path), so
+      // the scope skew no longer defeats the match.
+      describe("cross-space scope skew (CT-1842)", () => {
+        // Stand up N profiles, each in its OWN space (real cross-space), wire the
+        // home `profiles` list, and OPTIONALLY write `mru` / `defaultProfile` as
+        // links whose stored `scope` differs from the candidate scope — the exact
+        // shape that made `Cell.equals` return false for the same profile.
+        async function setupCrossSpace(
+          label: string,
+          opts: {
+            names: string[];
+            // Indices into `names`, most-recently-used first. Written with a
+            // `scope` that differs from the profiles-list candidate scope.
+            mruIndices?: number[];
+            // Index into `names` to set as default, with a differing scope.
+            defaultIndex?: number;
+            skewScope?: "user" | "session";
+          },
+        ) {
+          const scope = opts.skewScope ?? "user";
+          // Each profile in a DISTINCT space; commit per space (a single tx can
+          // only open one space writer at a time).
+          const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
+          const links: Array<
+            ReturnType<
+              ReturnType<Runtime["getCell"]>["getAsNormalizedFullLink"]
+            >
+          > = [];
+          for (let i = 0; i < opts.names.length; i++) {
+            const spaceDid = (await Identity.fromPassphrase(
+              `ct1842-${label}-space-${i}`,
+            )).did();
+            const cell = runtime.getCell(
+              spaceDid,
+              `ct1842-${label}-profile-${i}`,
+              undefined,
+              tx,
+            );
+            cell.set({
+              name: opts.names[i],
+              initialNameApplied: opts.names[i],
+              avatar: "",
+              bio: "",
+              elements: [],
+            });
+            await tx.commit();
+            await runtime.idle();
+            tx = runtime.edit();
+            profileCells.push(cell);
+            links.push(cell.getAsNormalizedFullLink());
+          }
+
+          // A scope-skewed sigil link to the same profile entity — the shape a
+          // cross-space `mru` / `defaultProfile` entry resolves to in production.
+          const skewedSigil = (i: number) => ({
+            "/": {
+              [LINK_V1_TAG]: {
+                id: links[i].id,
+                space: links[i].space,
+                path: [],
+                scope,
+              },
+            },
+          });
+
+          const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+          const homeDefaultCell = runtime.getCell(
+            userIdentity.did(),
+            `ct1842-${label}-home-default`,
+            undefined,
+            tx,
+          );
+          homeDefaultCell.key("profiles").set(profileCells);
+          if (opts.mruIndices) {
+            homeDefaultCell.key("mru").setRawUntyped(
+              // deno-lint-ignore no-explicit-any
+              opts.mruIndices.map((i) => skewedSigil(i)) as any,
+            );
+          }
+          if (opts.defaultIndex !== undefined) {
+            homeDefaultCell.key("defaultProfile").setRawUntyped(
+              // deno-lint-ignore no-explicit-any
+              skewedSigil(opts.defaultIndex) as any,
+            );
+          }
+          // deno-lint-ignore no-explicit-any
+          (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+          await tx.commit();
+          await runtime.idle();
+          tx = runtime.edit();
+
+          const wishPattern = pattern(() => ({
+            profile: wish({ query: "#profile", headless: true }),
+          }));
+          const resultCell = runtime.getCell<Record<string, any>>(
+            patternSpace.did(),
+            `ct1842-${label}-result`,
+            undefined,
+            tx,
+          );
+          const result = runtime.run(tx, wishPattern, {}, resultCell);
+          await tx.commit();
+          tx = runtime.edit();
+          await result.pull();
+          return { result };
+        }
+
+        it("MRU head resolves cross-space despite scope-skewed mru links (fails on unfixed code)", async () => {
+          // Two profiles in two spaces, no default. MRU lists the SECOND-created
+          // profile first, written with a scope that differs from the candidate
+          // scope. Pre-fix, `Cell.equals` rejects every mru↔candidate match, so
+          // ordering falls back to creation order and `.result` = first-created
+          // (Ada). With the identity-based match, `.result` = MRU head (Grace).
+          const { result } = await setupCrossSpace("mru-scope-skew", {
+            names: ["Ada", "Grace"],
+            mruIndices: [1],
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Grace");
+        });
+
+        it("default resolves cross-space despite scope-skewed default link (guards the default-match fix)", async () => {
+          // defaultProfile points at the SECOND profile via a scope-skewed link.
+          // Pre-fix the default-match (`defaultCell.equals(candidate)`) fails the
+          // same way, so the default is ignored; with the fix it resolves to the
+          // chosen default.
+          const { result } = await setupCrossSpace("default-scope-skew", {
+            names: ["Ada", "Grace"],
+            defaultIndex: 1,
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Grace");
+        });
+
+        it("default outranks MRU even under scope skew", async () => {
+          // Default = Ada (index 0), MRU head = Grace (index 1), both skewed.
+          // Default must win.
+          const { result } = await setupCrossSpace("default-over-mru-skew", {
+            names: ["Ada", "Grace"],
+            defaultIndex: 0,
+            mruIndices: [1],
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Ada");
+        });
+      });
     });
   });
 });
