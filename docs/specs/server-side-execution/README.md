@@ -66,9 +66,9 @@ slightly-laggier UI for free.
 The load-bearing enablers are exactly the in-flight work: persistent
 scheduler state (cheap spin-up/down of per-piece graphs), scheduler v2
 (bounded settle, static write surfaces, read-delta bookkeeping), source
-linking via `patternIdentity` + content-addressed action identity (stale doc
-→ runnable action), and the reactive interpreter (execution density on the
-server). §9 is a register of the gaps that remain even after all of those
+linking via the `source`/`pattern` doc annotations + content-addressed
+action identity (stale doc → producing piece → runnable action), and the
+reactive interpreter (execution density on the server). §9 is a register of the gaps that remain even after all of those
 land — the two largest are **executor authority/identity** (§9 G1–G3) and
 **the derived/source write split in the runner** (§9 G5).
 
@@ -182,11 +182,13 @@ rehydration entry points (`rehydrateActionFromStorage`,
 
 Missing (G4): the memory-side tables (`scheduler_observation`, read/write
 indexes, action state) wired into the commit pipeline; durable dirty
-markers (compare `observedAtSeq` against branch-head seq); and — most
-important for this design — the **doc → producing-action reverse index**
-(spec §9), which is what lets the server answer *"commit touched doc X;
-which parked pieces have stale downstream state?"* without instantiating
-anything.
+markers (compare `observedAtSeq` against branch-head seq); and the
+**doc → readers index** derived from the persisted read sets, which is
+what lets the server answer *"commit touched doc X; which parked pieces
+have stale downstream state?"* without instantiating anything. The
+*producer* direction, by contrast, needs no index at all: it is already
+recorded on the docs themselves as the `source`/`pattern` annotation chain
+(§3.3).
 
 Contribution: spin-up/spin-down becomes cheap. An idle space's graph is a
 set of observation rows; waking it is `rehydrate` + running only actions
@@ -205,20 +207,37 @@ Merkle-verified closure with `loadPatternByIdentity` +
 (`cf:module/<hash>:<symbol>:<instanceKey>`,
 `docs/specs/action-id-per-instance-decision.md`), reload-stable.
 
-Contribution: the concrete catch-up path exists end to end:
+Contribution: **doc → producing piece is recorded on the docs themselves.**
+Every document envelope carries provenance annotations
+(`docs/specs/memory-v2/01-data-model.md`): a `source` short-link to the doc
+it derives from, and — on a piece's root docs — the well-known `pattern` /
+`argument` / `result` / `internal` metadata links
+(`packages/runner/src/result-utils.ts:17` writes `pattern`; the raw
+`["source"]` surface is runtime metadata, excluded from CFC flow reads,
+`packages/runner/src/cfc/prepare.ts:1159`). The reverse lookup is
+therefore a walk, not an index: **follow `source` until a doc carries
+`pattern`** — that doc is the piece root, and `pattern` +
+`patternIdentity` name the runnable module. The full catch-up path:
 
 ```
-stale doc ──(observation reverse index)──▶ actionId + pieceId
-pieceId   ──(result cell meta)───────────▶ patternIdentity {identity, symbol}
-identity  ──(loadPatternByIdentity)──────▶ compiled closure (or recompile
-                                            from source docs)
-argument meta link ──▶ argument cell ──▶ re-instantiate ──▶ rehydrate
-observations ──▶ pull the stale doc
+stale doc ──(follow `source` links)──▶ piece root doc carrying `pattern`
+`pattern` / `patternIdentity` ───────▶ {identity, symbol}
+identity  ──(loadPatternByIdentity)──▶ compiled closure (or recompile
+                                        from source docs)
+`argument` meta link ──▶ argument cell ──▶ re-instantiate ──▶ rehydrate
+observations (per-instance actionId) ──▶ pull the stale doc
 ```
+
+The walk runs directly against the store (state-inspector-style), with
+zero scheduler state; the persisted observations then narrow *which*
+actions inside the piece are stale (`observedAtSeq` vs branch head)
+instead of re-settling the whole piece.
 
 Gaps: keyless/hand-built patterns are session-only by design (no durable
-pointer — sanctioned); builtin-internal writes and schema-less writes carry
-no `patternIdentity` on stored results (G6); `.src` eager annotation is
+pointer — sanctioned); the chain needs a coverage audit — every doc the
+executor may be asked to catch up must terminate the `source` walk at a
+`pattern`-bearing root (builtin-created docs, schema-less writes, and
+external ingest are the suspect cases, G6); `.src` eager annotation is
 dev-only but debug-only (no identity impact).
 
 ### 3.4 Reactive interpreter (#4514; v2 supersedes #4298; nothing on main)
@@ -688,7 +707,7 @@ A space is *active* when any of:
 2. a persisted registration says so (BG pieces, timers, webhooks — today's
    bps registry generalized);
 3. an incoming commit touches a doc that the **persisted read index** maps
-   to some piece's stale downstream (the §3.2 reverse index) — wake, catch
+   to some piece's stale downstream (the §3.2 readers index) — wake, catch
    up, hibernate.
 
 Within an active space the executor's demand roots are: each interested
@@ -720,9 +739,11 @@ executor's own cross-space reads).
   + rehydrate + stale subset; with RI v2, ROG artifacts replace pattern
   execution for the interpretable corpus. Pre-seeded system-pattern compile
   caches (the browser-wedge follow-up) apply server-side directly.
-- **Catch-up without spin-up:** if the reverse index shows no interested
+- **Catch-up without spin-up:** if the readers index shows no interested
   piece downstream of a commit, do nothing (the doc is stale but nobody
-  cares — pull semantics, now durable).
+  cares — pull semantics, now durable). When a stale doc *is* demanded,
+  the `source`→`pattern` walk on the doc itself names the piece to wake
+  (§3.3), even with no scheduler state at all.
 - **Hibernate** (idle timeout): flush observations, `closeSpace`
   (per-space teardown — landed, extended by #4115), terminate worker. The
   space's whole scheduler state is the observation rows.
@@ -756,11 +777,14 @@ different residency and different correctness weight:
 2. **Durable tier — SQLite, transaction-coupled.** The observation rows
    (reads / writes / `observedAtSeq` / gate options per action,
    `packages/runner/src/scheduler/persistent-observation.ts:22`) plus the
-   doc→action reverse index (G4), written in the same transaction as the
-   commits they describe. Three consumers: rehydration on spin-up,
-   wake-on-commit (the engine answers "does this commit make any parked
-   piece stale?" with one indexed lookup, no worker running), and the
-   derived-from watermark on commits (§5.B.4).
+   doc→readers index derived from them (G4), written in the same
+   transaction as the commits they describe. Three consumers: rehydration
+   on spin-up, wake-on-commit (the engine answers "does this commit make
+   any parked piece stale?" with one indexed lookup, no worker running),
+   and the derived-from watermark on commits (§5.B.4). The *producer*
+   direction is not part of this tier at all: `source`/`pattern`
+   annotations ride the docs themselves (§3.3) — write-side provenance is
+   ground truth, not an index.
 3. **Session tier.** The delivery cursor (`seenSeq`) is already durable in
    the session-resume sense. The per-session **interest declaration**
    (space + piece ids) is persisted with the session; the derived doc-id
@@ -774,8 +798,10 @@ Rules that keep this sound:
 - **Disk is an index of ground truth, not ground truth.** Commits and
   revisions remain the durable record; observations are a
   transaction-coupled projection of them. Because observation writes ride
-  the same commit, the reverse index can never be ahead of or behind the
-  data it indexes.
+  the same commit, the readers index can never be ahead of or behind the
+  data it indexes — and the producer direction is carried *inside* the
+  data (`source`/`pattern` annotations), so it cannot drift by
+  construction.
 - **Fail-open to recompute.** Missing, stale, or corrupt observations
   degrade to re-running actions (the persistent-scheduler-state spec's
   invariant: never incorrect cleanliness, at worst wasted recompute). The
@@ -839,7 +865,7 @@ Phases assume #4288 and the persistent-scheduler-state wiring land first;
 RI (#4514) accelerates but does not gate any phase.
 
 - **Phase 0 — foundations (gap closure).** Persistent-state memory tables +
-  commit wiring + reverse read index (G4); executor principal + per-space
+  commit wiring + doc→readers index (G4); executor principal + per-space
   grant flow (G1/G2); in-process executor provider stage 1→2 (G0);
   `session.interest.set` + doc-set feed behind a flag (G7).
 - **Phase 1 — Approach A.** Executor pool serves opted-in spaces
@@ -878,9 +904,9 @@ means a design doc/decision is required before implementation.
 | G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal), B (atom) | needs-spec (small) |
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
 | G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
-| G4 | Persistent-state memory tables + commit-pipeline wiring + doc→action reverse read/write index (spec §9) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
+| G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no index (`source`/`pattern` chain, landed) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
 | G5 | Runner write split: route tx by originating action kind; speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
-| G6 | Builtin-internal / schema-less writes carry no `patternIdentity`/action provenance on stored results | catch-up completeness | known source-linking gap; needs-impl |
+| G6 | Source-chain coverage audit: every executor-reachable doc must terminate the `source` walk at a `pattern`-bearing root (suspects: builtin-created docs, schema-less writes, external ingest) | catch-up completeness | needs-audit, then targeted fixes |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
 | G8 | RI gates: cross-space pull-amplification loop; F4 I/O coalescing ratchet; scoped-output exclusion (by design) | RI-on-executor only | tracked in RI specs; not on B's critical path |
 | G9 | Executor cross-space reads (remote-space sessions from the executor; reader-isolated cross-space docs) | B completeness | needs-design; today's client semantics reusable |
