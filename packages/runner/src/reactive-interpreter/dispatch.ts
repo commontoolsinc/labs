@@ -38,6 +38,11 @@ import {
 } from "./from-builder.ts";
 import { partition, type Segment } from "./partition.ts";
 import { type EvalContext, evalRog } from "./interpret.ts";
+import { ri2SetOutputScopes } from "./builtin-markers.ts";
+import { scopeRank } from "../scope.ts";
+import { resolveLink } from "../link-resolution.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { CellScope } from "../builder/types.ts";
 import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
 import {
   elementArgumentUsage,
@@ -139,24 +144,21 @@ export interface DispatchOptions {
   resumed?: boolean;
 }
 
-/** Recursive key-walk for scope-routing markers in serialized pattern data. */
-function containsScopeMarker(value: unknown, depth = 0): boolean {
-  if (depth > 64 || value === null || typeof value !== "object") return false;
-  if (Array.isArray(value)) {
-    return value.some((v) => containsScopeMarker(v, depth + 1));
-  }
-  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-    // The default "space" scope rides on every serialized alias — only a
-    // NARROWED scope (user/session/any) or explicit routing is a marker.
-    if (key === "scope" && v !== undefined && v !== "space") return true;
-    if (
-      (key === "defaultScope" || key === "targetSpace") && v !== undefined
-    ) {
-      return true;
-    }
-    if (containsScopeMarker(v, depth + 1)) return true;
-  }
-  return false;
+/** Declared scope routing on a pattern/module-like object: a child that
+ * declares its OWN result scope (or a cross-space target) must stay a real
+ * instantiation — the legacy child machinery applies these; in-memory
+ * value evaluation has nowhere to. */
+function declaresScopeRouting(candidate: unknown): boolean {
+  if (candidate === null || typeof candidate !== "object") return false;
+  const c = candidate as {
+    defaultScope?: unknown;
+    targetSpace?: unknown;
+    resultSchema?: { scope?: unknown } | undefined;
+  };
+  if (c.defaultScope !== undefined && c.defaultScope !== "space") return true;
+  if (c.targetSpace !== undefined) return true;
+  const schemaScope = c.resultSchema?.scope;
+  return schemaScope !== undefined && schemaScope !== "space";
 }
 
 function safeJson(value: unknown): string {
@@ -192,17 +194,18 @@ export function planInterpreterDispatch(
     return fallback(`incomplete:${built.rog.incomplete.join(",")}`);
   }
 
-  // SCOPE-NARROWING gate (v1 D-EMISSION-SCOPE parity): schema-declared
-  // scope routing on aliases/results is per-op machinery the segment write
-  // path does not implement — pattern-wide fallback. (Runtime-scoped INPUTS
-  // are handled: the segment action threads the tx's narrowest read scope.)
-  if (
-    containsScopeMarker(pattern.nodes) ||
-    containsScopeMarker(pattern.resultSchema) ||
-    containsScopeMarker(pattern.result)
-  ) {
-    return fallback("scope_narrowing");
-  }
+  // SCOPE handling (scope flow-tracking): no pattern-wide gate. Every
+  // consumer of STATIC scope markers is either a BOUNDARY the interpreter
+  // instantiates verbatim (raw builtins fold module.defaultScope /
+  // resultSchema.scope into their output binding; pattern nodes scope
+  // their child result cells; frame-result javascript lifts are
+  // capability-demoted to gated-leaf boundaries) or the SHARED binding
+  // write machinery segments already use (alias-folded schema scopes via
+  // scopedLinkForPath). Simple-path lifts — the only thing segments
+  // replace — take scope ONLY from the narrowest READ scope in legacy,
+  // which segments now track PER OP. The two spots where the interpreter
+  // replaces child instantiation (value-consumed pattern inlining,
+  // collection element inlining) refuse scope-declaring children below.
 
   // Demote gated leaves to boundaries: untrusted impls (SECURITY — the
   // verbatim legacy node applies its own SES/trust resolution) and
@@ -228,6 +231,7 @@ export function planInterpreterDispatch(
   const { inlinablePatternOps, inlineCollections } = findValueConsumedOps(
     built,
     options.leafTrust,
+    pattern.nodes,
   );
 
   const part = partition({
@@ -333,6 +337,7 @@ interface InlineTransientCollection {
 function findValueConsumedOps(
   built: BuiltRog,
   leafTrust: DispatchOptions["leafTrust"],
+  nodes: Pattern["nodes"],
 ): {
   inlinablePatternOps: Set<OpId>;
   inlineCollections: Map<OpId, InlineTransientCollection>;
@@ -343,12 +348,24 @@ function findValueConsumedOps(
   for (const op of rog.ops) {
     if (op.detail.kind === "pattern") {
       const child = built.children.get(op.id);
-      if (child && rogFullyInlinable(child, leafTrust)) {
-        patternCands.add(op.id);
+      if (!child || !rogFullyInlinable(child, leafTrust)) continue;
+      // Scope-declaring children stay REAL instantiations (the legacy
+      // pattern-node machinery scopes their result cells; in-memory value
+      // evaluation has nowhere to).
+      const module = nodes[op.id]?.module as
+        | { implementation?: unknown }
+        | undefined;
+      if (
+        declaresScopeRouting(module) ||
+        declaresScopeRouting(module?.implementation)
+      ) {
+        continue;
       }
+      patternCands.add(op.id);
     } else if (op.detail.kind === "collection") {
       const factory = built.collectionElements.get(op.id);
       if (factory === undefined) continue;
+      if (declaresScopeRouting(factory)) continue;
       const elementBuilt = getBuiltRogResolved(factory);
       if (!elementBuilt || !rogFullyInlinable(elementBuilt, leafTrust)) {
         continue;
@@ -496,6 +513,10 @@ function tryBuildInlineCollectionNode(
   }
   const elementFactory = built.collectionElements.get(opId);
   if (elementFactory === undefined) return refuse("no_element_factory");
+  // A scope-declaring element pattern stays on the LEGACY coordinator: its
+  // child runs scope their result cells; the inline per-element writes
+  // would not.
+  if (declaresScopeRouting(elementFactory)) return refuse("element_scoped");
   const elementBuilt = getBuiltRogResolved(elementFactory);
   if (!elementBuilt) return refuse("element_no_rog");
   if (!rogFullyInlinable(elementBuilt, options.leafTrust)) {
@@ -738,6 +759,11 @@ function buildSegmentNode(
     segment.id,
     options,
     inlineCollections,
+    {
+      readsArgument,
+      internalKeys: [...internalReads],
+      externalKeys: [...externalReads],
+    },
   );
 
   return {
@@ -746,9 +772,12 @@ function buildSegmentNode(
         type: "raw",
         implementation,
         debugName: `ri2:${segment.id}`,
-        // Thread the tx's narrowest read scope into the result write
-        // (legacy javascript-action parity for runtime-scoped inputs).
-        ri2ThreadNarrowestReadScope: true,
+        // PER-OP effective-scope routing (scope flow-tracking): the
+        // implementation derives one scope per collapsed op from the
+        // scopes of the values that op consumed; the runner's send seam
+        // routes each output key at its own scope — legacy per-node-action
+        // parity (a single tx-ambient scope would over-narrow siblings).
+        ri2PerOpOutputScopes: true,
       } as unknown as Module,
       inputs,
       outputs,
@@ -769,6 +798,11 @@ function makeSegmentImplementation(
   segmentId: string,
   options: DispatchOptions,
   inlineCollections: ReadonlyMap<OpId, InlineTransientCollection>,
+  io: {
+    readsArgument: boolean;
+    internalKeys: number[];
+    externalKeys: number[];
+  },
 ) {
   return function reactiveInterpreterSegment(
     inputsCell: Cell<{
@@ -793,36 +827,103 @@ function makeSegmentImplementation(
       const frame = options.actionFrame(tx, { ri2Segment: segmentId });
       let firstError: unknown;
       try {
-        // Legacy action parity: effective-scope routing derives from the
-        // narrowest scope READ since this reset.
+        // SCOPE attribution (scope flow-tracking), three complementary
+        // mechanisms — none of which change the segment's JOURNAL (the
+        // read set must stay byte-identical to the pre-scope emission, or
+        // re-run reactivity changes):
+        //  (1) values come from ONE bulk inputs read (as before);
+        //  (2) each seed key's scope = the scope its binding RESOLVES to
+        //      (bare resolveLink — its probes belong to the dereferences
+        //      it records, so neither scheduling nor CFC flow sees extra
+        //      reads);
+        //  (3) lazy derefs inside op bodies (query-result proxies) are
+        //      caught by the per-op run bracket handed to evalRog.
         tx.resetNarrowestReadScope();
+        const rt = _runtime as {
+          // deno-lint-ignore no-explicit-any
+          getCellFromLink: (...args: any[]) => unknown;
+        };
+        const scopeOfBinding = (cell: {
+          getAsNormalizedFullLink: () => NormalizedFullLink;
+        }): CellScope => {
+          try {
+            const resolved = resolveLink(
+              // deno-lint-ignore no-explicit-any
+              rt as any,
+              tx,
+              cell.getAsNormalizedFullLink(),
+              "value",
+            );
+            return (resolved.scope ?? "space") as CellScope;
+          } catch {
+            return "space";
+          }
+        };
+        const inputs = inputsCell.withTx(tx);
         const bound = inputsCell.withTx(tx).get() ?? {};
+        const argument = bound.argument;
+        const argumentScope: CellScope = io.readsArgument
+          ? scopeOfBinding(inputs.key("argument"))
+          : "space";
         const seed = new Map<OpId, unknown>();
+        const byOp = new Map<OpId, CellScope>();
         for (const id of externalOpIds) {
           seed.set(id, bound.ops?.[String(id)]);
+          byOp.set(id, scopeOfBinding(inputs.key("ops").key(String(id))));
         }
         const seedByInternal = new Map<number, unknown>();
-        for (const [key, value] of Object.entries(bound.internals ?? {})) {
-          seedByInternal.set(Number(key), value);
+        const byInternal = new Map<number, CellScope>();
+        for (const idx of io.internalKeys) {
+          seedByInternal.set(idx, bound.internals?.[String(idx)]);
+          byInternal.set(
+            idx,
+            scopeOfBinding(inputs.key("internals").key(String(idx))),
+          );
         }
         const seedByExternal = new Map<number, unknown>();
-        for (const [key, value] of Object.entries(bound.externals ?? {})) {
-          seedByExternal.set(Number(key), value);
+        const byExternal = new Map<number, CellScope>();
+        for (const idx of io.externalKeys) {
+          seedByExternal.set(idx, bound.externals?.[String(idx)]);
+          byExternal.set(
+            idx,
+            scopeOfBinding(inputs.key("externals").key(String(idx))),
+          );
         }
         // Fully-external leaves: read the ORIGINAL alias tree through the
-        // leaf's own argumentSchema (legacy readJavaScriptArgument).
+        // leaf's own argumentSchema (legacy readJavaScriptArgument). These
+        // reads existed before scope-tracking (same journal); the bracket
+        // only attributes their observed scope.
+        const captureScope = <T>(read: () => T): [T, CellScope] => {
+          const prev = tx.getNarrowestReadScope();
+          tx.resetNarrowestReadScope();
+          let observed: CellScope = "space";
+          try {
+            const v = read();
+            observed = tx.getNarrowestReadScope();
+            return [v, observed];
+          } finally {
+            observed = tx.getNarrowestReadScope();
+            tx.resetNarrowestReadScope(
+              scopeRank(observed) > scopeRank(prev) ? observed : prev,
+            );
+          }
+        };
         const leafInputOverrides = new Map<OpId, unknown>();
+        const byLeafInput = new Map<OpId, CellScope>();
         for (const { id, schema } of schemaBoundLeaves) {
           const at = inputsCell.key("leafInputs").key(String(id));
-          const value = schema !== undefined
-            ? (at as unknown as {
-              asSchema: (s: unknown) => Cell<unknown>;
-            }).asSchema(schema).withTx(tx).get()
-            : at.withTx(tx).get();
+          const [value, sc] = captureScope(() =>
+            schema !== undefined
+              ? (at as unknown as {
+                asSchema: (s: unknown) => Cell<unknown>;
+              }).asSchema(schema).withTx(tx).get()
+              : at.withTx(tx).get()
+          );
           leafInputOverrides.set(id, value);
+          byLeafInput.set(id, sc);
         }
-        const { opValues, errors } = evalRog(subRog, {
-          argument: bound.argument,
+        const { opValues, errors, opScopes } = evalRog(subRog, {
+          argument,
           leafImpls: built.leafImpls,
           children: built.children,
           collections: inlineCollections as EvalContext["collections"],
@@ -830,15 +931,48 @@ function makeSegmentImplementation(
           seedByInternal,
           seedByExternal,
           leafInputOverrides,
+          scopes: {
+            argument: argumentScope,
+            byOp,
+            byInternal,
+            byExternal,
+            byLeafInput,
+          },
+          // Lazy leaf-input derefs read through the tx DURING op bodies —
+          // bracket each op run so those reads attribute to the right op.
+          runScoped: (fn, onScope) => {
+            const prev = tx.getNarrowestReadScope();
+            tx.resetNarrowestReadScope();
+            try {
+              return fn();
+            } finally {
+              const observed = tx.getNarrowestReadScope();
+              onScope(observed);
+              tx.resetNarrowestReadScope(
+                scopeRank(observed) > scopeRank(prev) ? observed : prev,
+              );
+            }
+          },
         });
         const out: Record<string, unknown> = {};
+        const outScopes: Record<string, string> = {};
         for (const opId of outputOpIds) {
           out[String(opId)] = opValues.get(opId);
+          outScopes[String(opId)] = opScopes.get(opId) ?? "space";
         }
+        ri2SetOutputScopes(out, outScopes);
         if (RI2_DEBUG) {
           console.log(
-            `[ri2] run ${segmentId}: bound=${safeJson(bound)} out=${
-              safeJson(out)
+            `[ri2] run ${segmentId}: out=${safeJson(out)} scopes=${
+              safeJson(outScopes)
+            } inScopes=${
+              safeJson({
+                argument: argumentScope,
+                leaf: Object.fromEntries(byLeafInput),
+                ops: Object.fromEntries(byOp),
+                ext: Object.fromEntries(byExternal),
+                int: Object.fromEntries(byInternal),
+              })
             }`,
           );
         }

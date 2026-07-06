@@ -298,7 +298,9 @@ describe("interpreter dispatch differential (W3c)", () => {
           ELEMENT_SCHEMA,
         );
         const Double = pattern<{ element: { n: number } }>(
-          (i) => ({ d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }) }),
+          (i) => ({
+            d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }),
+          }),
           ELEMENT_SCHEMA,
         );
         const kept = (input.items as unknown as {
@@ -385,7 +387,9 @@ describe("interpreter dispatch differential (W3c)", () => {
     const buildPattern = () =>
       pattern<{ items: { n: number }[] }>((input) => {
         const Double = pattern<{ element: { n: number } }>(
-          (i) => ({ d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }) }),
+          (i) => ({
+            d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }),
+          }),
           ELEMENT_SCHEMA,
         );
         const doubled = (input.items as unknown as {
@@ -418,9 +422,7 @@ describe("interpreter dispatch differential (W3c)", () => {
     assertEquals(census.transientCollections, 0);
     assert(
       (census.boundariesByKind["collection-inlined"] ?? 0) >= 1,
-      `expected the map to stay materialized, census=${
-        JSON.stringify(census)
-      }`,
+      `expected the map to stay materialized, census=${JSON.stringify(census)}`,
     );
   });
 });

@@ -119,7 +119,7 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -959,13 +959,32 @@ export class CellImpl<T extends FabricValue>
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
-      this.runtime,
-      this.tx,
-      this.viewRef,
-      [],
-      { ...options, synced: this.synced },
-    );
+    // Scope-accurate caching: bracket the fill so the entry records the
+    // narrowest scope THIS traversal observed (nesting-safe: an inner fill
+    // resets, measures its own delta, and restores max(outer, inner)).
+    // Hits replay it (getCachedReadResult), so narrowest-read-scope
+    // derivation sees cached reads exactly like real ones.
+    let fillScope: CellScope | undefined;
+    const prevScope = cacheable ? tx!.getNarrowestReadScope() : undefined;
+    if (cacheable) tx!.resetNarrowestReadScope();
+    let value: Readonly<StripDefaultBrand<T>>;
+    try {
+      value = validateAndTransform(
+        this.runtime,
+        this.tx,
+        this.viewRef,
+        [],
+        { ...options, synced: this.synced },
+      );
+    } finally {
+      if (cacheable) {
+        const observed = tx!.getNarrowestReadScope();
+        fillScope = observed;
+        tx!.resetNarrowestReadScope(
+          scopeRank(observed) > scopeRank(prevScope!) ? observed : prevScope!,
+        );
+      }
+    }
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
@@ -978,7 +997,7 @@ export class CellImpl<T extends FabricValue>
       // Re-read this._link: validateAndTransform (via viewRef -> link) may have
       // run ensureLink() and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
-      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
+      tx.setCachedReadResult!(this.viewRefHash(), variant, value, fillScope);
     }
     return value;
   }

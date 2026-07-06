@@ -90,6 +90,7 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { planInterpreterDispatch } from "./reactive-interpreter/dispatch.ts";
+import { ri2GetOutputScopes } from "./reactive-interpreter/builtin-markers.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -4001,28 +4002,63 @@ export class Runner {
             tx,
             result,
           );
-          sendValueToBinding(
-            tx,
-            resultCell,
-            argumentCellLink!,
-            mappedOutputBindings,
-            resultForRawBuiltinOutputBinding(
-              result,
-              outputBindingSchema,
-              builtinIdentity,
-            ),
-            {
-              preserveLinkOutput: true,
-              // Opt-in effective-scope threading for the reactive-interpreter
-              // segment nodes (legacy javascript actions pass the tx's
-              // narrowest read scope; no legacy raw builtin sets this marker,
-              // so the default path is byte-identical).
-              ...((module as { ri2ThreadNarrowestReadScope?: boolean })
-                  .ri2ThreadNarrowestReadScope
-                ? { narrowestReadScope: tx.getNarrowestReadScope() }
-                : {}),
-            },
-          );
+          // PER-OP effective-scope routing for reactive-interpreter segment
+          // nodes (scope flow-tracking): the segment derives one scope per
+          // collapsed op from the values THAT op consumed; each top-level
+          // output key routes at its own scope — legacy runs one action per
+          // node, so this is the per-node scope routing segments must
+          // reproduce (one tx-ambient scope would over-narrow siblings).
+          // Fallback for a missing entry is the tx ambient (the OVER-narrow,
+          // fail-safe direction: scoped data must never widen to space).
+          const perOpScopes = (module as { ri2PerOpOutputScopes?: boolean })
+              .ri2PerOpOutputScopes
+            ? ri2GetOutputScopes(result)
+            : undefined;
+          if (
+            perOpScopes && isRecord(mappedOutputBindings) && isRecord(result)
+          ) {
+            const ambient = tx.getNarrowestReadScope();
+            for (
+              const [key, binding] of Object.entries(
+                mappedOutputBindings as Record<string, unknown>,
+              )
+            ) {
+              sendValueToBinding(
+                tx,
+                resultCell,
+                argumentCellLink!,
+                binding,
+                (result as Record<string, unknown>)[key],
+                {
+                  preserveLinkOutput: true,
+                  narrowestReadScope:
+                    (perOpScopes[key] as CellScope | undefined) ?? ambient,
+                },
+              );
+            }
+          } else {
+            sendValueToBinding(
+              tx,
+              resultCell,
+              argumentCellLink!,
+              mappedOutputBindings,
+              resultForRawBuiltinOutputBinding(
+                result,
+                outputBindingSchema,
+                builtinIdentity,
+              ),
+              {
+                preserveLinkOutput: true,
+                // Opt-in effective-scope threading (legacy javascript actions
+                // pass the tx's narrowest read scope; no legacy raw builtin
+                // sets this marker, so the default path is byte-identical).
+                ...((module as { ri2ThreadNarrowestReadScope?: boolean })
+                    .ri2ThreadNarrowestReadScope
+                  ? { narrowestReadScope: tx.getNarrowestReadScope() }
+                  : {}),
+              },
+            );
+          }
         },
         addCancel,
         {

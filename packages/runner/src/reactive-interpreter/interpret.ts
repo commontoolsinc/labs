@@ -29,6 +29,8 @@
  *   unless(c,f)=c?c:f.
  */
 
+import type { CellScope } from "../builder/types.ts";
+import { scopeRank } from "../scope.ts";
 import {
   type ExprOp,
   type InternalDecl,
@@ -96,6 +98,31 @@ export interface EvalContext {
   leafInputOverrides?: Map<OpId, unknown>;
   /** Wrap a plain value in a read-only Cell view (runner-supplied). */
   wrapReadOnlyValue?: (value: unknown) => unknown;
+  /**
+   * SCOPE FLOW-TRACKING (per-op narrowest-read-scope): the scopes at which
+   * the segment's SEED reads resolved, per input class. When present, the
+   * evaluator propagates a per-op scope through the dataflow (an op's scope
+   * = the NARROWEST scope among the values it consumed) and returns it in
+   * `opScopes` — the segment's write seam routes each op's output at that
+   * scope, reproducing legacy's PER-NODE-ACTION scope routing (one ambient
+   * tx-wide scope would over-narrow siblings that never read scoped data).
+   */
+  scopes?: {
+    argument?: CellScope;
+    byOp?: Map<OpId, CellScope>;
+    byInternal?: Map<number, CellScope>;
+    byExternal?: Map<number, CellScope>;
+    byLeafInput?: Map<OpId, CellScope>;
+  };
+  /**
+   * Bracket ONE op's execution for scope observation (dispatch-supplied,
+   * tx-backed). Leaf inputs are LAZY (query-result proxies): the deref of a
+   * scoped link often happens inside the leaf BODY, not during the seed
+   * read — so each op run is bracketed and the observed scope folds into
+   * that op's derived scope. `onScope` fires in a finally (observed even
+   * when fn throws); the fn's throw propagates unchanged.
+   */
+  runScoped?: <T>(fn: () => T, onScope: (scope: CellScope) => void) => T;
 }
 
 /** Structural "this op cannot be interpreted here" — always propagates to
@@ -254,9 +281,68 @@ export function evalRog(
   result: unknown;
   opValues: Map<OpId, unknown>;
   errors: Array<{ opId: OpId; error: unknown }>;
+  /** Per-op derived scope (present iff `ctx.scopes` was supplied). */
+  opScopes: Map<OpId, CellScope>;
 } {
   const opValues = new Map<OpId, unknown>(ctx.seed ?? []);
   const errors: Array<{ opId: OpId; error: unknown }> = [];
+
+  // --- scope flow-tracking (see EvalContext.scopes) -------------------------
+  const trackScopes = ctx.scopes !== undefined;
+  const opScopes = new Map<OpId, CellScope>();
+  const narrower = (a: CellScope, b: CellScope): CellScope =>
+    scopeRank(b) > scopeRank(a) ? b : a;
+  const scopeOfRef = (ref: ValueRef): CellScope => {
+    switch (ref.kind) {
+      case "const":
+        return "space";
+      case "argument":
+        return ctx.scopes?.argument ?? "space";
+      case "opOut":
+        return opScopes.get(ref.op) ?? ctx.scopes?.byOp?.get(ref.op) ??
+          "space";
+      case "internal": {
+        const producer = internalProducer(rog.internals, ref.cell);
+        if (producer !== undefined && opScopes.has(producer)) {
+          return opScopes.get(producer)!;
+        }
+        return ctx.scopes?.byInternal?.get(ref.cell) ?? "space";
+      }
+      case "external":
+        return ctx.scopes?.byExternal?.get(ref.cell) ?? "space";
+      case "result":
+        return "space";
+    }
+  };
+  const opScopeOf = (op: Op): CellScope => {
+    const d = op.detail;
+    // An override-fed leaf consumed EXACTLY that read (its refs were not
+    // resolved) — the read's own scope is the op's scope.
+    if (d.kind === "leaf" && ctx.leafInputOverrides?.has(op.id)) {
+      return ctx.scopes?.byLeafInput?.get(op.id) ?? "space";
+    }
+    let s: CellScope = "space";
+    const fold = (ref: ValueRef | "pred") => {
+      if (ref !== "pred") s = narrower(s, scopeOfRef(ref));
+    };
+    for (const ref of op.inputs) fold(ref);
+    if (d.kind === "collection") {
+      fold(d.listInput);
+      if (d.params) fold(d.params);
+    }
+    if (d.kind === "pattern") fold(d.argument);
+    if (d.kind === "control") {
+      fold(d.pred);
+      fold(d.then);
+      fold(d.else);
+    }
+    if (d.kind === "construct") {
+      const t = d.template;
+      const refs = t.shape === "object" ? Object.values(t.fields) : t.items;
+      for (const ref of refs) fold(ref);
+    }
+    return s;
+  };
 
   const resolve = (ref: ValueRef): unknown => {
     switch (ref.kind) {
@@ -470,18 +556,33 @@ export function evalRog(
     }
   };
 
+  const bracket = trackScopes ? ctx.runScoped : undefined;
   for (const op of topoOrder(rog.ops, rog.internals)) {
     // PER-OP ERROR ISOLATION (legacy parity — see module doc).
     let value: unknown;
+    let runScope: CellScope = "space";
     try {
-      value = evalOp(op);
+      value = bracket
+        ? bracket(() => evalOp(op), (s) => runScope = s)
+        : evalOp(op);
     } catch (e) {
       if (e instanceof NotInterpretedHere) throw e;
       errors.push({ opId: op.id, error: e });
       value = undefined;
     }
     opValues.set(op.id, value);
+    // Scope derives from CONSUMED refs + the reads the op's own execution
+    // performed (lazy leaf-input derefs) — independent of the op's outcome
+    // (an isolated error still writes `undefined` at the op's derived
+    // scope, exactly like the legacy per-node action would).
+    if (trackScopes) {
+      const derived = opScopeOf(op);
+      opScopes.set(
+        op.id,
+        scopeRank(runScope) > scopeRank(derived) ? runScope : derived,
+      );
+    }
   }
 
-  return { result: resolve(rog.result), opValues, errors };
+  return { result: resolve(rog.result), opValues, errors, opScopes };
 }

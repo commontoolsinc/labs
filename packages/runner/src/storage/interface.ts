@@ -1096,12 +1096,17 @@ export interface IExtendedStorageTransaction
   getCachedReadResult?(
     key: string,
     variant: string,
-  ): { value: unknown } | undefined;
+  ): { value: unknown; narrowestReadScope?: CellScope } | undefined;
 
   setCachedReadResult?(
     key: string,
     variant: string,
     value: unknown,
+    /** The narrowest scope OBSERVED while computing this entry (the reads
+     * the cache elides on a hit). Replayed into the tx's narrowest-read
+     * tracking on every hit, so scope derivation stays read-accurate even
+     * when the traversal itself is skipped. */
+    narrowestReadScope?: CellScope,
   ): void;
 
   /**

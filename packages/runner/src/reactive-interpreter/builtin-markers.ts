@@ -23,3 +23,31 @@ export function isStrInterpolation(fn: unknown): boolean {
   return (typeof fn === "function" || typeof fn === "object") && fn !== null &&
     strInterpolationImpls.has(fn as object);
 }
+
+/**
+ * PER-OP output scopes for a segment result (scope flow-tracking): the
+ * segment implementation derives one effective scope per collapsed op from
+ * the scopes of the values that op consumed (legacy runs one action per
+ * node, so scope routing is per-node — one ambient tx-wide scope would
+ * over-narrow siblings). Side-channel keyed on the RESULT OBJECT so the
+ * runner's send seam can route each output key without changing the
+ * `sendResult` value shape. Scope strings only ("space"|"user"|"session");
+ * typed loosely to keep this module import-free.
+ */
+const outputScopesByResult = new WeakMap<object, Record<string, string>>();
+
+export function ri2SetOutputScopes(
+  result: object,
+  scopes: Record<string, string>,
+): void {
+  outputScopesByResult.set(result, scopes);
+}
+
+export function ri2GetOutputScopes(
+  result: unknown,
+): Record<string, string> | undefined {
+  return (typeof result === "object" || typeof result === "function") &&
+      result !== null
+    ? outputScopesByResult.get(result as object)
+    : undefined;
+}

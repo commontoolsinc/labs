@@ -656,9 +656,7 @@ function buildRog(input: RogBuildInput): BuiltRog {
     // unmappable params keeps the node a BOUNDARY (materialized
     // coordinators read params off the node inputs regardless).
     const rawParams = inputField(node, "params");
-    const params = rawParams !== undefined
-      ? refForValue(rawParams)
-      : undefined;
+    const params = rawParams !== undefined ? refForValue(rawParams) : undefined;
     if (rawParams !== undefined && !params) {
       return boundaryOp(id, outSchema, "io", name, node);
     }
