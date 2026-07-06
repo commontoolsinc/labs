@@ -46,6 +46,7 @@ import {
 import { fromURI, toURI } from "./uri-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import { yieldToEventLoop } from "@commonfabric/utils/sleep";
+import { COMPILE_INTERLEAVES_EVENT_LOOP } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
 
@@ -484,9 +485,10 @@ export class PatternManager {
         cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {},
       );
     cacheCtx?.onEntryIdentity?.(entryIdentity);
-    // evaluateRecordGraph is a single synchronous SES stretch; yield first so
-    // event-loop work queued behind the compile runs before it, not after.
-    await yieldToEventLoop();
+    // evaluateRecordGraph is a single synchronous SES stretch; in the browser
+    // worker, yield first so event-loop work queued behind the compile runs
+    // before it, not after. No-op in Deno, where it would be batch overhead.
+    if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
       graph,
@@ -543,7 +545,7 @@ export class PatternManager {
       });
     byteCache.putAll(runtimeVersion, modules);
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
-    await yieldToEventLoop();
+    if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
       graph,
@@ -582,7 +584,7 @@ export class PatternManager {
       await this.persistSourceCacheTracked(space, modules, entryIdentity);
       cacheCtx.onEntryIdentity?.(entryIdentity);
       // Yield ahead of the synchronous SES evaluation (see compilePattern).
-      await yieldToEventLoop();
+      if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
       const result = harness.evaluateRecordGraph(
         id,
         graph,
@@ -706,7 +708,7 @@ export class PatternManager {
     byteCache?.putAll(cacheOpts.runtimeVersion, modules);
 
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
-    await yieldToEventLoop();
+    if (COMPILE_INTERLEAVES_EVENT_LOOP) await yieldToEventLoop();
     const evalStart = performance.now();
     const result = harness.evaluateRecordGraph(
       id,
