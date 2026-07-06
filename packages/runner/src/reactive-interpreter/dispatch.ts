@@ -124,6 +124,14 @@ export interface DispatchOptions {
    * actions have AND carries the piece metadata `handleSchedulerError`
    * reads off `error.frame`. The dispatch pops it via `popFrame`. */
   actionFrame: (tx: IExtendedStorageTransaction, cause: unknown) => Frame;
+  /** Resumed-from-synced-state instantiation (the runner's
+   * `awaitSyncBeforeInitialRun`): inline collection coordinators refuse and
+   * the ORIGINAL legacy nodes instantiate — the resume/recovery machinery
+   * (stale-basis republish, armed recoveries, per-element doc awaits) is
+   * the battle-tested legacy path, and a degrade INSIDE a synthetic wrapper
+   * is not byte-identical to a legacy-instantiated node. Segments are
+   * unaffected (they re-derive; covered by the reload suites). */
+  resumed?: boolean;
 }
 
 /** Recursive key-walk for scope-routing markers in serialized pattern data. */
@@ -399,6 +407,9 @@ function tryBuildInlineCollectionNode(
   if (op?.detail.kind !== "collection") {
     return refuse(`not_collection:${op?.detail.kind}`);
   }
+  // Resumed instantiation → the ORIGINAL legacy node, byte-identical to
+  // flag-off (see DispatchOptions.resumed).
+  if (options.resumed) return refuse("resumed");
   const collectionOp = op.detail.op;
   if (collectionOp !== "map" && collectionOp !== "filter") {
     return refuse(`op_pending:${collectionOp}`); // flatMap stays legacy

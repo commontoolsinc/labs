@@ -1263,6 +1263,10 @@ export class Runner {
                   frameTx,
                   false,
                 ),
+              // Resumed-from-synced-state: inline collection coordinators
+              // refuse so the ORIGINAL legacy nodes instantiate (their
+              // resume/recovery machinery is the battle-tested path).
+              resumed: !!options.awaitSyncBeforeInitialRun,
             })
             : undefined;
         const nodesToInstantiate = interpreterPlan?.kind === "interpret"

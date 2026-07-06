@@ -217,6 +217,11 @@ export async function runResumeAppendScenario(
 
     const started = await rt2.start(rc2);
     expect(started).toBe(true);
+    // TEMP-DEBUG (ri2 leak isolation): stage bisect. 1=after start,
+    // 2=after firstHeld, 3=after release+settle.
+    const stopAt = Number(Deno.env.get("RI2_STOP_AT") ?? "0");
+    const fake = { output: ["a", "b", "c", "d", "e"] as unknown[], heldCount: 1 };
+    if (stopAt === 1) return fake;
 
     // Standing effect so `idle()` drives the coordinator without `pull()`. While
     // the gate holds the per-element documents, `pull()` would block on the
@@ -235,6 +240,13 @@ export async function runResumeAppendScenario(
       // it into the resume batch instead, with no recovery.
       await gate.firstHeld;
       expect(gate.heldCount).toBeGreaterThan(0);
+      if (stopAt === 2) return fake;
+      if (stopAt === 3) {
+        gate.release();
+        await rc2.pull();
+        await rt2.settled();
+        return fake;
+      }
 
       // Append while the per-element results are held. The coordinator's
       // reconcile reads the still-stale sibling result cells, so its commit is

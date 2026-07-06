@@ -654,6 +654,13 @@ export function makeInlineFilterImplementation(
         let freshRun = false;
         if (!run) {
           freshRun = true;
+          // COLLIDING cause with legacy's child-result docs, ON PURPOSE: for
+          // a withheld-container resume, a (dispatch-degraded) legacy
+          // coordinator can only converge from durable per-element docs at
+          // ITS child ids — `included = childCell.get()` reads these
+          // booleans exactly like child results. (A non-colliding cause
+          // strands that resume at []: children instantiate inside the
+          // revertible batch reconcile and legacy dedups them forever.)
           // deno-lint-ignore no-explicit-any
           const predicateCell = runtime.getCell<any>(
             parentCell.space,
