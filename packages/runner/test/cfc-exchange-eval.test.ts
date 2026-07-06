@@ -7,7 +7,6 @@ import {
 } from "../src/cfc/exchange-eval.ts";
 import {
   buildCfcPolicySnapshot,
-  type CfcPolicyRecordInput,
   type ExchangeRule,
 } from "../src/cfc/policy.ts";
 import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";

@@ -3,7 +3,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   type AtomPatternBindings,
-  EMPTY_ATOM_PATTERN_BINDINGS,
   instantiateAtomPattern,
   isAtomVarPlaceholder,
   matchAtomPattern,
@@ -12,7 +11,6 @@ import {
 import {
   type CfcConfClause,
   clauseAlternatives,
-  clausesEqual,
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
