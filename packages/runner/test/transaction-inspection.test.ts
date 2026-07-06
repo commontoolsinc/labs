@@ -358,6 +358,43 @@ describe("transaction inspection", () => {
     }
   });
 
+  it("derives positional clock stamps from a journal-backed transaction", () => {
+    // Journal fallback: reads and writes share one enumeration of the
+    // activity stream, so the derived indices sit on one clock — the same
+    // contract the native V2 stamps satisfy.
+    const id = "test:transaction-inspection-journal-fallback" as const;
+    const read = { space, scope: "space", id, path: ["value"], meta: {} };
+    const write = { space, scope: "space", id, path: ["value", "count"] };
+    const journalTx = {
+      journal: {
+        activity: () => [{ read }, { write }, { read }],
+      },
+    } as unknown as IExtendedStorageTransaction;
+
+    assertEquals(
+      [...getTransactionReadActivities(journalTx)].map((r) => r.journalIndex),
+      [0, 2],
+    );
+    assertEquals(
+      getTransactionWriteAttempts(journalTx)?.map((attempt) => ({
+        path: attempt.path,
+        journalIndex: attempt.journalIndex,
+      })),
+      [{ path: ["value", "count"], journalIndex: 1 }],
+    );
+
+    // Neither a native log nor a working journal: "order unknown" — callers
+    // must degrade to transaction-global gating, never a too-early bound.
+    const bareTx = {
+      journal: {
+        activity: () => {
+          throw new Error("no activity");
+        },
+      },
+    } as unknown as IExtendedStorageTransaction;
+    assertEquals(getTransactionWriteAttempts(bareTx), undefined);
+  });
+
   it("stamps reads and write attempts on one shared activity clock (D4)", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
