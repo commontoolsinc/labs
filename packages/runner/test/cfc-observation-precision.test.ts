@@ -227,9 +227,10 @@ describe("CFC observation precision (C4)", () => {
   });
 
   // When even the pointer label exceeds the ceiling, the handle would leak
-  // which-document: fall through to the ordinary path (full node
-  // confidentiality reported upward for the caller's gate).
-  it("suppresses the handle when the pointer label exceeds the ceiling", () => {
+  // which-document — and falling through would serialize the over-ceiling
+  // CONTENT into paths with no downstream gate (post-commit context/pinned
+  // docs). Redact entirely: no content, no handle, no observation.
+  it("redacts entirely when the pointer label also exceeds the ceiling", () => {
     const labelView = view([
       {
         path: [],
@@ -257,7 +258,8 @@ describe("CFC observation precision (C4)", () => {
       observationMaxConfidentiality: [],
     });
     expect((result.value as { "@link"?: string })?.["@link"]).toBeUndefined();
-    expect(result.observedConfidentiality).toContainEqual("secret-content");
+    expect(result.value).toBe("[redacted: exceeds observation ceiling]");
+    expect(result.observedConfidentiality).toEqual([]);
   });
 
   // The child-shedding applies through the serializer walk: a public child

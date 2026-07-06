@@ -537,10 +537,6 @@ function serializeForLLMObservation(
       // Rendering WHICH reference sits here — without following it — is a
       // followRef observation (C4, C0 §7): the opaque handle taints the
       // prompt with the pointer's label, not the target's content label.
-      // If even the pointer's label exceeds the ceiling, the handle would
-      // itself leak which-document — fall through to the ordinary path,
-      // which reports the full node confidentiality upward for the
-      // caller's gate (same as when no handle can be built).
       const handleConfidentiality = cfcConfidentialityForObservationNode({
         labelView,
         logicalPath,
@@ -557,6 +553,16 @@ function serializeForLLMObservation(
           observedConfidentiality: handleConfidentiality,
         };
       }
+      // Even the pointer's label exceeds the ceiling: the handle would leak
+      // which-document, and falling through would serialize the over-ceiling
+      // CONTENT into consumers with no downstream gate (the post-commit
+      // context/pinned-cell docs send llmParams without a sink-request
+      // gate). Redact entirely — no content, no handle, no observation
+      // (Codex review on #4541).
+      return {
+        value: "[redacted: exceeds observation ceiling]",
+        observedConfidentiality: [],
+      };
     }
   }
 
