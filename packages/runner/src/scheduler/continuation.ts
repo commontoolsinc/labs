@@ -10,6 +10,7 @@ export interface ExecuteContinuationState {
   readonly idlePromises: (() => void)[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly hasPendingLineageHeadEvent: () => boolean;
+  readonly hasLoadParkedHeadEvent: () => boolean;
   readonly scheduleWake: (at: number) => void;
   readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;
@@ -93,11 +94,14 @@ export function applyPullExecuteContinuation(
   // In pull mode, we consider ourselves done when there are no effects or
   // effect-demanded computations to execute.
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
+  const hasLoadParkedHeadEvent = state.hasLoadParkedHeadEvent();
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
     !isHeadEventParked(state) &&
-    !hasPendingLineageHeadEvent;
+    !hasPendingLineageHeadEvent &&
+    !hasLoadParkedHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
-    (isHeadEventParked(state) || hasPendingLineageHeadEvent);
+    (isHeadEventParked(state) || hasPendingLineageHeadEvent ||
+      hasLoadParkedHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 

@@ -8,6 +8,7 @@ import {
   collectMaterializerWritersForLog,
   type MaterializerIndexState,
 } from "./materializers.ts";
+import { entityKey } from "./keys.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
@@ -93,6 +94,71 @@ export function collectInvalidUpstreamForLog(
     hasInvalidUpstream = true;
   }
   return hasInvalidUpstream;
+}
+
+/**
+ * In-flight document loads that gate the head event (CT-1795): keys of
+ * loading documents that the handler's closure reads directly, or whose
+ * readers are transitively upstream of the closure. The invalid-upstream gate
+ * covers *graph* staleness (nodes whose inputs changed); this covers *replica*
+ * staleness — an address the closure depends on whose load has not completed.
+ * Only events need it: computations self-heal through the change channel when
+ * the load lands, but handlers are at-most-once (D7). Same inverted shape as
+ * decision 15: seed from the (small) pending-load set, walk downstream to the
+ * closure — never up the closure's cone.
+ */
+export function collectPendingLoadParkKeys(
+  state: EventPreflightDependencyState,
+  pendingLoadAddresses: readonly Pick<
+    IMemorySpaceAddress,
+    "space" | "scope" | "id"
+  >[],
+  log: ReactivityLog,
+): string[] {
+  if (pendingLoadAddresses.length === 0) return [];
+  const pendingByKey = new Map(
+    pendingLoadAddresses.map((address) => [entityKey(address), address]),
+  );
+
+  const keys = new Set<string>();
+  // Direct: the closure itself reads a loading document.
+  for (const read of [...log.reads, ...log.shallowReads]) {
+    const key = entityKey(read);
+    if (pendingByKey.has(key)) keys.add(key);
+  }
+
+  // Upstream: a reader of the loading document feeds the closure. The
+  // closure set mirrors collectInvalidUpstreamForLog's (direct writers of the
+  // log plus materializer writers).
+  const closure = collectDirectWritersForLog({
+    writersByEntity: state.writersByEntity,
+    effects: state.effects,
+    getSchedulingWrites: state.getSchedulingWrites,
+  }, log);
+  for (
+    const materializer of collectMaterializerWritersForLog(
+      state.materializerIndex,
+      log,
+    )
+  ) {
+    closure.add(materializer);
+  }
+  if (closure.size > 0) {
+    for (const [key, address] of pendingByKey) {
+      if (keys.has(key)) continue;
+      // A root-path probe matches every registered reader of the document.
+      const readers = state.triggerIndex.collectReadersForWrite(
+        { ...address, path: [] } as IMemorySpaceAddress,
+      );
+      for (const reader of readers) {
+        if (closure.has(reader) || reachesClosure(state, reader, closure)) {
+          keys.add(key);
+          break;
+        }
+      }
+    }
+  }
+  return [...keys];
 }
 
 /**

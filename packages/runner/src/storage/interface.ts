@@ -197,6 +197,25 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   crossSpaceSettled?(): Promise<void>;
 
   /**
+   * Documents whose load (`syncCell`) is currently in flight, as
+   * `(space, scope, id)` addresses. The scheduler's event preflight parks the
+   * head event while an address in the handler's read closure (or upstream of
+   * it) is still loading — a load that completes with the document absent
+   * counts as complete (CT-1795).
+   */
+  pendingLoadAddresses?(): readonly Pick<
+    IMemorySpaceAddress,
+    "space" | "scope" | "id"
+  >[];
+
+  /**
+   * Resolves when none of the given documents (keyed
+   * `space/scope/id`, see the scheduler's `entityKey`) has an in-flight
+   * load. Resolves immediately when none do.
+   */
+  loadsSettled?(keys: readonly string[]): Promise<void>;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.

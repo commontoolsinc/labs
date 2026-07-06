@@ -240,6 +240,15 @@ export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
   readonly backpressure: CommitBackpressurePolicy;
+  readonly collectPendingLoadParkKeys: (
+    event: QueuedEvent,
+    deps: ReactivityLog,
+  ) => string[];
+  readonly parkHeadEventForLoads: (
+    event: QueuedEvent,
+    keys: readonly string[],
+  ) => void;
+  readonly isHeadEventLoadParked: (event: QueuedEvent) => boolean;
   readonly nodes: NodeRegistry;
   readonly pending: Set<Action>;
   readonly eventPreflightTelemetryEnabled: boolean;
@@ -299,6 +308,14 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  readonly collectPendingLoadParkKeys: (
+    event: QueuedEvent,
+    deps: ReactivityLog,
+  ) => string[];
+  readonly parkHeadEventForLoads: (
+    event: QueuedEvent,
+    keys: readonly string[],
+  ) => void;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -453,6 +470,21 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  // Replica-staleness gate (CT-1795): with no invalid upstream left, an
+  // address the closure depends on may still have a load in flight — the
+  // wish shape, where a computation settles CLEAN on a provisional value
+  // while its fire-and-forget pull is outstanding. Handlers are at-most-once
+  // (D7), so park the head until those loads complete (absent counts as
+  // complete); load completion is the wake source, mirroring the lineage
+  // park.
+  if (!shouldSkipEvent && !hasInvalidDependencies) {
+    const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
+    if (parkKeys.length > 0) {
+      state.parkHeadEventForLoads(queuedEvent, parkKeys);
+      shouldSkipEvent = true;
+    }
+  }
+
   return {
     shouldSkipEvent,
     deps,
@@ -496,6 +528,12 @@ export async function processPullQueuedEventDuringExecute(
     }
   }
 
+  // Head is parked on in-flight closure loads; the loadsSettled callback (or
+  // the timeout backstop) re-queues execution.
+  if (state.isHeadEventLoadParked(queuedEvent)) {
+    return;
+  }
+
   if (
     queuedEvent.notBefore !== undefined &&
     queuedEvent.notBefore > performance.now()
@@ -527,6 +565,10 @@ export async function processPullQueuedEventDuringExecute(
           deps,
           invalidDeps,
         ),
+      collectPendingLoadParkKeys: (event, deps) =>
+        state.collectPendingLoadParkKeys(event, deps),
+      parkHeadEventForLoads: (event, keys) =>
+        state.parkHeadEventForLoads(event, keys),
       isDebouncedComputationWaiting: (dep) =>
         state.isDebouncedComputationWaiting(dep),
       getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),

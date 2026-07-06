@@ -838,6 +838,56 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
+  // In-flight document loads keyed `space/scope/id` (the scheduler's
+  // entityKey format). Refcounted: concurrent syncCell calls for the same
+  // document share one entry. Waiters resolve when the count returns to zero
+  // — whether the load produced a value or found the document absent.
+  #pendingLoads = new Map<string, {
+    count: number;
+    address: { space: MemorySpace; scope: CellScope; id: URI };
+    waiters: Set<() => void>;
+  }>();
+
+  #registerPendingLoad(
+    address: { space: MemorySpace; scope: CellScope; id: URI },
+  ): () => void {
+    const key = `${address.space}/${address.scope}/${address.id}`;
+    const entry = this.#pendingLoads.get(key) ??
+      { count: 0, address, waiters: new Set<() => void>() };
+    entry.count++;
+    this.#pendingLoads.set(key, entry);
+    return () => {
+      entry.count--;
+      if (entry.count > 0) return;
+      this.#pendingLoads.delete(key);
+      for (const waiter of entry.waiters) waiter();
+      entry.waiters.clear();
+    };
+  }
+
+  pendingLoadAddresses(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[] {
+    return [...this.#pendingLoads.values()].map((entry) => entry.address);
+  }
+
+  loadsSettled(keys: readonly string[]): Promise<void> {
+    const pending = keys.filter((key) => this.#pendingLoads.has(key));
+    if (pending.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      let remaining = pending.length;
+      const onSettled = () => {
+        remaining--;
+        if (remaining === 0) resolve();
+      };
+      for (const key of pending) {
+        this.#pendingLoads.get(key)!.waiters.add(onSettled);
+      }
+    });
+  }
+
   trackUntilSettled(work: Promise<unknown>): void {
     const tracked = work.finally(() =>
       this.#crossSpacePromises.delete(tracked)
@@ -874,10 +924,19 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
-    await provider.sync(id, {
-      path: cell.path.map((segment) => segment.toString()),
-      schema: schema ?? false,
-    }, scope);
+    const releaseLoad = this.#registerPendingLoad({
+      space,
+      scope: normalizeCellScope(scope),
+      id,
+    });
+    try {
+      await provider.sync(id, {
+        path: cell.path.map((segment) => segment.toString()),
+        schema: schema ?? false,
+      }, scope);
+    } finally {
+      releaseLoad();
+    }
     await this.syncCfcSchemaDocument(
       space,
       (provider as {

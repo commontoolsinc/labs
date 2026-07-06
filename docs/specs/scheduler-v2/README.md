@@ -603,7 +603,16 @@ Per pass, for each lane's head event:
    closure — not an upstream walk of the closure's cone, which is O(graph)
    against a hub (decision 15). If any are ineligible (time-gated),
    park the lane's head with `notBefore = min eligibleAt` and set the wake
-   gate; the lane stays FIFO.
+   gate; the lane stays FIFO. The gate also covers **replica staleness**
+   (CT-1795): addresses in the closure with in-flight replica loads park the
+   head, and load completion — a definitively absent document counts as
+   complete — is the wake source (same shape as the lineage park's
+   origin-commit callback; a timeout backstop fail-opens). Computations need
+   no such gate (they self-heal through the one channel when the load
+   lands); handlers are at-most-once. Because preflight itself kicks
+   fire-and-forget pulls on cold reads, a key that settled once while the
+   event was head never re-parks it — otherwise each pass would re-arm the
+   park on its own freshly kicked load, a livelock.
 3. **Dispatch** once the closure is clean: presync handler inputs
    (`presyncInputs`, unchanged), run the handler in an immediate transaction
    stamped with the handler's id, commit optimistically (changes propagate
@@ -929,8 +938,9 @@ unchanged output triggers no downstream runs.
 
 **I4 — Event ordering & consistency.** Handlers dispatch in enqueue order
 within their ordering lane (today: one global lane). Before dispatch, every
-invalid node upstream of the handler's read closure has been run (or the
-event is parked; it is never skipped or reordered within its lane).
+invalid node upstream of the handler's read closure has been run, and every
+in-flight replica load for an address the closure depends on has completed
+(or the event is parked; it is never skipped or reordered within its lane).
 
 **I5 — Self-stability.** A run's own committed changes never invalidate the
 node that produced them. A run that writes only its output with unchanged

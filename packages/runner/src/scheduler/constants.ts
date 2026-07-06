@@ -19,6 +19,13 @@ export const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 export const AUTO_DEBOUNCE_MIN_RUNS = 3;
 export const AUTO_DEBOUNCE_DELAY_MS = 100;
 
+// How long the head event may park waiting for in-flight document loads in
+// its read closure (CT-1795). Load completion — including "document absent" —
+// releases the park immediately; the timeout only bounds a wedged transport,
+// after which the event dispatches fail-open (today's behavior) with a
+// warning.
+export const EVENT_LOAD_PARK_TIMEOUT_MS = 10_000;
+
 // How long a resumed action's initial run may be held while waiting for its
 // space to finish syncing (the flag-off resume hold; see runner.ts
 // awaitSyncBeforeInitialRun). The sync completing releases the hold early; the

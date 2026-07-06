@@ -29,6 +29,7 @@ import type {
 } from "../telemetry.ts";
 import {
   DEFAULT_RETRIES_FOR_EVENTS,
+  EVENT_LOAD_PARK_TIMEOUT_MS,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
@@ -68,6 +69,7 @@ import {
 } from "./trigger-index.ts";
 import {
   collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
+  collectPendingLoadParkKeys as collectPendingLoadParkKeysState,
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
@@ -368,6 +370,24 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  // Head event parked on in-flight document loads (CT-1795). Keyed by event
+  // id; released by loadsSettled (or the timeout backstop), which re-queues
+  // execution.
+  private headEventLoadPark: {
+    eventId: string;
+    keys: readonly string[];
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
+  // Keys whose loads already settled while this event was head. Preflight
+  // itself kicks fire-and-forget pulls (populateDependencies cold reads), so
+  // an address can be freshly in flight on every pass; without this memo the
+  // park re-arms per pass and the event never dispatches. Once a key settled
+  // for this event its replica is warm — a refresh is an ordinary concurrent
+  // update, not a provisional snapshot.
+  private headEventLoadParkHistory: {
+    eventId: string;
+    keys: Set<string>;
+  } | null = null;
   // Depth of the initial-rehydration apply window (the rehydration barrier reads
   // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
   // resume a synchronous snapshot apply at registration, so this is >0 only
@@ -763,9 +783,13 @@ export class Scheduler {
         // A queued event or idle-blocking pull node is parked behind a time
         // gate. Wait for the wake timer to re-schedule the queue and re-check.
         this.idlePromises.push(resolve);
-      } else if (this.hasPendingLineageHeadEvent()) {
-        // A cross-space lineage head has no timer; its origin commit callback
-        // is the wake source, so idle must stay open until that callback runs.
+      } else if (
+        this.hasPendingLineageHeadEvent() || this.hasLoadParkedHeadEvent()
+      ) {
+        // A cross-space lineage head has no timer — its origin commit callback
+        // is the wake source; a load-parked head wakes on load completion (or
+        // its timeout backstop). Either way idle must stay open until the
+        // callback re-queues execution.
         this.idlePromises.push(resolve);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
@@ -1172,6 +1196,11 @@ export class Scheduler {
    * Should be called when the scheduler is being torn down.
    */
   dispose(): void {
+    if (this.headEventLoadPark) {
+      clearTimeout(this.headEventLoadPark.timeout);
+      this.headEventLoadPark = null;
+    }
+    this.headEventLoadParkHistory = null;
     this.disposed = true;
     this.gates.cancelWake();
     if (this.pendingQueueTaskTimer !== null) {
@@ -1679,6 +1708,7 @@ export class Scheduler {
         return shouldRerun;
       },
       hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
+      hasLoadParkedHeadEvent: () => this.hasLoadParkedHeadEvent(),
       scheduleWake: (at) => this.gates.scheduleWake(at),
       hasWakeTimer: () => this.gates.hasWakeTimer(),
       setScheduled: (scheduled) => {
@@ -1730,6 +1760,11 @@ export class Scheduler {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
       backpressure: this.runtime.commitBackpressure,
+      collectPendingLoadParkKeys: (event, deps) =>
+        this.collectPendingLoadParkKeys(event, deps),
+      parkHeadEventForLoads: (event, keys) =>
+        this.parkHeadEventForLoads(event, keys),
+      isHeadEventLoadParked: (event) => this.isHeadEventLoadParked(event),
       nodes: this.nodes,
       pending: this.pending,
       get eventPreflightTelemetryEnabled() {
@@ -1964,6 +1999,66 @@ export class Scheduler {
       log,
       workSet,
     );
+  }
+
+  private collectPendingLoadParkKeys(
+    event: QueuedEvent,
+    log: ReactivityLog,
+  ): string[] {
+    const pendingLoadAddresses =
+      this.runtime.storageManager.pendingLoadAddresses?.() ?? [];
+    const keys = collectPendingLoadParkKeysState(
+      this.eventPreflightDependencyState,
+      pendingLoadAddresses,
+      log,
+    );
+    if (keys.length === 0) return keys;
+    const history = this.headEventLoadParkHistory;
+    if (!history || history.eventId !== event.id) return keys;
+    return keys.filter((key) => !history.keys.has(key));
+  }
+
+  private parkHeadEventForLoads(
+    event: QueuedEvent,
+    keys: readonly string[],
+  ): void {
+    if (this.headEventLoadPark?.eventId === event.id) return;
+    if (this.headEventLoadPark) {
+      clearTimeout(this.headEventLoadPark.timeout);
+    }
+    const timeout = setTimeout(() => {
+      logger.warn("scheduler-load-park", () => [
+        "Event load park timed out; dispatching fail-open",
+        { eventId: event.id, keys },
+      ]);
+      this.releaseHeadEventLoadPark(event.id);
+    }, EVENT_LOAD_PARK_TIMEOUT_MS);
+    this.headEventLoadPark = { eventId: event.id, keys, timeout };
+    const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
+      Promise.resolve();
+    settled.then(() => this.releaseHeadEventLoadPark(event.id));
+  }
+
+  private releaseHeadEventLoadPark(eventId: string): void {
+    if (this.headEventLoadPark?.eventId !== eventId) return;
+    clearTimeout(this.headEventLoadPark.timeout);
+    if (this.headEventLoadParkHistory?.eventId !== eventId) {
+      this.headEventLoadParkHistory = { eventId, keys: new Set() };
+    }
+    for (const key of this.headEventLoadPark.keys) {
+      this.headEventLoadParkHistory.keys.add(key);
+    }
+    this.headEventLoadPark = null;
+    this.queueExecution();
+  }
+
+  private isHeadEventLoadParked(event: QueuedEvent): boolean {
+    return this.headEventLoadPark?.eventId === event.id;
+  }
+
+  private hasLoadParkedHeadEvent(): boolean {
+    const head = this.eventQueue[0];
+    return head !== undefined && this.headEventLoadPark?.eventId === head.id;
   }
 
   private canAutomaticallyDebounce(action: Action): boolean {
