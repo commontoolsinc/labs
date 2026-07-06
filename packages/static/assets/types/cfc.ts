@@ -27,9 +27,21 @@ export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {
 }
 export type CfcAtom = CfcJsonValue;
 export declare const CFC_ATOM_TYPE: {
+  readonly BoundaryContext: "https://commonfabric.org/cfc/atom/BoundaryContext";
   readonly Builtin: "https://commonfabric.org/cfc/atom/Builtin";
   readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";
+  readonly CaveatAssessment:
+    "https://commonfabric.org/cfc/atom/CaveatAssessment";
+  readonly CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened";
+  readonly DisclaimerAttached:
+    "https://commonfabric.org/cfc/atom/DisclaimerAttached";
+  readonly DisclosureAcknowledged:
+    "https://commonfabric.org/cfc/atom/DisclosureAcknowledged";
+  readonly DisclosureRendered:
+    "https://commonfabric.org/cfc/atom/DisclosureRendered";
+  readonly Expires: "https://commonfabric.org/cfc/atom/Expires";
   readonly ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest";
+  readonly HasRole: "https://commonfabric.org/cfc/atom/HasRole";
   readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
   readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
   readonly LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived";
@@ -39,7 +51,9 @@ export declare const CFC_ATOM_TYPE: {
   readonly PromptSlotInfluence:
     "https://commonfabric.org/cfc/atom/PromptSlotInfluence";
   readonly Resource: "https://commonfabric.org/cfc/atom/Resource";
+  readonly Space: "https://commonfabric.org/cfc/atom/Space";
   readonly TransformedBy: "https://commonfabric.org/cfc/atom/TransformedBy";
+  readonly User: "https://commonfabric.org/cfc/atom/User";
   readonly UserSurfaceInput:
     "https://commonfabric.org/cfc/atom/UserSurfaceInput";
 };
@@ -47,8 +61,12 @@ export declare const CFC_RUNTIME_SUBJECT = "did:web:commonfabric.org#runtime";
 export declare const CFC_CONCEPT_KIND: {
   readonly PromptInfluence:
     "https://commonfabric.org/cfc/concepts/prompt-influence";
+  readonly PromptInjectionRiskIngressScreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-ingress-screened";
   readonly PromptInjectionRiskUnscreened:
     "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened";
+  readonly PromptInjectionRiskValueScreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-value-screened";
 };
 export declare const CFC_FUSE_ATOM_CLASS: {
   readonly ProjectionMetadataIncomplete:
@@ -91,6 +109,79 @@ export type CfcExternalIngestAtom = CfcAtomObject & {
   readonly audience: string;
   readonly receivedAt: string;
   readonly valueDigest: string;
+};
+export type CfcUserAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.User;
+  readonly subject: string;
+};
+export type CfcSpaceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Space;
+  readonly id: string;
+};
+export type CfcExpiresAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Expires;
+  readonly timestamp: number;
+};
+export type CfcHasRoleAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.HasRole;
+  readonly principal: string;
+  readonly space: string;
+  readonly role: "owner" | "writer" | "reader";
+};
+export type CfcBoundaryContextAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.BoundaryContext;
+  readonly key: string;
+  readonly value?: string;
+  readonly ref?: CfcAtom;
+};
+export type CfcCaveatScreenedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.CaveatScreened;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly stage: string;
+  readonly detector: CfcAtom;
+  readonly verdict: string;
+  readonly valueRef?: CfcAtom;
+  readonly profileHash?: string;
+  readonly screenedAt?: number;
+};
+export type CfcDisclosureRenderedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclosureRendered;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly sink: string;
+  readonly renderRef: CfcAtom;
+  readonly snapshotDigest: string;
+  readonly user?: string;
+};
+export type CfcDisclosureAcknowledgedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclosureAcknowledged;
+  readonly user: string;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly renderRef: CfcAtom;
+  readonly snapshotDigest: string;
+  readonly sink?: string;
+};
+export type CfcDisclaimerAttachedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclaimerAttached;
+  readonly sink: string;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly disclaimerDigest: string;
+  readonly formatter?: CfcAtom;
+};
+export type CfcCaveatAssessmentAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.CaveatAssessment;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly assessor: CfcAtom;
+  readonly evidenceDigest: string;
+  readonly result: "supported" | "rejected";
+  readonly sink?: string;
+  readonly intentId?: CfcAtom;
+  readonly purpose?: string;
+  readonly assessedAt?: number;
 };
 export type CfcPromptSlotBoundAtom<
   Source extends CfcAtom = CfcAtom,
@@ -163,6 +254,63 @@ export declare const cfcAtom: {
     surface: string,
     valueDigest: string,
   ) => CfcPromptSlotBoundAtom<Source, Role>;
+  readonly user: (subject: string) => CfcUserAtom;
+  readonly space: (id: string) => CfcSpaceAtom;
+  readonly expires: (timestamp: number) => CfcExpiresAtom;
+  readonly hasRole: (
+    principal: string,
+    space: string,
+    role: "owner" | "writer" | "reader",
+  ) => CfcHasRoleAtom;
+  readonly boundaryContext: (
+    key: string,
+    value?: string,
+    ref?: CfcAtom,
+  ) => CfcBoundaryContextAtom;
+  readonly caveatScreened: (fields: {
+    kind: string;
+    source: CfcAtom;
+    stage: string;
+    detector: CfcAtom;
+    verdict: string;
+    valueRef?: CfcAtom;
+    profileHash?: string;
+    screenedAt?: number;
+  }) => CfcCaveatScreenedAtom;
+  readonly disclosureRendered: (fields: {
+    kind: string;
+    source: CfcAtom;
+    sink: string;
+    renderRef: CfcAtom;
+    snapshotDigest: string;
+    user?: string;
+  }) => CfcDisclosureRenderedAtom;
+  readonly disclosureAcknowledged: (fields: {
+    user: string;
+    kind: string;
+    source: CfcAtom;
+    renderRef: CfcAtom;
+    snapshotDigest: string;
+    sink?: string;
+  }) => CfcDisclosureAcknowledgedAtom;
+  readonly disclaimerAttached: (fields: {
+    sink: string;
+    kind: string;
+    source: CfcAtom;
+    disclaimerDigest: string;
+    formatter?: CfcAtom;
+  }) => CfcDisclaimerAttachedAtom;
+  readonly caveatAssessment: (fields: {
+    kind: string;
+    source: CfcAtom;
+    assessor: CfcAtom;
+    evidenceDigest: string;
+    result: "supported" | "rejected";
+    sink?: string;
+    intentId?: CfcAtom;
+    purpose?: string;
+    assessedAt?: number;
+  }) => CfcCaveatAssessmentAtom;
 };
 export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "Cfc",

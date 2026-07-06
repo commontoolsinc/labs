@@ -2851,6 +2851,20 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   // in BOTH directions: pattern code can neither forge it onto values the
   // model never produced nor author schemas that mint it.
   CFC_ATOM_TYPE.LlmDerived,
+  // Exchange-rule evidence families (Epic B1, spec §15.4/§10.1): screening
+  // verdicts, disclosure/acknowledgment/disclaimer events, assessor
+  // judgments, role membership, and boundary context are all minted by
+  // trusted runtime surfaces (detectors, the UI runtime, membership lookup,
+  // the boundary evaluator). A pattern-authored schema that could self-attach
+  // any of them would forge the guard evidence exchange rules fire on —
+  // upgrading its own caveat tier or discharging its own material risk.
+  CFC_ATOM_TYPE.BoundaryContext,
+  CFC_ATOM_TYPE.CaveatAssessment,
+  CFC_ATOM_TYPE.CaveatScreened,
+  CFC_ATOM_TYPE.DisclaimerAttached,
+  CFC_ATOM_TYPE.DisclosureAcknowledged,
+  CFC_ATOM_TYPE.DisclosureRendered,
+  CFC_ATOM_TYPE.HasRole,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
