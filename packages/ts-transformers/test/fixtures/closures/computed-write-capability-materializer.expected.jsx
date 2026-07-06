@@ -51,7 +51,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     asCell: ["opaque"]
-} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["processed"]] });
+} as const satisfies __cfHelpers.JSONSchema, { materializerWriteInputPaths: [["processed"]], captureWritesAnalyzed: true });
 // FIXTURE: computed-write-capability-materializer
 // Verifies: a computed() that WRITES to a captured cell (`.set(...)`) produces a
 //   write-capability capture, which the lift-applied strategy emits with a

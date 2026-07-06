@@ -76,6 +76,13 @@ interface MutableCapabilityState {
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
+  /**
+   * An unrecognized method was called on a cell-like receiver rooted in this
+   * parameter. The call could be a mutator this analysis does not know, so
+   * `writes` cannot be treated as exhaustive (fail-closed for
+   * `captureWritesAnalyzed`); recognized reads/derivations are unaffected.
+   */
+  hasUnverifiedCellUse: boolean;
 }
 
 interface ObservedCapabilityUsage {
@@ -85,6 +92,7 @@ interface ObservedCapabilityUsage {
   readonly opaquePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly hasUnverifiedCellUse: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
@@ -147,9 +155,14 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
   MERGEABLE_OP_METHODS.filter((op) => op.kind === kind).map((op) => op.method);
 
+// `send` is a write: at runtime Stream.send() delegates to set() (an event
+// enqueue is a write to the stream cell). Classifying it here keeps
+// writePaths an exhaustive record of capture writes, which the computed-cell
+// classifier relies on (docs/specs/computed-cell-identity.md).
 const WRITER_METHODS = new Set([
   "set",
   "update",
+  "send",
   ...mergeableMethods("scalar-writer"),
 ]);
 const ARRAY_IDENTITY_WRITER_METHODS = new Set([
@@ -1325,6 +1338,7 @@ function normalizeObservedCapabilityUsage(
     opaquePaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
+    hasUnverifiedCellUse: state.hasUnverifiedCellUse,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
       !state.hasNonIdentityUse &&
       state.reads.size === 0 &&
@@ -1430,6 +1444,7 @@ export function analyzeFunctionCapabilities(
           hasIdentityUse: false,
           hasNonIdentityUse: false,
           hasNonIdentityRootUse: false,
+          hasUnverifiedCellUse: false,
         };
         states.set(name, state);
       }
@@ -1469,6 +1484,15 @@ export function analyzeFunctionCapabilities(
       const state = ensureState(name);
       state.wildcard = true;
       state.hasNonIdentityUse = true;
+    };
+
+    // Unlike markWildcard this does NOT change shrinking or identity
+    // classification — it only poisons write-exhaustiveness, so
+    // `captureWritesAnalyzed` is withheld while everything else behaves as
+    // before.
+    const markUnverifiedCellUse = (name: string): void => {
+      const state = ensureState(name);
+      state.hasUnverifiedCellUse = true;
     };
 
     const markPassthrough = (
@@ -2814,6 +2838,9 @@ export function analyzeFunctionCapabilities(
               markWildcard(source.root);
               continue;
             }
+            if (paramSummary.hasUnverifiedCellUse) {
+              markUnverifiedCellUse(source.root);
+            }
 
             for (const readPath of paramSummary.readPaths) {
               trackRead(source.root, [...source.path, ...readPath]);
@@ -3004,7 +3031,19 @@ export function analyzeFunctionCapabilities(
                 markOpaqueUse(receiver.root, receiver.path);
               }
             } else {
-              // Unknown method call over a tracked source reads at least the receiver path.
+              // Unknown method call over a tracked source reads at least the
+              // receiver path. On a CELL-LIKE receiver the unknown method
+              // could be a mutator this analysis does not recognize (the
+              // writer sets are a closed list against an evolving Cell API),
+              // so write-exhaustiveness is poisoned — fail closed. Value
+              // receivers (e.g. array methods on a `.get()` snapshot) cannot
+              // write through the cell and stay reads.
+              if (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
               if (shouldTrackFullShape) {
                 trackFullShapeReadRef(receiver);
               } else if (directReceiver) {

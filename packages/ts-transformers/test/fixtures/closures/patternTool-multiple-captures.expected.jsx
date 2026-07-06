@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     value: number;
 }) => {

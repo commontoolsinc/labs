@@ -83,7 +83,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → lift(({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))({ numbers, multiplier })

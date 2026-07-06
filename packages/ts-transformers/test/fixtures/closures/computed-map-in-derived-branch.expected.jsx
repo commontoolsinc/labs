@@ -66,7 +66,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         },
         required: ["name", "rank", "isFirst"]
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<unknown[]>;
 }, number>(({ people }) => people.get().length, {
@@ -83,7 +83,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["people"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-map-in-derived-branch
 // Verifies: moving a reactive computation out of a JSX slot forces the whole
 //   branch into derive(), so nested maps run in compute context and stay plain

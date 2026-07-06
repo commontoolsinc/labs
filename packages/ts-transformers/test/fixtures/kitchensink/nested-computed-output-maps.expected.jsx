@@ -219,7 +219,7 @@ state.threads.map((thread, outerIndex) => ({
             required: ["id", "title", "muted", "comments"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     visibleComments: Comment[];
 }, Comment[]>(({ visibleComments }) => visibleComments, {
@@ -284,7 +284,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["id", "text", "flagged", "reactions"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_3 = __cfHelpers.lift<{
     reboundIndex: number;
     outerIndex: number;
@@ -716,7 +716,7 @@ visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_8 = __cfHelpers.lift<{
     labelIndex: number;
 }, boolean>(({ labelIndex }) => labelIndex === 0, {

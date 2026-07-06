@@ -57,7 +57,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-filter-map-chain
 // Verifies: .filter() and .map() inside computed() are NOT transformed
 // Context: Inside computed(), Reactive auto-unwraps to plain array, so

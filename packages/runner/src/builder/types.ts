@@ -220,6 +220,14 @@ declare module "@commonfabric/api" {
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
     /** Input paths whose writable cells should become materializer envelopes */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+    /**
+     * Transformer assertion that capability analysis ran over this module's
+     * callback and no capture escaped tracking, making
+     * `materializerWriteInputPaths` an exhaustive record of capture writes
+     * (`.send()` included). Lets the computed-cell classifier accept
+     * handle-bearing argument schemas when no writes were observed.
+     */
+    captureWritesAnalyzed?: boolean;
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
   }

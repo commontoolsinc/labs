@@ -209,6 +209,20 @@ only a missed optimization; tagging state as computed means the server
 silently drops user writes. The classifier may start extremely narrow and
 widen as capability analysis improves.
 
+One widening is implemented: a handle-bearing argument schema (`asCell`
+entries) disqualifies only when the module's capture writes are UNVERIFIED.
+The transformer emits `captureWritesAnalyzed` on lowered computeds whose
+capability analysis saw every capture (no wildcard escape, no recursion
+short-circuit, and no unrecognized method call on a cell-like receiver —
+the writer-method list is closed but the Cell API is not, so unknown
+cell-methods fail closed), making `materializerWriteInputPaths` an
+exhaustive record of writes through captures — `.send()` included, since it
+is a write (`Stream.send()` delegates to `set()`). For such modules, possession of a
+handle is not use: a computed may embed event streams in the JSX it produces
+and still classify as a pure derivation. Hand-written `lift()`s with
+`asCell` schemas carry no such provenance and stay under the conservative
+rule.
+
 ### Server conflict policy
 
 At commit-apply time the engine classifies each semantic operation by

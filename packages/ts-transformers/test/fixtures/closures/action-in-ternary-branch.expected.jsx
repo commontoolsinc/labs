@@ -60,7 +60,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["card"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": [false, true, ""]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
 //   local JSX rewrites instead of forcing a whole-branch lift-applied computation

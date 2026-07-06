@@ -47,7 +47,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     items: {
         label: string;
@@ -71,7 +71,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Extras key: only exists on some elements; must shrink to `priority?`.

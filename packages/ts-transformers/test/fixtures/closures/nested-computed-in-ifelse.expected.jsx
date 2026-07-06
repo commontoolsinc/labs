@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["background"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     secondToggle: __cfHelpers.ReadonlyCell<boolean>;
 }, { background: string; }>(({ secondToggle }) => {
@@ -68,7 +68,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     },
     required: ["background"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to the lift-applied form without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → lift(({ secondToggle }) => { secondToggle.get(); ... })({ secondToggle })

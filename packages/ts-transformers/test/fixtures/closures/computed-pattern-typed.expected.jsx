@@ -28,7 +28,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "multiplier"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-pattern-typed
 // Verifies: computed() inside a typed pattern with destructured params is closure-extracted
 //   computed(() => value.get() * multiplier) → lift(({ value, multiplier }) => value.get() * multiplier)({ value, multiplier })

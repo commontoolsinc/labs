@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "__cf_reserved"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-reserved-names
 // Verifies: variables with __cf_ prefixed names are captured without special treatment
 //   computed(() => value.get() * __cf_reserved.get()) → lift(...)({ value, __cf_reserved })

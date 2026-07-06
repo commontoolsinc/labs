@@ -50,7 +50,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-destructured-param
 // Verifies: a captured cell works alongside destructuring inside the computed body
 //   computed(() => { const { x, y } = point.get(); ... }) → lift(...)({ point, multiplier })

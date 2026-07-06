@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["showHistory", "messageCount", "dismissedIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in a lift-applied computation, which unwraps Cells,
 // but fails to remove the .get() calls

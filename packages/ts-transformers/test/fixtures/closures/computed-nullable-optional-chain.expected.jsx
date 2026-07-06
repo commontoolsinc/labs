@@ -45,7 +45,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["topQuestion"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_3 = __cfHelpers.lift<{
     topQuestion: Question | null;
 }, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.question, {
@@ -79,7 +79,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_4 = __cfHelpers.lift<{
     topQuestion: {
         category: string;
@@ -104,7 +104,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["topQuestion"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_5 = __cfHelpers.lift<{
     topQuestion: Question | null;
 }, string>(({ topQuestion }) => topQuestion === null ? "" : topQuestion.category, {
@@ -138,7 +138,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
 //   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })

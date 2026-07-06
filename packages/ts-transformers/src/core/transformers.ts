@@ -44,6 +44,12 @@ export interface CapabilityParamSummary {
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  /**
+   * An unrecognized method was called on a cell-like receiver rooted in this
+   * parameter — `writePaths` may be incomplete. Consumers asserting write
+   * exhaustiveness (`captureWritesAnalyzed`) must treat this like `wildcard`.
+   */
+  readonly hasUnverifiedCellUse?: boolean;
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];

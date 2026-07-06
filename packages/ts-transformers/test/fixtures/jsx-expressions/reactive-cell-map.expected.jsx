@@ -159,16 +159,16 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["cellRef"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     piece: any;
-}, any>(({ piece }) => piece[__cfHelpers.NAME], {
+}, any>(({ piece }) => piece[NAME], {
     type: "object",
     properties: {
         piece: true
     },
     required: ["piece"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const piece = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");

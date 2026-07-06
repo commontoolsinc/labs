@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "config"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-union-undefined
 // Verifies: captured properties with `number | undefined` union types produce correct schemas
 //   computed(() => ...) → lift(...)({ value, config: { required, unionUndefined } })

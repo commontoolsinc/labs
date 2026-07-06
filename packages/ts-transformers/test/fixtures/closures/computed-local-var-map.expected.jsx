@@ -62,7 +62,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "price"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     filtered: {
         name: string;
@@ -113,7 +113,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-local-var-map
 // Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const localVar = filtered; return localVar.map(fn) }) → lift(({ filtered }) => { const localVar = filtered; return localVar.map(fn) })(...)

@@ -43,7 +43,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["value", "data"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-collision-shorthand
 // Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly
 //   computed(() => ({ value, data: { multiplier } })) → lift(...)({ multiplier })

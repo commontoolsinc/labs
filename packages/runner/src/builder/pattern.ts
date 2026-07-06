@@ -710,6 +710,13 @@ function assignComputedCellKinds(
   // its own inputs. (Handlers never appear as writers — their `outputs` is
   // `{}` — but ref builtins, sub-patterns, raw/isolated modules, and effects
   // do, and none of their outputs are replayable.)
+  //
+  // Handle-bearing argument schemas (asCell entries) disqualify only when the
+  // module's capture writes are UNVERIFIED: when the transformer's capability
+  // analysis vouches for the callback (`captureWritesAnalyzed`, emitted only
+  // with no wildcard escape and no recursion short-circuit, with `.send()`
+  // counted as a write), possession of a handle is not use — a computed may
+  // embed event streams in its JSX output and still be a pure derivation.
   const writerQualifies = (module: NodeRef["module"]): boolean =>
     isModule(module) &&
     module.type === "javascript" &&
@@ -717,7 +724,8 @@ function assignComputedCellKinds(
     module.isEffect !== true &&
     (module.materializerWriteInputPaths?.length ?? 0) === 0 &&
     module.writableProxy !== true &&
-    !schemaGrantsWritableHandles(module.argumentSchema);
+    (module.captureWritesAnalyzed === true ||
+      !schemaGrantsWritableHandles(module.argumentSchema));
 
   const writersByRoot = new Map<OpaqueCell<any>, NodeRef["module"][]>();
   const disqualified = new Set<OpaqueCell<any>>();

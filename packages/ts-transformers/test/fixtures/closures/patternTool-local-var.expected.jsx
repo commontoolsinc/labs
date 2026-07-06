@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["language"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     content: string;
 }, string>(({ content }) => content, {
@@ -44,7 +44,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["content"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_3 = __cfHelpers.lift<{
     genResult: {
         pending: boolean;
@@ -73,7 +73,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["genResult"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     language: string;
     content: string;

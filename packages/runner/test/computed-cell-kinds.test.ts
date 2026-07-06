@@ -150,8 +150,62 @@ describe("computed cell kinds", () => {
         return { out: writeThrough({ c: st }) };
       });
       for (const descriptor of testPattern.derivedInternalCells ?? []) {
-        // Neither the captured cell (possibly written through the handle)
-        // nor the writer's own output qualifies.
+        // Without capability-analysis provenance, possession of a handle is
+        // indistinguishable from use: neither the captured cell nor the
+        // writer's own output qualifies.
+        expect(descriptor.kind).toBeUndefined();
+      }
+    });
+
+    it("accepts handle-bearing lifts when capture writes are analyzed", () => {
+      // The transformer emits captureWritesAnalyzed for lowered computeds
+      // whose capability analysis saw every capture (no wildcard escape):
+      // materializerWriteInputPaths is then exhaustive, so an empty one
+      // proves the handle is embedded, not written through.
+      const embedsHandle = lift(
+        (_input: unknown) => 0,
+        {
+          type: "object",
+          properties: { c: { type: "number", asCell: ["cell"] } },
+        } as const,
+        { type: "number" } as const,
+        { captureWritesAnalyzed: true },
+      );
+      const testPattern = pattern<{ x: number }>(() => {
+        const st = reactive<number>(5);
+        (st as any).for("st");
+        return { out: embedsHandle({ c: st }) };
+      });
+      const outDescriptor = testPattern.derivedInternalCells?.find((
+        descriptor,
+      ) => descriptor.partialCause === "out");
+      expect(outDescriptor?.kind).toBe("computed");
+      // The captured state cell still has no compute writer — untagged.
+      const stateDescriptor = testPattern.derivedInternalCells?.find((
+        descriptor,
+      ) => descriptor.partialCause === "st");
+      expect(stateDescriptor?.kind).toBeUndefined();
+    });
+
+    it("keeps analyzed lifts with observed capture writes disqualified", () => {
+      const writesThrough = lift(
+        (_input: unknown) => 0,
+        {
+          type: "object",
+          properties: { c: { type: "number", asCell: ["cell"] } },
+        } as const,
+        { type: "number" } as const,
+        {
+          captureWritesAnalyzed: true,
+          materializerWriteInputPaths: [["c"]],
+        },
+      );
+      const testPattern = pattern<{ x: number }>(() => {
+        const st = reactive<number>(5);
+        (st as any).for("st");
+        return { out: writesThrough({ c: st }) };
+      });
+      for (const descriptor of testPattern.derivedInternalCells ?? []) {
         expect(descriptor.kind).toBeUndefined();
       }
     });

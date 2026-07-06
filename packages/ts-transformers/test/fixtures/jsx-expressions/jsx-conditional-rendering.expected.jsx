@@ -249,7 +249,7 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: jsx-conditional-rendering
 // Verifies: ternary expressions and ifElse() calls in JSX are transformed to reactive ifElse()
 //   cond ? a : b             → ifElse(schema, schema, schema, schema, cond, a, b)

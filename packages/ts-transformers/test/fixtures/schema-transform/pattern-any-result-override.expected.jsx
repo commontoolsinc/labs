@@ -25,7 +25,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["result", "prompt"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: pattern-any-result-override
 // Verifies: explicit Output type parameter overrides inferred `any` return type for schema generation
 //   pattern<Input, string>() → output schema { type: "string" } instead of inferred any

@@ -124,29 +124,51 @@ function getFirstParameterCapabilitySummary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
-): CapabilityParamSummary | undefined {
-  const summary = analyzeFunctionCapabilities(callback, {
+): {
+  summary: CapabilityParamSummary | undefined;
+  recursive: boolean;
+} {
+  const functionSummary = analyzeFunctionCapabilities(callback, {
     checker,
     typeRegistry,
     includeNestedCallbacks: true,
   });
   const parameter = callback.parameters[0];
-  if (!parameter) return undefined;
+  const recursive = functionSummary.recursive === true;
+  if (!parameter) return { summary: undefined, recursive };
   const parameterName = ts.isIdentifier(parameter.name)
     ? parameter.name.text
     : "__param0";
-  return summary.params.find((param) => param.name === parameterName);
+  return {
+    summary: functionSummary.params.find((param) =>
+      param.name === parameterName
+    ),
+    recursive,
+  };
 }
 
 function createDeriveSchedulerOptions(
   inputParamSummary: CapabilityParamSummary | undefined,
+  recursive: boolean,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression | undefined {
   const writePaths = inputParamSummary?.writePaths ?? [];
-  if (writePaths.length === 0) return undefined;
+  // `captureWritesAnalyzed` asserts writePaths are an EXHAUSTIVE record of
+  // writes through captures: analysis ran, no capture escaped tracking
+  // (wildcard), no unrecognized method was called on a cell-like receiver
+  // (hasUnverifiedCellUse — the writer-method list is closed but the Cell API
+  // is not), and analysis was not short-circuited (recursive). The
+  // computed-cell classifier keys its relaxation off this — an unverified
+  // callback stays under the conservative has-a-handle rule.
+  const captureWritesAnalyzed = inputParamSummary !== undefined &&
+    inputParamSummary.wildcard !== true &&
+    inputParamSummary.hasUnverifiedCellUse !== true &&
+    !recursive;
+  if (writePaths.length === 0 && !captureWritesAnalyzed) return undefined;
 
-  return factory.createObjectLiteralExpression([
-    factory.createPropertyAssignment(
+  const properties: ts.ObjectLiteralElementLike[] = [];
+  if (writePaths.length > 0) {
+    properties.push(factory.createPropertyAssignment(
       "materializerWriteInputPaths",
       factory.createArrayLiteralExpression(
         writePaths.map((path) =>
@@ -157,8 +179,15 @@ function createDeriveSchedulerOptions(
         ),
         false,
       ),
-    ),
-  ], false);
+    ));
+  }
+  if (captureWritesAnalyzed) {
+    properties.push(factory.createPropertyAssignment(
+      "captureWritesAnalyzed",
+      factory.createTrue(),
+    ));
+  }
+  return factory.createObjectLiteralExpression(properties, false);
 }
 
 /**
@@ -542,11 +571,12 @@ export function transformLiftAppliedCall(
     captureNameMap,
     hadZeroParameters,
   );
-  const inputParamSummary = getFirstParameterCapabilitySummary(
-    newCallback,
-    checker,
-    options.state?.typeRegistry,
-  );
+  const { summary: inputParamSummary, recursive } =
+    getFirstParameterCapabilitySummary(
+      newCallback,
+      checker,
+      options.state?.typeRegistry,
+    );
   if (inputParamSummary) {
     inputTypeNode = applyShrinkAndWrap(
       inputParamSummary,
@@ -568,6 +598,7 @@ export function transformLiftAppliedCall(
   }
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,
+    recursive,
     factory,
   );
 

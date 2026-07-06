@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b", "c"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → lift(({ a, b, c }) => { ... })({ a, b, c })

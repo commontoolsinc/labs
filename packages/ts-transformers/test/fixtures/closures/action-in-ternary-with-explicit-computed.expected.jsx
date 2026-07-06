@@ -82,7 +82,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 // FIXTURE: action-in-ternary-with-explicit-computed
 // Verifies: action() referenced inside an explicit computed() in JSX is captured in the lift-applied wrapper
 //   action(() => ...) → handler(...)({ isEditing })

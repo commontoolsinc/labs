@@ -179,7 +179,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["allowMultiple"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     entry: {
         collapsed?: boolean | undefined;
@@ -203,7 +203,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["entry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_3 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
@@ -231,7 +231,7 @@ const __cfLift_3 = __cfHelpers.lift<{
         }
     },
     required: ["fontWeight"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_4 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
@@ -251,7 +251,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["entry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_5 = __cfHelpers.lift<{
     isExpanded: boolean;
 }, boolean>(({ isExpanded }) => !isExpanded, {

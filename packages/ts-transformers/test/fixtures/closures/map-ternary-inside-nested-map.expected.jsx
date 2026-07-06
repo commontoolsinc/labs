@@ -50,7 +50,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfLift_2 = __cfHelpers.lift<{
     item: {
         tags: {
@@ -79,7 +79,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const showInactive = __cf_pattern_input.key("params", "showInactive");

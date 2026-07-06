@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return __cfHelpers.ifElse({
