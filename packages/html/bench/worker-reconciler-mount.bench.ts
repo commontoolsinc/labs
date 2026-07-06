@@ -20,7 +20,7 @@
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, runtimePresets } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import type { Cell } from "@commonfabric/runner";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -35,10 +35,10 @@ type BenchEnv = {
 
 function createEnv(): BenchEnv {
   const storageManager = StorageManager.emulate({ as: signer });
-  const runtime = new Runtime({
+  const runtime = new Runtime(runtimePresets.unitTest({
     apiUrl: new URL(import.meta.url),
     storageManager,
-  });
+  }));
   return { runtime, storageManager };
 }
 

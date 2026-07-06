@@ -4,10 +4,12 @@ import { loadIdentity } from "./identity.ts";
 import {
   Cell,
   entityIdFrom,
+  experimentalOptionsFromEnv,
   getPatternIdentityRef,
   isSlugAddress,
   NAME,
   Runtime,
+  runtimePresets,
   RuntimeProgram,
   UI,
   VNode,
@@ -30,7 +32,7 @@ import { setLLMUrl } from "@commonfabric/llm";
 import { isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
-import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
+import { awaitSyncWithTimeout } from "./utils.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -193,14 +195,17 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   const runtime = await timeCliPhase(
     "loadManager.runtime",
     () =>
-      new Runtime({
+      // Shared first-party posture for client runtimes against a deployed
+      // API (CT-1814); collectors and the navigate hook are this CLI's
+      // declared deltas.
+      new Runtime(runtimePresets.remoteClient({
         apiUrl: new URL(config.apiUrl),
-        experimental: experimentalOptionsFromEnv(),
         storageManager: StorageManager.open({
           as: session.as,
           memoryHost: new URL(config.apiUrl),
           spaceIdentity: session.spaceIdentity,
         }),
+        experimental: experimentalOptionsFromEnv(Deno.env.get),
         errorHandlers: [
           (error) => {
             runtimeErrors.push({
@@ -245,7 +250,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
             console.error("navigateTo callback error:", e);
           }
         },
-      }),
+      })),
   );
   (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
     CF_RUNTIME_ERROR_LOG

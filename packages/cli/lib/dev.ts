@@ -9,12 +9,13 @@ import {
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
 import {
+  experimentalOptionsFromEnv,
   type MemorySpace,
   parseFabricRef,
   Runtime,
+  runtimePresets,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { experimentalOptionsFromEnv } from "./utils.ts";
 
 const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
   "fabric imports require a space context (options.fabricImports)";
@@ -26,11 +27,13 @@ export async function createRuntime() {
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
-  return new Runtime({
-    storageManager,
-    experimental: experimentalOptionsFromEnv(),
+  // Shared first-party posture (CT-1814); emulated storage is the local-dev
+  // delta and stays visible here.
+  return new Runtime(runtimePresets.localDev({
     apiUrl: new URL(import.meta.url),
-  });
+    storageManager,
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
+  }));
 }
 
 export interface ProcessOptions {

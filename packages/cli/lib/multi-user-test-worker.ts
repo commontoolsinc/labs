@@ -20,23 +20,25 @@ import {
   type ConsoleHandler,
   ConsoleMethod,
   type Engine,
+  experimentalOptionsFromEnv,
   type Pattern,
   PatternCoverageCollector,
   patternCoverageOutputPath,
   Runtime,
+  runtimePresets,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  flushDefaultModuleByteCache,
+  getDefaultModuleByteCache,
+} from "./compile-byte-cache.ts";
 import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  flushDefaultModuleByteCache,
-  getDefaultModuleByteCache,
-} from "./compile-byte-cache.ts";
 import {
   createSession,
   Identity,
@@ -167,7 +169,6 @@ const handlers: Record<
       spaceName: args.spaceName as string,
     });
     const space = session.space;
-    const moduleByteCache = getDefaultModuleByteCache();
     const { StorageManager } = await import(
       "@commonfabric/runner/storage/cache.deno"
     );
@@ -178,15 +179,18 @@ const handlers: Record<
       // internally (see createStorageAddressResolver).
       memoryHost: new URL(args.apiUrl as string),
     });
-    runtime = new Runtime({
-      storageManager: storageManager as never,
-      // Same default as single-runtime pattern tests: enforce explicitly
-      // declared `ifc` policies (the production runtime default).
-      cfcEnforcementMode: "enforce-explicit",
+    // `runtimePresets.patternTest` carries the shared first-party posture
+    // (CT-1814), including the enforce-explicit CFC pin this site previously
+    // restated — and the same env-honored experimental flags as the
+    // single-user runner (this worker previously ignored EXPERIMENTAL_*, so
+    // the two harness modes could run under different flags).
+    runtime = new Runtime(runtimePresets.patternTest({
       apiUrl: new URL(import.meta.url),
-      moduleByteCache,
+      storageManager: storageManager as never,
+      experimental: experimentalOptionsFromEnv(Deno.env.get),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
-    });
+      moduleByteCache: getDefaultModuleByteCache(),
+    }));
     runtime.enableIdempotencyCheck();
     // Channel 1: capture pattern-code console.error / console.warn calls.
     runtime.scheduler.onConsole(

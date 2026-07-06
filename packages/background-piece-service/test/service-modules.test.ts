@@ -372,21 +372,13 @@ describe("background piece utility functions", () => {
     assert(!isValidPieceId("short"));
   });
 
-  it("loads environment defaults and explicit feature flag values", () => {
+  it("loads environment defaults", () => {
+    // EXPERIMENTAL_* flags are no longer part of EnvVars: createRuntime reads
+    // them through the canonical runner mapping (CT-1814); see the
+    // "creates a configured runtime" test below.
     const defaults = loadEnv(() => undefined);
     assertEquals(defaults.API_URL, "http://localhost:8000");
     assertEquals(defaults.OPERATOR_PASS, "implicit trust");
-    assertEquals(defaults.EXPERIMENTAL_MODERN_CELL_REP, undefined);
-
-    const disabled = loadEnv((key) =>
-      key === "EXPERIMENTAL_MODERN_CELL_REP" ? "false" : undefined
-    );
-    assertEquals(disabled.EXPERIMENTAL_MODERN_CELL_REP, false);
-
-    const enabled = loadEnv((key) =>
-      key === "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE" ? "1" : undefined
-    );
-    assertEquals(enabled.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE, true);
   });
 
   it("loads identities from a key file, a passphrase, or neither", async () => {
@@ -1143,14 +1135,15 @@ describe("background piece service entry point", () => {
         API_URL: "memory://main-runtime-test",
         OPERATOR_PASS: "operator",
         IDENTITY: undefined,
-        EXPERIMENTAL_MODERN_CELL_REP: true,
-        EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
         ENV: "test",
         OTEL_ENABLED: false,
         OTEL_SERVICE_NAME: "bg-piece-service",
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
       },
       identity,
+      // Experimental flags flow through the injectable reader and the
+      // canonical runner mapping, not EnvVars (CT-1814).
+      (key) => key === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
     );
     assertEquals(runtime.experimental.modernCellRep, true);
     await runtime.dispose();
@@ -1176,8 +1169,6 @@ describe("background piece service entry point", () => {
         API_URL: "http://localhost:8000",
         OPERATOR_PASS: "operator",
         IDENTITY: undefined,
-        EXPERIMENTAL_MODERN_CELL_REP: true,
-        EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
         ENV: "test",
         OTEL_ENABLED: false,
         OTEL_SERVICE_NAME: "bg-piece-service",
@@ -1225,8 +1216,6 @@ describe("background piece service entry point", () => {
       API_URL: "http://localhost:8000",
       OPERATOR_PASS: "operator",
       IDENTITY: undefined,
-      EXPERIMENTAL_MODERN_CELL_REP: true,
-      EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: false,
       ENV: "test",
       OTEL_ENABLED: false,
       OTEL_SERVICE_NAME: "bg-piece-service",

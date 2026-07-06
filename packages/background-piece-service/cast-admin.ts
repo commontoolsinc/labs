@@ -1,6 +1,11 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { PieceManager } from "@commonfabric/piece";
-import { compileAndSavePattern, Runtime } from "@commonfabric/runner";
+import {
+  compileAndSavePattern,
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type DID } from "@commonfabric/identity";
 import { createSession } from "@commonfabric/identity";
@@ -43,13 +48,17 @@ export function createRuntime(
   toolshedUrl: string,
   identity: Identity,
 ): Runtime {
-  return new Runtime({
+  // Shared first-party posture for client runtimes against a deployed API
+  // (CT-1814); this admin CLI now honors EXPERIMENTAL_* like the rest of the
+  // service instead of silently ignoring it.
+  return new Runtime(runtimePresets.remoteClient({
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(toolshedUrl),
     }),
-  });
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
+  }));
 }
 
 export function requireCellCause(cause: string | undefined): string {
