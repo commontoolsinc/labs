@@ -105,6 +105,18 @@ Minimal needed now: reading an array whose items resolve to references _without
 dereferencing_ consumes container enumeration + per-item shape only — not
 element `value`. (This is what makes SC-7's coordinator taint well-defined.) A
 fuller table can come with the observation-class implementation.
+(Container-membership encoding residual, found 2026-07-06 during the C3
+follow-up's spec ground-truthing: the spec encodes membership as per-child
+`shape` entries plus container-level `iterate` (§8.5.6.1); the runner's
+container-anchored structure stamp is an undefined compaction with a known
+under-taint — a static per-child existence probe ("is `/items/3` present?")
+is a `shape` read at the child (§8.10.1.1) and does not consume the
+exact-path container stamp. The spec-conforming fix is per-slot shape
+entries, at the per-row entry-count cost (#3998); recorded here until an
+implementation decides to pay it. Existence-entry update discipline settled
+as freeze-at-creation — spec §8.12.8 amendment on branch
+`cfc/existence-freeze-at-creation`.)
+
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
 §5 SC-4 grow-vs-replace split, the §3 `origin:"link"` ⇒ implicit
