@@ -229,6 +229,12 @@ export function checkSqliteRowLabelWrite(
     }
   }
   if (listLen === 0 || values.length % Math.max(listLen, 1) !== 0) {
+    if (serverCommitEval && values.length === 0) {
+      // Zero-param columnless INSERT (`… DEFAULT VALUES`): nothing is bound,
+      // so there is nothing to launder — the server derives the label from
+      // the committed default row (3.c).
+      return {};
+    }
     return {
       error: `sqlite: cannot group the INSERT's params into rows for ` +
         `rule-bearing table "${declaredKey}" — fail closed`,

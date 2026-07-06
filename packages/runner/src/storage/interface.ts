@@ -283,6 +283,16 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
 
   /**
+   * Whether the CONNECTED SERVER advertised commit-time row-label evaluation
+   * for folded sqlite writes (CFC Phase 3.c,
+   * `MemoryProtocolFlags.sqliteCommitRowLabelEval`). The runner's write gate
+   * relaxes its non-attributable-shape rejects only when this is true; a
+   * missing implementation, a not-yet-resolved session, or an old server all
+   * read as `false` — fail closed.
+   */
+  sqliteServerCommitRowLabelEval?(): boolean;
+
+  /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
    * this, server-side reads for `id` resolve against the on-disk file at `path`
    * (attached read-only) instead of the cell-derived db; writes are rejected.

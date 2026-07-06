@@ -1118,6 +1118,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sqliteQuery(db, sql, params);
   }
 
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.replica.sqliteServerCommitRowLabelEval();
+  }
+
   registerSqliteDiskSource(
     id: string,
     path: string,
@@ -1205,6 +1209,9 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  /** The client of the last RESOLVED session handle — for synchronous
+   *  capability reads (`sqliteServerCommitRowLabelEval`). */
+  #sessionClient?: MemoryV2Client.Client;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
@@ -1321,6 +1328,18 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  /**
+   * Whether the server this replica is connected to advertised commit-time
+   * row-label evaluation (`sqliteCommitRowLabelEval`) in its handshake.
+   * Synchronous — the sqlite write gate runs inside `db.exec` — so it reads
+   * the LIVE client of the last resolved session: `false` until a session
+   * exists (fail closed; by the time a handler can call `db.exec`, its cells
+   * have synced through a session) and refreshed by reconnect handshakes.
+   */
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.#sessionClient?.serverFlags?.sqliteCommitRowLabelEval === true;
   }
 
   async registerSqliteDiskSource(
@@ -2780,7 +2799,10 @@ class SpaceReplica implements ISpaceReplica {
     session: MemoryV2Client.SpaceSession;
   }> {
     if (this.#sessionHandle === undefined) {
-      const handle = this.#createSession().catch((error) => {
+      const handle = this.#createSession().then((resolved) => {
+        this.#sessionClient = resolved.client;
+        return resolved;
+      }).catch((error) => {
         if (this.#sessionHandle === handle) {
           this.#sessionHandle = undefined;
         }
