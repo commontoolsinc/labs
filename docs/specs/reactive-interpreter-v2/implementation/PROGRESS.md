@@ -236,3 +236,22 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   Remaining gaps: scope flow-tracking (designed, task open), exit-leak in
   resume-append flag-ON (tracked, isolated), W5b native ops, W6 function
   lowering, control link-emission.
+
+- (2026-07-07) **SCOPES LANDED** (`da01f15ee`, D-V2-SCOPES-PER-OP — the
+  second of Berni's two gap briefs, same session as transient
+  collections). The pattern-wide scope_narrowing refusal is GONE: scoped
+  data interprets, routed exactly like legacy per-node actions. Per-op
+  scope lattice in evalRog (seed scopes by link RESOLUTION — journal
+  invariance is load-bearing, a per-key read restructure broke a scoped
+  resume test), per-op RUN BRACKETS (leaf inputs are lazy proxies — the
+  scoped deref happens inside leaf bodies; seed-time capture alone
+  observes nothing), per-key write routing (ri2PerOpOutputScopes
+  side-channel → sendValueToBinding per output key), and a SCOPE-ACCURATE
+  per-tx Cell.get() cache (entries record + replay the fill's narrowest
+  scope; closes a latent legacy under-narrowing hazard in warm batch txs).
+  Sibling differential pins the per-op property (scoped sibling narrows +
+  redirects, plain sibling stays space); a second differential pins that
+  legacy's simple path IGNORES static scope on plain-value lifts. The
+  ENTIRE pattern-scope oracle suite (39) passes flag-ON while
+  interpreting. Gates: runner 773/773 ON + 774/774 OFF, root both flags,
+  pattern-tests 87/87, chat sim 12/0, generated-patterns — all green.
