@@ -168,8 +168,10 @@ export function map(
     // read of every element doc the coordinator never consumes — under
     // flow labels (S16) that joined every element's label into the
     // coordinator's J and smeared it across sibling scaffolding.
-    // resolveLink's probe reads are flow-excluded (linkResolutionProbe);
-    // no element value is loaded at all.
+    // resolveLink's probes belong to the dereferences it records, so flow
+    // derivation treats them as resolution machinery, not followRef
+    // observations (observation classes C1); no element value is loaded at
+    // all.
     const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
     const list: Cell<any>[] | undefined = rawList === undefined

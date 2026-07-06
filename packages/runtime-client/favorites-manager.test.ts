@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import type { DID } from "@commonfabric/identity";
+import { favoriteKey } from "@commonfabric/home-schemas";
 import { FavoritesManager } from "./favorites-manager.ts";
 import type { RuntimeClient } from "./runtime-client.ts";
 
@@ -84,6 +85,11 @@ describe("FavoritesManager.addFavorite tag derivation", () => {
     await new FavoritesManager(stub.rt).addFavorite(space, "piece-1");
     expect(stub.sent[0].tags).toEqual(["search", "go"]);
     expect(stub.sent[0].piece).toMatchObject({ id: "of:piece-1", space });
+    // The favorite is addressed by the piece's identity so the handler can dedup
+    // a re-favorite and remove by identity.
+    expect(stub.sent[0].id).toBe(
+      favoriteKey({ space, id: "of:piece-1", path: [] }),
+    );
   });
 
   it("prefers an explicit tag and skips the schema read", async () => {
@@ -107,12 +113,16 @@ describe("FavoritesManager.addFavorite tag derivation", () => {
 });
 
 describe("FavoritesManager other operations", () => {
-  it("removeFavorite sends the piece reference", async () => {
+  it("removeFavorite sends the piece reference and its key", async () => {
     const stub = makeStub();
     await new FavoritesManager(stub.rt).removeFavorite(space, "piece-x");
     expect(stub.sent[0]).toMatchObject({
       piece: { id: "of:piece-x", space },
     });
+    // The same key add uses, so the removal reaches the same favorite entity.
+    expect(stub.sent[0].id).toBe(
+      favoriteKey({ space, id: "of:piece-x", path: [] }),
+    );
   });
 
   it("getFavorites returns the favorites list", async () => {
