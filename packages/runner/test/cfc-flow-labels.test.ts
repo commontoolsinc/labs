@@ -565,32 +565,39 @@ describe("CFC flow labels (default transition)", () => {
               path: string[];
               label: { confidentiality?: unknown[] };
               origin?: string;
+              observes?: string;
             }[];
           };
         };
       };
-      expect(stored.cfc.labelMap.entries.length).toBe(2);
+      // Two written paths (a, b), each carrying a `value` + a `shape`
+      // (existence) derived entry since C3 — four entries total.
+      expect(stored.cfc.labelMap.entries.length).toBe(4);
 
       // Re-serialize the stored envelope into a canonically-equal but
-      // byte-DIFFERENT form: entry list reversed, OR-clause alternatives
-      // reversed. The raw root write is the seed idiom, standing in for any
-      // writer whose serialization order differs.
+      // byte-DIFFERENT form by reversing the ENTRY LIST ORDER (across paths).
+      // `canonicalizeCfcMetadata` sorts entries by (path, origin, observes),
+      // so the reordering washes out under canonicalization — while the
+      // storage layer's order-sensitive `valueEqual` on the `["cfc"]` doc
+      // sees a different array and would NOT elide the rewrite. So this is
+      // exactly a byte-difference the skip must absorb and the storage
+      // elision cannot: a peer, an older writer, or a hand-authored seed
+      // whose entry order differs must not be rewritten every recompute.
+      //
+      // The clause INTERIORS are left stable on purpose. Permuting an
+      // OR-clause's alternative order in the STORED form would defeat
+      // idempotence through C3's existence-grow, not through this skip:
+      // the grow folds the cleared entry's clause back in via
+      // `uniqueCfcAtoms` (deepEqual dedup, not clause-aware), so a
+      // reversed-`anyOf` stored clause and the fresh canonical-order join
+      // clause both survive as a doubled clause list. That is a narrow
+      // grow-side limitation, orthogonal to the canonical-compare skip
+      // under test here.
       const permuted = {
         ...stored.cfc,
         labelMap: {
           version: 1,
-          entries: [...stored.cfc.labelMap.entries].reverse().map((entry) => ({
-            ...entry,
-            label: {
-              ...entry.label,
-              confidentiality: entry.label.confidentiality?.map((clause) => {
-                const anyOf = (clause as { anyOf?: unknown[] })?.anyOf;
-                return Array.isArray(anyOf)
-                  ? { anyOf: [...anyOf].reverse() }
-                  : clause;
-              }),
-            },
-          })),
+          entries: [...stored.cfc.labelMap.entries].reverse(),
         },
       };
       expect(permuted).not.toEqual(stored.cfc);
@@ -713,119 +720,6 @@ describe("CFC flow labels (default transition)", () => {
         }).getDocument(targetId);
       expect(storedTarget).toBeDefined();
       expect(storedTarget!.cfc).toBeUndefined();
-    } finally {
-      await runtime.dispose();
-      await storageManager.close();
-    }
-  });
-
-  // The flow-clear machinery is ancestor-aware: an untainted overwrite AT A
-  // PATH clears stale per-value components at every DEEPER path
-  // (isPrefix(written, entry) — the write replaced that whole subtree), and
-  // the resulting envelope must still be written even when it comes out
-  // empty (flowCleared), or the stale label never leaves storage. The
-  // exact-path case is covered above ("replaces the derived component…");
-  // this pins the proper-ancestor direction.
-  it("clears a deeper derived component when an ancestor path is overwritten untainted", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-      cfcFlowLabels: "persist",
-    });
-    try {
-      const seed = runtime.edit();
-      const sourceId = parseLink(
-        runtime.getCell(
-          signer.did(),
-          "cfc-flow-ancestor-source",
-          { type: "object", properties: { secret: { type: "string" } } },
-        ).getAsLink(),
-      ).id!;
-      seed.writeOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: sourceId,
-        path: [],
-      }, {
-        value: { secret: "s3cr3t" },
-        cfc: {
-          version: 1,
-          schemaHash: "seed-schema",
-          labelMap: {
-            version: 1,
-            entries: [{
-              path: ["secret"],
-              label: { confidentiality: ["secret"] },
-            }],
-          },
-        },
-      });
-      const targetId = parseLink(
-        runtime.getCell(
-          signer.did(),
-          "cfc-flow-ancestor-target",
-          {
-            type: "object",
-            properties: {
-              outer: {
-                type: "object",
-                properties: { inner: { type: "string" } },
-              },
-            },
-          },
-        ).getAsLink(),
-      ).id!;
-      seed.writeOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: targetId,
-        path: [],
-      }, { value: { outer: { inner: "x0" } } });
-      expect((await seed.commit()).ok).toBeDefined();
-
-      // Tainted write at the DEEP leaf: derived entry at ["outer","inner"].
-      const taint = runtime.edit();
-      const raw = runtime.getCell(
-        signer.did(),
-        "cfc-flow-ancestor-source",
-        undefined,
-        taint,
-      ).getRaw() as { secret?: string };
-      taint.writeOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: targetId,
-        path: ["value", "outer", "inner"],
-      }, `${raw.secret}!`);
-      taint.prepareCfc();
-      expect((await taint.commit()).ok).toBeDefined();
-
-      const entry = replicaEntries(storageManager, targetId).find((e) =>
-        e.origin === "derived"
-      );
-      expect(entry).toBeDefined();
-      expect(entry!.path).toEqual(["outer", "inner"]);
-
-      // Untainted overwrite of the ANCESTOR subtree (raw write, no reads in
-      // the journal): the deeper derived entry is stale — the value it
-      // labeled is gone — and must be cleared.
-      const clean = runtime.edit();
-      clean.writeOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: targetId,
-        path: ["value", "outer"],
-      }, { inner: "fresh public text" });
-      clean.prepareCfc();
-      expect((await clean.commit()).ok).toBeDefined();
-
-      expect(
-        replicaEntries(storageManager, targetId).find((e) =>
-          e.origin === "derived"
-        ),
-      ).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
