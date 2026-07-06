@@ -21,7 +21,11 @@ export interface CastAdminDependencies {
   args: string[];
   envGet: typeof Deno.env.get;
   getIdentity: typeof getIdentity;
-  createRuntime: (toolshedUrl: string, identity: Identity) => Runtime;
+  createRuntime: (
+    toolshedUrl: string,
+    identity: Identity,
+    envGet: typeof Deno.env.get,
+  ) => Runtime;
   readTextFile: typeof Deno.readTextFile;
   createSession: typeof createSession;
   createPieceManager: (
@@ -47,17 +51,19 @@ export interface CastAdminDependencies {
 export function createRuntime(
   toolshedUrl: string,
   identity: Identity,
+  envGet: typeof Deno.env.get = Deno.env.get,
 ): Runtime {
   // Shared first-party posture for client runtimes against a deployed API
   // (CT-1814); this admin CLI now honors EXPERIMENTAL_* like the rest of the
-  // service instead of silently ignoring it.
+  // service instead of silently ignoring it, read through the same injected
+  // env boundary as every other env consultation here (CastAdminDependencies).
   return new Runtime(runtimePresets.remoteClient({
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(toolshedUrl),
     }),
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
+    experimental: experimentalOptionsFromEnv(envGet),
   }));
 }
 
@@ -87,7 +93,11 @@ export async function castPattern(
     quit,
   });
 
-  const runtime = dependencies.createRuntime(toolshedUrl, identity);
+  const runtime = dependencies.createRuntime(
+    toolshedUrl,
+    identity,
+    dependencies.envGet,
+  );
 
   try {
     // Load and compile the pattern first

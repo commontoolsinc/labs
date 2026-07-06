@@ -1820,6 +1820,28 @@ describe("browserWorkerParamsFromInitializationData", () => {
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
     expect(options.cfcFlowLabels).toBeUndefined();
   });
+
+  it("threads the host-decided space-host map through to the runtime options", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          spaceHostMap: { "did:key:federated": "http://other-host.test/" },
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.spaceHostMap).toEqual({
+      "did:key:federated": "http://other-host.test/",
+    });
+  });
 });
 
 // Federation PR2: one worker serves page operations for many spaces.

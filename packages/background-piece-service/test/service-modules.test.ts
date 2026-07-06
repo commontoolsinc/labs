@@ -7,7 +7,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   isWorkerIPCResponse,
@@ -1450,6 +1450,29 @@ describe("cast admin entry point", () => {
     await cell.sync();
     await runtime.storageManager.synced();
     await runtime.dispose();
+  });
+
+  it("threads the injected env reader into the cast runtime's experimental flags", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const consulted = new Set<string>();
+    const runtime = createCastRuntime(
+      "memory://cast-env-reader",
+      identity,
+      (key) => {
+        consulted.add(key);
+        return undefined;
+      },
+    );
+    try {
+      // The canonical mapping consults the reader passed through the
+      // CastAdminDependencies boundary — not process env — for every
+      // env-wired EXPERIMENTAL_* flag.
+      for (const envVar of Object.values(EXPERIMENTAL_ENV_VARS)) {
+        if (envVar !== null) assert(consulted.has(envVar));
+      }
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("syncs and exits with failure when casting fails with quit", async () => {

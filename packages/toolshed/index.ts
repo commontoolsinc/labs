@@ -1,12 +1,9 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import {
-  experimentalOptionsFromEnv,
-  Runtime,
-  runtimePresets,
-} from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toolshedRuntimeOptions } from "@/runtime-options.ts";
 import { memory } from "@/routes/storage/memory.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
@@ -19,20 +16,15 @@ const initializeRuntime = () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
-    // Shared first-party posture (CT-1814). `apiUrl` is the storage/memory
-    // base; patterns fetch against the public API base instead (the preset
-    // would otherwise pin them to `apiUrl`, and the builder/env.ts fallback
-    // is a hardcoded `localhost:<ports.toolshed>` — wrong for any non-default
-    // port).
-    runtime = new Runtime(runtimePresets.productionServer({
-      apiUrl: new URL(env.MEMORY_URL),
-      patternApiUrl: new URL(env.API_URL),
-      storageManager: StorageManager.open({
+    // Options assembly (the MEMORY_URL/API_URL split, EXPERIMENTAL_* wiring)
+    // lives in runtime-options.ts, where it is unit-tested (CT-1814).
+    runtime = new Runtime(toolshedRuntimeOptions(
+      env,
+      StorageManager.open({
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
-      experimental: experimentalOptionsFromEnv(Deno.env.get),
-    }));
+    ));
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {
