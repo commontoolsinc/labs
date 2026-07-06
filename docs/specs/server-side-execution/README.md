@@ -234,11 +234,68 @@ actions inside the piece are stale (`observedAtSeq` vs branch head)
 instead of re-settling the whole piece.
 
 Gaps: keyless/hand-built patterns are session-only by design (no durable
-pointer — sanctioned); the chain needs a coverage audit — every doc the
-executor may be asked to catch up must terminate the `source` walk at a
-`pattern`-bearing root (builtin-created docs, schema-less writes, and
-external ingest are the suspect cases, G6); `.src` eager annotation is
-dev-only but debug-only (no identity impact).
+pointer — sanctioned); chain coverage — every doc the executor may be
+asked to catch up must terminate the `source` walk at a `pattern`-bearing
+root — is closable mechanically (§3.3.1) plus a legacy audit (G6); `.src`
+eager annotation is dev-only but debug-only (no identity impact).
+
+#### 3.3.1 Closing the chain: source attaching in the write path
+
+Rather than auditing every write site into attaching `source` explicitly,
+source attaching becomes a property of the **cell write mechanism
+itself**. Every transaction is already associated with exactly one
+originating action (`tx.sourceAction` / `debugActionId`, stamped at run
+start — `packages/runner/src/scheduler/action-run.ts:347`, landed with
+#4099 for scheduler self-suppression), and every action belongs to one
+piece. Generalize that stamp into a small **tx provenance envelope**,
+populated at tx open by the runner:
+
+```
+tx.provenance = {
+  source: <short-link to the provenance anchor>,
+      // piece root doc for action txs; ingest-channel doc for ingest txs
+  action: { id, kind },
+      // per-instance action id; computation | effect | event-handler
+  observedAtSeq?: number,
+      // derived-from watermark (§5.B.4), executor txs only
+}
+```
+
+The storage layer **transfers it to documents at apply time**: every
+document the transaction *creates* is stamped with `["source"]` = the
+envelope's anchor link. Later writes by other actions do not re-parent a
+doc — `source` records provenance of existence, and the creator is the
+recomputer. The raw `["source"]` surface is already CFC-excluded from
+flow reads (`packages/runner/src/cfc/prepare.ts:1159`), so automatic
+stamping does not perturb labels. On the wire this is one field on
+`ClientCommit`, mirrored by local apply, so client- and executor-created
+docs are stamped identically.
+
+One mechanism, several consumers:
+
+- **Chain completeness (closes the mechanical part of G6).**
+  Builtin-created result docs, handler-created docs, and schema-less
+  writes all happen inside some tx — they get `source` for free, with no
+  per-site work. External ingest txs anchor to the ingest-channel doc
+  instead of a piece root: the walk then terminates at a registration that
+  names the ingest source — a meaningful root even without `pattern`.
+- **Write-class routing for B (G5).** The envelope's `action.kind` is the
+  classifier the derived/source write split routes on (§5.B.1) — no
+  second channel.
+- **Self-suppression (P5)** keeps reading the same envelope
+  (`tx.sourceAction` becomes `tx.provenance.action`).
+- **Watermark and endorsement (G10, §5.B.7).** The derived-from watermark
+  and, later, the executor-computed endorsement atom are also per-tx facts
+  that transfer onto the committed writes — same envelope, same
+  apply-time transfer.
+
+Open details: **cross-space writes** (the `source` short-link form is
+same-space by definition; a piece writing into another space needs either
+a sigil-link extension of `source` or an accepted walk fallback), and
+**setup txs** (the piece root itself is created by the setup tx — its
+`source` anchors to the creating context, i.e. the parent piece or the
+space root, which is exactly the nesting the walk expects). Docs created
+before stamping ships still need the one-time G6 audit-and-backfill.
 
 ### 3.4 Reactive interpreter (#4514; v2 supersedes #4298; nothing on main)
 
@@ -285,7 +342,8 @@ approach comparison honest.
 - **Q1 — Authority: which writes may a client commit?**
   All writes (today) / source writes only (B) / no writes, events only (C).
   "Source write" is definable *today* by the originating action kind the
-  scheduler already stamps on transactions (`tx.sourceNodeId` → node kind:
+  scheduler already stamps on transactions (`tx.sourceAction`,
+  `packages/runner/src/scheduler/action-run.ts:348` → node kind:
   `event-handler` vs `computation`/materializer-effect), plus
   setup/seed-materialization structural writes, plus direct `.set()` from
   UI bindings — everything else is derived.
@@ -372,9 +430,12 @@ computations downstream, never shipped, always discardable.
 
 #### B.1 Client write path
 
-The runner tags every transaction with its originating node
-(`tx.sourceNodeId`, landed with #4099) and the node kind is known at
-subscribe time. The storage layer routes on it:
+The runner tags every transaction with its originating action
+(`tx.sourceAction`, `packages/runner/src/scheduler/action-run.ts:348`,
+landed with #4099) and the node kind is known at subscribe time. §3.3.1
+generalizes this tag into the tx provenance envelope that also stamps
+`source` onto created docs — one channel, both consumers. The storage
+layer routes on it:
 
 - `event-handler` (and setup/seed) transactions → today's commit pipeline.
 - `computation`/materializer transactions → **overlay apply**: applied to
@@ -394,7 +455,8 @@ computation/materializer transactions commit through the in-process engine
 (§6.2) under the executor identity. Every derived commit is stamped with a
 **derived-from watermark**: the max input `seq` consumed by the producing
 action — which is exactly `observedAtSeq` from the persistent-observation
-work, surfaced onto the commit (G4/G10).
+work, surfaced onto the commit via the §3.3.1 tx provenance envelope
+(G4/G10).
 
 #### B.3 Handler reads: today's semantics, then dual execution
 
@@ -905,12 +967,12 @@ means a design doc/decision is required before implementation.
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
 | G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
 | G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no index (`source`/`pattern` chain, landed) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
-| G5 | Runner write split: route tx by originating action kind; speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
-| G6 | Source-chain coverage audit: every executor-reachable doc must terminate the `source` walk at a `pattern`-bearing root (suspects: builtin-created docs, schema-less writes, external ingest) | catch-up completeness | needs-audit, then targeted fixes |
+| G5 | Runner write split: route tx by originating action kind (rides the §3.3.1 tx provenance envelope); speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
+| G6 | Source attaching in the write path (§3.3.1: tx provenance envelope, transferred to created docs at apply) + one-time legacy audit/backfill of pre-stamping docs | catch-up completeness | needs-impl (mechanism); then audit |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
 | G8 | RI gates: cross-space pull-amplification loop; F4 I/O coalescing ratchet; scoped-output exclusion (by design) | RI-on-executor only | tracked in RI specs; not on B's critical path |
 | G9 | Executor cross-space reads (remote-space sessions from the executor; reader-isolated cross-space docs) | B completeness | needs-design; today's client semantics reusable |
-| G10 | Watermark surfacing: `observedAtSeq` onto derived commits; confirmation already returns source seq | B reconciliation | small, rides G4 |
+| G10 | Watermark surfacing: `observedAtSeq` onto derived commits (via the §3.3.1 envelope); confirmation already returns source seq | B reconciliation | small, rides G4 + G6 mechanism |
 | G11 | Server-side async policy: per-space egress/throttle (#2659), retry/circuit-breaker, in-flight registry keyed `(actionId, inputHash)`, heartbeat/reclaim | A | partial (idempotency keys, toolshed LLM cache exist); needs-impl |
 | G12 | Durable LLM streaming (re-issue vs chunk append on executor restart) | A polish | needs-decision (recommend re-issue v1) |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |
