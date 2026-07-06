@@ -10,6 +10,7 @@ import {
   Writable,
 } from "commonfabric";
 import ProfileCreate, {
+  type DefaultProfileCell,
   profileLinkListSchema,
   profileLinkSchema,
   setDefaultProfile,
@@ -39,7 +40,13 @@ import type { ProfileHomeOutput } from "./profile-home.tsx";
 
 type ProfilePickerInput = {
   profiles: Writable<ProfileHomeOutput[]>;
-  defaultProfile: Writable<ProfileHomeOutput | undefined>;
+  // CT-1845: OPAQUE `DefaultProfileCell`, never `Writable<ProfileHomeOutput |
+  // undefined>`. CFC derives the walked write-authorization schema from the
+  // binding site, and this input type flows into the `setDefaultProfile` write
+  // below (`defaultProfile: defaultProfile as any`). A walkable
+  // `ProfileHomeOutput` here re-introduces the owner-protected `/avatar` walk
+  // that fails the overwrite. See profile-create.tsx.
+  defaultProfile: DefaultProfileCell;
   mru: Writable<ProfileHomeOutput[]>;
 };
 

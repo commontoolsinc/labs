@@ -102,14 +102,26 @@ export const submitProfileCreation = handler<
 export const setDefaultProfile = handler<
   unknown,
   {
-    defaultProfile: Writable<ProfileHomeOutput | undefined>;
-    // Take the profile as a LINK cell, not a resolved value: the handler only
-    // needs the link to write into defaultProfile, and a link argument doesn't
-    // require the profile's cross-space values to be loaded at event time —
-    // resolving the full value here would fail required-field validation
-    // ("stream action argument is undefined … not running") whenever the
-    // profile's space hasn't materialized locally yet.
-    profile: Cell<ProfileHomeOutput>;
+    // CT-1845 — CFC derives the walked write-authorization schema from THIS
+    // handler-state declaration (the write TARGET the handler binds). Declaring
+    // it `Writable<ProfileHomeOutput | undefined>` bakes the walkable
+    // owner-protected `/avatar` (etc.) into the write path, so overwriting an
+    // already-set default trips `writeAuthorizedBy failed at /avatar` (the picker
+    // writer ≠ `setAvatar`). It MUST be the opaque `DefaultProfileCell` — every
+    // site whose type flows into this write (home durable cell, picker input,
+    // this handler param) must be consistently opaque or the walk fires again.
+    // See the `TrustedDefaultProfile` / `DefaultProfileCell` notes below.
+    defaultProfile: DefaultProfileCell;
+    // Take the profile as an OPAQUE LINK cell, not a resolved value and not the
+    // walkable `ProfileHomeOutput`: the handler only needs the link to write into
+    // defaultProfile, a link argument doesn't require the profile's cross-space
+    // values to be loaded at event time (resolving the full value here would fail
+    // required-field validation — "stream action argument is undefined … not
+    // running" — whenever the profile's space hasn't materialized locally yet),
+    // AND an opaque param keeps the serialized link's carried schema free of the
+    // walkable owner-protected sub-fields (CT-1845, same rationale as the write
+    // target above).
+    profile: Cell<OpaqueProfileLinkTarget>;
   }
 >((_, { defaultProfile, profile }) => {
   if (profile) {
@@ -173,8 +185,15 @@ export type TrustedProfileList = Cfc<
 >;
 
 // A profile link written via the trusted picker surface (default / MRU writes).
-type PickerProfileLink<Binding, Action extends string> = Cfc<
-  WriteAuthorizedBy<Cell<ProfileHomeOutput>, Binding>,
+// `LinkTarget` is the referenced schema — the walkable `ProfileHomeOutput` for
+// the MRU array, or the opaque `OpaqueProfileLinkTarget` for the single default
+// slot (see the CT-1845 note on `TrustedDefaultProfile`).
+type PickerProfileLink<
+  Binding,
+  Action extends string,
+  LinkTarget = ProfileHomeOutput,
+> = Cfc<
+  WriteAuthorizedBy<Cell<LinkTarget>, Binding>,
   {
     addIntegrity: ["profile-link"];
     uiContract: {
@@ -186,13 +205,59 @@ type PickerProfileLink<Binding, Action extends string> = Cfc<
   }
 >;
 
-// The home `defaultProfile` link: write authorized by `setDefaultProfile`.
+// The home `defaultProfile` OUTPUT slot: write authorized by `setDefaultProfile`.
+//
+// CT-1845: the referenced link target is OPAQUE (`OpaqueProfileLinkTarget`, an
+// empty object), NOT the walkable `ProfileHomeOutput`, kept consistent with the
+// `DefaultProfileCell` sites below (the real runtime lever is the handler's own
+// write target — see its note). `defaultProfile` is a SINGLE owner-protected
+// slot; the write-authorization schema CFC walks derives from the binding site.
+// With a walkable `ProfileHomeOutput`, CFC
+// (`walkIfcSchema`) emits owner-protected entries for the target's OWN fields —
+// `/name`, `/avatar`, `/bio`, each `writeAuthorizedBy: set…`. OVERWRITING the
+// default with a different profile changes the container link, which
+// `ifcEntryAppliesToAttemptedWrite` marks as "touching" the nested `/avatar`;
+// its RESOLVED value is a concrete string, so the entry APPLIES and CFC enforces
+// `/avatar`'s `writeAuthorizedBy: setAvatar` against the PICKER writer
+// (`setDefaultProfile` ≠ `setAvatar`) — the commit is rejected with
+// `writeAuthorizedBy failed at /avatar`. A first write from EMPTY has no prior
+// resolved `/avatar` to touch, so it passes — the bug is overwrite-specific. The
+// MRU array dodges this because CFC checks its owner-protected element under a
+// wildcard `*` per changed element, not as a single walked container. Prior fix
+// PR #4539 (`profile.getAsLink()`) was disproven in-browser. An OPAQUE link
+// target carries no walkable sub-fields, so no nested `/avatar` claim exists to
+// enforce. Reads are unaffected — the picker/wish resolve `defaultProfile` via
+// `resolveAsCell()` / `profileLinkSchema()` (identity only), never the slot's
+// declared schema.
 export type TrustedDefaultProfile =
   | PickerProfileLink<
     typeof setDefaultProfile,
-    typeof TRUSTED_PROFILE_SET_DEFAULT_ACTION
+    typeof TRUSTED_PROFILE_SET_DEFAULT_ACTION,
+    OpaqueProfileLinkTarget
   >
   | undefined;
+
+// The opaque referenced schema for the single `defaultProfile` slot: an object
+// with no properties, so no owner-protected sub-field is walked on write. The
+// link's identity is all the read side needs.
+export type OpaqueProfileLinkTarget = Record<never, never>;
+
+// The OPAQUE type for the home `defaultProfile` cell.
+//
+// CT-1845: CFC derives the walked write-authorization schema from the BINDING
+// SITE of the `setDefaultProfile` write — primarily the handler's OWN
+// `defaultProfile` state param (its `asCell:["writeonly"]` write target), which
+// the type flows into from the home durable cell (`new Writable<…>().for(
+// "defaultProfile")`) and the picker input. If ANY of those sites declares the
+// walkable `Writable<ProfileHomeOutput | undefined>`, CFC (`walkIfcSchema`)
+// emits owner-protected entries for the target's OWN `/name`, `/avatar`, `/bio`,
+// and overwriting the default with a different profile trips
+// `writeAuthorizedBy failed at /avatar` (see `TrustedDefaultProfile` above).
+// `OpaqueProfileLinkTarget` (an empty object) carries no walkable sub-fields, so
+// the overwrite commits. EVERY site that flows into the setDefaultProfile write
+// MUST use this opaque type — the handler param (above), the home durable cell,
+// and the picker input — or the walk fires again from the site that was missed.
+export type DefaultProfileCell = Writable<OpaqueProfileLinkTarget | undefined>;
 
 // The home `mru` list: elements carry the picker `uiContract`; the array
 // container carries `writeAuthorizedBy: setMruProfile` to gate structural

@@ -12,6 +12,7 @@ import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
 import {
   type CreateProfileEvent,
+  type DefaultProfileCell,
   submitProfileCreation,
   type TrustedDefaultProfile,
   type TrustedProfileList,
@@ -178,7 +179,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // is the one `#profile` resolves to in headless mode and orders first in the
   // picker; `mru` is the recency-ordered list driving the rest of the ordering.
   const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
-  const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
+  // CT-1845: declare the durable cell with the OPAQUE `DefaultProfileCell` type,
+  // never `Writable<ProfileHomeOutput | undefined>`. The stored default link
+  // carries THIS declared schema, and CFC walks it on every write; a walkable
+  // `ProfileHomeOutput` here makes overwriting the default trip
+  // `writeAuthorizedBy failed at /avatar`. See profile-create.tsx.
+  const defaultProfile: DefaultProfileCell = new Writable<
+    Record<never, never> | undefined
+  >(undefined)
     .for("defaultProfile");
   const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
   // Untrusted-write regression surface: this stream is exported so tests can
