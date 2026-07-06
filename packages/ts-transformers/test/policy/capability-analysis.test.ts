@@ -812,6 +812,707 @@ const fn = (input) => helper(input);`;
   },
 );
 
+Deno.test(
+  "Capability analysis records write intent from imported Writable parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.readPaths.includes("auth"));
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for a nullable imported Writable parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth> | null): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for a null-and-undefined imported Writable parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(
+          auth: Writable<Auth> | null | undefined,
+        ): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent from imported WriteonlyCell parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { WriteonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: WriteonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("auth"));
+    // A write-only parameter records only a write; the passing-read is
+    // suppressed, so the destructured argument stays write-only.
+    assertEquals(state.readPaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps a member-access WriteonlyCell argument write-only",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { WriteonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function persist(auth: WriteonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { persist, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          state: { auth: Writable<Auth> },
+        ) => {
+          persist(state.auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "state");
+
+    // A member-access argument (state.auth) must be treated the same as a
+    // destructured one: the write-only parameter records only a write.
+    assert(state.writePaths.includes("auth"));
+    assertEquals(state.readPaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent from imported Cell parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Cell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Cell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assert(state.readPaths.includes("auth"));
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis ignores imported Writable type names from other libraries",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        export type Auth = { token: string };
+        export type Writable<T> = any;
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assert(state.readPaths.includes("auth"));
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis selects the Writable overload for imported clients",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export interface AuthCell {
+          get(): Auth | undefined;
+          update(values: { token?: string }): void;
+        }
+        export interface ClientFactory {
+          (auth: Writable<Auth>): void;
+          (auth: AuthCell): void;
+        }
+        export const createClient: ClientFactory;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent from imported Writable constructors",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export class Client {
+          constructor(auth: Writable<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent from imported Cell constructors",
+  () => {
+    // A constructor whose auth parameter is declared bare `Cell<Auth>` does not
+    // grant write authority. Write intent must be spelled `Writable<Auth>`; a
+    // client that writes the cell (such as a token refresh) must declare it that
+    // way rather than rely on the neutral `Cell<Auth>` alias.
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Cell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export class Client {
+          constructor(auth: Cell<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis does not record write intent for unmatched extra arguments",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(auth: Writable<Auth>): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          createClient("ignored", auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis reads a generic constraint to classify an imported parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function persist<C extends Writable<Auth>>(auth: C): void;
+      `,
+      "/test.ts": `
+        import { persist, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          persist(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A bounded generic parameter carries the capability of its constraint.
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis reads a ReadonlyCell generic constraint as readonly",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function readAll<C extends ReadonlyCell<Auth>>(auth: C): void;
+      `,
+      "/test.ts": `
+        import { readAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          readAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes("auth"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported Writable rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: Writable<Auth>[]): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported Array rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: Array<Writable<Auth>>): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records write intent for imported readonly-array rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(...auths: readonly Writable<Auth>[]): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          writeAll(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.capability, "writable");
+    assert(state.writePaths.includes("auth"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not map array spreads to imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function createClient(
+          first: Writable<Auth>,
+          second: Writable<Auth>,
+          third: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { createClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            rest,
+            later,
+          }: {
+            first: Writable<Auth>;
+            rest: Writable<Auth>[];
+            later: Writable<Auth>;
+          },
+        ) => {
+          createClient(first, ...rest, later);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assertEquals(state.writePaths.includes("rest.0"), false);
+    assertEquals(state.writePaths.includes("later"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis maps spread calls to imported Writable rest parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function writeAll(
+          first: Writable<Auth>,
+          ...rest: Writable<Auth>[]
+        ): void;
+      `,
+      "/test.ts": `
+        import { writeAll, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            rest,
+            later,
+          }: {
+            first: Writable<Auth>;
+            rest: Writable<Auth>[];
+            later: Writable<Auth>;
+          },
+        ) => {
+          writeAll(first, ...rest, later);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assert(state.writePaths.includes("rest.0"));
+    assert(state.writePaths.includes("later"));
+  },
+);
+
+Deno.test(
+  "Capability analysis shrinks a root cell to readonly for a ReadonlyCell parameter",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function readClient(auth: ReadonlyCell<Auth>): void;
+      `,
+      "/test.ts": `
+        import { readClient, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (auth: Writable<Auth>) => {
+          readClient(auth);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "auth");
+
+    // The declared read-only contract accounts for this argument, so the
+    // whole-cell root fallback does not also grant write. Passing a cell to a
+    // declared reader demonstrates only read need, and the handler is not given
+    // write authority it never uses. In well-typed code a `Writable<Auth>` value
+    // cannot be passed to a `ReadonlyCell<Auth>` parameter (distinct brands,
+    // TS2345), so this shape is reached through a `ReadonlyCell`-typed input or
+    // an explicit cast; the snippet exercises the parameter-type mapping the
+    // analysis applies at that call.
+    assertEquals(state.capability, "readonly");
+    assertEquals(state.writePaths.includes(""), false);
+    assertEquals(state.wildcard, false);
+  },
+);
+
 Deno.test("Capability analysis marks for...in over tracked source as wildcard", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
@@ -2160,13 +2861,35 @@ Deno.test(
     assertEquals(findings.length, 1);
     assertEquals(findings[0]!.rootName, "input");
     assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
     assert(ts.isCallExpression(findings[0]!.node));
   },
 );
 
 Deno.test(
-  "Mergeable-push misuse: flags an iterate-then-push to the same collection",
+  "Mergeable-push misuse: flags an iterate-dedup-then-push to the same collection",
   () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        for (const u of input.key("users")) {
+          if (u.name === "a") return;
+        }
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores an iterate-then-push when the iteration serves neither the push nor a write",
+  () => {
+    // The iteration still keeps the append in the conflict set, but with no
+    // dedup guard, no value dependence, and no sibling write there is usually
+    // no better expression to point at, so the check stays silent.
     const findings = collectMergeablePushMisuses(
       `const fn = (input) => {
         for (const u of input.key("users")) { u; }
@@ -2174,8 +2897,272 @@ Deno.test(
       };`,
     );
 
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a value-dependent push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        input.key("users").push({
+          describe() { return "meta"; },
+          position: existing.length,
+        });
+      };`,
+    );
+
     assertEquals(findings.length, 1);
-    assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies an append-then-trim as an independent read-modify-write",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        input.key("messages").push({ text: "a" });
+        const current = input.key("messages").get();
+        input.key("messages").set(current.slice(-50));
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.path.join("."), "messages");
+    assertEquals(findings[0]!.kind, "independent-read-modify-write");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: ignores a push when the read serves neither the push nor another write",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const snapshot = input.key("users").get();
+        input.key("log").set(snapshot);
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 0);
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a ternary-guarded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        existing.length < 5
+          ? input.key("users").push({ name: "a" })
+          : undefined;
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a coalescing-guarded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        existing.find((u) => u.name === "a") ??
+          input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a while-bounded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        while (existing.length < 2) {
+          input.key("users").push({ name: "a" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a for-condition-bounded push as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (let i = 0; i < existing.length; i++) {
+          input.key("users").push({ name: "a" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push inside iteration of the read as read-dependent",
+  () => {
+    // The pushed value is a constant, so this classifies through the loop's
+    // control dependence on the read, not through the pushed value.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (const u of existing) {
+          input.key("users").push({ name: "member" });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push keyed by a for-in over the read as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        const existing = input.key("users").get();
+        for (const k in existing) {
+          input.key("users").push({ name: k });
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a push inside a callback over the read as read-dependent",
+  () => {
+    // Checker-less analysis only descends into nested callbacks when asked;
+    // the transformer path gets the same descent from the checker's eager
+    // array-callback classification.
+    const findings: MergeablePushMisuse[] = [];
+    analyzeFunctionCapabilities(
+      parseFirstCallback(
+        `const fn = (input) => {
+          const existing = input.key("users").get();
+          existing.forEach(() => {
+            input.key("users").push({ name: "a" });
+          });
+        };`,
+      ),
+      {
+        includeNestedCallbacks: true,
+        mergeablePushMisuseSink: (finding) => findings.push(finding),
+      },
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: tracks read influence through assignment and destructuring",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input) => {
+        let snapshot;
+        snapshot = input.key("users").get();
+        const [, first] = snapshot;
+        if (first) return;
+        input.key("users").push({ name: "a" });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a dedup guard inside a switch case as read-dependent",
+  () => {
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        const existing = input.key("users").get();
+        switch (event.kind) {
+          case "add":
+            if (existing.some((u) => u.name === event.name)) return;
+            input.key("users").push({ name: event.name });
+            break;
+          default:
+            break;
+        }
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: scans past a nested function declaration in a guard statement",
+  () => {
+    // The first early-exit sibling contains a function declaration; its name
+    // must read as a declaration name, not a value reference, and scanning
+    // continues to the real dedup guard.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        const existing = input.key("users").get();
+        if (event.flag) {
+          function helper() { return 0; }
+          return;
+        }
+        if (existing.some((u) => u.name === event.name)) return;
+        input.key("users").push({ name: event.name });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
+  },
+);
+
+Deno.test(
+  "Mergeable-push misuse: classifies a destructuring iterate-dedup as read-dependent",
+  () => {
+    // The loop destructures the tainted element, dedups against it, and the
+    // guard statement keeps scanning past an unrelated callback before the
+    // early return; the push after the loop is still read-dependent.
+    const findings = collectMergeablePushMisuses(
+      `const fn = (input, event) => {
+        if (["reserved"].some((s) => s === event.name)) return;
+        for (const { name } of input.key("users")) {
+          if (name === event.name) return;
+          void name;
+        }
+        input.key("users").push({ name: event.name });
+      };`,
+    );
+
+    assertEquals(findings.length, 1);
+    assertEquals(findings[0]!.kind, "read-dependent-push");
   },
 );
 
@@ -2194,6 +3181,7 @@ Deno.test(
 
     assertEquals(findings.length, 1);
     assertEquals(findings[0]!.path.join("."), "users");
+    assertEquals(findings[0]!.kind, "read-dependent-push");
   },
 );
 

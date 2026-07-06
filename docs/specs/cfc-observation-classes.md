@@ -138,6 +138,18 @@ This is the crux of SC-4: separating the two classes lets `value` replace (the
 precision win) while `shape` grows (the soundness fix), where today one label
 does both and the existence bit leaks.
 
+**C2 note (2026-07-03): existence entries carry confidentiality only.** "The
+join of the old and new derivation's flow labels" above is a
+confidentiality-channel rule. The persisted `observes:"shape"` entry does not
+carry J's integrity: integrity composes by meet, never join, so growing an
+existence entry's integrity across writers would *union* certification claims
+— an over-claim. The `value` entry keeps the full J (confidentiality +
+integrity, replace-on-overwrite); this matches the existing `structure`
+stamps, which have always been confidentiality-only. Consequence: a
+`nonRecursive` (shape) read of a split-labeled path taints with the existence
+confidentiality but no longer inherits content certification into the
+hereditary meet — an intended under-claim (SC-9's fail-safe direction).
+
 ## 6. What `deriveFlowJoin` consumes per read shape
 
 `forEachFlowObservation` (`prepare.ts`) already visits each read with its
@@ -159,6 +171,39 @@ entries via `excludeLinkOrigin: true` (`prepare.ts`). Two distinct effects:
   that path is *wider* than today by design. The parity test must exempt this
   path (or assert the new, wider result) — it is not, and must not be, claimed
   byte-identical.
+
+### 6.1 C1 code-validation refinements (2026-07-03)
+
+Landing C1 (`cfc/observation-classes.ts`, `forEachFlowObservation` /
+`effectiveReadLabel` in `prepare.ts`) validated the §4 mapping in code and
+forced three refinements the text above leaves ambiguous. Each was measured
+against the phase-B pointwise suite (`cfc-flow-pointwise.test.ts`), whose
+reader-visible guarantees break under the naive readings; all three are
+normative from C1 on:
+
+- **followRef reads consume only followRef-class entries — covering entries
+  are content.** §3's "absent `observes` = consumed by every read class"
+  holds for the content classes (`value`/`shape`/`enumerate`) only. A
+  followRef observation reads a pointer, not content: letting it consume
+  covering entries would taint the terminal resolution probe of every blind
+  pass-through with the target doc's content label, re-smearing the §2
+  pointer/content substrate. Still strictly wider than pre-C1, which
+  consumed nothing for probes.
+- **The §4 row 3 / row 4 boundary is the dereference trace.** A probe issued
+  while *following* a reference — its slot path covered at-or-above by a
+  same-tx recorded trace source — is resolution machinery (row 4,
+  unchanged); the follow's taint arrives via the ordinary reads of the
+  target. Only standalone probes (no covering trace: `lastNode:"top"` link
+  reads, raw link handles, unfollowed redirect checks) are row-3 followRef
+  observations. Without this boundary every value read's own traversal
+  probes consume each hop's pointer label, and a list coordinator's J joins
+  every slot's transport label — the same pointwise re-smear.
+- **followRef observations contribute confidentiality only.** The §8.9.3
+  hereditary integrity meet quantifies over the transformation's *content*
+  inputs; standalone probes rarely resolve any label, and admitting them
+  would empty the weakest-link meet on virtually every transaction,
+  silently ending TransformedBy / PolicyCertified propagation. Pointer
+  integrity evidence stays on the link entry (the LinkReference chain).
 
 ## 7. Observation ceiling (LLM path) and render
 

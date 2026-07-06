@@ -104,6 +104,17 @@ Run it from the repository root, targeting a pattern that lives in the workspace
 transform. Add `--no-run` to emit the transformed output without running the
 pattern.
 
+### Unit Tests
+
+Most other `*.test.ts` files under `test/` are unit tests that drive a single
+transformer function or the full pipeline directly and assert on the result,
+rather than comparing against a golden file. See
+[test/README.md](test/README.md) for the two harnesses (driving an exported
+function directly vs. `transformSource`/`validateSource`) and the convention for
+asserting on emitted code: parse the output back into an AST via
+`test/transformed-ast.ts` and assert on real nodes or evaluated schema values,
+not printed-text substrings.
+
 ### Adding New Transformations
 
 1. Create `test/fixtures/closures/my-new-case.input.tsx` with the natural

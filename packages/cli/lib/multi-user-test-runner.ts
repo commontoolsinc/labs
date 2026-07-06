@@ -251,6 +251,7 @@ export async function runMultiUserTestPattern(
           );
         }
       } catch (error) {
+        await worker.call("dispose").catch(() => {});
         worker.terminate();
         throw error;
       }

@@ -1234,3 +1234,376 @@ describe("mergeable op guards and single-session branches", () => {
     expect(await readDurable(server)).toEqual(["c"]);
   });
 });
+
+// The home-space `spaces` list shape: an array of `{ name }` records addressed
+// by name via `elementById`. Adding sets the keyed entity and add-uniques it
+// (dedup by the deterministic link); removing matches that link. This mirrors
+// home.tsx's addSpaceHandler / removeSpaceHandler after the keyed migration —
+// object elements are stored as links, so membership merges by identity, not by
+// whole-record value equality.
+interface NamedEntry {
+  name: string;
+}
+
+const NAMED_CAUSE = "keyed-named-list";
+
+const namedListSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: { name: { type: "string" } },
+  },
+  // deno-lint-ignore no-explicit-any
+} as any;
+
+async function readDurableNamed(
+  server: MemoryV2Server.Server,
+): Promise<NamedEntry[]> {
+  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const rt = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+  });
+  try {
+    const cell = rt.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema);
+    await cell.sync();
+    await cell.pull();
+    return (cell.get() ?? []) as NamedEntry[];
+  } finally {
+    await rt.dispose();
+    await storage.close();
+  }
+}
+
+describe("keyed object list (home spaces shape)", () => {
+  let server: MemoryV2Server.Server;
+  let storage1: SharedServerStorageManager;
+  let storage2: SharedServerStorageManager;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+  });
+  afterEach(async () => {
+    await storage1?.close();
+    await storage2?.close();
+    await server?.close();
+  });
+
+  // Two sessions add spaces with distinct names against the same base; both
+  // memberships merge rather than the second clobbering the first.
+  it("two sessions add distinct names concurrently — both survive", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
+        [],
+      );
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      const spacesA = rt1.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txA,
+      );
+      const a = spacesA.elementById("alpha");
+      a.set({ name: "alpha" });
+      spacesA.addUnique(a);
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // rt2 still holds [] (has not observed "alpha").
+      const txB = rt2.edit();
+      const spacesB = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txB,
+      );
+      const b = spacesB.elementById("beta");
+      b.set({ name: "beta" });
+      spacesB.addUnique(b);
+      await txB.commit();
+      await rt2.storageManager.synced();
+
+      const durable = await readDurableNamed(server);
+      expect(durable.map((e) => e.name).sort()).toEqual(["alpha", "beta"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Two sessions add the SAME name against the same base; the key derives to the
+  // same entity, so add-unique dedups by link to one membership entry.
+  it("two sessions add the same name concurrently — dedups to one", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
+        [],
+      );
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      const spacesA = rt1.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txA,
+      );
+      const a = spacesA.elementById("dup");
+      a.set({ name: "dup" });
+      spacesA.addUnique(a);
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const spacesB = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txB,
+      );
+      const b = spacesB.elementById("dup");
+      b.set({ name: "dup" });
+      spacesB.addUnique(b);
+      await txB.commit();
+      await rt2.storageManager.synced();
+
+      const durable = await readDurableNamed(server);
+      expect(durable.map((e) => e.name)).toEqual(["dup"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Two sessions remove different spaces by key concurrently; both removals land
+  // instead of clobbering through a whole-list rewrite.
+  it("two sessions remove distinct names concurrently — both land", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      const seed = rt1.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        tx0,
+      );
+      seed.set([]);
+      for (const name of ["a", "b", "c"]) {
+        const e = seed.elementById(name);
+        e.set({ name });
+        seed.addUnique(e);
+      }
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      const spacesA = rt1.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txA,
+      );
+      spacesA.removeByValue(spacesA.elementById("b"));
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // rt2, still holding all three, removes a different space.
+      const txB = rt2.edit();
+      const spacesB = rt2.getCell<NamedEntry[]>(
+        space,
+        NAMED_CAUSE,
+        namedListSchema,
+        txB,
+      );
+      spacesB.removeByValue(spacesB.elementById("c"));
+      await txB.commit();
+      await rt2.storageManager.synced();
+
+      const durable = await readDurableNamed(server);
+      expect(durable.map((e) => e.name)).toEqual(["a"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+});
+
+// The home-space `favorites` list shape: each element is a keyed entity whose
+// value CONTAINS a cell reference to the favorited piece, addressed by a key
+// derived from that piece's intrinsic link. This mirrors home.tsx's addFavorite
+// / removeFavorite after the keyed migration — the favorite's identity is the
+// piece, so keying by the piece link dedups a re-favorite and lets an unfavorite
+// remove by identity without reading the whole list.
+interface FavoriteLike {
+  cell: unknown;
+  tags: string[];
+  userTags: string[];
+  spaceName?: string;
+}
+
+const FAV_CAUSE = "keyed-favorites-list";
+
+const favoriteLikeSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      cell: { type: "unknown", asCell: ["cell"] },
+      tags: { type: "array", items: { type: "string" } },
+      userTags: { type: "array", items: { type: "string" } },
+      spaceName: { type: "string" },
+    },
+    required: ["cell"],
+  },
+  // deno-lint-ignore no-explicit-any
+} as any;
+
+// The key a favorite is addressed by: the favorited piece's intrinsic link,
+// identical in any session that references the same piece.
+function favoriteKeyFor(piece: { getAsNormalizedFullLink(): unknown }): string {
+  const link = piece.getAsNormalizedFullLink() as {
+    space: string;
+    id: string;
+    path: readonly unknown[];
+  };
+  return JSON.stringify([link.space, link.id, link.path]);
+}
+
+describe("keyed entity holding a cell reference (home favorites shape)", () => {
+  let server: MemoryV2Server.Server;
+  let storage1: SharedServerStorageManager;
+  let rt: Runtime;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+  });
+  afterEach(async () => {
+    await rt?.dispose();
+    await storage1?.close();
+    await server?.close();
+  });
+
+  it("favoriting a piece by its link dedups and removes by identity", () => {
+    const tx = rt.edit();
+    // The piece being favorited: any cell with a stable link.
+    const piece = rt.getCell(space, "favorited-piece", anySchema, tx);
+    piece.set({ title: "a piece" });
+
+    const favorites = rt.getCell<FavoriteLike[]>(
+      space,
+      FAV_CAUSE,
+      favoriteLikeSchema,
+      tx,
+    );
+    favorites.set([]);
+
+    const key = favoriteKeyFor(piece);
+    const entry = favorites.elementById(key);
+    entry.set({ cell: piece, tags: ["x"], userTags: [], spaceName: "s" });
+    favorites.addUnique(entry);
+    expect(favorites.get()?.length).toBe(1);
+    // The stored element carries the piece as a cell reference and the tags.
+    expect(favorites.get()?.[0].cell).toBeTruthy();
+    expect(favorites.get()?.[0].tags).toEqual(["x"]);
+
+    // Re-favoriting the same piece resolves to the same key — dedups to one.
+    const again = favorites.elementById(favoriteKeyFor(piece));
+    again.set({ cell: piece, tags: ["x"], userTags: [], spaceName: "s" });
+    favorites.addUnique(again);
+    expect(favorites.get()?.length).toBe(1);
+
+    // Unfavoriting removes the membership entry by identity.
+    favorites.removeByValue(favorites.elementById(favoriteKeyFor(piece)));
+    expect(favorites.get()?.length ?? 0).toBe(0);
+  });
+
+  it("favorites of two distinct pieces coexist and remove independently", () => {
+    const tx = rt.edit();
+    const pieceA = rt.getCell(space, "piece-a", anySchema, tx);
+    pieceA.set({ title: "A" });
+    const pieceB = rt.getCell(space, "piece-b", anySchema, tx);
+    pieceB.set({ title: "B" });
+
+    const favorites = rt.getCell<FavoriteLike[]>(
+      space,
+      FAV_CAUSE,
+      favoriteLikeSchema,
+      tx,
+    );
+    favorites.set([]);
+
+    for (const [piece, tag] of [[pieceA, "a"], [pieceB, "b"]] as const) {
+      const entry = favorites.elementById(favoriteKeyFor(piece));
+      entry.set({ cell: piece, tags: [tag], userTags: [] });
+      favorites.addUnique(entry);
+    }
+    expect(favorites.get()?.length).toBe(2);
+
+    // Removing one leaves the other intact.
+    favorites.removeByValue(favorites.elementById(favoriteKeyFor(pieceA)));
+    const remaining = favorites.get() ?? [];
+    expect(remaining.length).toBe(1);
+    // The surviving favorite is pieceB's, identified by its tag.
+    expect(remaining[0].tags).toEqual(["b"]);
+    expect(remaining[0].cell).toBeTruthy();
+  });
+});

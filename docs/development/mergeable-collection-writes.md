@@ -1,5 +1,10 @@
 # Mergeable collection writes (operation-based append, add-unique, increment, remove-by-value)
 
+> For how a patch operation is put together across the codebase — the registries
+> that define each op once and how to add a new one — see
+> [patch-operations.md](./patch-operations.md). This note covers *why* the
+> mergeable ops exist.
+
 ## The problem
 
 The runtime is local-first and optimistic. A handler write applies to local
@@ -114,8 +119,8 @@ The same machinery carries three mergeable ops. `append` is described below;
   `append` case that returns the array path, the same as `splice`.
 
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
-  `recordArrayAppend(address, count)` records, per document and path, a mergeable
-  intent (`mergeableOps` on the writable entry). At commit:
+  `recordMergeableOp(address, { op: "append", count })` records, per document and
+  path, a mergeable intent (`mergeableOps` on the writable entry). At commit:
   - The op builder emits an `append` op for each recorded array path. With a
     base present, only `count` tail elements are the append; with the array
     absent from the base (a fresh or not-yet-loaded entity) the whole working
@@ -209,7 +214,8 @@ first, since the op carries only the delta.
 - **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) and the
   query-result-proxy's `push` (`packages/runner/src/query-result-proxy.ts`,
   which routes array mutators through `diffAndUpdate`) both call
-  `recordArrayAppend` after writing the combined array, so id anchoring,
+  `recordMergeableOp` with an `append` delta after writing the combined array, so
+  id anchoring,
   cross-space link elements, and CFC write-policy recording continue to run
   through the existing `diffAndUpdate` path unchanged.
 
@@ -282,24 +288,36 @@ Two further responses make the keyed case cheaper and catch misuse (see
   analysis already tracks per-handler reads and the mergeable write methods. The
   `MergeablePushValidationTransformer`
   ([packages/ts-transformers/src/transformers/mergeable-push-validation.ts](../../packages/ts-transformers/src/transformers/mergeable-push-validation.ts))
-  runs that analysis over each handler and flags a handler that both reads a
-  collection (an explicit `.get()` or an iteration) and mergeable-`push`es to the
-  same collection path. The diagnostic (`mergeable-push:read-then-push`) points at
-  the identity-addressed `elementById` + `addUnique` for a uniqueness condition,
-  or at a read-modify-write `set` for other content-dependent conditions. It is a
-  warning, not an error: the kept read keeps the shape safe today (it forces the
+  runs that analysis over each handler, finds a handler that both reads a
+  collection (an explicit `.get()` or an iteration) and mergeable-`push`es to
+  the same collection path, and classifies how the read relates to the push
+  ([packages/ts-transformers/src/policy/mergeable-push-classification.ts](../../packages/ts-transformers/src/policy/mergeable-push-classification.ts)).
+  A push that *depends* on the read — through a guard (the dedup-then-push
+  shape: an enclosing condition or an earlier early-return derived from the
+  read) or through the pushed value — gets the diagnostic
+  (`mergeable-push:read-then-push`) pointing at the identity-addressed
+  `elementById` + `addUnique` for a uniqueness condition, or at a
+  read-modify-write `set` for other content-dependent appends. A read that
+  instead feeds an *independent* write to the same collection — for example
+  appending an entry and then trimming the list to a maximum length — still
+  costs the append its mergeability, so the same diagnostic fires with the
+  matching remedy: keep the independent read-modify-write in its own handler so
+  the append stays mergeable. A read related to neither the push nor another
+  write of the collection is not reported — the append forfeits merging, but
+  there is usually no better expression to point at, so warning would be noise.
+  Read influence is tracked by name through variable initializers, assignments,
+  and loop bindings, without scope analysis: over-approximation only promotes a
+  site to the dependent-push diagnosis (the diagnosis every flagged site got
+  before classification), while a missed influence demotes toward the softer
+  message or silence, never toward a wrong remedy. It is a warning, not an
+  error: the kept read keeps every flagged shape safe today (it forces the
   conflict-and-retry), so the check nudges toward the better expression without
   failing the build. A bare push with no read of that path, or a read of a
-  different path, is left alone. The analysis exposes the findings through an
-  optional `mergeablePushMisuseSink`; the read-vs-push correlation lives next to
-  the read/write classification in `capability-analysis.ts`. The lunch poll's
-  `addUser` read-then-push is the worked example the warning fires on. The check
-  is path-correlated but order- and purpose-blind: a handler that mergeable-
-  `push`es and *also* runs an independent read-modify-write on the same list —
-  for example appending an entry and then trimming the list to a maximum length —
-  trips the warning too, because the trimming read keeps the append in the
-  conflict set. The remedy there is to keep the independent read-modify-write in
-  its own handler so the append stays mergeable.
+  different path, is left alone. The analysis exposes the classified findings
+  through an optional `mergeablePushMisuseSink`; the read-vs-push correlation
+  lives next to the read/write classification in `capability-analysis.ts`. The
+  lunch poll's `addUser` read-then-push is the worked example the dependent-push
+  warning fires on: its push is both dedup-guarded and built from the read.
 
 ## Scope
 
@@ -315,24 +333,93 @@ mergeable methods to stop false-conflicting and clobbering under contention; the
 favorites, spaces, MRU, and pin lists on the owner-protected home space are the
 highest-value remaining candidates.
 
-## Residual: profile-append-during-rehydration is not fully closed by this change
+### Home-space migration outcome
+
+The favorites and spaces lists on the home space are migrated, both to the
+keyed `elementById` form. A favorite is addressed by its piece's identity, and a
+space by its name; adding sets the keyed entity and `addUnique`s it, and removing
+is `removeByValue` of the same entity. The whole-value `addUnique(value)` and
+`removeByValue(value)` do not apply to either list, because a list element that
+is an object is stored as a link to a separate entity: two objects that are equal
+by content are still distinct entities, so a value comparison never matches, an
+`addUnique` of an equal object never dedups, and a `removeByValue` of an equal
+object never removes. Addressing the element by a deterministic key and matching
+by that link is the form that works — the same form the lunch poll uses for its
+votes and options.
+
+Pattern code cannot read a cell's link, so a favorite's key is derived by the
+client that adds or removes it (the client holds the piece's address as strings)
+and passed in as event data. The handler stores that key on the entry, so the
+in-app remove button can address the same entity without introspecting the piece
+cell. A space's key is the space name, which the handler already has from the
+event.
+
+The MRU lists — the profile most-recently-used list and the recent-pieces list —
+stay a read-modify-write `set`. Their write is not a set-membership change: it
+moves an entry to the front of the list and caps the length, so its correctness
+depends on reading the current order and count. That is a condition other than
+uniqueness, which the mergeable ops do not preserve: `addUnique` appends at the
+tail and never reorders, and there is no mergeable "keep only the first N". A
+concurrent pair of most-recently-used stamps conflicts and one retries, which
+only reorders a recency heuristic, so the read-modify-write is acceptable here.
+
+The profile pinned-elements list is owner-protected by a `writeAuthorizedBy`
+claim on its container. A mergeable op is authorized by that claim the same way a
+whole-value `set` is: the authorization runs over the transaction's write log and
+the schema write-policy inputs, and the mergeable ops record those inputs exactly
+as `set` does, so migrating the list would not weaken the owner-write protection.
+A test in `packages/runner/test/profile-owner-cfc.test.ts` confirms this — an
+authorized writer's `addUnique` and `removeByValue` on an owner-protected list
+commit, and an unauthorized writer's are rejected. The list is left unmigrated
+for two other reasons. A pin is addressed by its element cell's identity rather
+than a scalar key, so a keyed migration needs an addressing scheme the entries do
+not yet carry — unlike a space, which is keyed by its name, or a favorite, which
+is keyed by its piece's identity. And a keyed removal takes on the
+add-wins-after-delete ordering, so a pin removed while a stale add is in flight
+would reappear, which is a semantic change worth weighing for an owner-protected
+list.
+
+## Residual: profile-append-during-rehydration (closed by mergeable-op retry windowing)
 
 This work was motivated by profile creates being lost when issued while the home
 space is rehydrating. The mergeable-append mechanism here is necessary for that
-case and fixes the part where a stale or empty base produced a clobbering or
-position-wrong op. It is not sufficient on its own.
+case: it fixes the part where a stale or empty base produced a clobbering or
+position-wrong op. It was not sufficient on its own. A second failure remained on
+the cross-space, multi-space commit path. That failure is described and closed
+below.
 
-An end-to-end probe — create one profile, reload, then create two more using only
-an idle-wait (no full-sync barrier) between steps, reading a durable count of the
-home `profiles` list — still ends at one. Server-side op tracing during that run
-shows the home `profiles` entity receiving its initial `set` and exactly one
-`append` op (the first, pre-reload create); the two post-reload creates
-produce no append revision on that entity at all. A commit that is rejected on a
-conflict never reaches the revision-apply path, so the two appends are being
-attempted and conflict-rejected (or reverted and not replayed) during the
-post-reload churn — not clobbered at the tail. That is a separate failure: an
-optimistic event-handler write reverted by an unrelated conflict during
-rehydration and never successfully retried (and/or the home rehydration storm
-itself), on the cross-space, multi-space commit path. Closing it needs work on
-the revert/replay of event-handler writes or on eliminating the rehydration
-storm, beyond making the append mergeable.
+A profile create is a multi-space commit. The handler pushes a freshly-created
+`ProfileHome.inSpace()` onto the home `profiles` list, so a single transaction
+both appends to the home space and writes the new profile's own space. A
+multi-space commit runs one per-space commit in order — the child space first,
+then the home space — with no rollback. During the reload storm the home-space
+commit fails repeatedly with transient errors: a stale read, or a same-replica
+race as rehydration applies revisions to the local replica concurrently with the
+commit. The child space, committed first, is already durable, so the new
+profile exists in its own space; but the home-space append keeps failing.
+
+The event-handler commit path retried these failures, but a transient error that
+is not a `ConflictError` consumed the handler's fixed retry budget (five
+attempts). Once the budget was exhausted the commit hit the give-up disposition,
+which drops the write. The mergeable append — add-wins, commutative, and unable
+to truly conflict — was dropped along with it. The durable result is a profile
+whose `ProfileHome` exists but which is absent from the home list, so the durable
+count of `profiles` ends at one.
+
+The fix routes the storm's stale-basis inconsistency through the windowed-retry
+path a `ConflictError` already used — rather than the fixed budget — when the
+commit carries a mergeable op. A `StorageTransactionInconsistent` is a same-basis
+race: a value the transaction read changed on this replica between the read and
+the commit, which re-running against fresh state resolves. A mergeable op's
+durable intent commutes, so retrying it is always safe and it lands once the
+storm clears. The extra windowing is scoped to that stale-basis error: an
+authorization failure, a malformed store op, or a transport error still keeps the
+fixed budget even with a mergeable op present, because re-running cannot resolve
+it. A commit that genuinely cannot converge within the retry window surfaces a
+loud `CommitConvergenceError` instead of silently dropping the append. See
+`classifyCommitDisposition` in `packages/runner/src/scheduler/events.ts`, and the
+regression test
+`packages/runner/test/mergeable-append-multispace-conflict.test.ts`, which
+injects a stale-basis inconsistency storm longer than the fixed budget on the
+home-space commit of a multi-space mergeable append and asserts the append
+survives durably.

@@ -206,6 +206,88 @@ on TypeScript's understanding, even when that might not match user expectations.
 - BigInt literals: `10n` → `bigint` (integer in JSON Schema)
 - Nested literals: Recursively widened through union merging
 
+### Imported Cell Parameters Are a Capability Contract
+
+Capability analysis decides how a handler input cell is shrunk. Body analysis
+can see reads and direct writes (`auth.update(...)`), but it cannot see what a
+callee does inside a body that lives in another file. When a handler passes a
+cell to such a callee, the callee's declared Common Fabric wrapper parameter
+type is the capability contract at that import boundary, and it accounts for
+that argument at that call.
+
+A recognized wrapper parameter type maps to a capability: `Writable<T>` → read
+and write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` → write, and the
+opaque/stream/comparable/sqlite wrappers to their respective handling.
+`Writable<T>` is a _structural_ alias of `Cell<T>` — an identical type — so
+those two are distinguished only by the spelling on the declared type node; the
+transformer's matching is what is nominal (by name). Bare `Cell<T>` and
+same-named types from other libraries are not recognized and leave the
+conservative default in place; unknown callees stay conservative.
+
+The other wrappers carry distinct compile-time brands, so they are genuinely
+different types, not just different spellings. In particular a `Writable<T>`
+value is not assignable to a `ReadonlyCell<T>` parameter — that is a `TS2345`
+error (the `[CELL_BRAND]` tags `"cell"` and `"readonly"` are incompatible). So
+the `ReadonlyCell<T>` → readonly shrink is reached when a handler's own input is
+declared `ReadonlyCell<T>`, or through an explicit cast; a writable cell cannot
+be passed to a read-only parameter directly. This is why granting write is the
+only direction the contract needs to relax the least-authority default — the
+type system already prevents the read-only direction from silently discarding a
+writable cell.
+
+Why the declared type is the right contract, and why it is trusted in both
+directions: the schema this analysis produces is what the runtime enforces. Per
+spec 8.15, a field's `writeAuthorizedBy` set is composed from the handlers that
+declare they write it, and `authorizeWrite` allows a runtime write only when the
+handler identity is in that set. The threat model (spec 9.1.1, 9.2.2) treats
+handler code as untrusted and able to attempt privilege escalation. So the
+analysis derives least authority: it grants write only where a write is
+demonstrated, and passing a cell to a declared reader demonstrates no write.
+Preserving write authority a handler does not use would broaden
+`writeAuthorizedBy` and weaken least authority; a cast that tries to write past
+a declared read-only type is denied at runtime because the schema, not the cast,
+is enforced. Trusting the declared type to reduce authority is therefore safe,
+and trusting it to grant write is bounded by the caller's own declaration and is
+what real refresh clients need.
+
+A recognized wrapper accounts for its argument: it replaces the conservative
+whole-cell root fallback for that specific argument and call, and it does not
+erase other evidence found elsewhere in the handler (a direct `auth.update(...)`
+still contributes a write). A provider client whose factory accepts both a live
+cell and a read-only wrapper should expose them as separate overloads
+(`Writable<T>` and the wrapper type) rather than a single union parameter, so
+overload resolution selects the writable form only for a live cell. See
+`GmailSendClient` for the pattern.
+
+Authoring rule: an imported function or constructor that writes a cell argument
+must declare that parameter `Writable<T>` (or `WriteonlyCell<T>`). Declaring it
+`ReadonlyCell<T>` shrinks callers' schemas to read-only and their writes are
+denied at runtime — the honest fix is the declared type, not broader authority
+in the caller.
+
+### Diagnostic for ambiguous cell-union parameters
+
+Most unclassifiable parameter shapes degrade conservatively and are safe or are
+legitimate framework types, so they are left alone. One shape is a genuine
+authoring bug: a union parameter that mixes a recognized cell wrapper with a
+member the contract cannot resolve to the same capability — for example
+`AuthCell | Writable<Auth>`, or `Writable<Auth> | ReadonlyCell<Auth>`. Overload
+resolution cannot pick the capability, so a cell argument silently degrades.
+When a branded cell argument flows to such a parameter, capability analysis
+records it and the schema-injection transformer raises a
+`capability:unreadable-cell-argument` error telling the author to split the
+callee into overloads (the fix `GmailSendClient` already applies). This makes
+the split-overload rule fail loudly rather than by convention.
+
+The diagnostic is deliberately narrow, and only fires for the mixed-wrapper
+union. It does **not** fire for value-or-cell framework types
+(`FactoryInput<T>`, `CellLike<T>`, `U | AnyBrandedCell<U>`), which accept a
+value or a cell by design and are either not unions or unions with no
+recognized-wrapper member; nor for bare `Cell<T>`, generic parameters,
+structural cell-like interfaces on their own, array identity-writer methods, or
+`any`/`unknown` sinks. A sweep of the pattern corpus confirmed zero matches for
+anything but the true overload-split shape.
+
 ---
 
 ## Test Coverage

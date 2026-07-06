@@ -17,6 +17,11 @@ export default pattern(() => {
     profile.setAvatar.send({ avatar: "AL" });
   });
 
+  // CT-1828: same empty-after-trim guard applies to setAvatar.
+  const action_clear_avatar = action(() => {
+    profile.setAvatar.send({ avatar: "" });
+  });
+
   // CT-1748 note: the presentation-vs-edit *content* lives behind `ifElse`, and
   // [UI] vnode traversal doesn't resolve through this test harness's `.get()`,
   // so the toggle is asserted via the exported `isEditing` and the bound data
@@ -31,6 +36,10 @@ export default pattern(() => {
   // The avatar the badge binds resolves (single context — owner-protected reads
   // are clean here; cross-stamp masking is the browser-only CT-1740 issue).
   const assert_avatar_set = computed(() => profile.avatar === "AL");
+  // CT-1828: an empty send must not clear a previously-set avatar.
+  const assert_avatar_unchanged_after_empty = computed(() =>
+    profile.avatar === "AL"
+  );
 
   const action_add_catalog_element = action(() => {
     profile.addElement.send({
@@ -56,8 +65,16 @@ export default pattern(() => {
     profile.removeElement.send({});
   });
 
+  // CT-1828: an empty (or whitespace-only) send must be a no-op — it must
+  // NOT clear the canonical name. Clearing here would fall back to the
+  // literal "Profile" display product-wide (unlike setBio, which is
+  // deliberately left clearable).
   const action_clear_name = action(() => {
     profile.setName.send({ name: "" });
+  });
+
+  const action_whitespace_name = action(() => {
+    profile.setName.send({ name: "   " });
   });
 
   const action_set_name = action(() => {
@@ -73,7 +90,11 @@ export default pattern(() => {
     profile.initialNameApplied === "Grace Hopper"
   );
 
-  const assert_name_cleared = computed(() => profile.initialNameApplied === "");
+  // The prior (non-empty) name must survive both an empty and a
+  // whitespace-only send.
+  const assert_name_unchanged_after_empty = computed(() =>
+    profile.initialNameApplied === "Grace Hopper"
+  );
 
   const assert_added_element = computed(() => {
     const element = profile.elements[0];
@@ -93,11 +114,17 @@ export default pattern(() => {
       { assertion: assert_not_editing },
       { action: action_set_name },
       { assertion: assert_name_set },
+      // CT-1828: empty and whitespace-only sends must not erase the name.
       { action: action_clear_name },
-      { assertion: assert_name_cleared },
+      { assertion: assert_name_unchanged_after_empty },
+      { action: action_whitespace_name },
+      { assertion: assert_name_unchanged_after_empty },
       // CT-1748: the avatar the badge binds resolves.
       { action: action_set_avatar },
       { assertion: assert_avatar_set },
+      // CT-1828: an empty send must not erase the avatar either.
+      { action: action_clear_avatar },
+      { assertion: assert_avatar_unchanged_after_empty },
       // Add/remove exercise the full owner-protected element write stack:
       // the same-transaction card instantiation linked into the
       // writeAuthorizedBy-protected list (prepare's setup-schema / child-doc
