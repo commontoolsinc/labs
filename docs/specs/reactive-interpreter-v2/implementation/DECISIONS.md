@@ -199,3 +199,37 @@ Mechanics:
   element change — the deliberate trade for transient outputs (in-memory
   recompute, no doc round-trips) vs the materialized path's per-element
   incrementality for kept outputs.
+
+## D-V2-SCOPES-PER-OP — scope flow-tracking at per-op granularity (user, 2026-07-06)
+
+Berni's design brief, realized: "track the scopes through the flow of
+data, so we know what the final scope is when writing something (even if
+the output scope is declared as space, if derived from session-scoped
+data it becomes session-scoped and we add that redirect from the space
+scope doc to the session scoped one)". Legacy already IS this — per node
+action, via narrowest-read-scope + sendValueToBinding's scoped-instance +
+redirect write. The interpreter's obligation is GRANULARITY: a segment
+collapses N legacy actions, so one tx-ambient scope would smear a scoped
+read across sibling ops (proven by the sibling differential before the
+fix). Per-op = exactly legacy.
+
+Three load-bearing findings:
+1. LAZY DEREFS: leaf inputs are query-result proxies — the scoped link's
+   deref happens inside the leaf BODY, not the seed read. Seed-time
+   capture alone observes nothing (session reads landed after every
+   capture had closed); the per-op RUN BRACKET is what attributes them.
+2. JOURNAL INVARIANCE: the first implementation switched the bulk inputs
+   read to per-key reads for attribution and broke a scoped-map resume
+   test — the segment's journaled read set drives re-run reactivity and
+   must stay byte-identical. Scope attribution therefore uses bare
+   resolveLink (self-exempt probes) + run brackets, never extra reads.
+3. CACHE BLINDNESS: the per-tx Cell.get() cache elides the reads scope
+   tracking observes — entries now record the fill's narrowest scope and
+   replay it on hits (also closes a latent legacy under-narrowing hazard
+   in warm batch transactions; under-narrowing is the leak direction).
+
+Static markers stay legacy-owned: raw-builtin outputBinding folds,
+pattern-node child scoping, and frame-result schema folds are all
+boundary territory (verbatim instantiation); legacy's simple javascript
+path IGNORES static scope for plain-value lifts (pinned by differential).
+Value-consumed inlining refuses scope-declaring children.
