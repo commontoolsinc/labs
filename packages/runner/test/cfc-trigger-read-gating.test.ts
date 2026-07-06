@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
@@ -334,6 +335,21 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       // is ECMAScript-private, so `(tx as any).cfcState` finds nothing.
       expect((tx as unknown as Record<string, unknown>).cfcState)
         .toBeUndefined();
+      // The Map facade forwards reads bound to the real Map and rejects
+      // mutators.
+      const identities = tx.getCfcState().writePolicyInputIdentities;
+      expect(identities.size).toBe(0);
+      expect(identities.get({} as never)).toBeUndefined();
+      expect(() => identities.set({} as never, {} as never)).toThrow(
+        "read-only",
+      );
+      expect(() => identities.clear()).toThrow("read-only");
+      // The child-cell wrapper's diagnostics seam delegates to the wrapped
+      // transaction.
+      new TransactionWrapper(tx, {}).noteCfcDiagnostic("h5-view-wrapper-note");
+      expect(tx.getCfcState().diagnostics).toContainEqual(
+        "h5-view-wrapper-note",
+      );
       // Nothing stuck: the state is intact and the gate still enforces.
       expect(tx.getCfcState().triggerReadGating).toBe(true);
       expect(tx.getCfcState().triggerReads.length).toBe(1);
