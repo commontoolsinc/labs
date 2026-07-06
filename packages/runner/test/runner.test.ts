@@ -1246,6 +1246,246 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("reports a missing stream marker when a handler's $event reads undefined", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: {
+            $event: { $alias: { cell: "argument", path: ["missingStream"] } },
+          },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler $event reads undefined",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    // The node is authored as a handler but its stream marker location was
+    // never written (e.g. state persisted in an older format). The error must
+    // say the marker is missing, not that it was overwritten.
+    const error = await runtime.start(resultCell).then(
+      () => undefined,
+      (e) => e as Error,
+    );
+    expect(error?.message).toContain("was never written");
+    // This piece's internal meta is the modern manifest (an array), so the
+    // pre-manifest hint must not fire on it.
+    expect(error?.message).not.toContain("pre-manifest");
+  });
+
+  it("reports an overwritten stream marker when $event resolves to data", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { ev: { type: "number" } },
+      },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: { $alias: { cell: "argument", path: ["ev"] } } },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler $event resolves to data",
+    );
+    setupTrusted(runtime, undefined, pattern, { ev: 7 }, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "was overwritten (found: 7)",
+    );
+  });
+
+  it("reports a non-link $event input on a handler node", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "handler $event is not a link");
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "is not a stream reference",
+    );
+  });
+
+  it("hints at the pre-manifest format when internal meta is a single-cell link", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: {
+            $event: { $alias: { cell: "argument", path: ["missingStream"] } },
+          },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "pre-manifest internal meta hint",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    // Simulate a piece persisted before the internal-cell manifest format
+    // (#3911): its `internal` meta is a single cell link rather than the
+    // manifest array the modern setup path writes.
+    const legacyInternalCell = runtime.getCell(
+      space,
+      "pre-manifest single internal cell",
+    );
+    const metaTx = runtime.edit();
+    resultCell.withTx(metaTx).setMetaRaw(
+      "internal",
+      legacyInternalCell.getAsWriteRedirectLink({ base: resultCell }),
+    );
+    await metaTx.commit();
+
+    const error = await runtime.start(resultCell).then(
+      () => undefined,
+      (e) => e as Error,
+    );
+    expect(error?.message).toContain("was never written");
+    // The non-array internal meta is the discriminator for the pre-manifest
+    // format; the hint and its remedy must both surface.
+    expect(error?.message).toContain("pre-manifest format");
+    expect(error?.message).toContain("recreate the piece");
+  });
+
+  it("truncates long values in the overwritten-marker diagnostic", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { ev: { type: "string" } },
+      },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: { $alias: { cell: "argument", path: ["ev"] } } },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler $event resolves to a long value",
+    );
+    setupTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { ev: "x".repeat(200) },
+      resultCell,
+    );
+
+    // The diagnostic prints the offending value but must stay bounded:
+    // toCompactDebugString caps it at 80 characters with an ellipsis, so an
+    // error message never dumps a large payload.
+    const error = await runtime.start(resultCell).then(
+      () => undefined,
+      (e) => e as Error,
+    );
+    expect(error?.message).toContain("was overwritten (found: ");
+    expect(error?.message).toContain("...");
+    expect(error?.message).not.toContain("x".repeat(100));
+  });
+
+  it("start() leaves no running registration when instantiation throws", async () => {
+    // A handler node whose $event input does not resolve to a stream marker
+    // (e.g. persisted state in an older format) makes node instantiation
+    // throw "Handler used as lift".
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "start cleans up when instantiation throws",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "Handler used as lift",
+    );
+
+    // Regression: the failed start used to leave the piece registered as
+    // running, so a second start() reported success for a piece that had no
+    // nodes or event handlers — events sent to it were silently dropped. It
+    // must fail the same way as the first attempt instead.
+    await expect(runtime.start(resultCell)).rejects.toThrow(
+      "Handler used as lift",
+    );
+  });
+
+  it("run() with a given pattern leaves no running registration when instantiation throws", () => {
+    // Same regression as above, via the fresh-run entry (the path a live
+    // `cf piece new` takes): startCore's givenPattern branch must also clean
+    // up when node instantiation throws.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: { type: "javascript", implementation: () => undefined },
+          inputs: { $event: 42 },
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "fresh run cleans up when instantiation throws",
+    );
+
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow("Handler used as lift");
+
+    // A zombie registration would make the second run() short-circuit to
+    // "already running" and return without error. It must throw identically.
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow("Handler used as lift");
+  });
+
   it("setup ignores exhausted retry errors and still resolves", async () => {
     const pattern: Pattern = {
       argumentSchema: {

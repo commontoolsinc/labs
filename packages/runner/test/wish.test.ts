@@ -2343,12 +2343,11 @@ describe("wish built-in", () => {
       expect((favorites as any[])[0].tag).toEqual("test favorite");
     });
 
-    // Helper: stand up the home space with a single favorite carrying the given
-    // discovery/user tags, then resolve `#favorites/<term>` against it.
     async function resolveFavoritesTerm(
       label: string,
       entry: { tags?: string[]; userTags?: string[] },
       term: string,
+      options?: { value?: unknown; path?: string[] },
     ) {
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const defaultPatternCell = runtime.getCell(
@@ -2364,7 +2363,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      favoriteItem.set({ name: "My Favorite", value: 42 });
+      favoriteItem.set(options?.value ?? { name: "My Favorite", value: 42 });
       favoritesCell.set([
         {
           cell: favoriteItem,
@@ -2379,7 +2378,11 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishPattern = pattern(() => {
-        return { result: wish({ query: `#favorites/${term}` }) };
+        return {
+          result: wish({
+            query: ["#favorites", term, ...(options?.path ?? [])].join("/"),
+          }),
+        };
       });
       const resultCell = runtime.getCell<{
         result?: { result?: unknown; error?: string };
@@ -2396,10 +2399,6 @@ describe("wish built-in", () => {
       return result.key("result").get();
     }
 
-    // A `#favorites/<term>` query finds a favorite whose discovery tag or user
-    // tag matches `term`. These tests assert the match decision (no "No favorite
-    // found" error when one matches; the error when none do) — that is the code
-    // path the favorite matchers own.
     it("matches a #favorites/<term> query by a structured discovery tag", async () => {
       const resolved = await resolveFavoritesTerm(
         "tag",
@@ -2418,6 +2417,32 @@ describe("wish built-in", () => {
       expect(resolved?.error).toBeUndefined();
     });
 
+    it("resolves #favorites/<term> to the matched favorite", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "weather-value",
+        { userTags: ["weather"] },
+        "weather",
+        { value: { name: "My Favorite", value: 42 } },
+      );
+      expect(resolved?.result).toEqual({
+        name: "My Favorite",
+        value: 42,
+      });
+    });
+
+    it("resolves #favorites/<term>/<subpath> inside the matched favorite", async () => {
+      const resolved = await resolveFavoritesTerm(
+        "weather-subpath",
+        { userTags: ["weather"] },
+        "weather",
+        {
+          value: { name: "My Favorite", forecast: { temp: 72 } },
+          path: ["forecast", "temp"],
+        },
+      );
+      expect(resolved?.result).toBe(72);
+    });
+
     it("reports an error for #favorites/<term> when nothing matches", async () => {
       const resolved = await resolveFavoritesTerm(
         "nomatch",
@@ -2428,8 +2453,6 @@ describe("wish built-in", () => {
       expect(resolved?.error).toMatch(/No favorite found matching/);
     });
 
-    // Other well-known home-space targets resolve to fixed paths under the home
-    // default pattern.
     async function resolveHomeTarget(
       label: string,
       key: string,
@@ -2488,6 +2511,17 @@ describe("wish built-in", () => {
       );
       expect(resolved?.error).toBeUndefined();
       expect((resolved?.result as any)?.summary).toBe("a learned summary");
+    });
+
+    it("resolves #learnedSummary to the home learned summary", async () => {
+      const resolved = await resolveHomeTarget(
+        "learned-summary",
+        "learned",
+        { summary: "Known facts" },
+        "#learnedSummary",
+      );
+      expect(resolved?.error).toBeUndefined();
+      expect(resolved?.result).toBe("Known facts");
     });
 
     it("resolves well-known profile targets from the home default profile link", async () => {
@@ -2571,15 +2605,11 @@ describe("wish built-in", () => {
       // every pattern that wishes for "the viewer's active profile" (e.g.
       // profile-group-chat's send guard). With a default set, `#profile` must
       // resolve to it directly as a single result.
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-profile-default-among-many",
+      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      const spaceA = (await Identity.fromPassphrase(
+        "wish-profile-default-among-many-a",
       )).did();
-      const profileA = runtime.getCell(
-        profileSpaceDid,
-        "profile-a",
-        undefined,
-        tx,
-      );
+      const profileA = runtime.getCell(spaceA, "profile-a", undefined, tx);
       profileA.set({
         name: "Default Della",
         initialNameApplied: "Default Della",
@@ -2587,12 +2617,13 @@ describe("wish built-in", () => {
         bio: "",
         elements: [],
       });
-      const profileB = runtime.getCell(
-        profileSpaceDid,
-        "profile-b",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const spaceB = (await Identity.fromPassphrase(
+        "wish-profile-default-among-many-b",
+      )).did();
+      const profileB = runtime.getCell(spaceB, "profile-b", undefined, tx);
       profileB.set({
         name: "Other Otto",
         initialNameApplied: "Other Otto",
@@ -2936,30 +2967,25 @@ describe("wish built-in", () => {
     });
 
     it("resolves headless #profile to the default profile (ordered first)", async () => {
-      // Both profiles live in one (non-home) space so the home write opens a
-      // single cross-space writer; the real create flow appends one space per
-      // transaction.
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-multi-profile-space",
+      // Each profile lives in its OWN (non-home) space — its space DID is its
+      // identity (CT-1842). Commit per space (single-space-writer per tx).
+      const p1Space = (await Identity.fromPassphrase(
+        "wish-multi-profile-space-1",
       )).did();
-      const p1 = runtime.getCell(
-        profileSpaceDid,
-        "multi-profile-1",
-        undefined,
-        tx,
-      );
+      const p1 = runtime.getCell(p1Space, "multi-profile-1", undefined, tx);
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "ada.png",
         elements: [],
       });
-      const p2 = runtime.getCell(
-        profileSpaceDid,
-        "multi-profile-2",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const p2Space = (await Identity.fromPassphrase(
+        "wish-multi-profile-space-2",
+      )).did();
+      const p2 = runtime.getCell(p2Space, "multi-profile-2", undefined, tx);
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
@@ -3010,27 +3036,24 @@ describe("wish built-in", () => {
     });
 
     it("orders headless #profile by MRU when no default is set", async () => {
-      const profileSpaceDid = (await Identity.fromPassphrase(
-        "wish-mru-profile-space",
+      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      const p1Space = (await Identity.fromPassphrase(
+        "wish-mru-profile-space-1",
       )).did();
-      const p1 = runtime.getCell(
-        profileSpaceDid,
-        "mru-profile-1",
-        undefined,
-        tx,
-      );
+      const p1 = runtime.getCell(p1Space, "mru-profile-1", undefined, tx);
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "",
         elements: [],
       });
-      const p2 = runtime.getCell(
-        profileSpaceDid,
-        "mru-profile-2",
-        undefined,
-        tx,
-      );
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+      const p2Space = (await Identity.fromPassphrase(
+        "wish-mru-profile-space-2",
+      )).did();
+      const p2 = runtime.getCell(p2Space, "mru-profile-2", undefined, tx);
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
@@ -3439,6 +3462,157 @@ describe("wish built-in", () => {
       }
     });
 
+    // Host-embedding contract seam 1 (docs/development/HOST_EMBEDDING.md §1):
+    // the well-known profile wish targets an embedder binds to, and the
+    // zero-profile `result ?? fallback` idiom. This describe pins the
+    // load-bearing embedder guarantees in one place; the broader profile suite
+    // above covers ordering/picker/headless behavior in depth.
+    describe("host embedding contract: profile wish targets", () => {
+      it("resolves all five well-known targets from the default profile", async () => {
+        const profileSpaceDid = (await Identity.fromPassphrase(
+          "host-embedding-wish-profile-space",
+        )).did();
+        const profileDefaultCell = runtime.getCell(
+          profileSpaceDid,
+          "host-embedding-profile-default",
+          undefined,
+          tx,
+        );
+        profileDefaultCell.set({
+          name: "Ada Lovelace",
+          initialNameApplied: "Ada Lovelace",
+          avatar: "ada.png",
+          bio: "Mathematician & first programmer.",
+          elements: [],
+        });
+        const profileSpaceCell = runtime.getSpaceCell(
+          profileSpaceDid,
+          undefined,
+          tx,
+        );
+        profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-link",
+          undefined,
+          tx,
+        );
+        homeDefaultCell.key("profiles").set([profileDefaultCell]);
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+          profileName: wish({ query: "#profileName" }),
+          profileAvatar: wish({ query: "#profileAvatar" }),
+          profileBio: wish({ query: "#profileBio" }),
+          profileSpace: wish({ query: "#profileSpace" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-wish-targets-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
+        expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
+        expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+        expect(result.key("profileBio").get()?.result).toBe(
+          "Mathematician & first programmer.",
+        );
+        expect(
+          result.key("profileSpace").get()?.result?.defaultPattern?.name,
+        ).toBe("Ada Lovelace");
+      });
+
+      it("leaves #profileName result undefined at zero profiles (the result ?? fallback idiom)", async () => {
+        // No profile linked. A scalar target lands a WishError and `result`
+        // stays undefined, so every embedder consumer must use
+        // `wish.result ?? fallback` — this asserts the `undefined` half.
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-empty",
+          undefined,
+          tx,
+        );
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profileName: wish<string>({ query: "#profileName" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-empty-profile-name-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        const state = result.key("profileName").get();
+        expect(state?.result).toBeUndefined();
+        // The `?? fallback` idiom an embedder must use:
+        expect(state?.result ?? "Anonymous").toBe("Anonymous");
+      });
+
+      it("renders the create surface (result undefined) for #profile at zero profiles", async () => {
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultCell = runtime.getCell(
+          userIdentity.did(),
+          "host-embedding-home-default-create-ui",
+          undefined,
+          tx,
+        );
+        (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "host-embedding-empty-profile-create-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+        await result.pull();
+
+        const state = result.key("profile").get();
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(state?.result).toBeUndefined();
+        expect(String(state?.error)).toContain("profile");
+        expect(ui?.name).toBe("cf-render");
+        expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      });
+    });
+
     // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
     // (ordered default → MRU → first) in every mode. The picker no longer owns
     // `.result`; it is only the `[UI]` switching affordance. These tests pin the
@@ -3464,10 +3638,15 @@ describe("wish built-in", () => {
           headless?: boolean;
         },
       ) {
-        const profileSpaceDid = (await Identity.fromPassphrase(
-          `ct1829-${label}-space`,
-        )).did();
-        const profileCells = opts.names.map((name, i) => {
+        // Each profile lives in its OWN space (an anonymous
+        // `ProfileHome.inSpace()` in production) — the profile's own space DID is
+        // its stable identity (CT-1842). Commit per space: a single tx can only
+        // open one space writer at a time.
+        const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
+        for (let i = 0; i < opts.names.length; i++) {
+          const profileSpaceDid = (await Identity.fromPassphrase(
+            `ct1829-${label}-space-${i}`,
+          )).did();
           const cell = runtime.getCell(
             profileSpaceDid,
             `ct1829-${label}-profile-${i}`,
@@ -3475,18 +3654,17 @@ describe("wish built-in", () => {
             tx,
           );
           cell.set({
-            name,
-            initialNameApplied: name,
+            name: opts.names[i],
+            initialNameApplied: opts.names[i],
             avatar: "",
             bio: "",
             elements: [],
           });
-          return cell;
-        });
-
-        await tx.commit();
-        await runtime.idle();
-        tx = runtime.edit();
+          await tx.commit();
+          await runtime.idle();
+          tx = runtime.edit();
+          profileCells.push(cell);
+        }
 
         const homeSpaceCell = runtime.getHomeSpaceCell(tx);
         const homeDefaultCell = runtime.getCell(
@@ -3765,6 +3943,178 @@ describe("wish built-in", () => {
           setPatternEnvironment(originalEnvironment);
           await runtime.idle();
         }
+      });
+
+      // CT-1842: In real deployments each profile lives in its OWN space (an
+      // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile` link
+      // and the `profiles` candidate for the SAME profile point at DIFFERENT
+      // cells WITHIN that profile's space — same space, DIFFERENT entity id (the
+      // picker stores the profile pattern's result cell; the list stores the
+      // pattern cell). So neither `Cell.equals` nor an id-based comparison matches
+      // them; the MRU/default match returned false for every candidate and the
+      // ordering silently collapsed to `profiles`-list (creation) order — the
+      // switcher was a no-op cross-space. The builtin now matches by the profile's
+      // own SPACE (the stable per-profile identity), so the id difference no
+      // longer defeats the match. Verified against live data (switchtest
+      // identity): mru[0].space == profiles[1].space for the same profile, while
+      // the ids differ.
+      describe("cross-space id skew (CT-1842)", () => {
+        // Stand up N profiles, each in its OWN space (real cross-space), wire the
+        // home `profiles` list from the profiles' CANONICAL cells, and write
+        // `mru` / `defaultProfile` as links pointing at a DIFFERENT cell in the
+        // SAME profile space (a distinct entity id) — the exact production shape
+        // that made id/equals comparison return false for the same profile.
+        async function setupCrossSpace(
+          label: string,
+          opts: {
+            names: string[];
+            // Indices into `names`, most-recently-used first.
+            mruIndices?: number[];
+            // Index into `names` to set as default.
+            defaultIndex?: number;
+          },
+        ) {
+          // Each profile in a DISTINCT space; commit per space (a single tx can
+          // only open one space writer at a time). We create TWO cells per
+          // profile space: the canonical profile cell (goes in `profiles`) and a
+          // sibling "alias" cell with a DIFFERENT id but the SAME `name` (what the
+          // mru/default links point at) — mirroring production's list-cell vs
+          // picker-result-cell id divergence within one profile space.
+          const profileSpaces: string[] = [];
+          const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
+          const aliasLinks: Array<
+            ReturnType<
+              ReturnType<Runtime["getCell"]>["getAsNormalizedFullLink"]
+            >
+          > = [];
+          for (let i = 0; i < opts.names.length; i++) {
+            const spaceDid = (await Identity.fromPassphrase(
+              `ct1842-${label}-space-${i}`,
+            )).did();
+            profileSpaces.push(spaceDid);
+            const value = {
+              name: opts.names[i],
+              initialNameApplied: opts.names[i],
+              avatar: "",
+              bio: "",
+              elements: [],
+            };
+            const cell = runtime.getCell(
+              spaceDid,
+              `ct1842-${label}-profile-${i}`,
+              undefined,
+              tx,
+            );
+            cell.set(value);
+            // Sibling cell in the SAME space, DIFFERENT id — the mru/default link
+            // target.
+            const alias = runtime.getCell(
+              spaceDid,
+              `ct1842-${label}-profile-${i}-alias`,
+              undefined,
+              tx,
+            );
+            alias.set(value);
+            await tx.commit();
+            await runtime.idle();
+            tx = runtime.edit();
+            profileCells.push(cell);
+            aliasLinks.push(alias.getAsNormalizedFullLink());
+          }
+
+          // A sigil link to the SIBLING cell (same profile space, different id) —
+          // the shape a cross-space `mru` / `defaultProfile` entry resolves to in
+          // production.
+          const aliasSigil = (i: number) => ({
+            "/": {
+              [LINK_V1_TAG]: {
+                id: aliasLinks[i].id,
+                space: aliasLinks[i].space,
+                path: [],
+                scope: aliasLinks[i].scope,
+              },
+            },
+          });
+
+          const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+          const homeDefaultCell = runtime.getCell(
+            userIdentity.did(),
+            `ct1842-${label}-home-default`,
+            undefined,
+            tx,
+          );
+          homeDefaultCell.key("profiles").set(profileCells);
+          if (opts.mruIndices) {
+            homeDefaultCell.key("mru").setRawUntyped(
+              // deno-lint-ignore no-explicit-any
+              opts.mruIndices.map((i) => aliasSigil(i)) as any,
+            );
+          }
+          if (opts.defaultIndex !== undefined) {
+            homeDefaultCell.key("defaultProfile").setRawUntyped(
+              // deno-lint-ignore no-explicit-any
+              aliasSigil(opts.defaultIndex) as any,
+            );
+          }
+          // deno-lint-ignore no-explicit-any
+          (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+          await tx.commit();
+          await runtime.idle();
+          tx = runtime.edit();
+
+          const wishPattern = pattern(() => ({
+            profile: wish({ query: "#profile", headless: true }),
+          }));
+          const resultCell = runtime.getCell<Record<string, any>>(
+            patternSpace.did(),
+            `ct1842-${label}-result`,
+            undefined,
+            tx,
+          );
+          const result = runtime.run(tx, wishPattern, {}, resultCell);
+          await tx.commit();
+          tx = runtime.edit();
+          await result.pull();
+          return { result };
+        }
+
+        it("MRU head resolves cross-space despite different-id mru links (fails on unfixed code)", async () => {
+          // Two profiles in two spaces, no default. MRU lists the SECOND-created
+          // profile first, via a link whose entity id differs from the candidate's
+          // (but shares the profile space). Pre-fix, id/equals matching rejects
+          // every mru↔candidate pair, so ordering falls back to creation order and
+          // `.result` = first-created (Ada). With space-based matching, `.result`
+          // = MRU head (Grace).
+          const { result } = await setupCrossSpace("mru-id-skew", {
+            names: ["Ada", "Grace"],
+            mruIndices: [1],
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Grace");
+        });
+
+        it("default resolves cross-space despite different-id default link (guards the default-match fix)", async () => {
+          // defaultProfile points at the SECOND profile via a different-id link.
+          // Pre-fix the default-match (`defaultCell.equals(candidate)`) fails the
+          // same way, so the default is ignored; with the fix it resolves to the
+          // chosen default.
+          const { result } = await setupCrossSpace("default-id-skew", {
+            names: ["Ada", "Grace"],
+            defaultIndex: 1,
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Grace");
+        });
+
+        it("default outranks MRU even under id skew", async () => {
+          // Default = Ada (index 0), MRU head = Grace (index 1), both different-id.
+          // Default must win.
+          const { result } = await setupCrossSpace("default-over-mru-id-skew", {
+            names: ["Ada", "Grace"],
+            defaultIndex: 0,
+            mruIndices: [1],
+          });
+          expect(result.key("profile").get()?.result?.name).toBe("Ada");
+        });
       });
     });
   });

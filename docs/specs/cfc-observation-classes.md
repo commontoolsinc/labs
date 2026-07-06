@@ -150,6 +150,18 @@ stamps, which have always been confidentiality-only. Consequence: a
 confidentiality but no longer inherits content certification into the
 hereditary meet — an intended under-claim (SC-9's fail-safe direction).
 
+**C3 note (2026-07-03): the grow landed.** On overwrite the flow-clear folds
+the confidentiality of every dropped `derived` (any class, covering
+included — pre-C2 data) and `structure` entry into the covering written
+path's `observes:"shape"` entry: new J first, then the cleared atoms, so
+re-derivation stays byte-identical (SC-11). The grown entry is written even
+when the overwriting transaction consumed nothing (the red SC-4 case — a
+clean overwrite previously made the existence bit public). Cleared `link`
+entries are excluded (pointer labels; folding them into content shape would
+re-smear the pointer/content split), and cleared existence not covered by
+any stamp path (e.g. a link write replacing the slot) lands as a bare shape
+entry at the shallowest covering written path.
+
 ## 6. What `deriveFlowJoin` consumes per read shape
 
 `forEachFlowObservation` (`prepare.ts`) already visits each read with its

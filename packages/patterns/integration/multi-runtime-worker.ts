@@ -95,12 +95,90 @@ function sanitizeForTransfer(value: unknown): unknown {
   }));
 }
 
+// Test-only network shaping: wrap this realm's WebSocket so every frame (both
+// directions) is delayed by a fixed amount. Installed BEFORE the runtime opens
+// its storage session, so the whole client stack sees the added latency —
+// the in-process equivalent of the browser-harness WS shim used to reproduce
+// multiplayer contention (starvation / wedge) without a network.
+function installWsDelay(delayMs: number): void {
+  if (delayMs <= 0) return;
+  const Native = globalThis.WebSocket;
+  const Delayed = function (
+    this: WebSocket,
+    url: string | URL,
+    protocols?: string | string[],
+  ): WebSocket {
+    const ws = protocols !== undefined
+      ? new Native(url, protocols)
+      : new Native(url);
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const nativeAdd = ws.addEventListener.bind(ws);
+    const nativeRemove = ws.removeEventListener.bind(ws);
+    ws.addEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ) => {
+      if (type === "message" && listener) listeners.add(listener);
+      else if (listener) nativeAdd(type, listener, options);
+    };
+    // Mirror removal for the diverted message listeners, preserving
+    // WebSocket semantics for callers that unsubscribe/re-subscribe.
+    ws.removeEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | EventListenerOptions,
+    ) => {
+      if (type === "message" && listener) listeners.delete(listener);
+      else if (listener) nativeRemove(type, listener, options);
+    };
+    let onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null =
+      null;
+    Object.defineProperty(ws, "onmessage", {
+      configurable: true,
+      get: () => onmessage,
+      set: (fn) => {
+        onmessage = fn;
+      },
+    });
+    nativeAdd("message", (ev: Event) => {
+      const deliver = () => {
+        onmessage?.call(ws, ev as MessageEvent);
+        for (const listener of listeners) {
+          const fn = typeof listener === "function"
+            ? listener
+            : listener.handleEvent.bind(listener);
+          fn.call(ws, ev);
+        }
+      };
+      setTimeout(deliver, delayMs);
+    });
+    const nativeSend = ws.send.bind(ws);
+    ws.send = (data: Parameters<WebSocket["send"]>[0]) => {
+      setTimeout(() => {
+        try {
+          nativeSend(data);
+        } catch {
+          // Socket closed while the frame was in flight; same as a network drop.
+        }
+      }, delayMs);
+    };
+    return ws;
+  } as unknown as typeof WebSocket;
+  Delayed.prototype = Native.prototype;
+  for (const k of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"] as const) {
+    (Delayed as unknown as Record<string, unknown>)[k] = Native[k];
+  }
+  globalThis.WebSocket = Delayed;
+}
+
 const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics }) {
+  async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
+    if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
@@ -136,7 +214,7 @@ const handlers: Record<
     return {};
   },
 
-  async send({ handler, event, trustedUi }) {
+  async send({ handler, event, trustedUi, idle: doIdle }) {
     const trusted = trustedUi as TrustedUiDescriptor | undefined;
     let eventValue: unknown = event ?? {};
     if (trusted) {
@@ -167,7 +245,11 @@ const handlers: Record<
     if (error) {
       throw new Error(`send "${handler}" failed: ${error.message}`);
     }
-    await idle();
+    // `idle: false` returns as soon as the event is queued, leaving the action
+    // run + commit in flight — lets a test stack several sends into a deep
+    // optimistic pipeline (the multiplayer-contention shape) instead of
+    // serializing one settled commit per event.
+    if (doIdle !== false) await idle();
     return {};
   },
 
@@ -285,6 +367,28 @@ const handlers: Record<
       space: link.space,
       scope: link.scope,
       path: link.path,
+    });
+  },
+
+  // Raw replica read: a storage-transaction read at an explicit address,
+  // bypassing the piece result / schema / link-following path entirely. Lets a
+  // test distinguish "this runtime's replica never received the doc" from
+  // "the doc is in the replica but the schema-aware read fails to resolve it".
+  async rawRead({ id, space, path, scope }) {
+    const runtime = controller().manager().runtime;
+    const tx = runtime.edit();
+    const res = tx.read({
+      space: space as never,
+      id: id as never,
+      type: "application/json",
+      path: (path ?? []) as string[],
+      ...(scope !== undefined ? { scope: scope as never } : {}),
+    } as never) as { ok?: { value?: unknown }; error?: { message?: string } };
+    await tx.commit();
+    return sanitizeForTransfer({
+      ok: res.error === undefined,
+      value: res.ok?.value,
+      error: res.error?.message,
     });
   },
 

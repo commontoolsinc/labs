@@ -4,8 +4,10 @@ _Epic D, stage D4, of
 [`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
 This doc is a **soundness review** of the plan's proposed prefix approximation,
 grounded in the CFC spec (`commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`
-§8.9, §8.9.1). It found a real unsoundness in the plan text and fixes the
-design before code lands. Written 2026-07-02 at owner request._
+§8.9, §8.9.1, §8.9.2). It found a real unsoundness in the plan text and fixes the
+design before code lands. Written 2026-07-02 at owner request; amended
+2026-07-03 (overlap-keyed bound, read positions in the digest, §8.9.2
+citation)._
 
 ## 1. What D4 proposes and why
 
@@ -30,14 +32,16 @@ dataflow, stated honestly."
 
 ## 2. What the spec actually requires
 
-`08-09` §8.9.1 (*Normative definition, `computePcConfidentiality`*) defines the
-consumed set `O` as **every read recorded in the attempt's transaction
-journal** — transaction-global — plus trigger/gating reads. The default output
-label `L_default` is "the conservative label from all observable inputs plus PC
+`08-09` §8.9.2 (*Propagation Algorithm* — *Normative definition,
+`computePcConfidentiality`*) defines the consumed set `O` as **every read
+recorded in the attempt's transaction journal** — transaction-global — plus
+trigger/gating reads. §8.9.1's normative profile sets the baseline label
+`L_default`, the conservative label "from all observable inputs plus PC
 taint." So the spec's baseline is exactly today's transaction-global gating.
 
-§8.9.1 (*Decomposition before claims*) is the only sanctioned way to be **more
-precise** than `L_default`, and it names exactly two mechanisms:
+§8.9.1 (*Trusted Flow-Precision Claims* — *Decomposition before claims*) is
+the only sanctioned way to be **more precise** than `L_default`, and it names
+exactly two mechanisms:
 
 1. **Transaction decomposition** — running a sub-operation in its own
    transaction whose journal *does not contain* the other reads. Then pointwise
@@ -76,34 +80,64 @@ Re-attempts are not exotic: a reactive recompute, a retry, or a
 read-modify-write of the same path all produce write-then-read-then-write on one
 path within a transaction.
 
-## 4. The sound bound: the write's LAST attempt
+## 4. The sound bound: the last OVERLAPPING write attempt
 
-Gate a write to path `P` on the reads with `journalIndex <` the **last** write
-to `P` in the journal.
+Gate a write to path `P` on the reads with `journalIndex <` the **last write
+whose target overlaps `P`** in the journal — overlap meaning **either prefix
+direction**: the write's path is a prefix of `P` (an ancestor rewrite replaces
+`P`'s value wholesale) *or* `P` is a prefix of the write's path (a child write
+recomputes part of `P`'s subtree). This is exactly the floor-applicability
+predicate already in the code (`ifcEntryAppliesToAttemptedWrite`,
+`cfc/prepare.ts`: `concretePathHasPrefix(path, writePath) ||
+concretePathHasPrefix(writePath, path)`), and the bound must use the same
+match.
+
+**Exact-path keying is NOT sufficient.** Because floor applicability matches
+both prefix directions, keying "last write" on the exact address `P`
+re-creates §3's taint escape one level down:
+
+| journal index | activity |
+|---|---|
+| 5 | write `P` = a |
+| 7 | read `R` (low-integrity) |
+| 9 | write `P.child` = f(R) |
+
+The write at index 9 targets `P`'s subtree — it is a later **overlapping**
+write that consumed `R` — but a log keyed on the exact address `P` puts the
+bound at index 5 and excludes `R`. The floored value at `P` commits with
+low-integrity taint the gate never saw. The mirror case (floor on `P.child`,
+late ancestor write to `P`) escapes the same way.
 
 Soundness argument — this *is* a structural fact from the journal order, on par
 with decomposition:
 
-- `P`'s committed value is the value of its **last** write. Call its index `w`.
-- Any read at index `> w` occurs after `P` was finalized. No later write touches
-  `P` (by definition of "last"), so nothing recomputes `P` from that read.
-  Therefore a read after `w` **cannot** have fed `P`'s committed value.
+- The committed value of the subtree at `P` is fixed by the **last** write
+  overlapping `P`. Call its index `w`.
+- Any read at index `> w` occurs after `P` was finalized. No later write
+  touches `P`'s value at any path — neither `P` itself, nor a descendant, nor
+  an ancestor (by definition of "last overlapping") — so nothing recomputes any
+  part of `P` from that read. Therefore a read after `w` **cannot** have fed
+  `P`'s committed value.
 - `P`'s own value is a plain datum or a *reference*; if it is a link, the
-  reference was fixed at `w`, and the link target's label is tracked separately
-  by the link machinery (§8.11) — not by `P`'s prefix.
-- Reads at index `< w` are exactly the observations that *could* have fed any of
-  `P`'s writes up to and including the finalizing one. Keeping all of them is
-  conservative within the dataflow-to-`P` question.
+  reference was fixed at or before `w`, and the link target's label is tracked
+  separately by the link machinery (§8.11) — not by `P`'s prefix.
+- Reads at index `< w` are exactly the observations that *could* have fed any
+  of the overlapping writes contributing to `P`'s committed value, up to and
+  including the finalizing one. Keeping all of them is conservative within the
+  dataflow-to-`P` question.
 
-So the last-attempt prefix drops only reads that provably did not feed the
-value — the same character of structural argument §8.9.1 makes for
+So the last-overlapping-write prefix drops only reads that provably did not
+feed the value — the same character of structural argument §8.9.1 makes for
 decomposition ("the journal simply does not contain the other elements"). It is
 **not** an untrusted `L_claim`, so it does **not** require the
 `flow-taint-precision` trust gate. It is a permitted precision, and it is sound.
 
 The first-attempt bound fails this argument (reads between the first and last
-write to `P` are dropped though they can feed the re-write); the last-attempt
-bound satisfies it. **Use last-attempt.**
+write to `P` are dropped though they can feed the re-write). Exact-path
+last-write keying fails it too (reads between the last write to exactly `P`
+and a later overlapping write are dropped though they feed `P`'s committed
+subtree). The last-overlapping-write bound satisfies it. **Use the last
+overlapping write, matched in both prefix directions.**
 
 ### Trigger reads (§8.9.2 / H5)
 
@@ -116,52 +150,88 @@ transaction-global gate; D4 must keep them in every prefix.)
 
 ## 5. Consequences for the two payoffs
 
-- **Vacuous-pass fix (#14).** Under the last-attempt prefix a floored write whose
-  prefix has **no** gating reads had no endorsed input and MUST fail. This is
-  now sound *because the prefix is a true dataflow bound* — the reason the
-  in-code comment (`isProvenanceOnlyConsumedLabel`, prepare.ts) says the #14
-  tightening "is unsound to apply without (a)": (a) is exactly this prefix, and
-  it must be the *sound* (last-attempt) prefix.
+- **Vacuous-pass fix (#14).** Under the last-overlapping-write prefix a floored
+  write whose prefix has **no** gating reads had no endorsed input and MUST
+  fail. This is now sound *because the prefix is a true dataflow bound* — the
+  reason the in-code comment (`isProvenanceOnlyConsumedLabel`, prepare.ts) says
+  the #14 tightening "is unsound to apply without (a)": (a) is exactly this
+  prefix, and it must be the *sound* (last-overlapping-write) prefix.
 - **S7 narrowing.** The provenance-only exemption can shrink: a provenance read
-  that occurs *after* a protected write's last attempt no longer gates it (it
-  couldn't have fed it), so the exemption is needed only for provenance reads
-  *within* the prefix. Port the group-chat regression scenario as a test.
+  that occurs *after* the last write overlapping a protected path no longer
+  gates it (it couldn't have fed it), so the exemption is needed only for
+  provenance reads *within* the prefix. Port the group-chat regression scenario
+  as a test.
 
 ## 6. Digest binding is mandatory (not optional)
 
-The decision now depends on **journal order** — specifically the last-write
-index per path and the set of read indices below it. But
+The decision now depends on **journal order** — for each protected path, the
+index of its last overlapping write and the set of read indices below it. But
 `canonicalizePreparedDigestInput` (`cfc/canonical.ts`) **sorts `consumedReads`
-and `writes` by address**, discarding order. So the prepare→commit digest
-recheck would NOT detect a post-prepare reordering that changes which reads fall
-in a write's prefix — a verification bypass (audit S2 shape).
+and `writes` by address**, discarding order, and `ConsumedRead` (`cfc/types.ts`)
+carries **no journal position at all**. So the prepare→commit digest recheck
+would NOT detect a post-prepare reordering that changes which reads fall in a
+write's prefix — a verification bypass (audit S2 shape).
 
-Therefore D4 MUST add an **ordered** write-attempt log to `PreparedDigestInput`
-(`{ target: CfcAddress, journalIndex: number }` per path's last write, in
-journal order) and canonicalize it **order-preserving** (or by `journalIndex`),
-so any post-prepare activity that changes the ordering invalidates the
-preparation. This is the same discipline `trustSnapshot`/`policySnapshot` follow
-and is listed in the plan's cross-cutting register — the review confirms it is
-**load-bearing for soundness**, not bookkeeping.
+Two requirements, both mandatory:
+
+1. **Ordered write-attempt log, full addresses.** `PreparedDigestInput` gains
+   an ordered log of **every** write attempt
+   (`{ target: CfcAddress, journalIndex: number }`, in journal order),
+   canonicalized **order-preserving** (or by `journalIndex`). It must NOT be
+   reduced to one entry per exact address ("each path's last write"): the bound
+   is the last *overlapping* write (§4), and computing it for a protected path
+   `P` requires the write targets at their full paths, so the recheck can apply
+   the same both-directions prefix match as floor applicability. An
+   exact-address-keyed log cannot answer overlap queries and re-admits the §4
+   aliasing escape at verification time.
+2. **Read positions join the digest too.** A write-attempt log alone binds only
+   the writes: with `consumedReads` sorted by address and carrying no index, a
+   post-prepare reorder that moves a read from one side of a write to the other
+   flips its prefix membership **without changing the digest** — exactly the S2
+   shape this section exists to close. Each consumed read's `journalIndex` (or,
+   equivalently, the full interleaved read|write activity order) MUST be part
+   of `PreparedDigestInput` and survive canonicalization. **Source the order at
+   the extended-transaction/CFC recording layer, backend-independent** — a
+   per-transaction monotonic index stamped where `buildPreparedDigestInput`'s
+   inputs are recorded (`getReadActivities()` / the reactivity log,
+   `storage/extended-storage-transaction.ts`). Do NOT build the contract on
+   `tx.journal.activity()`: that is a legacy-journal seam —
+   `V2TransactionJournal.activity()` throws (`storage/v2-transaction.ts`), and
+   V2's reactivity log reconstructs writes by sorted path, not temporal order.
+
+Any post-prepare activity that changes the read/write interleaving then
+invalidates the preparation. This is the same discipline
+`trustSnapshot`/`policySnapshot` follow and is listed in the plan's
+cross-cutting register — the review confirms it is **load-bearing for
+soundness**, not bookkeeping.
 
 ## 7. Verdict and implementation constraints
 
 D4 is sound **iff** it is built as follows:
 
-1. **Bound = last write to the path**, not first (§3–4). Trigger reads at `−∞`.
+1. **Bound = last write overlapping the path** — either prefix direction,
+   matching floor applicability — not first-attempt and not exact-path
+   last-write (§3–4). Trigger reads at `−∞`.
 2. Framed and documented as a **structural precision fact** (§8.9.1
    decomposition-class), so it needs no `flow-taint-precision` trust gate — but
    the framing must be stated so a future reader does not mistake it for an
    untrusted `L_claim`.
-3. **Ordered write-attempt log in the digest** (§6) — mandatory.
+3. **Journal interleaving in the digest** (§6) — the ordered full-address
+   write-attempt log **and** consumed-read journal positions. Both mandatory.
 4. Applies to the `requiredIntegrity` gate and the D3 write floor; the
    confidentiality **egress ceiling** stays transaction-global (a sink request
    records no per-write provenance — §8.10 / `collectConsumedConfidentiality`
    comment — so the whole consumed set is the sound over-approximation there).
-5. Red-first tests: the §3 re-attempt counterexample **rejects** under
-   last-attempt (and would pass under the buggy first-attempt bound — a
-   regression guard); empty-prefix floored write fails; a post-prepare reorder
-   invalidates; the S7 group-chat scenario passes.
+   _Owner note: keeping the ceiling transaction-global while classing the
+   integrity-side prefix as §8.9.1 decomposition is itself a
+   spec-interpretation call — consider recording it as an SC entry in
+   [`cfc-spec-changes.md`](./cfc-spec-changes.md)._
+5. Red-first tests: the §3 re-attempt counterexample **rejects** under the
+   last-overlapping-write bound (and would pass under the buggy first-attempt
+   bound — a regression guard); the §4 child-write aliasing counterexample
+   **rejects** (and would pass under exact-path keying); empty-prefix floored
+   write fails; a post-prepare reorder — a write reorder *or* a read moved
+   across a write — invalidates; the S7 group-chat scenario passes.
 
 Stated honestly (as the plan asks): this is a **dataflow approximation**, but a
 *sound* one — it never drops a read that could have fed the value. It is tighter
@@ -170,10 +240,17 @@ than the spec's `L_default` only in the decomposition-permitted direction.
 ## Provenance
 
 Grounded in `commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`
-§8.9.1 (`computePcConfidentiality`, *Decomposition before claims*, the
-`flow-taint-precision` normative profile) and §8.9 read-time-journaling
-rationale; the runner seams are `verifyInputRequirements`/`verifyWriteFloor`
-(`cfc/prepare.ts`), `isProvenanceOnlyConsumedLabel` (the #14/S7 comment),
-`tx.journal.activity()` (the ordered read|write stream,
-`storage/interface.ts`), and `canonicalizePreparedDigestInput`
-(`cfc/canonical.ts`, the address-sort that motivates §6).
+§8.9.2 (*Propagation Algorithm* — the normative `computePcConfidentiality`
+definition and trigger-read joining), §8.9.1 (*Trusted Flow-Precision Claims*
+— *Decomposition before claims*, the `flow-taint-precision` normative
+profile), and §8.9 read-time-journaling rationale; the runner seams are
+`verifyInputRequirements`/`verifyWriteFloor` (`cfc/prepare.ts`),
+`ifcEntryAppliesToAttemptedWrite` (`cfc/prepare.ts`, the both-directions
+overlap predicate the §4 bound must match), `isProvenanceOnlyConsumedLabel`
+(the #14/S7 comment), `buildPreparedDigestInput`/`getReadActivities`
+(`storage/extended-storage-transaction.ts`, the recording layer where §6's
+order stamp must live — the legacy `tx.journal.activity()` seam cannot carry
+it: `V2TransactionJournal.activity()` throws, `storage/v2-transaction.ts`),
+`ConsumedRead` (`cfc/types.ts`, which carries no journal position today), and
+`canonicalizePreparedDigestInput` (`cfc/canonical.ts`, the address-sort that
+motivates §6).

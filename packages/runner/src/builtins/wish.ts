@@ -225,6 +225,8 @@ type WishContext = {
 type BaseResolution = {
   cell: Cell<unknown>;
   pathPrefix?: readonly string[];
+  // When true, pathPrefix is the full path to resolve from cell.
+  pathConsumed?: boolean;
 };
 
 type SharedHashtagState = {
@@ -285,6 +287,18 @@ function resolvePath(
   return current.resolveAsCell();
 }
 
+function buildResolutionPath(
+  baseResolution: BaseResolution,
+  parsedPath: readonly string[],
+): readonly string[] {
+  if (baseResolution.pathConsumed) {
+    return baseResolution.pathPrefix ?? [];
+  }
+  return baseResolution.pathPrefix
+    ? [...baseResolution.pathPrefix, ...parsedPath]
+    : parsedPath;
+}
+
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   ctx.usedHomeSpace = true;
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
@@ -303,6 +317,46 @@ function profileCellIsValid(
   if (!rawIsSet) return false;
   const link = cell.getAsNormalizedFullLink();
   return link.space !== homeSpace && link.path.length === 0;
+}
+
+/**
+ * Whether a `mru` / `defaultProfile` entry names the SAME profile as a candidate
+ * from the home `profiles` list — compared by the profile's own SPACE, NOT by
+ * `Cell.equals` or by entity id.
+ *
+ * CT-1842: the `#profile` ordering matches candidates (from `profiles`) against
+ * the `defaultProfile` link and the `mru` list. Those name the same profiles but
+ * reach them through DIFFERENT links. Two distinct differences defeat a naive
+ * comparison, both observed on live data:
+ *   - `scope` skew — `Cell.equals` (`areNormalizedLinksSame`) compares `scope`,
+ *     which the two sides don't always agree on; and
+ *   - DIFFERENT entity `id` — the `mru`/`defaultProfile` link and the `profiles`
+ *     link for the SAME profile point at different cells WITHIN that profile's
+ *     space (e.g. the picker stores the profile pattern's result cell while the
+ *     list stores the pattern cell). So even id+space+path comparison fails.
+ *
+ * The stable per-profile identity is the profile's own SPACE. Each profile is a
+ * distinct anonymous `ProfileHome.inSpace()` (see submitProfileCreation), whose
+ * DID is unique per user AND per creation event, and `profileCellIsValid`
+ * guarantees every valid candidate lives in its OWN non-home space. No two
+ * distinct valid profiles ever share a space, so equal space ⇒ same profile.
+ * Reading each cell's normalized link keeps the ordering reactive to
+ * `mru`/`defaultProfile` changes.
+ *
+ * `homeSpace` guards the degenerate case: a `mru`/`defaultProfile` entry that
+ * still resolves into the home space (an unmaterialized / invalid link) must
+ * never match — candidates are never in the home space, but the guard makes the
+ * intent explicit and defends against a future home-space candidate slipping in.
+ */
+function sameProfileCell(
+  a: Cell<unknown>,
+  b: Cell<unknown>,
+  homeSpace: Cell<unknown>["space"],
+): boolean {
+  const spaceA = a.getAsNormalizedFullLink().space;
+  const spaceB = b.getAsNormalizedFullLink().space;
+  if (spaceA === homeSpace || spaceB === homeSpace) return false;
+  return spaceA === spaceB;
 }
 
 /**
@@ -328,8 +382,11 @@ function subscribeProfileName(cell: Cell<unknown>): void {
 /**
  * Enumerate the user's profile candidate cells from the home `profiles` list,
  * ordered: default first, then by most-recently-used (MRU), then remaining list
- * order. Identity is by link equality (`Cell.equals`); there is no synthetic
- * key. Returns [] when no valid profile exists yet.
+ * order. Identity is by the profile's own SPACE — each profile is a distinct
+ * `ProfileHome.inSpace()` space, so the `defaultProfile` / `mru` links are
+ * matched to candidates by space, not `Cell.equals` (see `sameProfileCell`;
+ * CT-1842). There is no synthetic key. Returns [] when no valid profile exists
+ * yet.
  */
 function getProfileCandidateCells(
   ctx: WishContext,
@@ -377,16 +434,18 @@ function getProfileCandidateCells(
   for (let j = 0; j < mruLength; j++) {
     mruCells.push(mruCell.key(j).resolveAsCell());
   }
+  // Match by the profile's own space, not `Cell.equals` — see sameProfileCell.
+  const homeSpace = homeSpaceCell.space;
   const mruRank = (cell: Cell<unknown>): number => {
-    const idx = mruCells.findIndex((m) => m.equals(cell));
+    const idx = mruCells.findIndex((m) => sameProfileCell(m, cell, homeSpace));
     return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
   };
 
   const ordered = [...candidates];
   ordered.sort((a, b) => {
     if (defaultValid) {
-      const aDef = defaultCell.equals(a);
-      const bDef = defaultCell.equals(b);
+      const aDef = sameProfileCell(defaultCell, a, homeSpace);
+      const bDef = sameProfileCell(defaultCell, b, homeSpace);
       if (aDef && !bDef) return -1;
       if (bDef && !aDef) return 1;
     }
@@ -762,6 +821,7 @@ function resolveHomeSpaceTarget(
       return [{
         cell: match.cell,
         pathPrefix: parsed.path.slice(1),
+        pathConsumed: true,
       }];
     }
 
@@ -1051,9 +1111,10 @@ function createSharedHashtagResolver(
         queryKey,
         () =>
           baseResolutions.map((baseResolution) => {
-            const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...sharedParsed.path]
-              : sharedParsed.path;
+            const combinedPath = buildResolutionPath(
+              baseResolution,
+              sharedParsed.path,
+            );
             return resolvePath(baseResolution.cell, combinedPath);
           }),
       );
@@ -1969,9 +2030,10 @@ export function wish(
               queryKey,
               () =>
                 baseResolutions.map((baseResolution) => {
-                  const combinedPath = baseResolution.pathPrefix
-                    ? [...baseResolution.pathPrefix, ...activeParsed.path]
-                    : activeParsed.path;
+                  const combinedPath = buildResolutionPath(
+                    baseResolution,
+                    activeParsed.path,
+                  );
                   const resolvedCell = resolvePath(
                     baseResolution.cell,
                     combinedPath,

@@ -1,6 +1,8 @@
 import type { DID } from "@commonfabric/identity";
 import {
   createBuilder,
+  isCell,
+  isStream,
   type JSONSchema,
   type MemorySpace,
   type Runtime,
@@ -151,4 +153,73 @@ export async function readWish(
     schema: config.schema,
     scope: config.scope,
   });
+}
+
+/** Base marker substituted for a stream/handle-valued node in projected output. */
+export const WISH_STREAM_MARKER = "[stream]";
+
+/** Marker for a stripped handle, optionally tagged with the key it hung off. */
+function streamMarker(key?: string): string {
+  return key === undefined ? WISH_STREAM_MARKER : `[stream:${key}]`;
+}
+
+/**
+ * Project a resolved wish value to plain, serializable data for output (CT-1844).
+ *
+ * A `#profile` object result is a materialized pattern result: alongside the
+ * data fields (`$NAME`, `name`, `avatar`, `bio`, `elements`, `isEditing`, …) it
+ * carries the pattern's stream handles (`addElement`, `setName`, `setAvatar`,
+ * …). Those handles are live `Cell`/`Stream` objects; JSON-serializing them
+ * drags in the entire runtime object graph (scheduler, circular refs) — ~50KB
+ * of noise that defeats the agent/script/offline-cache audience this read path
+ * exists for.
+ *
+ * This walks the value and replaces every stream/cell/function-valued node with
+ * a `[stream]` / `[stream:<key>]` marker, keeping all plain data (including
+ * nested arrays like `elements` and the `$UI` VNode tree) intact. Scalar results
+ * (a bare string/number/etc. from `#profileName` and friends) pass straight
+ * through unchanged, so only the object-target output shape is affected.
+ *
+ * The walk memoizes the PROJECTED result per input node in a `Map` (with an
+ * in-progress sentinel so genuine cycles terminate rather than recurse forever).
+ * That is load-bearing correctness, not just efficiency: a plain object reached
+ * by two different paths (a DAG "diamond") must be projected on BOTH — a bare
+ * "already seen → return raw" dedup would leak any handle nested under the
+ * shared subtree on the second path, re-exposing exactly the graph this strips.
+ */
+export function projectWishValue(value: unknown): unknown {
+  return projectNode(value, undefined, new Map<object, unknown>());
+}
+
+/** In-progress sentinel: a node currently being projected higher in the stack. */
+const IN_PROGRESS = Symbol("wish-projection-in-progress");
+
+function projectNode(
+  value: unknown,
+  key: string | undefined,
+  memo: Map<object, unknown>,
+): unknown {
+  if (isCell(value) || isStream(value) || typeof value === "function") {
+    return streamMarker(key);
+  }
+  if (value === null || typeof value !== "object") return value;
+
+  const cached = memo.get(value);
+  if (cached === IN_PROGRESS) {
+    // A genuine cycle: this node is an ancestor of itself. Break it so the walk
+    // terminates; downstream stringify would otherwise flag the same loop.
+    return "[circular]";
+  }
+  if (cached !== undefined) return cached; // diamond: reuse the SAME projection.
+
+  memo.set(value, IN_PROGRESS);
+  const projected: unknown = Array.isArray(value)
+    ? value.map((item, i) => projectNode(item, String(i), memo))
+    : Object.fromEntries(
+      Object.entries(value).map((
+        [k, val],
+      ) => [k, projectNode(val, k, memo)]),
+    );
+  memo.set(value, projected);
+  return projected;
 }
