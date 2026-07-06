@@ -426,7 +426,8 @@ Deno.test("commit eval evaluates the columnless-INSERT default row", () => {
   try {
     // All-defaults row: from_addr is NULL, which the min:1 anchor refuses.
     assertThrows(
-      () => applySqliteCommitWrite(db, bareOp("INSERT INTO emails DEFAULT VALUES")),
+      () =>
+        applySqliteCommitWrite(db, bareOp("INSERT INTO emails DEFAULT VALUES")),
       RowLabelCommitError,
       "at least 1",
     );
