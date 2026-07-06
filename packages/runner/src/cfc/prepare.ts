@@ -3911,31 +3911,69 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     let flowCleared = false;
-    // SC-4 (C3): the existence channel never shrinks. When the flow-clear
-    // drops a derived or structure entry under a written path, its
-    // confidentiality is collected here and folded into the written path's
-    // `observes:"shape"` entry below — "this path was once written under J"
-    // reveals every historical writer, so the existence label GROWS across
-    // overwrites while the value label replaces (§8.12.8 stays a
-    // value-class rule; C0 §5). Link entries are excluded: they label the
-    // pointer, and folding them into content shape would re-smear the
-    // pointer/content split.
+    // SC-4 (C3, disciplines settled with the spec 2026-07-06 — freeze-at-
+    // creation, specs branch cfc/existence-freeze-at-creation): existence
+    // never shrinks, but it does not grow either. When a clear drops a
+    // DERIVED entry under a written path, its confidentiality is collected
+    // here and folded into the written path's `observes:"shape"` entry —
+    // the departed subtree's existence history. MEMBERSHIP stamps
+    // (`origin:"structure"`, `observes:"enumerate"`) are exempt:
+    // §8.12.8's replace-on-overwrite is normative for recomputed
+    // membership, and pooling them re-imports the label creep it rejects.
+    // Frozen existence entries (`origin:"structure"`, `observes:"shape"`)
+    // are never cleared at all (handled before the clears below). Legacy
+    // covering structure entries (pre-C2: membership and existence
+    // conflated) still pool once — the migration freeze absorbs them into
+    // the container's frozen existence entry, conservatively. Link entries
+    // are excluded: they label the pointer, and folding them into content
+    // shape would re-smear the pointer/content split.
     const clearedExistence: Array<{
       path: readonly string[];
       confidentiality: readonly unknown[];
     }> = [];
+    // Only pre-class LEGACY entries (no `observes`) pool: they conflated
+    // existence with content/membership, and the one-time migration absorb
+    // below freezes their accumulated confidentiality into the path's
+    // shape entry. Post-C2 entries never pool — value/enumerate replace,
+    // shape freezes.
+    const poolsExistence = (entry: LabelMapEntry): boolean =>
+      entry.observes === undefined &&
+      (entry.origin === "derived" || entry.origin === "structure");
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
+      // RUNTIME-MINTED shape-class (existence) entries survive every
+      // overwrite of a still-existing path (freeze-at-creation): not the
+      // flow-clear, not a link write replacing the slot, not a declared
+      // re-mint. Origin-scoped to derived/structure: a DECLARED
+      // observes:"shape" entry is policy, not measurement — it keeps the
+      // declared component's own discipline (grow-only re-mint through
+      // the schema walk) and must not be captured by the freeze carry
+      // (review on this PR). Known residual: deletion leaves the frozen
+      // entry in place (over-taint) and re-creation keeps it instead of
+      // re-minting at the re-creating join — re-mint-on-recreation needs
+      // per-path previousValue plumbing.
+      if (
+        (entry.origin === "derived" || entry.origin === "structure") &&
+        entry.observes === "shape"
+      ) {
+        persistedLabelEntries.push({
+          path: entryPath,
+          label: cloneLabel(entry.label),
+          ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+          observes: "shape",
+        });
+        continue;
+      }
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
         // A link write replacing a previously content-labeled path — or a
         // declared entry re-minting at the same path — drops the old
-        // derived/structure entries here, through a different skip than
-        // the flow-clear below; their existence history still folds into
-        // the SC-4 pool like any other clear.
+        // derived entries here, through a different skip than the
+        // flow-clear below; their existence history still folds into the
+        // SC-4 pool like any other clear.
         if (
           flowPersist &&
-          (entry.origin === "derived" || entry.origin === "structure") &&
+          poolsExistence(entry) &&
           (entry.label.confidentiality?.length ?? 0) > 0
         ) {
           clearedExistence.push({
@@ -3966,7 +4004,7 @@ export const prepareBoundaryCommit = (
       ) {
         flowCleared = true;
         if (
-          entry.origin !== "link" &&
+          poolsExistence(entry) &&
           (entry.label.confidentiality?.length ?? 0) > 0
         ) {
           clearedExistence.push({
@@ -4083,8 +4121,9 @@ export const prepareBoundaryCommit = (
       // not store policy — resolved by the same per-component longest-prefix
       // rule reads use, so the fit test measures exactly the declared floor
       // a reader of the path is tainted with. Only the CURRENT join is
-      // measured: grown shape/existence atoms are historical (SC-4
-      // grow-on-overwrite) and would permanently misfit clean overwrites.
+      // measured: shape/existence atoms are historical (SC-4
+      // freeze-at-creation) and measuring them would permanently misfit
+      // clean overwrites of a store created under taint.
       // A schema declaring a covering policy in this same tx passes by
       // construction — §8.12.5's monotone-safe upgrade route; the other two
       // outs are writing to a fitting store or not writing. Link-covered
@@ -4095,14 +4134,22 @@ export const prepareBoundaryCommit = (
           entry.origin === undefined || entry.origin === "declared"
         )
         : [];
-      // SC-4 grow (C3): the confidentiality of every derived/structure
-      // entry the flow-clear dropped folds into the shape-channel entry of
-      // the stamp path covering it — new J first, then the cleared atoms,
-      // so re-deriving the same overwrite reproduces the same grown entry
-      // byte-for-byte (SC-11). Consumed pool indices are tracked so
-      // anything not covered by a stamp still lands below.
+      // SC-4, freeze-at-creation form: a path's shape (existence) entry is
+      // minted ONCE — at creation, or at the one-time migration of legacy
+      // pre-class entries (whose accumulated confidentiality is absorbed
+      // here, conservatively over-attributed to this first stamping) — and
+      // is carried verbatim ever after. Consumed pool indices are tracked
+      // so legacy conf not covered by a stamp still lands below.
       const attachedExistence = new Set<number>();
-      const grownConfidentialityFor = (
+      // Clause-aware dedup: the fold is where STORED bytes (a peer may have
+      // persisted {anyOf:["B","A"]}) meet this tx's normalized derivation
+      // ({anyOf:["A","B"]}). uniqueCfcAtoms is deepEqual-based, so byte-
+      // permuted forms of one clause would both survive — a doubled clause
+      // list and one spurious envelope rewrite (the SC-11 churn class).
+      // normalizeClause each clause first; non-clause atoms pass through.
+      const foldedUnique = (atoms: readonly unknown[]): unknown[] =>
+        uniqueCfcAtoms(atoms.map((atom) => normalizeClause(atom)));
+      const frozenConfidentialityFor = (
         path: readonly string[],
       ): unknown[] => {
         const atoms: unknown[] = [...flowConfidentiality];
@@ -4112,7 +4159,7 @@ export const prepareBoundaryCommit = (
             atoms.push(...cleared.confidentiality);
           }
         });
-        return uniqueCfcAtoms(atoms);
+        return foldedUnique(atoms);
       };
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
@@ -4181,14 +4228,29 @@ export const prepareBoundaryCommit = (
             observes: "value",
           });
         }
-        const shapeConfidentiality = grownConfidentialityFor(path);
-        if (shapeConfidentiality.length > 0) {
-          persistedLabelEntries.push({
-            path,
-            label: { confidentiality: shapeConfidentiality },
-            origin: "derived",
-            observes: "shape",
-          });
+        // Freeze-at-creation: mint the existence entry only when the path
+        // has none (creation / legacy migration); a carried frozen entry
+        // pushed above wins, and later writes to a still-existing path add
+        // no existence information (a writer conditional on existence
+        // journals that observation itself, §8.10.1/§8.9.2).
+        // Only a runtime-minted existence entry suppresses the mint: a
+        // DECLARED observes:"shape" entry is store policy for the shape
+        // channel, not a record that creation happened — both coexist as
+        // separate components (review on this PR).
+        const hasShapeEntry = persistedLabelEntries.some((entry) =>
+          (entry.origin === "derived" || entry.origin === "structure") &&
+          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
+        );
+        if (!hasShapeEntry) {
+          const shapeConfidentiality = frozenConfidentialityFor(path);
+          if (shapeConfidentiality.length > 0) {
+            persistedLabelEntries.push({
+              path,
+              label: { confidentiality: shapeConfidentiality },
+              origin: "derived",
+              observes: "shape",
+            });
+          }
         }
       }
       for (const path of structureStampPaths) {
@@ -4206,22 +4268,50 @@ export const prepareBoundaryCommit = (
         // structure entries (absent `observes`) stay covering — unchanged
         // compat; the flow join is unaffected either way since value reads
         // consume the `shape` class too (C0 §4).
-        const structureConfidentiality = grownConfidentialityFor(path);
-        if (flowHasLabels || structureConfidentiality.length > 0) {
+        // MEMBERSHIP stamp: the container's current selection, recomputed
+        // from this attempt's journal — §8.12.8 replace-on-overwrite is
+        // normative for it, so it carries the current J only, never the
+        // pool. Labs-axis mapping note: the `observes` axis is read-op
+        // shaped, so "enumerate" here approximates the spec's container-
+        // level `iterate.{order,count}` classes; the spec's per-child
+        // shape encoding of membership remains a recorded residual.
+        if (flowHasLabels && flowConfidentiality.length > 0) {
           persistedLabelEntries.push({
             path,
-            label: { confidentiality: structureConfidentiality },
+            label: { confidentiality: [...flowConfidentiality] },
             origin: "structure",
-            observes: "shape",
+            observes: "enumerate",
           });
         }
+        // FROZEN existence entry (freeze-at-creation, spec branch
+        // cfc/existence-freeze-at-creation): minted once — at the first
+        // labeled stamping of this container (creation, or migration of
+        // pre-existing data, over-attributing conservatively) — carrying
+        // the creating attempt's join plus any cleared legacy covering
+        // structure confidentiality at-or-below (the one-time migration
+        // absorb). Never grown, never cleared; a carried entry above wins.
+        const hasFrozenExistence = persistedLabelEntries.some((entry) =>
+          (entry.origin === "derived" || entry.origin === "structure") &&
+          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
+        );
+        if (!hasFrozenExistence) {
+          const frozen = frozenConfidentialityFor(path);
+          if (frozen.length > 0) {
+            persistedLabelEntries.push({
+              path,
+              label: { confidentiality: frozen },
+              origin: "structure",
+              observes: "shape",
+            });
+          }
+        }
       }
-      // Cleared existence not covered by any stamp path (a link write
+      // Legacy migration conf not absorbed by any stamp path (a link write
       // replaced the slot, a declared entry re-minted at the path, or the
       // tx had no label of its own): the shallowest written path covering
-      // the cleared entry — or, when none does (a declared re-mint without
-      // a write there), the entry's own path — receives a bare shape entry
-      // so the existence history survives regardless.
+      // the cleared legacy entry — or, when none does (a declared re-mint
+      // without a write there), the entry's own path — receives the frozen
+      // shape entry so the existence history survives the migration.
       const leftoverByPath = new Map<
         string,
         { path: readonly string[]; atoms: unknown[] }
@@ -4249,7 +4339,7 @@ export const prepareBoundaryCommit = (
       for (const bucket of leftoverByPath.values()) {
         persistedLabelEntries.push({
           path: canonicalizeLogicalPath(bucket.path),
-          label: { confidentiality: uniqueCfcAtoms(bucket.atoms) },
+          label: { confidentiality: foldedUnique(bucket.atoms) },
           origin: "derived",
           observes: "shape",
         });
