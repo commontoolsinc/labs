@@ -186,3 +186,32 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   with origin/main (#4436 content-addressed action ids; flag-aware
   snapshot-filter resolution in the CT-1623 reload test). Gates: interpreter
   suite 47 steps green, full post-merge sweep running.
+
+- (2026-07-06) **Post-merge flag-ON repairs** (`80644bd53`). The origin/main
+  merge (CFC observation classes C1/C3/C4 #4523/#4525/#4541 + content-
+  addressed action ids #4436) surfaced five flag-ON failures; all
+  root-caused, all fixed:
+  (1) C1 followRef smear — probe-scoped asCell slot resolution's terminal
+  probe at the element root belongs to no recorded dereference and now
+  CONTRIBUTES the target's label; coordinators build identity-only slot
+  links from raw slots (bare resolveLink probes self-exempt), with the
+  list's schema STRIPPED from element links (an array schema at an element
+  path reads undefined). (2) Map's list-root read UNMARKED (value-class
+  reads don't consume per-slot link-origin labels; probe-marking made it a
+  followRef consumer). (3) Filter run-count parity: fresh runs register
+  triggers only (scheduler.resubscribe) — the effect's initial run had
+  doubled every predicate after batch-first-pass. (4) Filter resume (red
+  since the inline filter landed, hidden by an earlier truncated-grep
+  extraction — the lesson held): identity-form elementKeys EQUAL legacy's
+  cellIdentityKey form, so predicate cells ARE the docs a degraded
+  coordinator's legacy children resolve; load-bearing because the degraded
+  batch reconcile is revertible and legacy never re-runs deduped children.
+  (5) #4436's src-garble tests pinned flag-OFF (they characterize legacy
+  module-action minting; segments never mint from module identity).
+  Debug recipe that cracked (1)/(2): temp [cfcobs]/[cfcflow] dumps in
+  prepare.ts (per-observation consumption + per-target J/writtenPaths).
+  KNOWN RESIDUAL (tracked): resume-append-exclusion flag-ON leaves one
+  unattributed pending promise at process exit (test green, flag-OFF
+  clean, needs held-window+flag-ON; suspects exonerated: resubscribe
+  cancel, unmarked reads, SM closes; candidate: scheduler
+  awaitSpaceSyncedWithTimeout's deliberately-orphaned synced()).
