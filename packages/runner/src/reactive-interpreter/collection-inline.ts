@@ -577,6 +577,7 @@ export function makeInlineFilterImplementation(
       const keyCounts = new Map<string, number>();
       // deno-lint-ignore no-explicit-any
       const kept: any[] = [];
+      let firstInlineError: { error: unknown } | undefined;
       for (let i = 0; i < len; i++) {
         if (!(i in (rawList as unknown[]))) continue;
         const index = i;
@@ -587,6 +588,28 @@ export function makeInlineFilterImplementation(
         const occurrence = keyCounts.get(dedupKey) ?? 0;
         keyCounts.set(dedupKey, occurrence + 1);
         const elementKey = JSON.stringify([...linkKey, occurrence]);
+
+        const evalPredicateIn = (
+          evalTx: IExtendedStorageTransaction,
+        ): { out: unknown; errors: { error: unknown }[] } => {
+          const elemValue = runtime.getCellFromLink(
+            link,
+            undefined,
+            evalTx,
+          )!.withTx(evalTx).get() as unknown;
+          const argument: Record<string, unknown> = {};
+          if (usage.usesElement) argument.element = elemValue;
+          if (usage.usesIndex) argument.index = index;
+          if (usage.usesParams) {
+            argument.params = inputsCell.key("params").withTx(evalTx).get();
+          }
+          const { result: out, errors } = evalRog(elementBuilt.rog, {
+            argument,
+            leafImpls: elementBuilt.leafImpls,
+            children: elementBuilt.children,
+          });
+          return { out, errors };
+        };
 
         let run = elementRuns.get(elementKey);
         if (!run) {
@@ -600,6 +623,20 @@ export function makeInlineFilterImplementation(
           setResultCell(predicateCell, parentCell);
           run = { predicateCell, lastIndex: -1 };
           elementRuns.set(elementKey, run);
+          // Legacy batch-first-instantiation parity (CFC §8.5.6.1): an
+          // element's FIRST predicate evaluation runs inline in the
+          // coordinator's own tx, so the container write that decides its
+          // membership joins the element's content label — the membership
+          // structure stamp must be as confidential as the values that
+          // decided it, even when the container value is `[]` or later
+          // diffs never touch the root again. Subsequent element changes
+          // go through the per-element effect (pointwise labels).
+          // Deliberately NOT probe-scoped: the content read IS the taint.
+          const { out, errors } = evalPredicateIn(tx);
+          predicateCell.withTx(tx).setRawUntyped(
+            fabricFromNativeValue(convertCellsToLinks(out)),
+          );
+          if (errors.length > 0) firstInlineError ??= errors[0];
         }
         const needsSubscribe = !run.cancel ||
           (usage.usesIndex && run.lastIndex !== index);
@@ -612,23 +649,7 @@ export function makeInlineFilterImplementation(
             )
             : undefined;
           const elementAction: Action = (childTx) => {
-            const elemValue = runtime.getCellFromLink(
-              link,
-              undefined,
-              childTx,
-            )!.withTx(childTx).get() as unknown;
-            const argument: Record<string, unknown> = {};
-            if (usage.usesElement) argument.element = elemValue;
-            if (usage.usesIndex) argument.index = index;
-            if (usage.usesParams) {
-              argument.params = inputsCell.key("params").withTx(childTx)
-                .get();
-            }
-            const { result: out, errors } = evalRog(elementBuilt.rog, {
-              argument,
-              leafImpls: elementBuilt.leafImpls,
-              children: elementBuilt.children,
-            });
+            const { out, errors } = evalPredicateIn(childTx);
             predicateCell.withTx(childTx).setRawUntyped(
               fabricFromNativeValue(convertCellsToLinks(out)),
             );
@@ -674,6 +695,9 @@ export function makeInlineFilterImplementation(
       }
 
       probeScoped(() => resultPresence.withTx(tx).set(kept));
+      // Segment/effect protocol: the writes above survive; the throw
+      // surfaces the first inline predicate error to scheduler.onError.
+      if (firstInlineError !== undefined) throw firstInlineError.error;
     };
   };
 }
