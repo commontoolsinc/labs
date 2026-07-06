@@ -70,6 +70,12 @@ describe("profile-embed integration test", () => {
     });
     spaceDid = cc.manager().getSpace();
 
+    // Pre-create the space-root (default) pattern so the browser's
+    // `pattern:getSpaceRoot` storage-RESUMEs it instead of taking the create
+    // path and cold-compiling default-app inside its worker — see the
+    // beforeAll comment in lunch-poll-vote.test.ts.
+    await cc.ensureDefaultPattern();
+
     // Resolve the profile-embed system pattern through the harness (content-
     // addressed program) and create from that, mirroring shared-profile.test.ts.
     // profile-embed.tsx imports its sibling ./profile-home.tsx, so the resolver
