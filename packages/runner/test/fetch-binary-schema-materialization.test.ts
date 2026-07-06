@@ -82,7 +82,9 @@ describe("fetchBinary consumer materialization (CT-1836)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      // Deterministic binary response; no network (CT-1768 seam).
+      // `RuntimeOptions.fetch` overrides the outbound fetch for this runtime
+      // instance, so the builtin resolves against this deterministic binary
+      // response instead of the network.
       fetch: () =>
         Promise.resolve(
           new Response(TINY_PNG_BYTES, {
