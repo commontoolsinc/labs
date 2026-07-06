@@ -360,6 +360,9 @@ describe("CFC atom patterns", () => {
       });
       expect(Object.hasOwn(cfcAtom.boundaryContext("sinkClass"), "value"))
         .toBe(false);
+      expect(
+        cfcAtom.boundaryContext("intent", undefined, { "/": "intent" }).ref,
+      ).toEqual({ "/": "intent" });
       const screened = cfcAtom.caveatScreened({
         kind: "k",
         source: { "/": "doc" },
@@ -370,6 +373,46 @@ describe("CFC atom patterns", () => {
       });
       expect(Object.hasOwn(screened, "valueRef")).toBe(false);
       expect(screened.type).toBe(CFC_ATOM_TYPE.CaveatScreened);
+    });
+
+    it("mints the disclosure/disclaimer/assessment evidence shapes", () => {
+      const source = { "/": "doc" };
+      const renderRef = { seq: 1, rootRef: { "/": "root" } };
+      const rendered = cfcAtom.disclosureRendered({
+        kind: "warning",
+        source,
+        sink: "display",
+        renderRef,
+        snapshotDigest: "sha256:snap",
+      });
+      expect(rendered.type).toBe(CFC_ATOM_TYPE.DisclosureRendered);
+      expect(Object.hasOwn(rendered, "user")).toBe(false);
+      const acknowledged = cfcAtom.disclosureAcknowledged({
+        user: "did:key:alice",
+        kind: "warning",
+        source,
+        renderRef,
+        snapshotDigest: "sha256:snap",
+        sink: "display",
+      });
+      expect(acknowledged.type).toBe(CFC_ATOM_TYPE.DisclosureAcknowledged);
+      expect(acknowledged.sink).toBe("display");
+      const attached = cfcAtom.disclaimerAttached({
+        sink: "sendMail",
+        kind: "external-content",
+        source,
+        disclaimerDigest: "sha256:d",
+      });
+      expect(attached.type).toBe(CFC_ATOM_TYPE.DisclaimerAttached);
+      const assessment = cfcAtom.caveatAssessment({
+        kind: "warning",
+        source,
+        assessor: cfcAtom.builtin("assessor"),
+        evidenceDigest: "sha256:e",
+        result: "supported",
+      });
+      expect(assessment.type).toBe(CFC_ATOM_TYPE.CaveatAssessment);
+      expect(Object.hasOwn(assessment, "sink")).toBe(false);
     });
 
     it("declares §15 propagation classes for the new integrity families", () => {
