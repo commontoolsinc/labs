@@ -7,23 +7,30 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
-import { isOrClause, normalizeClause } from "./clause.ts";
 import { resolveCfcSchemaRefs } from "./schema-refs.ts";
+import { evaluateExchangeRules } from "./exchange-eval.ts";
+import { buildCfcPolicySnapshot } from "./policy.ts";
+import {
+  MATERIAL_RISK_DISCHARGE_KINDS,
+  STANDARD_PROMPT_CAVEAT_POLICY,
+} from "./standard-profile.ts";
 
 export const INJECTION_SAFE_ATOM = {
   type: CFC_ATOM_TYPE.InjectionSafe,
 } as const satisfies ImmutableJSONValue;
 
-const PROMPT_INJECTION_RISK_KINDS = new Set([
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk-ingress-screened",
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk-value-screened",
-  "prompt-injection-risk",
-  "prompt-injection-risk-unscreened",
-  "prompt-injection-risk-ingress-screened",
-  "prompt-injection-risk-value-screened",
-]);
+const PROMPT_INJECTION_RISK_KINDS = new Set(MATERIAL_RISK_DISCHARGE_KINDS);
+
+// The standard §10.1 profile, built once. The sanitizer runs the material-risk
+// discharge over an instruction-inert path's observed confidentiality with its
+// freshly-minted InjectionSafe — the discharge is now an ordinary exchange-rule
+// firing (Epic B6), not a hardcoded strip. Trusted, local, and unconditional
+// (independent of the global cfcPolicyEvaluation dial): §10.1 sanctions the
+// trusted-schema sanitizer's InjectionSafe mint + discharge as the profile's
+// own transition rule.
+const STANDARD_PROFILE_SNAPSHOT = buildCfcPolicySnapshot(
+  STANDARD_PROMPT_CAVEAT_POLICY,
+);
 
 type AnnotationResult = {
   schema: JSONSchema;
@@ -60,33 +67,30 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
     PROMPT_INJECTION_RISK_KINDS.has(atom.kind);
 };
 
-// Strip material-risk caveats from ONE confidentiality clause. A bare
-// material-risk atom is dropped; inside an OR-clause the scan descends into
-// alternatives and removes the material-risk ones (unwrapping/dropping the
-// clause if it collapses). Descending is load-bearing: a material-risk caveat
-// hidden as an alternative (`{anyOf:[risk, A]}`) is NOT more-restrictive when
-// preserved — a ceiling naming the sibling `A` subsumes the whole clause
-// (clause-subsumption fit), so the caveat would neither gate nor get stripped.
-// Returns undefined when the clause is entirely material-risk (fully
-// discharged for this instruction-inert path).
-const stripMaterialRiskFromClause = (clause: unknown): unknown | undefined => {
-  if (!isOrClause(clause)) {
-    return isPromptInjectionMaterialRiskAtom(clause) ? undefined : clause;
-  }
-  const kept = clause.anyOf.filter(
-    (alternative) => !isPromptInjectionMaterialRiskAtom(alternative),
-  );
-  return kept.length === 0 ? undefined : normalizeClause({ anyOf: kept });
-};
-
-const filterMaterialRiskAtoms = (
+// Discharge material-risk caveats from an instruction-inert path's
+// confidentiality by running the standard §10.1 profile's material-risk
+// discharge rules with the path's minted InjectionSafe as integrity evidence
+// (Epic B6 — this REPLACES the old hardcoded `filterMaterialRiskAtoms` strip
+// with an ordinary exchange-rule firing; `cfc-standard-profile.test.ts` proves
+// byte-for-byte equivalence). A dropClause rule removes a bare material-risk
+// atom AND a material-risk alternative nested inside an OR-clause
+// (`{anyOf:[risk, A]}` → `A`) — descending is load-bearing: a hidden caveat
+// alternative is not more-restrictive when preserved (a ceiling naming the
+// sibling subsumes the whole clause), so it must be discharged, not left.
+const dischargeMaterialRiskAtoms = (
   atoms: readonly unknown[],
-): ImmutableJSONValue[] =>
-  uniqueAtoms(
-    atoms
-      .map(stripMaterialRiskFromClause)
-      .filter((clause) => clause !== undefined),
+): ImmutableJSONValue[] => {
+  const result = evaluateExchangeRules(
+    { confidentiality: [...atoms] },
+    STANDARD_PROFILE_SNAPSHOT,
+    { integrity: [INJECTION_SAFE_ATOM] },
   );
+  // Fixpoint over the finite add-free discharge rule set cannot exhaust, but
+  // fail safe if it ever did: keep the un-discharged (more-restrictive) label.
+  return uniqueAtoms(
+    result.exhausted ? atoms : result.label.confidentiality ?? [],
+  );
+};
 
 const mergeIfc = (
   schema: Record<string, unknown>,
@@ -100,7 +104,7 @@ const mergeIfc = (
 ): Record<string, unknown> => {
   const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
   const retainedConfidentiality = instructionInert
-    ? filterMaterialRiskAtoms(observedConfidentiality)
+    ? dischargeMaterialRiskAtoms(observedConfidentiality)
     : uniqueAtoms(observedConfidentiality);
   const nextIfc: Record<string, unknown> = { ...existingIfc };
 

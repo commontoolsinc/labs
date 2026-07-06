@@ -1,0 +1,376 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  cfcAtom,
+} from "@commonfabric/api/cfc";
+import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
+import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import {
+  MATERIAL_RISK_DISCHARGE_KINDS,
+  STANDARD_PROMPT_CAVEAT_POLICY,
+} from "../src/cfc/standard-profile.ts";
+import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+import { clauseAlternatives, clausesEqual } from "../src/cfc/clause.ts";
+import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
+import { normalizeClause } from "../src/cfc/clause.ts";
+
+// Epic B6 (docs/plans/cfc-future-work-implementation.md §3): the §10.1
+// standard prompt-caveat profile as PolicyRecords. The goldens prove the
+// material-risk discharge rule reproduces the retired `filterMaterialRiskAtoms`
+// strip byte-for-byte; the remaining tests exercise the tier upgrades,
+// display discharge, the InjectionSafe/PROMPT_INFLUENCE boundary, and the
+// value-stage re-binding blind spot.
+
+const PROFILE = buildCfcPolicySnapshot(STANDARD_PROMPT_CAVEAT_POLICY)!;
+
+const caveat = (kind: string, source: string = "of:hostile") =>
+  cfcAtom.caveat(kind, source);
+
+// The retired strip, kept here as the golden ORACLE: this is exactly what
+// `filterMaterialRiskAtoms` computed before B6 deleted it.
+const materialKinds = new Set(MATERIAL_RISK_DISCHARGE_KINDS);
+const isMaterialRisk = (atom: unknown): boolean => {
+  if (typeof atom === "string") return materialKinds.has(atom);
+  return typeof atom === "object" && atom !== null &&
+    (atom as { type?: unknown }).type === CFC_ATOM_TYPE.Caveat &&
+    typeof (atom as { kind?: unknown }).kind === "string" &&
+    materialKinds.has((atom as { kind: string }).kind);
+};
+const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
+  uniqueCfcAtoms(
+    atoms
+      .map((clause) => {
+        if (
+          typeof clause !== "object" || clause === null ||
+          !Array.isArray((clause as { anyOf?: unknown }).anyOf)
+        ) {
+          return isMaterialRisk(clause) ? undefined : clause;
+        }
+        const kept = (clause as { anyOf: unknown[] }).anyOf.filter(
+          (alternative) => !isMaterialRisk(alternative),
+        );
+        return kept.length === 0 ? undefined : normalizeClause({ anyOf: kept });
+      })
+      .filter((clause) => clause !== undefined),
+  );
+
+// The new rule path, exactly as the sanitizer runs it.
+const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] => {
+  const result = evaluateExchangeRules(
+    { confidentiality: [...atoms] },
+    PROFILE,
+    { integrity: [INJECTION_SAFE_ATOM] },
+  );
+  return uniqueCfcAtoms(
+    result.exhausted ? atoms : result.label.confidentiality ?? [],
+  );
+};
+
+const clauseSetsEqual = (a: readonly unknown[], b: readonly unknown[]) =>
+  a.length === b.length &&
+  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
+  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+
+describe("CFC standard prompt-caveat profile (B6)", () => {
+  describe("material-risk discharge reproduces the retired strip (goldens)", () => {
+    const influence = caveat(CFC_CONCEPT_KIND.PromptInfluence);
+    const secret = { type: CFC_ATOM_TYPE.User, subject: "did:key:alice" };
+    const scenarios: Array<[string, unknown[]]> = [
+      ["bare unscreened risk", [caveat(
+        CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+      )]],
+      ["legacy single-risk URI", [caveat(
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      )]],
+      ["bare-string alias", [caveat("prompt-injection-risk-value-screened")]],
+      ["risk beside retained influence + secret", [
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
+        influence,
+        secret,
+      ]],
+      ["risk hidden as an OR-clause alternative", [
+        {
+          anyOf: [
+            caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
+            secret,
+          ],
+        },
+      ]],
+      ["OR-clause entirely material-risk", [
+        {
+          anyOf: [
+            caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
+            caveat(CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened),
+          ],
+        },
+      ]],
+      ["no material risk at all", [influence, secret]],
+      ["empty", []],
+      ["all four canonical tiers together", [
+        caveat(
+          "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+        ),
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskIngressScreened),
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened),
+        secret,
+      ]],
+    ];
+
+    for (const [name, input] of scenarios) {
+      it(name, () => {
+        const oracle = legacyStrip(input);
+        const ruled = dischargeViaProfile(input);
+        expect(clauseSetsEqual(ruled, oracle)).toBe(true);
+      });
+    }
+
+    it("does not discharge material risk WITHOUT InjectionSafe", () => {
+      const input = [caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened)];
+      const result = evaluateExchangeRules(
+        { confidentiality: input },
+        PROFILE,
+        { integrity: [] },
+      );
+      expect(result.label.confidentiality).toEqual(input);
+    });
+  });
+
+  describe("tier upgrades (add-alternative)", () => {
+    it("unscreened → ingress-screened on matching ingress evidence", () => {
+      const source = "of:src";
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [caveat(
+            CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            source,
+          )],
+        },
+        PROFILE,
+        {
+          integrity: [cfcAtom.caveatScreened({
+            kind: CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            source,
+            stage: "ingress",
+            detector: cfcAtom.builtin("detector"),
+            verdict: "pass",
+          })],
+        },
+      );
+      const clause = result.label.confidentiality![0];
+      const alternatives = clauseAlternatives(clause);
+      // Lower tier remains; higher tier added as an alternative.
+      expect(alternatives).toContainEqual(
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened, source),
+      );
+      expect(alternatives).toContainEqual(
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskIngressScreened, source),
+      );
+    });
+
+    it("does not upgrade on a verdict other than pass", () => {
+      const source = "of:src";
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [caveat(
+            CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            source,
+          )],
+        },
+        PROFILE,
+        {
+          integrity: [cfcAtom.caveatScreened({
+            kind: CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            source,
+            stage: "ingress",
+            detector: cfcAtom.builtin("detector"),
+            verdict: "suspect",
+          })],
+        },
+      );
+      expect(result.label.confidentiality).toEqual([
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened, source),
+      ]);
+    });
+
+    it("does not upgrade on a source mismatch (§10.1 same-source guard)", () => {
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [caveat(
+            CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            "of:a",
+          )],
+        },
+        PROFILE,
+        {
+          integrity: [cfcAtom.caveatScreened({
+            kind: CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
+            source: "of:b",
+            stage: "ingress",
+            detector: cfcAtom.builtin("detector"),
+            verdict: "pass",
+          })],
+        },
+      );
+      expect(result.label.confidentiality).toEqual([
+        caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened, "of:a"),
+      ]);
+    });
+  });
+
+  describe("value-stage screening + re-binding blind spot", () => {
+    const source = "of:src";
+    const valueScreened = caveat(
+      CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened,
+      source,
+    );
+    const freshValueEvidence = cfcAtom.caveatScreened({
+      kind: CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened,
+      source,
+      stage: "value",
+      detector: cfcAtom.builtin("detector"),
+      verdict: "pass",
+      valueRef: { "/": "value-doc" },
+    });
+
+    it("discharges a value-screened caveat WITH fresh value-stage evidence", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [valueScreened] },
+        PROFILE,
+        { integrity: [freshValueEvidence] },
+      );
+      expect(result.label.confidentiality).toEqual([]);
+    });
+
+    it("does NOT discharge a value-screened caveat once evidence is gone (post-transform)", () => {
+      // After a non-exactCopyOf transform the value-bound CaveatScreened atom
+      // drops from the value's integrity (§15.4 propagation), so the tier
+      // alternative persists but has no discharging evidence — the rule stops
+      // matching. This is the §10.1 re-binding blind spot: the stale marker
+      // cannot fire on its own.
+      const result = evaluateExchangeRules(
+        { confidentiality: [valueScreened] },
+        PROFILE,
+        { integrity: [] },
+      );
+      expect(result.label.confidentiality).toEqual([valueScreened]);
+    });
+
+    it("does not discharge value-screened via an INGRESS-stage screening atom", () => {
+      // Only value-stage evidence carries the binding; an ingress verdict for
+      // the same source must not release the value tier.
+      const result = evaluateExchangeRules(
+        { confidentiality: [valueScreened] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.caveatScreened({
+            kind: CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened,
+            source,
+            stage: "ingress",
+            detector: cfcAtom.builtin("detector"),
+            verdict: "pass",
+          })],
+        },
+      );
+      expect(result.label.confidentiality).toEqual([valueScreened]);
+    });
+  });
+
+  describe("influence-caveat discipline", () => {
+    const source = "of:src";
+    const influence = caveat(CFC_CONCEPT_KIND.PromptInfluence, source);
+
+    it("InjectionSafe alone never clears PROMPT_INFLUENCE (§10.1)", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        { integrity: [INJECTION_SAFE_ATOM] },
+      );
+      expect(result.label.confidentiality).toEqual([influence]);
+    });
+
+    it("releases PROMPT_INFLUENCE at a display sink via a rendered disclosure", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.disclosureRendered({
+            kind: CFC_CONCEPT_KIND.PromptInfluence,
+            source,
+            sink: "chat",
+            renderRef: { seq: 1, rootRef: { "/": "root" } },
+            snapshotDigest: "sha256:snap",
+          })],
+          boundary: [cfcAtom.boundaryContext("sinkClass", "display")],
+        },
+      );
+      expect(result.label.confidentiality).toEqual([]);
+    });
+
+    it("does not release a rendered disclosure without the display boundary context", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.disclosureRendered({
+            kind: CFC_CONCEPT_KIND.PromptInfluence,
+            source,
+            sink: "chat",
+            renderRef: { seq: 1, rootRef: { "/": "root" } },
+            snapshotDigest: "sha256:snap",
+          })],
+          // No BoundaryContext — the site is not known to be a display sink.
+        },
+      );
+      expect(result.label.confidentiality).toEqual([influence]);
+    });
+
+    it("requires acknowledgment (not a mere rendered disclosure) for routing fields", () => {
+      const routingBoundary = [cfcAtom.boundaryContext("fieldRole", "routing")];
+      // A rendered disclosure is NOT enough for a routing-sensitive field.
+      const rendered = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.disclosureRendered({
+            kind: CFC_CONCEPT_KIND.PromptInfluence,
+            source,
+            sink: "sendMail",
+            renderRef: { seq: 1, rootRef: { "/": "root" } },
+            snapshotDigest: "sha256:snap",
+          })],
+          boundary: routingBoundary,
+        },
+      );
+      expect(rendered.label.confidentiality).toEqual([influence]);
+      // Explicit acknowledgment discharges it.
+      const acknowledged = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.disclosureAcknowledged({
+            user: "did:key:alice",
+            kind: CFC_CONCEPT_KIND.PromptInfluence,
+            source,
+            renderRef: { seq: 1, rootRef: { "/": "root" } },
+            snapshotDigest: "sha256:snap",
+          })],
+          boundary: routingBoundary,
+        },
+      );
+      expect(acknowledged.label.confidentiality).toEqual([]);
+    });
+  });
+
+  describe("profile shape", () => {
+    it("validates + freezes as a policy snapshot", () => {
+      expect(Object.isFrozen(PROFILE)).toBe(true);
+      expect(PROFILE.records).toHaveLength(1);
+      expect(PROFILE.records[0].id).toBe(
+        "cfc:standard-prompt-caveat-profile",
+      );
+    });
+  });
+});
