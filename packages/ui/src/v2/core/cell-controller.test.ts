@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FakeTime } from "@std/testing/time";
 import type { ReactiveControllerHost } from "lit";
-import { CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import {
+  CellHandle,
+  type CellRef,
+  isCellHandle,
+} from "@commonfabric/runtime-client";
 import {
   createMockCellHandle,
   pushUpdate,
@@ -634,6 +638,191 @@ describe("CellController — timing integration", () => {
     ctrl.onFocus();
     ctrl.onBlur();
     expect(events).toEqual(["focus", "blur"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CellController — pending local edits vs stale bound state
+//
+// Regression coverage for the cf-input early-boot wipe: a user types before
+// the cell's initial echo/subscription has settled; the worker re-renders and
+// the applicator hands the element a FRESH CellHandle for the same cell
+// (cfcLabelView drift during CFC settling makes `equals()` false), whose value
+// has not hydrated yet. The controller used to adopt that handle's stale/empty
+// state, and the next repaint wiped the user's typed text until the backend
+// echo restored it. The local edit must win until the echo confirms it or a
+// genuinely newer remote value arrives.
+// ---------------------------------------------------------------------------
+
+/**
+ * A cfcLabelView that differs from the (absent) label view on the default mock
+ * ref. `CellHandle.equals()` compares cfcLabelView, so a rebind with this ref
+ * replaces the bound handle — the production wipe vector (the applicator's
+ * `setBinding` makes a fresh, value-less handle whenever the authored link's
+ * label view drifts during early CFC settling).
+ */
+const DRIFTED_LABEL_VIEW: CellRef["cfcLabelView"] = {
+  version: 1,
+  entries: [{ path: [], label: { confidentiality: ["did:key:z-someone"] } }],
+};
+
+/** Let in-flight CellHandle.set() round-trips settle (mock resolves async). */
+const settleWrites = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("CellController — pending local edits vs stale bound state", () => {
+  it("keeps a settled local edit when a same-cell rebind delivers a not-yet-hydrated handle", async () => {
+    // The confirmed lunch-poll trace: commit() resolved (write durable), THEN
+    // the host re-render swapped in a fresh handle with no value yet.
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "immediate" },
+    });
+    const initial = createMockCellHandle<string>("");
+    ctrl.bind(initial);
+
+    ctrl.setValue("Alice"); // user types; optimistic write
+    await settleWrites(); // the set() round-trip completes
+
+    const rebound = createMockCellHandle<string>(undefined, {
+      cfcLabelView: DRIFTED_LABEL_VIEW,
+    });
+    ctrl.bind(rebound);
+    // The typed value must survive the rebind — there is no newer remote
+    // value, only a handle that has not hydrated yet.
+    expect(ctrl.getValue()).toBe("Alice");
+
+    // The durable echo hydrates the fresh handle.
+    pushUpdate(rebound, "Alice");
+    expect(ctrl.getValue()).toBe("Alice");
+
+    // Once hydrated, remote updates (including a clear) apply normally.
+    pushUpdate(rebound, "");
+    expect(ctrl.getValue()).toBe("");
+  });
+
+  it("suppresses a stale pre-write value delivered by a same-cell rebind until the echo confirms", async () => {
+    const changes: Array<string | undefined> = [];
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "immediate" },
+      onChange: (newValue) => changes.push(newValue),
+    });
+    const initial = createMockCellHandle<string>("");
+    ctrl.bind(initial);
+
+    ctrl.setValue("Alice");
+    changes.length = 0;
+
+    // A re-render-driven rebind hands over a handle still holding the
+    // pre-write snapshot.
+    const rebound = createMockCellHandle<string>("", {
+      cfcLabelView: DRIFTED_LABEL_VIEW,
+    });
+    ctrl.bind(rebound);
+    expect(ctrl.getValue()).toBe("Alice");
+    // The stale "" must not be announced as a change either — the UI never
+    // showed it.
+    expect(changes).not.toContain("");
+    await settleWrites();
+    expect(ctrl.getValue()).toBe("Alice");
+
+    // Echo confirms; later remote edits apply normally.
+    pushUpdate(rebound, "Alice");
+    expect(ctrl.getValue()).toBe("Alice");
+    pushUpdate(rebound, "Bob");
+    expect(ctrl.getValue()).toBe("Bob");
+  });
+
+  it("keeps the latest keystroke when a partial echo of an earlier write arrives", () => {
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "immediate" },
+    });
+    const cell = createMockCellHandle<string>("");
+    ctrl.bind(cell);
+
+    ctrl.setValue("Al");
+    ctrl.setValue("Alice");
+    // The echo of the first keystroke arrives after the second was typed.
+    pushUpdate(cell, "Al");
+    expect(ctrl.getValue()).toBe("Alice");
+
+    pushUpdate(cell, "Alice");
+    expect(ctrl.getValue()).toBe("Alice");
+  });
+
+  it("keeps the typed value when a late initial hydration arrives during a debounce window", async () => {
+    const time = new FakeTime();
+    try {
+      const ctrl = new StringCellController(createMockHost(), {
+        timing: { strategy: "debounce", delay: 300 },
+      });
+      // Early boot: the cell has not hydrated at bind time.
+      const cell = createMockCellHandle<string>(undefined);
+      ctrl.bind(cell);
+
+      ctrl.setValue("Al"); // user typing; write still debounced
+      pushUpdate(cell, ""); // late initial hydration (pre-write snapshot)
+      expect(ctrl.getValue()).toBe("Al");
+
+      time.tick(300); // debounced write lands
+      expect(cell.get()).toBe("Al");
+      await time.runMicrotasks();
+      expect(ctrl.getValue()).toBe("Al");
+    } finally {
+      time.restore();
+    }
+  });
+
+  it("keeps an uncommitted edit over a remote update while using the blur strategy", () => {
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "blur" },
+    });
+    const cell = createMockCellHandle<string>("");
+    ctrl.bind(cell);
+
+    ctrl.setValue("Ali"); // typed, not yet committed (commits on blur)
+    pushUpdate(cell, "remote-edit");
+    // The in-progress local edit wins; the blur-time write will overwrite the
+    // remote value anyway (last-write-wins set).
+    expect(ctrl.getValue()).toBe("Ali");
+
+    ctrl.onBlur(); // commits the edit
+    expect(cell.get()).toBe("Ali");
+  });
+
+  it("accepts remote updates — including a clear back to the pre-edit value — once the write settled", async () => {
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "immediate" },
+    });
+    const cell = createMockCellHandle<string>("");
+    ctrl.bind(cell);
+
+    ctrl.setValue("Alice");
+    await settleWrites();
+
+    // A genuinely newer remote value must repaint...
+    pushUpdate(cell, "Bob");
+    expect(ctrl.getValue()).toBe("Bob");
+
+    ctrl.setValue("Carol");
+    await settleWrites();
+
+    // ...and so must a remote clear that matches the pre-edit baseline.
+    pushUpdate(cell, "Bob");
+    expect(ctrl.getValue()).toBe("Bob");
+  });
+
+  it("drops local-edit protection when rebinding to a different cell", () => {
+    const ctrl = new StringCellController(createMockHost(), {
+      timing: { strategy: "immediate" },
+    });
+    const cellA = createMockCellHandle<string>("a", { id: "of:cell-a" as any });
+    ctrl.bind(cellA);
+    ctrl.setValue("typed");
+
+    const cellB = createMockCellHandle<string>("other", {
+      id: "of:cell-b" as any,
+    });
+    ctrl.bind(cellB);
+    expect(ctrl.getValue()).toBe("other");
   });
 });
 
