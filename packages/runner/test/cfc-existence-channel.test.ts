@@ -19,15 +19,17 @@ type StoredEntry = {
   observes?: string;
 };
 
-// Epic C stage C3 — the two channel fixes (C0 §5, SC-4; C0 §4 row 3, SC-8).
+// Epic C stage C3 + follow-up — the existence channel (C0 §5, SC-4) and
+// the slot-pointer channel (C0 §4 row 3, SC-8).
 //
-// SC-4: §8.12.8 replace-on-overwrite is a VALUE-class rule. The existence
-// (shape) channel must never shrink: "this path was once written under J"
-// reveals every historical writer, so on overwrite the existence entry GROWS
-// (join of old and new confidentiality) — where before C3 the flow-clear
-// dropped it with the rest of the per-value components and a clean overwrite
-// made the existence bit public.
-describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
+// SC-4, settled with the spec (freeze-at-creation, §8.12.8 as amended on
+// specs branch cfc/existence-freeze-at-creation): the existence (shape)
+// entry is minted at the path's CREATION carrying the creating attempt's
+// join, is never cleared and never grown by overwrites of a still-existing
+// path (a writer conditional on existence journals that observation
+// itself), and legacy pre-class entries are absorbed once at migration.
+// C3's interim grow-on-overwrite is superseded by this discipline.
+describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -154,9 +156,10 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     }
   });
 
-  // A labeled overwrite: value replaces (precision win), existence grows
-  // (join of old and new — soundness fix).
-  it("labeled overwrite: value replaces, existence grows to the join", async () => {
+  // A labeled overwrite of a still-existing path: value replaces
+  // (§8.12.8), existence stays FROZEN at the creation join — the second
+  // writer adds no existence information.
+  it("labeled overwrite: value replaces, existence stays frozen at creation", async () => {
     const rt = makeRuntime();
     const secretId = await seedDoc(rt, "ec-secret", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -181,16 +184,14 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     expect(valueEntry?.label.confidentiality).toEqual(["public-ish"]);
     const shape = shapeEntriesAt(outId, []);
     expect(shape.length).toBe(1);
-    expect([...(shape[0].label.confidentiality ?? [])].sort()).toEqual([
-      "public-ish",
-      "secret",
-    ]);
+    expect(shape[0].label.confidentiality).toEqual(["secret"]);
   });
 
-  // An ancestor overwrite clears derived descendants (§8.12.8) — but their
-  // existence folds UP into the written path's existence entry rather than
-  // vanishing.
-  it("ancestor overwrite folds descendant existence into the written path", async () => {
+  // An ancestor overwrite clears derived VALUE descendants (§8.12.8) —
+  // but a descendant's frozen existence entry survives at its own path
+  // (never cleared), and the root mints no entry of its own from a clean
+  // overwrite.
+  it("ancestor overwrite leaves descendant existence frozen in place", async () => {
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-child-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -221,16 +222,23 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    expect(shapeEntriesAt(outId, ["child"])).toEqual([]);
-    const rootShape = shapeEntriesAt(outId, []);
-    expect(rootShape.length).toBe(1);
-    expect(rootShape[0].label.confidentiality).toContainEqual("secret");
+    const childShape = shapeEntriesAt(outId, ["child"]);
+    expect(childShape.length).toBe(1);
+    expect(childShape[0].label.confidentiality).toEqual(["secret"]);
+    // No value-class entry survives the clean recomputation anywhere.
+    for (const entry of entriesOf(outId)) {
+      if (entry.observes === "value") {
+        expect(entry.label.confidentiality ?? []).not.toContainEqual(
+          "secret",
+        );
+      }
+    }
   });
 
   // Pre-C2 covering derived entries carried the existence channel too; a
   // clean overwrite must fold their confidentiality into the new existence
   // entry, not erase it (the same SC-4 leak on legacy data).
-  it("legacy covering derived entries feed the existence grow", async () => {
+  it("legacy covering derived entries freeze into the migrated existence entry", async () => {
     const rt = makeRuntime();
     // Seed via a real flow write on a pre-C2-shaped doc: seed the covering
     // entry raw, with a loadable schema (the persist region skips docs
@@ -282,7 +290,7 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
   // Structure stamps are the container-shape half of the same channel: an
   // overwrite that replaces a labeled pure-link container with plain
   // content must keep the membership history on the existence entry.
-  it("cleared structure stamps feed the existence grow", async () => {
+  it("cleared legacy structure stamps freeze into the container existence entry", async () => {
     const rt = makeRuntime();
     const el0 = await seedDoc(rt, "ec-el-0", { n: 1 }, [
       { path: [], label: { confidentiality: ["alice"] } },
@@ -478,10 +486,232 @@ describe("CFC existence channel (C3, SC-4 grow-on-overwrite)", () => {
     expect(shape[0].label.confidentiality).toContainEqual("old-secret");
   });
 
+  // SC-11, clause-aware: a stored existence clause in a byte-permuted form
+  // (a peer wrote {anyOf:["B","A"]}) meeting this tx's normalized
+  // derivation ({anyOf:["A","B"]}) must collapse to ONE clause — deepEqual
+  // dedup alone doubles the clause list and rewrites the envelope once.
+  it("folds byte-permuted clause forms without doubling (SC-11)", async () => {
+    const rt = makeRuntime();
+    const orClause = { anyOf: ["reader-a", "reader-b"] };
+    const sourceId = await seedDoc(rt, "ec-clause-source", { n: 1 }, [
+      { path: [], label: { confidentiality: [orClause] } },
+    ]);
+    const outId = await writeTainted(rt, sourceId, "ec-clause-out", {
+      copied: true,
+    });
+
+    // Flip the stored existence clause to the reversed byte form, as a
+    // peer's view merge could have persisted it.
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): { cfc?: Record<string, unknown> };
+    };
+    const stored = replica.getDocument(outId).cfc! as {
+      labelMap: { entries: StoredEntry[] };
+    };
+    const flipped = {
+      ...stored,
+      labelMap: {
+        version: 1,
+        entries: stored.labelMap.entries.map((e) =>
+          e.observes === "shape"
+            ? {
+              ...e,
+              label: { confidentiality: [{ anyOf: ["reader-b", "reader-a"] }] },
+            }
+            : e
+        ),
+      },
+    };
+    const flip = rt.edit();
+    flip.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      flipped as never,
+    );
+    expect((await flip.commit()).ok).toBeDefined();
+
+    // Re-derive: reads the source again (normalized clause) and overwrites
+    // the root — the fold meets the reversed stored form.
+    const tx = rt.edit();
+    tx.readOrThrow(readAddress(sourceId, []));
+    tx.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { copied: false },
+    );
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, []);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality?.length).toBe(1);
+
+    // And the re-derivation is now canonically idempotent: repeating the
+    // same overwrite leaves the stored metadata byte-identical.
+    const before = JSON.stringify(entriesOf(outId));
+    const again = rt.edit();
+    again.readOrThrow(readAddress(sourceId, []));
+    again.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { copied: 2 },
+    );
+    again.prepareCfc();
+    expect((await again.commit()).ok).toBeDefined();
+    expect(JSON.stringify(entriesOf(outId))).toEqual(before);
+  });
+
+  // The A3 cross-scenario shape from the #4525 probe: membership changes
+  // across labeled re-stamps of a pure-link container. The MEMBERSHIP
+  // (enumerate) stamp is replaced from the current criteria each time —
+  // bob's atom does not survive his element leaving (§8.12.8 normative,
+  // no accumulate-forever) — while the frozen existence (shape) entry
+  // keeps the CREATION join only, untouched by later re-stamps.
+  it("membership replaces per criteria while frozen existence keeps the creation join (A3)", async () => {
+    const rt = makeRuntime();
+    const alice = await seedDoc(rt, "ec-a3-alice", { n: 1 }, [
+      { path: [], label: { confidentiality: ["alice"] } },
+    ]);
+    const bob = await seedDoc(rt, "ec-a3-bob", { n: 2 }, [
+      { path: [], label: { confidentiality: ["bob"] } },
+    ]);
+
+    const stampList = async (readIds: string[], members: string[]) => {
+      const tx = rt.edit();
+      for (const id of readIds) tx.readOrThrow(readAddress(id, []));
+      const cells = members.map((cause) =>
+        rt.getCell(space, cause, undefined, tx)
+      );
+      const list = rt.getCell(space, "ec-a3-list", {
+        type: "array",
+        items: { asCell: ["cell"] },
+      }, tx);
+      list.set(cells);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+      return list.getAsNormalizedFullLink().id;
+    };
+
+    // A1: created under alice's influence, members [alice].
+    const listId = await stampList([alice], ["ec-a3-alice"]);
+    // A2: re-stamped under bob's influence, members [alice, bob].
+    await stampList([bob], ["ec-a3-alice", "ec-a3-bob"]);
+    // A3: re-stamped under alice's influence again, members [alice].
+    await stampList([alice], ["ec-a3-alice"]);
+
+    const structure = entriesOf(listId).filter((e) => e.origin === "structure");
+    const enumerateConf = structure
+      .filter((e) => e.observes === "enumerate")
+      .flatMap((e) => e.label.confidentiality ?? []);
+    const shapeConf = structure
+      .filter((e) => e.observes === "shape")
+      .flatMap((e) => e.label.confidentiality ?? []);
+    // Current membership: alice's criteria only — bob's atom left with his
+    // element (no unshrinkable accumulation).
+    expect(enumerateConf).toEqual(["alice"]);
+    // Frozen existence: the creation join only — untouched by A2/A3.
+    expect(shapeConf).toEqual(["alice"]);
+  });
+
+  // Legacy migration through the OTHER carry-forward skips: a pre-class
+  // covering entry at a slot replaced by a LINK write pools through the
+  // link-path skip and lands as a frozen shape entry at its own path (the
+  // leftover anchor — link-covered paths get no stamps).
+  it("legacy entry at a link-replaced slot freezes via the leftover anchor", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-legacy-link-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["old-secret"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-legacy-link-out", {
+      slot: 0,
+    });
+    const taint = rt.edit();
+    taint.readOrThrow(readAddress(sourceId, []));
+    taint.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "slot"] },
+      { copied: true },
+    );
+    taint.prepareCfc();
+    expect((await taint.commit()).ok).toBeDefined();
+    // Rewrite stored metadata: ONE legacy covering derived entry at the slot.
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): { cfc?: Record<string, unknown> };
+    };
+    const stored = replica.getDocument(outId).cfc! as Record<string, unknown>;
+    const legacy = rt.edit();
+    legacy.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      {
+        ...stored,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["slot"],
+            label: { confidentiality: ["old-secret"] },
+            origin: "derived",
+          }],
+        },
+      },
+    );
+    expect((await legacy.commit()).ok).toBeDefined();
+
+    // Replace the slot with a LINK in a clean tx: the legacy entry pools
+    // through the link-path skip; no stamp path covers a link write, so
+    // the leftover anchors the frozen shape entry at the slot itself.
+    await seedDoc(rt, "ec-legacy-link-target", { n: 2 }, []);
+    const linkTx = rt.edit();
+    const outCell = rt.getCell(space, "ec-legacy-link-out", undefined, linkTx);
+    const otherCell = rt.getCell(
+      space,
+      "ec-legacy-link-target",
+      undefined,
+      linkTx,
+    );
+    outCell.key("slot").set(otherCell);
+    linkTx.prepareCfc();
+    expect((await linkTx.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["slot"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toContainEqual("old-secret");
+  });
+
+  // A mixed write — plain content at the root and a pure-link container in
+  // the same transaction — collapses the container's membership stamp
+  // against the covering derived ancestor (exact-path structure stamps
+  // only collapse against derived ancestors-or-equal).
+  it("structure stamps collapse under a derived ancestor stamp", async () => {
+    const rt = makeRuntime();
+    const sourceId = await seedDoc(rt, "ec-mixed-source", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret"] } },
+    ]);
+    await seedDoc(rt, "ec-mixed-el", { n: 2 }, []);
+
+    const tx = rt.edit();
+    tx.readOrThrow(readAddress(sourceId, []));
+    const out = rt.getCell(space, "ec-mixed-out", undefined, tx);
+    const outId = out.getAsNormalizedFullLink().id;
+    tx.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { text: "x" },
+    );
+    const el = rt.getCell(space, "ec-mixed-el", undefined, tx);
+    out.key("list").withTx(tx).set([el]);
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const entries = entriesOf(outId);
+    expect(
+      entries.some((e) => e.origin === "derived" && e.path.join("/") === ""),
+    ).toBe(true);
+    expect(
+      entries.filter((e) =>
+        e.origin === "structure" && e.observes === "enumerate"
+      ),
+    ).toEqual([]);
+  });
+
   // Idempotence stays per-class (SC-11): repeating the same clean overwrite
   // must not churn the metadata — the grown existence entry re-derives
   // identically.
-  it("the grown existence entry re-derives idempotently", async () => {
+  it("the frozen existence entry re-derives idempotently", async () => {
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-idem-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
