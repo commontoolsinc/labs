@@ -196,7 +196,6 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
@@ -209,7 +208,6 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      ipcLogger.debug(`responded/${request.type}`, () => []);
       self.postMessage({ msgId });
       ipcLogger.debug(`responded/${request.type}`, () => []);
       return;
@@ -227,7 +225,6 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    ipcLogger.debug(`responded/${request.type}`, () => []);
     self.postMessage(payload);
     ipcLogger.debug(`responded/${request.type}`, () => []);
   } catch (error) {
