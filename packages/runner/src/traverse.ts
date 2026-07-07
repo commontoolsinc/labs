@@ -494,7 +494,7 @@ const TRAVERSE_DIAGNOSTICS: boolean = (() => {
  */
 const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 
-function resolveSchemaRefsCanonical(
+export function resolveSchemaRefsCanonical(
   schema: JSONSchemaObj,
 ): JSONSchema | undefined {
   if (!isMemoizableSchemaInput(schema)) {

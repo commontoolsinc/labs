@@ -15,6 +15,7 @@ import {
   ID_FIELD,
   type JSONSchema,
 } from "./builder/types.ts";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
@@ -24,7 +25,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { schemaAcceptsType } from "./traverse.ts";
+import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -282,17 +283,30 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  * `slotRequiredByParent`): the full criterion is "the read would actually
  * reject the missing cell".
  */
+const _toleratesMissingCache = new WeakMap<object, boolean>();
 function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
   if (schema === undefined) return true;
-  // Resolve a top-level $ref before the default check, and apply the default
-  // with the same LOOSE comparison the read side uses when it applies
-  // defaults (`!= undefined`): a `default: null` is skipped by the read and
-  // therefore does not make the slot tolerant, while `default: 0/""/false`
-  // do. Judged on the resolved schema so a default carried by the $defs
-  // target counts too.
+  if (!isRecord(schema)) return true;
+  // Schemas are identity-stable (interned / deep-frozen) on the paths that
+  // reach here, mirroring traverse's own ref cache — memoize the verdict so
+  // per-row write loops don't re-resolve refs (a CI-visible cost otherwise).
+  const cached = _toleratesMissingCache.get(schema);
+  if (cached !== undefined) return cached;
+  const verdict = computeToleratesMissing(schema);
+  _toleratesMissingCache.set(schema, verdict);
+  return verdict;
+}
+
+function computeToleratesMissing(schema: JSONSchema): boolean {
+  // Resolve a top-level $ref before the default check (via the MEMOIZED
+  // canonical resolver traverse uses), and apply the default with the same
+  // LOOSE comparison the read side uses when it applies defaults
+  // (`!= undefined`): a `default: null` is skipped by the read and therefore
+  // does not make the slot tolerant, while `default: 0/""/false` do. Judged
+  // on the resolved schema so a default carried by the $defs target counts.
   let resolved: JSONSchema | undefined = schema;
   if (isRecord(schema) && "$ref" in schema) {
-    resolved = ContextualFlowControl.resolveSchemaRefs(schema) ?? schema;
+    resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj) ?? schema;
   }
   if (isRecord(resolved) && resolved.default != undefined) return true;
   // Type tolerance judged with the read side's own matcher (schemaAcceptsType
