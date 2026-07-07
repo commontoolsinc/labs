@@ -19,16 +19,16 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import * as Transaction from "../src/storage/transaction.ts";
 import type {
-  FabricValue,
   ISpaceReplica,
   IStorageManager,
   MemorySpace,
   Signer,
 } from "../src/storage/interface.ts";
+import type { FabricValue } from "@commonfabric/api";
 import type { Cell } from "../src/cell.ts";
 
 // Mirrors Runtime.getImmutableCell's mint: percent-encoded JSON payload.
-const dataURI = (value: unknown): string =>
+const dataURI = (value: unknown): `${string}:${string}` =>
   `data:application/json,${encodeURIComponent(JSON.stringify(value))}`;
 
 describe("attestation.load freeze + identity stability (CT-1840)", () => {
