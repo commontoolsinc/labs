@@ -395,6 +395,73 @@ describe("committed-write backpressure", () => {
   );
 
   it(
+    "does not retry a terminal commit-rule rejection (RowLabelCommitError) and stops after one run",
+    async () => {
+      // A server-side commit-time row-label violation (E4 Phase 3.c,
+      // memory/v2/sqlite/commit-eval.ts `RowLabelCommitError`) rolls back the
+      // whole commit and can NEVER succeed on retry: re-running the identical
+      // handler recomputes the identical refused write. Unlike a stale-read
+      // ConflictError, it must not consume the retry budget — each doomed
+      // re-run's speculative rev bumps starve concurrent sibling commits that
+      // share reactive state (the E4 3.c integration test masked this with a
+      // between-sends drain). It must therefore run exactly once, like a
+      // permanent rejection.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-terminal-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const terminalErrors: ErrorWithContext[] = [];
+      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "RowLabelCommitError",
+        message:
+          "sqlite commit refused: rowLabel rule rejected committed row " +
+          '(rowid 1) of table "emails"',
+      });
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-terminal:0:backpressure-terminal-root",
+        );
+
+        await waitFor(
+          runtime,
+          () => commitTelemetry.markers.length >= 1,
+          "terminal rejection never reported a commit marker",
+        );
+        // Give any erroneous retry a generous chance to run (a bounded-retry
+        // misclassification would re-run the handler up to
+        // DEFAULT_RETRIES_FOR_EVENTS more times), then confirm none did.
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await runtime.idle();
+
+        // The doomed handler ran exactly once — no retry budget consumed.
+        expect(piece.invocations()).toBe(1);
+        // The refused write did not land.
+        expect(piece.total()).toBe(0);
+        // A terminal deterministic refusal is reported, not silently dropped.
+        expect(
+          commitTelemetry.markers.some((marker) =>
+            (marker as { terminal?: string }).terminal === "rule"
+          ),
+        ).toBe(true);
+      } finally {
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
     "surfaces a terminal error when a transient conflict never converges",
     async () => {
       await disposeSchedulerTestRuntime({ storageManager, runtime, tx });

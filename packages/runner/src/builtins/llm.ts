@@ -17,7 +17,10 @@ import {
   BuiltInLLMParams,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
+import type { JSONSchema } from "../builder/types.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
@@ -39,6 +42,7 @@ import {
   GenerateObjectResultSchema,
   GenerateTextParamsSchema,
   GenerateTextResultSchema,
+  LLM_DERIVED_RESULT_STAMP_SCHEMA,
   LLMParamsSchema,
   LLMResultSchema,
   LLMToolSchema,
@@ -61,6 +65,152 @@ const client = new LLMClient();
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
+
+// Epic D1b (docs/plans/cfc-future-work-implementation.md): the llm builtins
+// stamp their model-output writebacks with an explicit `LlmDerived` provenance
+// atom — the same mark D1 attaches to dialog messages. `llm`/`generateText`
+// write `result`/`partial` through {@link LLM_DERIVED_RESULT_STAMP_SCHEMA};
+// `generateObject` merges the stamp into EVERY node of the (possibly custom)
+// resultSchema via `withLlmDerivedStamp`, so it also rides split child-document
+// writes (`asCell` fields, ID-anchored array items) whose descent via
+// `getSchemaAtPath` would otherwise drop `ifc.addIntegrity`. Both apply the
+// stamp at the WRITE, not on the shared
+// result schema, so the builtins' control-state writes (initial-run / error-path
+// `pending`/`result=undefined` resets, and the transient streaming `partial`
+// batches) stay CFC-inert — only the final model bytes are stamped and made
+// CFC-relevant, mirroring D1's `pushModelMessages`. The write is attributed to
+// the builtin because `LlmDerived` is a runtime-minted evidence family: the
+// persist-time gate (`gateRuntimeMintedIntegrity`, audit S4) admits it only from
+// a builtin author, which also stops pattern code forging it.
+
+/**
+ * Attribute a model-output writeback tx to the builtin so the `LlmDerived` stamp
+ * persists rather than being gate-stripped. Gated on CFC enforcement so a
+ * `disabled` deployment is a strict no-op (no identity, no stamp).
+ */
+function attributeModelOutputWrite(
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  builtinId: string,
+): void {
+  if (runtime.cfcEnforcementMode === "disabled") return;
+  tx.setCfcImplementationIdentity({ kind: "builtin", builtinId });
+}
+
+/**
+ * Write a model-output field (`result`/`partial`) through the `LlmDerived` stamp
+ * schema, attributed to the builtin. A no-op stamp (plain write) when CFC is
+ * disabled, so the disabled deployment stores no CFC metadata.
+ */
+function setStampedModelOutput(
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  resultCell: Cell<any>,
+  field: "result" | "partial",
+  value: unknown,
+): void {
+  const cell = runtime.cfcEnforcementMode === "disabled"
+    ? resultCell.key(field)
+    : resultCell.key(field).asSchema(LLM_DERIVED_RESULT_STAMP_SCHEMA);
+  cell.withTx(tx).set(value);
+}
+
+/** Merge `LlmDerived` into one schema node's `ifc.addIntegrity`, idempotently. */
+function mergeLlmDerivedIntoNode(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
+  const stamp = cfcAtom.llmDerived();
+  const already = addIntegrity.some((atom) =>
+    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+  );
+  return {
+    ...node,
+    ifc: {
+      ...ifc,
+      addIntegrity: already ? addIntegrity : [...addIntegrity, stamp],
+    },
+  };
+}
+
+/**
+ * Deep-merge the `LlmDerived` stamp into a generateObject result schema's
+ * `ifc.addIntegrity` at EVERY node — the root AND every nested property / item /
+ * `$defs` / compound-branch node — so it rides the (possibly custom /
+ * injection-safe) resultSchema write to wherever the model bytes land, whether
+ * inline at `["result"]` or in a SPLIT CHILD DOCUMENT.
+ *
+ * A root-only merge is not enough: when a nested value redirects/splits into its
+ * own document (an `asCell` field, an ID-anchored array item), the child write
+ * descends via `runtime.cfc.getSchemaAtPath`, which carries ancestor
+ * confidentiality but NOT `ifc.addIntegrity`. The child doc that stores the
+ * model bytes would then persist as unstamped/ordinary output and the D1b
+ * provenance guarantee would be lost for structured results (codex P1). Stamping
+ * every node keeps `getSchemaAtPath` at any split-child path carrying the mark,
+ * so `walkIfcSchema` mints the `LlmDerived` labelMap entry on that child doc too.
+ *
+ * The merge is idempotent (an injection-safe schema that already carries the
+ * stamp on a node is left unchanged). The recursion follows the finite, acyclic
+ * JSON-Schema tree — `$ref` is a string this function does not dereference, so a
+ * recursive `$defs` self-reference is a leaf here — and the result is interned.
+ * An absent resultSchema defaults to a plain object schema.
+ */
+function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
+  const stampNode = (node: Record<string, unknown>): JSONSchema => {
+    const stamped = mergeLlmDerivedIntoNode(node);
+
+    const descend = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(descend);
+      if (isRecord(value)) return stampNode(value);
+      return value;
+    };
+
+    for (const key of ["properties", "$defs", "patternProperties"]) {
+      const container = stamped[key];
+      if (isRecord(container)) {
+        stamped[key] = Object.fromEntries(
+          Object.entries(container).map(([k, v]) => [k, descend(v)]),
+        );
+      }
+    }
+    for (const key of ["items", "additionalProperties", "prefixItems"]) {
+      if (key in stamped) stamped[key] = descend(stamped[key]);
+    }
+    for (const key of ["anyOf", "oneOf", "allOf"]) {
+      if (Array.isArray(stamped[key])) stamped[key] = descend(stamped[key]);
+    }
+    return stamped as JSONSchema;
+  };
+
+  const base: Record<string, unknown> = isRecord(schema)
+    ? schema
+    : { type: "object" };
+  return internSchema(stampNode(base));
+}
+
+/**
+ * Write a generateObject model-output object through its (possibly custom)
+ * resultSchema, with the `LlmDerived` stamp merged into every schema node (so it
+ * lands on split child documents too). When CFC is disabled, writes through the
+ * bare resultSchema so no metadata is minted — keeping the disabled deployment
+ * CFC-inert.
+ */
+function setStampedObjectResult(
+  tx: IExtendedStorageTransaction,
+  runtime: Runtime,
+  resultCell: Cell<any>,
+  resultSchema: JSONSchema | undefined,
+  object: unknown,
+): void {
+  const disabled = runtime.cfcEnforcementMode === "disabled";
+  const target = disabled
+    ? (resultSchema === undefined
+      ? resultCell.key("result")
+      : resultCell.key("result").asSchema(resultSchema))
+    : resultCell.key("result").asSchema(withLlmDerivedStamp(resultSchema));
+  target.withTx(tx).set(object);
+}
 
 function logGenerateObject(stage: string, details: Record<string, unknown>) {
   console.warn("[generateObject]", stage, details);
@@ -650,10 +800,24 @@ export function llm(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    // D1b: attribute FIRST, then stamp the model-output fields —
+                    // `result`/`partial` carry `LlmDerived`; the control-state
+                    // fields (pending/error/requestHash/grounding) do not.
+                    attributeModelOutputWrite(tx, runtime, "llm");
                     resultCell.key("pending").withTx(tx).set(false);
-                    resultCell.key("result").withTx(tx).set(llmResult.content);
+                    setStampedModelOutput(
+                      tx,
+                      runtime,
+                      resultCell,
+                      "result",
+                      llmResult.content,
+                    );
                     resultCell.key("error").withTx(tx).set(undefined);
-                    resultCell.key("partial").withTx(tx).set(
+                    setStampedModelOutput(
+                      tx,
+                      runtime,
+                      resultCell,
+                      "partial",
                       extractTextFromLLMResponse(llmResult),
                     );
                     resultCell.key("requestHash").withTx(tx).set(hash);
@@ -978,10 +1142,24 @@ export function generateText(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
+                    // D1b: attribute FIRST, then stamp the model-output fields.
+                    attributeModelOutputWrite(tx, runtime, "generateText");
                     resultCell.key("pending").withTx(tx).set(false);
-                    resultCell.key("result").withTx(tx).set(textResult);
+                    setStampedModelOutput(
+                      tx,
+                      runtime,
+                      resultCell,
+                      "result",
+                      textResult,
+                    );
                     resultCell.key("error").withTx(tx).set(undefined);
-                    resultCell.key("partial").withTx(tx).set(textResult);
+                    setStampedModelOutput(
+                      tx,
+                      runtime,
+                      resultCell,
+                      "partial",
+                      textResult,
+                    );
                     resultCell.key("requestHash").withTx(tx).set(hash);
                     resultCell.key("groundingSources").withTx(tx).set(
                       groundingSources,
@@ -1522,18 +1700,25 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.editWithRetry((tx) => {
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
-                // the persist-time evidence gate trusts them (audit S4).
+                // the persist-time evidence gate trusts them (audit S4). The
+                // same attribution keeps the D1b LlmDerived stamp merged into
+                // the result schema root below.
                 tx.setCfcImplementationIdentity({
                   kind: "builtin",
                   builtinId: "generateObject",
                 });
                 resultCell.key("pending").withTx(tx).set(false);
-                const resultTarget = objectResponse.resultSchema === undefined
-                  ? resultCell.key("result")
-                  : resultCell.key("result").asSchema(
-                    objectResponse.resultSchema,
-                  );
-                resultTarget.withTx(tx).set(objectResponse.object);
+                // D1b: write the model-produced object through the resultSchema
+                // with `LlmDerived` merged into its root, so the stamp rides to
+                // wherever the object lands (inline or a split child doc). This
+                // covers both a custom user resultSchema and the default.
+                setStampedObjectResult(
+                  tx,
+                  runtime,
+                  resultCell,
+                  objectResponse.resultSchema,
+                  objectResponse.object,
+                );
                 // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values
                 // on this `.get()`-path today, but will in the not-too-distant
                 // future; at that point this JSON round-trip silently loses any
@@ -1761,7 +1946,9 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.editWithRetry((tx) => {
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
-                // the persist-time evidence gate trusts them (audit S4).
+                // the persist-time evidence gate trusts them (audit S4). The
+                // same attribution keeps the D1b LlmDerived stamp merged into
+                // the result schema root below.
                 tx.setCfcImplementationIdentity({
                   kind: "builtin",
                   builtinId: "generateObject",
@@ -1771,10 +1958,15 @@ export function generateObject<T extends Record<string, unknown>>(
                   content: JSON.stringify(response.object, null, 2),
                 };
                 resultCell.key("pending").withTx(tx).set(false);
-                const resultTarget = response.resultSchema === undefined
-                  ? resultCell.key("result")
-                  : resultCell.key("result").asSchema(response.resultSchema);
-                resultTarget.withTx(tx).set(response.object);
+                // D1b: write the model-produced object through the resultSchema
+                // with `LlmDerived` merged into its root (custom or default).
+                setStampedObjectResult(
+                  tx,
+                  runtime,
+                  resultCell,
+                  response.resultSchema,
+                  response.object,
+                );
                 // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values
                 // on this `.get()`-path today, but will in the not-too-distant
                 // future; at that point these JSON round-trips silently lose any

@@ -677,7 +677,13 @@ server + new runner keeps failing closed). No-laundering stays runner-side
 (the server has no input-value labels; document the split). Integration tests
 in `packages/runner/integration/sqlite-cfc-*`: INSERT…SELECT whose committed
 rows violate the rule rolls back atomically; upsert re-derives from the
-post-image.
+post-image. Status: **implemented (#4552)** —
+`memory/v2/sqlite/commit-eval.ts` (evaluation runs unconditionally
+server-side; RETURNING-rowid + read-back-by-rowid; row cap), the
+`sqliteCommitRowLabelEval` hello-flag, the gate relaxation (labeled inputs
+still fail closed on every relaxed shape), spec updated in
+sqlite-builtin/06-cfc.md ("Server commit" section); e2e
+`sqlite-cfc-commit-eval.test.ts`.
 
 **E5 — trusted `authoredBy` upgrade path (later; wants per-column ingest
 provenance).** When the matched column itself carries trusted-ingestion

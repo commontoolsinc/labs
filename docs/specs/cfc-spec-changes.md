@@ -242,6 +242,19 @@ derived-consuming list names the display ceiling and missing-policy rules,
 not writer-fit; (c) the rejection error contract and the audit/diagnostics
 contract for persist-and-flag.
 
+(b) and (c) are now **decided and landed (Epic H4 code step)**: the `canWrite`
+confidentiality misfit — the per-tx flow join measured against the declared
+store-policy component at each derived-stamp path — rejects at
+`enforce-strict` only, and persists-and-flags (a
+`writer-fit(persist-and-flag)` diagnostic carrying the identical reason
+string) under every lower mode, with the stable SC-18c reason
+`writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
+<offending clauses>`. Contract text in
+`docs/specs/cfc-enforcement-matrix.md` §4; implementation in
+`prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
+standard-profile default — stays open on the confidentiality side.
+
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
 and is now decided (owner, 2026-06-12): the schema's `requiredIntegrity` is a
@@ -278,8 +291,9 @@ value consultation), and empty integrity on a floor-declaring path fails (a
 stamped-`LlmDerived`-only value fails any floor by construction — closing the
 write-side half of the vacuous pass). Wildcard (`*`) floor entries and
 pattern-setup/seed initialization stay exempt (v1 scope); (a) the standard-
-profile default, (b) `enforce-strict` making writer-fit itself reject, and (c)
-the §8.10 spec home remain open.
+profile default and (c) the §8.10 spec home remain open — (b),
+`enforce-strict` making writer-fit itself reject, landed with the H4 code
+step (see the confidentiality paragraph above).
 
 **SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
 Verified open (the rule is stated as fact in §15.1 and §3.1.2, nowhere
@@ -322,6 +336,31 @@ change changes the hash and with it every identity within the artifact —
 rebinding is re-authorization, not inheritance; `writeAuthorizedBy`
 references resolve against this pair. Replace §8.15.6's "no separate naming
 scheme" claim with the pair definition and state the rebinding rule.
+
+**SC-23 [interpretation] Per-write read-prefix provenance classed as
+decomposition-grade precision — §8.9.1/§8.9.2 (Epic D4).** The runner's
+input-requirement gate (`requiredIntegrity`/`maxConfidentiality` in
+`verifyInputRequirements`) quantifies each protected write over the reads
+whose activity-clock position precedes the LAST write attempt overlapping the
+protected path (either prefix direction, matching floor applicability),
+trigger reads joining every prefix at −∞. Interpretation call (owner note in
+`cfc-write-prefix-provenance.md` §7.4): this is treated as a **structural
+fact of the journal order in §8.9.1's decomposition class** — a read past the
+last overlapping write provably did not feed the committed value — so it is
+applied WITHOUT the `flow-taint-precision` trust gate; it is not an untrusted
+`L_claim`. Two boundaries of the interpretation, both deliberate: (a) the
+confidentiality **egress ceiling** stays transaction-global (a sink request
+records no per-write provenance — §8.10); (b) the flow-label join `J(tx)` and
+the D3 floor's flow-meet credit stay transaction-global too (one per-tx label
+is load-bearing for stamp-collapse and persist-credit coherence); per-write
+narrowing there needs per-path derived components first. The audit-#14
+read-side vacuous pass resolves by DELEGATION: with an empty prefix the only
+possible endorsement is the one the written value carries, which is exactly
+the D3 write floor's check (§8.12.4.1) under its staged dial — an
+unconditional read-side rejection would duplicate it under `enforce` and
+break the pinned dial-off/observe byte-compat. If the spec wants the read
+gate itself to reject empty-input floored writes independent of the floor
+dial, that needs its own normative text + rollout dial.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)

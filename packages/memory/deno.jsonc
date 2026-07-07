@@ -42,6 +42,7 @@
     "./sqlite/guard": "./v2/sqlite/guard.ts",
     "./sqlite/schema": "./v2/sqlite/schema.ts",
     "./sqlite/row-label": "./v2/sqlite/row-label.ts",
+    "./sqlite/write-targets": "./v2/sqlite/write-targets.ts",
     "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {

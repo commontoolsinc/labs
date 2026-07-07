@@ -541,6 +541,7 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
         consumedReads: [],
         attemptedWrites: [],
         writes: [],
+        writeAttemptLog: [],
         dereferenceTraces: [],
         triggerReads: [],
         writePolicyInputs: [],
