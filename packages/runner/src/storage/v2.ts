@@ -1322,6 +1322,25 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
+  /**
+   * The durable half of `synced()`: flush scheduler observations and in-flight
+   * commits, but do NOT block on in-flight reads/watch refreshes.
+   *
+   * `close()` uses this instead of `synced()` because a watch's transport
+   * response can be withheld past dispose (e.g. a gate holding a doc), so a read
+   * pull promise may never settle on its own. Awaiting it before teardown would
+   * deadlock close(); teardown rejects the request instead, settling the read.
+   */
+  private async flushCommits(): Promise<void> {
+    if (
+      this.#schedulerObservationBatch.length > 0 ||
+      this.#schedulerObservationFlushPromise
+    ) {
+      await this.flushSchedulerObservationBatch();
+    }
+    await Promise.allSettled([...this.#commitPromises]);
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -1369,8 +1388,17 @@ class SpaceReplica implements ISpaceReplica {
     this.#closed = true;
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
-    await this.synced();
+    // Settle any queued (not-yet-sent) watch refresh first so its pull promise
+    // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
+    // for any refresh already in flight.
     this.cancelQueuedWatchRefresh();
+    // Flush durable work (scheduler observations + in-flight commits). Unlike
+    // `synced()`, this does NOT wait on in-flight reads/watch refreshes: a
+    // watch's transport response can be withheld past dispose (e.g. a gate
+    // holding a doc), so awaiting it here would deadlock close(). The client
+    // teardown below rejects every in-flight request, which settles those read
+    // promises without waiting on a response that may never arrive.
+    await this.flushCommits();
     this.#watchView?.close();
     this.#watchView = null;
     // Also close the view the update consumer is bound to, in case it diverged
@@ -1393,9 +1421,17 @@ class SpaceReplica implements ISpaceReplica {
         resolved = undefined;
       }
       if (resolved !== undefined) {
+        // Closing the client rejects every in-flight request (pulls/watch
+        // refreshes) with a ConnectionError and closes the session's watch
+        // view — the generic drain for any open watch, not just the two views
+        // tracked above.
         await resolved.client.close();
       }
     }
+    // With the client closed, every in-flight read/watch pull has been rejected
+    // and now settles promptly. Awaiting them here can no longer hang and
+    // guarantees no transport promise is left pending when close() resolves.
+    await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
@@ -1470,6 +1506,9 @@ class SpaceReplica implements ISpaceReplica {
         // The session never opened cleanly; there is nothing to close.
       });
     }
+    // The fire-and-forget client.close() above rejects in-flight requests; drain
+    // their read pulls too so no transport promise is left pending.
+    void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
