@@ -440,9 +440,23 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     });
 
     // A re-write of the identical source (idempotent recompile) preserves the
-    // annotation rather than clobbering it.
+    // annotation when the caller supplies it. `writeSourceDocs` is a pure blind
+    // writer that never reads the existing doc (that read is what conflicts
+    // forever on aged spaces — CT-1864), so annotation preservation is the
+    // caller's responsibility: it reads them OUTSIDE the write tx and passes
+    // them in. Here we thread through the annotation loaded above.
+    const preserved = verified?.get(entryIdentity)?.annotations as
+      | Record<string, unknown>
+      | undefined;
     const rewriteTx = runtime.edit();
-    writeSourceDocs(runtime, spaceA, modules, entryIdentity, rewriteTx);
+    writeSourceDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      rewriteTx,
+      preserved,
+    );
     runtime.prepareTxForCommit(rewriteTx);
     await rewriteTx.commit();
     const afterRewriteTx = runtime.edit();
@@ -455,6 +469,25 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     expect(afterRewrite?.get(entryIdentity)?.annotations).toEqual({
       name: { "/": "name-doc-link" },
     });
+
+    // And a re-write that does NOT re-supply the annotation clobbers it — the
+    // writer holds no memory of its own, by design. This is the CT-1864
+    // regression guard: if `writeSourceDocs` ever reads the existing entry doc
+    // again to self-preserve annotations, that read is what conflicts forever
+    // on aged spaces — and this assertion (annotation survives without being
+    // re-supplied) would flip and fail.
+    const clobberTx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, clobberTx);
+    runtime.prepareTxForCommit(clobberTx);
+    await clobberTx.commit();
+    const afterClobberTx = runtime.edit();
+    const afterClobber = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      afterClobberTx,
+    );
+    expect(afterClobber?.get(entryIdentity)?.annotations).toBeUndefined();
   });
 
   it("is empty for an entry that was never written", async () => {
