@@ -43,6 +43,15 @@ const AUTH_EVENT = "auth-event";
 
 export class XLoginView extends BaseView {
   static override styles = css`
+    /* The document-level border-box reset doesn't pierce the shadow root;
+      without this, width: 100% + padding (.auth-action-container) overflows
+      the viewport horizontally on mobile. */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
     :host {
       display: flex;
       width: 100%;
@@ -98,7 +107,6 @@ export class XLoginView extends BaseView {
       color: var(--font-color);
       border: var(--border-width, 2px) solid var(--border-color, #000);
       background: var(--shell-surface);
-      box-sizing: border-box;
     }
 
     textarea {
