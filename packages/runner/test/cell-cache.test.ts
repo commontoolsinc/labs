@@ -490,6 +490,41 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     expect(afterClobber?.get(entryIdentity)?.annotations).toBeUndefined();
   });
 
+  it("readEntrySourceAnnotations recovers existing annotations off the write tx (CT-1864 healthy path)", async () => {
+    // The write-back reads annotations to preserve via this helper, which runs
+    // on a throwaway tx OUTSIDE editWithRetry (so it can't poison the commit).
+    // Guard that it still recovers them on a healthy space — otherwise every
+    // redeploy would silently drop annotations, not just aged ones.
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    const pm = runtime.patternManager as unknown as {
+      readEntrySourceAnnotations(
+        space: typeof spaceA,
+        id: string,
+      ): Record<string, unknown> | undefined;
+    };
+
+    // No annotation yet → undefined, so a rewrite overwrites cleanly rather
+    // than resurrecting anything stale.
+    expect(pm.readEntrySourceAnnotations(spaceA, entryIdentity)).toBeUndefined();
+
+    await runtime.patternManager.annotatePattern(
+      entryIdentity,
+      spaceA,
+      "name",
+      { "/": "name-doc-link" },
+    );
+
+    // Present → recovered, so a healthy redeploy re-supplies and preserves them.
+    expect(pm.readEntrySourceAnnotations(spaceA, entryIdentity)).toEqual({
+      name: { "/": "name-doc-link" },
+    });
+  });
+
   it("is empty for an entry that was never written", async () => {
     const tx = runtime.edit();
     const loaded = await loadSourceClosure(
