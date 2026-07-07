@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { getLogger } from "@commonfabric/utils/logger";
 import { RuntimeConnection } from "./connection.ts";
 import { EventEmitter } from "./emitter.ts";
 import {
@@ -278,5 +279,150 @@ describe("RuntimeConnection.attachVDom", () => {
     // unmount is redundant and is skipped.
     await session.unmount(1);
     expect(transport.sent.length).toBe(sentBefore);
+  });
+});
+
+describe("RuntimeConnection request timeline", () => {
+  it("records send and settle offsets for boot-window requests", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    await connection.request<RequestType.Idle>({ type: RequestType.Idle });
+
+    const timeline = connection.getRequestTimelineDiagnostics();
+    expect(timeline.map((entry) => entry.type)).toEqual([
+      RequestType.Initialize,
+      RequestType.Idle,
+    ]);
+    for (const entry of timeline) {
+      expect(typeof entry.msgId).toBe("number");
+      expect(typeof entry.sentAtMs).toBe("number");
+      // Both requests settled, so both are stamped done — at or after send.
+      expect(typeof entry.doneAtMs).toBe("number");
+      expect(entry.doneAtMs!).toBeGreaterThanOrEqual(entry.sentAtMs);
+      expect(entry.error).toBeUndefined();
+    }
+    await connection.dispose();
+  });
+
+  it("leaves doneAtMs unset while in flight and flags error replies", async () => {
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+    const inFlight = connection.request<RequestType.Idle>({
+      type: RequestType.Idle,
+    });
+    const settled = inFlight.then(() => undefined, (error) => error);
+
+    const pendingEntry = connection.getRequestTimelineDiagnostics()
+      .find((entry) => entry.type === RequestType.Idle);
+    expect(pendingEntry).toBeDefined();
+    expect(pendingEntry!.doneAtMs).toBeUndefined();
+    expect(pendingEntry!.error).toBeUndefined();
+
+    // The worker answers with an error; the entry is stamped done + error.
+    const sent = transport.sent.find(
+      (m): m is IPCClientMessage =>
+        "msgId" in m && m.data.type === RequestType.Idle,
+    );
+    transport.emit("message", { msgId: sent!.msgId, error: "boom" });
+    const error = await settled;
+    expect((error as Error).message).toBe("boom");
+
+    const doneEntry = connection.getRequestTimelineDiagnostics()
+      .find((entry) => entry.type === RequestType.Idle);
+    expect(doneEntry!.error).toBe(true);
+    expect(typeof doneEntry!.doneAtMs).toBe("number");
+    await connection.dispose();
+  });
+
+  it("returns a copy that does not expose the internal ledger", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+
+    const first = connection.getRequestTimelineDiagnostics();
+    expect(first.length).toBe(1);
+    // Mutate the returned array and its entries every way a caller could.
+    first[0].type = "mutated" as RequestType;
+    first[0].doneAtMs = -1;
+    first.push({ msgId: 999, type: RequestType.Idle, sentAtMs: 0 });
+
+    const second = connection.getRequestTimelineDiagnostics();
+    expect(second.length).toBe(1);
+    expect(second[0].type).toBe(RequestType.Initialize);
+    expect(second[0].doneAtMs).not.toBe(-1);
+    await connection.dispose();
+  });
+});
+
+describe("RuntimeConnection pending-request diagnostics", () => {
+  it("snapshots in-flight requests with their ages, oldest first", async () => {
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+
+    const first = connection.request<RequestType.Idle>({
+      type: RequestType.Idle,
+    });
+    const firstSettled = first.then(() => undefined, (error) => error);
+    await new Promise((resolve) => setTimeout(resolve, 3));
+    const second = connection.request<RequestType.Idle>({
+      type: RequestType.Idle,
+    });
+    const secondSettled = second.then(() => undefined, (error) => error);
+
+    const pending = connection.getPendingRequestDiagnostics();
+    expect(pending.length).toBe(2);
+    for (const entry of pending) {
+      expect(entry.type).toBe(RequestType.Idle);
+      expect(typeof entry.msgId).toBe("number");
+      expect(entry.ageMs).toBeGreaterThanOrEqual(0);
+    }
+    // Sorted oldest (largest age) first — the request a stalled caller has
+    // been waiting on longest names the wedged layer.
+    expect(pending[0].ageMs).toBeGreaterThanOrEqual(pending[1].ageMs);
+    expect(pending[0].msgId).toBeLessThan(pending[1].msgId);
+
+    await connection.dispose();
+    await firstSettled;
+    await secondSettled;
+    // Disposal settled both as cancellation; nothing is pending anymore.
+    expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+  });
+});
+
+describe("RuntimeConnection loop-lag probe", () => {
+  it("samples main-thread lag while alive and clears its timer on dispose", async () => {
+    const logger = getLogger("runtime-client");
+    const lagCountBefore = logger.getTimeStats("loop", "mainLag")?.count ?? 0;
+
+    // Spy on clearInterval: the loop-lag interval is the only interval the
+    // connection owns, so dispose must clear exactly one.
+    const originalClearInterval = globalThis.clearInterval;
+    const cleared: unknown[] = [];
+    globalThis.clearInterval = ((id?: number) => {
+      cleared.push(id);
+      return originalClearInterval(id);
+    }) as typeof clearInterval;
+
+    try {
+      const transport = new FakeTransport();
+      const connection = await initializedConnection(transport);
+
+      // Block the thread past the first 100ms sample: the tick due during the
+      // block can only fire late, so the probe records a positive mainLag.
+      // (Structure/counter assertion only — the magnitude is not asserted.)
+      const end = performance.now() + 110;
+      while (performance.now() < end) {
+        // busy
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const lagCountAfter = logger.getTimeStats("loop", "mainLag")?.count ?? 0;
+      expect(lagCountAfter).toBeGreaterThan(lagCountBefore);
+
+      expect(cleared.length).toBe(0);
+      await connection.dispose();
+      expect(cleared.length).toBe(1);
+    } finally {
+      globalThis.clearInterval = originalClearInterval;
+    }
   });
 });

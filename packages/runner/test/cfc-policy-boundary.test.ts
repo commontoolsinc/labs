@@ -4,6 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
@@ -354,7 +358,7 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
     const readThenWrite = (
       runtime: Runtime,
       id: string,
-    ): { reasons: readonly string[] } => {
+    ): { reasons: readonly string[]; diagnostics: readonly string[] } => {
       const tx = runtime.edit();
       const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
       expect(cell.key("secret").get()).toBe("rosebud");
@@ -365,8 +369,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
       const reasons = state.prepare.status === "invalidated"
         ? [...state.prepare.reasons]
         : [];
+      const result = { reasons, diagnostics: [...state.diagnostics] };
       tx.abort();
-      return { reasons };
+      return result;
     };
 
     it("off: rejects on the raw label", async () => {
@@ -418,6 +423,68 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
         },
       );
     });
+
+    it("observe: decides as off (rejects), and diagnoses the would-be admission", async () => {
+      // The rewrite (space-reader-anywhere) WOULD add User(alice), which fits
+      // the [User(alice)] ceiling — but observe decides on the raw label
+      // ([Space] does not fit) and only diagnoses the divergence.
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: unguardedPolicy },
+        async (runtime) => {
+          await seedSpaceLabeledCell(runtime, "input-observe", {
+            confidentiality: [SPACE_ATOM],
+            integrity: [ROLE_ALICE],
+          });
+          const { reasons, diagnostics } = readThenWrite(
+            runtime,
+            "input-observe",
+          );
+          // Decided as off: still rejected.
+          expect(
+            reasons.some((reason) =>
+              reason.includes("maxConfidentiality failed")
+            ),
+          ).toBe(true);
+          // …and the divergence (reject → fit) is diagnosed.
+          expect(
+            diagnostics.some((d) =>
+              d.includes("policy-evaluation(observe): rewrite would change") &&
+              d.includes("maxConfidentiality") &&
+              d.includes("from reject to fit")
+            ),
+          ).toBe(true);
+        },
+      );
+    });
+
+    it("observe: fuel exhaustion at the input gate is diagnosed, decision unchanged", async () => {
+      // A cycling policy exhausts fuel; observe still decides on the raw label
+      // (reject) and diagnoses the exhaustion at the input requirement.
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: CYCLING_POLICY },
+        async (runtime) => {
+          await seedSpaceLabeledCell(runtime, "input-observe-exhaust", {
+            confidentiality: [SPACE_ATOM],
+            integrity: [ROLE_ALICE],
+          });
+          const { reasons, diagnostics } = readThenWrite(
+            runtime,
+            "input-observe-exhaust",
+          );
+          expect(
+            reasons.some((reason) =>
+              reason.includes("maxConfidentiality failed")
+            ),
+          ).toBe(true);
+          expect(
+            diagnostics.some((d) =>
+              d.includes("policy-evaluation(observe): fuel exhausted") &&
+              d.includes("input requirement")
+            ),
+          ).toBe(true);
+        },
+      );
+    });
   });
 
   describe("dial + digest plumbing", () => {
@@ -433,6 +500,38 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
         );
         // Re-asserting enforce is fine.
         tx.setCfcPolicyEvaluationMode("enforce");
+        tx.abort();
+      });
+    });
+
+    it("invalidates a prepared tx when the evaluation mode is strengthened", async () => {
+      // Prepare under observe, then strengthen to enforce: the mode is not in
+      // PreparedDigestInput, so a decision computed under observe must be
+      // invalidated rather than surviving the commit-time recheck while the tx
+      // now reports enforce (codex P2 on #4566).
+      await withRuntime({ policyEvaluation: "observe" }, (runtime) => {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "mode-change-probe",
+          {
+            type: "object",
+            properties: {
+              value: { type: "string", ifc: { confidentiality: ["x"] } },
+            },
+          } as const satisfies JSONSchema,
+          tx,
+        );
+        cell.set({ value: "v" });
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().prepare.status).toBe("invalidated");
+        // A no-op re-set of the SAME mode does not invalidate a fresh prepare.
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
         tx.abort();
       });
     });
@@ -486,6 +585,18 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           expect(state.prepare.input.policySnapshot?.digest)
             .toBe(runtime.cfcPolicySnapshot!.digest);
         }
+        tx.abort();
+      });
+    });
+
+    it("the TransactionWrapper delegates setCfcPolicyEvaluationMode to the wrapped tx", async () => {
+      // The child-tx wrapper forwards the dial setter; a nested/child pattern
+      // tx must carry the deployment mode into the wrapped tx's CFC state.
+      await withRuntime({ policyEvaluation: "off" }, (runtime) => {
+        const tx = runtime.edit() as ExtendedStorageTransaction;
+        const wrapper = new TransactionWrapper(tx, {});
+        wrapper.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().policyEvaluationMode).toBe("enforce");
         tx.abort();
       });
     });

@@ -23,10 +23,7 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
-import {
-  contentAddressedActionIdentity,
-  toActionRunTraceAddress,
-} from "./diagnostics.ts";
+import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
@@ -732,20 +729,14 @@ export function schedulerImplementationFingerprint(
   // `cf:module/<hash>:<symbol>` — stable across reloads, entry points, and TCB
   // upgrades (see docs/specs/content-addressed-action-identity.md). It is
   // deliberately per-SYMBOL (it identifies the implementation code), with NO
-  // per-instance key — unlike the action id (`getSchedulerActionId`). `.src` is
-  // no longer consulted (the prior `src:` fallback depended on the source-map
-  // path).
+  // per-instance key — unlike the action id (`getSchedulerActionId`). It is
+  // read from the stamp set at action creation (`applyImplementationHash`) —
+  // the single identity channel; no re-derivation here, and `.src` is never
+  // consulted (the prior `src:` fallback depended on the source-map path).
   const implementationHash = (action as { implementationHash?: unknown })
     .implementationHash;
   if (typeof implementationHash === "string" && implementationHash.length > 0) {
     return `impl:${implementationHash}`;
-  }
-  // `.src` is no longer consulted for the durable fingerprint; resolve the
-  // content-addressed `{ identity, symbol }` directly (the prior `src:` fallback
-  // depended on the source-map path).
-  const contentId = contentAddressedActionIdentity(action);
-  if (contentId) {
-    return `impl:${contentId}`;
   }
   const telemetryId = schedulerObservationPieceId(actionId, telemetry);
   return `action:${telemetryId}:${actionId}`;

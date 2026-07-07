@@ -9,7 +9,10 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
-import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -3189,14 +3192,26 @@ export class SchemaObjectTraverser<V extends FabricValue>
       });
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
-      // TODO(danfuzz): The value-type dispatch above has no `FabricSpecialObject`
-      // arm: a `FabricPrimitive` (`typeof "object"`) never reaches the leaf
-      // `traversePrimitive` and falls into this record branch (decomposed); a
-      // `FabricInstance` is walked by `Object.entries` over internal slots rather
-      // than descended by its codec contents. The same gap applies to the
-      // schema-`default` fallback path (`traverseDAG`/`applyDefault`), since a
-      // schema `default` can carry a `FabricValue`. A correct fix descends a
-      // `FabricInstance` by codec contents, not own-props.
+      // TODO(danfuzz): a `FabricInstance` is walked by `Object.entries` over
+      // internal slots rather than descended by its codec contents; the same
+      // gap applies to the schema-`default` fallback path
+      // (`traverseDAG`/`applyDefault`), since a schema `default` can carry a
+      // `FabricValue`. A correct fix descends a `FabricInstance` by codec
+      // contents, not own-props.
+    } else if (doc.value instanceof FabricSpecialObject) {
+      // A `FabricSpecialObject` (e.g. `FabricBytes`) is an opaque host value
+      // the fabric type system treats like a primitive — always frozen,
+      // passing through conversion unchanged — so it materializes as a LEAF:
+      // its `typeof` is "object", so this arm must precede the record branch
+      // below, which would otherwise decompose it via `Object.entries` over
+      // its own props (empty for e.g. `FabricBytes`, whose surface lives on
+      // the prototype). Type-validate as "object" — the shape the
+      // schema-generator emits for these types today — but do not consult
+      // the schema's structural details: leaves are not property-walked
+      // (CT-1836).
+      return this.isValidType(schemaObj, "object") !== TypeValidity.False
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isRecord(doc.value)) {
       if (isSigilLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);

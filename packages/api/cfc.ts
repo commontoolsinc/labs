@@ -34,15 +34,15 @@ export const CFC_ATOM_TYPE = {
   // Scoped assessor/verifier judgment for caveat-bearing profiles (spec
   // §15.4): evidence for policy, not global clearance. Trusted-minted.
   CaveatAssessment: "https://commonfabric.org/cfc/atom/CaveatAssessment",
+  // Screening evidence for caveat-bearing profiles (spec §15.4/§10.1):
+  // ingress-stage evidence claims the source was screened; value-stage
+  // evidence binds the exact current value via `valueRef`. Trusted-minted.
+  CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened",
   // Conceptual principal (spec §15.5/§4.8.1): names an abstract requirement
   // in trust statements and exchange-rule integrity guards. A guard of this
   // shape is satisfied via the acting principal's trust closure — never by a
   // literal Concept atom in carried integrity.
   Concept: "https://commonfabric.org/cfc/atom/Concept",
-  // Screening evidence for caveat-bearing profiles (spec §15.4/§10.1):
-  // ingress-stage evidence claims the source was screened; value-stage
-  // evidence binds the exact current value via `valueRef`. Trusted-minted.
-  CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened",
   // Trusted evidence that a source-linked disclaimer was attached to content
   // emitted through a sink (spec §15.4). Trusted-minted.
   DisclaimerAttached: "https://commonfabric.org/cfc/atom/DisclaimerAttached",
@@ -447,10 +447,6 @@ export const cfcAtom = {
     return { type: CFC_ATOM_TYPE.HasRole, principal, space, role };
   },
 
-  concept(uri: string): CfcConceptAtom {
-    return { type: CFC_ATOM_TYPE.Concept, uri };
-  },
-
   boundaryContext(
     key: string,
     value?: string,
@@ -529,6 +525,10 @@ export const cfcAtom = {
     assessedAt?: number;
   }): CfcCaveatAssessmentAtom {
     return { ...pruneOptional(fields), type: CFC_ATOM_TYPE.CaveatAssessment };
+  },
+
+  concept(uri: string): CfcConceptAtom {
+    return { type: CFC_ATOM_TYPE.Concept, uri };
   },
 } as const;
 
