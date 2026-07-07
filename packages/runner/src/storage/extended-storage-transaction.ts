@@ -850,6 +850,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
+      // A recorded reason makes the transaction CFC-relevant by definition.
+      // Without this mark, a reasoned transaction whose reads/writes never
+      // tripped an eager mark (e.g. a schema-less labeled flow feeding a
+      // writer-fit misfit) leaves `relevant` false; the commit-time probes
+      // skip non-`unprepared` prepare states, so the enforcement ladder's
+      // reject would silently fail open (same shape as the late-sink-request
+      // hole, Codex P2 on #4070).
+      this.markCfcRelevant("prepare-reasons");
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,

@@ -59,12 +59,13 @@ conforming, and the conforming ones are reachable only along a partial order.
   not to tolerating absent policy on labeled docs; that case is already
   fail-closed.
 - **`enforce-strict`** — everything `enforce-explicit` rejects, **plus**
-  strict-only fail-closed rejects. The one specified today is the writer-fit
+  strict-only fail-closed rejects. The one implemented today is the writer-fit
   misfit variant (SC-18b): the `canWrite` confidentiality misfit **rejects**
-  rather than persist-and-flag; future checks that want a persist-and-flag
-  grace under explicit put their reject here. This is the H4 target; today
-  `enforce-strict` is rankable (strictness 3) but has **no distinct behavior**
-  from explicit — H4 gives it one.
+  rather than persist-and-flag (H4,
+  [prepare.ts](../../packages/runner/src/cfc/prepare.ts) writer-fit,
+  [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts));
+  future checks that want a persist-and-flag grace under explicit put their
+  reject here, same shape.
 
 ## 2. Rollout ordering (the partial order)
 
@@ -190,9 +191,30 @@ posture (anti-fail-closed).
 
 The strict-only delta is:
 
-- **Writer-fit reject (SC-18b).** The `canWrite` confidentiality misfit rejects
-  under strict instead of persist-and-flag. Reason string names the rule id and
-  path (SC-18c). This does **not** exist in code yet — it is H4's contract.
+- **Writer-fit reject (SC-18b) — implemented (H4 code step).** The per-tx flow
+  join landing as a target's `derived` value component is measured against the
+  target's DECLARED store-policy component (declared + legacy entries, resolved
+  by the same per-component longest-prefix rule reads use; absent declarations
+  are the empty "public" ceiling, fail-closed) at each path where the component
+  lands, with the shared clause-subsumption predicate of the egress gates
+  (`atomsOutsideCeiling`). Under `enforce-strict` a misfit records a prepare
+  reason and the commit rejects; every mode below persists the measurement and
+  flags a `writer-fit(persist-and-flag)` diagnostic carrying the same reason
+  string — so `enforce-explicit` keeps the shipped persist-and-flag posture
+  bit-for-bit on stored metadata. The reason string is stable and names the
+  rule id, target, path, and offending clause(s) (SC-18c):
+  `writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
+  <clauses>`. Scope note (v1): link-covered writes carry per-slot link labels
+  instead of the join and are outside the check, as is the pure-link-structure
+  shape channel; grown existence atoms (SC-4) are historical and deliberately
+  never measured — only the current join is. Implementation in
+  [prepare.ts](../../packages/runner/src/cfc/prepare.ts) (`prepareBoundaryCommit`
+  flow-persist stamping), asserted both ways in
+  [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts).
+  Landing this also closed a reasoned-tx fail-open: `prepareCfc` now marks any
+  transaction with recorded reasons CFC-relevant (`prepare-reasons`), so a
+  reasoned tx whose reads never tripped an eager relevance mark cannot slip the
+  ladder ([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)).
 - **Future strict-only fail-closed cases.** Any new check that wants a
   persist-and-flag grace under explicit puts its reject at the strict level,
   same shape.

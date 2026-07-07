@@ -242,6 +242,19 @@ derived-consuming list names the display ceiling and missing-policy rules,
 not writer-fit; (c) the rejection error contract and the audit/diagnostics
 contract for persist-and-flag.
 
+(b) and (c) are now **decided and landed (Epic H4 code step)**: the `canWrite`
+confidentiality misfit — the per-tx flow join measured against the declared
+store-policy component at each derived-stamp path — rejects at
+`enforce-strict` only, and persists-and-flags (a
+`writer-fit(persist-and-flag)` diagnostic carrying the identical reason
+string) under every lower mode, with the stable SC-18c reason
+`writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
+<offending clauses>`. Contract text in
+`docs/specs/cfc-enforcement-matrix.md` §4; implementation in
+`prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
+standard-profile default — stays open on the confidentiality side.
+
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
 and is now decided (owner, 2026-06-12): the schema's `requiredIntegrity` is a
@@ -278,8 +291,9 @@ value consultation), and empty integrity on a floor-declaring path fails (a
 stamped-`LlmDerived`-only value fails any floor by construction — closing the
 write-side half of the vacuous pass). Wildcard (`*`) floor entries and
 pattern-setup/seed initialization stay exempt (v1 scope); (a) the standard-
-profile default, (b) `enforce-strict` making writer-fit itself reject, and (c)
-the §8.10 spec home remain open.
+profile default and (c) the §8.10 spec home remain open — (b),
+`enforce-strict` making writer-fit itself reject, landed with the H4 code
+step (see the confidentiality paragraph above).
 
 **SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
 Verified open (the rule is stated as fact in §15.1 and §3.1.2, nowhere

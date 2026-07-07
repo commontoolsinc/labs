@@ -62,6 +62,7 @@ import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  cfcEnforcementStrictness,
   type CfcMetadata,
   type IFCLabel,
   type ImplementationIdentity,
@@ -92,10 +93,15 @@ const isPrefix = (
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
   path: readonly string[],
+): IFCLabel | undefined =>
+  metadata === undefined
+    ? undefined
+    : labelForEntriesAtPath(metadata.labelMap.entries, path);
+
+const labelForEntriesAtPath = (
+  entries: readonly LabelMapEntry[],
+  path: readonly string[],
 ): IFCLabel | undefined => {
-  if (!metadata) {
-    return undefined;
-  }
   // Per-component longest-prefix resolution: within one origin component a
   // more specific entry replaces its ancestor (§4.6.3 replace-down), but
   // components layer independently, so the effective label is the join of
@@ -106,7 +112,7 @@ const labelAtPath = (
     string,
     { path: readonly string[]; label: IFCLabel }
   >();
-  for (const entry of metadata.labelMap.entries) {
+  for (const entry of entries) {
     if (!isPrefix(entry.path, path)) {
       continue;
     }
@@ -3756,6 +3762,12 @@ export const prepareBoundaryCommit = (
   const flowIntegrity = flowJoin.integrity;
   const flowHasLabels = flowConfidentiality.length > 0 ||
     flowIntegrity.length > 0;
+  // H4 (SC-18b): the writer-fit misfit REJECTS only at `enforce-strict`;
+  // every mode below persists-and-flags, so `enforce-explicit` keeps the
+  // shipped behavior where the derived component is a measurement, not a
+  // write ceiling (§8.12.4, enforcement-matrix §4).
+  const writerFitRejects = cfcEnforcementStrictness(state.enforcementMode) >=
+    cfcEnforcementStrictness("enforce-strict");
   if (
     flowMode === "observe" &&
     flowTargets !== undefined &&
@@ -4275,6 +4287,33 @@ export const prepareBoundaryCommit = (
         }
         derivedStampPaths.push(path);
       }
+      // H4 writer-fit (SC-18b, §8.12.4 `canWrite`): the per-tx join landing
+      // below as this target's `derived` value component is the measurement
+      // of the written value's actual taint, and canWrite demands it fit the
+      // store's DECLARED policy component at each path where it lands. The
+      // policy component is the declared + legacy entries only — link/
+      // derived/structure entries are per-value data components (§8.12.8),
+      // not store policy — and of those, only the entries a VALUE read
+      // consumes (C0 §4 class selection: covering/value/shape/enumerate; a
+      // declared `observes:"followRef"` entry is pointer policy that value
+      // readers never consume, so it must not admit a value write — bot
+      // review on this PR). Resolution is the same per-component
+      // longest-prefix rule reads use, so the fit test measures exactly the
+      // declared floor a value reader of the path is tainted with. Only the
+      // CURRENT join is measured: shape/existence atoms are historical
+      // (SC-4 freeze-at-creation) and measuring them would permanently
+      // misfit clean overwrites of a store created under taint.
+      // A schema declaring a covering policy in this same tx passes by
+      // construction — §8.12.5's monotone-safe upgrade route; the other two
+      // outs are writing to a fitting store or not writing. Link-covered
+      // writes carry per-slot link labels instead of the join and are
+      // outside this v1 check, as is the pure-link-structure shape channel.
+      const declaredPolicyEntries = flowConfidentiality.length > 0
+        ? persistedLabelEntries.filter((entry) =>
+          (entry.origin === undefined || entry.origin === "declared") &&
+          readConsumesEntry("value", entry)
+        )
+        : [];
       // SC-4, freeze-at-creation form: a path's shape (existence) entry is
       // minted ONCE — at creation, or at the one-time migration of legacy
       // pre-class entries (whose accumulated confidentiality is absorbed
@@ -4311,6 +4350,38 @@ export const prepareBoundaryCommit = (
           )
         ) {
           continue;
+        }
+        if (flowConfidentiality.length > 0) {
+          // Absent declared entries resolve to the EMPTY ceiling ("public
+          // store"), never the undefined "no ceiling" — a tainted write to
+          // an undeclared store is the canonical misfit, and fitting it
+          // by default would hollow the rule out. Clause membership is the
+          // shared subsumption predicate of the egress/observation gates,
+          // so writer-fit cannot drift from what a ceiling admits — and the
+          // ungrantable read-failed marker stays outside every declared
+          // policy (a poisoned measurement never proves fit).
+          const declaredCeiling =
+            labelForEntriesAtPath(declaredPolicyEntries, path)
+              ?.confidentiality ?? [];
+          const offending = atomsOutsideCeiling(
+            flowConfidentiality,
+            declaredCeiling,
+          );
+          if (offending.length > 0) {
+            // SC-18c error contract: a stable reason naming the rule id and
+            // the target path, plus the offending clause(s) so a flag names
+            // exactly what the store would need to declare (§8.12.5).
+            const misfit =
+              `writer-fit confidentiality misfit for ${id} at /${
+                path.join("/")
+              } (canWrite, §8.12.4): ` +
+              offending.map((atom) => JSON.stringify(atom)).join(", ");
+            if (writerFitRejects) {
+              reasons.push(misfit);
+            } else {
+              tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);
+            }
+          }
         }
         // C2 persist split (C0 §5/§8): the per-tx join lands as two
         // per-class entries instead of one covering entry. The `value`
