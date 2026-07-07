@@ -119,6 +119,17 @@ export {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+export type {
+  RenderConfidentialityResolver,
+  RenderConfidentialityResolverConfig,
+  RenderLabelInput,
+} from "./render-ceiling.ts";
+export {
+  createRenderConfidentialityResolver,
+  RENDER_DISPLAY_SINK_CLASS,
+  RENDER_SINK_NAME,
+  STANDARD_RENDER_EXCHANGE_RULES,
+} from "./render-ceiling.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
@@ -159,6 +170,7 @@ export {
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
 export {
+  atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,

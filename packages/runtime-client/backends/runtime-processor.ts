@@ -34,7 +34,9 @@ import {
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
+  createRenderConfidentialityResolver,
   redactCaveatSourcesForDisplay,
+  type RenderConfidentialityResolver,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -175,6 +177,46 @@ export function runtimeOptionsFromInitializationData(
       ? () => data.trustSnapshot
       : undefined,
   };
+}
+
+/**
+ * Builds the H3b display-boundary resolver for a worker's renders. When a
+ * ceiling is in force, each render egress resolves principal-form atoms
+ * (Space-via-HasRole) RUNNER-side; the reconciler only fits the result.
+ *
+ * Reader membership is sourced ONLY from verified facts, never from a cell's
+ * mere local residency:
+ *  - the acting user's own identity space (space DID == principal DID) — a
+ *    principal definitionally reads its own space;
+ *  - the current session workspace (`sessionSpace` = the space the session was
+ *    authorized to open) — with `createSession({ spaceName })` the home space
+ *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
+ *    is the space `session.open` gated on, so an own-workspace `Space(...)`
+ *    label resolves rather than over-blocking.
+ * Broader cross-space membership awaits the §4.9.3 membership lookup; until
+ * then other-space `Space(...)` labels fail closed. Returns undefined when no
+ * ceiling is configured (no render gating — today's behavior).
+ */
+export function renderConfidentialityResolverFor(
+  runtime: Runtime,
+  identity: Identity,
+  ceiling: RenderConfidentialityCeiling | undefined,
+  sessionSpace?: string,
+): RenderConfidentialityResolver | undefined {
+  if (ceiling === undefined) {
+    return undefined;
+  }
+  const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
+    identity.did();
+  const memberSpaces = sessionSpace === undefined ||
+      sessionSpace === actingPrincipal
+    ? [actingPrincipal]
+    : [actingPrincipal, sessionSpace];
+  return createRenderConfidentialityResolver({
+    actingPrincipal,
+    trustConfig: runtime.cfcTrustConfig,
+    memberSpaces,
+  });
 }
 
 /**
@@ -330,6 +372,11 @@ export class RuntimeProcessor {
   // Host-supplied default render ceiling applied to every mount's
   // reconciler. Undefined preserves prior behavior (no ceiling).
   private renderConfidentialityCeiling?: RenderConfidentialityCeiling;
+  // Runner-side display-boundary resolver (Epic H3b) built once from the
+  // runtime's trust config + acting principal when a ceiling is in force.
+  // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
+  // `HasRole` principal forms resolve before the reconciler's ceiling fit.
+  private renderConfidentialityResolver?: RenderConfidentialityResolver;
 
   private constructor(
     runtime: Runtime,
@@ -466,6 +513,12 @@ export class RuntimeProcessor {
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     processor.renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    processor.renderConfidentialityResolver = renderConfidentialityResolverFor(
+      runtime,
+      identity,
+      processor.renderConfidentialityCeiling,
+      space,
+    );
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). Refusals
@@ -1497,6 +1550,7 @@ export class RuntimeProcessor {
     const reconciler = new WorkerReconciler({
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       renderConfidentialityCeiling: this.renderConfidentialityCeiling,
+      resolveRenderConfidentiality: this.renderConfidentialityResolver,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({

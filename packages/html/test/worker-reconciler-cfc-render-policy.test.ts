@@ -7,6 +7,8 @@ import {
 } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { createRenderConfidentialityResolver } from "@commonfabric/runner/cfc";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -2966,6 +2968,270 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           assertEquals(renderedText.includes("Content hidden by policy"), true);
         } finally {
           cancel();
+        }
+      },
+    );
+
+    // Epic H3b: the render gate resolves §15.2 principal shapes through the
+    // runner-side exchange evaluator (spec §8.10.6) before the fit check. The
+    // reconciler consumes the resolved label; a display-class BoundaryContext
+    // and the acting user's HasRole membership facts drive resolution.
+    await t.step(
+      "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
+      async () => {
+        const seedTx = runtime.edit();
+        const seedLabeled = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        // A Space atom naming the acting user's OWN space resolves — the user
+        // is a verified reader of their own space (§4.9.3). A Space atom naming
+        // a space the user has no verified role in stays blocked (fail-closed),
+        // even though the cell is locally resident: residency is not authority.
+        const userLabeled = seedLabeled(
+          "cfc-h3b-user",
+          "User-scoped note",
+          cfcAtom.user(signer.did()),
+        );
+        const spaceMemberLabeled = seedLabeled(
+          "cfc-h3b-space-member",
+          "Own-space note",
+          cfcAtom.space(signer.did()),
+        );
+        const spaceOtherLabeled = seedLabeled(
+          "cfc-h3b-space-other",
+          "Other-space note",
+          cfcAtom.space("did:key:z6MkOtherSpaceOutsideRoles"),
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // The §8.10.6 default display ceiling: acting-user identity + personal
+        // space principal forms. The acting user's own space is the one
+        // always-verifiable member fact (space DID == principal DID).
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
+        });
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [
+            userLabeled as never,
+            spaceMemberLabeled as never,
+            spaceOtherLabeled as never,
+          ],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("User-scoped note"), true);
+          assertEquals(renderedText.includes("Own-space note"), true);
+          assertEquals(renderedText.includes("Other-space note"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // With the resolver active, the clause-aware fit still routes each
+    // still-offending clause through the same per-clause admission as the H3a
+    // path: the read-failure marker stays ungrantable (audit item 22), an
+    // allow-listed caveat kind renders, and an author-declassified atom renders.
+    await t.step(
+      "resolved-path fit honors marker / caveat-kind / declassification",
+      async () => {
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
+        });
+        const influenceCaveat = {
+          type: "https://commonfabric.org/cfc/atom/Caveat",
+          kind: "prompt-influence",
+          source: {
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: signer.did(),
+          },
+        };
+        const seedTx = runtime.edit();
+        const seed = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-branch-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        const markerCell = seed(
+          "cfc-h3b-marker",
+          "Marker content",
+          "cfc:label-read-failed",
+        );
+        const caveatCell = seed(
+          "cfc-h3b-caveat",
+          "Influence-caveated note",
+          influenceCaveat,
+        );
+        const declassCell = seed(
+          "cfc-h3b-declass",
+          "Author-released note",
+          cfcAtom.space("did:key:z6MkDeclassSpace"),
+        );
+        // An authored OR-clause: declassifying ONE alternative must release the
+        // whole disjunctive clause even after resolution keeps it an OR.
+        const declassOrCell = seed(
+          "cfc-h3b-declass-or",
+          "Author-released OR note",
+          {
+            anyOf: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+              cfcAtom.space("did:key:z6MkDeclassOrB"),
+            ],
+          },
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // Marker + caveat under a root ceiling that allow-lists the influence
+        // kind: the caveat renders, the marker stays blocked.
+        const rootCollector = createOpsCollector();
+        const rootReconciler = new WorkerReconciler({
+          onOps: rootCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+            caveatKinds: ["prompt-influence"],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelRoot = rootReconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [markerCell as never, caveatCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = rootCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Influence-caveated note"), true);
+          assertEquals(text.includes("Marker content"), false);
+        } finally {
+          cancelRoot();
+        }
+
+        // An authored boundary that declassifies the offending atom renders it
+        // even under the resolver path (renderDeclassificationPolicy "allow").
+        const declassCollector = createOpsCollector();
+        const declassReconciler = new WorkerReconciler({
+          onOps: declassCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelDeclass = declassReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassSpace"),
+            ],
+          },
+          children: [declassCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = declassCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released note"), true);
+        } finally {
+          cancelDeclass();
+        }
+
+        // Declassifying one alternative of an OR-clause releases the clause.
+        const orCollector = createOpsCollector();
+        const orReconciler = new WorkerReconciler({
+          onOps: orCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelOr = orReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+            ],
+          },
+          children: [declassOrCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = orCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released OR note"), true);
+        } finally {
+          cancelOr();
         }
       },
     );

@@ -1,5 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
-import { CFC_CONCEPT_KIND } from "@commonfabric/api/cfc-atoms";
+import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc-atoms";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
@@ -50,12 +50,14 @@ export type RuntimeRenderConfidentialityCeiling = NonNullable<
 >;
 
 /**
- * The §8.10.6 initial display-sink release ceiling (Epic H3a,
+ * The §8.10.6 initial display-sink release ceiling (Epic H3a/H3b,
  * docs/plans/cfc-future-work-implementation.md): what a display surface
- * admits when no authored policy covers it. Exact-match forms only — the
- * reconciler checks ceiling atoms by structural equality; principal forms
- * that need exchange resolution (PersonalSpace/Space-via-HasRole) are H3b.
- * Everything outside the ceiling fails closed at the render gate.
+ * admits when no authored policy covers it. The audience of a display sink
+ * is the acting user, so the identity/personal-space principal forms naming
+ * exactly that audience are admissible by construction. Shared `Space(...)`
+ * principals are NOT listed here — they resolve to the acting user via the
+ * verified `HasRole` exchange rules at the render boundary (H3b), so the
+ * runner-side resolver admits them without widening this static ceiling.
  *
  * Tighten-only evolution (spec §8.10.6): removing an entry needs no
  * ceremony; admitting a new atom family or caveat kind is a release
@@ -67,8 +69,14 @@ export function defaultRenderConfidentialityCeiling(
   return {
     // Acting-user identity atoms: the audience of a display sink is the
     // acting user, so atoms naming exactly that audience are admissible by
-    // construction. DID-string form — the exact shape labels carry today.
-    atoms: [actingUser],
+    // construction (spec §8.10.6). Both the §15.2 principal atom objects
+    // (`User`, `PersonalSpace`) and the legacy DID-string form are listed —
+    // the ceiling is a set, and every entry names exactly this audience.
+    atoms: [
+      cfcAtom.user(actingUser),
+      cfcAtom.personalSpace(actingUser),
+      actingUser,
+    ],
     // Influence-class caveat kinds, whose canonical display release is the
     // rendered-disclosure rule (§8.10.5). Deliberately excludes
     // PromptInjectionRiskUnscreened: a material-risk kind that keeps its

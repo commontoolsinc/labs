@@ -49,10 +49,13 @@ import {
   normalizeRenderDeclassificationPolicy,
 } from "./types.ts";
 import {
+  atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
   type CfcLabelView,
   cfcLabelViewForCell,
+  clauseAlternatives,
   markRendererTrustedEvent,
+  type RenderConfidentialityResolver,
 } from "@commonfabric/runner/cfc";
 import type { VDomOp } from "../vdom-ops.ts";
 import { generateChildKeys } from "./keying.ts";
@@ -138,10 +141,16 @@ export class WorkerReconciler {
   // (spec §8.10.6), otherwise the historical unbounded policy. Authored
   // boundaries can only narrow from here.
   private readonly rootRenderPolicy: RenderPolicy;
+  // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
+  // confidentiality label through the exchange rules before the ceiling fit,
+  // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
+  // exact-match behavior.
+  private readonly resolveRenderConfidentiality?: RenderConfidentialityResolver;
 
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
+    this.resolveRenderConfidentiality = options.resolveRenderConfidentiality;
     // Security knob: a present-but-unknown value fails closed to "deny";
     // only an absent option keeps the documented "allow" default.
     this.renderDeclassificationPolicy = normalizeRenderDeclassificationPolicy(
@@ -969,9 +978,21 @@ export class WorkerReconciler {
     } catch {
       return false;
     }
+    // Epic H3b: with a resolver wired and a ceiling in force, exchange-resolve
+    // the cell's label (runner-side) before the fit — this is where
+    // `Space(...)`-via-`HasRole` principal forms become admissible. Without a
+    // resolver, or on a declassify-only boundary, fall back to the H3a
+    // per-atom exact-match path.
+    const useResolver = this.resolveRenderConfidentiality !== undefined &&
+      policy.maxConfidentiality !== undefined;
+
     if (labelView === undefined) {
       // Schema IFC is a constraint, not the data label. Use it only as a
       // conservative fallback when no stored/read label metadata is available.
+      // Exchange resolution is deliberately NOT applied here: schema IFC does
+      // not carry the runtime `Space(...)` principals resolution targets, and
+      // the per-atom exact-match fit stays fail-closed for anything it cannot
+      // admit — the resolver drives the stored-label path below.
       const schemaLabels = this.confidentialityLabelsFromCellSchema(cell);
       if (schemaLabels.length === 0) {
         return true;
@@ -981,10 +1002,71 @@ export class WorkerReconciler {
       );
     }
 
-    for (const atom of this.confidentialityLabels(labelView)) {
+    const confidentiality = this.confidentialityLabels(labelView);
+    if (useResolver) {
+      return this.resolvedConfidentialityRenderable(
+        confidentiality,
+        this.integrityLabels(labelView),
+        policy,
+      );
+    }
+    for (const atom of confidentiality) {
       if (!this.atomRenderableUnderPolicy(atom, policy)) {
         return false;
       }
+    }
+    return true;
+  }
+
+  /**
+   * Clause-aware admission of a resolved confidentiality label (Epic H3b).
+   * The resolver rewrites the raw atoms through the display-boundary exchange
+   * rules (runner-side); this method fits the result by clause subsumption
+   * (spec §8.10.3, `atomsOutsideCeiling`). A resolved OR-clause fits when one
+   * of its alternatives sits under the ceiling — so `Space(X)` that gained a
+   * `User(actingUser)` alternative renders. Each still-offending clause gets a
+   * last-chance per-clause check: the read-failure marker is ungrantable
+   * (audit item 22), author declassification and the caveat-kind allow-list
+   * admit only bare atoms — an OR-clause never matches either, staying closed.
+   */
+  private resolvedConfidentialityRenderable(
+    confidentiality: readonly unknown[],
+    integrity: readonly unknown[],
+    policy: RenderPolicy,
+  ): boolean {
+    const resolved = this.resolveRenderConfidentiality!({
+      confidentiality,
+      integrity,
+    });
+    const offending = atomsOutsideCeiling(resolved, policy.maxConfidentiality);
+    for (const clause of offending) {
+      // Ungrantable: the marker means "the label could not be read" — no
+      // ceiling entry, declassification, or resolved alternative may admit it.
+      if (
+        clauseAlternatives(clause).some((alternative) =>
+          deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM)
+        )
+      ) {
+        return false;
+      }
+      // Author declassification names an ATOM; after exchange resolution an
+      // offending clause may be an OR of alternatives, so match the
+      // declassified atom against the clause OR any of its alternatives —
+      // releasing one alternative of a disjunctive clause releases the clause.
+      if (
+        policy.declassifyConfidentiality.some((declassified) =>
+          deepEqual(declassified, clause) ||
+          clauseAlternatives(clause).some((alternative) =>
+            deepEqual(declassified, alternative)
+          )
+        )
+      ) {
+        continue;
+      }
+      if (this.canRenderConfidentialityAtom(clause, policy)) {
+        continue;
+      }
+      return false;
     }
     return true;
   }

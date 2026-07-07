@@ -6,10 +6,13 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  renderConfidentialityResolverFor,
   runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
+import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   type CellRef,
   type CfcLabelView,
@@ -91,6 +94,90 @@ function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
 // A valid `fid1:` page id from a readable seed (handlers parse pageId via
 // `entityIdFrom`, which requires a real tagged-hash string).
 const fid = (seed: string) => taggedHashStringOf(seed);
+
+describe("renderConfidentialityResolverFor (H3b)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(
+        renderConfidentialityResolverFor(runtime, cfcSigner, undefined),
+      ).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the acting user's own space against a ceiling", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(resolver).toBeDefined();
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The acting user's own space (space DID == principal DID) is a verified
+      // member, so a Space label naming it resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A different space the acting user has no verified role in stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkElse")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkElse")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the session workspace when it differs from the principal DID", async () => {
+    // createSession({ spaceName }) derives a home-space DID distinct from the
+    // acting principal; the session-authorized workspace is a verified member,
+    // so its own Space(...) label resolves rather than over-blocking.
+    const { runtime, storageManager } = createRuntime();
+    const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
+    try {
+      const resolver = renderConfidentialityResolverFor(
+        runtime,
+        cfcSigner,
+        { atoms: [cfcAtom.user(cfcSigner.did())] },
+        sessionSpace,
+      );
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The session workspace resolves...
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(sessionSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // ...and the acting user's own identity space still resolves too.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A third, unrelated space stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkThird")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
 
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
