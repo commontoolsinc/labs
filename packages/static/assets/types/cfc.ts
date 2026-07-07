@@ -33,6 +33,7 @@ export declare const CFC_ATOM_TYPE: {
   readonly CaveatAssessment:
     "https://commonfabric.org/cfc/atom/CaveatAssessment";
   readonly CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened";
+  readonly Concept: "https://commonfabric.org/cfc/atom/Concept";
   readonly DisclaimerAttached:
     "https://commonfabric.org/cfc/atom/DisclaimerAttached";
   readonly DisclosureAcknowledged:
@@ -170,6 +171,10 @@ export type CfcDisclaimerAttachedAtom = CfcAtomObject & {
   readonly source: CfcAtom;
   readonly disclaimerDigest: string;
   readonly formatter?: CfcAtom;
+};
+export type CfcConceptAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Concept;
+  readonly uri: string;
 };
 export type CfcCaveatAssessmentAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.CaveatAssessment;
@@ -311,6 +316,7 @@ export declare const cfcAtom: {
     purpose?: string;
     assessedAt?: number;
   }) => CfcCaveatAssessmentAtom;
+  readonly concept: (uri: string) => CfcConceptAtom;
 };
 export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "Cfc",

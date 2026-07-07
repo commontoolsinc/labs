@@ -6,6 +6,7 @@ export type {
   CfcCaveatAssessmentAtom,
   CfcCaveatAtom,
   CfcCaveatScreenedAtom,
+  CfcConceptAtom,
   CfcDisclaimerAttachedAtom,
   CfcDisclosureAcknowledgedAtom,
   CfcDisclosureRenderedAtom,

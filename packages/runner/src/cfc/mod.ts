@@ -100,6 +100,15 @@ export {
   createTrustResolver,
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
+export type {
+  ExchangeEvalContext,
+  ExchangeEvalResult,
+  RuleFiring,
+} from "./exchange-eval.ts";
+export {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
