@@ -147,6 +147,8 @@ describe("CFC builtin implementation identity", () => {
     // the only source of `kind: "verified"`. This drives the resolver through
     // the same registration channel the engine uses.
     const implementation = Object.assign(() => undefined, {
+      // `.src` is present but NO LONGER consulted — identity is provenance-only,
+      // so no `sourceLocation` is derived from it.
       src: "cf:module/module-hash-1/main.tsx:4:12",
     });
     recordVerifiedProvenance(implementation, {
@@ -166,7 +168,6 @@ describe("CFC builtin implementation identity", () => {
       symbol: "localFunction",
       sourceFile: "/main.tsx",
       bindingPath: ["localFunction"],
-      sourceLocation: { line: 4, column: 12 },
     });
   });
 
@@ -240,10 +241,14 @@ describe("CFC builtin implementation identity", () => {
     ).toBeUndefined();
   });
 
-  it("fails closed when the canonical source disagrees with the provenance identity", () => {
-    // The provenance analogue of the former out-of-bundle check: a recorded
-    // identity must match the module the function's canonical src points
-    // into; a mismatch is rejected as unsupported rather than guessed at.
+  it("ignores a canonical source that disagrees with the provenance identity", () => {
+    // Re-rooted off `.src`: the former consistency check (src identity ===
+    // provenance identity, else `unsupported`) is GONE. The WeakMap provenance is
+    // the anti-spoof proof and the sole identity source, so a `.src` that points
+    // at a DIFFERENT module — or is garbled/absent, as it will be under lazy
+    // debug-only `.src` — is inert and does NOT downgrade the identity. (An
+    // attacker cannot exploit this: a forged function has no provenance entry at
+    // all and resolves to nothing — see the provenance-less test above.)
     const implementation = Object.assign(() => undefined, {
       src: "cf:module/other-module-hash/other.tsx:4:12",
     });
@@ -253,13 +258,12 @@ describe("CFC builtin implementation identity", () => {
     });
     const module = { type: "javascript" as const };
 
-    expect(
-      resolvePolicyFacingImplementationIdentity(module, { implementation }),
-    ).toEqual({
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "provenance identity must match the implementation's canonical source",
+    const identity = resolvePolicyFacingImplementationIdentity(module, {
+      implementation,
     });
+    expect(identity?.kind).toBe("verified");
+    expect((identity as { moduleIdentity?: string }).moduleIdentity).toBe(
+      "module-hash-1",
+    );
   });
 });

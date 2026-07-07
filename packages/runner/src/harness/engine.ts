@@ -16,6 +16,7 @@ import type {
   ProgramResolver,
   Source,
   TypeScriptCompiler,
+  TypeScriptCompilerOptions,
 } from "@commonfabric/js-compiler";
 import { InMemoryProgram } from "@commonfabric/js-compiler/program";
 import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
@@ -28,6 +29,10 @@ import {
   ensureCompilerStack,
 } from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import {
+  COMPILE_INTERLEAVES_EVENT_LOOP,
+  interleaveCompileYield,
+} from "./compile-interleave.ts";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
@@ -81,7 +86,7 @@ import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
 import {
-  identityFromCanonicalSource,
+  getDefiningModule,
   readBindingIdentity,
   recordVerifiedProvenance,
 } from "./verified-provenance.ts";
@@ -370,7 +375,16 @@ export class Engine extends EventTarget implements Harness {
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
-        const modules = compiler.compileToModules(resolvedForCompile, {
+        // A cold compile is a seconds-long CPU-bound pipeline. In the browser
+        // runtime worker a synchronous run wedges the event loop and stalls
+        // every queued IPC delivery until it finishes (measured as
+        // runner.loop/workerLag ≈ the whole compile), so there we drive the
+        // per-module interleaved variant to bound the stall to the longest
+        // single module step. In Deno batch compiles (cf test, server, CLI)
+        // nothing latency-sensitive shares the loop, so the yields would be
+        // pure overhead (~2x wall) — run the synchronous driver instead.
+        // Both drain the same generator, so the emitted output is identical.
+        const compileOptions: TypeScriptCompilerOptions = {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
           specifierAliases,
@@ -391,7 +405,13 @@ export class Engine extends EventTarget implements Harness {
               getDiagnostics: () => pipeline.getDiagnostics(),
             };
           },
-        });
+        };
+        const modules = COMPILE_INTERLEAVES_EVENT_LOOP
+          ? await compiler.compileToModulesInterleaved(
+            resolvedForCompile,
+            compileOptions,
+          )
+          : compiler.compileToModules(resolvedForCompile, compileOptions);
 
         // Every authored source must have an emitted body; a missing one would
         // otherwise be silently dropped and only fail later at import.
@@ -466,13 +486,16 @@ export class Engine extends EventTarget implements Harness {
       if (!trustBodies) {
         // Verify, and record which modules the verifier approved for hoist
         // registration — only those get the real `__cfReg` registrar (the rest
-        // get a throwing one, so a smuggled call fails closed).
+        // get a throwing one, so a smuggled call fails closed). In the browser
+        // worker, yield between modules: per-body SES verification is CPU-bound
+        // and shares the event loop with IPC traffic there (no-op in Deno).
         for (const [specifier, body] of graph.compiledBodies) {
           const { hasHoistRegistration } = verifyCompiledModuleBody(
             body,
             specifier,
           );
           if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+          await interleaveCompileYield();
         }
       } else {
         // Trusted integrity-gated bytes: SES verification — and its registration
@@ -1073,20 +1096,21 @@ export class Engine extends EventTarget implements Harness {
       if (typeof implementation !== "function") return;
       // Reject a CONFIRMED cross-module mismatch: a re-exporting module
       // (`export { setName } from "./defn"`) surfaces the same function under
-      // its own identity, but the function's canonical `fn.src` names its
-      // defining module. Provenance is first-write-wins and CFC fails closed on
-      // an identity/`fn.src` mismatch, so letting a re-exporter (possibly
-      // visited first) stamp its identity would make a valid verified artifact
-      // resolve as `unsupported`; dropping the re-exporter's record leaves the
-      // defining module's (matching) record to stick. A non-canonical `src`
-      // (e.g. a standalone-engine load whose src isn't rewritten to
-      // `cf:module/<hash>`) is left ALONE — recording it is harmless (CFC then
-      // fail-closes on its own src check), and blocking it would needlessly
-      // strip the `$implRef` such a module can still resolve by.
-      const srcIdentity = identityFromCanonicalSource(
-        (implementation as { src?: string }).src,
-      );
-      if (srcIdentity !== undefined && srcIdentity !== identity) return;
+      // its own identity. Provenance is first-write-wins, so letting a
+      // re-exporter (possibly visited first here) stamp its identity would give a
+      // genuinely-verified artifact the WRONG (re-exporter's) module identity —
+      // and its `writeAuthorizedBy` claims (which name the defining module) would
+      // then be denied. The defining module stamps `getDefiningModule` at its
+      // own (dependency-ordered) evaluation, so drop any record whose recording
+      // identity disagrees; the defining module's (matching) record sticks. An
+      // UNSTAMPED function (undefined — e.g. a runtime/host module, or a
+      // standalone-engine load) is left ALONE: recording it is harmless.
+      // (This replaces the former canonical-`fn.src` guard; `.src` is now
+      // lazy/debug-only and no longer names the defining module.)
+      const definingIdentity = getDefiningModule(implementation);
+      if (definingIdentity !== undefined && definingIdentity !== identity) {
+        return;
+      }
       const bindingIdentity = readBindingIdentity(value);
       recordVerifiedProvenance(implementation, {
         identity,
@@ -1180,13 +1204,17 @@ export class Engine extends EventTarget implements Harness {
     // structural graph verify below always runs.
     if (options.trustedBodies !== true) {
       // Verify, and record which modules the verifier approved for hoist
-      // registration — only those get the real `__cfReg` registrar.
+      // registration — only those get the real `__cfReg` registrar. Yield
+      // between modules so queued event-loop work (worker IPC) interleaves
+      // with the CPU-bound per-body verification (browser worker only; a no-op
+      // in Deno, where the yield would be pure batch overhead).
       for (const [specifier, body] of graph.compiledBodies) {
         const { hasHoistRegistration } = verifyCompiledModuleBody(
           body,
           specifier,
         );
         if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+        await interleaveCompileYield();
       }
     } else {
       // Trusted integrity-gated bytes: registration approval was sealed at
@@ -1202,6 +1230,11 @@ export class Engine extends EventTarget implements Harness {
       );
     }
     verifyModuleGraph(graph.records, mainSpecifier);
+
+    // The SES evaluation below is a single synchronous stretch (~100ms+ for a
+    // system pattern); in the browser worker, yield first so IPC queued behind
+    // the load runs before it rather than after (no-op in Deno).
+    await interleaveCompileYield();
 
     return this.evaluateGraph(graph, mainSpecifier, {
       evalIdPrefix: entryIdentity,

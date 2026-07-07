@@ -22,15 +22,20 @@ describe("schedulerImplementationFingerprint", () => {
     );
   });
 
-  it("derives a content-addressed impl: id from provenance, NOT from src", () => {
+  it("reads ONLY the creation-time stamp — no re-derivation through action.module", () => {
+    // The stamp (`applyImplementationHash` at action creation) is the single
+    // identity channel. A provenance-carrying `action.module` WITHOUT a stamp
+    // must NOT resolve an impl: fingerprint — the former fallback derivation
+    // silently diverged from the stamps (no instance key on the id side) and
+    // was deleted. Unstamped actions take the telemetry fingerprint.
     const impl = (() => {}) as () => void;
     recordVerifiedProvenance(impl, { identity: "HASH", symbol: "__cfLift_1" });
     const action = makeAction({
       src: "/abc123/pattern.tsx:1:1", // present but must be ignored
-      module: { implementation: impl },
+      module: { implementation: impl }, // provenance present but UNSTAMPED
     });
     expect(schedulerImplementationFingerprint(action, "id", undefined)).toBe(
-      "impl:cf:module/HASH:__cfLift_1",
+      "action:action:id:id",
     );
   });
 

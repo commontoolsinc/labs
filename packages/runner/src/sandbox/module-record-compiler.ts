@@ -7,6 +7,7 @@ import {
   computeModuleHashes,
   findInternalTarget,
 } from "../harness/module-identity.ts";
+import { recordDefiningModule } from "../harness/verified-provenance.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
@@ -165,6 +166,45 @@ export function populateModuleExports(
     moduleExports[name] = hardenExportedValue(writeOnceExports[name]);
   }
   moduleExports.__esModule = true;
+}
+
+/**
+ * Stamp each exported builder-artifact implementation with the DEFINING module's
+ * content identity (`recordDefiningModule`, first-write-wins). Called from a
+ * module's `execute` — which runs in dependency order — so a re-exporting module
+ * (which imports, therefore runs after, its definer) never overwrites the
+ * defining module's stamp. `recordModuleProvenance`'s guard reads this to keep a
+ * re-exporter from stamping its own identity onto a function it did not define
+ * (the `.src`-free replacement for the former canonical-`fn.src` guard).
+ */
+function stampDefiningModule(
+  moduleExports: Record<string, unknown>,
+  identity: string,
+): void {
+  for (const name of Object.keys(moduleExports)) {
+    if (name === "__esModule") continue;
+    const value = moduleExports[name];
+    if (
+      value === null ||
+      (typeof value !== "object" && typeof value !== "function")
+    ) {
+      continue;
+    }
+    // Match what `recordModuleProvenance` keys provenance on: the artifact's
+    // `.implementation` function, or the value itself when it is a function.
+    // Read via the OWN data-property descriptor, never a normal get: this walk
+    // runs over every export BEFORE any trust gate, so a plain `.implementation`
+    // read would execute a module-authored accessor during this host-initiated
+    // pass — a throwing getter would fail the module load after its factory
+    // succeeded, and a getter's return value must never receive this module's
+    // defining stamp. Real builder factories carry `.implementation` as an own
+    // data property, so legitimate artifacts are unaffected.
+    const implementation =
+      Object.getOwnPropertyDescriptor(value, "implementation")?.value ?? value;
+    if (typeof implementation === "function") {
+      recordDefiningModule(implementation, identity);
+    }
+  }
 }
 
 /**
@@ -752,6 +792,10 @@ export function compileSourcesToRecords(
         // Reached only if the factory returned normally — commit staged hoist
         // registrations (transactional: a throw above skips this).
         commit();
+        // Stamp the defining module identity on this module's exported artifacts
+        // (dependency-ordered, first-write-wins) so the re-exporter provenance
+        // guard works without reading `.src`.
+        stampDefiningModule(moduleExports, moduleHash);
       },
     });
   }
@@ -974,6 +1018,9 @@ export function buildRecordsFromCompiled(
           register,
         );
         commit();
+        // Stamp the defining module identity (see the cold path above) so the
+        // re-exporter provenance guard works on warm/cached reloads too.
+        stampDefiningModule(moduleExports, m.identity);
       },
     });
   }
