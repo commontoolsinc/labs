@@ -12,6 +12,7 @@ export {
   CrossStageState,
   injectCfDataHelper,
   injectCfHelpers,
+  isLegacyInjectedEnvelope,
   PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   sourceDisablesCfTransform,

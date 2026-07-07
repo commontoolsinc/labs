@@ -221,6 +221,54 @@ export function injectCfHelpers(source: string, fileName?: string): string {
   ].join("\n");
 }
 
+/**
+ * Exact-envelope detector for LEGACY stored pattern sources (CT-1838).
+ *
+ * Pre-#4158 pipelines persisted the helper-INJECTED pretransform form as the
+ * source-of-record: `[HELPERS_STMT, source, usedStmt].join("\n")`. Such a
+ * document is byte-recognizable — its first line is exactly
+ * {@link HELPERS_STMT} and it ends with the {@link HELPERS_USED_STMT} (or
+ * {@link HELPERS_USED_STMT_JS}) trailer. The current authoring guard
+ * (`checkCFHelperVar`) rejects the reserved `__cfHelpers` identifier, so
+ * without tolerance every pre-#4158 stored pattern bricks on cold load —
+ * and, via the default pattern, all piece creation in aged spaces.
+ *
+ * Match rules (deliberately exact — see the runner's cold-load call sites):
+ * - prefix: line 1 must be byte-exactly `HELPERS_STMT`;
+ * - trailer: the document must end with `"\n" + HELPERS_USED_STMT` or
+ *   `"\n" + HELPERS_USED_STMT_JS` (both constants end in `"\n"`; a stripped
+ *   final newline is tolerated);
+ * - the prefix and trailer must not overlap.
+ *
+ * Interior `__cfHelpers` occurrences inside a valid envelope DO match: the
+ * predicate is prefix+suffix only. That is chosen behavior — `__cfHelpers`
+ * grants nothing beyond what injection gives every pattern, and tolerance is
+ * only ever applied to Merkle-verified stored input, never to authored
+ * writes (all authoring paths keep throwing via `checkCFHelperVar`).
+ *
+ * NOTE: the export name and home (this module, next to the constants it
+ * matches) are a compatibility contract — downstream vendoring gates import
+ * `isLegacyInjectedEnvelope` from `cf-helpers.ts` to probe whether a runtime
+ * candidate tolerates legacy stored envelopes. Do not rename or move.
+ */
+export function isLegacyInjectedEnvelope(source: string): boolean {
+  const prefix = HELPERS_STMT + "\n";
+  if (!source.startsWith(prefix)) return false;
+  for (const stmt of [HELPERS_USED_STMT, HELPERS_USED_STMT_JS]) {
+    // `stmt` ends with "\n": accept the stored form both with and without
+    // that final newline (storage/tooling may have trimmed it).
+    for (const trailer of ["\n" + stmt, ("\n" + stmt).slice(0, -1)]) {
+      if (
+        source.length >= prefix.length + trailer.length &&
+        source.endsWith(trailer)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function injectCfDataHelper(source: string): string {
   checkReservedHelperVar(source, CF_DATA_HELPER_IDENTIFIER);
   checkReservedHelperVar(source, CF_DATA_HELPER_KEEP_IDENTIFIER);
