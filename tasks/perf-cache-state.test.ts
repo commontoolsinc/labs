@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  changedPathsOf,
   classifyCacheKeyState,
   classifyRunAgainstPredecessor,
   COMPILE_CACHE_KEY_GLOBS,
@@ -125,4 +126,22 @@ Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", asy
       `compile-cache key inputs drifted from COMPILE_CACHE_KEY_GLOBS in:\n${line.trim()}`,
     );
   }
+});
+
+Deno.test("changedPathsOf surfaces both sides of a rename", () => {
+  const paths = changedPathsOf([
+    {
+      filename: "packages/runner/src/moved.ts",
+      previous_filename: "packages/api/moved.ts",
+    },
+    { filename: "docs/notes.md" },
+  ]);
+  assertEquals(paths, [
+    "packages/runner/src/moved.ts",
+    "packages/api/moved.ts",
+    "docs/notes.md",
+  ]);
+  // A rename OUT of the key set still rotated the fingerprint: the file
+  // left a hashed directory even though its new path matches nothing.
+  assertEquals(classifyCacheKeyState(paths), "cold");
 });
