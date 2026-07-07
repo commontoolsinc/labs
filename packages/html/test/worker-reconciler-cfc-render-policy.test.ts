@@ -3494,6 +3494,26 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               .includes("Team note"),
             true,
           );
+
+          // Revoke (admit -> block, the confidentiality-critical direction):
+          // the ACL drops READ, the subscription fires again, and the gate
+          // re-blocks the already-rendered cell — the content is removed and
+          // the blocked placeholder re-inserted. Guards against an upgrade-only
+          // re-eval regression that would leave admitted content on screen.
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
+            true,
+          );
         } finally {
           cancel();
         }
@@ -3597,6 +3617,22 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           assertEquals(
             collector.getOpsOfType("create-text").map((op) => op.text)
               .includes("Root team note"),
+            true,
+          );
+
+          // Revoke re-blocks the root-mounted cell too (admit -> block).
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
             true,
           );
         } finally {
