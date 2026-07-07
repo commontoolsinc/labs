@@ -48,8 +48,11 @@ import { externalIngestStamp } from "./external-ingest.ts";
 import {
   atomsOutsideCeiling,
   cfcIntegritySatisfiesFloor,
+  cfcIntegritySatisfiesFloorCoherently,
   uniqueCfcAtoms,
 } from "./observation.ts";
+import { evaluateExchangeRules } from "./exchange-eval.ts";
+import { createTrustResolver } from "./trust.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
@@ -2574,7 +2577,7 @@ const verifyInputRequirements = (
 ): string | undefined => {
   // The consumed reads this gate quantifies over (provenance-only reads
   // excluded). Distinct from the egress side's transaction-global consumed
-  // set (collectConsumedConfidentiality), which keeps every labeled read.
+  // set (collectConsumedLabel), which keeps every labeled read.
   // Deliberately class-blind (`consumes: "all"`): the gate is a screen over
   // everything the tx consumed, and over-inclusive quantification is the
   // fail-safe direction for it; per-class narrowing of consumers is C4.
@@ -2667,11 +2670,14 @@ const verifyInputRequirements = (
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     if (requiredIntegrity.length > 0 && gatedReads.length > 0) {
-      const ok = gatedReads.every((read) =>
-        cfcIntegritySatisfiesFloor(
-          read.label?.integrity ?? [],
-          requiredIntegrity,
-        )
+      // Coherent satisfaction (§8.10.3, Epic B5): each requirement must be
+      // met by ONE shared witness atom across every gated read, not by a
+      // different witness per read — "each input was screened by someone"
+      // is not "the inputs were screened". The single-read case reduces to
+      // the plain floor.
+      const ok = cfcIntegritySatisfiesFloorCoherently(
+        gatedReads.map((read) => read.label?.integrity ?? []),
+        requiredIntegrity,
       );
       if (!ok) {
         return `requiredIntegrity failed at /${entry.path.join("/")}`;
@@ -2682,11 +2688,54 @@ const verifyInputRequirements = (
     // An empty ceiling is "public only": any consumed confidential atom fails.
     const maxConfidentiality = ifc?.maxConfidentiality;
     if (maxConfidentiality !== undefined && gatedReads.length > 0) {
-      const ok = gatedReads.every((read) =>
-        (read.label?.confidentiality ?? []).every((value) =>
+      // The pre-dial membership check, kept verbatim as the `off` path (and
+      // the `observe` decision path — observe evaluates but never decides
+      // differently).
+      const fitsLegacy = (confidentiality: readonly unknown[]): boolean =>
+        confidentiality.every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))
-        )
-      );
+        );
+      const mode = tx.getCfcState().policyEvaluationMode;
+      const ok = gatedReads.every((read) => {
+        const confidentiality = read.label?.confidentiality ?? [];
+        if (mode === "off") return fitsLegacy(confidentiality);
+        // Evaluate the consumed label to fixpoint (Epic B5). No boundary
+        // atoms: this is a write-target input gate, not a sink.
+        const outcome = evaluateGatedConfidentiality(
+          tx,
+          confidentiality,
+          read.label?.integrity ?? [],
+          [],
+        );
+        if (mode === "enforce") {
+          // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
+          // label (spec §8.10.3 clause fit — flat ceilings keep their
+          // conjunctive meaning through atomsOutsideCeiling).
+          return outcome.exhausted === false &&
+            atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
+                .length === 0;
+        }
+        // observe: decide exactly as `off` would, diagnose the divergence.
+        const decision = fitsLegacy(confidentiality);
+        const rewrittenFits = outcome.exhausted === false &&
+          atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
+              .length === 0;
+        if (outcome.exhausted) {
+          tx.noteCfcDiagnostic(
+            `policy-evaluation(observe): fuel exhausted for input ` +
+              `requirement at /${entry.path.join("/")}`,
+          );
+        } else if (decision !== rewrittenFits) {
+          tx.noteCfcDiagnostic(
+            `policy-evaluation(observe): rewrite would change ` +
+              `maxConfidentiality at /${entry.path.join("/")} from ` +
+              `${decision ? "fit" : "reject"} to ${
+                rewrittenFits ? "fit" : "reject"
+              } (${outcome.firings} firings)`,
+          );
+        }
+        return decision;
+      });
       if (!ok) {
         return `maxConfidentiality failed at /${entry.path.join("/")}`;
       }
@@ -2857,6 +2906,26 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   // in BOTH directions: pattern code can neither forge it onto values the
   // model never produced nor author schemas that mint it.
   CFC_ATOM_TYPE.LlmDerived,
+  // Exchange-rule evidence families (Epic B1, spec §15.4/§10.1): screening
+  // verdicts, disclosure/acknowledgment/disclaimer events, assessor
+  // judgments, role membership, and boundary context are all minted by
+  // trusted runtime surfaces (detectors, the UI runtime, membership lookup,
+  // the boundary evaluator). A pattern-authored schema that could self-attach
+  // any of them would forge the guard evidence exchange rules fire on —
+  // upgrading its own caveat tier or discharging its own material risk.
+  CFC_ATOM_TYPE.BoundaryContext,
+  CFC_ATOM_TYPE.CaveatAssessment,
+  CFC_ATOM_TYPE.CaveatScreened,
+  CFC_ATOM_TYPE.DisclaimerAttached,
+  CFC_ATOM_TYPE.DisclosureAcknowledged,
+  CFC_ATOM_TYPE.DisclosureRendered,
+  CFC_ATOM_TYPE.HasRole,
+  // Conceptual principals live in trust statements and rule guards, never in
+  // carried integrity: concept guards resolve exclusively through the trust
+  // closure (exchange-eval), so a literal Concept atom in a value label is
+  // meaningless at best and bait for a config that pool-matches it at worst.
+  // Belt: schemas cannot mint one.
+  CFC_ATOM_TYPE.Concept,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
@@ -3215,15 +3284,21 @@ export const loadSchemaDocument = (
   return schema;
 };
 
-// Union of confidentiality atoms across every non-internal labeled read in the
+// Union of confidentiality (and integrity) atoms across every non-internal labeled read in the
 // transaction, resolved from stored labels the same way verifyInputRequirements
 // resolves them. Transaction-global by design: a sink request is built from
 // whatever the handler read, and the sink-request input does not record its own
 // read provenance, so the whole consumed set is the sound over-approximation.
-const collectConsumedConfidentiality = (
+const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
-): readonly unknown[] => {
+): { confidentiality: readonly unknown[]; integrity: readonly unknown[] } => {
   const atoms: unknown[] = [];
+  // Integrity evidence riding the same consumed entries: the guard pool the
+  // exchange evaluator matches rule preconditions against (Epic B5). Same
+  // transaction-global over-approximation as the confidentiality union —
+  // rules bind kind/source structurally, so evidence still has to match the
+  // clause it discharges.
+  const integrityAtoms: unknown[] = [];
   for (
     const read of [
       ...(tx.getReadActivities?.() ?? []),
@@ -3266,10 +3341,53 @@ const collectConsumedConfidentiality = (
           (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
       atoms.push(...(entry.label.confidentiality ?? []));
+      integrityAtoms.push(...(entry.label.integrity ?? []));
     }
   }
   // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
-  return uniqueCfcAtoms(atoms);
+  return {
+    confidentiality: uniqueCfcAtoms(atoms),
+    integrity: uniqueCfcAtoms(integrityAtoms),
+  };
+};
+
+/**
+ * Runs the exchange-rule evaluator over one gated confidentiality set under
+ * the transaction's policy snapshot + trust config (Epic B5). Pure wiring:
+ * the snapshot/trust/acting-principal come from tx CFC state; `boundary` is
+ * the site-specific `BoundaryContext` pool. Exhaustion reports through the
+ * `exhausted` flag with the ORIGINAL confidentiality (never a partial
+ * rewrite) — the caller decides whether that fails closed (enforce) or is a
+ * diagnostic (observe).
+ */
+const evaluateGatedConfidentiality = (
+  tx: IExtendedStorageTransaction,
+  confidentiality: readonly unknown[],
+  integrity: readonly unknown[],
+  boundary: readonly unknown[],
+): {
+  confidentiality: readonly unknown[];
+  exhausted: boolean;
+  firings: number;
+} => {
+  const state = tx.getCfcState();
+  const result = evaluateExchangeRules(
+    { confidentiality: [...confidentiality] },
+    state.policySnapshot,
+    {
+      integrity,
+      boundary,
+      trustResolver: createTrustResolver(state.trustConfig),
+      actingPrincipal: state.trustSnapshot?.actingPrincipal,
+    },
+  );
+  return {
+    confidentiality: result.exhausted
+      ? confidentiality
+      : result.label.confidentiality ?? [],
+    exhausted: result.exhausted,
+    firings: result.firings.length,
+  };
 };
 
 // §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
@@ -3294,13 +3412,70 @@ const verifySinkRequestCeilings = (
     if (ceiling !== undefined) gatedSinks.set(input.sink, ceiling);
   }
   if (gatedSinks.size === 0) return [];
-  const consumed = collectConsumedConfidentiality(tx);
-  if (consumed.length === 0) return [];
+  const consumed = collectConsumedLabel(tx);
+  if (consumed.confidentiality.length === 0) return [];
+  const mode = state.policyEvaluationMode;
   const reasons: string[] = [];
   for (const [sink, ceiling] of gatedSinks) {
+    let effective = consumed.confidentiality;
+    if (mode !== "off") {
+      // Boundary context for this release site (spec §8.10.5 / §15.4): the
+      // sink name plus its class. Every sink in the initial inventory is a
+      // NETWORK egress (fetch*/stream/llm*/generate*); the display class
+      // arrives with H3b's render-ceiling work.
+      const boundary = [
+        cfcAtom.boundaryContext("sink", sink),
+        cfcAtom.boundaryContext("sinkClass", "network"),
+      ];
+      const outcome = evaluateGatedConfidentiality(
+        tx,
+        consumed.confidentiality,
+        consumed.integrity,
+        boundary,
+      );
+      if (mode === "enforce") {
+        if (outcome.exhausted) {
+          // Fail closed (invariant 6): a rule set that cannot converge
+          // disables exchange, it never silently downgrades to a partial
+          // rewrite or to the raw label.
+          reasons.push(
+            `cfc policy evaluation exhausted fuel for sink-request ${sink}`,
+          );
+          continue;
+        }
+        effective = outcome.confidentiality;
+      } else {
+        // observe: decide exactly as `off` would; diagnose what enforce
+        // would have done differently.
+        const rewrittenOffending = outcome.exhausted
+          ? undefined
+          : atomsOutsideCeiling(outcome.confidentiality, ceiling);
+        const rawOffending = atomsOutsideCeiling(
+          consumed.confidentiality,
+          ceiling,
+        );
+        if (outcome.exhausted) {
+          tx.noteCfcDiagnostic(
+            `policy-evaluation(observe): fuel exhausted for sink-request ` +
+              `${sink}`,
+          );
+        } else if (
+          (rawOffending.length > 0) !== (rewrittenOffending!.length > 0)
+        ) {
+          tx.noteCfcDiagnostic(
+            `policy-evaluation(observe): rewrite would change sink-request ` +
+              `ceiling for ${sink} from ${
+                rawOffending.length > 0 ? "reject" : "fit"
+              } to ${
+                rewrittenOffending!.length > 0 ? "reject" : "fit"
+              } (${outcome.firings} firings)`,
+          );
+        }
+      }
+    }
     // Same membership semantics as cfcObservationFitsCeiling (shared helper),
     // so the egress gate and the observation fits-test cannot drift.
-    const offending = atomsOutsideCeiling(consumed, ceiling);
+    const offending = atomsOutsideCeiling(effective, ceiling);
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).

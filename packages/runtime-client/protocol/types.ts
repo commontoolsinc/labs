@@ -152,6 +152,7 @@ export interface InitializationData {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
+    eagerSourceAnnotation?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

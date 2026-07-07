@@ -28,6 +28,10 @@ import {
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
+import {
+  isEagerSourceAnnotationEnabled,
+  setEagerSourceAnnotation,
+} from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
   ChangeGroup,
@@ -37,6 +41,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  URI,
 } from "./storage/interface.ts";
 import {
   type Cell,
@@ -63,16 +68,23 @@ import {
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  buildCfcPolicySnapshot,
+  buildCfcTrustConfig,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcPolicyEvaluationMode,
+  type CfcPolicyRecordInput,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
+  type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
+  type PolicySnapshot,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -172,6 +184,15 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
+   * module evaluation. Debug-only — identity never reads `.src` — and OFF by
+   * default: the resolution (a stack capture + source-map walk per primitive)
+   * is the boot floor's largest single cost (~80ms+ per cold piece boot).
+   * Shell development builds turn it on so `.src` debugging keeps working;
+   * see `setEagerSourceAnnotation` (builder/module.ts).
+   */
+  eagerSourceAnnotation?: boolean | undefined;
 }
 
 /**
@@ -257,11 +278,38 @@ export interface RuntimeOptions {
    * metadata resolution per prepare).
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
+  /**
+   * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
+   * `off` (gates decide on raw labels, byte-identical to before the dial).
+   * `observe` evaluates gated labels to fixpoint and emits diagnostics while
+   * still deciding on the un-rewritten label; `enforce` decides on the
+   * rewritten label and fails closed on fuel exhaustion.
+   */
+  cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
    *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+  /**
+   * Deployment policy records for the exchange-rule evaluator (Epic B2a,
+   * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
+   * at construction — malformed records throw at boot (fail-closed config,
+   * mirroring the sink ceilings' freeze discipline). Defaults to none
+   * configured (evaluation is a no-op).
+   */
+  cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
+  /**
+   * Deployment trust config for concept-guard satisfaction (Epic B3, spec
+   * §4.8): trust statements, verifier delegations, concept edges. Validated,
+   * digested, and deep-frozen at construction; malformed config throws at
+   * boot. The config digest folds into the DEFAULT trust-snapshot provider's
+   * `revision`, so a config change invalidates prepared digests; hosts
+   * supplying a custom `trustSnapshotProvider` must fold their own trust
+   * versioning into `revision`. Defaults to none configured (every concept
+   * guard fails closed).
+   */
+  cfcTrustConfig?: CfcTrustConfigInput;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
@@ -394,7 +442,12 @@ export class Runtime {
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
+  readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
+  /** Frozen deployment policy snapshot; undefined = no policies configured. */
+  readonly cfcPolicySnapshot: PolicySnapshot | undefined;
+  /** Frozen deployment trust config; undefined = no trust configured. */
+  readonly cfcTrustConfig: CfcTrustConfig | undefined;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
@@ -428,6 +481,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
 
@@ -455,6 +509,14 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
+    // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
+    // directly around runtime construction), and an unconditional
+    // `undefined -> default` write would stomp it.
+    if (this.experimental.eagerSourceAnnotation !== undefined) {
+      setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
+    }
+    this.experimental.eagerSourceAnnotation = isEagerSourceAnnotationEnabled();
 
     this.commitBackpressure = resolveCommitBackpressure(
       options.commitBackpressure,
@@ -501,11 +563,19 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.moduleByteCache = options.moduleByteCache;
+    // Validated + digested + frozen before the trust-snapshot provider
+    // default below, whose `revision` covers the config digest (a trust
+    // config change must invalidate prepared digests like any other
+    // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
+    this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
     const actingPrincipal = options.storageManager.as.did() as DID;
+    const trustRevision = this.cfcTrustConfig === undefined
+      ? this.id
+      : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
     this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
       id: `principal:${actingPrincipal}`,
       actingPrincipal,
-      revision: this.id,
+      revision: trustRevision,
     }));
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
@@ -517,6 +587,7 @@ export class Runtime {
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -527,6 +598,10 @@ export class Runtime {
         ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
       ),
     );
+    // Validates + digests + deep-freezes; throws on malformed records so a
+    // config error surfaces at boot, not as a silently inert rule (same
+    // eager-validation posture as the spaceHostMap URLs above).
+    this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -768,7 +843,10 @@ export class Runtime {
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
+    wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
+    wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
+    wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
@@ -892,9 +970,52 @@ export class Runtime {
       });
     }
     this.prepareTxForCommit(tx);
-    return tx.commit().then(({ error }) => {
+    return tx.commit().then(async ({ error }) => {
       if (error) {
         if (maxRetries > 0) {
+          // A CONFLICT means this replica is behind the authoritative
+          // version: re-running immediately re-reads the same stale local
+          // state and fails identically, so without waiting the retries all
+          // burn on one deterministic conflict (CT-1824 — the compile-cache
+          // write-back looped this way and stale-version pieces recompiled
+          // on every cold boot). The conflict carries the catch-up gate;
+          // await it so the retry runs against fresh state — same protocol
+          // as the scheduler's conflict handling (scheduler/action-run.ts).
+          // A readiness gate that rejects (session closed/replaced while
+          // waiting) is control flow, not an error: retry anyway and let
+          // commit produce the definitive outcome.
+          const readyToRetry =
+            (error as { readyToRetry?: () => unknown }).readyToRetry;
+          if (typeof readyToRetry === "function") {
+            try {
+              await readyToRetry();
+            } catch {
+              // Readiness aborted — the retry's commit decides.
+            }
+          }
+          // The catch-up gate advances the session past the conflicting
+          // commit, but a doc this replica never READ does not arrive with
+          // it — and a conflicted blind WRITE means exactly that (the
+          // compile-cache write-back rewrites derived docs a cold replica
+          // has never seen). Pull the named doc so the retry's write
+          // carries its true version instead of re-asserting seq 0.
+          const conflict = (error as {
+            conflict?: { space?: MemorySpace; of?: string };
+          }).conflict;
+          if (
+            conflict?.space !== undefined &&
+            typeof conflict.of === "string" &&
+            conflict.of !== "of:unknown"
+          ) {
+            try {
+              await this.storageManager.open(conflict.space).sync(
+                conflict.of as unknown as URI,
+                { path: [], schema: false },
+              );
+            } catch {
+              // Pull failed — the retry's commit decides.
+            }
+          }
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };

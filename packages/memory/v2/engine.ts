@@ -674,9 +674,21 @@ export interface Engine {
 }
 
 export class ConflictError extends Error {
-  constructor(message: string) {
+  /** Entity whose confirmed read went stale (stale-read conflicts only). */
+  readonly of?: string;
+  readonly seq?: number;
+  readonly conflictSeq?: number;
+  constructor(
+    message: string,
+    details?: { of: string; seq: number; conflictSeq: number },
+  ) {
     super(message);
     this.name = "ConflictError";
+    if (details !== undefined) {
+      this.of = details.of;
+      this.seq = details.seq;
+      this.conflictSeq = details.conflictSeq;
+    }
   }
 }
 
@@ -3515,6 +3527,7 @@ const validateConfirmedReads = (
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
+        { of: read.id, seq: read.seq, conflictSeq },
       );
     }
   }
