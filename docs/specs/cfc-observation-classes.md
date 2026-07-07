@@ -150,17 +150,33 @@ stamps, which have always been confidentiality-only. Consequence: a
 confidentiality but no longer inherits content certification into the
 hereditary meet — an intended under-claim (SC-9's fail-safe direction).
 
-**C3 note (2026-07-03): the grow landed.** On overwrite the flow-clear folds
-the confidentiality of every dropped `derived` (any class, covering
-included — pre-C2 data) and `structure` entry into the covering written
-path's `observes:"shape"` entry: new J first, then the cleared atoms, so
-re-derivation stays byte-identical (SC-11). The grown entry is written even
-when the overwriting transaction consumed nothing (the red SC-4 case — a
-clean overwrite previously made the existence bit public). Cleared `link`
-entries are excluded (pointer labels; folding them into content shape would
-re-smear the pointer/content split), and cleared existence not covered by
-any stamp path (e.g. a link write replacing the slot) lands as a bare shape
-entry at the shallowest covering written path.
+**C3 note (2026-07-03, superseded 2026-07-06): grow shipped, then the
+discipline was settled with the spec as freeze-at-creation.** C3's interim
+fix grew the existence entry on every overwrite; running the open questions
+against the spec (§8.12.8 as amended on specs branch
+`cfc/existence-freeze-at-creation`) settled the final disciplines:
+
+- **`observes:"shape"` (existence) entries FREEZE at creation**: minted
+  once with the creating attempt's join (legacy pre-class entries are
+  absorbed at the one-time migration, conservatively over-attributed to
+  the first labeled stamping), never cleared and never grown by overwrites
+  of a still-existing path. Soundness: a writer conditional on existence
+  journals that observation itself (§8.10.1/§8.9.2). Residual: deletion
+  leaves the frozen entry (over-taint) and re-creation keeps it instead of
+  re-minting at the re-creating join — re-mint-on-recreation needs
+  per-path previousValue plumbing.
+- **`origin:"structure"` membership stamps are `observes:"enumerate"`**,
+  replace-from-criteria per §8.12.8 (normative — its rationale names and
+  rejects accumulate-forever). Axis-mapping note: the labs `observes` axis
+  is read-op shaped, so labs `enumerate` at a container approximates the
+  spec's container-level `iterate.{order,count}` label classes; the
+  spec's per-child `shape` encoding of membership is a recorded residual
+  (see SC note in `cfc-spec-changes.md`: a static per-child existence
+  probe does not consume the container-anchored stamp).
+- Cleared `link` entries never fold (pointer labels; folding them into
+  content shape would re-smear the pointer/content split). Legacy
+  migration conf not covered by any stamp path lands as a frozen shape
+  entry at the shallowest covering written path, or the entry's own path.
 
 ## 6. What `deriveFlowJoin` consumes per read shape
 

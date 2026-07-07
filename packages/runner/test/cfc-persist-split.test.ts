@@ -149,8 +149,13 @@ describe("CFC observation classes (C2 persist split)", () => {
     expect(shapeEntry.path).toEqual(valueEntry.path);
   });
 
-  // Structure stamps (pure-link-structure writes) now state their class.
-  it('structure stamps carry observes:"shape"', async () => {
+  // Structure stamps (pure-link-structure writes) split per channel: the
+  // MEMBERSHIP stamp is observes:"enumerate" (replace-from-criteria,
+  // §8.12.8 — labs-axis approximation of the spec's container-level
+  // iterate classes) and the container's EXISTENCE is a separate frozen
+  // observes:"shape" entry minted at creation (freeze-at-creation, spec
+  // branch cfc/existence-freeze-at-creation).
+  it("structure stamps split into enumerate membership + frozen shape existence", async () => {
     const rt = makeRuntime();
     const el0 = await seedDoc(rt, "ps-el-0", { n: 1 }, [
       { path: [], label: { confidentiality: ["alice"] } },
@@ -172,8 +177,9 @@ describe("CFC observation classes (C2 persist split)", () => {
     const listId = list.getAsNormalizedFullLink().id;
     const structure = entriesOf(listId).filter((e) => e.origin === "structure");
     expect(structure.length).toBeGreaterThan(0);
+    const classes = [...new Set(structure.map((e) => e.observes))].sort();
+    expect(classes).toEqual(["enumerate", "shape"]);
     for (const entry of structure) {
-      expect(entry.observes).toBe("shape");
       expect(entry.label.confidentiality).toEqual(["alice"]);
     }
   });

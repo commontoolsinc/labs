@@ -9,6 +9,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
@@ -46,6 +47,7 @@ describe("Pattern Runner - Handlers", () => {
   });
 
   afterEach(async () => {
+    setEagerSourceAnnotation(false);
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
@@ -127,6 +129,9 @@ describe("Pattern Runner - Handlers", () => {
   });
 
   it("should propagate handler source location to scheduler via .name", async () => {
+    // `.name` source-location propagation is a debug feature; its eager
+    // resolution is off by default (the boot lever), so enable it for this test.
+    setEagerSourceAnnotation(true);
     // Spy on addEventHandler to capture the handler passed to it
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
 

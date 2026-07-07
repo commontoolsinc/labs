@@ -5,7 +5,10 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Module } from "../src/builder/types.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { __setSrcAnnotationTransformForTest } from "../src/builder/module.ts";
+import {
+  __setSrcAnnotationTransformForTest,
+  setEagerSourceAnnotation,
+} from "../src/builder/module.ts";
 import { recordVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 
@@ -27,14 +30,14 @@ import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementa
 // garble is in effect during module eval + action creation — any `.src` -> id
 // path *anywhere* in the pipeline makes the two runs diverge loudly.
 //
-// THE BOUNDARY (second test): B re-rooted the SCHEDULER action layer only. CFC
-// verified-implementation identity (resolveProvenanceImplementationIdentity,
-// which feeds `writeAuthorizedBy`) STILL consults `.src` as a fail-closed
-// consistency check, so garbling `.src` flips it `verified` -> `unsupported`.
-// That is the remaining `.src` dependency the red-team pass must bless and that
-// the lazy/debug-only `.src` follow-up (workstream C) must re-root before `.src`
-// can be deferred. This test characterizes that boundary so a future "make
-// `.src` lazy" change trips a loud, self-documenting failure here.
+// THE BOUNDARY (second test): CFC verified-implementation identity
+// (resolveProvenanceImplementationIdentity, which feeds `writeAuthorizedBy`) is
+// now ALSO `.src`-independent — re-rooted off `.src` onto the WeakMap provenance
+// (the anti-spoof proof) so lazy/debug-only `.src` (skipped at boot) cannot deny
+// authorized writes. Garbling OR removing `.src` must keep identity `verified`
+// with the same moduleIdentity. This test characterizes that boundary so a future
+// change that re-introduces a `.src` dependency in CFC identity trips a loud,
+// self-documenting failure here.
 //
 // See docs/specs/content-addressed-action-identity.md and
 // packages/patterns/lunch-poll/perf-seed/B-IDENTITY-REROOT-HANDOFF.md.
@@ -147,6 +150,9 @@ async function runAndCollect(
 Deno.test(
   "scheduler action ids + fingerprints are byte-identical with .src garbled",
   async () => {
+    // This harness exercises the annotation path — enable the (default-off)
+    // eager source-location resolution so `.src` is actually written + garbled.
+    setEagerSourceAnnotation(true);
     // Baseline: real `.src`.
     const baseline = await runAndCollect(
       StorageManager.emulate({ as: signer }),
@@ -178,6 +184,7 @@ Deno.test(
       garbled = await runAndCollect(StorageManager.emulate({ as: signer }));
     } finally {
       __setSrcAnnotationTransformForTest(undefined);
+      setEagerSourceAnnotation(false);
     }
 
     // The whole point: identity did not move.
@@ -188,35 +195,44 @@ Deno.test(
 );
 
 Deno.test(
-  "BOUNDARY: CFC verified-implementation identity still fail-closes on .src",
+  "BOUNDARY: CFC verified-implementation identity is .src-independent",
   () => {
-    // This documents the remaining `.src` dependency B did NOT remove: CFC
-    // verified-source identity (the `writeAuthorizedBy` arm) reads `.src` as a
-    // fail-closed consistency check. It is NOT part of the scheduler-identity
-    // invariant above — and it is the gate workstream C (lazy `.src`) must
-    // re-root first. If a future change makes `.src` lazy without re-rooting
-    // this check, this test trips.
+    // Part B (workstream C prerequisite) re-rooted CFC verified-source identity
+    // OFF `.src`: the WeakMap provenance lookup IS the anti-spoof proof, and every
+    // field the `writeAuthorizedBy` arm checks (moduleIdentity / sourceFile /
+    // bindingPath) is provenance-derived. So garbling or REMOVING `.src` must NOT
+    // change the resolved identity — that is exactly what makes lazy/debug-only
+    // `.src` (skipped at boot) safe for authorized writes. If a future change
+    // re-introduces a `.src` dependency in CFC identity, this test trips.
     const impl = (() => {}) as unknown as HarnessedFunction;
     recordVerifiedProvenance(impl, { identity: "HASH", symbol: "__cfLift_1" });
 
+    const resolve = () =>
+      resolvePolicyFacingImplementationIdentity({} as Module, {
+        implementation: impl,
+      });
+
     // Canonical `.src` pointing into the provenance module => verified.
     (impl as { src?: string }).src = "cf:module/HASH/main.tsx:3:20";
-    const verified = resolvePolicyFacingImplementationIdentity(
-      {} as Module,
-      { implementation: impl },
-    );
-    expect(verified?.kind).toBe("verified");
-    expect((verified as { moduleIdentity?: string }).moduleIdentity).toBe(
+    const canonical = resolve();
+    expect(canonical?.kind).toBe("verified");
+    expect((canonical as { moduleIdentity?: string }).moduleIdentity).toBe(
       "HASH",
     );
 
-    // Garbled `.src` => CFC fails closed (NOT byte-identical, by design).
+    // Garbled `.src` => STILL verified, same identity (`.src` is identity-inert).
     (impl as { src?: string }).src = "GARBLED-SRC";
-    const garbled = resolvePolicyFacingImplementationIdentity(
-      {} as Module,
-      { implementation: impl },
+    const garbled = resolve();
+    expect(garbled?.kind).toBe("verified");
+    expect((garbled as { moduleIdentity?: string }).moduleIdentity).toBe(
+      "HASH",
     );
-    expect(garbled?.kind).toBe("unsupported");
+
+    // Absent `.src` (the lazy/debug-only boot state) => STILL verified.
+    delete (impl as { src?: string }).src;
+    const absent = resolve();
+    expect(absent?.kind).toBe("verified");
+    expect((absent as { moduleIdentity?: string }).moduleIdentity).toBe("HASH");
   },
 );
 
@@ -269,6 +285,7 @@ async function runMultiAndCollect(
 Deno.test(
   "two instances of one lift get DISTINCT per-instance ids (no collision), .src-independent",
   async () => {
+    setEagerSourceAnnotation(true);
     const baseline = await runMultiAndCollect(
       StorageManager.emulate({ as: signer }),
     );
@@ -296,7 +313,36 @@ Deno.test(
       );
     } finally {
       __setSrcAnnotationTransformForTest(undefined);
+      setEagerSourceAnnotation(false);
     }
     expect(garbled).toEqual(baseline);
+  },
+);
+
+Deno.test(
+  "multi-instance ids stay per-instance with the eager annotation OFF (production default)",
+  async () => {
+    // THE REGRESSION THIS PINS: with eager annotation off, anonymous arrow
+    // implementations have an empty fn.name, and identity stamping was once
+    // gated behind the name — the stamps were skipped and identity fell to a
+    // per-symbol re-derivation with NO instance key, silently collapsing two
+    // instances of one lift onto one durable observation (and one actionStats
+    // entry, mis-tuning auto-debounce for maps/repeated ops). Stamping is now
+    // unconditional and the fallback derivation is deleted, so the DEFAULT
+    // (annotation-off) state must produce the same per-instance shape the
+    // eager-on test above pins.
+    const observations = await runMultiAndCollect(
+      StorageManager.emulate({ as: signer }),
+    );
+
+    expect(observations.length).toBe(2);
+    expect(new Set(observations.map((o) => o.actionId)).size).toBe(2);
+    for (const { actionId, fingerprint } of observations) {
+      // Per-instance id: content address + `:dbl` symbol + instance suffix.
+      expect(actionId).toMatch(/^cf:module\/[^:]+:dbl:[^:]+$/);
+      // Per-symbol fingerprint: NO instance suffix, shared by both instances.
+      expect(fingerprint).toMatch(/^impl:cf:module\/[^:]+:dbl$/);
+    }
+    expect(new Set(observations.map((o) => o.fingerprint)).size).toBe(1);
   },
 );

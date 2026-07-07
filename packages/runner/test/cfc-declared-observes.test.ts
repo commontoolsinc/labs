@@ -175,6 +175,70 @@ describe("CFC declared observation classes (C5)", () => {
     ).toContainEqual("content-secret");
   });
 
+  // A declared observes:"shape" label must neither suppress the runtime's
+  // frozen existence stamp (different component: declared = policy,
+  // derived = measurement — review on the freeze follow-up) nor be
+  // captured by the freeze carry out of its declared-policy discipline.
+  it("declared shape labels coexist with the frozen existence stamp", async () => {
+    const rt = makeRuntime();
+    const secretId = await (async () => {
+      const seed = rt.edit();
+      const cell = rt.getCell(space, "dobs-shape-secret", undefined, seed);
+      const id = cell.getAsNormalizedFullLink().id;
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { n: 1 },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: { confidentiality: ["secret"] } }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+      return id;
+    })();
+
+    const guarded = internSchema(
+      {
+        type: "object",
+        ifc: { confidentiality: ["declared-members"], observes: "shape" },
+      } as JSONSchema,
+      true,
+    );
+    const tx = rt.edit();
+    tx.readOrThrow({
+      space,
+      scope: "space",
+      id: uri(secretId),
+      type: "application/json",
+      path: ["value"],
+    });
+    const out = rt.getCell(space, "dobs-shape-out", guarded.schema, tx);
+    out.set({ created: true });
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const outId = out.getAsNormalizedFullLink().id;
+    const entries = entriesOf(outId);
+    const declaredShape = entries.find((e) =>
+      e.origin === "declared" && e.observes === "shape"
+    );
+    expect(declaredShape).toBeDefined();
+    expect(declaredShape!.label.confidentiality).toContainEqual(
+      "declared-members",
+    );
+    // The runtime existence stamp is NOT suppressed by the declared entry:
+    // creation under secret influence must be recorded (SC-4).
+    const frozen = entries.find((e) =>
+      (e.origin === "derived" || e.origin === "structure") &&
+      e.observes === "shape"
+    );
+    expect(frozen).toBeDefined();
+    expect(frozen!.label.confidentiality).toContainEqual("secret");
+  });
+
   // A bogus observes value must not narrow anything: the entry mints
   // covering (over-taint, fail-safe) and every read class consumes it.
   it("an invalid ifc.observes value mints a covering entry", async () => {
