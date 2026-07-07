@@ -395,6 +395,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `transaction is pinned at "enforce"`,
       );
     }
+    // A strengthen after prepare (e.g. off/observe → enforce) changes which
+    // label a gate decides on and whether fuel exhaustion fails closed, but
+    // the mode is not part of PreparedDigestInput — so a prepared decision
+    // computed under the old mode must be invalidated, or the commit-time
+    // recheck would pass it through while the tx now reports `enforce`
+    // (codex P2 on #4566). Only a real change invalidates (the Runtime's
+    // idempotent set at tx creation, before prepare, does not).
+    if (
+      this.#cfcState.policyEvaluationMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("policy-evaluation-mode-changed");
+    }
     this.#cfcState.policyEvaluationMode = mode;
     if (mode === "enforce") {
       this.#cfcPolicyEvaluationPinned = true;

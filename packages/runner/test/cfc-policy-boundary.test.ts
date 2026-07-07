@@ -437,6 +437,38 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
       });
     });
 
+    it("invalidates a prepared tx when the evaluation mode is strengthened", async () => {
+      // Prepare under observe, then strengthen to enforce: the mode is not in
+      // PreparedDigestInput, so a decision computed under observe must be
+      // invalidated rather than surviving the commit-time recheck while the tx
+      // now reports enforce (codex P2 on #4566).
+      await withRuntime({ policyEvaluation: "observe" }, (runtime) => {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "mode-change-probe",
+          {
+            type: "object",
+            properties: {
+              value: { type: "string", ifc: { confidentiality: ["x"] } },
+            },
+          } as const satisfies JSONSchema,
+          tx,
+        );
+        cell.set({ value: "v" });
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().prepare.status).toBe("invalidated");
+        // A no-op re-set of the SAME mode does not invalidate a fresh prepare.
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.abort();
+      });
+    });
+
     it("folds the policy snapshot digest into the prepared digest", () => {
       const base: PreparedDigestInput = {
         consumedReads: [],
