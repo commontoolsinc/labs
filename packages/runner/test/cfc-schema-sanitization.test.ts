@@ -289,6 +289,61 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     expect(sanitized.properties.reason.ifc.addIntegrity).toBeUndefined();
   });
 
+  it("discharges ALL material-risk caveats on a large label (fuel scales past the default 64)", () => {
+    // A path carrying more than DEFAULT_EXCHANGE_FUEL (64) material-risk
+    // ALTERNATIVES must still be fully discharged on an instruction-inert
+    // field — the old strip removed all of them, and the fuel budget must
+    // scale (over the summed clause-alternative count, not the clause count)
+    // so the rule path matches that (cubic P2 on #4567). With a fixed 64-fuel
+    // budget this retains the tail. Mixes flat caveats AND OR-clauses whose
+    // material-risk alternative must be dropped from within the clause — the
+    // alternative-count path the fuel budget sums over.
+    const risk = (i: number) => ({
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      source: `of:hostile-${i}`,
+    });
+    const keep = (i: number) => ({
+      type: CFC_ATOM_TYPE.User,
+      subject: `did:key:reader-${i}`,
+    });
+    const flatRisks = Array.from({ length: 50 }, (_, i) => risk(i));
+    // 40 OR-clauses (80 alternatives), each a risk beside a retained atom.
+    const orRisks = Array.from(
+      { length: 40 },
+      (_, i) => ({ anyOf: [risk(1000 + i), keep(i)] }),
+    );
+    const schema = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["approve", "reject"] },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = schemaWithInjectionSafeAnnotations(
+      schema,
+      [...flatRisks, ...orRisks],
+    ) as any;
+
+    const remaining: unknown[] = sanitized.properties.action.ifc
+      .confidentiality ?? [];
+    // No material-risk alternative survives anywhere — not as a bare clause,
+    // not nested inside a surviving OR-clause.
+    const hasMaterialRiskAnywhere = remaining.some((clause) =>
+      isPromptInjectionMaterialRiskAtom(clause) ||
+      (typeof clause === "object" && clause !== null &&
+        Array.isArray((clause as { anyOf?: unknown }).anyOf) &&
+        (clause as { anyOf: unknown[] }).anyOf.some(
+          isPromptInjectionMaterialRiskAtom,
+        ))
+    );
+    expect(hasMaterialRiskAnywhere).toBe(false);
+    // The retained (non-risk) alternatives survive.
+    expect(remaining.length).toBe(40);
+  });
+
   it("marks a whole closed object when every readable child is instruction-inert", () => {
     const schema = {
       type: "object",

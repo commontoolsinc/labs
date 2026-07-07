@@ -1,9 +1,18 @@
 export type {
   CfcAtom,
   CfcAtomObject,
+  CfcBoundaryContextAtom,
   CfcBuiltinAtom,
+  CfcCaveatAssessmentAtom,
   CfcCaveatAtom,
+  CfcCaveatScreenedAtom,
+  CfcConceptAtom,
+  CfcDisclaimerAttachedAtom,
+  CfcDisclosureAcknowledgedAtom,
+  CfcDisclosureRenderedAtom,
+  CfcExpiresAtom,
   CfcExternalIngestAtom,
+  CfcHasRoleAtom,
   CfcInjectionSafeAtom,
   CfcJsonArray,
   CfcJsonValue,
@@ -11,6 +20,8 @@ export type {
   CfcPromptSlotInfluenceAtom,
   CfcPromptSlotRunManifest,
   CfcResourceAtom,
+  CfcSpaceAtom,
+  CfcUserAtom,
   CfcUserSurfaceInputAtom,
 } from "./cfc.ts";
 export {
