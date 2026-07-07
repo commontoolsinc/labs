@@ -87,10 +87,9 @@ describe("CFC render confidentiality resolver (H3b)", () => {
       actingPrincipal: ALICE,
       memberSpaces: [SPACE_TEAM],
     });
-    // Data claims a space Alice is NOT a reader of, and it does not live there.
+    // Data claims a space Alice is NOT a verified reader of.
     const resolved = resolve({
       confidentiality: [cfcAtom.space(SPACE_OTHER)],
-      space: SPACE_TEAM,
     });
     const offending = atomsOutsideCeiling(resolved, aliceCeiling);
     expect(offending).toEqual([cfcAtom.space(SPACE_OTHER)]);
