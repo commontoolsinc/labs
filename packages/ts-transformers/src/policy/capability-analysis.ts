@@ -80,9 +80,10 @@ interface MutableCapabilityState {
    * Write-exhaustiveness is unverifiable for this parameter. Set by an
    * unrecognized or dynamic (`cell[m]()`) method call on a cell-like
    * receiver (the call could be a mutator this analysis does not know), and
-   * by recognized `set`/`send` calls carrying an onCommit callback (which
-   * receives the committed transaction and can write arbitrary cells
-   * through it). Consumers asserting write exhaustiveness must fail closed
+   * by recognized `set`/`send` calls carrying an onCommit callback (whose
+   * closure can escape into fresh transactions or external I/O after
+   * commit — writes this analysis cannot bound). Consumers asserting
+   * write exhaustiveness must fail closed
    * on this, like `wildcard`; recognized reads/derivations are unaffected.
    *
    * Syntactic boundary: detection is per method-CALL dispatch. An extracted
@@ -2996,12 +2997,12 @@ export function analyzeFunctionCapabilities(
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
               recordMergeableNonAppendWrite(receiver);
-              // set(value, onCommit?) / send(event, onCommit?): the onCommit
-              // callback receives the committed TRANSACTION and can write
-              // arbitrary cells through it — writes invisible to capture-path
-              // tracking (even an inline arrow the nested walk analyzes
-              // writes via `tx`, not via captures). A second argument means
-              // `writes` is not exhaustive; fail closed.
+              // set(value, onCommit?) / send(event, onCommit?): onCommit runs
+              // after the commit settles, so the passed tx is no longer a
+              // write channel — but the closure can still write via captured
+              // cells, fresh transactions (cell.runtime.edit()), or external
+              // I/O, and the contract forbidding that is advisory. That
+              // residue is unboundable, so a second argument fails closed.
               if (
                 (methodName === "set" || methodName === "send") &&
                 node.arguments.length > 1
