@@ -10,6 +10,7 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { waitForText } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -67,15 +68,7 @@ describe("counter direct operations test", () => {
     });
 
     // Verify initial value is 0
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const initialText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return initialText?.trim() === "Counter is the 0th number";
-    });
+    await waitForText(page, "#counter-result", "Counter is the 0th number");
 
     assertEquals(await piece.result.get(["value"]), 0);
   });
@@ -89,16 +82,7 @@ describe("counter direct operations test", () => {
 
     await piece.result.set(42, ["value"]);
 
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-
-      const updatedText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return updatedText?.trim() === "Counter is the 42nd number";
-    });
+    await waitForText(page, "#counter-result", "Counter is the 42nd number");
 
     // Verify we can also read the value back
     await waitFor(async () => (await piece.result.get(["value"]) === 42));
@@ -123,15 +107,6 @@ describe("counter direct operations test", () => {
     });
 
     // Get the counter result element after refresh
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-
-      const textAfterRefresh = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return textAfterRefresh?.trim() === "Counter is the 42nd number";
-    });
+    await waitForText(page, "#counter-result", "Counter is the 42nd number");
   });
 });
