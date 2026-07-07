@@ -26,16 +26,17 @@ into explicit graph nodes, and harden the result.**
 
 ## The pipeline
 
-`packages/ts-transformers/src/cf-pipeline.ts` defines ~19 transformer stages
+`packages/ts-transformers/src/cf-pipeline.ts` defines ~20 transformer stages
 that run in strict order over the TypeScript AST. You don't need to know
 all of them; you need the five jobs they implement:
 
 **Validation** (early stages — `CastValidation`, `OpaqueGetValidation`,
-`PatternContextValidation`, ...): reject things that cannot work at
-runtime, at compile time — e.g. `.get()` calls in invalid positions, or
-malformed pattern context usage. Many "framework rules" from Part I are
-enforced here, which is why violations are compile errors rather than weird
-runtime behavior.
+`PatternContextValidation`, `MergeablePushValidation`, ...): reject things
+that cannot work at runtime, at compile time — e.g. `.get()` calls in
+invalid positions, malformed pattern context usage, or a mergeable `push`
+whose value was read from the same list (a hidden read-modify-write). Many
+"framework rules" from Part I are enforced here, which is why violations
+are compile errors rather than weird runtime behavior.
 
 **JSX lowering** (`JsxExpressionSiteRouter`, `LiftLowering`): every dynamic
 expression site in JSX is routed to a lowering strategy. A multi-value
@@ -48,8 +49,8 @@ closure's body logic stays plain JavaScript (only its captures are
 rewritten, as described next).
 
 **Closure reification** (`ClosureTransformer`,
-`PatternCallbackLowering`, `BuilderCallbackHoisting`,
-`BuilderCallHoisting`): callbacks that conceptually close over pattern
+`PatternCallbackLowering`, `BuilderCallHoisting`): callbacks that
+conceptually close over pattern
 state — `action()` bodies, `.map()` callbacks — are analyzed; their
 captured variables become explicit, schema-described inputs, and the
 callbacks are hoisted to module scope. A `.map()` over items becomes a
@@ -68,7 +69,8 @@ created.
 module-scope functions get `Object.freeze()` and the module is shaped for
 the SES sandbox.
 
-You can watch all of this on any file:
+You can watch all of this on any file (append `| deno task cf view` for a
+navigable, syntax-colored view of the dense output):
 
 ```bash
 deno task cf check pattern.tsx --show-transformed --no-run
@@ -85,7 +87,7 @@ one handles the branded wrapper types:
 | `number` | `{ type: "number" }` |
 | `Cell<T>` / `Writable<T>` | schema of `T` + `asCell: ["cell"]` |
 | `Stream<T>` | schema of `T` + `asCell: ["stream"]` |
-| `Reactive<T>` | schema of `T` + `asCell: ["opaque"]` |
+| `OpaqueCell<T>` | schema of `T` + `asCell: ["opaque"]` |
 | `T \| Default<V>` | schema of `T` + `default: V` |
 | `PerSpace<T>` / `PerUser<T>` / `PerSession<T>` | schema of `T` + `scope: "space" \| "user" \| "session"` (folded into the `asCell` entry when the inner type is cell-wrapped) |
 
@@ -143,7 +145,7 @@ Pattern {
 }
 Node {
   module: { type: "javascript" | "pattern" | "raw" | "isolated" | ...,
-            implementation, implementationRef, ... },
+            implementation, $implRef, ... },
   inputs, outputs,                // value trees containing cell links
 }
 ```
@@ -155,22 +157,24 @@ real data only flows later, when the scheduler executes nodes (Chapter 8).
 It's also why `if (count > 3)` in the body can't work — `count` is a
 placeholder, not a number.
 
-## Identity and caching: `implementationRef`
+## Identity and caching: `$implRef`
 
-Each node's code carries an `implementationRef` — a stable, content-derived
-identity for the implementation (minted from the function's source, kind,
-and position; trusted host functions get reserved refs). It serves three
-masters:
+Each node's code carries an `$implRef` — a stable, content-derived identity
+for the implementation: `{ identity, symbol }`, the defining module's
+content identity plus the artifact's export symbol
+(`packages/runner/src/builder/types.ts`). It is deliberately ordinal-free —
+where the function sits in the file doesn't participate, only its content.
+It serves three masters:
 
-- **Caching**: compiled functions are cached by ref
-  (`packages/runner/src/function-cache.ts`), so re-loading a piece doesn't
-  recompile unchanged nodes.
+- **Caching**: compiled implementations are resolved and cached by ref
+  (`packages/runner/src/harness/executable-registry.ts`, with compiled
+  records in `packages/runner/src/compilation-cache/`), so re-loading a
+  piece doesn't recompile unchanged nodes.
 - **Stable scheduling**: the scheduler identifies actions across re-runs by
-  a content-addressed implementation fingerprint (the implementation hash,
-  falling back to source location).
+  a content-addressed implementation fingerprint (the implementation hash).
 - **Provenance**: verified-source tracking ties running code back to the
-  exact source that produced it (this also feeds the CFC
-  confidential-computing work you'll see in `packages/patterns/cfc-*`).
+  exact source that produced it (this also feeds the CFC contextual
+  flow-control machinery in `packages/runner/src/cfc/` — Chapter 10).
 
 The `js-compiler` package does the actual TypeScript-to-JS emission in two
 modes: **bundle** (one AMD bundle — how pattern programs are packaged for
