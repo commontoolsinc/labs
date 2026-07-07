@@ -4,6 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
@@ -581,6 +585,18 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           expect(state.prepare.input.policySnapshot?.digest)
             .toBe(runtime.cfcPolicySnapshot!.digest);
         }
+        tx.abort();
+      });
+    });
+
+    it("the TransactionWrapper delegates setCfcPolicyEvaluationMode to the wrapped tx", async () => {
+      // The child-tx wrapper forwards the dial setter; a nested/child pattern
+      // tx must carry the deployment mode into the wrapped tx's CFC state.
+      await withRuntime({ policyEvaluation: "off" }, (runtime) => {
+        const tx = runtime.edit() as ExtendedStorageTransaction;
+        const wrapper = new TransactionWrapper(tx, {});
+        wrapper.setCfcPolicyEvaluationMode("enforce");
+        expect(tx.getCfcState().policyEvaluationMode).toBe("enforce");
         tx.abort();
       });
     });
