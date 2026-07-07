@@ -89,6 +89,7 @@ enumerate a member set.
 New `packages/runner/src/cfc/space-membership.ts`:
 
 ```ts
+// Shown for illustration only.
 import { type ACL, type Capability, isACL, isCapable, ANYONE_USER }
   from "@commonfabric/memory/acl";
 
@@ -123,6 +124,7 @@ fit runs inside a `cell.sink` callback). The provider gives a sync snapshot
 plus a subscription for reactive re-render:
 
 ```ts
+// Shown for illustration only.
 export interface SpaceMembershipProvider {
   /** Sync role snapshot for (principal, space) from the local replica; null =
    *  not-yet-known-or-not-a-member (both fail closed). Kicks a background sync
