@@ -129,36 +129,23 @@ type InternalCellDescriptor = {
   link: SigilLink;
 };
 
+// The debug-name builders reuse the action's already-computed
+// `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
+// the same links a second time (one hashOf per action creation, not two). The
+// name stays per-instance-unique — same-named actions differ in links, so the
+// suffix differs; differently-named actions differ in the prefix.
 function schedulerRawActionName(
   rawTargetName: string,
-  inputCells: readonly NormalizedFullLink[],
-  outputCells: readonly NormalizedFullLink[],
+  instanceKey: string,
 ): string {
-  const identity = hashOf({
-    type: "raw-node",
-    name: rawTargetName,
-    inputs: inputCells.map(schedulerActionLinkIdentity),
-    outputs: outputCells.map(schedulerActionLinkIdentity),
-  }).hashString.slice(0, 12);
-  return `raw:${rawTargetName}:${identity}`;
+  return `raw:${rawTargetName}:${instanceKey}`;
 }
 
 function schedulerJavaScriptActionName(
   actionName: string,
-  processCell: Cell<unknown>,
-  reads: readonly NormalizedFullLink[],
-  writes: readonly NormalizedFullLink[],
+  instanceKey: string,
 ): string {
-  const identity = hashOf({
-    type: "javascript-node",
-    name: actionName,
-    process: schedulerActionLinkIdentity(
-      processCell.getAsNormalizedFullLink(),
-    ),
-    reads: reads.map(schedulerActionLinkIdentity),
-    writes: writes.map(schedulerActionLinkIdentity),
-  }).hashString.slice(0, 12);
-  return `action:${actionName}:${identity}`;
+  return `action:${actionName}:${instanceKey}`;
 }
 
 function schedulerActionLinkIdentity(link: NormalizedFullLink) {
@@ -1389,7 +1376,9 @@ export class Runner {
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
     if (rootCell.getRaw() === undefined) {
+      const rootSyncStart = performance.now();
       return rootCell.sync().then(() => {
+        logger.time(rootSyncStart, "start", "rootCellSync");
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -1445,6 +1434,7 @@ export class Runner {
       // No patternId, no meta cell — the source docs are the single durable
       // source. A piece carrying only a legacy `pattern` link is unrecoverable
       // (the sanctioned data-wipe outcome).
+      const loadStart = performance.now();
       return pm
         .loadPatternByIdentity(
           identityRef.identity,
@@ -1452,6 +1442,9 @@ export class Runner {
           rootCell.space,
         )
         .then((loaded) => {
+          // Resume-boot decomposition: source-doc fetch + module load/eval for
+          // a pattern this runtime has never instantiated.
+          logger.time(loadStart, "start", "loadPatternByIdentity");
           if (loaded) {
             return this.doStart(rootCell, seenCells);
           } else {
@@ -1495,6 +1488,7 @@ export class Runner {
           return true;
         }
 
+        const startCoreStart = performance.now();
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
@@ -1506,6 +1500,10 @@ export class Runner {
           });
         } catch (err) {
           return Promise.reject(err);
+        } finally {
+          // Synchronous instantiation cost of the resumed piece (pattern
+          // setup, node wiring), distinct from the syncs around it.
+          logger.time(startCoreStart, "start", "startCoreResume");
         }
 
         return true;
@@ -1849,6 +1847,27 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
+    const syncStart = performance.now();
+    try {
+      return await this.syncCellsForRunningPatternInner(
+        resultCell,
+        pattern,
+        inputs,
+      );
+    } finally {
+      // Resume-boot decomposition: this is the dependency pre-sync a fresh
+      // runtime pays before wiring a stored piece back up. Recorded under the
+      // runner timing stats (they record even when the logger is disabled) so
+      // load summaries can attribute slow storage-resume boots.
+      logger.time(syncStart, "start", "syncCellsForRunningPattern");
+    }
+  }
+
+  private async syncCellsForRunningPatternInner(
+    resultCell: Cell<any>,
+    pattern: Module | Pattern,
+    inputs?: any,
+  ): Promise<boolean> {
     const seen = new Set<Cell<any>>();
     const promises = new Set<Promise<any>>();
 
@@ -1928,7 +1947,15 @@ export class Runner {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
 
-    await Promise.all(cells.map((c) => c.sync()));
+    // Per-cell spans: `n` in the timing stats is the number of cells this
+    // resume pre-synced, total/max its round-trip cost (spans overlap, so the
+    // wall cost is bounded by the enclosing syncCellsForRunningPattern span).
+    await Promise.all(cells.map((c) => {
+      const cellSyncStart = performance.now();
+      return Promise.resolve(c.sync()).finally(() =>
+        logger.time(cellSyncStart, "start", "resumeCellSync")
+      );
+    }));
 
     return true;
   }
@@ -3582,24 +3609,34 @@ export class Runner {
       }
     };
 
+    // Identity stamping is UNCONDITIONAL — the single identity channel (the
+    // scheduler reads only these stamps; there is no fallback derivation).
+    // The debug NAME below depends on `name` (fn.src / fn.name — absent for
+    // anonymous arrows when the eager source annotation is off), but identity
+    // must not: gating the stamps on `name` silently re-opened the per-symbol
+    // multi-instance collision (N instances of one lift sharing one id, so one
+    // actionStats entry and one durable observation) whenever annotation was
+    // off — the production default.
+    //
+    // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
+    // not `module.implementation`: an `$implRef`-resolved module (reloaded from
+    // a serialized graph) carries the ref, not the live function, so reading
+    // provenance off `module.implementation` would drop the content-addressed
+    // scheduler identity on reload.
+    this.applyImplementationHash(action, fn);
+    const instanceKey = schedulerActionInstanceKey({
+      process: processCell.getAsNormalizedFullLink(),
+      reads,
+      writes,
+    });
+    (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
+      instanceKey;
     if (name) {
       setRunnableName(
         action,
-        schedulerJavaScriptActionName(name, processCell, reads, writes),
+        schedulerJavaScriptActionName(name, instanceKey),
         { setSrc: true },
       );
-      // Use the RESOLVED implementation `fn` (`resolveByImplRef(module) ?? …`),
-      // not `module.implementation`: an `$implRef`-resolved module (reloaded from
-      // a serialized graph) carries the ref, not the live function, so reading
-      // provenance off `module.implementation` would drop the content-addressed
-      // scheduler identity on reload.
-      this.applyImplementationHash(action, fn);
-      (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
-        schedulerActionInstanceKey({
-          process: processCell.getAsNormalizedFullLink(),
-          reads,
-          writes,
-        });
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -4031,11 +4068,11 @@ export class Runner {
       sanitizeDebugLabel(impl.src) ??
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
-    const rawName = schedulerRawActionName(
-      rawTargetName,
-      inputCells,
-      outputCells,
-    );
+    const rawInstanceKey = schedulerActionInstanceKey({
+      reads: inputCells,
+      writes: outputCells,
+    });
+    const rawName = schedulerRawActionName(rawTargetName, rawInstanceKey);
 
     const action: Action = (tx: IExtendedStorageTransaction) => {
       logger.timeStart("raw", "run", rawTargetName);
@@ -4056,7 +4093,7 @@ export class Runner {
     setRunnableName(action, rawName, { setSrc: true });
     this.applyImplementationHash(action, impl);
     (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
-      schedulerActionInstanceKey({ reads: inputCells, writes: outputCells });
+      rawInstanceKey;
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.

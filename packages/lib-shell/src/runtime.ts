@@ -30,6 +30,7 @@ const identityLogger = getLogger("lib-shell.identity", {
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  eagerSourceAnnotation?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<
@@ -91,6 +92,18 @@ export type RuntimeInternalsCallbacks = {
   onError?: (event: RuntimeClientEvents["error"][0]) => void;
 };
 
+/**
+ * Optional telemetry sink for the client marker stream. When provided (browser
+ * OTel enabled), each marker is forwarded here IN ADDITION to the existing debug
+ * handling. Structurally matches the browser OTel bridge returned by
+ * packages/shell/src/lib/otel.ts, so this package pulls in no OTel code — the
+ * embedder owns SDK setup and passes the sink in. Absent = zero added work.
+ */
+export interface RuntimeTelemetrySink {
+  handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  shutdown(): void | Promise<void>;
+}
+
 export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   apiUrl: URL;
@@ -125,6 +138,11 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   forwardWorkerConsole?: boolean;
   getBuildHash?: () => Promise<string | undefined>;
   workerUrl?: URL;
+  /**
+   * Optional telemetry sink (browser OTel bridge). Purely additive and gated by
+   * the embedder: when omitted, no telemetry work happens.
+   */
+  telemetry?: RuntimeTelemetrySink;
 };
 
 const NavigationEventName = "cf-navigate";
@@ -259,14 +277,18 @@ export class RuntimeInternals extends EventTarget {
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  // Optional OTel sink (browser telemetry enabled). Inert when undefined.
+  #telemetrySink?: RuntimeTelemetrySink;
 
   constructor(
     client: RuntimeClient,
     callbacks: RuntimeInternalsCallbacks = {},
+    telemetry?: RuntimeTelemetrySink,
   ) {
     super();
     this.#client = client;
     this.#callbacks = callbacks;
+    this.#telemetrySink = telemetry;
     this.#favorites = new FavoritesManager(client);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
@@ -441,6 +463,16 @@ export class RuntimeInternals extends EventTarget {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Flush + tear down telemetry first so buffered spans aren't dropped on
+    // runtime replacement/logout. Guarded — telemetry must never break disposal.
+    if (this.#telemetrySink) {
+      try {
+        await this.#telemetrySink.shutdown();
+      } catch (e) {
+        console.error("[RuntimeInternals] telemetry sink shutdown failed:", e);
+      }
+      this.#telemetrySink = undefined;
+    }
     await this.#client.dispose();
   }
 
@@ -547,6 +579,19 @@ export class RuntimeInternals extends EventTarget {
   #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {
     this.#telemetryMarkers.push(marker);
     this.dispatchEvent(new CustomEvent("telemetryupdate"));
+    // Additionally translate the marker into OTel spans/metrics when a sink is
+    // attached (browser telemetry enabled). Guarded so a bridge error never
+    // disrupts the existing debug telemetry pipeline.
+    if (this.#telemetrySink) {
+      try {
+        this.#telemetrySink.handleMarker(marker);
+      } catch (e) {
+        console.error(
+          "[RuntimeInternals] telemetry sink handleMarker failed:",
+          e,
+        );
+      }
+    }
   };
 
   #check() {
@@ -570,6 +615,7 @@ export class RuntimeInternals extends EventTarget {
     navigate,
     onConsole,
     onError,
+    telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
     // One runtime per identity: the worker session is always the
     // identity's home session. Spaces — including derived named spaces —
@@ -617,6 +663,7 @@ export class RuntimeInternals extends EventTarget {
     return new RuntimeInternals(
       client,
       { navigate, onConsole, onError },
+      telemetry,
     );
   }
 }

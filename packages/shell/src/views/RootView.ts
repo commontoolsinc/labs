@@ -28,8 +28,9 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
-import { EXPERIMENTAL } from "../lib/env.ts";
+import { ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
+import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -100,9 +101,24 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
+          this.#telemetry = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
         }
+
+        // Browser OpenTelemetry (Phase 3): self-gated + lazy — returns null
+        // (and imports no OTel SDK) unless telemetryEnabled is set. Attributes
+        // use the identity's DID and the currently resolved space; the runtime
+        // (and this sink) outlives navigations, so #resolveViewSpace keeps the
+        // sink's space.did current via setSpace.
+        const userDid = app.identity.did();
+        const telemetry = await initBrowserOtel({
+          apiUrl: app.apiUrl,
+          userDid,
+          spaceDid: this.space ?? userDid,
+          environment: ENVIRONMENT,
+        });
+        this.#telemetry = telemetry ?? undefined;
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
@@ -115,6 +131,8 @@ export class XRootView extends BaseView {
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.
           navigate,
+          // Purely additive; null when telemetry is disabled.
+          telemetry: telemetry ?? undefined,
         });
 
         if (signal.aborted) {
@@ -186,6 +204,10 @@ export class XRootView extends BaseView {
     }
   }
 
+  // The active browser telemetry sink (undefined when telemetry is disabled
+  // or no runtime); kept only so space.did attribution can track navigation.
+  #telemetry: BrowserTelemetry | undefined;
+
   // Resolve the current view to a space DID — view state, independent of
   // the runtime's lifecycle.
   #resolveSpaceToken = 0;
@@ -210,6 +232,9 @@ export class XRootView extends BaseView {
     }
     if (token !== this.#resolveSpaceToken) return;
     this.space = space;
+    // Keep browser OTel span attribution in sync with the resolved space —
+    // the telemetry sink lives across navigations.
+    this.#telemetry?.setSpace(space);
   }
 
   private _onThemeChanged = (e: Event) => {

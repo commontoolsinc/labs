@@ -1,4 +1,9 @@
-import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertMatch,
+  assertThrows,
+} from "@std/assert";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type EntityRef,
@@ -9,6 +14,7 @@ import { Database } from "@db/sqlite";
 import {
   applyCommit,
   close,
+  ConflictError,
   createBranch,
   deleteBranch,
   type Engine,
@@ -546,6 +552,88 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
         }),
       Error,
       "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+// CT-1824 contract: a stale-read ConflictError must name the conflicted
+// entity BOTH structurally (of/seq/conflictSeq — read in-process by
+// editWithRetry's pull) AND in the message with this exact shape — server
+// Error fields do not survive serialization to the browser, so the runner
+// client re-derives `of` by parsing the message (runner storage/v2.ts
+// toRejectedError). Changing either surface breaks conflict recovery for
+// blind writes.
+Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted entity structurally and in the message", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:alice";
+  const principal = "did:key:alice";
+
+  try {
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:stale-named",
+          value: toEntityDocument({ v: 1 }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId,
+      principal,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:stale-named",
+          value: toEntityDocument({ v: 2 }),
+        }],
+      },
+    });
+
+    const error = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId,
+          principal,
+          commit: {
+            localSeq: 3,
+            reads: {
+              confirmed: [{
+                id: "entity:stale-named",
+                path: toDocumentPath(["value"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:stale-result",
+              value: toEntityDocument("late"),
+            }],
+          },
+        }),
+      ConflictError,
+    );
+    assertEquals(error.of, "entity:stale-named");
+    assertEquals(error.seq, 1);
+    assertEquals(error.conflictSeq, 2);
+    assertMatch(
+      error.message,
+      /^stale confirmed read: \S+ at seq \d+ conflicted with seq \d+$/,
+    );
+    // The exact parse the runner client performs on the wire-crossed message.
+    assertEquals(
+      error.message.match(/stale confirmed read: (\S+) at seq/)?.[1],
+      "entity:stale-named",
     );
   } finally {
     close(engine);

@@ -7,6 +7,8 @@ import {
   StorageManager,
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
+import type { ModuleByteCache } from "../src/runtime.ts";
+import type { CompiledModuleArtifact } from "../src/harness/types.ts";
 
 /**
  * Conformance guard for CT-1811.
@@ -62,5 +64,82 @@ describe("PatternManager.compileAndRegisterModules", () => {
     // would fall back to the embedded graph (this is the CT-1811 hazard the seam
     // exists to remove).
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeUndefined();
+  });
+
+  // The cf-test harness injects a process-wide module byte cache
+  // (`RuntimeOptions.moduleByteCache`) so repeated pattern compiles across
+  // runtimes skip the transform-and-emit step. Pin that seam here: a fresh
+  // runtime given a previously populated cache must serve the compile from
+  // cached bytes (a COMPLETE set — partial sets recompile) and still register
+  // the evaluated artifacts exactly like a cold compile.
+  it("reuses an injected module byte cache across runtimes and still registers", async () => {
+    const entries = new Map<
+      string,
+      { identity: string } & CompiledModuleArtifact
+    >();
+    let completeSetHits = 0;
+    const byteCache: ModuleByteCache = {
+      getCompleteSet(runtimeVersion, identities) {
+        const set = new Map<string, CompiledModuleArtifact>();
+        for (const identity of identities) {
+          const entry = entries.get(`${runtimeVersion}\0${identity}`);
+          if (entry === undefined) return undefined;
+          set.set(identity, entry);
+        }
+        completeSetHits++;
+        return set;
+      },
+      putAll(runtimeVersion, modules) {
+        for (const module of modules) {
+          entries.set(`${runtimeVersion}\0${module.identity}`, module);
+        }
+      },
+    };
+
+    // Cold: compiles, writes the emitted bodies back through putAll.
+    const coldStorage = StorageManager.emulate({ as: signer });
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: coldStorage,
+      moduleByteCache: byteCache,
+    });
+    try {
+      const cold = await coldRuntime.patternManager.compileAndRegisterModules(
+        program,
+      );
+      expect(
+        coldRuntime.patternManager.getArtifactEntryRef(
+          cold.main!["default"] as object,
+        ),
+      ).toBeDefined();
+      expect(entries.size).toBeGreaterThan(0);
+      expect(completeSetHits).toBe(0); // nothing cached yet on the cold pass
+    } finally {
+      await coldRuntime.dispose();
+      await coldStorage.close();
+    }
+
+    // Warm: a fresh runtime with the SAME cache must get a complete set and
+    // still produce a registered, evaluated namespace.
+    const warmStorage = StorageManager.emulate({ as: signer });
+    const warmRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: warmStorage,
+      moduleByteCache: byteCache,
+    });
+    try {
+      const warm = await warmRuntime.patternManager.compileAndRegisterModules(
+        program,
+      );
+      expect(completeSetHits).toBe(1);
+      expect(
+        warmRuntime.patternManager.getArtifactEntryRef(
+          warm.main!["default"] as object,
+        ),
+      ).toBeDefined();
+    } finally {
+      await warmRuntime.dispose();
+      await warmStorage.close();
+    }
   });
 });

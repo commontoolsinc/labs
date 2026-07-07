@@ -29,6 +29,7 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
     persistentSchedulerState: read(
       "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
     ),
+    eagerSourceAnnotation: read("EXPERIMENTAL_EAGER_SOURCE_ANNOTATION"),
   };
 
   // Log any overridden experimental flags.

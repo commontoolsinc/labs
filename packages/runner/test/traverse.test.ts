@@ -9,6 +9,7 @@ import type {
   URI,
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
@@ -996,6 +997,87 @@ describe("SchemaObjectTraverser boolean type handling", () => {
 
     // boolean doesn't match string schema
     expect(error).toBeDefined();
+  });
+});
+
+describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
+  it("materializes a FabricSpecialObject value as an opaque leaf", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-fabric-bytes" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // The structural shape the schema-generator emits for these types today
+    // (CT-1836): own props can never satisfy it — `length` lives on the
+    // prototype. A leaf is not property-walked, so it must not matter.
+    const schema = {
+      type: "object",
+      properties: { length: { type: "number" } },
+      required: ["length"],
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    // The same frozen instance passes through — not an `Object.entries`
+    // decomposition of its (empty) own props.
+    expect(result).toBe(docValue);
+  });
+
+  it("rejects a FabricSpecialObject value where the schema cannot be an object", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-fabric-bytes-reject" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = { type: "string" } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    // A special object validates as "object" and nothing else: it is
+    // rejected here, not decomposed against the mismatched schema.
+    expect(error?.code).toBe("INVALID_TYPE");
   });
 });
 

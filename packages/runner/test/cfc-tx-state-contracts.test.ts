@@ -102,6 +102,48 @@ describe("CFC tx state contracts", () => {
     });
   });
 
+  it("strengthening the flow-labels or write-floor mode after prepare invalidates", async () => {
+    // Both modes drive prepareBoundaryCommit but are absent from
+    // PreparedDigestInput, so a strengthen-after-prepare must invalidate the
+    // prepared decision — otherwise the stale (weaker) decision survives the
+    // commit-time digest recheck while the tx reports the stronger mode
+    // (review of #4566, same class as the policy-evaluation setter). A no-op
+    // re-set of the same mode does not invalidate.
+    await withTx(async (runtime, tx) => {
+      runtime.getCell(signer.did(), "tx-contracts-flow", undefined, tx).set({
+        v: 1,
+      });
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      tx.setCfcFlowLabelsMode("off"); // no change from default off → no-op
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      tx.setCfcFlowLabelsMode("observe"); // real change → invalidate
+      const flow = tx.getCfcState().prepare;
+      expect(flow.status).toBe("invalidated");
+      expect(
+        (flow as { status: string; reasons: readonly string[] }).reasons,
+      ).toContainEqual("flow-labels-mode-changed");
+      await tx.commit();
+    });
+
+    await withTx(async (runtime, tx) => {
+      runtime.getCell(signer.did(), "tx-contracts-floor", undefined, tx).set({
+        v: 1,
+      });
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      tx.setCfcWriteFloorMode("off"); // no change → no-op
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      tx.setCfcWriteFloorMode("enforce"); // strengthen → invalidate
+      const floor = tx.getCfcState().prepare;
+      expect(floor.status).toBe("invalidated");
+      expect(
+        (floor as { status: string; reasons: readonly string[] }).reasons,
+      ).toContainEqual("write-floor-mode-changed");
+      await tx.commit();
+    });
+  });
+
   it("a write after prepare invalidates the prepared digest", async () => {
     await withTx(async (runtime, tx) => {
       const cell = runtime.getCell(
