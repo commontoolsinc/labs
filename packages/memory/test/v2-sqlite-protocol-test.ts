@@ -8,6 +8,7 @@ import { expect } from "@std/expect";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
+import { all, match, principal } from "../v2/sqlite/row-label.ts";
 import type { SqliteDbRef } from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
@@ -225,6 +226,54 @@ describe("sqlite protocol verbs (loopback)", () => {
     await seedRows(goodDb, "INSERT INTO messages (body) VALUES (?)", ["ok"]);
     const r = await session.sqliteQuery(goodDb, "SELECT body FROM messages");
     expect(r.rows).toEqual([{ body: "ok" }]);
+  });
+
+  it("surfaces a row-label commit violation as a terminal RowLabelCommitError (name preserved over the wire)", async () => {
+    // A folded write whose committed row violates the table's row-label rule
+    // (Phase 3.c commit-time re-derivation, sqlite/commit-eval.ts) is TERMINAL:
+    // re-running recomputes the identical refused write. The server MUST
+    // serialize the class name UNCHANGED so the runner classifies it
+    // non-retryable (runner storage/rejection.ts `isTerminalRejection`).
+    // Collapsing it into a generic TransactionError (the pre-fix behavior) would
+    // let the doomed handler burn its retry budget and starve concurrent
+    // siblings — this asserts the exact server-side serialization the runner
+    // integration test otherwise only covers end-to-end.
+    const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
+    const ruleDb: SqliteDbRef = {
+      id: `of:rowlabel-terminal-${crypto.randomUUID()}`,
+      owner: SPACE,
+      tables: {
+        // A required-anchor sender rule: a from_addr with no address-shaped
+        // match fails closed (strict-if-present) when re-derived at commit.
+        emails: table(
+          { id: "integer primary key", from_addr: "text", body: "text" },
+          (f) => ({
+            confidentiality: all(
+              principal("mailto", match(f.from_addr, ADDR, { min: 1 })),
+            ),
+          }),
+        ),
+      },
+    };
+    let name: string | undefined;
+    try {
+      await session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "sqlite",
+            db: ruleDb,
+            sql: "INSERT INTO emails (from_addr, body) VALUES (?, ?)",
+            params: ["not an address", "boom"],
+          },
+        ],
+      });
+    } catch (error) {
+      name = (error as { name?: string }).name;
+    }
+    // Not "TransactionError": the terminal identity survived the wire.
+    expect(name).toBe("RowLabelCommitError");
   });
 
   it("rolls back the whole commit when a folded sqlite op fails", async () => {

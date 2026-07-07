@@ -159,6 +159,21 @@ describe("CFC canonicalization helpers", () => {
       }],
       attemptedWrites: [],
       writes: [],
+      // Deliberately out of clock order: the attempt log canonicalizes BY
+      // journalIndex (order-preserving), never by address.
+      writeAttemptLog: [{
+        space: signer.did(),
+        scope: "space",
+        id: "of:doc",
+        path: ["value", "a"],
+        journalIndex: 3,
+      }, {
+        space: signer.did(),
+        scope: "space",
+        id: "of:doc",
+        path: ["value", "z"],
+        journalIndex: 1,
+      }],
       dereferenceTraces: [],
       triggerReads: [],
       writePolicyInputs: [{
@@ -175,6 +190,17 @@ describe("CFC canonicalization helpers", () => {
     expect(input.consumedReads.map((read) => read.path)).toEqual([
       ["a"],
       ["z"],
+    ]);
+    // Sorted by journalIndex (temporal order), paths verbatim (raw, no
+    // leading-"value" strip) — the §6 order binding, not an address sort.
+    expect(
+      input.writeAttemptLog.map((attempt) => ({
+        path: attempt.path,
+        journalIndex: attempt.journalIndex,
+      })),
+    ).toEqual([
+      { path: ["value", "z"], journalIndex: 1 },
+      { path: ["value", "a"], journalIndex: 3 },
     ]);
     expect(
       input.writePolicyInputs.map((item) =>

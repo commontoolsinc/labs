@@ -242,6 +242,17 @@ export interface MemoryProtocolFlags {
   syncSchemaTable: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+  /**
+   * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
+   * rule-bearing tables are re-derived through the shared row-label evaluator
+   * against the committed rows, rolling back on violation (see
+   * `v2/sqlite/commit-eval.ts`). The RUNNER keys its write-gate relaxation for
+   * the non-attributable shapes (INSERT…SELECT, upsert, columnless INSERT,
+   * rule-input UPDATE) on the SERVER advertising this — an old server that
+   * never evaluates keeps a new runner failing closed. Inherent to the build
+   * (not configuration), so a server of this version always advertises it.
+   */
+  sqliteCommitRowLabelEval: boolean;
 }
 
 /**
@@ -253,6 +264,7 @@ export type WireMemoryProtocolFlags = {
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
+  sqliteCommitRowLabelEval?: boolean;
 };
 
 export interface HelloMessage {
@@ -685,6 +697,11 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
   syncSchemaTable: false,
+  // A build-inherent capability, not configuration: this build's engine always
+  // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
+  // advertises the fact. Peers that see it absent (an older server) keep their
+  // write gate failing closed.
+  sqliteCommitRowLabelEval: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -750,12 +767,23 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const sqliteCommitRowLabelEval = value.sqliteCommitRowLabelEval;
+  if (
+    sqliteCommitRowLabelEval !== undefined &&
+    typeof sqliteCommitRowLabelEval !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    // Absent (an older peer) parses to false: the capability must be
+    // POSITIVELY advertised for the runner to relax its write gate.
+    sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
   };
 };
 
@@ -770,6 +798,7 @@ export const wireMemoryProtocolFlags = (
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
 });
 
 export const encodeMemoryBoundary = (value: FabricValue): string =>

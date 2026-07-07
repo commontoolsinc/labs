@@ -39,6 +39,7 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
+  IWriteAttempt,
   IWriteOptions,
   MediaType,
   MemorySpace,
@@ -866,6 +867,14 @@ export class V2StorageTransaction implements IStorageTransaction {
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
+  // Per-transaction monotonic activity clock, shared between read activities
+  // and write attempts so their relative order (the read|write interleaving)
+  // is recoverable without a journal scan — V2 journals don't support
+  // activity(). Stamped at the two record points: the read() activity push
+  // and recordPatchIntent(). Consumed by CFC write-prefix provenance
+  // (docs/specs/cfc-write-prefix-provenance.md §4/§6).
+  #activityClock = 0;
+  #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
@@ -937,6 +946,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getReadActivities() {
     return this.#readActivities;
+  }
+
+  getWriteAttemptLog(): readonly IWriteAttempt[] {
+    return this.#writeAttemptLog;
   }
 
   getReactivityLog() {
@@ -1289,6 +1302,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           ? { ...readMeta, ...ignoreReadForCommit }
           : readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+        journalIndex: this.#activityClock++,
       };
       this.#readActivities.push(readActivity);
       this.invalidateReactivityLog();
@@ -1724,6 +1738,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
   ): void {
+    // The per-attempt order stamp. recordPatchIntent runs once per applied
+    // write in both the single-write and batch paths, with the EXACT write
+    // address (unlike recordWriteActivity's materialized-parent activity
+    // path) and only after the value-equal elision checks — so the attempt
+    // log carries exactly the write set the rest of the inspection surface
+    // (writeDetails/reactivity) sees, in temporal order. Raw path on
+    // purpose: the CFC consumer distinguishes `["value",...]` user writes
+    // from `["cfc"]`/`["source"]` runtime surfaces.
+    this.#writeAttemptLog.push({
+      space,
+      scope: normalizeCellScope(address.scope),
+      id: address.id,
+      path: address.path,
+      journalIndex: this.#activityClock++,
+    });
     this.upsertWriteDetail(
       doc.patchDetails,
       space,

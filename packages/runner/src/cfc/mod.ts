@@ -39,6 +39,7 @@ export type {
   EntityDocumentWithCfc,
   IFCLabel,
   ImplementationIdentity,
+  OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
   TrustSnapshot,
@@ -89,6 +90,13 @@ export type {
   PolicySnapshot,
 } from "./policy.ts";
 export { buildCfcPolicySnapshot } from "./policy.ts";
+export {
+  MATERIAL_RISK_DISCHARGE_KINDS,
+  MATERIAL_RISK_DISCHARGE_POLICY,
+  MATERIAL_RISK_KINDS,
+  PROMPT_INJECTION_RISK_LEGACY,
+  STANDARD_PROMPT_CAVEAT_POLICY,
+} from "./standard-profile.ts";
 export type {
   CfcConceptEdge,
   CfcTrustConfig,

@@ -2758,6 +2758,57 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   );
 });
 
+Deno.test("memory v2 client stores the server's advertised flags (capability handshake)", async () => {
+  // An OLD server's hello.ok omits sqliteCommitRowLabelEval: the parsed
+  // server flags must read false (the runner's write gate then keeps failing
+  // closed), while a current server's advertisement reads true.
+  const transportWithFlags = (flags: unknown): Transport => {
+    let receiver = (_payload: string) => {};
+    return {
+      send(payload): Promise<void> {
+        const message = decodeMemoryBoundary(payload) as { type?: string };
+        if (message.type === "hello") {
+          receiver(encodeMemoryBoundary({
+            type: "hello.ok",
+            protocol: MEMORY_PROTOCOL,
+            flags,
+            sessionOpen: {
+              audience: TEST_SESSION_OPEN_AUDIENCE,
+              challenge: sessionOpenChallenge,
+            },
+          } as FabricValue));
+        }
+        return Promise.resolve();
+      },
+      async close() {},
+      setReceiver(next) {
+        receiver = next;
+      },
+      setCloseReceiver() {},
+    };
+  };
+
+  const current = await connect({
+    transport: transportWithFlags(getMemoryProtocolFlags()),
+  });
+  try {
+    assertEquals(current.serverFlags?.sqliteCommitRowLabelEval, true);
+  } finally {
+    await current.close();
+  }
+
+  const legacy = await connect({
+    transport: transportWithFlags({
+      modernCellRep: getMemoryProtocolFlags().modernCellRep,
+    }),
+  });
+  try {
+    assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
+  } finally {
+    await legacy.close();
+  }
+});
+
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {
   const client = await connect({
     transport: new CloseOnSessionOpenTransport(),

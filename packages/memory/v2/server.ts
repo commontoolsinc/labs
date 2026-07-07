@@ -54,6 +54,7 @@ import {
   ensureTables,
 } from "./sqlite/exec.ts";
 import { assertReadOnly } from "./sqlite/guard.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
@@ -1745,6 +1746,15 @@ export class Server {
               ? "ConflictError"
               : error instanceof Engine.ProtocolError
               ? "ProtocolError"
+              // A RowLabelCommitError (Phase 3.c commit-time row-label refusal,
+              // sqlite/commit-eval.ts) is TERMINAL: re-running recomputes the
+              // identical refused write, so the client must not retry it.
+              // Preserve the class name unchanged — the runner classifies by it
+              // (storage/rejection.ts `isTerminalRejection`); collapsing it into
+              // a generic TransactionError would let the doomed handler burn its
+              // retry budget and starve concurrent siblings.
+              : error instanceof RowLabelCommitError
+              ? "RowLabelCommitError"
               : "TransactionError",
             messageText,
           );

@@ -15,8 +15,10 @@ import {
 import type {
   Action,
   IExtendedStorageTransaction,
+  ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
 
 describe("reactive retries", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -82,6 +84,81 @@ describe("reactive retries", () => {
       await runtime.idle();
 
       expect(attempts).toBe(11);
+    },
+  );
+
+  // Directly exercise the reactive commit-result classification
+  // (`watchReactiveActionCommit`): a whole-runtime commit injector would churn
+  // every commit and re-trigger the action externally, confounding the retry
+  // count, so drive the watcher with a resolved commit result instead.
+  const runWatcher = async (
+    errorName: string | undefined,
+    initialRetries: number,
+  ) => {
+    const action = (() => {}) as unknown as Action;
+    const retries = new WeakMap<Action, number>();
+    if (initialRetries > 0) retries.set(action, initialRetries);
+    let queued = 0;
+    let resubscribed = 0;
+    const error = errorName === undefined
+      ? undefined
+      : { name: errorName, message: `injected ${errorName}` };
+    const commitPromise = Promise.resolve({ error }) as unknown as ReturnType<
+      IExtendedStorageTransaction["commit"]
+    >;
+    watchReactiveActionCommit({
+      action,
+      tx: {} as IExtendedStorageTransaction,
+      log: {} as ReactivityLog,
+      retries,
+      pending: new Set<Action>(),
+      commitPromise,
+      resubscribe: () => {
+        resubscribed++;
+      },
+      markDirectDirty: () => {},
+      queueExecution: () => {
+        queued++;
+      },
+      restoreCfcTriggerReads: () => {},
+    });
+    await commitPromise;
+    await new Promise((r) => setTimeout(r, 0));
+    return { queued, resubscribed, retries, action };
+  };
+
+  it(
+    "does not retry a terminal reactive rejection and clears the retry budget",
+    async () => {
+      // A deterministic commit-rule refusal (RowLabelCommitError) can never
+      // converge; re-running recomputes the identical refused write and its
+      // speculative rev bumps starve concurrent siblings. It must not re-queue,
+      // and — since the sequence has ended — must clear any accumulated count so
+      // a later input-triggered run keeps its full budget for a transient
+      // failure. (Contrast the abort case above, which retries to the limit.)
+      const r = await runWatcher("RowLabelCommitError", 3);
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+    },
+  );
+
+  it(
+    "does not retry a permanent reactive rejection and clears the retry budget",
+    async () => {
+      const r = await runWatcher("PreconditionFailedError", 3);
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+    },
+  );
+
+  it(
+    "retries a transient reactive rejection within the bounded budget",
+    async () => {
+      // A generic transient error keeps the bounded retry path: it re-queues and
+      // charges the counter (proving terminal/permanent are the exceptions).
+      const r = await runWatcher("TransactionError", 0);
+      expect(r.queued).toBe(1);
+      expect(r.retries.get(r.action)).toBe(1);
     },
   );
 

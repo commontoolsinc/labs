@@ -284,6 +284,16 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
 
   /**
+   * Whether the CONNECTED SERVER advertised commit-time row-label evaluation
+   * for folded sqlite writes (CFC Phase 3.c,
+   * `MemoryProtocolFlags.sqliteCommitRowLabelEval`). The runner's write gate
+   * relaxes its non-attributable-shape rejects only when this is true; a
+   * missing implementation, a not-yet-resolved session, or an old server all
+   * read as `false` — fail closed.
+   */
+  sqliteServerCommitRowLabelEval?(): boolean;
+
+  /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
    * this, server-side reads for `id` resolve against the on-disk file at `path`
    * (attached read-only) instead of the cell-derived db; writes are rejected.
@@ -674,6 +684,17 @@ export interface IStorageTransaction {
    * scan journal activity.
    */
   getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional ordered log of every applied write attempt, in transaction
+   * order, stamped on the same per-transaction activity clock as read
+   * activities. Unlike `getWriteDetails` (per-path, last-value upserts,
+   * path-sorted reconstruction) this preserves the temporal write sequence,
+   * one entry per write call. The CFC write-prefix provenance gate derives
+   * each protected path's last-overlapping-write bound from it
+   * (docs/specs/cfc-write-prefix-provenance.md §4/§6).
+   */
+  getWriteAttemptLog?(): readonly IWriteAttempt[];
 
   /**
    * Optional write details for the given space.
@@ -1495,6 +1516,32 @@ export type Activity = Variant<{
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
+  /**
+   * Position of this read on the transaction's activity clock — a single
+   * per-transaction monotonic counter shared with write attempts
+   * ({@link IWriteAttempt}), stamped at record time by the storage
+   * transaction. Gives the read|write interleaving order without a journal
+   * scan (V2 journals do not support `activity()`). Consumed by the CFC
+   * write-prefix provenance gate and bound into the prepared digest
+   * (docs/specs/cfc-write-prefix-provenance.md §6). Optional only for
+   * backends that predate the clock; absent means "order unknown" and CFC
+   * treats the read as preceding every write (conservative).
+   */
+  journalIndex?: number;
+}
+
+/**
+ * One applied write attempt, in transaction order. `path` is the RAW storage
+ * path as written (`["value", ...]` for user data, `["cfc"]`/`["source"]`
+ * for runtime surfaces, `[]` for whole-envelope writes) — deliberately not
+ * canonicalized, so surface distinctions survive. Value-equal writes that
+ * the storage layer elides entirely (no write details, no reactivity) do
+ * not appear here either: the log records exactly the write set the rest of
+ * the transaction inspection surface sees. `journalIndex` is the shared
+ * activity clock (see {@link IReadActivity.journalIndex}).
+ */
+export interface IWriteAttempt extends IMemorySpaceAddress {
+  journalIndex: number;
 }
 
 /**
