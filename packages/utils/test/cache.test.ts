@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { LRUCache } from "@commonfabric/utils/cache";
+import { LRUCache, WeightedLRUCache } from "@commonfabric/utils/cache";
 
 describe("LRUCache", () => {
   describe("basic operations", () => {
@@ -170,5 +170,115 @@ describe("LRUCache", () => {
       expect(cache.has("c")).toBe(true);
       expect(cache.has("d")).toBe(true);
     });
+  });
+});
+
+describe("WeightedLRUCache", () => {
+  it("stores and retrieves values, tracking total weight", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 10);
+    cache.put("b", 2, 20);
+    expect(cache.get("a")).toBe(1);
+    expect(cache.get("b")).toBe(2);
+    expect(cache.size).toBe(2);
+    expect(cache.totalWeight).toBe(30);
+  });
+
+  it("evicts least-recently-used entries when over the weight budget", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("b", 2, 40);
+    cache.put("c", 3, 40); // exceeds 100: evicts "a"
+    expect(cache.has("a")).toBe(false);
+    expect(cache.get("b")).toBe(2);
+    expect(cache.get("c")).toBe(3);
+    expect(cache.totalWeight).toBe(80);
+  });
+
+  it("a heavy entry evicts as many light entries as needed", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 30);
+    cache.put("b", 2, 30);
+    cache.put("c", 3, 30);
+    cache.put("big", 4, 90); // evicts a, b, c
+    expect(cache.has("a")).toBe(false);
+    expect(cache.has("b")).toBe(false);
+    expect(cache.has("c")).toBe(false);
+    expect(cache.get("big")).toBe(4);
+    expect(cache.totalWeight).toBe(90);
+  });
+
+  it("get refreshes recency so hot entries survive eviction", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("b", 2, 40);
+    cache.get("a"); // "a" now most recent
+    cache.put("c", 3, 40); // evicts "b", not "a"
+    expect(cache.get("a")).toBe(1);
+    expect(cache.has("b")).toBe(false);
+    expect(cache.get("c")).toBe(3);
+  });
+
+  it("does not store entries heavier than the whole budget", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("huge", 2, 101);
+    expect(cache.has("huge")).toBe(false);
+    // Existing entries survive the refused insert.
+    expect(cache.get("a")).toBe(1);
+    expect(cache.totalWeight).toBe(40);
+  });
+
+  it("an oversize re-put removes the existing entry under that key", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("a", 2, 101);
+    expect(cache.has("a")).toBe(false);
+    expect(cache.totalWeight).toBe(0);
+  });
+
+  it("re-put under the same key replaces value and weight", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("a", 2, 60);
+    expect(cache.get("a")).toBe(2);
+    expect(cache.size).toBe(1);
+    expect(cache.totalWeight).toBe(60);
+  });
+
+  it("delete removes an entry and its weight", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("b", 2, 40);
+    expect(cache.delete("a")).toBe(true);
+    expect(cache.delete("a")).toBe(false);
+    expect(cache.has("a")).toBe(false);
+    expect(cache.totalWeight).toBe(40);
+  });
+
+  it("clear empties the cache", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 100 });
+    cache.put("a", 1, 40);
+    cache.put("b", 2, 40);
+    cache.clear();
+    expect(cache.size).toBe(0);
+    expect(cache.totalWeight).toBe(0);
+    expect(cache.has("a")).toBe(false);
+  });
+
+  it("zero-weight entries are admitted and never trigger eviction", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 10 });
+    for (let i = 0; i < 100; i++) {
+      cache.put(`k${i}`, i, 0);
+    }
+    expect(cache.size).toBe(100);
+    expect(cache.totalWeight).toBe(0);
+  });
+
+  it("rejects invalid weights", () => {
+    const cache = new WeightedLRUCache<string, number>({ maxWeight: 10 });
+    expect(() => cache.put("a", 1, -1)).toThrow();
+    expect(() => cache.put("a", 1, Number.NaN)).toThrow();
+    expect(() => cache.put("a", 1, Infinity)).toThrow();
   });
 });

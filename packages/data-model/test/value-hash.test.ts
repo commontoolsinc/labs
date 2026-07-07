@@ -1361,3 +1361,39 @@ describe("value-hash", () => {
     });
   });
 });
+
+describe("hashStats instrumentation (CT-1840)", () => {
+  it("counts compute calls, and bytes fed when enabled", async () => {
+    const { hashStats, resetHashStats } = await import("@/value-hash.ts");
+    const wasEnabled = hashStats.enabled;
+    try {
+      hashStats.enabled = true;
+      resetHashStats();
+      // Fresh mutable object: bypasses the frozen-object identity cache, so
+      // a full computation must run.
+      hashOf({ a: 1, b: "two" } as FabricValue);
+      expect(hashStats.computeHashCalls).toBeGreaterThan(0);
+      expect(hashStats.bytesFed).toBeGreaterThan(0);
+
+      const callsAfterFirst = hashStats.computeHashCalls;
+      const bytesAfterFirst = hashStats.bytesFed;
+      hashOf({ a: 1, b: "two" } as FabricValue);
+      // Another fresh mutable object: recomputed (not identity-cached).
+      expect(hashStats.computeHashCalls).toBeGreaterThan(callsAfterFirst);
+      expect(hashStats.bytesFed).toBeGreaterThan(bytesAfterFirst);
+
+      resetHashStats();
+      expect(hashStats.computeHashCalls).toBe(0);
+      expect(hashStats.bytesFed).toBe(0);
+
+      // Disabled: calls still counted, bytes not.
+      hashStats.enabled = false;
+      hashOf({ c: 3 } as FabricValue);
+      expect(hashStats.computeHashCalls).toBeGreaterThan(0);
+      expect(hashStats.bytesFed).toBe(0);
+    } finally {
+      hashStats.enabled = wasEnabled;
+      resetHashStats();
+    }
+  });
+});
