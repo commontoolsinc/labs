@@ -568,8 +568,11 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const tagged = result.key("result").key("tagged") as unknown as Cell<any>;
     const taggedFirst = tagged.key(0) as unknown as Cell<any>;
     const taggedSecond = tagged.key(1) as unknown as Cell<any>;
-    const treeChild = ((result.key("result").key("tree") as unknown as Cell<any>)
-      .key("children") as unknown as Cell<any>).key(0) as unknown as Cell<any>;
+    const treeChild =
+      ((result.key("result").key("tree") as unknown as Cell<any>)
+        .key("children") as unknown as Cell<any>).key(0) as unknown as Cell<
+          any
+        >;
 
     // Sanity: every asserted element really split into its own document.
     expect(parseLink(taggedFirst.withTx().getRaw())?.id).toBeDefined();
