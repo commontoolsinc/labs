@@ -2022,6 +2022,65 @@ describe("scope-isolation write guard", () => {
     expect(warnCounts()).toBe(before + 1);
   });
 
+  it("does not warn when re-serializing the identical stored link (no-op route)", () => {
+    // At-rest data must not start warning on unrelated rewrites: the same
+    // link written twice takes the no-op branch, which precedes the guard.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-noop-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+    const value = scopedLinkValue("scope-guard-noop-target", "user");
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      value,
+    );
+    expect(warnCounts()).toBe(before + 1);
+    // Second, identical write: no-op, no additional warn.
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      value,
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("warns despite a default of null (the read side skips null defaults)", () => {
+    // Read-side default application uses a loose `!= undefined` check, so
+    // `default: null` never fills the hole — the slot is NOT tolerant.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-null-default-dest",
+      {
+        type: "object",
+        properties: {
+          profile: { type: "object", default: null },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-null-default-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
   it("does not warn for same-scope links (space into space)", () => {
     const dest = runtime.getCell<{ item?: unknown }>(
       space,

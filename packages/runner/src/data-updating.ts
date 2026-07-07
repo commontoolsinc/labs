@@ -284,11 +284,20 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  */
 function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
   if (schema === undefined) return true;
-  if (isRecord(schema) && schema.default !== undefined) return true;
-  // Judged with the read side's own matcher (schemaAcceptsType wraps the
-  // canonical logic extracted from SchemaObjectTraverser.isValidType,
-  // including $ref resolution and allOf/anyOf/oneOf), so this warning and the
-  // read-side rejection cannot drift apart.
+  // Resolve a top-level $ref before the default check, and apply the default
+  // with the same LOOSE comparison the read side uses when it applies
+  // defaults (`!= undefined`): a `default: null` is skipped by the read and
+  // therefore does not make the slot tolerant, while `default: 0/""/false`
+  // do. Judged on the resolved schema so a default carried by the $defs
+  // target counts too.
+  let resolved: JSONSchema | undefined = schema;
+  if (isRecord(schema) && "$ref" in schema) {
+    resolved = ContextualFlowControl.resolveSchemaRefs(schema) ?? schema;
+  }
+  if (isRecord(resolved) && resolved.default != undefined) return true;
+  // Type tolerance judged with the read side's own matcher (schemaAcceptsType
+  // wraps the logic extracted from SchemaObjectTraverser.isValidType,
+  // including $ref resolution and allOf/anyOf/oneOf).
   return schemaAcceptsType(schema, "undefined");
 }
 
@@ -848,20 +857,24 @@ export function normalizeAndDiff(
       // readers see a permanent hole (the B2 reader-blackout investigation,
       // #4457/#4532). The slot's schema declaring the scope (the narrowing
       // branch above and scoped asCell entries) is the explicit opt-in to
-      // per-reader semantics. The warn fires only where the read would
-      // actually REJECT the missing cell (ubik2's criterion): the slot's
-      // schema doesn't match undefined and carries no default
+      // per-reader semantics. The warn fires where the slot's shape says the
+      // author wanted SHARED data (ubik2's criterion): the slot's schema
+      // doesn't match undefined and carries no effective default
       // (schemaToleratesMissing, judged with the read side's own matcher),
       // AND the parent's schema lists the slot in `required`
-      // (slotRequiredByParent, threaded by the object branch) — an
-      // undefined-tolerant, defaulted, or optional slot degrades harmlessly
-      // per reader, which is a legitimate pattern and also what the runtime's
-      // own scoped-link writes (.asScope() results, navigateTo result cells,
-      // updateArgument setup wiring, cold-resume re-scope walks) flow
-      // through. This is a WARN, not a throw, pending review of whether
-      // remaining machinery writes can ever hit the strict case; see #4561.
-      // Authors: share the value, or a space-scoped cell with a PerUser
-      // pointer to "mine" (pitfall #6 shows the idiom).
+      // (slotRequiredByParent, threaded one hop by the object branch; direct
+      // slot writes — cell.key().set(), bound handler cells — have no parent
+      // in view and keep the warn). This approximates but is NOT identical to
+      // "the read would reject": the B2 element grace means array-element
+      // reads degrade rather than void, and rejection is ultimately judged
+      // against each READER's combined schema — the warn is a write-site
+      // lint, not a proof. Undefined-tolerant, defaulted, or optional slots
+      // degrade harmlessly per reader, which is a legitimate pattern and also
+      // what the runtime's own scoped-link writes (.asScope() results,
+      // navigateTo result cells, updateArgument setup wiring, cold-resume
+      // re-scope walks) flow through. This is a WARN, not a throw, pending
+      // review; see #4561. Authors: share the value, or a space-scoped cell
+      // with a PerUser pointer to "mine" (pitfall #6 shows the idiom).
       if (scopeRank(parsedLink.scope) > scopeRank(link.scope)) {
         const declared = declaredCellScope(link.schema);
         if (
@@ -874,23 +887,21 @@ export function normalizeAndDiff(
           // the warn.
           slotRequiredByParent !== false
         ) {
-          {
-            diffLogger.warn(
-              "diff",
-              () => [
-                `Storing a ${parsedLink.scope}-scoped link in ` +
-                `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
-                `do not carry a principal, so every reader resolves it to ` +
-                `their own ${parsedLink.scope} instance. If this write meant ` +
-                `to SHARE data, it cannot propagate — share the value itself, ` +
-                `or a space-scoped cell (keep a PerUser pointer to "mine"), ` +
-                `or declare the slot's schema with scope ` +
-                `"${parsedLink.scope}" if per-reader resolution is intended. ` +
-                `See docs/development/debugging/gotchas/` +
-                `scoped-cell-pitfalls.md (pitfall 6).`,
-              ],
-            );
-          }
+          diffLogger.warn(
+            "diff",
+            () => [
+              `Storing a ${parsedLink.scope}-scoped link in ` +
+              `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
+              `do not carry a principal, so every reader resolves it to ` +
+              `their own ${parsedLink.scope} instance. If this write meant ` +
+              `to SHARE data, it cannot propagate — share the value itself, ` +
+              `or a space-scoped cell (keep a PerUser pointer to "mine"), ` +
+              `or declare the slot's schema with scope ` +
+              `"${parsedLink.scope}" if per-reader resolution is intended. ` +
+              `See docs/development/debugging/gotchas/` +
+              `scoped-cell-pitfalls.md (pitfall 6).`,
+            ],
+          );
         }
       }
       diffLogger.debug(
@@ -1216,14 +1227,21 @@ export function normalizeAndDiff(
 
     // Requiredness of each child slot, for the scope-isolation warn: only a
     // parent-`required` property makes a missing cell void the read.
-    // A resolved object schema with no `required` array requires nothing —
-    // that is a known `false` for every key, not an unknown. Only an absent /
+    // A resolved object schema with no top-level `required` array is treated
+    // as requiring nothing (known `false` for every key); only an absent /
     // unresolvable parent schema leaves requiredness unknown (undefined).
-    const resolvedForRequired = resolveSchema(link.schema);
-    const requiredProps = isRecord(resolvedForRequired)
+    // KNOWN GAP (deliberate, false-negative direction): `required` carried
+    // inside a compound parent (`allOf` branches, all-branches-require
+    // `anyOf`) is not merged here — resolveSchema resolves only a top-level
+    // $ref — so such parents read as requiring nothing and the warn stays
+    // silent, even though the read side's required-intersection machinery may
+    // still reject. A missed warn is acceptable for a lint; asserting
+    // requiredness where there is none is not.
+    const resolvedParentSchema = resolveSchema(link.schema);
+    const requiredProps = isRecord(resolvedParentSchema)
       ? new Set(
-        Array.isArray(resolvedForRequired.required)
-          ? (resolvedForRequired.required as readonly string[])
+        Array.isArray(resolvedParentSchema.required)
+          ? (resolvedParentSchema.required as readonly string[])
           : [],
       )
       : undefined;
@@ -1275,9 +1293,8 @@ export function normalizeAndDiff(
     // property values and diverges on circular values + recursive $ref
     // schemas; only the top-level property names are needed here.)
     const eagerScopedKeys = new Set<string>();
-    const resolvedSchema = resolveSchema(link.schema);
-    const schemaProperties = isRecord(resolvedSchema)
-      ? resolvedSchema.properties
+    const schemaProperties = isRecord(resolvedParentSchema)
+      ? resolvedParentSchema.properties
       : undefined;
     if (isRecord(schemaProperties)) {
       for (const key in schemaProperties) {

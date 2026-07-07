@@ -123,9 +123,10 @@ the explicit mechanism for moving data from narrow to wide scopes.
 
 Moving data from narrow to wide scopes means writing the **value** (or a link
 to a broader-scoped cell). Storing a narrower-scoped **link** in a
-broader-scoped slot warns loudly at the write site when the read would reject
-the missing cell — the slot's schema neither matches `undefined` nor carries a
-`default`, and the parent schema requires the slot — unless the slot's schema
+broader-scoped slot warns loudly at the write site when the slot's shape
+indicates shared-data intent — the slot's schema neither matches `undefined`
+nor carries an effective `default`, and the parent schema (where visible at
+the write site) requires the slot — unless the slot's schema
 declares that scope (a scoped `asCell` entry or schema `scope`): because links
 do not encode the DID or session id, such a link resolves to a different
 instance for every reader, so data "shared" that way can never propagate — it
