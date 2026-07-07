@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
+#!/usr/bin/env -S deno run --allow-all
 
 // Run a command while sampling how much CPU the whole machine is using, then
 // print how many cores the command actually drove. On a dedicated CI runner
@@ -8,7 +8,12 @@
 // busy fraction into "cores busy" by multiplying by the core count. Reports the
 // average over the whole run plus the per-interval peak and percentiles, which
 // separates a job that pins many cores throughout from one that only spikes
-// briefly and is otherwise single-threaded.
+// briefly and is otherwise single-threaded. Also samples the 1-minute load
+// average, which unlike utilization can rise above the core count and so shows
+// when the command wants more cores than the runner has.
+//
+// Runs under --allow-all: Deno gates /proc/stat behind the all-access
+// permission, and the wrapped command brings its own permissions when spawned.
 //
 // Exits with the wrapped command's exit code, so it is a transparent prefix in
 // front of any command. On a platform without /proc/stat it still runs the
@@ -34,9 +39,9 @@ interface StatSample {
 // missing instead of guessing "no /proc/stat".
 let statError: string | null = null;
 
-// Read the first line of /proc/stat. procfs files report a size of 0, so a
-// size-hinted whole-file read can come back empty; read through an explicit
-// descriptor loop until the first newline instead.
+// Read the first line of /proc/stat through an explicit descriptor loop.
+// procfs files report a size of 0, so read until the first newline rather than
+// trusting a size-hinted whole-file read.
 function readProcStatFirstLine(): string | null {
   let file: Deno.FsFile;
   try {
@@ -87,18 +92,29 @@ function coresBusy(a: StatSample, b: StatSample): number | null {
   return (1 - dIdle / dTotal) * cores;
 }
 
+function loadavg1(): number | null {
+  try {
+    return Deno.loadavg()[0];
+  } catch {
+    return null;
+  }
+}
+
 const SAMPLE_INTERVAL_MS = 2000;
 const intervalCores: number[] = [];
+let peakLoad = loadavg1() ?? 0;
 let prev = readStat();
 const overallStart = prev;
 
-const timer = prev === null ? undefined : setInterval(() => {
+const timer = setInterval(() => {
   const cur = readStat();
   if (prev && cur) {
     const busy = coresBusy(prev, cur);
     if (busy !== null) intervalCores.push(busy);
   }
   prev = cur ?? prev;
+  const load = loadavg1();
+  if (load !== null) peakLoad = Math.max(peakLoad, load);
 }, SAMPLE_INTERVAL_MS);
 
 const startedAt = performance.now();
@@ -111,7 +127,9 @@ const child = new Deno.Command(command[0], {
 const status = await child.status;
 const wallSeconds = (performance.now() - startedAt) / 1000;
 const overallEnd = readStat();
-if (timer !== undefined) clearInterval(timer);
+const endLoad = loadavg1();
+if (endLoad !== null) peakLoad = Math.max(peakLoad, endLoad);
+clearInterval(timer);
 
 function fmt(n: number): string {
   return n.toFixed(2);
@@ -141,6 +159,12 @@ if (intervalCores.length) {
     `median / p90 cores busy: ${fmt(at(0.5))} / ${
       fmt(at(0.9))
     } (${intervalCores.length} samples)`,
+  );
+}
+if (peakLoad > 0) {
+  lines.push(
+    `peak 1-min load average: ${fmt(peakLoad)}` +
+      (peakLoad > cores ? ` (above ${cores} cores — wants more)` : ""),
   );
 }
 lines.push("=========================================================");

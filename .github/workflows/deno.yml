@@ -174,7 +174,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: 🧪 Run parallel workspace tests with CPU sampling
-        run: deno run --allow-read --allow-run --allow-env scripts/run-with-cpu-stats.ts deno task test
+        run: deno run --allow-all scripts/run-with-cpu-stats.ts deno task test
         env:
           DENO_COVERAGE_DIR: coverage/raw/workspace
           TEST_DISABLED_PACKAGES: runner
