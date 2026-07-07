@@ -397,10 +397,57 @@ function feedPlainObject(
 //
 
 /**
+ * Instrumentation counters for hash computation (CT-1840 benchmark support).
+ *
+ * `computeHashCalls` counts full (cache-missing) hash computations and is
+ * always on (a single integer increment). `bytesFed` measures the raw bytes
+ * fed through the hasher — the quantity the CT-1840 work drives down — but
+ * requires wrapping the hasher, so it is only collected when `enabled` is
+ * set (via `CF_HASH_STATS=1` or directly by tests/benchmarks).
+ */
+export const hashStats = {
+  enabled: (() => {
+    try {
+      return typeof Deno !== "undefined" &&
+        typeof Deno.env?.get === "function" &&
+        Deno.env.get("CF_HASH_STATS") === "1";
+    } catch {
+      return false;
+    }
+  })(),
+  computeHashCalls: 0,
+  bytesFed: 0,
+};
+
+/** Test/benchmark hook: zero the hash instrumentation counters. */
+export function resetHashStats(): void {
+  hashStats.computeHashCalls = 0;
+  hashStats.bytesFed = 0;
+}
+
+/** Wraps a hasher so every fed byte is counted in `hashStats.bytesFed`. */
+function instrumentedHasher(hasher: IncrementalHasher): IncrementalHasher {
+  return {
+    update(data: Uint8Array): void {
+      hashStats.bytesFed += data.length;
+      hasher.update(data);
+    },
+    digest: hasher.digest.bind(hasher) as IncrementalHasher["digest"],
+  };
+}
+
+/** Creates a hasher, instrumented when `hashStats.enabled` is set. */
+function createMeasuredHasher(): IncrementalHasher {
+  hashStats.computeHashCalls++;
+  const hasher = createHasher();
+  return hashStats.enabled ? instrumentedHasher(hasher) : hasher;
+}
+
+/**
  * Computes the hash of a value without consulting or populating any cache.
  */
 function computeHash(value: unknown): FabricHash {
-  const hasher = createHasher();
+  const hasher = createMeasuredHasher();
   feedValue(hasher, value);
   return new FabricHash(hasher.digest(), "fid1");
 }
@@ -410,7 +457,7 @@ function computeHash(value: unknown): FabricHash {
  * as `base64url`, rather than a hash object.
  */
 function computeHashAsString(value: unknown): string {
-  const hasher = createHasher();
+  const hasher = createMeasuredHasher();
   feedValue(hasher, value);
   return hasher.digest("base64url");
 }

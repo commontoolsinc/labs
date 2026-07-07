@@ -53,6 +53,7 @@ import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -2398,9 +2399,15 @@ class SpaceReplica implements ISpaceReplica {
       if (upsert.seq < record.confirmed.seq) {
         continue;
       }
+      // Deep-freeze at confirmed-ingest (CT-1840): wire-decoded docs are
+      // already deep-frozen at the codec boundary (JsonEncodingContext), so
+      // this is an O(1) WeakSet check there; it only pays on providers that
+      // hand over locally-constructed docs. Frozen confirmed values are what
+      // let embedded link schemas pass the frozen-only gates on the
+      // identity-keyed schema/hash memos downstream.
       record.confirmed = confirmedVersion(
         upsert.seq,
-        upsert.deleted === true ? undefined : upsert.doc,
+        upsert.deleted === true ? undefined : deepFreeze(upsert.doc),
       );
       record.materialized = undefined;
       this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));

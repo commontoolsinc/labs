@@ -21,7 +21,8 @@ import type {
 } from "../interface.ts";
 import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
-import { LRUCache } from "@commonfabric/utils/cache";
+import { WeightedLRUCache } from "@commonfabric/utils/cache";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 
 const logger = getLogger("attestation", {
@@ -33,14 +34,52 @@ const cacheHitLogger = getLogger("attestation-hit", {
   enabled: false,
   level: "debug",
 });
+
+type LoadResult = Result<
+  IAttestation,
+  IInvalidDataURIError | IUnsupportedMediaTypeError
+>;
+
 /**
- * Cache for parsed data URIs to avoid redundant parsing.
- * Key format: `${address.id}::${address.type}`
+ * Cache for parsed data URIs, keyed by `address.id` (the id IS the content —
+ * `data:` URIs are content-addressed, so no other key component is needed).
+ *
+ * Identity stability is load-bearing here (CT-1840): every identity-keyed
+ * cache downstream — `frozenObjectHashCache`, `_schemaAtPathCache`, the
+ * schema seam memos — hangs off the object identity of the parse result. If
+ * this cache hands out a fresh parse for an id it has seen before, every one
+ * of those caches misses and the runner re-hashes/re-traverses the value
+ * from scratch. The previous 1000-ENTRY LRU did exactly that under >1000
+ * distinct data: URIs (Loom-scale workloads carry ~10k), cycling on every
+ * pass. Two layers fix it:
+ *
+ * - `dataURIRetention`: strong, byte-budgeted LRU (weight = id length, which
+ *   bounds the parse-result size too since the id embeds the content).
+ *   Retention proportional to memory, not entry count.
+ * - `dataURIInterns`: `Map<string, WeakRef>` + `FinalizationRegistry`
+ *   (precedent: schema interning in data-model/schema-hash.ts). Guarantees
+ *   that as long as a previously returned result is alive ANYWHERE, `load`
+ *   returns that same object — even after retention eviction. When nothing
+ *   references the result, the entry is collected and a later re-parse is
+ *   harmless: the downstream weak caches keyed on the dead identity are gone
+ *   too.
  */
-const dataURICache = new LRUCache<
-  string,
-  Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError>
->({ capacity: 1000 });
+const DATA_URI_RETENTION_MAX_BYTES = 128 * 1024 * 1024;
+
+const dataURIRetention = new WeightedLRUCache<string, LoadResult>({
+  maxWeight: DATA_URI_RETENTION_MAX_BYTES,
+});
+
+const dataURIInterns = new Map<string, WeakRef<LoadResult>>();
+
+const dataURIFinalizer = new FinalizationRegistry<string>((id) => {
+  const ref = dataURIInterns.get(id);
+  // Guard against a NEWER result having been interned under the same id
+  // after the finalized one died: only delete if the ref is actually dead.
+  if (ref !== undefined && ref.deref() === undefined) {
+    dataURIInterns.delete(id);
+  }
+});
 
 export const InvalidDataURIError = (
   message: string,
@@ -225,17 +264,35 @@ export const resolve = (
 /**
  * Loads an attestation from a data URI address. Parses the data URI content
  * and returns an attestation with the parsed value.
- * Results are cached to avoid redundant parsing of the same data URIs.
+ *
+ * Results are cached to avoid redundant parsing, and the cache is
+ * identity-stable: repeated loads of the same id return the SAME result
+ * object (see the cache commentary above). The parsed value is deep-frozen —
+ * `data:` URIs are content-addressed, the id IS the content, so the value is
+ * immutable by definition; freezing both hardens the shared cache result
+ * against in-place mutation and lets the value pass the frozen-only gates on
+ * the identity-keyed schema/hash memos downstream (CT-1840).
  */
 export const load = (
   address: Omit<IMemoryAddress, "path">,
 ): Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError> => {
-  // Check cache first
   const cacheKey = address.id;
-  const cached = dataURICache.get(cacheKey);
+
+  // Strong retention layer first (bumps recency).
+  const cached = dataURIRetention.get(cacheKey);
   if (cached) {
     cacheHitLogger.debug("cache-hit", "found cached result");
     return cached;
+  }
+
+  // Intern layer: a result evicted from retention but still referenced
+  // elsewhere MUST keep its identity. Re-admit it to retention on the way
+  // out (it is evidently hot again).
+  const interned = dataURIInterns.get(cacheKey)?.deref();
+  if (interned) {
+    cacheHitLogger.debug("cache-hit", "found interned result");
+    dataURIRetention.put(cacheKey, interned, cacheKey.length);
+    return interned;
   }
 
   logger.debug("storage-datauri-parse", () => ["Parsing data URI"]);
@@ -276,7 +333,7 @@ export const load = (
         if (mediaType === "application/json") {
           let value: FabricValue;
           try {
-            value = JSON.parse(content);
+            value = deepFreeze(JSON.parse(content));
             result = { ok: { address: { ...address, path: [] }, value } };
           } catch (error) {
             const reason = error as Error;
@@ -304,7 +361,9 @@ export const load = (
     };
   }
 
-  dataURICache.put(cacheKey, result);
+  dataURIRetention.put(cacheKey, result, cacheKey.length);
+  dataURIInterns.set(cacheKey, new WeakRef(result));
+  dataURIFinalizer.register(result, cacheKey);
 
   return result;
 };

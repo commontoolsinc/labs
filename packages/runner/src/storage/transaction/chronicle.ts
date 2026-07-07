@@ -34,7 +34,59 @@ import {
 } from "./attestation.ts";
 import { applyMutablePathWrite } from "./mutable-path-write.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import * as Edit from "./edit.ts";
+
+/**
+ * Debug-only invariant assertion (CT-1840): storage-sourced read results —
+ * `data:` URI parses and replica-backed attestations — must be deep-frozen.
+ * The frozen-only gates on the identity-keyed schema/hash memos depend on
+ * it; an unfrozen value silently bypasses every one of them and the runner
+ * re-hashes/re-traverses the value on each touch. Enable via
+ * `CF_ASSERT_FROZEN_READS=1` so the invariant can't rot unnoticed.
+ *
+ * Deliberately NOT applied to novelty-backed (working copy) reads: the
+ * working copy is mutable by design within a transaction.
+ */
+const ASSERT_FROZEN_READS_ENV: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      typeof Deno.env?.get === "function" &&
+      Deno.env.get("CF_ASSERT_FROZEN_READS") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+let assertFrozenReads = ASSERT_FROZEN_READS_ENV;
+
+/**
+ * Test hook: override (or restore, with `undefined`) the
+ * `CF_ASSERT_FROZEN_READS` debug assertion, which is otherwise fixed at
+ * module load.
+ */
+export const setAssertFrozenReadsForTesting = (
+  value: boolean | undefined,
+): void => {
+  assertFrozenReads = value ?? ASSERT_FROZEN_READS_ENV;
+};
+
+const assertFrozenReadValue = (
+  attestation: IAttestation | undefined,
+): void => {
+  if (!assertFrozenReads || attestation === undefined) {
+    return;
+  }
+  if (!isDeepFrozen(attestation.value)) {
+    throw new Error(
+      `CF_ASSERT_FROZEN_READS: storage read returned a value that is not ` +
+        `deep-frozen: ${attestation.address.id} (type ` +
+        `${attestation.address.type}, path [${
+          attestation.address.path.join(", ")
+        }])`,
+    );
+  }
+};
 
 /**
  * Mutating-write wrapper around `applyMutablePathWrite()` that mirrors
@@ -270,6 +322,7 @@ export class Chronicle {
       if (error) {
         return { error };
       } else {
+        assertFrozenReadValue(attestation);
         return read(attestation, address);
       }
     }
@@ -289,6 +342,9 @@ export class Chronicle {
     }
 
     const loaded = attest(state);
+    // Replica-backed values must arrive deep-frozen (materialization and
+    // confirmed-ingest both freeze); novelty overlays below are exempt.
+    assertFrozenReadValue(loaded);
     const { error, ok: invariant } = read(loaded, address);
     if (error) {
       // If the read failed because of path errors, this is still effectively a
