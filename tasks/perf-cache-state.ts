@@ -96,12 +96,30 @@ export async function fetchChangedFilesBetween(
   baseSha: string,
   headSha: string,
 ): Promise<string[]> {
-  const data = await githubGet<{ files?: { filename: string }[] }>(
+  const data = await githubGet<
+    { files?: { filename: string; previous_filename?: string }[] }
+  >(
     `/repos/${REPO}/compare/${encodeURIComponent(baseSha)}...${
       encodeURIComponent(headSha)
     }`,
   );
-  return (data.files ?? []).map((file) => file.filename);
+  return changedPathsOf(data.files ?? []);
+}
+
+/**
+ * Both sides of every change: a file renamed OUT of the key set appears only
+ * under its new path, but the rename removed it from a hashed directory —
+ * the fingerprint rotated all the same. Deletions already surface under
+ * `filename`; renames need `previous_filename` too.
+ */
+export function changedPathsOf(
+  files: readonly { filename: string; previous_filename?: string }[],
+): string[] {
+  return files.flatMap((file) =>
+    file.previous_filename
+      ? [file.filename, file.previous_filename]
+      : [file.filename]
+  );
 }
 
 /**

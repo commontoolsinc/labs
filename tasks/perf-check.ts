@@ -85,6 +85,7 @@ import {
   writePerfMetricsFile,
 } from "./perf-lib.ts";
 import {
+  changedPathsOf,
   classifyCacheKeyState,
   classifyRunAgainstPredecessor,
   uniformCacheStates,
@@ -1435,7 +1436,7 @@ export async function main() {
   // (a warm fill would change nothing — unknown already gates normally).
   const inferredRunState = prNumber
     ? (prFiles.length > 0
-      ? classifyCacheKeyState(prFiles.map((file) => file.filename))
+      ? classifyCacheKeyState(changedPathsOf(prFiles))
       : "unknown")
     : await (async () => {
       try {
