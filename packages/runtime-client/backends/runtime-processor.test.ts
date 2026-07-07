@@ -1903,6 +1903,28 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
+  it("handleIdle awaits commit-durability quiescence, not plain idle", async () => {
+    // The client reads "idle" as a safe point to navigate or reload, so the
+    // handler must await idleWithPendingCommits() — which includes in-flight
+    // commit durability — rather than runtime.idle() (reactive quiescence
+    // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
+    // regression to runtime.idle() throws here.
+    const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
+    let calls = 0;
+    const fake = {
+      runtime: {
+        scheduler: {
+          idleWithPendingCommits: () => {
+            calls++;
+            return Promise.resolve();
+          },
+        },
+      },
+    };
+    await handleIdle.call(fake);
+    expect(calls).toBe(1);
+  });
+
   it("watchSiteTable registers table entries, isolating bad ones", async () => {
     const { runtime } = createRuntime();
     const { siteTableCause, siteTableSchema } = await import(

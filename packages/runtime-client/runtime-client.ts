@@ -174,16 +174,23 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle(this, response.cell);
   }
 
-  // TODO(unused)
+  /**
+   * Wait until the worker runtime is quiescent AND every issued commit has
+   * been confirmed by the server (or terminally failed). This is the client's
+   * "safe to navigate or reload" checkpoint: once it resolves, tearing the
+   * page down loses no writes. Waits for the joint fixpoint of reactive
+   * quiescence and commit durability (Scheduler.idleWithPendingCommits), not
+   * for pulls or subscription convergence — that is `allSynced()`.
+   */
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
   /**
-   * Await all in-flight compile-cache write-backs in the worker. Distinct from
-   * `idle()` (reactive/scheduler quiescence): this guarantees persistence
-   * durability, so a subsequent load of an already-compiled pattern reads the
-   * cached entry instead of recompiling in-client.
+   * Await all in-flight compile-cache write-backs in the worker. Narrower than
+   * `idle()`: it flushes only the compile cache, so a subsequent load of an
+   * already-compiled pattern reads the cached entry instead of recompiling
+   * in-client, without waiting for runtime quiescence.
    */
   async flushCompileCacheWrites(): Promise<void> {
     await this.#conn.request<RequestType.FlushCompileCacheWrites>({

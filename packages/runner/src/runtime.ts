@@ -648,7 +648,10 @@ export class Runtime {
   }
 
   /**
-   * Wait for all pending operations to complete
+   * Wait for reactive quiescence: no scheduler pass running, no queued events,
+   * no background scheduler work. Does NOT wait for issued commits to be
+   * confirmed by the server (`scheduler.idleWithPendingCommits()`), for async
+   * builtin I/O (`settled()`), or for storage sync (`storageManager.synced()`).
    */
   idle(): Promise<void> {
     return this.scheduler.idle();

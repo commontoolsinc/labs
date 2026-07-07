@@ -1019,7 +1019,14 @@ export class RuntimeProcessor {
   }
 
   async handleIdle(): Promise<void> {
-    await this.runtime.idle();
+    // The client reads "idle" as a safe point to navigate or reload, so it
+    // must include durability of just-issued writes: idleWithPendingCommits()
+    // waits for reactive quiescence and for every in-flight commit together
+    // (see Scheduler.idleWithPendingCommits; the pending set is sourced from
+    // the storage manager, covering event handlers, direct cell IPC writes,
+    // and reactive write-backs alike). Internal callers that only need
+    // reactive quiescence use runtime.idle() and are unaffected.
+    await this.runtime.scheduler.idleWithPendingCommits();
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:

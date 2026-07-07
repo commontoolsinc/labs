@@ -705,6 +705,13 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // In-flight commits, registered synchronously by the transaction layer at
+  // commit() entry (see IStorageManager.trackPendingCommit). This is the
+  // write-durability barrier: distinct from #crossSpacePromises, which also
+  // carries cross-space READ work (link-target loads) and so must not gate
+  // "are there unconfirmed writes" questions.
+  #pendingCommits = new Set<Promise<unknown>>();
+  #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #spaceIdentity?: Signer;
   /** Seed map from Options — fixed for the manager's lifetime. */
@@ -829,6 +836,51 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.synced()),
     ).finally(() => this.resolveCrossSpace(resolve));
     return promise;
+  }
+
+  trackPendingCommit(promise: Promise<unknown>): void {
+    // Normalize so a rejected commit settles the barrier instead of leaking an
+    // unhandled rejection; the caller keeps the original promise for results.
+    const tracked = promise.then(() => {}, () => {});
+    this.#pendingCommits.add(tracked);
+    if (this.#pendingCommits.size === 1) {
+      this.#notifyPendingCommits(true);
+    }
+    tracked.finally(() => {
+      this.#pendingCommits.delete(tracked);
+      if (this.#pendingCommits.size === 0) {
+        this.#notifyPendingCommits(false);
+      }
+    });
+  }
+
+  hasPendingCommits(): boolean {
+    return this.#pendingCommits.size > 0;
+  }
+
+  async pendingCommitsSettled(): Promise<void> {
+    await Promise.allSettled([...this.#pendingCommits]);
+  }
+
+  /**
+   * Observe transitions of the pending-commit state: `true` when the set of
+   * unconfirmed commits becomes non-empty, `false` when it drains. Drives the
+   * client-side "unconfirmed writes" flag (e.g. the shell's before-unload
+   * guard). Returns an unsubscribe function.
+   */
+  subscribePendingCommits(callback: (pending: boolean) => void): () => void {
+    this.#pendingCommitsSubscribers.add(callback);
+    return () => this.#pendingCommitsSubscribers.delete(callback);
+  }
+
+  #notifyPendingCommits(pending: boolean): void {
+    for (const callback of this.#pendingCommitsSubscribers) {
+      try {
+        callback(pending);
+      } catch (error) {
+        console.error("pending-commits subscriber threw:", error);
+      }
+    }
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
