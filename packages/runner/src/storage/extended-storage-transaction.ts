@@ -63,6 +63,7 @@ import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcPolicyEvaluationMode,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -70,6 +71,7 @@ import {
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
@@ -243,6 +245,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
+    policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     triggerReads: [],
@@ -266,6 +269,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcFlowLabelsPinned = false;
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
+  #cfcPolicyEvaluationPinned = false;
   // Write-once pin for the deployment policy snapshot. Distinct from the
   // slot's value being defined: the Runtime configures MANY tx with NO
   // policies (`undefined`), and that "no policies" state must be just as
@@ -357,6 +361,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is pinned at "persist"`,
       );
     }
+    // The flow-labels mode drives prepareBoundaryCommit (which derived
+    // components are stamped and credited) but is not part of
+    // PreparedDigestInput, so a change after prepare must invalidate the
+    // prepared decision — otherwise a strengthen-after-prepare survives the
+    // commit-time digest recheck while the tx reports the stronger mode
+    // (same silent-downgrade class as the policy-evaluation setter below;
+    // review of #4566). Only a real change invalidates.
+    if (
+      this.#cfcState.flowLabelsMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("flow-labels-mode-changed");
+    }
     this.#cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
       this.#cfcFlowLabelsPinned = true;
@@ -373,6 +390,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
           `is pinned at "enforce"`,
       );
+    }
+    // The write-floor mode drives which SC-18 floor reasons prepare records
+    // but is not in PreparedDigestInput, so — like the flow-labels and
+    // policy-evaluation setters — a change after prepare must invalidate,
+    // else a strengthen (off/observe → enforce) after prepare could commit
+    // the stale permissive decision while the tx reports enforce.
+    if (
+      this.#cfcState.writeFloorMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("write-floor-mode-changed");
     }
     this.#cfcState.writeFloorMode = mode;
     if (mode === "enforce") {
@@ -395,6 +423,36 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.triggerReadGating = enabled;
     if (enabled) {
       this.#cfcTriggerReadGatingPinned = true;
+    }
+  }
+
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — code reaching the tx cannot weaken it
+    // to `observe`/`off` so the boundary gates decide on un-rewritten labels
+    // again (or skip the exhaustion fail-close). Strengthening is allowed.
+    if (this.#cfcPolicyEvaluationPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC policy-evaluation mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    // A strengthen after prepare (e.g. off/observe → enforce) changes which
+    // label a gate decides on and whether fuel exhaustion fails closed, but
+    // the mode is not part of PreparedDigestInput — so a prepared decision
+    // computed under the old mode must be invalidated, or the commit-time
+    // recheck would pass it through while the tx now reports `enforce`
+    // (codex P2 on #4566). Only a real change invalidates (the Runtime's
+    // idempotent set at tx creation, before prepare, does not).
+    if (
+      this.#cfcState.policyEvaluationMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("policy-evaluation-mode-changed");
+    }
+    this.#cfcState.policyEvaluationMode = mode;
+    if (mode === "enforce") {
+      this.#cfcPolicyEvaluationPinned = true;
     }
   }
 
@@ -766,6 +824,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
       implementationIdentity: this.#cfcState.implementationIdentity,
       trustSnapshot: this.#cfcState.trustSnapshot,
+      // Digest-only projection: the decision-relevant identity of the policy
+      // set (Epic B5). The snapshot itself is frozen Runtime config; only its
+      // identity needs to invalidate.
+      policySnapshot: this.#cfcState.policySnapshot === undefined
+        ? undefined
+        : { digest: this.#cfcState.policySnapshot.digest },
     };
   }
 
@@ -1379,6 +1443,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void {
     this.wrapped.setCfcTriggerReadGating(enabled);
+  }
+
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    this.wrapped.setCfcPolicyEvaluationMode(mode);
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
