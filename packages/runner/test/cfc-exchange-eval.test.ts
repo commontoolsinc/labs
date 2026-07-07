@@ -487,13 +487,15 @@ describe("CFC exchange-rule evaluation (B4)", () => {
     });
 
     it("drops each alternative once across sibling clauses under duplicate bindings", () => {
-      // Contract test (not red-green): two integrity facts give the drop rule
-      // two bindings per matched alternative; with singleton + multi-alternative
-      // sibling clauses that both carry the target, each clause must lose ONLY
-      // the target alternative and no sibling is corrupted. The per-(clause,
-      // alternative) drop dedup is defensive hardening here — the descending
-      // order + length guard already make the duplicate a no-op — so this
-      // pins the observable invariant rather than a dedup-specific regression.
+      // Two integrity facts give the drop rule two bindings per matched
+      // alternative, so each (clauseIndex, alternative) is matched twice. This
+      // exercises BOTH no-op guards in the drop loop: the multi-alternative
+      // sibling clause reaches applyRuleMatch's `index < 0` deepEqual
+      // re-location (the alternative already removed), and the singleton clause
+      // reaches the `clauseIndex >= length` guard (its clause spliced). Each
+      // clause must lose ONLY the target alternative and no sibling is
+      // corrupted — the duplicate/stale drop matches no-op (cubic P2 on #4564:
+      // the corruption is unreachable, so the guards suffice; no dedup added).
       const detectedA = {
         type: "https://example.com/atoms/DetectedBy",
         id: "a",

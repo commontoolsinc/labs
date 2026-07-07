@@ -154,29 +154,6 @@ type RuleMatch = {
 };
 
 /**
- * Collapses drop matches that target the same alternative in the same clause
- * (different bindings) to one — a drop carries no binding-dependent
- * postcondition, so they are the same removal. See the call site: this is
- * defensive hardening (the duplicate is already a harmless no-op under the
- * descending order + length guard), kept to make correctness independent of
- * that argument. Order-preserving.
- */
-const dedupeDropMatches = (matches: readonly RuleMatch[]): RuleMatch[] => {
-  const unique: RuleMatch[] = [];
-  for (const match of matches) {
-    if (
-      !unique.some((existing) =>
-        existing.clauseIndex === match.clauseIndex &&
-        deepEqual(existing.alternative, match.alternative)
-      )
-    ) {
-      unique.push(match);
-    }
-  }
-  return unique;
-};
-
-/**
  * All matches of one rule against the current label (spec §4.4.5
  * `matchRuleWithTargetClause`): the `appliesTo` pattern fixes the target
  * clause/alternative; remaining guards must all be satisfiable under one
@@ -395,25 +372,22 @@ export const evaluateExchangeRules = (
       // Index discipline (spec §4.4.5): adds never shift clause indices, so
       // add-matches apply in order; drop-matches apply back-to-front. A
       // match whose target was consumed by an earlier application in this
-      // batch no-ops (applyRuleMatch re-locates the alternative); the next
-      // pass re-derives matches from scratch.
+      // batch no-ops — `applyRuleMatch` re-locates the alternative by
+      // deepEqual (returns unchanged when it is gone), and the
+      // `clauseIndex >= length` guard below skips a match whose clause was
+      // spliced; the next pass re-derives matches from scratch.
       //
-      // Drop matches are additionally DEDUPED by (clauseIndex, alternative)
-      // (cubic P2 on #4564): a drop carries no postcondition, so distinct
-      // bindings that select the same alternative in the same clause are the
-      // same removal. This is DEFENSIVE HARDENING, not a live-bug fix — the
-      // descending order above already fully processes a higher-index sibling
-      // clause before a lower-index one splices into a freed slot, so the
-      // shifted-in clause never still carries the target, and the
-      // `clauseIndex >= length` guard below plus applyRuleMatch's deepEqual
-      // re-location make the duplicate a harmless no-op (a differential sweep
-      // over exhaustive + 20k randomized labels found dedup-on/off
-      // byte-identical). The dedup makes correctness independent of that subtle
-      // ordering argument and trims redundant no-op iterations.
+      // This is also why the (clauseIndex, alternative) "duplicate drop"
+      // corruption cubic raised (P2 on #4564) cannot occur: descending order
+      // fully processes a higher-index sibling clause before a lower-index one
+      // splices into a freed slot, so the shifted-in clause never still
+      // carries the target — a differential sweep over exhaustive + 20k
+      // randomized labels confirmed zero divergence from any de-duplicated
+      // variant. So no dedup is added; the two guards already no-op the
+      // duplicate/stale drop matches (and are exercised by the sibling-clause
+      // test below).
       const ordered = rule.post.dropClause === true
-        ? dedupeDropMatches(matches).sort((a, b) =>
-          b.clauseIndex - a.clauseIndex
-        )
+        ? [...matches].sort((a, b) => b.clauseIndex - a.clauseIndex)
         : matches;
       for (const match of ordered) {
         if (match.clauseIndex >= confidentiality.length) continue;
