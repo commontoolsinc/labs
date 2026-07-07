@@ -303,8 +303,14 @@ export const instantiateAtomPattern = (
 export const conceptGuard = (
   pattern: unknown,
 ): { uri: string | undefined } | undefined => {
+  // `isRecord` admits arrays (`typeof [] === "object"`), and an array can carry
+  // own `type`/`uri` properties — exclude it explicitly so only the canonical
+  // OBJECT shape `{ type, uri }` can route to trust-closure satisfaction. A
+  // Concept-shaped array is not the canonical shape and fails closed to
+  // ordinary matching, in keeping with the discipline below.
   if (
-    !isRecord(pattern) || isAtomVarPlaceholder(pattern) ||
+    !isRecord(pattern) || Array.isArray(pattern) ||
+    isAtomVarPlaceholder(pattern) ||
     (pattern as { type?: unknown }).type !== CFC_ATOM_TYPE.Concept
   ) {
     return undefined;

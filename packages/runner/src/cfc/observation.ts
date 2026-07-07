@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -198,7 +199,18 @@ const integrityAtomSatisfies = (
 ): boolean => {
   const concept = conceptGuard(required);
   if (concept !== undefined) {
+    // A concept floor is satisfied ONLY by concrete evidence reaching the
+    // concept in the closure — NEVER by a literal Concept atom in carried
+    // integrity (spec §4.8: conceptual principals live in trust statements,
+    // not carried labels; the mint gate strips any Concept atom). Reject a
+    // Concept-typed `actual` locally, BEFORE the resolver, so a misconfigured
+    // trust statement whose `concrete` is itself Concept-shaped cannot let a
+    // smuggled `Concept` atom pool-match its way through — fail closed here
+    // rather than lean on the upstream mint gate. `isRecord` admits arrays, so
+    // this catches a Concept-typed array shape too.
     return concept.uri !== undefined &&
+      !(isRecord(actual) &&
+        (actual as { type?: unknown }).type === CFC_ATOM_TYPE.Concept) &&
       trust?.trustResolver !== undefined &&
       trust.trustResolver.conceptSatisfied(
         concept.uri,

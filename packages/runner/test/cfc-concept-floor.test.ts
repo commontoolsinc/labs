@@ -15,6 +15,7 @@ import {
   type CfcTrustConfigInput,
   createTrustResolver,
 } from "../src/cfc/trust.ts";
+import { conceptGuard } from "../src/cfc/atom-pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
@@ -163,6 +164,63 @@ describe("CFC concept-level integrity floors (D5)", () => {
       expect(cfcIntegritySatisfiesFloor(
         [concept(GPS_CONCEPT)],
         [concept(GPS_CONCEPT)],
+        trustCtx(signer.did()),
+      )).toBe(false);
+    });
+
+    it("rejects a Concept-typed carried atom even under a Concept-shaped concrete statement (cubic P2)", () => {
+      // Defense in depth (cubic review-run a177bba7): the previous version
+      // handed `actual` straight to the resolver, so a MISCONFIGURED trust
+      // statement whose `concrete` side is itself Concept-shaped would let a
+      // smuggled literal Concept atom pool-match its way to concept
+      // satisfaction. A concept floor is satisfied ONLY by concrete evidence
+      // (spec §4.8), so a Concept-typed carried atom must fail closed BEFORE
+      // the closure is consulted, independent of how the config is written.
+      const cfg = buildCfcTrustConfig({
+        // `concrete` is the concept atom itself — a config a careful operator
+        // would never write, but the predicate must not depend on that.
+        statements: [{
+          concrete: concept(GPS_CONCEPT),
+          implements: PRIVACY_CONCEPT,
+          verifier: AUDITOR,
+        }],
+        delegations: [{
+          delegator: signer.did(),
+          verifier: AUDITOR,
+          concepts: [PRIVACY_CONCEPT],
+        }],
+      });
+      const ctx = {
+        trustResolver: createTrustResolver(cfg),
+        actingPrincipal: signer.did(),
+      };
+      // Before the fix this returned true: `concept(GPS_CONCEPT)` matched the
+      // Concept-shaped concrete and reached PRIVACY_CONCEPT.
+      expect(cfcIntegritySatisfiesFloor(
+        [concept(GPS_CONCEPT)],
+        [concept(PRIVACY_CONCEPT)],
+        ctx,
+      )).toBe(false);
+    });
+
+    it("does not treat a Concept-shaped ARRAY as a concept guard (cubic P2)", () => {
+      // `isRecord` admits arrays (`typeof [] === "object"`), so an array
+      // carrying own `type`/`uri` properties previously routed to trust-closure
+      // satisfaction. The canonical Concept atom is an OBJECT; a Concept-shaped
+      // array is not the canonical shape and must fail closed to ordinary
+      // matching (cubic review-run a177bba7).
+      const arrayGuard = [] as unknown as Record<string, unknown>;
+      arrayGuard.type = concept(GPS_CONCEPT).type;
+      arrayGuard.uri = GPS_CONCEPT;
+      // Before the fix `conceptGuard` returned `{ uri }` here.
+      expect(conceptGuard(arrayGuard)).toBeUndefined();
+      // And through the floor: an array-shaped requirement is NOT a concept
+      // floor, so a valid measurement does not satisfy it via the closure —
+      // it falls through to structural matching, which an array requirement
+      // against a concrete object never meets.
+      expect(cfcIntegritySatisfiesFloor(
+        [gps("X")],
+        [arrayGuard],
         trustCtx(signer.did()),
       )).toBe(false);
     });
