@@ -241,24 +241,18 @@ export class WorkerReconciler {
       let lastRootValue: unknown;
       let rootHasRendered = false;
       const rootWatchedSpaces = new Set<string>();
-      const watchRootMembershipSpaces = () => {
-        const provider = this.membershipProvider;
-        if (provider === undefined) return;
-        for (const space of this.spaceIdsForCellLabel(vnode as Cell<unknown>)) {
-          if (rootWatchedSpaces.has(space)) continue;
-          rootWatchedSpaces.add(space);
-          addCancel(
-            provider.subscribe(space, () => {
-              if (rootHasRendered) renderRoot(lastRootValue);
-            }),
-          );
-        }
-      };
       const renderRoot = (resolvedVnode: unknown) => {
         logger.debug("root-cell-update", () => ({ resolvedVnode }));
         lastRootValue = resolvedVnode;
         rootHasRendered = true;
-        watchRootMembershipSpaces();
+        this.watchCellMembership(
+          vnode as Cell<unknown>,
+          rootWatchedSpaces,
+          addCancel,
+          () => {
+            if (rootHasRendered) renderRoot(lastRootValue);
+          },
+        );
         // The mounted cell is an egress like any descendant cell: gate its
         // own label against the root policy (the host ceiling when
         // configured) before rendering its resolved content. Checked per
@@ -1137,30 +1131,46 @@ export class WorkerReconciler {
   }
 
   /**
-   * The `Space(id)` ids in a cell's confidentiality label — the spaces whose
-   * ACL docs a Stage-2 reactive re-render must watch (§4.9.3). Empty unless a
-   * membership provider is wired; reads the same label the resolver consumes,
-   * so a resolved `Space(X)` and its watched ACL doc stay in lockstep. Any read
-   * failure is swallowed to `[]` (fail closed on watching — the render fit
-   * itself stays fail-closed independently).
+   * §4.9.3 Stage 2: subscribe `reeval` to the ACL docs of the spaces `cell` is
+   * labeled `Space(X)` with, so a fail-closed over-block re-renders when an ACL
+   * later grants (or revokes) READ. Shared by the descendant-cell
+   * (`renderCellChild`) and root-mounted (`mount`) egress paths. A no-op
+   * without a membership provider or when the label carries no `Space` atom;
+   * idempotent per space via `watched`; cancels register through `addCancel`
+   * (the cell's cancel group). Reads the same label view the render fit
+   * consumes, so a resolved `Space(X)` and its watched ACL doc stay in
+   * lockstep. Any label-read failure is swallowed (fail closed on watching —
+   * the render fit itself stays fail-closed independently).
    */
-  private spaceIdsForCellLabel(cell: Cell<unknown>): readonly string[] {
-    if (this.membershipProvider === undefined) {
-      return [];
+  private watchCellMembership(
+    cell: Cell<unknown>,
+    watched: Set<string>,
+    addCancel: (cancel: Cancel) => void,
+    reeval: () => void,
+  ): void {
+    const provider = this.membershipProvider;
+    if (provider === undefined) {
+      return;
     }
     let labelView: CfcLabelView | undefined;
     try {
       labelView = cfcLabelViewForCell(cell);
-      if (labelView === undefined) {
-        labelView = cfcLabelViewForCell(cell.resolveAsCell());
-      }
     } catch {
-      return [];
+      labelView = undefined;
     }
-    if (labelView === undefined) {
-      return [];
+    // No stored label (or a read failure) → no `Space` atom to watch. The
+    // render fit still fail-closes independently; we just set up no reactive
+    // upgrade.
+    if (labelView === undefined) return;
+    for (
+      const space of spaceAtomIdsInConfidentiality(
+        this.confidentialityLabels(labelView),
+      )
+    ) {
+      if (watched.has(space)) continue;
+      watched.add(space);
+      addCancel(provider.subscribe(space, reeval));
     }
-    return spaceAtomIdsInConfidentiality(this.confidentialityLabels(labelView));
   }
 
   private confidentialityLabelsFromCellSchema(
@@ -3446,26 +3456,11 @@ export class WorkerReconciler {
 
     let currentCancel: Cancel | undefined;
 
-    // §4.9.3 Stage 2: watch the ACL docs of the spaces this cell is labeled
-    // with, so a fail-closed over-block upgrades to an admit when a `Space(X)`
-    // ACL syncs in (and a revoke re-blocks) — a re-evaluation with the last
-    // resolved value, forced past the value-identity dedupe. Idempotent per
-    // space, and re-scanned on each render so a late-syncing label is caught.
+    // §4.9.3 Stage 2: on each render, watch the ACL docs of the spaces this
+    // cell is labeled with, so a fail-closed over-block upgrades to an admit
+    // when a `Space(X)` ACL syncs in (and a revoke re-blocks) — a re-evaluation
+    // with the last resolved value, forced past the value-identity dedupe.
     const watchedSpaces = new Set<string>();
-    const watchMembershipSpaces = () => {
-      const provider = this.membershipProvider;
-      if (provider === undefined) return;
-      for (const space of this.spaceIdsForCellLabel(cell)) {
-        if (watchedSpaces.has(space)) continue;
-        watchedSpaces.add(space);
-        addCancel(
-          provider.subscribe(
-            space,
-            () => renderResolved(childState.currentValue, true),
-          ),
-        );
-      }
-    };
 
     const renderResolved = (resolvedChild: unknown, forced = false) => {
       const isInitialRender = childState.nodeId === -1;
@@ -3479,7 +3474,12 @@ export class WorkerReconciler {
         return;
       }
       childState.currentValue = resolvedChild;
-      watchMembershipSpaces();
+      this.watchCellMembership(
+        cell,
+        watchedSpaces,
+        addCancel,
+        () => renderResolved(childState.currentValue, true),
+      );
 
       if (!this.canRenderCellUnderPolicy(cell, policy)) {
         if (!isInitialRender) {

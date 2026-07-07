@@ -3403,6 +3403,18 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           signer.did(),
           "cfc-stage4-team-note",
         );
+        // A sibling cell with NO stored label: the membership watcher must find
+        // no Space atom and set up no ACL subscription for it (labelView
+        // undefined path), while it renders normally under the ceiling.
+        const plainCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-plain-note",
+        );
+        {
+          const seed = runtime.edit();
+          plainCell.withTx(seed).set("Plain note");
+          assertEquals((await seed.commit()).ok !== undefined, true);
+        }
 
         // Start denying (ACL unsynced), then grant + fire the subscription.
         let granted = false;
@@ -3446,7 +3458,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           type: "vnode",
           name: "div",
           props: {},
-          children: [teamLabeled as never],
+          children: [teamLabeled as never, plainCell as never],
         });
         try {
           await new Promise((resolve) => setTimeout(resolve, 10));
@@ -3456,11 +3468,19 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               .includes("Team note"),
             false,
           );
+          // The unlabeled sibling renders (no Space atom to gate) and no ACL
+          // subscription was set up for it.
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Plain note"),
+            true,
+          );
           // The reconciler subscribed to the labeled space's ACL doc.
           assertEquals(
             listeners.some((listener) => listener.space === teamSpace),
             true,
           );
+          assertEquals(listeners.length, 1);
 
           // The ACL syncs in and grants READ; the subscription fires and the
           // cell re-renders — the Stage-1 over-block upgrades to an admit with

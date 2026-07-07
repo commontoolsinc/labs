@@ -62,11 +62,12 @@ export const spaceReaderRole = (
   if (!isACL(acl)) return null;
   const byPrincipal = acl as Record<string, Capability | undefined>;
   const cap = byPrincipal[principal] ?? byPrincipal[ANYONE_USER];
-  if (cap === undefined) return null;
-  // WRITE/OWNER imply READ; a defensive guard mirroring the server's
-  // `isCapable(capability, requirement)` — `Capability` is only ever
-  // READ/WRITE/OWNER, so a valid grant always clears READ.
-  if (!isCapable(cap, "READ")) return null;
+  // `undefined` = principal not listed and no `"*"` grant. The `isCapable`
+  // mirror of the server's requirement check is folded in: a valid `Capability`
+  // is only ever READ/WRITE/OWNER and each clears READ (WRITE/OWNER imply READ),
+  // so it is vacuously true here, but kept so the client cannot drift from the
+  // server if READ's rank ever changes.
+  if (cap === undefined || !isCapable(cap, "READ")) return null;
   return capToRole[cap];
 };
 
