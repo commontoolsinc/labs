@@ -426,6 +426,106 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       expect(result.firings).toEqual([]);
     });
 
+    it("fails closed on an OVER-CONSTRAINED concept guard (extra fields ignored otherwise)", () => {
+      // A Concept guard is checked on type + trust closure only, so extra
+      // constraint fields would be silently dropped — an author's narrow guard
+      // `{type:Concept, uri:C, subject:X}` would fire as broadly as the bare
+      // concept (codex/cubic P2 on #4564). It must NOT fire even when C is
+      // satisfied; only the exact `{type, uri}` shape is a live guard.
+      const concept = "https://commonfabric.org/cfc/concepts/age-rounding";
+      const codeAtom = {
+        type: "https://commonfabric.org/cfc/atom/CodeHash",
+        hash: "sha256:rounding",
+      };
+      const trust = createTrustResolver(
+        buildCfcTrustConfig({
+          statements: [{
+            concrete: codeAtom,
+            implements: concept,
+            verifier: "did:key:auditor",
+          }],
+          delegations: [{
+            delegator: "*",
+            verifier: "did:key:auditor",
+            concepts: "*",
+          }],
+        })!,
+      );
+      const overConstrained: ExchangeRule = {
+        id: "over-constrained-concept",
+        appliesTo: spaceX,
+        preCondition: {
+          integrity: [{
+            type: CFC_ATOM_TYPE.Concept,
+            uri: concept,
+            subject: ALICE, // extra field → not the exact concrete shape
+          }],
+        },
+        post: { addAlternatives: [userAlice] },
+      };
+      const overResult = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [codeAtom] },
+        snapshot([overConstrained]),
+        { trustResolver: trust, actingPrincipal: ALICE },
+      );
+      expect(overResult.firings).toEqual([]);
+      // The exact-shape guard, same evidence, DOES fire — proving the negative
+      // above is the extra field, not a missing statement/delegation.
+      const exact: ExchangeRule = {
+        ...overConstrained,
+        id: "exact-concept",
+        preCondition: {
+          integrity: [{ type: CFC_ATOM_TYPE.Concept, uri: concept }],
+        },
+      };
+      const exactResult = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [codeAtom] },
+        snapshot([exact]),
+        { trustResolver: trust, actingPrincipal: ALICE },
+      );
+      expect(exactResult.firings.length).toBe(1);
+    });
+
+    it("drops each alternative once across sibling clauses under duplicate bindings", () => {
+      // Two integrity facts give the drop rule two bindings per matched
+      // alternative; with singleton + multi-alternative sibling clauses that
+      // both carry the target, the per-(clause,alternative) drop dedup keeps
+      // the splice-and-shift index discipline from touching the wrong clause
+      // (cubic P2 on #4564). Each clause loses ONLY the target alternative.
+      const detectedA = {
+        type: "https://example.com/atoms/DetectedBy",
+        id: "a",
+      };
+      const detectedB = {
+        type: "https://example.com/atoms/DetectedBy",
+        id: "b",
+      };
+      const dropVarGuard: ExchangeRule = {
+        id: "drop-expires-var-guard",
+        appliesTo: { type: CFC_ATOM_TYPE.Expires, timestamp: { var: "$t" } },
+        preCondition: {
+          integrity: [{
+            type: "https://example.com/atoms/DetectedBy",
+            id: { var: "$d" },
+          }],
+        },
+        post: { dropClause: true },
+      };
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [
+            cfcAtom.expires(1000), // singleton — splices when dropped
+            { anyOf: [cfcAtom.expires(1000), userBob] },
+          ],
+          integrity: [detectedA, detectedB],
+        },
+        snapshot([dropVarGuard]),
+      );
+      // Clause 0 fully dropped; clause 1 keeps userBob (never corrupted).
+      expect(clauseSetsEqual(result.label.confidentiality ?? [], [userBob]))
+        .toBe(true);
+    });
+
     it("is the identity without a snapshot, rules, or confidentiality", () => {
       const label: IFCLabel = { confidentiality: [spaceX] };
       expect(evaluateExchangeRules(label, undefined).label).toBe(label);

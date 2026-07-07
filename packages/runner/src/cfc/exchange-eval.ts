@@ -1,6 +1,7 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import {
   type AtomPatternBindings,
   instantiateAtomPattern,
@@ -89,9 +90,17 @@ export type ExchangeEvalResult = {
  * pattern. Satisfied exclusively via the acting principal's trust closure —
  * never by pool-matching a literal Concept atom (which carried integrity
  * cannot legitimately contain; the mint gate strips it). Returns `undefined`
- * for non-concept-shaped patterns and `{ uri: undefined }` for a
- * concept-shaped pattern whose uri is malformed (a variable, non-string, or
- * empty) — malformed guards are never satisfied.
+ * for non-concept-shaped patterns (they route to ordinary pool matching) and
+ * `{ uri: undefined }` — a concept guard that is NEVER satisfied — for any
+ * `Concept`-typed pattern that is not the EXACT concrete two-field shape
+ * `{ type, uri: <non-empty string> }`.
+ *
+ * The exact-shape requirement is load-bearing (codex/cubic P2 on #4564):
+ * concept guards are checked ONLY on `type` + trust closure, so extra
+ * constraint fields (`{ type: Concept, uri, subject: … }`) or a smuggled
+ * `var` key would be silently ignored — an over-constrained guard the author
+ * wrote as narrow would fire as broadly as the bare concept. Anything but the
+ * canonical shape fails closed.
  */
 const conceptGuard = (
   pattern: unknown,
@@ -103,7 +112,15 @@ const conceptGuard = (
     return undefined;
   }
   const uri = (pattern as { uri?: unknown }).uri;
-  return { uri: typeof uri === "string" && uri.length > 0 ? uri : undefined };
+  // Exactly `{ type, uri }`, uri a non-empty string. Extra fields (or a `var`
+  // key, which would push the key count past 2) → never satisfied.
+  if (
+    Object.keys(pattern).length !== 2 ||
+    typeof uri !== "string" || uri.length === 0
+  ) {
+    return { uri: undefined };
+  }
+  return { uri };
 };
 
 /**
@@ -134,6 +151,26 @@ type RuleMatch = {
   readonly clauseIndex: number;
   readonly alternative: unknown;
   readonly bindings: AtomPatternBindings;
+};
+
+/**
+ * Collapses drop matches that target the same alternative in the same clause
+ * (different bindings) to one — see the call site for why the duplicate is
+ * unsafe under the splice-and-shift index discipline. Order-preserving.
+ */
+const dedupeDropMatches = (matches: readonly RuleMatch[]): RuleMatch[] => {
+  const unique: RuleMatch[] = [];
+  for (const match of matches) {
+    if (
+      !unique.some((existing) =>
+        existing.clauseIndex === match.clauseIndex &&
+        deepEqual(existing.alternative, match.alternative)
+      )
+    ) {
+      unique.push(match);
+    }
+  }
+  return unique;
 };
 
 /**
@@ -314,15 +351,16 @@ export const evaluateExchangeRules = (
 ): ExchangeEvalResult => {
   const rules: Array<{ recordId: string; rule: ExchangeRule }> = [];
   if (snapshot !== undefined) {
+    // Canonical UTF-8 code-point order (not JS `<`, which orders UTF-16 code
+    // UNITS and disagrees on astral ids) so evaluation and diagnostic order
+    // match the repo's canonical string order everywhere (codex P2 on #4564).
     for (
       const record of [...snapshot.records].sort((a, b) =>
-        a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+        utf8Compare(a.id, b.id)
       )
     ) {
       for (
-        const rule of [...record.rules].sort((a, b) =>
-          a.id < b.id ? -1 : a.id > b.id ? 1 : 0
-        )
+        const rule of [...record.rules].sort((a, b) => utf8Compare(a.id, b.id))
       ) {
         rules.push({ recordId: record.id, rule });
       }
@@ -356,8 +394,18 @@ export const evaluateExchangeRules = (
       // match whose target was consumed by an earlier application in this
       // batch no-ops (applyRuleMatch re-locates the alternative); the next
       // pass re-derives matches from scratch.
+      //
+      // Drop matches are additionally DEDUPED by (clauseIndex, alternative)
+      // (cubic P2 on #4564): a drop carries no postcondition, so distinct
+      // bindings that select the same alternative in the same clause are the
+      // same removal. Without dedup, the first such match can empty+splice the
+      // clause, and the duplicate — same clauseIndex, now pointing at the
+      // clause that shifted into that slot — would deepEqual-search the WRONG
+      // clause and could erroneously drop an alternative from it.
       const ordered = rule.post.dropClause === true
-        ? [...matches].sort((a, b) => b.clauseIndex - a.clauseIndex)
+        ? dedupeDropMatches(matches).sort((a, b) =>
+          b.clauseIndex - a.clauseIndex
+        )
         : matches;
       for (const match of ordered) {
         if (match.clauseIndex >= confidentiality.length) continue;
