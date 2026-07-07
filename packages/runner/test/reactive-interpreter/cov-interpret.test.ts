@@ -714,7 +714,6 @@ describe("evalRog — collections", () => {
       children: new Map(),
       leafArgSchemas: new Map(),
       collectionElements: new Map(),
-      canonicalNodes: [],
     } as never;
   }
 
@@ -1112,7 +1111,6 @@ describe("evalRog — pattern op", () => {
       children: new Map(),
       leafArgSchemas: new Map(),
       collectionElements: new Map(),
-      canonicalNodes: [],
     } as never;
   }
 
@@ -1382,7 +1380,6 @@ describe("evalRog — scope flow-tracking", () => {
       children: new Map(),
       leafArgSchemas: new Map(),
       collectionElements: new Map(),
-      canonicalNodes: [],
     } as never;
     // Two-field argument scoping: model `flag`/`list` as session by putting
     // argument at session (all argument reads then start at session).
@@ -1399,7 +1396,6 @@ describe("evalRog — scope flow-tracking", () => {
             children: new Map(),
             leafArgSchemas: new Map(),
             collectionElements: new Map(),
-            canonicalNodes: [],
           } as never,
           usage: {
             usesElement: false,

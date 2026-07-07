@@ -473,11 +473,12 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       // back to its live canonical at instantiation (`resolveStoredPattern` /
       // `resolveOpPattern`). The live canonical is the exact object the builder
       // keyed its reactive-interpreter ROG on, so instantiating it is a strict
-      // `getBuiltRog` WeakMap hit instead of a derived-copy fallback
-      // (`getBuiltRogResolved` + `validatePositionalCorrespondence`). This
-      // generalizes the former `Runner.substituteOpPatternRefs` — which did the
-      // same for the `map`/`filter`/`flatMap` `op` input only — to the whole
-      // binding channel, including the directly-invoked-sub-pattern node.
+      // `getBuiltRog` WeakMap hit. (Because these copies are gone at the source,
+      // the interpreter needs no derived-copy recovery path — a strict miss
+      // just runs legacy.) This generalizes the former
+      // `Runner.substituteOpPatternRefs` — which did the same for the
+      // `map`/`filter`/`flatMap` `op` input only — to the whole binding
+      // channel, including the directly-invoked-sub-pattern node.
       const ref = getArtifactEntryRef(binding);
       if (ref !== undefined) {
         // Match `patternToJSON`'s JSON-boundary form EXACTLY (json-utils.ts):

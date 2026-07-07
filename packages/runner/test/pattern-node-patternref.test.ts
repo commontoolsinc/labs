@@ -3,16 +3,16 @@
  * `unwrapOneLevelAndBindtoDoc`'s `convert`, which STRUCTURALLY COPIED the
  * embedded sub-pattern graph (`Object.fromEntries` + `noteDerivedCopy`). That
  * copy is a fresh object, so the reactive interpreter's STRICT `getBuiltRog`
- * WeakMap lookup missed it and fell to the derived-copy path
- * (`getBuiltRogResolved` + `validatePositionalCorrespondence`), counted by
- * `census.interpretedViaResolved`.
+ * WeakMap lookup missed it and (until the copies were eliminated at the
+ * source) fell to a now-removed derived-copy recovery path.
  *
  * `convert` now represents a content-addressed pattern value as a
  * `{ $patternRef }` sentinel and `instantiatePatternNode` resolves it back to
  * the LIVE canonical — the exact object the ROG was keyed on. These tests pin
- * that (a) the sub-pattern instantiates as a STRICT hit (no
- * `interpretedViaResolved`), and (b) a scoped sub-pattern still lands its child
- * result cell + redirect at the right scope through the sentinel round-trip.
+ * that (a) the sub-pattern instantiates as a STRICT `getBuiltRog` hit (a copy
+ * would instead fall to `no_rog` and not interpret — the recovery path is
+ * gone), and (b) a scoped sub-pattern still lands its child result cell +
+ * redirect at the right scope through the sentinel round-trip.
  */
 import { assert, assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
@@ -30,8 +30,8 @@ const space = signer.did();
 
 // A parent pattern that directly invokes a sub-pattern with two chained lifts
 // (≥2 collapsible node-ops, so the sub-pattern actually INTERPRETS rather than
-// falling out on the cost gate — which is what makes `interpretedViaResolved`
-// observable when the sub-pattern is a copy).
+// falling out on the cost gate — a copy reaching dispatch would instead
+// register a `no_rog` fallback and not interpret).
 const NESTED_PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -100,29 +100,24 @@ describe("pattern node $patternRef instantiation", () => {
           JSON.stringify(census)
         }`,
       );
+      // The sub-pattern binds as a `$patternRef` and resolves to its LIVE
+      // canonical — a STRICT `getBuiltRog` hit — so it interprets. A
+      // regression that let it reach dispatch as a structural COPY would
+      // miss the strict WeakMap and fall to `no_rog` (there is no
+      // derived-copy recovery path), so it would NOT interpret. `interpreted`
+      // therefore carries the whole assertion.
       assert(
         census.interpreted >= 1,
-        `expected the sub-pattern to interpret, census=${
+        `expected the sub-pattern to interpret as a strict hit, census=${
           JSON.stringify(census)
         }`,
       );
       assertEquals(
-        census.interpretedViaResolved,
-        0,
-        `no dispatch should fall to the derived-copy resolved path; census=${
-          JSON.stringify(census)
-        }`,
-      );
-      // A surviving structural copy would leave a trace: either a
-      // `interpretedViaResolved` hit (checked above) or a `derived_*` cost
-      // fallback. Neither may appear.
-      const derivedFallback = Object.keys(census.fallbackByReason).find((r) =>
-        r.startsWith("derived")
-      );
-      assertEquals(
-        derivedFallback,
+        census.fallbackByReason["no_rog"],
         undefined,
-        `no derived-copy fallback expected; census=${JSON.stringify(census)}`,
+        `a copy reaching dispatch would show as a no_rog fallback; census=${
+          JSON.stringify(census)
+        }`,
       );
     } finally {
       await runtime.dispose();
