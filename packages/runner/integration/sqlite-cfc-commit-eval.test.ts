@@ -54,17 +54,13 @@ async function runTest(base: URL) {
     const send = (key: string) =>
       runtime.editWithRetry((tx) => result.key(key).withTx(tx).send({}));
 
-    // A handler whose commit the server REFUSES re-runs through the
-    // scheduler's bounded retry budget before giving up loudly (~1s of
-    // requeue timers `settled()` cannot see). Drain that churn before
-    // sending the next handler, so the doomed re-runs' speculative rev bumps
-    // don't contend with — and starve — the successor's commit.
-    const drainDoomed = async () => {
-      for (let round = 0; round < 12; round++) {
-        await runtime.settled();
-        await new Promise((r) => setTimeout(r, 250));
-      }
-    };
+    // NOTE: a handler whose commit the server refuses (a RowLabelCommitError)
+    // is now classified as a TERMINAL rejection and runs exactly once — it does
+    // NOT re-run through the scheduler's retry budget (storage/rejection.ts
+    // `isTerminalRejection`; server preserves the class name). So the next
+    // handler can be sent immediately: there are no doomed re-runs whose
+    // speculative rev bumps would starve the successor's commit, and no drain is
+    // needed between sends. If this test flakes, that classification regressed.
 
     const dumpQ = (k: string) => ({
       pending: result.key(k).key("pending").getRaw(),
@@ -119,7 +115,6 @@ async function runTest(base: URL) {
       // advertised 3.c); the server evaluates the two committed rows, the
       // violating one refuses, and the WHOLE statement rolls back. ---
       await send("copyBad");
-      await drainDoomed();
       // The failed commit rolls back the db-handle rev bump too, so `q` does
       // not re-run for it; the next SUCCESSFUL write re-queries server truth.
       await send("copyGood");
@@ -143,7 +138,6 @@ async function runTest(base: URL) {
       // --- Upsert, violating post-image: row 2's sender flips to junk ->
       // the server re-derives the post-image, refuses, rolls back. ---
       await send("upsertBad");
-      await drainDoomed();
       // --- Upsert, valid post-image: row 1's sender flips to carol2. Its
       // successful commit bumps the handle rev, forcing a FRESH query cycle
       // against server truth (no dependency on rolled-back speculation). ---
