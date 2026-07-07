@@ -180,6 +180,36 @@ export function runtimeOptionsFromInitializationData(
 }
 
 /**
+ * Builds the H3b display-boundary resolver for a worker's renders. When a
+ * ceiling is in force, each render egress resolves principal-form atoms
+ * (Space-via-HasRole) RUNNER-side; the reconciler only fits the result.
+ *
+ * Reader membership is sourced ONLY from verified facts: the acting user's own
+ * space (space DID == principal DID) is the one always-verifiable member — a
+ * principal definitionally reads its own space, independent of deployment ACL
+ * mode. Broader cross-space membership awaits the §4.9.3 membership lookup;
+ * until then cross-space `Space(...)` labels fail closed rather than trusting a
+ * cell's mere local residency. Returns undefined when no ceiling is configured
+ * (no render gating — today's behavior).
+ */
+export function renderConfidentialityResolverFor(
+  runtime: Runtime,
+  identity: Identity,
+  ceiling: RenderConfidentialityCeiling | undefined,
+): RenderConfidentialityResolver | undefined {
+  if (ceiling === undefined) {
+    return undefined;
+  }
+  const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
+    identity.did();
+  return createRenderConfidentialityResolver({
+    actingPrincipal,
+    trustConfig: runtime.cfcTrustConfig,
+    memberSpaces: [actingPrincipal],
+  });
+}
+
+/**
  * Formats a cell link for display in console output.
  * Returns a string like "[Cell: of:fid1:abc.../path/to/prop]"
  */
@@ -473,26 +503,11 @@ export class RuntimeProcessor {
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     processor.renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
-    // Epic H3b: when a ceiling is in force, resolve principal-form atoms
-    // (Space-via-HasRole) at each render egress. The evaluator context comes
-    // from the runtime — its acting principal and deployment trust config —
-    // so resolution happens RUNNER-side; the reconciler only fits the result.
-    // Reader membership is sourced ONLY from verified facts: the acting user's
-    // own space (space DID == principal DID) is the one always-verifiable
-    // member (a principal definitionally reads its own space, independent of
-    // deployment ACL mode). Broader cross-space membership awaits the §4.9.3
-    // membership lookup — until then, cross-space Space(...) labels fail closed
-    // rather than trusting a cell's mere local residency.
-    const renderActingPrincipal =
-      runtime.trustSnapshotProvider()?.actingPrincipal ?? identity.did();
-    processor.renderConfidentialityResolver =
-      processor.renderConfidentialityCeiling === undefined
-        ? undefined
-        : createRenderConfidentialityResolver({
-          actingPrincipal: renderActingPrincipal,
-          trustConfig: runtime.cfcTrustConfig,
-          memberSpaces: [renderActingPrincipal],
-        });
+    processor.renderConfidentialityResolver = renderConfidentialityResolverFor(
+      runtime,
+      identity,
+      processor.renderConfidentialityCeiling,
+    );
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). Refusals

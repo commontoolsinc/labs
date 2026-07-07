@@ -3070,6 +3070,130 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    // With the resolver active, the clause-aware fit still routes each
+    // still-offending clause through the same per-clause admission as the H3a
+    // path: the read-failure marker stays ungrantable (audit item 22), an
+    // allow-listed caveat kind renders, and an author-declassified atom renders.
+    await t.step(
+      "resolved-path fit honors marker / caveat-kind / declassification",
+      async () => {
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
+        });
+        const influenceCaveat = {
+          type: "https://commonfabric.org/cfc/atom/Caveat",
+          kind: "prompt-influence",
+          source: {
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: signer.did(),
+          },
+        };
+        const seedTx = runtime.edit();
+        const seed = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-branch-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        const markerCell = seed(
+          "cfc-h3b-marker",
+          "Marker content",
+          "cfc:label-read-failed",
+        );
+        const caveatCell = seed(
+          "cfc-h3b-caveat",
+          "Influence-caveated note",
+          influenceCaveat,
+        );
+        const declassCell = seed(
+          "cfc-h3b-declass",
+          "Author-released note",
+          cfcAtom.space("did:key:z6MkDeclassSpace"),
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // Marker + caveat under a root ceiling that allow-lists the influence
+        // kind: the caveat renders, the marker stays blocked.
+        const rootCollector = createOpsCollector();
+        const rootReconciler = new WorkerReconciler({
+          onOps: rootCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+            caveatKinds: ["prompt-influence"],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelRoot = rootReconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [markerCell as never, caveatCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = rootCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Influence-caveated note"), true);
+          assertEquals(text.includes("Marker content"), false);
+        } finally {
+          cancelRoot();
+        }
+
+        // An authored boundary that declassifies the offending atom renders it
+        // even under the resolver path (renderDeclassificationPolicy "allow").
+        const declassCollector = createOpsCollector();
+        const declassReconciler = new WorkerReconciler({
+          onOps: declassCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelDeclass = declassReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassSpace"),
+            ],
+          },
+          children: [declassCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = declassCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released note"), true);
+        } finally {
+          cancelDeclass();
+        }
+      },
+    );
+
     // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
     // "the label could not be read", so it must never fit a render policy —
     // even one that names the exported marker string — in either the
