@@ -130,6 +130,8 @@ export {
   RENDER_SINK_NAME,
   STANDARD_RENDER_EXCHANGE_RULES,
 } from "./render-ceiling.ts";
+export type { SpaceRole } from "./space-membership.ts";
+export { spaceReaderRole } from "./space-membership.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
