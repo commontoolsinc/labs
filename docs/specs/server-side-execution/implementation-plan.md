@@ -76,7 +76,8 @@ dual handler execution.
 - Env flags: `CF_INTEREST_FEED` (client), `EXECUTOR_MODE=reactive` (bps).
 - Protocol messages: `session.interest.set`.
 - Space config doc key: `executorConfig` (fields:
-  `{ enabled, derivedAuthority: "client" | "executor", epoch }`).
+  `{ enabled, derivedAuthority: "client" | "executor", epoch,
+  unservablePieces?: string[] }`).
 - Tx envelope type: `TxProvenance`
   (`{ source?, action?: { id, kind }, observedAtSeq? }`).
 
@@ -214,13 +215,22 @@ are already in hand.
 
 **Steps:**
 
-1. Add `scheduler_read_index` table: `(space, branch, doc_id, action_id,
-   piece_id, observed_at_seq)`, indexed on `(space, branch, doc_id)`.
-   Populate/replace rows in the same transaction as the observation write
+1. Add `scheduler_read_index` as deployment-level engine infrastructure
+   (not per-space data — README §6.8): keyed by TARGET
+   `(space, branch, doc_id)` → `(reader_space, piece_id, action_id,
+   observed_at_seq)`, indexed on the target key. Same-space rows
+   populate/replace in the same transaction as the observation write
    (delete-then-insert per actionId; read sets come from
-   `observation.reads` + `shallowReads`).
+   `observation.reads` + `shallowReads`). Rows for reads targeting
+   ANOTHER space: fold into the same transaction via the engine's
+   existing ATTACH mechanism if straightforward (it already attaches
+   cell-dbs during `applyCommit` — `packages/memory/v2/server.ts` ~1617),
+   otherwise write them async with fail-open semantics (a missed
+   cross-space wake = stale-until-demanded, never wrong data — state in
+   the PR which you shipped).
 2. Implement `Engine.staleReadersFor(space, changedIds, commitSeq)`:
-   one indexed SELECT returning distinct `(pieceId, actionId)` where
+   one indexed SELECT returning distinct
+   `(reader_space, piece_id, action_id)` where
    `doc_id IN changedIds AND observed_at_seq < commitSeq`.
 3. Expose it as an engine/server method (no wire protocol yet — Phase 1
    consumes it in-process).
@@ -239,6 +249,9 @@ are already in hand.
       is generous).
 - [ ] Same-transaction guarantee: a conflicted commit leaves the index
       untouched.
+- [ ] Cross-space rows: an observation for a piece in space A reading a
+      doc in space B yields a row queryable from B's commit path —
+      `staleReadersFor(B, …)` returns the A-space piece.
 
 **Review checklist:** the query must key on `(space, branch, doc_id)` via
 the index (check the query plan comment or EXPLAIN in a test); deletion on
@@ -621,6 +634,12 @@ README §6.1–§6.5.
 3. Space worker: construct runtime with `persistSchedulerState: true`,
    `storageConnection: "in-process"` (worker-bridge from W0.6), the
    executor signer, and `rehydrateFromStorage` subscriptions.
+   Registration order is load-bearing (README §6.5 spawn sequence): the
+   pool registers `onSpaceCommit` and BUFFERS batches before the
+   worker's first settle; the worker reports "live at seq S" and the
+   pool releases the buffer from S — no notification gap. After
+   rehydration, also register `onSpaceCommit` for every OTHER space in
+   the pieces' read closures (README §6.8).
 4. Demand loop (the core): on each `onSpaceCommit` batch → for each
    interested piece → `resultCell.pull()` → await settle → await
    `runtime.settled()` (async builtins). Explicitly DO NOT register a
@@ -637,9 +656,12 @@ README §6.1–§6.5.
    against last-settled seq (W1.3), so nothing lands unseen between
    settle and terminate. Wake = W1.3 (until then, workers for registered
    spaces stay up).
-6. Crash isolation: worker error → report, restart with backoff, other
-   spaces unaffected (worker-controller has error events already —
-   extend).
+6. Crash isolation: worker error → report, restart with exponential
+   backoff, other spaces unaffected (worker-controller has error events
+   already — extend). After N consecutive failures, quarantine the space
+   (stop serving, alert, no restart storm). Stub a quarantine hook the
+   ownership machinery will consume (W2.1 auto-flips `derivedAuthority`
+   to `"client"` on quarantine).
 
 **Success criteria:**
 
@@ -667,6 +689,12 @@ README §6.1–§6.5.
       terminate triggers a respawn that catches up (force the window
       with a test hook/delay; assert final derived state correct and
       exactly one respawn).
+- [ ] No-gap spawn: a commit landing between worker spawn and its first
+      settle is reflected in the catch-up without a second wake (test
+      hook delays the first settle; assert the buffered batch was
+      applied).
+- [ ] Quarantine: N forced crashes → space quarantined, backoff schedule
+      observed (no restart storm), other spaces unaffected.
 
 **Review checklist:** the demand loop must be pull-based
 (`pull()`-per-wake) as specified; check `settled()` (not `idle()`) gates
@@ -755,6 +783,9 @@ interested piece stale; irrelevant commits don't wake anything.
       only work done.
 - [ ] Burst: 50 rapid commits → at most a handful of wake evaluations
       (batching assert), one worker spawn.
+- [ ] Cross-space wake: a piece in space A reads a doc in space B (both
+      enabled); with A parked, a commit to that doc in B wakes A's
+      worker and catches the piece up (rides W0.2's cross-space row).
 
 **Review checklist:** the no-reader suppression is the point of W0.2 —
 reject implementations that spin the worker up to "check". Verify the
@@ -807,7 +838,10 @@ by Phase 4.
 **Deliverable:** one PR: `executorConfig.derivedAuthority:
 "client" | "executor"` with sticky epoch semantics; client runtime reads
 it at space open, subscribes to changes, and exposes
-`spaceDerivedAuthority(space)` to the storage layer. No routing yet.
+`spaceDerivedAuthority(space)` to the storage layer; the pool's
+quarantine hook (W1.1) auto-flips the config to `"client"` (epoch bump,
+written pool-side — the pool holds the signer, so the flip survives the
+worker being gone). No routing yet.
 
 **Success criteria:**
 
@@ -816,6 +850,9 @@ it at space open, subscribes to changes, and exposes
       epoch increases monotonically; a stale-epoch write of the config
       doc is rejected by normal conflict rules.
 - [ ] Default: spaces without the doc report `"client"` (today's mode).
+- [ ] Quarantine auto-flip: simulated quarantine flips the config to
+      client authority; connected clients observe it without reload
+      (getter flips; under W2.2 they resume committing derived writes).
 
 ### W2.2 — Write-class routing + speculative overlay
 
@@ -847,7 +884,10 @@ client-committed in this phase);
 2. Routing decision at commit-enqueue time, from
    `tx.provenance.action.kind` + target address scope + the W2.1 getter.
    Scoped-address writes (user/session) bypass routing (commit as
-   today) even from computation txs.
+   today) even from computation txs. Routing also consults
+   `executorConfig.unservablePieces` (README §6.8): pieces on the list
+   route their derived writes as client-authority even on an
+   executor-owned space.
 3. Instrumentation: per-space counters {overlayWrites, committedSource,
    committedScoped, droppedOverlay, divergences}.
 4. Safety valve: authority flip back to `"client"` → flush semantics:
@@ -877,6 +917,10 @@ client-committed in this phase);
       conflict/retry test passes unmodified on a flagged space with a
       live executor (two-runtime test: stale handler read → conflict →
       retry → success).
+- [ ] Unservable carve-out: with piece P in
+      `executorConfig.unservablePieces`, P's derived writes commit from
+      the client (wire assert) while other pieces' stay overlay-only;
+      removing P from the list flips it back without reload.
 
 **Review checklist:** the routing must key on the W0.3 envelope, not on
 heuristics (doc-id patterns, schema sniffing — reject); the overlay must
@@ -950,8 +994,13 @@ path with a test, and that nothing busy-waits.
 ### W2.5 — Executor demand-root scope exclusion
 
 **Depends on:** W1.1.
-**Deliverable:** one PR: the executor's per-piece pulls never demand
-user/session-scoped subtrees (transitional carve-out; lifted in Phase 4).
+**Deliverable:** one PR: the executor's demand side gets both
+exclusions — (a) per-piece pulls never demand user/session-scoped
+subtrees (transitional carve-out; lifted in Phase 4), and (b)
+cross-space servability discovery: an ACL-denied cross-space read while
+serving piece P records P in `executorConfig.unservablePieces`
+(epoch-bumped write), stops demanding P, and retries on config epoch
+bumps (README §6.8).
 
 **Read first:** scope brands on links (see
 `packages/runner/test/link-utils.test.ts` and the scope-folding
@@ -968,6 +1017,11 @@ history); README §5.B.6.
       materialize an executor-partition copy; that must not happen).
 - [ ] Client-side computation of the scoped values still works (its
       writes commit per W2.2 exemption).
+- [ ] Unservable discovery: a piece reading a non-enabled space → the
+      executor writes the exception within one settle and stops pulling
+      P (pull counter flat afterwards); enabling the target space (epoch
+      bump) clears the exception and P becomes served (pull counter
+      moves, derived docs update).
 
 **Review checklist:** the exclusion must live in the demand walk (what
 gets pulled), not only in write filtering — the criterion about

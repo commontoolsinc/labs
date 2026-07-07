@@ -821,30 +821,80 @@ links: the closure naturally names remote docs; the feed for those rides
 the same session against the other space (unchanged semantics, G9 for the
 executor's own cross-space reads).
 
-### 6.5 Lifecycle: spin-up, catch-up, hibernate
+### 6.5 Lifecycle: spawn, catch-up, liveness, hibernate
 
-- **Spin-up** (interest or wake-commit): start worker → rehydrate
-  observations for interested pieces (`rehydrateActionFromStorage`) →
-  compare `observedAtSeq` vs branch head per read → run only stale actions
-  (scheduler-v2 bounded settle) → serve.
-  Cold-start cost without RI ≈ pattern load (compileCache, single-flighted)
-  + rehydrate + stale subset; with RI v2, ROG artifacts replace pattern
-  execution for the interpretable corpus. Pre-seeded system-pattern compile
-  caches (the browser-wedge follow-up) apply server-side directly.
+**Spawn triggers** — a space worker starts when any of:
+
+1. **Interest:** a client session opens/declares interest in an
+   executor-enabled space (Phase 1: registry entries; Phase 3:
+   `session.interest.set`), or an administrative warm-up (CLI, deploy
+   pre-seed).
+2. **Wake-on-commit:** a commit lands whose written docs have stale
+   interested readers per the readers index (§3.2). This subsumes
+   webhook/ingest ingress — ingest is itself a commit.
+3. **Async continuation:** executor restart finds request cells still
+   marked in flight (resume/re-issue per G12).
+4. (Future) server-side timers.
+
+**Spawn sequence** (ordered; the order is load-bearing):
+
+1. Pool capacity check; at cap, evict the idlest live worker (eviction =
+   ordinary hibernation, below).
+2. `new Worker(...)` (the bps `worker-controller.ts` shape) + handshake:
+   space DID, executor signer, provider `MessageChannel` port, flags.
+3. The pool registers the engine's `onSpaceCommit(space)` callback and
+   starts BUFFERING batches for the worker BEFORE the worker settles
+   anything — no notification gap between the rehydration snapshot and
+   the live stream.
+4. The worker builds the runtime (in-process provider,
+   `persistSchedulerState`, executor identity), rehydrates observations
+   for the interested piece set, computes the stale set (`observedAtSeq`
+   vs branch head), and pulls stale pieces; missing/invalid observations
+   degrade to a full pull of that piece (fail-open).
+5. The worker reports "live at seq S"; the pool releases the buffered
+   stream from S. It also registers `onSpaceCommit` for every OTHER
+   space in the pieces' read closures (§6.8).
+
+Cold-start cost without RI ≈ pattern load (compileCache by identity,
+single-flighted, plus a process-wide disk byte cache; pre-seed system
+patterns — the browser-wedge follow-up applies server-side directly) +
+observation rehydrate + the stale subset only. With RI v2, ROG artifacts
+replace pattern execution for the interpretable corpus. Parked→live is
+therefore far below a browser cold boot — which is what makes aggressive
+hibernation viable.
+
+**Liveness — what keeps a worker alive:**
+
+- Live client interest pins the worker (default policy; under memory
+  pressure the pool MAY hibernate pinned-but-quiescent workers anyway —
+  wake-on-commit keeps that correct, only latency suffers).
+- In-flight async builtin work pins it past idle, bounded by the builtin
+  timeouts plus a hard cap (default 2× the longest builtin timeout) so a
+  wedged request cannot pin a worker forever.
+- Otherwise, `idleTimeout` (default 10 min — the existing bps worker
+  timeout) of no commits, no dirty work, `settled()` resolved, and no
+  interest → hibernate.
 - **Catch-up without spin-up:** if the readers index shows no interested
   piece downstream of a commit, do nothing (the doc is stale but nobody
   cares — pull semantics, now durable). When a stale doc *is* demanded,
   the `source`→`pattern` walk on the doc itself names the piece to wake
   (§3.3), even with no scheduler state at all — contingent on G6 stamping
   coverage for that doc.
-- **Hibernate** (idle timeout): flush observations, tear down the space's
-  storage (`StorageManager.closeSpace` — in-flight with PR #4115, not on
-  main), terminate worker. The space's whole scheduler state is the
-  observation rows. Hibernation records the worker's last-settled seq and
-  marks the space *draining* until the worker exits; wake decisions treat
-  draining spaces as having no worker and compare incoming commits
-  against the last-settled seq, so a commit racing the drain triggers an
-  immediate respawn instead of being lost.
+- **Hibernate** (the drain protocol): mark the space *draining* in the
+  pool and record the worker's last-settled seq (wake decisions treat
+  draining spaces as having no worker and compare incoming commit seqs
+  against it) → `runtime.settled()` → tear down the space's storage
+  (`StorageManager.closeSpace` — in-flight with PR #4115, not on main) →
+  terminate the worker → the pool re-checks for commits past the
+  last-settled seq and respawns immediately if any landed during the
+  drain. A parked space holds zero memory; its whole scheduler state is
+  the observation rows.
+- **Crash and quarantine:** worker error → restart with exponential
+  backoff; after N consecutive failures the space is quarantined (not
+  served) with an operator alert — and, critically, quarantine
+  auto-flips `derivedAuthority` back to `"client"` (W2.1) so a B-mode
+  space degrades to today's client-computed behavior instead of its
+  derived data stalling. Un-quarantine is manual (runbook, W2.6).
 
 ### 6.6 Isolation and resources
 
@@ -914,6 +964,61 @@ Rules that keep this sound:
   `actionId` (keep latest; no history requirement); no-op observations are
   batch-elided (`schedulerObservationBatch`, planned in the spec); a
   space's rows drop wholesale with the space.
+
+### 6.8 Cross-space
+
+A piece's graph may read — and occasionally write — docs in other spaces
+(links carry the space; the scheduler's read log and trigger index are
+space-qualified addresses already). v1 scope: spaces hosted by the same
+deployment; federation is noted at the end.
+
+- **Read authority (the policy).** The executor principal can read space
+  B iff B is executor-enabled (the per-space grant, G2, implies READ for
+  the deployment's principal), so cross-space reads between
+  executor-enabled spaces just work. A subgraph that reads a NON-enabled
+  space is **unservable**: the executor cannot compute it, and under B
+  nobody else may — so unservable subgraphs stay client-authority. v1
+  granularity is the piece: when the executor hits an ACL-denied
+  cross-space read while serving piece P, it records P in
+  `executorConfig.unservablePieces` (it has WRITE on the config doc;
+  versioned/epoch-bumped like the ownership bit). Clients already
+  subscribe to the config (W2.1) and route P's derived writes as
+  client-authority. There is a bounded first-discovery window (executor
+  denied, clients not yet re-routed → P's derived data is stale until
+  the exception propagates); it self-heals via the config write.
+  Exceptions retry on config epoch bumps (e.g. when B later opts in).
+- **Scoped cross-space state** — the known pathological case
+  (reader-isolated cross-space PerUser docs drove the RI ~270×
+  re-run amplification) — is already excluded by the scope carve-out
+  (W2.5): the executor never demands scoped subtrees, local or remote.
+- **Derived writes into another space.** Rare — cross-space writes are
+  mostly handler-driven, and handler writes are client-committed source
+  writes, unchanged. When a derived/materializer write targets
+  executor-enabled space B from A's worker, it commits to B under the
+  same principal. A's and B's workers are then occasional co-writers of
+  B — accepted: same trusted principal, ordinary conflict resolution,
+  convergent; the same argument as the authority-flip window (§5.B.8).
+  If B is not enabled, the subgraph is unservable (above).
+- **Invalidations and wake.** A live A-worker registers `onSpaceCommit`
+  for every space in its read closure and lets its trigger index filter.
+  For PARKED pieces, wake-on-commit must find cross-space readers, so
+  the readers index is **deployment-level engine infrastructure**, not
+  per-space data: keyed by target `(space, docId)` →
+  `(readerSpace, pieceId, actionId, observedAtSeq)` (W0.2). Same-space
+  rows ride the observation transaction; cross-space rows either fold
+  into the same transaction via the engine's existing ATTACH mechanism
+  (it already attaches cell-dbs during `applyCommit`) or are written
+  async with fail-open semantics — a missed cross-space wake means
+  "stale until demanded", never wrong data.
+- **Client feed:** unchanged — the interest closure names remote docs,
+  and the feed for those rides the client's own session against the
+  other space (§6.4).
+- **Federation (later).** When spaces live on different hosts (the
+  loom-federation line, #4115), a worker's cross-space providers degrade
+  from in-process to remote sessions — the same provider seam — and the
+  readers index stops being deployment-global: cross-host wake becomes
+  an explicit subscription between deployments. Out of scope here; the
+  unservable-piece mechanism is the fallback in the meantime.
 
 ---
 
@@ -1011,7 +1116,7 @@ means a design doc/decision is required before implementation.
 | G6 | Source attaching in the write path (§3.3.1: tx provenance envelope, transferred to created docs at apply) + one-time legacy audit/backfill of pre-stamping docs | catch-up completeness | needs-impl (mechanism); then audit |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
 | G8 | RI gates: cross-space pull-amplification loop; F4 I/O coalescing ratchet; scoped-output exclusion (by design) | RI-on-executor only | tracked in RI specs; not on B's critical path |
-| G9 | Executor cross-space reads (remote-space sessions from the executor; reader-isolated cross-space docs) | B completeness | needs-design; today's client semantics reusable |
+| G9 | Cross-space: v1 policy designed (§6.8 — same-principal reads between enabled spaces; unservable-piece carve-out via `executorConfig.unservablePieces`; deployment-level readers index). Residuals: per-subgraph granularity, federation | B completeness | §6.8 designed; residuals later |
 | G10 | Watermark surfacing: `observedAtSeq` onto derived commits (via the §3.3.1 envelope); confirmation already returns source seq | B reconciliation | small, rides G4 + G6 mechanism |
 | G11 | Server-side async policy: per-space egress/throttle (#2659), retry/circuit-breaker, in-flight registry keyed `(actionId, inputHash)`, heartbeat/reclaim | A | partial (idempotency keys, toolshed LLM cache exist); needs-impl |
 | G12 | Durable LLM streaming (re-issue vs chunk append on executor restart) | A polish | needs-decision (recommend re-issue v1) |
