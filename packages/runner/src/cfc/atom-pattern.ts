@@ -76,6 +76,17 @@ const matchPatternValue = (
   value: unknown,
   bindings: AtomPatternBindings,
 ): AtomPatternBindings | null => {
+  // Reserved-key discipline applies in EITHER direction (module doc): a
+  // malformed var-bearing record — `{var: "$x", type: "…"}`, `{var: 5}` — is
+  // never legitimate atom data (`var` is reserved for placeholders), so as a
+  // VALUE it matches nothing. Without this, a crafted label atom carrying such
+  // a key would bind to a catch-all `{var}` placeholder (or satisfy a subset
+  // record pattern), letting an attacker-shaped atom slip past an
+  // exchange-rule guard. Checked before binding/walking, at every recursion
+  // depth (nested field values are re-checked on re-entry).
+  if (isMalformedVarBearingRecord(value)) {
+    return null;
+  }
   if (isAtomVarPlaceholder(pattern)) {
     if (Object.hasOwn(bindings, pattern.var)) {
       return deepEqual(bindings[pattern.var], value) ? bindings : null;
@@ -270,8 +281,15 @@ export const instantiateAtomPattern = (
 
 type ExpiresAtom = { type: string; timestamp: number };
 
+// Only the CANONICAL two-field `Expires` shape participates in timestamp
+// ordering. A record carrying extra fields (`{type, timestamp, scope: "x"}`)
+// is non-canonical: applying the `<=` order to it would let a ceiling
+// `Expires(1000)` admit that atom even though `deepEqual` correctly rejects
+// it — silently bypassing the fail-closed intent. Non-canonical Expires
+// records therefore fall through to structural equality only (below).
 const isOrderedExpiresAtom = (value: unknown): value is ExpiresAtom =>
   isRecord(value) &&
+  Object.keys(value).length === 2 &&
   (value as { type?: unknown }).type === CFC_ATOM_TYPE.Expires &&
   typeof (value as { timestamp?: unknown }).timestamp === "number" &&
   Number.isFinite((value as { timestamp: number }).timestamp);

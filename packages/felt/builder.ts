@@ -1,6 +1,7 @@
 import * as esbuild from "esbuild";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { debounce } from "@std/async/debounce";
+import { join as joinPath, resolve as resolvePath } from "@std/path";
 import { ResolvedConfig } from "./interface.ts";
 import { blue, dim, green, red, yellow } from "@std/fmt/colors";
 
@@ -160,6 +161,38 @@ function textLoaderPlugin(): esbuild.Plugin {
   };
 }
 
+// The Deno resolver ignores npm packages' "browser" field. @opentelemetry
+// packages gate their node/browser split behind it: modules import
+// `./platform` (whose index re-exports `./node`), and the browser field remaps
+// that index file to `platform/browser/index.js`. Without the remap the node
+// platform build — `import "perf_hooks"`, `import "stream"` — lands in browser
+// bundles and breaks both the browser (unresolvable specifiers) and
+// `deno compile` of binaries that embed them. Reproduce exactly that file
+// mapping here, scoped to @opentelemetry packages.
+function otelBrowserPlatformPlugin(): esbuild.Plugin {
+  const OTEL_PKG = /[/\\]@opentelemetry[/\\][^/\\]+[/\\]/;
+  return {
+    name: "otel-browser-platform",
+    setup(build) {
+      build.onResolve({ filter: /^\.\.?[/\\]platform$/ }, (args) => {
+        if (!OTEL_PKG.test(args.importer)) return undefined;
+        const platformDir = resolvePath(args.resolveDir, args.path);
+        const browserIndex = joinPath(platformDir, "browser", "index.js");
+        try {
+          Deno.statSync(browserIndex);
+        } catch (error) {
+          // Only "file doesn't exist" means "no browser split in this
+          // package"; a real I/O error must fail the build, not silently
+          // fall back to bundling the node platform path.
+          if (error instanceof Deno.errors.NotFound) return undefined;
+          throw error;
+        }
+        return { path: browserIndex };
+      });
+    },
+  };
+}
+
 // Exposes `esbuild`'s build functionality, applying
 // default deno resolution plugins, browser platform,
 // and ESM bundling format.
@@ -167,7 +200,11 @@ export async function build(
   config: Parameters<typeof esbuild.build>[0],
 ): Promise<ReturnType<typeof esbuild.build>> {
   const fullConfig = Object.assign({}, config, {
-    plugins: [textLoaderPlugin(), denoPlugin({ noTranspile: true })],
+    plugins: [
+      textLoaderPlugin(),
+      otelBrowserPlatformPlugin(),
+      denoPlugin({ noTranspile: true }),
+    ],
     platform: "browser",
     bundle: true,
     format: "esm",

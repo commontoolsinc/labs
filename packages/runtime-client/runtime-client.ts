@@ -43,6 +43,8 @@ import { RuntimeTransport } from "./client/transport.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import {
   InitializedRuntimeConnection,
+  type PendingRequestDiagnostic,
+  type RequestTimelineEntry,
   RuntimeConnection,
   type SubscriptionDiagnostics,
 } from "./client/connection.ts";
@@ -347,6 +349,26 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   getSubscriptionDiagnostics(): SubscriptionDiagnostics {
     return this.#conn.getSubscriptionDiagnostics();
+  }
+
+  /**
+   * Snapshot of in-flight IPC requests (sent to the worker, not yet answered).
+   * Main-thread state only — needs no worker round-trip, so it works even when
+   * the worker is wedged. Exposed on `commonfabric.rt` so an integration-test
+   * probe on a stuck page can name the request a UI await is blocked on.
+   */
+  getPendingRequests(): PendingRequestDiagnostic[] {
+    return this.#conn.getPendingRequestDiagnostics();
+  }
+
+  /**
+   * Bounded send/settle timeline of the first IPC requests on this
+   * connection — the boot window. Main-thread state only, like
+   * getPendingRequests. Where the per-type histograms say a request was slow,
+   * this says when it was sent and what overlapped it.
+   */
+  getRequestTimeline(): RequestTimelineEntry[] {
+    return this.#conn.getRequestTimelineDiagnostics();
   }
 
   resetSubscriptionDiagnostics(): void {

@@ -84,3 +84,24 @@ describe("RuntimeClient.setForwardWorkerConsole", () => {
     ]);
   });
 });
+
+describe("RuntimeClient boot-window diagnostics", () => {
+  // Both getters are main-thread snapshots forwarded straight from the
+  // connection (no worker round-trip), so a connection stub pins the wiring.
+  it("exposes pending-request and request-timeline snapshots", () => {
+    const pending = [{ msgId: 7, type: RequestType.Idle, ageMs: 12 }];
+    const timeline = [
+      { msgId: 7, type: RequestType.Idle, sentAtMs: 3, doneAtMs: 8 },
+    ];
+    const conn = {
+      on: () => {},
+      getPendingRequestDiagnostics: () => pending,
+      getRequestTimelineDiagnostics: () => timeline,
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    expect(client.getPendingRequests()).toEqual(pending);
+    expect(client.getRequestTimeline()).toEqual(timeline);
+  });
+});
