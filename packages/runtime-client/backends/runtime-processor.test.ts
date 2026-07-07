@@ -177,6 +177,52 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
       await storageManager.close();
     }
   });
+
+  it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
+    // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
+    // reads each space's ACL doc. A space whose declared ACL grants the acting
+    // user READ resolves; one that does not (no ACL / residency only) blocks.
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
+    const deniedSpace = "did:key:z6MkDeniedSpaceForRenderTest";
+    try {
+      // Seed the granted space's ACL doc (entity id == space DID) with a READ
+      // grant for the acting user. The denied space gets no ACL doc at all —
+      // its bytes may still be resident, but residency is not read authority.
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The ACL-granted space resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(grantedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // The space with no granting ACL stays blocked (fail-closed).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(deniedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space(deniedSpace)]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
 
 describe("page slug metadata", () => {

@@ -35,6 +35,7 @@ import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
+  createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
   type RenderConfidentialityResolver,
 } from "@commonfabric/runner/cfc";
@@ -193,9 +194,15 @@ export function runtimeOptionsFromInitializationData(
  *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
  *    is the space `session.open` gated on, so an own-workspace `Space(...)`
  *    label resolves rather than over-blocking.
- * Broader cross-space membership awaits the §4.9.3 membership lookup; until
- * then other-space `Space(...)` labels fail closed. Returns undefined when no
- * ceiling is configured (no render gating — today's behavior).
+ *
+ * Broader cross-space membership comes from the §4.9.3 membership lookup: a
+ * runtime-backed `SpaceMembershipProvider` reads each other space's declared
+ * ACL doc and mints a reader fact only when it grants the acting user READ+
+ * (never from residency). Its cross-space guarantee is exactly as strong as
+ * the deployment `MEMORY_ACL_MODE`. Service DIDs are NOT threaded to the
+ * worker today (design §9), so `serviceDids` is `[]` and service principals —
+ * which rarely render — fail closed. Returns undefined when no ceiling is
+ * configured (no render gating — today's behavior).
  */
 export function renderConfidentialityResolverFor(
   runtime: Runtime,
@@ -216,6 +223,10 @@ export function renderConfidentialityResolverFor(
     actingPrincipal,
     trustConfig: runtime.cfcTrustConfig,
     memberSpaces,
+    membershipProvider: createRuntimeSpaceMembershipProvider(
+      runtime,
+      actingPrincipal,
+    ),
   });
 }
 
