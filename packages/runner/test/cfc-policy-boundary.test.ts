@@ -354,7 +354,7 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
     const readThenWrite = (
       runtime: Runtime,
       id: string,
-    ): { reasons: readonly string[] } => {
+    ): { reasons: readonly string[]; diagnostics: readonly string[] } => {
       const tx = runtime.edit();
       const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
       expect(cell.key("secret").get()).toBe("rosebud");
@@ -365,8 +365,9 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
       const reasons = state.prepare.status === "invalidated"
         ? [...state.prepare.reasons]
         : [];
+      const result = { reasons, diagnostics: [...state.diagnostics] };
       tx.abort();
-      return { reasons };
+      return result;
     };
 
     it("off: rejects on the raw label", async () => {
@@ -413,6 +414,68 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           expect(
             reasons.some((reason) =>
               reason.includes("maxConfidentiality failed")
+            ),
+          ).toBe(true);
+        },
+      );
+    });
+
+    it("observe: decides as off (rejects), and diagnoses the would-be admission", async () => {
+      // The rewrite (space-reader-anywhere) WOULD add User(alice), which fits
+      // the [User(alice)] ceiling — but observe decides on the raw label
+      // ([Space] does not fit) and only diagnoses the divergence.
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: unguardedPolicy },
+        async (runtime) => {
+          await seedSpaceLabeledCell(runtime, "input-observe", {
+            confidentiality: [SPACE_ATOM],
+            integrity: [ROLE_ALICE],
+          });
+          const { reasons, diagnostics } = readThenWrite(
+            runtime,
+            "input-observe",
+          );
+          // Decided as off: still rejected.
+          expect(
+            reasons.some((reason) =>
+              reason.includes("maxConfidentiality failed")
+            ),
+          ).toBe(true);
+          // …and the divergence (reject → fit) is diagnosed.
+          expect(
+            diagnostics.some((d) =>
+              d.includes("policy-evaluation(observe): rewrite would change") &&
+              d.includes("maxConfidentiality") &&
+              d.includes("from reject to fit")
+            ),
+          ).toBe(true);
+        },
+      );
+    });
+
+    it("observe: fuel exhaustion at the input gate is diagnosed, decision unchanged", async () => {
+      // A cycling policy exhausts fuel; observe still decides on the raw label
+      // (reject) and diagnoses the exhaustion at the input requirement.
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: CYCLING_POLICY },
+        async (runtime) => {
+          await seedSpaceLabeledCell(runtime, "input-observe-exhaust", {
+            confidentiality: [SPACE_ATOM],
+            integrity: [ROLE_ALICE],
+          });
+          const { reasons, diagnostics } = readThenWrite(
+            runtime,
+            "input-observe-exhaust",
+          );
+          expect(
+            reasons.some((reason) =>
+              reason.includes("maxConfidentiality failed")
+            ),
+          ).toBe(true);
+          expect(
+            diagnostics.some((d) =>
+              d.includes("policy-evaluation(observe): fuel exhausted") &&
+              d.includes("input requirement")
             ),
           ).toBe(true);
         },
