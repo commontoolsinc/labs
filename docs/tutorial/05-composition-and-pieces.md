@@ -146,10 +146,11 @@ sentence is the product.
 
 A piece can keep working with no browser open. A pattern that exposes a
 `bgUpdater` stream (or registers via the `cf-updater` component) gets picked
-up by the **background piece service**, which polls registered pieces (every
-60 s by default) and sends to that stream server-side — same graph, same
-cells, headless executor (details in Chapter 11). This is how "summarize my
-feed every morning" works without anyone keeping a tab open.
+up by the **background piece service**, which re-runs each registered piece
+on a fixed cadence (every 60 s by default), sending to that stream
+server-side — same graph, same cells, headless executor (details in
+Chapter 11). This is how "summarize my feed every morning" works without
+anyone keeping a tab open.
 
 ---
 

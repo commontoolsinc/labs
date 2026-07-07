@@ -13,13 +13,17 @@ signatures.
 This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
-1. Foundation: api, runner, identity, memory
+1. Foundation: api, data-model, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
-4. Operation: background-piece-service, cli
-5. Deployed Product: toolshed, shell
+4. Operation: background-piece-service, cli, fuse, state-inspector, cf-harness
+5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
+
+Support and test packages (utils, test-support, deno-web-test, integration,
+generated-patterns, content-hash, leb128, felt, static, vendor-astral,
+fs-sync-example) sit outside the layer stack.
 
 ## Pattern Development
 

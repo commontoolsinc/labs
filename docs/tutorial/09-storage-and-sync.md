@@ -6,24 +6,26 @@ without locks, how other clients hear about it, and what's actually on disk.
 The code is `packages/memory` (the store and protocol) plus
 `packages/runner/src/storage/` (the client side).
 
-> **Historical note, because you'll see it in the code.** The package
-> contains two generations. The original ("v1") modeled storage as a chain
-> of immutable *facts* `{the, of, is, cause}` with per-fact compare-and-swap
-> — its types still shape the public vocabulary (`URI`, `ConflictError`,
-> entity ids like `of:<hash>`). The current engine ("v2",
-> `packages/memory/v2/`) keeps the spirit — optimistic concurrency over
-> append-only history — but moves the unit of conflict from single facts to
-> **commits with read-set validation**, which is what's described below.
-> Toolshed and the runtime speak only v2.
+> **Historical note, because you'll see traces of it in the code.** The
+> original storage engine ("v1") modeled storage as a chain of immutable
+> *facts* `{the, of, is, cause}` with per-fact compare-and-swap. Its engine
+> has been removed; what survives is its type vocabulary (`URI`,
+> `ConflictError`, `MIME`, the fact shape in `interface.ts`/`fact.ts`),
+> reused by the current engine ("v2", `packages/memory/v2/`). V2 keeps the
+> spirit — optimistic concurrency over append-only history — but moves the
+> unit of conflict from single facts to **commits with read-set
+> validation**, which is what's described below. Toolshed and the runtime
+> speak only v2.
 
 ## The data model: documents in spaces
 
 The unit of storage is an **entity document**: a JSON document named by a
-hash id (`of:<hash>`, derived from the cell's creation context — the
-document itself mutates while its id stays stable), living in a space, with the cell's payload
-under its `value` field plus metadata (e.g. a `source` link to the owning
-piece). Cells (Chapter 8) address `(space, id, path)`; the path is resolved
-inside the document.
+hash id (`of:fid1:<hash>`, derived from the cell's creation context — the
+document itself mutates while its id stays stable), living in a space, with
+the cell's payload under its `value` field (the document shape reserves
+room for metadata fields such as `source`, but today the system produces
+and consumes only `value`). Cells (Chapter 8) address `(space, id, path)`;
+the path is resolved inside the document.
 
 Documents also carry a **scope key**. `PerUser`/`PerSession` cells
 (Chapter 2) aren't filtered by queries — the engine physically partitions
@@ -44,8 +46,22 @@ ClientCommit {
     pending:   [{ id, path, localSeq }], // "I read my own unconfirmed commit"
   },
   operations: [ set | patch | delete | sqlite ],
+  // (abridged — the real type also carries preconditions, scheduler
+  // observations, branch/merge fields, ...)
 }
 ```
+
+A `patch` operation is itself a small language: alongside the
+diff-generated ops (`replace`, `add`, `remove`, `move`, `splice`) it
+carries the **mergeable** ops from Chapter 2 — `append`, `add-unique`,
+`remove-by-value`, `increment` — which record the *intent* of a collection
+write rather than its result. The whole family is defined in one registry;
+see `docs/development/patch-operations.md`,
+`docs/development/mergeable-collection-writes.md` (including the trade-off:
+merging is add-wins, so a stale add landing after a remove resurrects the
+element), and `docs/development/keyed-collection-writes.md` (how
+`elementById` gives a list element a deterministic address so per-element
+edits decompose into these ops).
 
 The `reads` field is the concurrency-control token, built automatically from
 the transaction journal (Chapter 8). The protocol is *optimistic*: no locks,
@@ -59,9 +75,17 @@ transaction):
 2. **Read validation.** For each confirmed read, the engine checks whether
    any later revision touched it. Full-document `set`/`delete` conflicts
    with any read of that document; a `patch` conflicts **only if its patched
-   paths overlap the read path**. Two users patching disjoint fields of the
-   same document both succeed — this path-granular rule is what makes
-   field-level two-way bindings (Chapter 4) practical under concurrency.
+   paths overlap the read path** (a read can also be recorded as shape-only
+   — `nonRecursive` — conflicting only with writes at or above its path).
+   Two users patching disjoint fields of the same document both succeed —
+   this path-granular rule is what makes field-level two-way bindings
+   (Chapter 4) practical under concurrency. Mergeable ops go one step
+   further, on the client side: the op's own incidental read of the
+   container is dropped from the read set, so two concurrent `append`s or
+   `increment`s to the *same* collection both land, applied against durable
+   state — they merge rather than conflict. (A reader that explicitly
+   `.get()`s the list still records that read, and still
+   conflicts-and-retries.)
 3. **Pending resolution.** Pipelined commits (a client needn't wait for ack
    to keep committing) have their pending reads mapped to the server
    sequence numbers their dependencies actually landed at, then validated
@@ -99,7 +123,7 @@ result of a query defined by schemas*.)
 After every commit the server marks the written ids dirty and, on a
 debounced tick, re-walks only the affected graphs per session, diffs against
 what that session already has, and pushes a `session/effect` carrying a
-`SessionSync` — upserts (id, seq, document) and removals. The originating
+`SessionSync` — upserts (id, seq, doc) and removes. The originating
 session is skipped (it already applied the change optimistically). The
 client integrates the delta into its replica and notifies cell sinks —
 re-entering Chapter 8's trigger index, completing the loop from the
@@ -150,7 +174,9 @@ per-`(space, id)` database file. The design is asymmetric, deliberately:
 
 A server-side registry can also map a handle to an external on-disk
 database (`cf piece link sqlite:/abs/path <piece>/<field>`) — read-only —
-which is how local datasets get exposed to patterns.
+which is how local datasets get exposed to patterns. (Databases governed by
+the CFC flow-control layer additionally capture per-column provenance and
+apply read-time clearance to query results — Chapter 10.)
 
 ## The local/remote symmetry
 
