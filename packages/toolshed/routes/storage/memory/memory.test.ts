@@ -14,6 +14,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
 
 const HELLO = {
   type: "hello",
@@ -106,19 +107,6 @@ const readJsonMessage = async <Message extends FabricValue>(
   });
 
   return decodeMemoryBoundary<Message>(payload);
-};
-
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 5000,
-): Promise<void> => {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeout) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 };
 
 const createRuntime = (identity: Identity, base: URL) =>
@@ -243,12 +231,6 @@ serialTest(
 
       const provider = storageManager.open(identity.did());
       await provider.sync(cell.getAsNormalizedFullLink().id);
-      await waitFor(() =>
-        provider.replica.get({
-          id: cell.getAsNormalizedFullLink().id,
-          type: "application/json",
-        })?.is !== undefined
-      );
       const persisted = provider.replica.get({
         id: cell.getAsNormalizedFullLink().id,
         type: "application/json",
@@ -766,10 +748,10 @@ serialTest(
       await runtime2.storageManager.synced();
       assertEquals(personCell2.get()?.address, undefined);
 
-      let receivedAddress = false;
+      const gotAddress = defer<void>();
       personCell2.sink((value) => {
         if (value?.address?.city === "San Francisco") {
-          receivedAddress = true;
+          gotAddress.resolve();
         }
       });
 
@@ -788,7 +770,7 @@ serialTest(
       await tx.commit();
       await runtime3.storageManager.synced();
 
-      await waitFor(() => receivedAddress);
+      await gotAddress.promise;
       assertEquals(personCell2.get(), {
         name: "Alice",
         address: { city: "San Francisco" },
@@ -872,10 +854,10 @@ serialTest(
         address: { city: "New York" },
       });
 
-      let receivedNewCity = false;
+      const gotNewCity = defer<void>();
       personCell2.sink((value) => {
         if (value?.address?.city === "Los Angeles") {
-          receivedNewCity = true;
+          gotNewCity.resolve();
         }
       });
 
@@ -891,7 +873,7 @@ serialTest(
       await tx.commit();
       await runtime3.storageManager.synced();
 
-      await waitFor(() => receivedNewCity);
+      await gotNewCity.promise;
       assertEquals(personCell2.get(), {
         name: "Bob",
         address: { city: "Los Angeles" },
@@ -1004,10 +986,10 @@ serialTest(
         },
       });
 
-      let receivedPopulation = false;
+      const gotPopulation = defer<void>();
       personCell2.sink((value) => {
         if (value?.address?.city?.population === 800000) {
-          receivedPopulation = true;
+          gotPopulation.resolve();
         }
       });
 
@@ -1019,7 +1001,7 @@ serialTest(
       await tx.commit();
       await runtime3.storageManager.synced();
 
-      await waitFor(() => receivedPopulation);
+      await gotPopulation.promise;
       assertEquals(personCell2.get(), {
         name: "Charlie",
         address: {
@@ -1079,10 +1061,10 @@ serialTest(
       await subscriberRuntime.storageManager.synced();
       assertEquals(counterCell.get(), { count: 1 });
 
-      let sawReconnectUpdate = false;
+      const gotReconnectUpdate = defer<void>();
       counterCell.sink((value) => {
         if (value?.count === 2) {
-          sawReconnectUpdate = true;
+          gotReconnectUpdate.resolve();
         }
       });
 
@@ -1102,7 +1084,7 @@ serialTest(
       await tx.commit();
       await runtime2.storageManager.synced();
 
-      await waitFor(() => sawReconnectUpdate);
+      await gotReconnectUpdate.promise;
       assertEquals(counterCell.get(), { count: 2 });
 
       await runtime2.dispose();
@@ -1231,10 +1213,10 @@ serialTest(
       assertEquals(aliasCell2.schema, schema);
       assertEquals(aliasCell2.get(), { count: 1, label: "start" });
 
-      let sawUpdate = false;
+      const gotUpdate = defer<void>();
       aliasCell2.sink((value) => {
         if (value?.count === 2 && value?.label === "after-restart") {
-          sawUpdate = true;
+          gotUpdate.resolve();
         }
       });
 
@@ -1253,7 +1235,7 @@ serialTest(
       await tx.commit();
       await runtime2.storageManager.synced();
 
-      await waitFor(() => sawUpdate);
+      await gotUpdate.promise;
       assertEquals(aliasCell2.schema, schema);
       assertEquals(aliasCell2.key("count").schema, { type: "number" });
       assertEquals(aliasCell2.get(), { count: 2, label: "after-restart" });
@@ -1326,10 +1308,10 @@ serialTest(
       await subscriberRuntime.storageManager.synced();
       assertEquals(aliasCell2.get(), { count: 1, label: "first" });
 
-      let sawRetarget = false;
+      const gotRetarget = defer<void>();
       aliasCell2.sink((value) => {
         if (value?.count === 2 && value?.label === "second") {
-          sawRetarget = true;
+          gotRetarget.resolve();
         }
       });
 
@@ -1342,7 +1324,7 @@ serialTest(
       await tx.commit();
       await runtime1.storageManager.synced();
 
-      await waitFor(() => sawRetarget);
+      await gotRetarget.promise;
       assertEquals(aliasCell2.schema, schema);
       assertEquals(aliasCell2.get(), { count: 2, label: "second" });
 
