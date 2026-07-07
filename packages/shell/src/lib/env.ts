@@ -4,6 +4,7 @@ declare global {
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
+  var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -20,6 +21,10 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
 const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
   typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
     ? $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE
+    : undefined;
+const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
+  typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
+    ? $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -45,4 +50,10 @@ export const EXPERIMENTAL = {
   persistentSchedulerState: flagValue(
     EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
   ),
+  // Debug `.src` source annotation: ON in development builds (so per-primitive
+  // source locations keep working for debugging), OFF in production (it is the
+  // boot floor's largest single cost). The define overrides either way.
+  eagerSourceAnnotation:
+    flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
+      (ENVIRONMENT === "development"),
 };

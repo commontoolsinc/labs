@@ -2,10 +2,7 @@ import type { Module } from "../builder/types.ts";
 import type { HarnessedFunction } from "../harness/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import {
-  getVerifiedProvenance,
-  identityFromCanonicalSource,
-} from "../harness/verified-provenance.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 
 /**
  * Resolve the policy-facing implementation identity for a module invocation.
@@ -61,23 +58,16 @@ const resolveProvenanceImplementationIdentity = (
   const provenance = getVerifiedProvenance(implementation);
   if (!provenance) return undefined;
 
-  const src = (implementation as { src?: string }).src;
-  const sourceLocation = parseVerifiedSourceLocation(src);
-  // Fail closed: the canonical source location must point INTO the provenance
-  // module. A mismatch means the src annotation and the registration disagree
-  // — treat as unsupported rather than guessing.
-  if (
-    !sourceLocation ||
-    identityFromCanonicalSource(src) !== provenance.identity
-  ) {
-    return {
-      kind: "unsupported",
-      className: "verified",
-      reason:
-        "provenance identity must match the implementation's canonical source",
-    };
-  }
-
+  // `.src` (the debug source location) is NO LONGER consulted for identity: the
+  // WeakMap provenance lookup above IS the anti-spoof proof (an attacker-supplied
+  // function has no entry), and every field the `writeAuthorizedBy` gate checks
+  // (`moduleIdentity`, `sourceFile`, `bindingPath` — prepare.ts) is provenance-
+  // derived, never `.src`-derived. The former `identityFromCanonicalSource(.src)
+  // === provenance.identity` consistency check was defense-in-depth, not the
+  // security boundary; it is dropped so that making `.src` lazy/debug-only
+  // (skipped at boot) cannot flip a genuinely-verified implementation to
+  // `unsupported` and deny its authorized writes. `.src` garble/absence is now
+  // identity-inert (the `src-garble-identity-invariant` harness asserts this).
   return {
     kind: "verified",
     moduleIdentity: provenance.identity,
@@ -90,34 +80,10 @@ const resolveProvenanceImplementationIdentity = (
         bindingPath: [...provenance.bindingIdentity.bindingPath],
       }
       : {}),
-    sourceLocation: {
-      line: sourceLocation.line,
-      column: sourceLocation.column,
-    },
     ...(provenance.bindingIdentity ? {} : {
       codeHash: hashOf(Function.prototype.toString.call(implementation))
         .toString(),
     }),
-  };
-};
-
-const parseVerifiedSourceLocation = (
-  location: string | undefined,
-): { source: string; line: number; column: number } | undefined => {
-  if (typeof location !== "string" || location.length === 0) {
-    return undefined;
-  }
-
-  const match = /^(.*):(\d+):(\d+)$/.exec(location);
-  if (!match) {
-    return undefined;
-  }
-
-  const [, source, line, column] = match;
-  return {
-    source: normalizeIdentitySource(source),
-    line: Number.parseInt(line, 10),
-    column: Number.parseInt(column, 10),
   };
 };
 

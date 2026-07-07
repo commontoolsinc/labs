@@ -259,6 +259,7 @@ export const EnvSchema = z.object({
   // ===========================================================================
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
+  EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: flagValue(),
 
   // Git SHA of the deployed commit. Set at deploy time; takes priority over
   // the build-baked SHA (see lib/build-info.ts).
@@ -278,6 +279,26 @@ export const EnvSchema = z.object({
 });
 
 export type env = z.infer<typeof EnvSchema>;
+
+/**
+ * The runner `ExperimentalOptions` derived from the environment flags —
+ * assembled here rather than inline in the server entrypoint so the
+ * env → option mapping is unit-testable. Tri-state semantics matter: an
+ * unset flag must stay `undefined` (the runner distinguishes "unset" from an
+ * explicit false — e.g. an explicit `eagerSourceAnnotation` overrides the
+ * runner's ambient default, an unset one leaves it alone).
+ */
+export function runtimeExperimentalOptions(e: env): {
+  modernCellRep?: boolean;
+  persistentSchedulerState?: boolean;
+  eagerSourceAnnotation?: boolean;
+} {
+  return {
+    modernCellRep: e.EXPERIMENTAL_MODERN_CELL_REP,
+    persistentSchedulerState: e.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
+    eagerSourceAnnotation: e.EXPERIMENTAL_EAGER_SOURCE_ANNOTATION,
+  };
+}
 
 // CLI args override env vars (needed for --watch compatibility)
 const cliOverrides = parseCliArgs();

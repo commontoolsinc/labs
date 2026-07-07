@@ -45,6 +45,7 @@ import {
 } from "./sandbox/fabric-import-specifier.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
+import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
 
@@ -483,6 +484,10 @@ export class PatternManager {
         cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {},
       );
     cacheCtx?.onEntryIdentity?.(entryIdentity);
+    // evaluateRecordGraph is a single synchronous SES stretch; in the browser
+    // worker, yield first so event-loop work queued behind the compile runs
+    // before it, not after. No-op in Deno, where it would be batch overhead.
+    await interleaveCompileYield();
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
       graph,
@@ -538,6 +543,8 @@ export class PatternManager {
           Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
       });
     byteCache.putAll(runtimeVersion, modules);
+    // Yield ahead of the synchronous SES evaluation (see compilePattern).
+    await interleaveCompileYield();
     const result = this.runtime.harness.evaluateRecordGraph(
       id,
       graph,
@@ -575,6 +582,8 @@ export class PatternManager {
         );
       await this.persistSourceCacheTracked(space, modules, entryIdentity);
       cacheCtx.onEntryIdentity?.(entryIdentity);
+      // Yield ahead of the synchronous SES evaluation (see compilePattern).
+      await interleaveCompileYield();
       const result = harness.evaluateRecordGraph(
         id,
         graph,
@@ -697,6 +706,8 @@ export class PatternManager {
     // modules instead of re-transforming them.
     byteCache?.putAll(cacheOpts.runtimeVersion, modules);
 
+    // Yield ahead of the synchronous SES evaluation (see compilePattern).
+    await interleaveCompileYield();
     const evalStart = performance.now();
     const result = harness.evaluateRecordGraph(
       id,
@@ -1357,10 +1368,26 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
+    // The write-back re-writes source docs whose values carry quote-cell
+    // indirections (one derived doc per import edge). On a cold replica those
+    // derived docs are unknown, and each commit attempt discovers exactly ONE
+    // of them: the engine rejects on the first stale read, editWithRetry
+    // pulls that doc, and only then does the next attempt's diff reach the
+    // following one (CT-1824, live-traced on the browser rig — the system-app
+    // closure re-write conflicts on ~24 pre-existing edge docs, one per
+    // round). Convergence therefore needs one retry per pre-existing derived
+    // doc; the general DEFAULT_MAX_RETRIES (5) exhausts long before that and
+    // the cache never heals, so every later cold boot recompiles. Budget by
+    // the write set's edge count (source + compiled edge docs) with slack.
+    // Rounds are bounded by actual conflicts — a conflict-free write-back
+    // still commits on the first attempt — so the ceiling is only paid during
+    // recovery after a compiler-version bump.
+    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
+    const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
     const { error } = await this.runtime.editWithRetry((tx) => {
       writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
       writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
-    });
+    }, writebackMaxRetries);
     logger.time(writebackStart, "compile-cache", "writeback");
     if (error) {
       logger.error("compile-cache-writeback-failed", () => [
