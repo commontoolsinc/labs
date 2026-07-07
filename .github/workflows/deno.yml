@@ -186,8 +186,7 @@ jobs:
 
   build-binaries:
     name: "Build Binaries"
-    runs-on:
-      group: labs
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -818,8 +817,7 @@ jobs:
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on:
-      group: labs
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       [

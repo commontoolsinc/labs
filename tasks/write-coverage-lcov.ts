@@ -1,6 +1,24 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
 
+/**
+ * Normalize per-instance source paths in an LCOV report to their physical
+ * file. A handful of tests deliberately import modules with a cache-busting
+ * query (`foo.ts?testRun=<uuid>`) to get fresh module-scoped state per test;
+ * V8 then reports each such import as a separate script, and
+ * `deno coverage --lcov` emits a separate record per instance under the
+ * suffixed path. Downstream consumers (the coverage-debt metric, the
+ * combined IDE report) must see one record set per physical file — a line is
+ * covered when ANY instance executed it — so the suffix is stripped here, at
+ * generation, rather than taught to every consumer (CT-1861). Records are
+ * left separate; LCOV consumers accumulate duplicate `SF:` sections.
+ */
+export function normalizeLcovInstancePaths(lcov: string): string {
+  return lcov.split(/\r?\n/).map((line) =>
+    line.startsWith("SF:") ? `SF:${line.slice(3).split("?")[0]}` : line
+  ).join("\n");
+}
+
 async function collectCoverageProfileFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
   try {
@@ -92,6 +110,11 @@ async function main(): Promise<void> {
     }
     throw new Error(`deno coverage failed: ${stderr.trim()}`);
   }
+
+  await Deno.writeTextFile(
+    outputPath,
+    normalizeLcovInstancePaths(await Deno.readTextFile(outputPath)),
+  );
 
   console.log(`Wrote LCOV coverage report to ${outputPath}`);
 }

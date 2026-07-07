@@ -7,12 +7,13 @@
  * UPDATED: Now uses the elegant agentic-tools API (defineItemSchema + listTool)
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { __cf_data, computed, Default, NAME, pattern, UI } from "commonfabric";
 import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
   InferItem,
   listTool,
+  listToolHandler,
 } from "../core/util/agentic-tools.ts";
 
 // ============================================================================
@@ -35,37 +36,39 @@ const FOOD_QUERIES = [
 // SCHEMA - DEFINED ONCE! (replaces interface + input type + JSON schema)
 // ============================================================================
 // The new elegant API: define schema once, get type-checked dedupe fields
-const FoodSchema = defineItemSchema({
-  foodName: {
-    type: "string",
-    description: "The specific food, cuisine, or restaurant name",
-  },
-  category: {
-    type: "string",
-    description: "One of: 'cuisine', 'dish', 'ingredient', 'restaurant'",
-  },
-  confidence: {
-    type: "number",
-    description: "0-100 confidence based on frequency",
-  },
-  sourceEmailId: {
-    type: "string",
-    description: "The email ID from searchGmail",
-  },
-  sourceEmailSubject: { type: "string", description: "The email subject" },
-  sourceEmailDate: { type: "string", description: "The email date" },
-  notes: {
-    type: "string",
-    description: "Optional context (e.g., 'ordered 5 times')",
-  },
-}, [
-  "foodName",
-  "category",
-  "confidence",
-  "sourceEmailId",
-  "sourceEmailSubject",
-  "sourceEmailDate",
-]);
+const FoodSchema = __cf_data(
+  defineItemSchema({
+    foodName: {
+      type: "string",
+      description: "The specific food, cuisine, or restaurant name",
+    },
+    category: {
+      type: "string",
+      description: "One of: 'cuisine', 'dish', 'ingredient', 'restaurant'",
+    },
+    confidence: {
+      type: "number",
+      description: "0-100 confidence based on frequency",
+    },
+    sourceEmailId: {
+      type: "string",
+      description: "The email ID from searchGmail",
+    },
+    sourceEmailSubject: { type: "string", description: "The email subject" },
+    sourceEmailDate: { type: "string", description: "The email date" },
+    notes: {
+      type: "string",
+      description: "Optional context (e.g., 'ordered 5 times')",
+    },
+  }, [
+    "foodName",
+    "category",
+    "confidence",
+    "sourceEmailId",
+    "sourceEmailSubject",
+    "sourceEmailDate",
+  ]),
+);
 
 // Derive TypeScript type from schema (for UI code)
 type FoodPreference = InferItem<typeof FoodSchema> & { extractedAt: number };
@@ -196,7 +199,8 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
         reportFood: {
           description:
             "Report a discovered food preference. Call this IMMEDIATELY when you identify a food the user likes.",
-          handler: reportFood, // Already bound - no second call needed!
+          inputSchema: reportFood.inputSchema,
+          handler: listToolHandler(reportFood.state),
         },
       },
       title: "🍕 Favorite Foods Finder",

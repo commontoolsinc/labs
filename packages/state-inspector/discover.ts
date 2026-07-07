@@ -84,11 +84,19 @@ export function candidateRoots(cwd: string = Deno.cwd()): string[] {
   return roots;
 }
 
-/** Discover local space DBs. `dirs` are searched before the default roots. */
+/**
+ * Discover local space DBs. `dirs` are searched before the default roots.
+ * `defaultRoots: false` searches ONLY `dirs`, skipping env overrides, the
+ * remote-pull cache, and the cwd walk — tests need this to stay hermetic on
+ * machines whose real `~/.cache/cf-inspect` holds pulled DBs.
+ */
 export function discoverSpaceDbs(
-  opts: { dirs?: string[]; cwd?: string } = {},
+  opts: { dirs?: string[]; cwd?: string; defaultRoots?: boolean } = {},
 ): DiscoveredSpace[] {
-  const roots = [...(opts.dirs ?? []), ...candidateRoots(opts.cwd)];
+  const roots = [
+    ...(opts.dirs ?? []),
+    ...(opts.defaultRoots === false ? [] : candidateRoots(opts.cwd)),
+  ];
   const seen = new Set<string>();
   const out: DiscoveredSpace[] = [];
   for (const root of roots) {
