@@ -28,14 +28,15 @@
  * additionalTools: {
  *   reportMembership: {
  *     description: "Report a found membership",
- *     handler: reportMembership,
+ *     inputSchema: reportMembership.inputSchema,
+ *     handler: listToolHandler(reportMembership.state),
  *   },
  * }
  * ```
  */
 import {
   handler,
-  JSONSchema,
+  type JSONSchema,
   nonPrivateRandom,
   safeDateNow,
   Writable,
@@ -126,88 +127,112 @@ const LIST_TOOL_STATE_SCHEMA = {
   required: ["items", "dedupeFields", "idPrefix", "timestampField"],
 } as const satisfies JSONSchema;
 
+export type ListToolState = {
+  items: Writable<any[]>;
+  dedupeFields: string[];
+  idPrefix: string;
+  timestampField: string;
+};
+
+type ListToolHandlerState = {
+  readonly items: Writable<any[]>;
+  readonly dedupeFields: readonly string[];
+  readonly idPrefix: string;
+  readonly timestampField: string;
+};
+
+const LIST_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    result: { type: "object", asCell: ["cell"] },
+  },
+  additionalProperties: true,
+} as const satisfies JSONSchema;
+
+export const listToolHandler = handler(
+  LIST_TOOL_INPUT_SCHEMA,
+  LIST_TOOL_STATE_SCHEMA,
+  (input: Record<string, any>, state: ListToolHandlerState) => {
+    const currentItems = state.items.get() || [];
+
+    // Generate dedup key
+    const dedupeKey = state.dedupeFields
+      .map((field) => String(input[field] ?? ""))
+      .join(":")
+      .toLowerCase();
+
+    const existingKeys = new Set(
+      currentItems.map((item: Record<string, any>) =>
+        state.dedupeFields
+          .map((field) => String(item[field] ?? ""))
+          .join(":")
+          .toLowerCase()
+      ),
+    );
+
+    let resultMessage: string;
+
+    if (existingKeys.has(dedupeKey)) {
+      resultMessage = `Duplicate: ${dedupeKey} already saved`;
+    } else {
+      const id = `${state.idPrefix}-${safeDateNow()}-${
+        nonPrivateRandom().toString(36).slice(2, 8)
+      }`;
+      const newRecord = {
+        ...input,
+        id,
+        [state.timestampField]: safeDateNow(),
+      };
+      delete newRecord.result;
+
+      state.items.push(newRecord);
+      resultMessage = `Saved new item`;
+    }
+
+    // Write result for LLM
+    if (input.result) {
+      input.result.set({ success: true, message: resultMessage });
+    }
+
+    return { success: true, message: resultMessage };
+  },
+);
+
+export type ListToolDefinition = {
+  inputSchema: JSONSchema;
+  state: ListToolState;
+};
+
 /**
- * Creates a tool handler that adds items to a list with deduplication.
+ * Creates a tool schema and bound state for adding items to a list with deduplication.
  *
  * Type-safe: dedupe fields are checked against the schema at compile time.
  *
  * @param schema - Typed schema created with defineItemSchema()
  * @param config - Tool configuration with type-checked field names
- * @returns A bound handler ready for use in additionalTools
+ * @returns A tool schema and state ready for binding in additionalTools
  */
 export function listTool<Fields extends string>(
   schema: TypedSchema<Fields>,
   config: ListToolConfig<Fields>,
-) {
+): ListToolDefinition {
   const { items, dedupe, idPrefix = "item", timestamp = "savedAt" } = config;
 
-  // Convert TypedSchema to JSONSchema by extracting the relevant properties
-  // TypedSchema is structurally compatible with JSONSchema, just with extra phantom type
-  const jsonSchema: JSONSchema = {
+  const inputSchema = {
     type: schema.type,
     properties: schema.properties,
     required: schema.required,
-  };
+  } as const satisfies JSONSchema;
 
-  return handler(
-    jsonSchema,
-    LIST_TOOL_STATE_SCHEMA,
-    (input: Record<string, any>, state: {
-      items: Writable<any[]>;
-      dedupeFields: readonly string[];
-      idPrefix: string;
-      timestampField: string;
-    }) => {
-      const currentItems = state.items.get() || [];
-
-      // Generate dedup key
-      const dedupeKey = state.dedupeFields
-        .map((field) => String(input[field] ?? ""))
-        .join(":")
-        .toLowerCase();
-
-      const existingKeys = new Set(
-        currentItems.map((item: Record<string, any>) =>
-          state.dedupeFields
-            .map((field) => String(item[field] ?? ""))
-            .join(":")
-            .toLowerCase()
-        ),
-      );
-
-      let resultMessage: string;
-
-      if (existingKeys.has(dedupeKey)) {
-        resultMessage = `Duplicate: ${dedupeKey} already saved`;
-      } else {
-        const id = `${state.idPrefix}-${safeDateNow()}-${
-          nonPrivateRandom().toString(36).slice(2, 8)
-        }`;
-        const newRecord = {
-          ...input,
-          id,
-          [state.timestampField]: safeDateNow(),
-        };
-        delete newRecord.result; // Don't save the result cell
-
-        state.items.set([...currentItems, newRecord]);
-        resultMessage = `Saved new item`;
-      }
-
-      // Write result for LLM
-      if (input.result) {
-        input.result.set({ success: true, message: resultMessage });
-      }
-
-      return { success: true, message: resultMessage };
+  return {
+    inputSchema,
+    state: {
+      items,
+      dedupeFields: dedupe,
+      idPrefix,
+      timestampField: timestamp,
     },
-  )({
-    // Bind the config immediately
-    items,
-    dedupeFields: dedupe,
-    idPrefix,
-    timestampField: timestamp,
-  });
+  };
 }
 
 // =============================================================================

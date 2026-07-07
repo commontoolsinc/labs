@@ -19,8 +19,6 @@
  */
 import { getPatternEnvironment, type Writable } from "commonfabric";
 
-const env = getPatternEnvironment();
-
 // Re-export Auth type for convenience
 export type { Auth } from "../google-auth.tsx";
 import type { Auth } from "../google-auth.tsx";
@@ -108,31 +106,36 @@ export function extractFileId(url: string): string | null {
  * Do NOT pass a derived auth cell - use property access (piece.auth) instead.
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
-export class GoogleDocsClient {
-  private auth: Writable<Auth>;
-  private retries: number;
-  private delay: number;
-  private delayIncrement: number;
-  private debugMode: boolean;
-  private onRefresh?: () => Promise<void>;
+export interface GoogleDocsClient {
+  getDocument(docId: string): Promise<GoogleDocsDocument>;
+  listComments(
+    fileId: string,
+    includeResolved?: boolean,
+  ): Promise<GoogleComment[]>;
+}
 
-  constructor(
+type GoogleDocsClientConstructor = {
+  new (
     auth: Writable<Auth>,
-    {
-      retries = 3,
-      delay = 1000,
-      delayIncrement = 1000,
-      debugMode = false,
-      onRefresh,
-    }: GoogleDocsClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.retries = retries;
-    this.delay = delay;
-    this.delayIncrement = delayIncrement;
-    this.debugMode = debugMode;
-    this.onRefresh = onRefresh;
-  }
+    config?: GoogleDocsClientConfig,
+  ): GoogleDocsClient;
+  (
+    auth: Writable<Auth>,
+    config?: GoogleDocsClientConfig,
+  ): GoogleDocsClient;
+};
+
+export const GoogleDocsClient = function GoogleDocsClient(
+  auth: Writable<Auth>,
+  {
+    retries = 3,
+    delay = 1000,
+    delayIncrement = 1000,
+    debugMode = false,
+    onRefresh,
+  }: GoogleDocsClientConfig = {},
+): GoogleDocsClient {
+  let requestDelay = delay;
 
   /**
    * Refresh the OAuth token using the refresh token.
@@ -142,27 +145,28 @@ export class GoogleDocsClient {
    * of direct cell update. This enables cross-piece refresh where direct
    * cell writes would fail due to transaction isolation.
    */
-  private async refreshAuth(): Promise<void> {
+  async function refreshAuth(): Promise<void> {
     // If an external refresh callback was provided, use it
     // (for cross-piece refresh via streams)
-    if (this.onRefresh) {
+    if (onRefresh) {
       debugLog(
-        this.debugMode,
+        debugMode,
         "Refreshing auth token via external callback...",
       );
-      await this.onRefresh();
-      debugLog(this.debugMode, "Auth token refreshed via external callback");
+      await onRefresh();
+      debugLog(debugMode, "Auth token refreshed via external callback");
       return;
     }
 
     // Fall back to direct refresh (only works if auth cell is writable)
-    const refreshToken = this.auth.get().refreshToken;
+    const refreshToken = auth.get().refreshToken;
     if (!refreshToken) {
       throw new Error("No refresh token available");
     }
 
-    debugLog(this.debugMode, "Refreshing auth token directly...");
+    debugLog(debugMode, "Refreshing auth token directly...");
 
+    const env = getPatternEnvironment();
     const res = await fetch(
       new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
       {
@@ -177,47 +181,47 @@ export class GoogleDocsClient {
 
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
-    this.auth.update(authData);
-    debugLog(this.debugMode, "Auth token refreshed successfully");
+    auth.update(authData);
+    debugLog(debugMode, "Auth token refreshed successfully");
   }
 
   /**
    * Make an authenticated request to Google APIs.
    * Handles 401 (token refresh) and 429 (rate limit) automatically.
    */
-  private async request(
+  async function request(
     url: URL,
     options?: RequestInit,
-    retries?: number,
+    remainingRetries?: number,
   ): Promise<Response> {
     // Get fresh token on each request
-    const token = this.auth.get().token;
+    const token = auth.get().token;
     if (!token) {
       throw new Error("No authorization token");
     }
 
-    const retriesLeft = retries ?? this.retries;
+    const retriesLeft = remainingRetries ?? retries;
     const opts = options ?? {};
     opts.headers = new Headers(opts.headers);
     opts.headers.set("Authorization", `Bearer ${token}`);
 
     // Add delay if we've been rate limited
-    if (this.delay > 1000) {
-      await sleep(this.delay - 1000);
+    if (requestDelay > 1000) {
+      await sleep(requestDelay - 1000);
     }
 
     const res = await fetch(url, opts);
     const { ok, status, statusText } = res;
 
     if (ok) {
-      debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
+      debugLog(debugMode, `${url}: ${status} ${statusText}`);
       // Reset delay on success
-      this.delay = 1000;
+      requestDelay = 1000;
       return res;
     }
 
     debugWarn(
-      this.debugMode,
+      debugMode,
       `${url}: ${status} ${statusText}`,
       `Remaining retries: ${retriesLeft}`,
     );
@@ -242,20 +246,20 @@ export class GoogleDocsClient {
       throw new Error(`Google API error: ${status} ${statusText}`);
     }
 
-    await sleep(this.delay);
+    await sleep(requestDelay);
 
     if (status === 401) {
-      await this.refreshAuth();
+      await refreshAuth();
     } else if (status === 429) {
-      this.delay += this.delayIncrement;
+      requestDelay += delayIncrement;
       debugLog(
-        this.debugMode,
-        `Rate limited, incrementing delay to ${this.delay}ms`,
+        debugMode,
+        `Rate limited, incrementing delay to ${requestDelay}ms`,
       );
-      await sleep(this.delay);
+      await sleep(requestDelay);
     }
 
-    return this.request(url, options, retriesLeft - 1);
+    return request(url, options, retriesLeft - 1);
   }
 
   /**
@@ -264,13 +268,13 @@ export class GoogleDocsClient {
    * @param docId The document ID
    * @returns The full document structure
    */
-  async getDocument(docId: string): Promise<GoogleDocsDocument> {
+  async function getDocument(docId: string): Promise<GoogleDocsDocument> {
     const url = new URL(`https://docs.googleapis.com/v1/documents/${docId}`);
 
-    debugLog(this.debugMode, `Fetching document: ${docId}`);
-    const res = await this.request(url);
+    debugLog(debugMode, `Fetching document: ${docId}`);
+    const res = await request(url);
     const doc = await res.json();
-    debugLog(this.debugMode, `Document fetched: ${doc.title}`);
+    debugLog(debugMode, `Document fetched: ${doc.title}`);
 
     return doc;
   }
@@ -283,14 +287,14 @@ export class GoogleDocsClient {
    * @param includeResolved Whether to include resolved comments (default: false)
    * @returns Array of all comments
    */
-  async listComments(
+  async function listComments(
     fileId: string,
     includeResolved: boolean = false,
   ): Promise<GoogleComment[]> {
     const allComments: GoogleComment[] = [];
     let pageToken: string | undefined;
 
-    debugLog(this.debugMode, `Fetching comments for file: ${fileId}`);
+    debugLog(debugMode, `Fetching comments for file: ${fileId}`);
 
     do {
       const url = new URL(
@@ -306,12 +310,12 @@ export class GoogleDocsClient {
         url.searchParams.set("pageToken", pageToken);
       }
 
-      const res = await this.request(url);
+      const res = await request(url);
       const json = await res.json();
 
       const comments = json.comments || [];
       debugLog(
-        this.debugMode,
+        debugMode,
         `Fetched ${comments.length} comments (page token: ${
           pageToken || "none"
         })`,
@@ -327,10 +331,15 @@ export class GoogleDocsClient {
     } while (pageToken);
 
     debugLog(
-      this.debugMode,
+      debugMode,
       `Total comments fetched: ${allComments.length} (includeResolved: ${includeResolved})`,
     );
 
     return allComments;
   }
-}
+
+  return {
+    getDocument,
+    listComments,
+  };
+} as GoogleDocsClientConstructor;
