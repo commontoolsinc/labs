@@ -175,21 +175,27 @@ export function watchReactiveActionCommit(state: {
       return;
     }
 
+    // Permanent (precondition) and terminal (deterministic commit-rule refusal —
+    // `isTerminalRejection`) rejections are never retried: re-running recomputes
+    // the identical refused write, and the doomed re-runs would starve
+    // concurrent siblings. Skip BEFORE charging the retry budget — a no-retry
+    // outcome must not consume it, or an action that later re-runs on changed
+    // inputs and then hits a genuinely transient failure would start from the
+    // accumulated count and skip its own bounded retries. Resubscribe still
+    // happens (finalizeReactiveActionCommit), so a real input change re-triggers.
+    if (isPermanentRejection(error) || isTerminalRejection(error)) {
+      return;
+    }
+
     // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
     // transport error, or the path-blind local StorageTransactionInconsistent
     // guard that fires before the engine's granular matcher — so they still
-    // warrant a bounded retry. Permanent (precondition) and terminal
-    // (deterministic commit-rule refusal — `isTerminalRejection`) rejections are
-    // never retried: re-running recomputes the identical refused write, and the
-    // doomed re-runs would starve concurrent siblings. On every attempt we still
-    // resubscribe, so even after the budget is exhausted (or a terminal skip)
-    // the action is re-triggered when its input data changes.
+    // warrant a bounded retry. On every attempt we still resubscribe, so even
+    // after the budget is exhausted the action is re-triggered when its input
+    // data changes.
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
-    if (
-      retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error) &&
-      !isTerminalRejection(error)
-    ) {
+    if (retries < MAX_RETRIES_FOR_REACTIVE) {
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
