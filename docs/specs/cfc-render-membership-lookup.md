@@ -1,9 +1,36 @@
 # CFC render membership lookup (§4.9.3) — design
 
-**Status:** design. Follow-up to Epic H3b (PR #4572, merged). Replaces the H3b
-render resolver's static `memberSpaces` heuristic with a verified per-space
-membership lookup, so cross-space `Space(...)` labels resolve for principals
-who genuinely read the space — never from a cell's mere local residency.
+**Status:** implemented (stages 1–4, this branch). Follow-up to Epic H3b (PR
+#4572, merged). Replaces the H3b render resolver's static `memberSpaces`
+heuristic with a verified per-space membership lookup, so cross-space
+`Space(...)` labels resolve for principals who genuinely read the space — never
+from a cell's mere local residency.
+
+**Implementation map (all four stages landed):**
+
+- **Stage 1 — capability resolver:** `spaceReaderRole` in
+  [space-membership.ts](../../packages/runner/src/cfc/space-membership.ts),
+  tested in `packages/runner/test/cfc-space-membership.test.ts`.
+- **Stage 2 — provider + per-label discovery:**
+  `createRuntimeSpaceMembershipProvider` (sync `readerRole` + change-only
+  `subscribe`) in the same file, and `spaceAtomIdsInConfidentiality` +
+  per-label mint in
+  [render-ceiling.ts](../../packages/runner/src/cfc/render-ceiling.ts), tested
+  in `cfc-space-membership.test.ts` and `cfc-render-ceiling.test.ts`.
+- **Stage 3 — wiring:** `renderConfidentialityResolverFor` /
+  `renderMembershipProviderFor` in
+  [runtime-processor.ts](../../packages/runtime-client/backends/runtime-processor.ts),
+  tested in `runtime-processor.test.ts`.
+- **Stage 4 — reactive re-render:** the worker
+  [reconciler](../../packages/html/src/worker/reconciler.ts) subscribes a gated
+  `Space(X)` cell to X's ACL doc within its cancel group and re-evaluates the
+  gate on change (`renderCellChild`), tested in
+  `packages/html/test/worker-reconciler-cfc-render-policy.test.ts`. Reused the
+  reconciler's existing `.sink` + `useCancelGroup` machinery — no
+  core-reactivity change was needed.
+
+The design below is retained as the record of intent; the spec/Lean obligations
+in §7–§8 remain outgoing follow-ups.
 
 ## 1. Problem
 
