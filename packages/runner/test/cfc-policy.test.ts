@@ -154,9 +154,55 @@ describe("CFC policy records (B2a)", () => {
         /must be an object/,
       ],
       [
+        // A Map passes `isRecord` but exposes no own string keys, so
+        // field-by-field validation would read no guards — must fail closed
+        // (cubic P1 on #4562).
+        "Map-shaped record",
+        () => buildCfcPolicySnapshot([new Map() as unknown as never]),
+        /must be an object/,
+      ],
+      [
         "non-object rule",
         () => buildCfcPolicySnapshot([record({ rules: ["nope"] as never })]),
         /must be a rule object/,
+      ],
+      [
+        "Map-shaped rule",
+        () =>
+          buildCfcPolicySnapshot([
+            record({ rules: [new Map() as unknown as never] }),
+          ]),
+        /must be a rule object/,
+      ],
+      [
+        "Map-shaped preCondition",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                {
+                  ...spaceReaderRule,
+                  preCondition: new Map([["integrity", "x"]]),
+                } as unknown as never,
+              ],
+            }),
+          ]),
+        /preCondition must be an object/,
+      ],
+      [
+        "Map-shaped post",
+        () =>
+          buildCfcPolicySnapshot([
+            record({
+              rules: [
+                {
+                  ...spaceReaderRule,
+                  post: new Map([["dropClause", true]]),
+                } as unknown as never,
+              ],
+            }),
+          ]),
+        /needs a post object/,
       ],
       [
         "non-object preCondition",
@@ -399,7 +445,11 @@ describe("CFC policy records (B2a)", () => {
       }
     });
 
-    it("leaves the snapshot unset when no records are configured", async () => {
+    it("pins the no-policy state write-once: a later injection is refused", async () => {
+      // Runtime with NO policies configured. The "no policies" state must be
+      // just as write-once as a configured one — handler code reaching the
+      // concrete tx must not be able to install exchange rules after the
+      // Runtime's `undefined` call (codex P1 / cubic P2 on #4562).
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
@@ -408,6 +458,14 @@ describe("CFC policy records (B2a)", () => {
       try {
         expect(runtime.cfcPolicySnapshot).toBeUndefined();
         const tx = runtime.edit();
+        expect(tx.getCfcState().policySnapshot).toBeUndefined();
+        (tx as unknown as {
+          setCfcPolicySnapshot: (s: unknown) => void;
+        }).setCfcPolicySnapshot({
+          records: [{ id: "injected", digest: "x", rules: [] }],
+          digest: "injected",
+        });
+        // Still undefined — the injection was ignored.
         expect(tx.getCfcState().policySnapshot).toBeUndefined();
         tx.abort();
       } finally {
