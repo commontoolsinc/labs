@@ -5,7 +5,10 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  noteDerivedCopy,
+} from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -464,6 +467,35 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       }
       // TODO(@ubik2) - we may never get here -- see if this can be removed
       return { $alias: alias };
+    } else if (isPattern(binding)) {
+      // A referenced pattern is NOT traversed or copied here: it is represented
+      // by its content-addressed `{ identity, symbol }` entry ref and resolved
+      // back to its live canonical at instantiation (`resolveStoredPattern` /
+      // `resolveOpPattern`). The live canonical is the exact object the builder
+      // keyed its reactive-interpreter ROG on, so instantiating it is a strict
+      // `getBuiltRog` WeakMap hit instead of a derived-copy fallback
+      // (`getBuiltRogResolved` + `validatePositionalCorrespondence`). This
+      // generalizes the former `Runner.substituteOpPatternRefs` — which did the
+      // same for the `map`/`filter`/`flatMap` `op` input only — to the whole
+      // binding channel, including the directly-invoked-sub-pattern node.
+      const ref = getArtifactEntryRef(binding);
+      if (ref !== undefined) {
+        return { $patternRef: { identity: ref.identity, symbol: ref.symbol } };
+      }
+      // No entry ref: a manually-constructed / bare-Engine pattern with no live
+      // canonical to resolve to. Preserve the legacy behavior — a callable
+      // pattern passes through unchanged; an object pattern is structurally
+      // copied (one alias level unwrapped) and linked to its original so trust
+      // and any later-indexed ref still resolve.
+      if (typeof binding !== "object") return binding;
+      const copy: Record<string | symbol, unknown> = Object.fromEntries(
+        Object.entries(binding).map(([key, value]) => [
+          key,
+          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
+        ]),
+      );
+      noteDerivedCopy(copy, binding);
+      return copy;
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(
@@ -472,17 +504,12 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         )
       );
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
+      return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,
           convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
-      // Carry the derivation link (trust + content-addressed entry ref) onto
-      // the bound copy so a pattern value re-bound here still resolves its
-      // `{ identity, symbol }` and stays trusted.
-      if (isPattern(binding)) noteDerivedCopy(result, binding);
-      return result;
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;

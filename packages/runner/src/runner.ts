@@ -89,6 +89,10 @@ import {
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
+import {
+  type PatternRefSentinel,
+  resolveStoredPattern,
+} from "./builtins/op-pattern-ref.ts";
 import { planInterpreterDispatch } from "./reactive-interpreter/dispatch.ts";
 import { ri2GetOutputScopes } from "./reactive-interpreter/builtin-markers.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -3865,52 +3869,6 @@ export class Runner {
     return runInActionExecution(invoke);
   }
 
-  /**
-   * CT-1623: for the list builtins (`map`/`filter`/`flatMap`), annotate the `op`
-   * input with its content-addressed `{ identity, symbol }` entry ref (when
-   * known) so the builtin can resolve the live canonical pattern by identity
-   * instead of deserializing the embedded graph. Mutates `inputBindings` in
-   * place: `op` becomes `{ $patternRef }`.
-   *
-   * Only the `op` key is rewritten — it is the sole pattern-valued input the
-   * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
-   * pattern captured in `params`) would leave an unresolved `$patternRef` object
-   * that nothing reads back.
-   *
-   * The sentinel carries NO embedded fallback graph (identity E4): the artifact
-   * index is session-lifetime, and the op's module evaluated in this session by
-   * construction (the sentinel is stamped from its live artifact right here),
-   * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph. `inputBindings` here is
-   * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
-   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the
-   * op is left as the embedded graph.
-   */
-  private substituteOpPatternRefs(
-    moduleRefName: string | undefined,
-    inputBindings: FabricValue,
-  ): void {
-    if (
-      moduleRefName !== "map" && moduleRefName !== "filter" &&
-      moduleRefName !== "flatMap"
-    ) {
-      return;
-    }
-    if (!isRecord(inputBindings)) return;
-    const op = (inputBindings as Record<string, unknown>).op;
-    if (!isRecord(op)) return;
-    const ref = this.runtime.patternManager.getArtifactEntryRef(
-      op as unknown as object,
-    );
-    if (ref) {
-      (inputBindings as Record<string, unknown>).op = {
-        $patternRef: { identity: ref.identity, symbol: ref.symbol },
-      };
-    }
-  }
-
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -3949,22 +3907,13 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
-    // with a compact `{ $patternRef }` sentinel when its content-addressed entry
-    // ref is known. This is the post-eval moment where the in-memory op object
-    // (linked to its original via `noteDerivedCopy`, preserved through binding)
-    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
-    // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph.
-    // The reactive-interpreter's inline collection nodes are raw modules (no
-    // ref name) but must keep the SAME by-identity op protocol — they opt in
-    // via `ri2SubstituteOpRefs`.
-    this.substituteOpPatternRefs(
-      moduleRefName ??
-        (module as { ri2SubstituteOpRefs?: string }).ri2SubstituteOpRefs,
-      mappedInputBindings,
-    );
-
+    // CT-1623: a pattern-valued input (the list builtins' `op`, an inline
+    // collection node's op, or a sub-pattern passed as an argument) has already
+    // been replaced with a compact `{ $patternRef }` sentinel by
+    // `unwrapOneLevelAndBindtoDoc` (see `convert` in pattern-binding.ts). The
+    // sentinel survives the immutable-cell JSON round-trip, so the builtin
+    // resolves the live canonical pattern by identity (`resolveOpPattern`)
+    // instead of deserializing the embedded graph.
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
       processCell,
@@ -4307,13 +4256,33 @@ export class Runner {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindtoDoc(
+    // The bound sub-pattern is a `{ $patternRef }` sentinel when
+    // `module.implementation` carries a content-addressed entry ref (the common
+    // case: the transformer hoists every sub-pattern to module scope and indexes
+    // it). Resolve it back to the live canonical pattern — the object the
+    // reactive interpreter's ROG WeakMap is keyed on — so `this.run` below hands
+    // the interpreter a strict `getBuiltRog` hit rather than a derived copy.
+    // A ref-less (manually-constructed) sub-pattern binds to a plain graph, which
+    // `resolveStoredPattern` returns unchanged.
+    const boundPatternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    const patternImpl = resolveStoredPattern(this.runtime, boundPatternImpl);
+    if (!patternImpl) {
+      const ref = (boundPatternImpl as {
+        $patternRef?: PatternRefSentinel["$patternRef"];
+      })
+        .$patternRef;
+      throw new Error(
+        `instantiatePatternNode: sub-pattern ${
+          ref ? `${ref.identity}#${ref.symbol}` : ""
+        } did not resolve to a live canonical in this session`,
+      );
+    }
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,

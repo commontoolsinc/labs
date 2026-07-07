@@ -133,10 +133,10 @@ export class ExecutableRegistry {
     } else if (typeof value === "function" && !isPattern(value)) {
       // A bare host helper. Pattern FACTORIES are excluded: patterns resolve
       // through the artifact index, not the implementation index, and giving
-      // a factory a host entry ref would poison the op-sentinel path
-      // (substituteOpPatternRefs would stamp a `$patternRef` the artifact
-      // index cannot resolve). Their nodes' module implementations are
-      // registered by the walk below.
+      // a factory a host entry ref would poison the `$patternRef` sentinel path
+      // (binding's `convert` would stamp a `$patternRef` the artifact index
+      // cannot resolve). Their nodes' module implementations are registered by
+      // the walk below.
       functions.push(value as HarnessedFunction);
     }
 

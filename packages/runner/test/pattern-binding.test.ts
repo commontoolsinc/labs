@@ -20,9 +20,31 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  isPatternRefSentinel,
+  resolveStoredPattern,
+} from "../src/builtins/op-pattern-ref.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+// A minimal compilable pattern used to obtain a content-addressed
+// `{ identity, symbol }` entry ref (compiled patterns are indexed by identity).
+const SUBPATTERN_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "export default pattern<{ value: number }>(({ value }) => {",
+        "  return { doubled: value };",
+        "});",
+      ].join("\n"),
+    },
+  ],
+};
 
 describe("pattern-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -481,6 +503,48 @@ describe("pattern-binding", () => {
       expect(result.op.nodes[0].outputs).toEqual({
         $alias: { partialCause: "output", path: [] },
       });
+    });
+
+    it("represents a content-addressed pattern value as a $patternRef", async () => {
+      // A compiled sub-pattern carries a content-addressed { identity, symbol }
+      // entry ref. Binding a pattern-valued input replaces it with a compact
+      // { $patternRef } sentinel that resolves back to the SAME live canonical
+      // object — never a structurally-copied graph. The live canonical is what
+      // the reactive interpreter's ROG WeakMap is keyed on, so instantiating it
+      // is a strict getBuiltRog hit rather than a derived-copy fallback.
+      const compiled = await runtime.patternManager.compilePattern(
+        SUBPATTERN_PROGRAM,
+      );
+      const entryRef = runtime.patternManager.getArtifactEntryRef(compiled);
+      expect(entryRef).toBeDefined();
+
+      const resultCell = runtime.getCell(
+        space,
+        "pattern value bound as $patternRef",
+        undefined,
+        tx,
+      );
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        { op: compiled },
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      ) as { op: unknown };
+
+      // The pattern value is a compact sentinel, not a copied full graph.
+      expect(isPatternRefSentinel(result.op)).toBe(true);
+      expect(result.op).toEqual({
+        $patternRef: {
+          identity: entryRef!.identity,
+          symbol: entryRef!.symbol,
+        },
+      });
+      // It has NO embedded graph — no nodes/argumentSchema leaked through.
+      expect((result.op as Record<string, unknown>).nodes).toBeUndefined();
+      // ...and it round-trips back to the exact live canonical object.
+      expect(resolveStoredPattern(runtime, result.op)).toBe(compiled);
     });
   });
 
