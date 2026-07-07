@@ -6,6 +6,7 @@ import type {
   CfcDereferenceTrace,
   CfcMetadata,
   ConsumedRead,
+  OrderedWriteAttempt,
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
@@ -263,6 +264,16 @@ export const canonicalizePreparedDigestInput = (
   writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
     compareAddress,
   ),
+  // ORDER-PRESERVING on purpose (sorted by journalIndex, which is unique
+  // per record, so this is a total order): the log exists to bind the
+  // temporal write sequence into the digest — an address-sort here would
+  // discard exactly the information the write-prefix gate's decision
+  // depends on (docs/specs/cfc-write-prefix-provenance.md §6). Paths stay
+  // raw/verbatim for the same reason (surface fidelity).
+  writeAttemptLog: [...(input.writeAttemptLog ?? [])].sort(
+    (left: OrderedWriteAttempt, right: OrderedWriteAttempt) =>
+      left.journalIndex - right.journalIndex,
+  ),
   triggerReads: [...(input.triggerReads ?? [])].map(canonicalizeAttemptedWrite)
     .sort(compareAddress),
   dereferenceTraces: [...input.dereferenceTraces].map(
@@ -281,6 +292,10 @@ export const canonicalizePreparedDigestInput = (
   ).sort(compareWritePolicyInput),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
+  // Already canonical: a digest-only projection of the frozen policy
+  // snapshot (Epic B5). Absent (no policies configured) stays absent so
+  // pre-B5 digests are unchanged.
+  policySnapshot: input.policySnapshot,
 });
 
 export const preparedDigestFor = (input: PreparedDigestInput): string =>

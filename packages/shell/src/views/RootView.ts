@@ -29,7 +29,7 @@ import {
   type ThemePreference,
 } from "../lib/theme-preference.ts";
 import { ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
-import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
+import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
@@ -124,7 +124,9 @@ export class XRootView extends BaseView {
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
+          // Per-profile dogfood toggles: worker-console forwarding and the
+          // Epic H3a render ceiling (see lib/host-toggles.ts).
+          ...runtimeHostFlags(),
           // lib-shell emits address-shaped targets ({spaceDid, pieceId});
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.

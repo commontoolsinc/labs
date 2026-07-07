@@ -8,7 +8,9 @@ import type {
   IFCLabel,
   LabelObservationClass,
 } from "./label-view-core.ts";
+import type { PolicySnapshot } from "./policy.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
+import type { CfcTrustConfig } from "./trust.ts";
 
 export type {
   CfcLabelView,
@@ -248,9 +250,40 @@ export type ConsumedRead =
   & Immutable<{
     meta?: Metadata;
     nonRecursive?: boolean;
+    /**
+     * Position on the transaction's activity clock (shared with write
+     * attempts — see `OrderedWriteAttempt`). Part of the prepared digest:
+     * the write-prefix provenance gate's decision depends on which reads
+     * precede which writes, so a post-prepare reorder that flips a read's
+     * prefix membership must invalidate the preparation
+     * (docs/specs/cfc-write-prefix-provenance.md §6). Absent only on
+     * backends without the clock; the gate then treats the read as
+     * preceding every write (conservative).
+     */
+    journalIndex?: number;
   }>;
 
 export type AttemptedWrite = CfcAddress;
+
+/**
+ * One applied write attempt in transaction order (§6 of
+ * docs/specs/cfc-write-prefix-provenance.md — the ordered full-address
+ * write-attempt log). Unlike every other CfcAddress in the digest input,
+ * `path` is the RAW storage path (`["value", ...]`, `["cfc"]`, `[]`),
+ * deliberately NOT canonicalized: the prefix gate must distinguish
+ * user-value writes from runtime surfaces, and the digest must bind the
+ * addresses at full fidelity so the commit recheck can re-derive the same
+ * last-overlapping-write bounds. Not reducible to one entry per exact
+ * address: the bound is the last OVERLAPPING write (either prefix
+ * direction), which an exact-address-keyed log cannot answer.
+ */
+export type OrderedWriteAttempt = Immutable<{
+  space: MemorySpace;
+  id: string;
+  scope: CellScope;
+  path: string[];
+  journalIndex: number;
+}>;
 
 export type CfcDereferenceTrace = Immutable<{
   source: CfcAddress;
@@ -333,11 +366,26 @@ export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
+  /**
+   * The ordered write-attempt log (see `OrderedWriteAttempt`). Mandatory in
+   * the digest: `consumedReads`/`writes` are canonicalized by address-sort,
+   * which discards order, but the write-prefix provenance gate's decision
+   * depends on the read|write interleaving — without this (plus each read's
+   * `journalIndex`) a post-prepare reordering that changes which reads fall
+   * inside a write's prefix would slip past the commit recheck (audit S2
+   * shape; docs/specs/cfc-write-prefix-provenance.md §6).
+   */
+  readonly writeAttemptLog: readonly OrderedWriteAttempt[];
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
+  // Digest of the policy snapshot the boundary decisions evaluated under
+  // (Epic B5): anything that can change a boundary decision must be in the
+  // digest, so a decision made under one rule set cannot be committed under
+  // another (same discipline as trustSnapshot).
+  readonly policySnapshot?: { readonly digest: string };
 };
 
 export type PostCommitSideEffect = {
@@ -391,12 +439,28 @@ export type CfcTriggerReadGating = boolean;
 
 export const DEFAULT_CFC_TRIGGER_READ_GATING: CfcTriggerReadGating = false;
 
+/**
+ * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5/§5.3),
+ * orthogonal to the enforcement ladder: `off` = the gates decide on raw
+ * labels exactly as before this dial existed; `observe` = evaluate every
+ * gated label to fixpoint and emit diagnostics (rule firings, whether the
+ * rewrite would change the decision), but DECIDE on the un-rewritten label;
+ * `enforce` = decide on the REWRITTEN label — fuel exhaustion is a
+ * fail-closed prepare reason, never a partial result (invariant 6: a policy
+ * violation disables exchange, it never silently downgrades).
+ */
+export type CfcPolicyEvaluationMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
+  "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
   flowLabelsMode: CfcFlowLabelsMode;
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
+  policyEvaluationMode: CfcPolicyEvaluationMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Addresses whose invalidating writes scheduled this run (§8.9.2 trigger
@@ -439,6 +503,17 @@ export type CfcTxState = {
   // every recorded sink-request input (set once by the Runtime at tx creation;
   // see SinkMaxConfidentiality). Undefined = no ceilings declared.
   sinkMaxConfidentiality?: SinkMaxConfidentiality;
+  // Frozen deployment policy snapshot (Epic B2a) the exchange-rule evaluator
+  // runs under, set once by the Runtime at tx creation alongside the sink
+  // ceilings. Undefined = no policies configured (evaluation is a no-op; the
+  // B5 gates decide on un-rewritten labels).
+  policySnapshot?: PolicySnapshot;
+  // Frozen deployment trust config (Epic B3) backing concept-guard
+  // satisfaction (createTrustResolver), set once by the Runtime at tx
+  // creation. Undefined = no trust configured (every concept guard fails
+  // closed). Config identity is covered by TrustSnapshot.revision, not a
+  // separate digest input.
+  trustConfig?: CfcTrustConfig;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything

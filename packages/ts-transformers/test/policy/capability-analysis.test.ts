@@ -3258,3 +3258,203 @@ Deno.test(
     assertEquals(input!.capability, "writable");
   },
 );
+
+Deno.test("Capability analysis classifies send() as a write", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.events.send({ fired: true });
+      return null;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  // send() delegates to set() on every receiver: a raw cell takes a
+  // transactional write; a stream enqueues an event whose handler writes in
+  // its own transaction. Either way a sending callback must never summarize
+  // as write-free.
+  assert(input.writePaths.includes("events"));
+  assertEquals(input.capability, "writeonly");
+});
+
+Deno.test(
+  "Capability analysis fails closed on unknown methods without a checker",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => input.items.frobnicate();`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // Without a checker the receiver cannot be proven value-like, so the
+    // unknown method could be an unrecognized mutator: writePaths must not
+    // be treated as exhaustive.
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks unknown cell-method calls as unverified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<{ items: string[] }>) => {
+  // Not a method the analysis recognizes; the receiver is cell-like, so a
+  // mutation cannot be ruled out.
+  input.frobnicate();
+  return null;
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps value-level unknown methods verified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<string[]>) => {
+  const items = input.get();
+  return items.some((item) => item.length > 0);
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // Array methods on a .get() snapshot cannot write through the cell:
+    // only cell-like receivers poison write-exhaustiveness.
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks set() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // The write itself is still recorded...
+    assert(input!.writePaths.map((path) => path.join(".")).includes("count"));
+    // ...but onCommit receives the committed transaction and can write
+    // arbitrary cells through it, so writePaths is not exhaustive.
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks send() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.events.send({ fired: true }, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assert(input!.writePaths.map((path) => path.join(".")).includes("events"));
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps plain set()/send() calls verified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1);
+        input.events.send({ fired: true });
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks dynamic cell-method calls as unverified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<{ items: string[] }>, m: string) => {
+  // Unresolvable method name on a cell-like receiver: could be any mutator.
+  input[m]();
+  return null;
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps value-level dynamic method calls verified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<Record<string, () => number>>, m: string) => {
+  const value = input.get();
+  // Dynamic method on a .get() snapshot: cannot write through the cell.
+  return value[m]();
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis fails closed on dynamic methods without a checker",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, m) => input.items[m]();`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);

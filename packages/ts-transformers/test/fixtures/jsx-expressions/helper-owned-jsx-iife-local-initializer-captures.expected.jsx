@@ -227,6 +227,15 @@ const __cfLift_3 = __cfHelpers.lift<{
 const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
         pushPath: {
             type: "object",
             properties: {
@@ -236,18 +245,9 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
             },
             required: ["name"],
             asCell: ["stream"]
-        },
-        item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["name"]
         }
     },
-    required: ["pushPath", "item"]
+    required: ["item", "pushPath"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, item }) => pushPath.send({ name: item.name }));
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");

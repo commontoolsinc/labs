@@ -2114,6 +2114,35 @@ export interface PatternToolResult<E = Record<PropertyKey, never>> {
   useResultSchemaForObservation?: boolean;
 }
 
+// Marker branding a tool-input field as framework-provided: the runtime fills
+// it (e.g. the bash tool's `sandboxId`), and `patternTool` rejects any attempt
+// to pre-fill it through extraParams. Compile-time only; at runtime a
+// `FrameworkProvided<T>` value is just a `T`. The brand is a symbol-keyed
+// property, so schema generation emits the inner type's schema unchanged.
+//
+// Shaped as `(T & brand) | T` (like Default<>): the bare `| T` arm keeps the
+// type nameable in emitted declarations, while the branded arm is what
+// FrameworkProvidedKeys<> detects.
+export declare const FRAMEWORK_PROVIDED_MARKER: unique symbol;
+type FrameworkProvidedMarker = { readonly [FRAMEWORK_PROVIDED_MARKER]: true };
+export type FrameworkProvided<T> = (T & FrameworkProvidedMarker) | T;
+
+// Distributes over the union members of V (naked param) so it sees the brand in
+// the `(T & brand) | T` shape: `true` for the branded arm, `false` for the bare
+// one, hence `boolean` for the whole union. `any` is excluded — `any extends X`
+// is `boolean`, which would otherwise flag every loosely-typed field.
+type _HasFrameworkBrand<V> = IsAny<V> extends true ? false
+  : V extends FrameworkProvidedMarker ? true
+  : false;
+
+// The keys of T whose value is `FrameworkProvided<...>` — the fields an author
+// must not pre-fill. `NonNullable` lets it see the brand through an optional
+// `field?: FrameworkProvided<...>`.
+type FrameworkProvidedKeys<T> = {
+  [K in keyof T]-?: true extends _HasFrameworkBrand<NonNullable<T[K]>> ? K
+    : never;
+}[keyof T];
+
 export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
@@ -2123,8 +2152,12 @@ export type PatternToolFunction = <
   // its closure) is no longer supported — wrap it yourself:
   // `patternTool(pattern(fn), extraParams?)`.
   pattern: PatternFactory<T, any>,
-  // Validate that E (after stripping cells) is a subset of T
-  extraParams?: StripCell<E> extends Partial<T> ? FactoryInput<E> : never,
+  // Reject pre-filling a framework-provided field (e.g. the bash tool's
+  // `sandboxId`); otherwise validate that E (after stripping cells) is a subset
+  // of T.
+  extraParams?: [keyof E & FrameworkProvidedKeys<T>] extends [never]
+    ? (StripCell<E> extends Partial<T> ? FactoryInput<E> : never)
+    : never,
 ) => PatternToolResult<E>;
 
 // Public (schema-light) surface, matching PatternFunction's index.ts shape: the

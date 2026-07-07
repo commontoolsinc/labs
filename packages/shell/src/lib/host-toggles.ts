@@ -1,0 +1,42 @@
+/**
+ * Aggregation seam for the shell's per-browser-profile host toggles — the
+ * localStorage-persisted dogfood flags with `commonfabric.*` console
+ * commands. Each toggle owns its storage key and command (worker-console.ts,
+ * render-ceiling.ts); this module is the single place boot and runtime
+ * creation consume them, so adding a toggle does not touch the untestable
+ * entry module or the RootView task body.
+ */
+
+import {
+  isWorkerConsoleForwardingEnabled,
+  setupWorkerConsoleToggle,
+} from "./worker-console.ts";
+import {
+  isCfcRenderCeilingEnabled,
+  setupCfcRenderCeilingToggle,
+} from "./render-ceiling.ts";
+
+/**
+ * Install every `commonfabric.*` host-toggle console command. Run once at
+ * boot, before any runtime exists, so the commands are available while
+ * logged out.
+ */
+export function setupHostToggles(): void {
+  setupWorkerConsoleToggle();
+  setupCfcRenderCeilingToggle();
+}
+
+/**
+ * The host-toggle flags read at runtime creation and passed to
+ * RuntimeInternals.create. Read fresh per creation: a re-created runtime
+ * (identity or host change) picks up the current persisted state.
+ */
+export function runtimeHostFlags(): {
+  forwardWorkerConsole: boolean;
+  cfcRenderCeiling: boolean;
+} {
+  return {
+    forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
+    cfcRenderCeiling: isCfcRenderCeilingEnabled(),
+  };
+}

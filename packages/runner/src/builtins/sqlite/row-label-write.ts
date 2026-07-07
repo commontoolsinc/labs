@@ -2,10 +2,21 @@
 // tables. An attributable INSERT evaluates the rule over its bound values —
 // the prospective row label — and verifies NO-LAUNDERING: every labeled input
 // must be captured by that label (else confidential data would be stored
-// under a weaker label and re-derived reads would under-protect it). Anything
-// the runner cannot attribute or evaluate on a rule-bearing table fails
-// closed; server-side commit evaluation (3.c) is the follow-up that lifts
-// this for the non-attributable shapes.
+// under a weaker label and re-derived reads would under-protect it).
+//
+// The runner/server split (Phase 3.c): when the CONNECTED SERVER advertises
+// commit-time re-derivation (`serverCommitEval` — the
+// `sqliteCommitRowLabelEval` handshake capability), the shapes whose ONLY
+// problem is that the runner cannot see the committed row — INSERT…SELECT,
+// upsert, columnless INSERT, an UPDATE that writes a rule-input column — are
+// admitted with UNLABELED inputs and evaluated server-side against the true
+// post-image (memory/v2/sqlite/commit-eval.ts, same shared evaluator; a
+// violation rolls back the whole commit). NO-LAUNDERING stays here regardless:
+// the server sees stored values, never the CFC labels the writer's bound
+// inputs carry, so a LABELED input bound to a shape the runner cannot evaluate
+// still fails closed — there is no label to check capture against. Against an
+// old server (capability absent) everything below fails closed exactly as
+// before.
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Write — the runner gate").
 //
 // Zero cost when no table declares a rule.
@@ -23,7 +34,7 @@ import {
   parseUpdateSetColumns,
   parseWriteParamColumns,
   parseWriteTable,
-} from "./write-targets.ts";
+} from "@commonfabric/memory/sqlite/write-targets";
 
 /** One written row's computed label — recorded as the write's CFC policy
  *  input (sink-request) before the commit. */
@@ -41,6 +52,10 @@ export interface RowLabelWriteArgs {
   owner?: string;
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */
   confidentialityOf: (value: unknown) => readonly unknown[];
+  /** True iff the connected server advertised commit-time re-derivation
+   *  (Phase 3.c) — the gate then admits the non-attributable shapes with
+   *  unlabeled inputs instead of failing closed. Default false. */
+  serverCommitEval?: boolean;
 }
 
 export type RowLabelWriteResult =
@@ -57,7 +72,8 @@ export type RowLabelWriteResult =
 export function checkSqliteRowLabelWrite(
   args: RowLabelWriteArgs,
 ): RowLabelWriteResult {
-  const { sql, params, tables, owner, confidentialityOf } = args;
+  const { sql, params, tables, owner, confidentialityOf, serverCommitEval } =
+    args;
 
   // Zero cost for rule-less dbs.
   const hasRules = Object.values(tables ?? {}).some(tableDeclaresRowLabel);
@@ -148,13 +164,19 @@ export function checkSqliteRowLabelWrite(
           "`col = ?` form",
       };
     }
-    for (const c of setCols) {
-      if (inputSet.has(c.toLowerCase())) {
-        return {
-          error: `sqlite: UPDATE writes rule input column "${c}" of ` +
-            `"${declaredKey}" — the post-image row label cannot be computed ` +
-            "runner-side (other inputs unknown); fail closed (3.c lifts this)",
-        };
+    if (!serverCommitEval) {
+      // 3.c lift: with commit-time re-derivation the server evaluates the
+      // TRUE post-image, so writing a rule-input column is fine — the
+      // labeled-value check below still owns no-laundering.
+      for (const c of setCols) {
+        if (inputSet.has(c.toLowerCase())) {
+          return {
+            error: `sqlite: UPDATE writes rule input column "${c}" of ` +
+              `"${declaredKey}" — the post-image row label cannot be ` +
+              "computed runner-side (other inputs unknown), and the server " +
+              "did not advertise commit-time evaluation (3.c); fail closed",
+          };
+        }
       }
     }
     for (const v of values) {
@@ -171,12 +193,29 @@ export function checkSqliteRowLabelWrite(
 
   const cols = parseWriteParamColumns(sql, blanked);
   if (cols === undefined) {
-    return {
-      error: `sqlite: this write to rule-bearing table "${declaredKey}" is ` +
-        "not attributable (INSERT…SELECT, upsert, columnless INSERT, …) — " +
-        "the row label cannot be evaluated runner-side; fail closed " +
-        "(server-side commit evaluation is the planned lift)",
-    };
+    if (!serverCommitEval) {
+      return {
+        error: `sqlite: this write to rule-bearing table "${declaredKey}" ` +
+          "is not attributable (INSERT…SELECT, upsert, columnless INSERT, " +
+          "…) — the row label cannot be evaluated runner-side, and the " +
+          "server did not advertise commit-time evaluation (3.c); fail closed",
+      };
+    }
+    // 3.c lift: the server re-derives the label from the committed rows and
+    // rolls back on violation. No-laundering stays HERE — the server never
+    // sees input-value labels — so a labeled bound value still fails closed:
+    // the runner cannot compute the row label this shape would store it
+    // under, hence cannot verify capture.
+    for (const v of values) {
+      if (confidentialityOf(v).length > 0) {
+        return {
+          error: "sqlite: a labeled value bound to rule-bearing table " +
+            `"${declaredKey}" outside an evaluable INSERT cannot be ` +
+            "verified as captured by the row's label — fail closed",
+        };
+      }
+    }
+    return {}; // label derivation deferred to the server commit (3.c)
   }
 
   // INSERT / REPLACE: group the cycled param→column mapping back into rows.
@@ -190,6 +229,12 @@ export function checkSqliteRowLabelWrite(
     }
   }
   if (listLen === 0 || values.length % Math.max(listLen, 1) !== 0) {
+    if (serverCommitEval && values.length === 0) {
+      // Zero-param columnless INSERT (`… DEFAULT VALUES`): nothing is bound,
+      // so there is nothing to launder — the server derives the label from
+      // the committed default row (3.c).
+      return {};
+    }
     return {
       error: `sqlite: cannot group the INSERT's params into rows for ` +
         `rule-bearing table "${declaredKey}" — fail closed`,

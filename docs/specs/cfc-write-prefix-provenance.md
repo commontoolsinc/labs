@@ -237,6 +237,39 @@ Stated honestly (as the plan asks): this is a **dataflow approximation**, but a
 *sound* one — it never drops a read that could have fed the value. It is tighter
 than the spec's `L_default` only in the decomposition-permitted direction.
 
+## Implementation note (2026-07-06, the code PR)
+
+Landed per §7 with two reconciliations, both recorded as
+[SC-23](./cfc-spec-changes.md):
+
+- **Order source.** As §6 requires, the order is stamped at the recording
+  layer, backend-independent: one per-transaction monotonic **activity
+  clock** in `V2StorageTransaction` shared by read activities
+  (`IReadActivity.journalIndex`) and a new ordered **write-attempt log**
+  (`getWriteAttemptLog()`, one entry per applied write, raw full-fidelity
+  paths). Value-equal writes the storage layer elides never enter the log —
+  it carries exactly the write set every other inspection surface sees. In
+  the digest the clock values are **rank-normalized over the
+  decision-relevant set** (non-internal reads + attempts): raw values would
+  also encode how many runtime-internal verifier reads interleaved, which
+  must not perturb the enforcement identity of otherwise-identical
+  transactions; ranks preserve every relative order the gate consumes, so
+  the §6 invalidation property is intact.
+- **Vacuous-pass fix (#14) lands as a delegation, not a new rejection.**
+  D3's write floor (§8.12.4.1, dial `cfcWriteFloor`) already rejects an
+  empty-prefix floored write with no credited value under `enforce` — the §5
+  end state — and its dial-off/observe byte-compat is pinned by tests as the
+  staged-rollout contract. An unconditional read-side rejection would either
+  duplicate the floor's reason under `enforce` or break that compat, so the
+  read gate treats an empty prefix as "the value's own (evidence-gated)
+  endorsement is the only possible input" and defers to the floor's dialed
+  check. What the prefix contributes is exactness: an empty *prefix* means
+  this write provably had no labeled input, so value-side judgment is the
+  complete story for it — with the old *transaction-global* set that
+  inference was only valid when the whole transaction read nothing labeled,
+  which is why the old in-code comment called the #14 tightening unsound to
+  apply without per-write provenance.
+
 ## Provenance
 
 Grounded in `commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`

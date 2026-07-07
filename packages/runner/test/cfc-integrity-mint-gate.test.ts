@@ -84,4 +84,125 @@ describe("CFC integrity mint gate", () => {
       await storageManager.close();
     }
   });
+
+  it("does not let author-declared exchange-rule evidence satisfy a requiredIntegrity gate", async () => {
+    // The Epic B1 evidence families: guard atoms exchange rules fire on
+    // (screening verdicts, disclosure events, assessor judgments, role
+    // membership, boundary context). Forging any of them from a
+    // pattern-authored schema would let untrusted code upgrade its own caveat
+    // tier or discharge its own material risk, so the mint gate must strip
+    // them exactly like InjectionSafe.
+    const source = { "/": "evidence-src" };
+    const renderRef = { seq: 1, rootRef: { "/": "root" } };
+    const forgedAtoms = {
+      "boundary-context": {
+        type: "https://commonfabric.org/cfc/atom/BoundaryContext",
+        key: "sinkClass",
+        value: "display",
+      },
+      "caveat-screened": {
+        type: "https://commonfabric.org/cfc/atom/CaveatScreened",
+        kind: "prompt-injection-risk-unscreened",
+        source,
+        stage: "ingress",
+        detector: { type: "https://commonfabric.org/cfc/atom/Builtin" },
+        verdict: "pass",
+      },
+      "disclosure-rendered": {
+        type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
+        kind: "warning",
+        source,
+        sink: "display",
+        renderRef,
+        snapshotDigest: "digest",
+      },
+      "disclosure-acknowledged": {
+        type: "https://commonfabric.org/cfc/atom/DisclosureAcknowledged",
+        user: "did:key:attacker",
+        kind: "warning",
+        source,
+        renderRef,
+        snapshotDigest: "digest",
+      },
+      "disclaimer-attached": {
+        type: "https://commonfabric.org/cfc/atom/DisclaimerAttached",
+        sink: "display",
+        kind: "warning",
+        source,
+        disclaimerDigest: "digest",
+      },
+      "caveat-assessment": {
+        type: "https://commonfabric.org/cfc/atom/CaveatAssessment",
+        kind: "warning",
+        source,
+        assessor: { type: "https://commonfabric.org/cfc/atom/Builtin" },
+        evidenceDigest: "digest",
+        result: "supported",
+      },
+      "has-role": {
+        type: "https://commonfabric.org/cfc/atom/HasRole",
+        principal: "did:key:attacker",
+        space: "space:victim",
+        role: "owner",
+      },
+    } as const;
+
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      for (const [name, atom] of Object.entries(forgedAtoms)) {
+        const seed = runtime.edit();
+        const srcSchema = {
+          type: "string",
+          ifc: {
+            confidentiality: ["s"],
+            integrity: [atom],
+          },
+        } as JSONSchema;
+        const src = runtime.getCell(
+          signer.did(),
+          `evidence-gate-src-${name}`,
+          srcSchema,
+          seed,
+        );
+        src.set("attacker-controlled");
+        seed.prepareCfc();
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        runtime.getCell(
+          signer.did(),
+          `evidence-gate-src-${name}`,
+          srcSchema,
+          tx,
+        ).get();
+        runtime.getCell(
+          signer.did(),
+          `evidence-gate-sink-${name}`,
+          {
+            type: "object",
+            properties: {
+              out: {
+                type: "string",
+                ifc: { requiredIntegrity: [atom] },
+              },
+            },
+            required: ["out"],
+          } as JSONSchema,
+          tx,
+        ).set({ out: "derived" });
+
+        expect(tx.prepareCfc()).toBe("");
+        const result = await tx.commit();
+        expect(result.error?.message).toContain("requiredIntegrity failed");
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

@@ -204,6 +204,15 @@ const __cfLift_2 = __cfHelpers.lift<{
 const __cfHandler_3 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
         handleNavigateInto: {
             type: "object",
             properties: {
@@ -213,24 +222,18 @@ const __cfHandler_3 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
             },
             required: ["name"],
             asCell: ["stream"]
-        },
-        item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["name"]
         }
     },
-    required: ["handleNavigateInto", "item"]
+    required: ["item", "handleNavigateInto"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { handleNavigateInto, item }) => handleNavigateInto.send({
     name: item.name,
 }));
 const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        item: {
+            $ref: "#/$defs/Entry"
+        },
         handleOpenFile: {
             type: "object",
             properties: {
@@ -240,12 +243,9 @@ const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
             },
             required: ["item"],
             asCell: ["stream"]
-        },
-        item: {
-            $ref: "#/$defs/Entry"
         }
     },
-    required: ["handleOpenFile", "item"],
+    required: ["item", "handleOpenFile"],
     $defs: {
         Entry: {
             type: "object",

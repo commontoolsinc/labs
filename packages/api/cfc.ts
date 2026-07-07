@@ -25,14 +25,48 @@ export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
 export type CfcAtom = CfcJsonValue;
 
 export const CFC_ATOM_TYPE = {
+  // Generic sink-time context minted by trusted boundaries per evaluation
+  // (sink name, sink class, field role, purpose — spec §15.4/§8.10.5). Feeds
+  // exchange-rule `boundary` guards; never persisted onto values (Epic B).
+  BoundaryContext: "https://commonfabric.org/cfc/atom/BoundaryContext",
   Builtin: "https://commonfabric.org/cfc/atom/Builtin",
   Caveat: "https://commonfabric.org/cfc/atom/Caveat",
+  // Scoped assessor/verifier judgment for caveat-bearing profiles (spec
+  // §15.4): evidence for policy, not global clearance. Trusted-minted.
+  CaveatAssessment: "https://commonfabric.org/cfc/atom/CaveatAssessment",
+  // Screening evidence for caveat-bearing profiles (spec §15.4/§10.1):
+  // ingress-stage evidence claims the source was screened; value-stage
+  // evidence binds the exact current value via `valueRef`. Trusted-minted.
+  CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened",
+  // Conceptual principal (spec §15.5/§4.8.1): names an abstract requirement
+  // in trust statements and exchange-rule integrity guards. A guard of this
+  // shape is satisfied via the acting principal's trust closure — never by a
+  // literal Concept atom in carried integrity.
+  Concept: "https://commonfabric.org/cfc/atom/Concept",
+  // Trusted evidence that a source-linked disclaimer was attached to content
+  // emitted through a sink (spec §15.4). Trusted-minted.
+  DisclaimerAttached: "https://commonfabric.org/cfc/atom/DisclaimerAttached",
+  // Explicit user acknowledgment bound to a rendered disclosure (spec §15.4).
+  // Trusted-minted by the UI runtime.
+  DisclosureAcknowledged:
+    "https://commonfabric.org/cfc/atom/DisclosureAcknowledged",
+  // Trusted disclosure evidence that a caveat-linked warning/notice was
+  // rendered for a particular sink (spec §15.4). Trusted-minted.
+  DisclosureRendered: "https://commonfabric.org/cfc/atom/DisclosureRendered",
+  // Absolute expiration constraint (confidentiality; spec §4.2.3): the clause
+  // is satisfiable only while `now <= timestamp`. The one atom family with an
+  // entailment ORDER (`atomEntails`): an earlier deadline entails a later one.
+  Expires: "https://commonfabric.org/cfc/atom/Expires",
   // Runtime-minted external-ingest provenance: this value arrived through a
   // vouched ingest channel (an owner-granted, revocable append authority held
   // by an outside service). Mirrors `UserSurfaceInput` — human input gets its
   // own origin class; external input is just another origin. Evidence, not
   // authorable in schemas: the *channel* is vouched, the *contents* are not.
   ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest",
+  // Role-membership fact (integrity; spec §4.9.3/§15.4) minted by the trusted
+  // runtime from verified space membership — the guard that derives user
+  // access from `Space(...)` confidentiality via exchange rules.
+  HasRole: "https://commonfabric.org/cfc/atom/HasRole",
   InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe",
   LinkReference: "https://commonfabric.org/cfc/atom/LinkReference",
   // Runtime-minted LLM-derivation provenance: these bytes were produced by a
@@ -48,12 +82,24 @@ export const CFC_ATOM_TYPE = {
   // via the class-aware meet — present on an output only when present on
   // every input.
   PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified",
+  // Personal-space principal (confidentiality; spec §15.2): a per-user space,
+  // a convenience form for `Space(...)` that names its owner directly. The
+  // default display ceiling (§8.10.6) admits `PersonalSpace(actingUser)` by
+  // exact match — the acting user is the audience — so it needs no exchange
+  // rule, unlike a shared `Space(...)`.
+  PersonalSpace: "https://commonfabric.org/cfc/atom/PersonalSpace",
   PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound",
   PromptSlotInfluence: "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
   Resource: "https://commonfabric.org/cfc/atom/Resource",
+  // Space principal (confidentiality; spec §15.2): access is typically
+  // derived via exchange rules from `HasRole` integrity, not satisfied
+  // directly.
+  Space: "https://commonfabric.org/cfc/atom/Space",
   // Runtime-minted derivation provenance (spec §8.9.3): which implementation
   // produced this value. Evidence — not authorable in schemas.
   TransformedBy: "https://commonfabric.org/cfc/atom/TransformedBy",
+  // User principal (confidentiality; spec §15.2): readable by this user.
+  User: "https://commonfabric.org/cfc/atom/User",
   UserSurfaceInput: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
 } as const;
 
@@ -82,8 +128,17 @@ export const CFC_COMPILED_BY_ATOM = "cf-compiled-by:cf-compiler" as const;
 
 export const CFC_CONCEPT_KIND = {
   PromptInfluence: "https://commonfabric.org/cfc/concepts/prompt-influence",
+  // The §10.1 screening-gradient risk tiers. A tier upgrade ADDS the
+  // higher-tier caveat as an alternative in the same clause (never replaces
+  // the lower tier), guarded by `CaveatScreened` evidence whose stage matches:
+  // `ingress` evidence for `-ingress-screened`; `value` evidence (with a
+  // `valueRef` binding the exact current value) for `-value-screened`.
+  PromptInjectionRiskIngressScreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-ingress-screened",
   PromptInjectionRiskUnscreened:
     "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
+  PromptInjectionRiskValueScreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-value-screened",
 } as const;
 
 export const CFC_FUSE_ATOM_CLASS = {
@@ -147,6 +202,99 @@ export type CfcExternalIngestAtom = CfcAtomObject & {
   readonly valueDigest: string;
 };
 
+export type CfcUserAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.User;
+  readonly subject: string;
+};
+
+export type CfcSpaceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Space;
+  readonly id: string;
+};
+
+export type CfcPersonalSpaceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PersonalSpace;
+  readonly owner: string;
+};
+
+export type CfcExpiresAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Expires;
+  readonly timestamp: number;
+};
+
+export type CfcHasRoleAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.HasRole;
+  readonly principal: string;
+  readonly space: string;
+  readonly role: "owner" | "writer" | "reader";
+};
+
+export type CfcBoundaryContextAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.BoundaryContext;
+  readonly key: string;
+  readonly value?: string;
+  readonly ref?: CfcAtom;
+};
+
+export type CfcCaveatScreenedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.CaveatScreened;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly stage: string;
+  readonly detector: CfcAtom;
+  readonly verdict: string;
+  readonly valueRef?: CfcAtom;
+  readonly profileHash?: string;
+  readonly screenedAt?: number;
+};
+
+export type CfcDisclosureRenderedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclosureRendered;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly sink: string;
+  readonly renderRef: CfcAtom;
+  readonly snapshotDigest: string;
+  readonly user?: string;
+};
+
+export type CfcDisclosureAcknowledgedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclosureAcknowledged;
+  readonly user: string;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly renderRef: CfcAtom;
+  readonly snapshotDigest: string;
+  readonly sink?: string;
+};
+
+export type CfcDisclaimerAttachedAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.DisclaimerAttached;
+  readonly sink: string;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly disclaimerDigest: string;
+  readonly formatter?: CfcAtom;
+};
+
+export type CfcConceptAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Concept;
+  readonly uri: string;
+};
+
+export type CfcCaveatAssessmentAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.CaveatAssessment;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly assessor: CfcAtom;
+  readonly evidenceDigest: string;
+  readonly result: "supported" | "rejected";
+  readonly sink?: string;
+  readonly intentId?: CfcAtom;
+  readonly purpose?: string;
+  readonly assessedAt?: number;
+};
+
 export type CfcPromptSlotBoundAtom<
   Source extends CfcAtom = CfcAtom,
   Role extends string = string,
@@ -187,6 +335,19 @@ export type CfcPromptSlotInfluenceAtom<Role extends string = string> =
     readonly targetPath?: string;
     readonly runManifest?: CfcPromptSlotRunManifest;
   };
+
+/**
+ * Drops explicit-`undefined` entries so minted atoms never carry them: atoms
+ * compare by structural equality over canonical JSON (spec §4.1.3), and
+ * `{ sink: undefined }` must mint the same record as omitting `sink`.
+ */
+const pruneOptional = <T extends Record<string, unknown>>(fields: T): T => {
+  const pruned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) pruned[key] = value;
+  }
+  return pruned as T;
+};
 
 export const cfcAtom = {
   resource(
@@ -275,6 +436,114 @@ export const cfcAtom = {
       surface,
       valueDigest,
     };
+  },
+
+  user(subject: string): CfcUserAtom {
+    return { type: CFC_ATOM_TYPE.User, subject };
+  },
+
+  space(id: string): CfcSpaceAtom {
+    return { type: CFC_ATOM_TYPE.Space, id };
+  },
+
+  personalSpace(owner: string): CfcPersonalSpaceAtom {
+    return { type: CFC_ATOM_TYPE.PersonalSpace, owner };
+  },
+
+  expires(timestamp: number): CfcExpiresAtom {
+    return { type: CFC_ATOM_TYPE.Expires, timestamp };
+  },
+
+  hasRole(
+    principal: string,
+    space: string,
+    role: "owner" | "writer" | "reader",
+  ): CfcHasRoleAtom {
+    return { type: CFC_ATOM_TYPE.HasRole, principal, space, role };
+  },
+
+  boundaryContext(
+    key: string,
+    value?: string,
+    ref?: CfcAtom,
+  ): CfcBoundaryContextAtom {
+    return {
+      type: CFC_ATOM_TYPE.BoundaryContext,
+      key,
+      ...(value === undefined ? {} : { value }),
+      ...(ref === undefined ? {} : { ref }),
+    };
+  },
+
+  // The option-object mint helpers spell their field types explicitly rather
+  // than `Omit<CfcXAtom, "type">`: the atom types intersect `CfcAtomObject`'s
+  // string index signature, and `Omit` over an index-signatured type collapses
+  // `keyof` to `string`, silently dropping every literal (required) key.
+
+  caveatScreened(fields: {
+    kind: string;
+    source: CfcAtom;
+    stage: string;
+    detector: CfcAtom;
+    verdict: string;
+    valueRef?: CfcAtom;
+    profileHash?: string;
+    screenedAt?: number;
+  }): CfcCaveatScreenedAtom {
+    return { ...pruneOptional(fields), type: CFC_ATOM_TYPE.CaveatScreened };
+  },
+
+  disclosureRendered(fields: {
+    kind: string;
+    source: CfcAtom;
+    sink: string;
+    renderRef: CfcAtom;
+    snapshotDigest: string;
+    user?: string;
+  }): CfcDisclosureRenderedAtom {
+    return { ...pruneOptional(fields), type: CFC_ATOM_TYPE.DisclosureRendered };
+  },
+
+  disclosureAcknowledged(fields: {
+    user: string;
+    kind: string;
+    source: CfcAtom;
+    renderRef: CfcAtom;
+    snapshotDigest: string;
+    sink?: string;
+  }): CfcDisclosureAcknowledgedAtom {
+    return {
+      ...pruneOptional(fields),
+      type: CFC_ATOM_TYPE.DisclosureAcknowledged,
+    };
+  },
+
+  disclaimerAttached(fields: {
+    sink: string;
+    kind: string;
+    source: CfcAtom;
+    disclaimerDigest: string;
+    formatter?: CfcAtom;
+  }): CfcDisclaimerAttachedAtom {
+    return { ...pruneOptional(fields), type: CFC_ATOM_TYPE.DisclaimerAttached };
+  },
+
+  caveatAssessment(fields: {
+    kind: string;
+    source: CfcAtom;
+    assessor: CfcAtom;
+    evidenceDigest: string;
+    result: "supported" | "rejected";
+    sink?: string;
+    intentId?: CfcAtom;
+    purpose?: string;
+    assessedAt?: number;
+  }): CfcCaveatAssessmentAtom {
+    return { ...pruneOptional(fields), type: CFC_ATOM_TYPE.CaveatAssessment };
+  },
+
+  concept(uri: string): CfcConceptAtom {
+    return { type: CFC_ATOM_TYPE.Concept, uri };
   },
 } as const;
 

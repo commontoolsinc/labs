@@ -46,6 +46,11 @@ import {
 import { resolveLinkScope } from "../scope.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
+import { getEntityId } from "../create-ref.ts";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -77,6 +82,7 @@ import {
 } from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
+  type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloor,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
@@ -84,6 +90,7 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
+import { createTrustResolver } from "../cfc/trust.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -161,6 +168,32 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   if (!isObject(inputSchema)) inputSchema = { type: "object" };
   const stripped = stripInjectedResult(inputSchema);
   return prepareSchemaForLLM(stripped);
+}
+
+// Tool-input fields the framework fills in (see applyAutoProvidedSandboxId).
+// They are removed from the model-facing schema so the model is never asked for
+// a value it cannot set — the runtime owns them.
+const FRAMEWORK_PROVIDED_TOOL_FIELDS: readonly string[] = ["sandboxId"];
+
+// Remove framework-provided fields from a tool's model-facing input schema. The
+// pattern's own argumentSchema (which the runtime reads to decide what to fill)
+// is untouched; only what the model sees changes.
+function stripFrameworkProvidedFields(schema: JSONSchema): JSONSchema {
+  if (!schema || typeof schema !== "object") return schema;
+  const obj = schema as Record<string, unknown>;
+  const props = obj.properties as Record<string, unknown> | undefined;
+  if (!props || typeof props !== "object") return schema;
+  const present = FRAMEWORK_PROVIDED_TOOL_FIELDS.filter((f) => f in props);
+  if (present.length === 0) return schema;
+  const nextProps = { ...props };
+  for (const f of present) delete nextProps[f];
+  const next: Record<string, unknown> = { ...obj, properties: nextProps };
+  if (Array.isArray(obj.required)) {
+    next.required = (obj.required as unknown[]).filter(
+      (k) => !present.includes(k as string),
+    );
+  }
+  return next as JSONSchema;
 }
 
 /**
@@ -1310,7 +1343,7 @@ function buildToolCatalog(
       (normalizedInputSchema as any)?.description ?? "";
     llmTools[entry.name] = {
       description,
-      inputSchema: normalizedInputSchema,
+      inputSchema: stripFrameworkProvidedFields(normalizedInputSchema),
     };
     dynamicToolCells.set(entry.name, entry.cell);
   }
@@ -2042,6 +2075,7 @@ function toolInputRequiredIntegrityFailure(
   schema: unknown,
   value: unknown,
   path: string,
+  trust: CfcFloorTrustContext,
 ): string | undefined {
   if (!isRecord(schema)) {
     return undefined;
@@ -2052,8 +2086,10 @@ function toolInputRequiredIntegrityFailure(
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
       // The single shared floor predicate (observation.ts) — the same
-      // membership the commit-boundary gates use; D5 upgrades it in one place.
-      const satisfied = cfcIntegritySatisfiesFloor(integrity, required);
+      // membership the commit-boundary gates use. `trust` carries the acting
+      // principal's closure so a CONCEPT-valued floor accepts any concrete
+      // atom above the concept (D5), consistently with the read/write gates.
+      const satisfied = cfcIntegritySatisfiesFloor(integrity, required, trust);
       if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +
@@ -2077,6 +2113,7 @@ function toolInputRequiredIntegrityFailure(
         childSchema,
         value[key],
         path ? `${path}.${key}` : key,
+        trust,
       );
       if (failure !== undefined) {
         return failure;
@@ -2093,6 +2130,7 @@ function toolInputRequiredIntegrityFailure(
         schema.items,
         value[index],
         `${path}[${index}]`,
+        trust,
       );
       if (failure !== undefined) {
         return failure;
@@ -2112,6 +2150,7 @@ function toolInputRequiredIntegrityFailure(
           branch,
           value,
           path,
+          trust,
         );
         if (failure !== undefined) {
           return failure;
@@ -2190,12 +2229,20 @@ async function executeToolCalls(
           CFC_ENFORCING_STRICTNESS
       ) {
         const gate = integrityGateTarget(resolved, part, toolCatalog);
+        // Acting principal's trust closure for CONCEPT-valued floors (D5),
+        // built from the runtime's frozen trust config + acting principal —
+        // the same inputs the tx-side gates use via cfcFloorTrustContext.
+        const trust: CfcFloorTrustContext = {
+          trustResolver: createTrustResolver(runtime.cfcTrustConfig),
+          actingPrincipal: runtime.trustSnapshotProvider()?.actingPrincipal,
+        };
         const integrityFailure = toolInputRequiredIntegrityFailure(
           runtime,
           space,
           gate.schema,
           gate.input,
           "",
+          trust,
         );
         if (integrityFailure !== undefined) {
           results.push({
@@ -2299,6 +2346,8 @@ export const llmToolExecutionHelpers = {
   serializeForLLMObservation,
   toolAllowsObservedConfidentiality,
   effectiveObservationCeiling,
+  stripFrameworkProvidedFields,
+  applyAutoProvidedSandboxId,
 };
 
 /**
@@ -2512,6 +2561,58 @@ function handleUpdateArgument(
 }
 
 /**
+ * Auto-provides the `sandboxId` input for tools that declare it (the bash tool
+ * and anything sharing its contract). The framework OWNS this field: a pattern
+ * that declares `sandboxId` never chooses its value, and neither does the model.
+ *
+ * The value is the content-addressed entity id of the tool's own definition
+ * cell. That id is unique to this pattern instance, constant for the life of the
+ * instance, and the same for every call the instance makes — so repeated bash
+ * calls reuse one persistent server-side sandbox, while two instances (or two
+ * users) never land on the same one. The id comes from the instance's identity
+ * rather than the clock or randomness.
+ *
+ * The server names sandboxes by this id (`/v1/sandboxes/<id>`), so any
+ * caller-chosen value is a cross-instance leak vector: two patterns that pin the
+ * same id would share a sandbox, and a pattern could name another instance's (or
+ * another user's). A pattern that pre-fills `sandboxId` through patternTool's
+ * extraParams is rejected outright — a chosen value can never take effect, so
+ * silently dropping it would hide an authoring mistake; this throws instead. A
+ * model-supplied value (untrusted, not an authoring mistake) is overwritten. If
+ * the pattern declares `sandboxId` but no stable id can be derived, this also
+ * throws rather than fall through to an empty, shared name.
+ */
+function applyAutoProvidedSandboxId(
+  args: Record<string, unknown>,
+  pattern: Readonly<Pattern> | undefined,
+  extraParams: Record<string, unknown>,
+  identityCell: Cell<any> | undefined,
+): void {
+  const properties = (pattern?.argumentSchema as
+    | { properties?: Record<string, unknown> }
+    | undefined)?.properties;
+  if (!properties || !("sandboxId" in properties)) return;
+  if (extraParams.sandboxId !== undefined) {
+    throw new Error(
+      "sandboxId is framework-provided for tools that declare it; " +
+        "remove it from patternTool's extraParams",
+    );
+  }
+  const ref = identityCell ? getEntityId(identityCell) : undefined;
+  const entityId = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
+  if (typeof entityId !== "string" || entityId.length === 0) {
+    throw new Error(
+      "Cannot auto-provide sandboxId: tool instance has no stable entity id",
+    );
+  }
+  // The entity id carries a URI scheme separator (e.g. "fid1:<hash>"). The id
+  // names a server-side resource at `/v1/sandboxes/<id>`, so map the only unsafe
+  // character (the scheme colon) to a hyphen. The hash body is base64url and is
+  // preserved exactly, so distinct entity ids stay distinct.
+  args.sandboxId = entityId.replace(/[^A-Za-z0-9_-]/g, "-");
+}
+
+/**
  * Handles the invoke tool call (both pattern and handler execution).
  */
 async function handleInvoke(
@@ -2530,6 +2631,9 @@ async function handleInvoke(
   let extraParams: Record<string, unknown> = {};
   let handler: any;
   let useResultSchemaForObservation = false;
+  // The cell the tool was resolved from. Its content-addressed entity id is the
+  // running instance's identity, used to auto-provide a per-instance sandbox id.
+  let identityCell: Cell<any> | undefined;
 
   if (resolved.type === "external") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
@@ -2540,10 +2644,14 @@ async function handleInvoke(
     useResultSchemaForObservation = Boolean(
       resolved.toolDef.key("useResultSchemaForObservation").get(),
     );
+    identityCell = resolved.toolDef;
   } else if (resolved.type === "invoke") {
     pattern = resolved.pattern;
     extraParams = resolved.extraParams ?? {};
     handler = resolved.handler;
+    // No identity cell for invoke-by-path: a tool that declares `sandboxId` and
+    // is invoked this way fails closed in applyAutoProvidedSandboxId rather than
+    // run with an unprovided id.
   }
 
   // A pattern read raw from a cell is the boundary serialization (refs-only
@@ -2556,6 +2664,19 @@ async function handleInvoke(
     | undefined;
 
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
+
+  // The model input is the lowest-priority layer; extraParams (author pre-fills)
+  // override it, and the framework-owned sandbox id overrides both.
+  const invocationArgs = {
+    ...input as Record<string, unknown>,
+    ...extraParams,
+  };
+  applyAutoProvidedSandboxId(
+    invocationArgs,
+    pattern,
+    extraParams,
+    identityCell,
+  );
 
   const { resolve, promise } = Promise.withResolvers<any>();
 
@@ -2572,7 +2693,7 @@ async function handleInvoke(
     );
 
     if (pattern) {
-      runtime.run(tx, pattern, { ...input, ...extraParams }, result);
+      runtime.run(tx, pattern, invocationArgs, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...input,

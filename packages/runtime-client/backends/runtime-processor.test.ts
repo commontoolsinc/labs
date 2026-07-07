@@ -6,10 +6,14 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  renderConfidentialityResolverFor,
+  renderMembershipProviderFor,
   runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
+import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   type CellRef,
   type CfcLabelView,
@@ -91,6 +95,180 @@ function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
 // A valid `fid1:` page id from a readable seed (handlers parse pageId via
 // `entityIdFrom`, which requires a real tagged-hash string).
 const fid = (seed: string) => taggedHashStringOf(seed);
+
+describe("renderConfidentialityResolverFor (H3b)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(
+        renderConfidentialityResolverFor(runtime, cfcSigner, undefined),
+      ).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the acting user's own space against a ceiling", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(resolver).toBeDefined();
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The acting user's own space (space DID == principal DID) is a verified
+      // member, so a Space label naming it resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A different space the acting user has no verified role in stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkElse")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkElse")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the session workspace when it differs from the principal DID", async () => {
+    // createSession({ spaceName }) derives a home-space DID distinct from the
+    // acting principal; the session-authorized workspace is a verified member,
+    // so its own Space(...) label resolves rather than over-blocking.
+    const { runtime, storageManager } = createRuntime();
+    const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
+    try {
+      const resolver = renderConfidentialityResolverFor(
+        runtime,
+        cfcSigner,
+        { atoms: [cfcAtom.user(cfcSigner.did())] },
+        sessionSpace,
+      );
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The session workspace resolves...
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(sessionSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // ...and the acting user's own identity space still resolves too.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A third, unrelated space stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkThird")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
+    // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
+    // reads each space's ACL doc. A space whose declared ACL grants the acting
+    // user READ resolves; one that does not (no ACL / residency only) blocks.
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
+    const deniedSpace = "did:key:z6MkDeniedSpaceForRenderTest";
+    try {
+      // Seed the granted space's ACL doc (entity id == space DID) with a READ
+      // grant for the acting user. The denied space gets no ACL doc at all —
+      // its bytes may still be resident, but residency is not read authority.
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The ACL-granted space resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(grantedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // The space with no granting ACL stays blocked (fail-closed).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(deniedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space(deniedSpace)]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
+describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(renderMembershipProviderFor(runtime, cfcSigner, undefined))
+        .toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("builds a runtime-backed provider that reads a space's ACL doc", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
+    try {
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const provider = renderMembershipProviderFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(provider).toBeDefined();
+      // The acting user's own space is an implicit OWNER (no ACL read).
+      expect(provider!.readerRole(cfcSigner.did())).toBe("owner");
+      // A space whose ACL grants READ resolves to a reader role.
+      expect(provider!.readerRole(grantedSpace)).toBe("reader");
+      // A space with no ACL doc fails closed.
+      expect(provider!.readerRole("did:key:z6MkNoAclProviderTest")).toBeNull();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
 
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {

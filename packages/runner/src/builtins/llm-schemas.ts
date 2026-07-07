@@ -1,4 +1,23 @@
+import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { cfcAtom } from "@commonfabric/api/cfc";
+
+// Epic D1b (docs/plans/cfc-future-work-implementation.md): model output written
+// by the `llm`, `generateText`, and `generateObject` builtins carries an
+// explicit `LlmDerived` provenance stamp — the same mark D1 attaches to dialog
+// messages, so "model-derived" is explicit provenance rather than mere absence
+// of integrity. The stamp is applied AT the model-output writeback (llm.ts), not
+// on the shared result schemas: keeping it off the schema means the builtins'
+// control-state writes (the `pending`/`error` resets of the initial run and the
+// error path) stay CFC-inert — only the actual model bytes are stamped and made
+// CFC-relevant, mirroring D1's `pushModelMessages` (which stamps the model push,
+// not every message-cell write). The write is attributed to the builtin because
+// `LlmDerived` is a runtime-minted evidence family: the persist-time gate
+// (`gateRuntimeMintedIntegrity`, audit S4) admits it only from a builtin author,
+// which also stops pattern code from forging it.
+export const LLM_DERIVED_RESULT_STAMP_SCHEMA = internSchema(
+  { ifc: { addIntegrity: [cfcAtom.llmDerived()] } } as JSONSchema,
+);
 
 /** Runtime schema for {@link BuiltInLLMContent} (packages/api/index.ts). */
 export const LLMContentSchema = internSchema(
@@ -239,6 +258,9 @@ export const LLMResultSchema = internSchema(
     type: "object",
     properties: {
       pending: { type: "boolean", default: false },
+      // `result`/`partial` are model output; the `LlmDerived` stamp is applied
+      // at the writeback (llm.ts), not declared here — see
+      // {@link LLM_DERIVED_RESULT_STAMP_SCHEMA}.
       result: {
         anyOf: [
           { type: "string" },
@@ -270,6 +292,8 @@ export const GenerateTextResultSchema = internSchema(
     type: "object",
     properties: {
       pending: { type: "boolean", default: false },
+      // `result`/`partial` are model output; stamped at the writeback (llm.ts),
+      // not declared here — see {@link LLM_DERIVED_RESULT_STAMP_SCHEMA}.
       result: { type: "string" },
       error: { type: "string" },
       partial: { type: "string" },
@@ -296,6 +320,10 @@ export const GenerateObjectResultSchema = internSchema(
     type: "object",
     properties: {
       pending: { type: "boolean", default: false },
+      // `result` is model output; generateObject writes it through a (possibly
+      // custom user) `resultSchema` via `asSchema`, and merges the `LlmDerived`
+      // stamp into that schema's root at the write (`withLlmDerivedStamp` in
+      // llm.ts) — so it is not declared here.
       result: { type: "object" },
       messages: { type: "array", items: LLMMessageSchema },
       error: { type: "string" },

@@ -107,11 +107,13 @@ If you get `TypeError: Cannot read properties of undefined (reading 'model')`, c
 
 ### Cache Busting for Regeneration
 
-For "respin" or "regenerate" features, set `cache: false` in the options:
+For "respin" or "regenerate" features, set `cache: false` in the options.
+Only `generateObject` accepts it (`generateText` is always cached per
+distinct input):
 
 ```typescript
 // Shown for illustration only.
-const result = generateText({
+const result = generateObject({
   prompt,
   cache: false,  // Forces fresh generation
 });
