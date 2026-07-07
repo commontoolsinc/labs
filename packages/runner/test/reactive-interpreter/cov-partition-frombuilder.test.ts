@@ -73,7 +73,6 @@ function builtOfRog(
     children: opts.children ?? new Map(),
     leafArgSchemas: new Map(),
     collectionElements: opts.collectionElements ?? new Map(),
-    canonicalNodes: [],
   };
 }
 

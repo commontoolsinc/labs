@@ -18,8 +18,6 @@ import {
   type DispatchPlan,
   planInterpreterDispatch,
 } from "../../src/reactive-interpreter/dispatch.ts";
-import { serializePatternGraph } from "../../src/builder/json-utils.ts";
-import { noteDerivedCopy } from "../../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("ri2 cov-dispatch");
 const space = signer.did();
@@ -110,69 +108,6 @@ describe("dispatch fallback reasons", () => {
       // the multi-lift chain INTERPRETS (the positive control) instead.
       const plan = planInterpreterDispatch(chain3(), OPTS);
       assertEquals(plan.kind, "interpret");
-    });
-  });
-});
-
-describe("derived-copy positional-correspondence failures", () => {
-  /** Build the canonical chain, a faithful serialized copy, and return the
-   * copy plus a deep-cloned node array we can mutate per-case. */
-  function makeCopy(): { copy: Pattern; nodes: unknown[] } {
-    return inFrame(() => {
-      const canonical = chain3();
-      const copy = serializePatternGraph(canonical) as unknown as Pattern;
-      noteDerivedCopy(copy, canonical);
-      const nodes = (copy as unknown as { nodes: unknown[] }).nodes;
-      return { copy, nodes };
-    });
-  }
-
-  it("faithful copy interprets via the resolved path", () => {
-    inFrame(() => {
-      const { copy } = makeCopy();
-      const plan = planInterpreterDispatch(copy, OPTS);
-      assertEquals(plan.kind, "interpret");
-    });
-  });
-
-  it("derived_len: a dropped node fails the length check", () => {
-    inFrame(() => {
-      const { copy, nodes } = makeCopy();
-      (copy as unknown as { nodes: unknown[] }).nodes = nodes.slice(0, -1);
-      const plan = planInterpreterDispatch(copy, OPTS);
-      assert(reasonOf(plan).startsWith("derived_len"), reasonOf(plan));
-    });
-  });
-
-  it("derived_kind: a swapped module kind fails the per-position kind check", () => {
-    inFrame(() => {
-      const { copy, nodes } = makeCopy();
-      // Rewrite node 0's module to a collection ref (was a javascript leaf).
-      const mutated = nodes.map((n, i) =>
-        i === 0
-          ? { ...(n as object), module: { type: "ref", implementation: "map" } }
-          : n
-      );
-      (copy as unknown as { nodes: unknown[] }).nodes = mutated;
-      const plan = planInterpreterDispatch(copy, OPTS);
-      assert(reasonOf(plan).startsWith("derived_kind"), reasonOf(plan));
-    });
-  });
-
-  it("derived_edge: a retargeted output alias fails the alias-digest check", () => {
-    inFrame(() => {
-      const { copy, nodes } = makeCopy();
-      // Repoint node 0's output alias to a different target path — same
-      // shape/kind, different TARGET, which only the alias digest catches.
-      const mutated = nodes.map((n, i) =>
-        i !== 0 ? n : {
-          ...(n as object),
-          outputs: { $alias: { cell: "result", path: ["__ri2_bogus__"] } },
-        }
-      );
-      (copy as unknown as { nodes: unknown[] }).nodes = mutated;
-      const plan = planInterpreterDispatch(copy, OPTS);
-      assert(reasonOf(plan).startsWith("derived_edge"), reasonOf(plan));
     });
   });
 });

@@ -67,15 +67,6 @@ export interface BuiltRog {
   /** Live element pattern factories for collection ops (op id → factory),
    * so W4 can resolve the element's own BuiltRog at dispatch time. */
   collectionElements: Map<OpId, unknown>;
-  /** The CANONICAL's serialized node input/output alias skeletons, by op id
-   * (= node index). Used ONLY by the dispatch's derived-copy validation
-   * (validatePositionalCorrespondence): a copy may bind against this ROG
-   * only if its own serialized nodes carry the SAME alias TARGETS
-   * position-for-position (modulo the two lossless copy transforms: defer
-   * nesting bumps and scope folded into schema). Never read on the hot
-   * path; captured because `getBuiltRogResolved` returns the BuiltRog, not
-   * the canonical Pattern. */
-  canonicalNodes: ReadonlyArray<{ inputs: unknown; outputs: unknown }>;
 }
 
 // --- side-table ------------------------------------------------------------
@@ -193,9 +184,6 @@ export interface RogBuildInput {
   ) => "argument" | "result" | undefined;
   /** Internal roots → their assigned partial causes (legacy naming scheme). */
   internalCauses: Map<OpaqueCell<unknown>, JSONValue>;
-  /** The just-computed SERIALIZED nodes (same order as `nodes`) — captured
-   * into BuiltRog.canonicalNodes for the derived-copy alias validation. */
-  serializedNodes: ReadonlyArray<{ inputs: unknown; outputs: unknown }>;
 }
 
 /** Build the ROG for one finalized pattern. Returns undefined on internal
@@ -740,17 +728,12 @@ function buildRog(input: RogBuildInput): BuiltRog {
     ...(externals.length > 0 && { externals }),
     ...(incomplete.length > 0 && { incomplete: dedupe(incomplete) }),
   };
-  const canonicalNodes = input.serializedNodes.map((n) => ({
-    inputs: n.inputs,
-    outputs: n.outputs,
-  }));
   return {
     rog,
     leafImpls,
     children,
     collectionElements,
     leafArgSchemas,
-    canonicalNodes,
   };
 }
 
