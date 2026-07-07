@@ -242,16 +242,19 @@ jobs:
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      # cache-matched-key is empty only on a full miss; any restore-key hit
-      # implies the fingerprint hash is unchanged (both key forms start with
-      # it), so cold := matched key empty, and a partial hit counts as warm.
-      # perf-check reads these artifacts to tag the run's compile cache state.
+      # The cache file exists on disk iff the restore found something (primary
+      # key or restore key); any restore implies the fingerprint hash is
+      # unchanged, so cold := file absent. The combined actions/cache action
+      # only exposes cache-hit (exact match), not the matched key, so file
+      # presence is the restore signal. perf-check reads these artifacts to
+      # tag the run's compile cache state.
       - name: 🧾 Record compile cache state
         env:
-          MATCHED_KEY: ${{ steps.compile-cache.outputs.cache-matched-key }}
+          CACHE_FILE: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
         run: |
           mkdir -p cache-state
+          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
           printf '{"family":"generated-patterns","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
             '${{ matrix.shard }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
             > cache-state/generated-patterns-${{ matrix.shard }}.json
@@ -581,16 +584,19 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      # cache-matched-key is empty only on a full miss; any restore-key hit
-      # implies the fingerprint hash is unchanged (both key forms start with
-      # it), so cold := matched key empty, and a partial hit counts as warm.
-      # perf-check reads these artifacts to tag the run's compile cache state.
+      # The cache file exists on disk iff the restore found something (primary
+      # key or restore key); any restore implies the fingerprint hash is
+      # unchanged, so cold := file absent. The combined actions/cache action
+      # only exposes cache-hit (exact match), not the matched key, so file
+      # presence is the restore signal. perf-check reads these artifacts to
+      # tag the run's compile cache state.
       - name: 🧾 Record compile cache state
         env:
-          MATCHED_KEY: ${{ steps.compile-cache.outputs.cache-matched-key }}
+          CACHE_FILE: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
         run: |
           mkdir -p cache-state
+          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
           printf '{"family":"pattern-integration","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
             '${{ matrix.shard }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
             > cache-state/pattern-integration-${{ matrix.shard }}.json
@@ -753,16 +759,19 @@ jobs:
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 
-      # cache-matched-key is empty only on a full miss; any restore-key hit
-      # implies the fingerprint hash is unchanged (both key forms start with
-      # it), so cold := matched key empty, and a partial hit counts as warm.
-      # perf-check reads these artifacts to tag the run's compile cache state.
+      # The cache file exists on disk iff the restore found something (primary
+      # key or restore key); any restore implies the fingerprint hash is
+      # unchanged, so cold := file absent. The combined actions/cache action
+      # only exposes cache-hit (exact match), not the matched key, so file
+      # presence is the restore signal. perf-check reads these artifacts to
+      # tag the run's compile cache state.
       - name: 🧾 Record compile cache state
         env:
-          MATCHED_KEY: ${{ steps.compile-cache.outputs.cache-matched-key }}
+          CACHE_FILE: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
         run: |
           mkdir -p cache-state
+          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
           printf '{"family":"pattern-unit","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
             '${{ matrix.chunk }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
             > cache-state/pattern-unit-${{ matrix.chunk }}.json

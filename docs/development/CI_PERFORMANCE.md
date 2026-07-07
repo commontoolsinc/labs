@@ -136,9 +136,11 @@ ratchet with phantom uncovered lines.
 To compare like with like, each pattern job uploads a small `cache-state-*`
 artifact recording its cache restore result. Performance Check aggregates those
 into `compileCacheStates` in `perf-metrics.json`. A job family is cold when any
-of its shards had a full cache miss, meaning an empty `cache-matched-key`. A
-partial hit through a restore key counts as warm: both key forms start with the
-fingerprint hash, so any hit means the compiled bytes are current.
+of its shards had a full cache miss, detected as the cache file being absent
+after the restore step (the combined `actions/cache` action does not expose the
+matched key). A partial hit through a restore key counts as warm: both key
+forms start with the fingerprint hash, so any restore means the compiled bytes
+are current.
 
 The comparison rules follow from the tagging:
 
