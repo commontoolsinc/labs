@@ -47,6 +47,7 @@ import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
   atomsOutsideCeiling,
+  type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloor,
   cfcIntegritySatisfiesFloorCoherently,
   uniqueCfcAtoms,
@@ -2552,6 +2553,24 @@ const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
     integrity.every(isNonEndorsementProvenanceAtom);
 };
 
+// Trust context for CONCEPT-valued requiredIntegrity floors (Epic D5): the
+// deployment trust closure plus the acting principal, built from tx CFC state
+// exactly like `evaluateGatedConfidentiality` — SAME resolver, SAME acting
+// principal — so the floor gates and the exchange-rule guards agree on concept
+// satisfaction. A concept floor ("minted by a valid GPS measurement") then
+// accepts any concrete atom above the concept in THIS user's closure; plain
+// (concrete/pattern) floors ignore it (inv-11: concrete integrity portable,
+// concept satisfaction acting-principal scoped).
+const cfcFloorTrustContext = (
+  tx: IExtendedStorageTransaction,
+): CfcFloorTrustContext => {
+  const state = tx.getCfcState();
+  return {
+    trustResolver: createTrustResolver(state.trustConfig),
+    actingPrincipal: state.trustSnapshot?.actingPrincipal,
+  };
+};
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -2672,6 +2691,7 @@ const verifyInputRequirements = (
       const ok = cfcIntegritySatisfiesFloorCoherently(
         gatedReads.map((read) => read.label?.integrity ?? []),
         requiredIntegrity,
+        cfcFloorTrustContext(tx),
       );
       if (!ok) {
         return `requiredIntegrity failed at /${entry.path.join("/")}`;
@@ -3561,6 +3581,10 @@ const verifyWriteFloor = (
   },
 ): string[] => {
   const failures: string[] = [];
+  // Built once per verify (not per entry/contribution): the closure and acting
+  // principal are tx-wide. Concept floors on the written value resolve through
+  // it; plain floors ignore it (Epic D5).
+  const trust = cfcFloorTrustContext(tx);
   const entries = walkIfcSchema(schema);
   const entryLabels = new Map<string, IFCLabel>(
     entries.map((entry) => [pathKey(entry.path), entry.label]),
@@ -3698,7 +3722,7 @@ const verifyWriteFloor = (
     if (valueWritten) contributions.push(ctx.flowIntegrity);
 
     const misses = contributions.some((extra) =>
-      !cfcIntegritySatisfiesFloor([...base, ...extra], floor)
+      !cfcIntegritySatisfiesFloor([...base, ...extra], floor, trust)
     );
     if (misses) {
       failures.push(

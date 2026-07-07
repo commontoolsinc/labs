@@ -77,6 +77,7 @@ import {
 } from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
+  type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloor,
   cfcObservationFitsCeiling,
   type CfcObservationResult,
@@ -84,6 +85,7 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
+import { createTrustResolver } from "../cfc/trust.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -2042,6 +2044,7 @@ function toolInputRequiredIntegrityFailure(
   schema: unknown,
   value: unknown,
   path: string,
+  trust: CfcFloorTrustContext,
 ): string | undefined {
   if (!isRecord(schema)) {
     return undefined;
@@ -2052,8 +2055,10 @@ function toolInputRequiredIntegrityFailure(
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
       // The single shared floor predicate (observation.ts) — the same
-      // membership the commit-boundary gates use; D5 upgrades it in one place.
-      const satisfied = cfcIntegritySatisfiesFloor(integrity, required);
+      // membership the commit-boundary gates use. `trust` carries the acting
+      // principal's closure so a CONCEPT-valued floor accepts any concrete
+      // atom above the concept (D5), consistently with the read/write gates.
+      const satisfied = cfcIntegritySatisfiesFloor(integrity, required, trust);
       if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +
@@ -2077,6 +2082,7 @@ function toolInputRequiredIntegrityFailure(
         childSchema,
         value[key],
         path ? `${path}.${key}` : key,
+        trust,
       );
       if (failure !== undefined) {
         return failure;
@@ -2093,6 +2099,7 @@ function toolInputRequiredIntegrityFailure(
         schema.items,
         value[index],
         `${path}[${index}]`,
+        trust,
       );
       if (failure !== undefined) {
         return failure;
@@ -2112,6 +2119,7 @@ function toolInputRequiredIntegrityFailure(
           branch,
           value,
           path,
+          trust,
         );
         if (failure !== undefined) {
           return failure;
@@ -2190,12 +2198,20 @@ async function executeToolCalls(
           CFC_ENFORCING_STRICTNESS
       ) {
         const gate = integrityGateTarget(resolved, part, toolCatalog);
+        // Acting principal's trust closure for CONCEPT-valued floors (D5),
+        // built from the runtime's frozen trust config + acting principal —
+        // the same inputs the tx-side gates use via cfcFloorTrustContext.
+        const trust: CfcFloorTrustContext = {
+          trustResolver: createTrustResolver(runtime.cfcTrustConfig),
+          actingPrincipal: runtime.trustSnapshotProvider()?.actingPrincipal,
+        };
         const integrityFailure = toolInputRequiredIntegrityFailure(
           runtime,
           space,
           gate.schema,
           gate.input,
           "",
+          trust,
         );
         if (integrityFailure !== undefined) {
           results.push({
