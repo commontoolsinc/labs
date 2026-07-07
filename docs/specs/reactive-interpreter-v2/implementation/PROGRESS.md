@@ -255,3 +255,26 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   ENTIRE pattern-scope oracle suite (39) passes flag-ON while
   interpreting. Gates: runner 773/773 ON + 774/774 OFF, root both flags,
   pattern-tests 87/87, chat sim 12/0, generated-patterns — all green.
+
+- (2026-07-07) **DERIVED-COPY resolved-ROG dispatch LANDED** (`87c1a1648`,
+  D-V2-RESOLVED-COPY). Berni's challenge — "I thought plain-JSON loads are
+  no longer used" — was RIGHT: the chat sim's 16/16 `no_rog` fallbacks were
+  all `resolvedHasRog=true` AND positionally faithful, i.e. false
+  rejections of derived copies (reload/embedded sub-patterns), not a
+  genuine legacy tail. My earlier "stays legacy" attribution was wrong.
+  FIX: strict-miss → `getBuiltRogResolved` + positional-correspondence
+  validation → bind canonical ROG against the copy's `pattern.nodes`.
+  A 6-lens adversarial soundness WORKFLOW (ultracode) found zero holes vs
+  the 4 current order-preserving copy sites but flagged the latent
+  REORDER-OF-EQUALS hole → hardened the gate with a per-position ALIAS-
+  TARGET digest (canonicalizes defer-bump + scope→schema, fails closed on
+  reorder/retarget). Comparator unit proof + runtime differential (real
+  serializePatternGraph copy interprets via resolved, byte-equal to legacy,
+  `interpretedViaResolved` census tag). Empirically: chat sim no_rog 16→0,
+  ZERO derived_* spurious rejects, still 12/0. Recovered patterns are
+  boundary-heavy sub-patterns that stop at the cost gate — the value is
+  metric honesty + engagement for reload/embedded patterns that DO carry
+  collapsible compute (generated-patterns corpus). Also measured this
+  session (flag on/off): micro map −56% docs/−65% wall, 6-lift chain −58%
+  nodes/−70% wall; pattern-tests suite flat (fixed costs dominate); chat
+  sim −3%. NEXT MEASUREMENT: corpus engagement delta from this fix.
