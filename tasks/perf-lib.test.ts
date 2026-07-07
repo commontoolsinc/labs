@@ -1,6 +1,7 @@
 import {
   assertAlmostEquals,
   assertEquals,
+  assertExists,
   assertFalse,
   assertStringIncludes,
   assertThrows,
@@ -643,6 +644,7 @@ Deno.test("cache state aggregation treats any restore hit as warm", () => {
     '{"family":"generated-patterns","shard":"2","matchedKey":"compile-abc","exactHit":false}',
     '{"family":"pattern-integration","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
   ]);
+  assertExists(records);
 
   // pattern-unit has no records, so its state stays absent (unknown).
   assertEquals(aggregateCacheStates(records), {
@@ -658,11 +660,15 @@ Deno.test("cache state aggregation marks a family cold on any full miss", () => 
     // A warm shard after the miss must not flip the family back to warm.
     '{"family":"pattern-unit","shard":"3","matchedKey":"compile-abc-3","exactHit":true}',
   ]);
+  assertExists(records);
 
   assertEquals(aggregateCacheStates(records), { "pattern-unit": "cold" });
 });
 
-Deno.test("cache state parsing skips malformed files and unknown families", () => {
+Deno.test("cache state parsing poisons the collection on any bad record", () => {
+  // A record that fails to parse could be the cold shard; surviving records
+  // must not tag its family warm, so the whole parse degrades to null
+  // (unknown) — same policy as an artifact download failure.
   const originalWarn = console.warn;
   const warnings: string[] = [];
   try {
@@ -673,22 +679,31 @@ Deno.test("cache state parsing skips malformed files and unknown families", () =
     const records = parseCacheStateFiles([
       "not json {",
       '{"family":"pattern-integration","shard":"1"}',
-      '{"family":"runner","shard":"1","matchedKey":"","exactHit":false}',
       '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
     ]);
 
-    assertEquals(records.length, 2);
+    assertEquals(records, null);
     assertEquals(warnings.length, 2);
     assertStringIncludes(warnings[0], "malformed cache-state file");
     assertStringIncludes(warnings[1], "invalid cache-state record");
-
-    // The unknown "runner" family parses but never becomes a state.
-    assertEquals(aggregateCacheStates(records), {
-      "pattern-integration": "warm",
-    });
   } finally {
     console.warn = originalWarn;
   }
+});
+
+Deno.test("cache state parsing keeps valid unknown-family records inert", () => {
+  // An unknown family name is forward-compatible data, not corruption: it
+  // parses cleanly and aggregation simply never assigns it a state.
+  const records = parseCacheStateFiles([
+    '{"family":"runner","shard":"1","matchedKey":"","exactHit":false}',
+    '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
+  ]);
+  assertExists(records);
+  assertEquals(records.length, 2);
+
+  assertEquals(aggregateCacheStates(records), {
+    "pattern-integration": "warm",
+  });
 });
 
 Deno.test("dropColdSamples removes known-cold runs and keeps unknown ones", () => {

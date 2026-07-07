@@ -1215,6 +1215,31 @@ Deno.test("collectCurrentCacheStates degrades to unknown on download failure", a
   );
 });
 
+Deno.test("collectCurrentCacheStates degrades to unknown on a malformed record", async () => {
+  const captured = await captureConsoleAsync(() =>
+    collectCurrentCacheStates(
+      [
+        makeArtifact(1, "cache-state-generated-patterns-1"),
+        makeArtifact(2, "cache-state-generated-patterns-2"),
+      ],
+      (artifactId) =>
+        Promise.resolve(
+          artifactId === 1
+            ? [cacheStateJson("generated-patterns", "1", "compile-abc")]
+            : ["not json {"],
+        ),
+    )
+  );
+
+  // The unreadable record could be the cold shard; the surviving warm record
+  // must not tag the family warm, so everything degrades to unknown.
+  assertEquals(captured.result, {});
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not collect compile cache states",
+  );
+});
+
 Deno.test("formatCompileCacheStates shows every family, absent as unknown", () => {
   assertEquals(
     formatCompileCacheStates({ "generated-patterns": "cold" }),

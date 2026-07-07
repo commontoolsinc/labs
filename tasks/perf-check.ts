@@ -675,7 +675,14 @@ export async function collectCurrentCacheStates(
       }
       contents.push(...files);
     }
-    return aggregateCacheStates(parseCacheStateFiles(contents));
+    const records = parseCacheStateFiles(contents);
+    if (!records) {
+      throw new Error(
+        "one or more cache-state records failed to parse; a missing shard " +
+          "could mislabel its family warm",
+      );
+    }
+    return aggregateCacheStates(records);
   } catch (error) {
     console.warn(
       `  Warning: could not collect compile cache states; treating them as unknown: ${error}`,

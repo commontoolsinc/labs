@@ -1426,19 +1426,25 @@ export function extractTestFileMetrics(
 
 /**
  * Parse the JSON contents of cache-state artifact files into records.
- * Malformed entries are skipped with a warning: a broken tag must degrade to
- * "unknown", never fail the gate.
+ * Returns null if any entry is malformed or invalid (each warned): a shard
+ * whose record cannot be read could be the cold one, so a partial parse
+ * could mislabel its family warm — the whole collection must degrade to
+ * "unknown" instead, matching the artifact-download failure policy.
  */
-export function parseCacheStateFiles(contents: string[]): CacheStateRecord[] {
+export function parseCacheStateFiles(
+  contents: string[],
+): CacheStateRecord[] | null {
   const records: CacheStateRecord[] = [];
+  let invalid = false;
   for (const content of contents) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
     } catch (error) {
       console.warn(
-        `  Warning: skipping malformed cache-state file: ${error}`,
+        `  Warning: malformed cache-state file: ${error}`,
       );
+      invalid = true;
       continue;
     }
 
@@ -1451,8 +1457,9 @@ export function parseCacheStateFiles(contents: string[]): CacheStateRecord[] {
       typeof record.exactHit !== "boolean"
     ) {
       console.warn(
-        `  Warning: skipping invalid cache-state record: ${content.trim()}`,
+        `  Warning: invalid cache-state record: ${content.trim()}`,
       );
+      invalid = true;
       continue;
     }
 
@@ -1463,7 +1470,7 @@ export function parseCacheStateFiles(contents: string[]): CacheStateRecord[] {
       exactHit: record.exactHit,
     });
   }
-  return records;
+  return invalid ? null : records;
 }
 
 /**

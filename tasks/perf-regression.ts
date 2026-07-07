@@ -635,10 +635,22 @@ async function main() {
     timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  // Apply baseline overrides (truncate timelines at override points)
+  if (overridesBySha.size > 0) {
+    console.log(
+      `Applying ${overridesBySha.size} baseline override(s)...`,
+    );
+    applyBaselineOverrides(timelines, overridesBySha);
+  }
+
   // Drop samples from known-cold runs for timing metrics inflated by a cold
   // compile cache, so cold main runs skew neither the baseline nor the
   // recent window. Runs without a recorded state are unknown and kept;
-  // metrics with no compile-cache family are untouched.
+  // metrics with no compile-cache family are untouched. This must run AFTER
+  // applyBaselineOverrides: truncation is anchored on the override commit's
+  // sample, which may itself be from a cold run (a fingerprint-changing PR
+  // carrying an override) — dropping it first would silently skip the
+  // truncation.
   if (cacheStatesByRunId.size > 0) {
     let coldSamplesDropped = 0;
     for (const timeline of timelines.values()) {
@@ -656,14 +668,6 @@ async function main() {
         `Dropped ${coldSamplesDropped} sample(s) from cold-compile-cache runs.`,
       );
     }
-  }
-
-  // Apply baseline overrides (truncate timelines at override points)
-  if (overridesBySha.size > 0) {
-    console.log(
-      `Applying ${overridesBySha.size} baseline override(s)...`,
-    );
-    applyBaselineOverrides(timelines, overridesBySha);
   }
 
   // Print a summary of all metrics
