@@ -17,6 +17,7 @@ import {
   isConflictRejection,
   isPermanentRejection,
   isStorageTransactionInconsistent,
+  isTerminalRejection,
 } from "../storage/rejection.ts";
 import { getDirectTransactionMergeableOpAddresses } from "../storage/transaction-inspection.ts";
 import {
@@ -770,6 +771,7 @@ export async function dispatchQueuedEvent(state: {
           ? { retryAttempt: disposition.attempts, terminal: "convergence" }
           : {}),
         ...(disposition.kind === "permanent" ? { terminal: "permanent" } : {}),
+        ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
       });
 
       switch (disposition.kind) {
@@ -805,6 +807,20 @@ export async function dispatchQueuedEvent(state: {
             disposition.attempts,
             disposition.deadline,
             disposition.runAt,
+          );
+          return;
+        case "terminal":
+          // A deterministic commit-rule refusal: run the final callback and
+          // stop. No retry (would recompute the identical refused write) and no
+          // handleError — the rejection is observable via the commit telemetry
+          // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
+          // a scheduler error here is reserved for non-deterministic failures.
+          runFinalCommitCallback();
+          logger.warn(
+            "scheduler",
+            "Event handler commit terminally rejected (deterministic refusal); " +
+              "not retrying",
+            { error: result.error, handlerId },
           );
           return;
         case "permanent":
@@ -922,6 +938,7 @@ function transactionHasMergeableOps(tx: IExtendedStorageTransaction): boolean {
 type CommitDisposition =
   | { kind: "success" }
   | { kind: "permanent" }
+  | { kind: "terminal" }
   | {
     kind: "backoff";
     attempts: number;
@@ -938,6 +955,10 @@ type CommitDisposition =
  *
  *  - success: nothing more to do.
  *  - permanent: a precondition failure; never retried.
+ *  - terminal: a deterministic server-side refusal of the committed data
+ *    (a CFC row-label commit-rule violation, `isTerminalRejection`); never
+ *    retried — re-running recomputes the identical refused write, and the
+ *    doomed re-runs' speculative rev bumps would starve concurrent siblings.
  *  - backoff / convergence-failed: a stale-basis ConflictError under
  *    contention, or a stale-basis StorageTransactionInconsistent on a commit
  *    that carries a mergeable op. It backs off and retries until it lands or the
@@ -967,6 +988,13 @@ function classifyCommitDisposition(
   }
   if (isPermanentRejection(error)) {
     return { kind: "permanent" };
+  }
+  // A deterministic commit-rule refusal is terminal BEFORE the retry-budget /
+  // windowing logic: it is neither a stale-read conflict (retry cannot converge)
+  // nor a transient error (re-running recomputes the identical refused write),
+  // so it must not consume the retry budget or back off — it stops now.
+  if (isTerminalRejection(error)) {
+    return { kind: "terminal" };
   }
   const windowed = isConflictRejection(error) ||
     (hasMergeableOps && isStorageTransactionInconsistent(error));

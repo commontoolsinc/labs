@@ -2907,6 +2907,21 @@ const toRejectedError = (
     return rejected;
   }
 
+  // A terminal commit rejection (a deterministic server-side refusal of the
+  // committed data — today `RowLabelCommitError`, storage/rejection.ts
+  // `isTerminalRejection`): preserve the wire name so the scheduler classifies
+  // it as non-retryable instead of collapsing it into a generic, bounded-retry
+  // TransactionError. Re-running the identical handler recomputes the identical
+  // refused write, so the doomed re-runs would only starve sibling commits.
+  if (name === "RowLabelCommitError") {
+    return {
+      name,
+      message,
+      cause: { name: "SystemError", message, code: 500 },
+      transaction: commit as Transaction,
+    } as unknown as TransactionError;
+  }
+
   return {
     name: "TransactionError",
     message,
