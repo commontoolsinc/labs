@@ -22,11 +22,21 @@ export async function listRunnerTests(): Promise<{ name: string }[]> {
   const testDir = new URL("../packages/runner/test/", import.meta.url);
   const files: { name: string }[] = [];
 
-  for await (const entry of Deno.readDir(testDir)) {
-    if (entry.isFile && entry.name.endsWith(".test.ts")) {
-      files.push({ name: entry.name });
+  // RECURSIVE: `.test.ts` files live in subdirectories too (e.g.
+  // `reactive-interpreter/`). A flat readDir silently dropped them from every
+  // shard — so they never ran in the coverage-collecting `runner-test` job,
+  // making their target modules read as uncovered. `name` is the path
+  // relative to `test/`, so the `./test/${name}` mapping below still holds.
+  const walk = async (dir: URL, prefix: string): Promise<void> => {
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isDirectory) {
+        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
+      } else if (entry.isFile && entry.name.endsWith(".test.ts")) {
+        files.push({ name: `${prefix}${entry.name}` });
+      }
     }
-  }
+  };
+  await walk(testDir, "");
 
   files.sort((a, b) => a.name.localeCompare(b.name));
   return files;
