@@ -292,6 +292,46 @@ export function withScopeIsolationWarnSuppressed<T>(fn: () => T): T {
 }
 
 /**
+ * Whether a slot's schema would TOLERATE the value reading as missing —
+ * i.e. it matches `undefined` or carries a `default` (ubik2's criterion on
+ * #4561). Used to restrict the scope-isolation warn to slots where an
+ * unresolvable link actually bites: a slot that accepts undefined (or
+ * defaults) degrades harmlessly per reader, so storing a narrower-scoped
+ * link there is a legitimate per-reader pattern rather than a footgun.
+ * Deliberately conservative toward silence: permissive/absent schemas and
+ * unresolved $refs count as tolerant (this is a lint-strength warn, not an
+ * enforcement gate). Limitation: the PARENT's `required` list is not
+ * visible at this write site, so an optional-but-strictly-typed slot still
+ * warns; thread the parent schema if that proves noisy.
+ */
+function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
+  if (schema === undefined || schema === true) return true;
+  if (schema === false) return true; // matches nothing; not the footgun shape
+  if (!isRecord(schema)) return true;
+  if (schema.default !== undefined) return true;
+  if ("$ref" in schema) {
+    // CTS-emitted slot schemas routinely carry $defs + $ref; resolve like the
+    // read side does. An unresolvable ref counts as tolerant (stay quiet).
+    const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+    if (resolved === undefined || resolved === schema) return true;
+    return schemaToleratesMissing(resolved);
+  }
+  if (
+    Array.isArray(schema.anyOf) &&
+    schema.anyOf.some((branch) => schemaToleratesMissing(branch as JSONSchema))
+  ) {
+    return true;
+  }
+  const t = schema.type;
+  if (t === undefined) return !Array.isArray(schema.anyOf);
+  if (typeof t === "string") return t === "undefined" || t === "unknown";
+  if (Array.isArray(t)) {
+    return t.includes("undefined") || t.includes("unknown");
+  }
+  return true;
+}
+
+/**
  * The scope at which a slot's content is stored (the write target scope). It
  * shares its precedence with the read follow-cap (see
  * `ContextualFlowControl.getSchemaScopeCap`) so writes and reads agree on which
@@ -847,14 +887,20 @@ export function normalizeAndDiff(
       // navigateTo result cells, Runner.updateArgument setup wiring,
       // cold-resume re-scope walks — enumerated on #4561); until those slots
       // declare their scope, author footguns and sanctioned machinery writes
-      // are indistinguishable here. Authors: share the value, or a
-      // space-scoped cell with a PerUser pointer to "mine" (pitfall #6 shows
-      // the idiom).
+      // are indistinguishable here. The warn is further restricted (ubik2's
+      // criterion) to slots whose schema would REJECT a missing value —
+      // doesn't match undefined and has no default — because that is where an
+      // unresolvable link actually bites (required-field void / degraded
+      // element); an undefined-tolerant or defaulted slot degrades harmlessly
+      // per reader, which is a legitimate pattern. Authors: share the value,
+      // or a space-scoped cell with a PerUser pointer to "mine" (pitfall #6
+      // shows the idiom).
       if (scopeRank(parsedLink.scope) > scopeRank(link.scope)) {
         const declared = declaredCellScope(link.schema);
         if (
-          declared === undefined ||
-          scopeRank(declared) < scopeRank(parsedLink.scope)
+          (declared === undefined ||
+            scopeRank(declared) < scopeRank(parsedLink.scope)) &&
+          !schemaToleratesMissing(link.schema)
         ) {
           if (scopeIsolationWarnSuppressionDepth > 0) {
             // Sanctioned machinery write (see withScopeIsolationWarnSuppressed

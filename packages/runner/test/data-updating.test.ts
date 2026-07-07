@@ -1884,6 +1884,85 @@ describe("scope-isolation write guard", () => {
     expect(warnCounts()).toBe(before + 1);
   });
 
+  it("does not warn when the slot's schema tolerates undefined (ubik2's criterion)", () => {
+    // A slot that matches undefined degrades harmlessly for readers whose
+    // resolution comes up empty — per-reader links there are a legitimate
+    // pattern, not the blackout footgun.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-undef-tolerant-dest",
+      {
+        type: "object",
+        properties: { profile: { type: ["object", "undefined"] } },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-undef-tolerant-target", "user"),
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
+  it("does not warn when the slot's schema carries a default", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-default-dest",
+      {
+        type: "object",
+        properties: {
+          profile: { type: "object", default: {} },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-default-target", "user"),
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
+  it("resolves $defs/$ref slot schemas before judging tolerance (still warns on strict refs)", () => {
+    // CTS-emitted slot schemas routinely carry $defs + $ref (the original
+    // convergence-chat repro's stored link schema had exactly this shape);
+    // tolerance must be judged on the resolved schema, not the ref wrapper.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-ref-dest",
+      {
+        type: "object",
+        properties: {
+          profile: {
+            $defs: { P: { type: "object" } },
+            $ref: "#/$defs/P",
+          },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-ref-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
   it("does not warn for same-scope links (space into space)", () => {
     const dest = runtime.getCell<{ item?: unknown }>(
       space,
