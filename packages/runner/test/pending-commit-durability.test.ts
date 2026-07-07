@@ -418,4 +418,40 @@ describe("pending-commit durability barrier", () => {
       unsubscribe();
     }
   });
+
+  it("a throwing subscriber does not stop the others from being notified", async () => {
+    // The notifier isolates subscribers: a callback that throws is caught and
+    // logged, and later subscribers still receive the transition.
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    const calls: string[] = [];
+    const unsubThrowing = storageManager.subscribePendingCommits(() => {
+      calls.push("throwing");
+      throw new Error("subscriber boom");
+    });
+    const unsubHealthy = storageManager.subscribePendingCommits(() => {
+      calls.push("healthy");
+    });
+    try {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      // Rising edge (empty -> non-empty) notifies synchronously.
+      storageManager.trackPendingCommit(promise);
+      expect(calls).toEqual(["throwing", "healthy"]);
+      // Falling edge (non-empty -> empty) notifies after the promise settles.
+      resolve();
+      await promise;
+      await tick();
+      expect(calls).toEqual(["throwing", "healthy", "throwing", "healthy"]);
+      // Both throws were caught and logged, never propagated.
+      expect(errors.length).toBe(2);
+      expect(storageManager.hasPendingCommits()).toBe(false);
+    } finally {
+      console.error = originalError;
+      unsubThrowing();
+      unsubHealthy();
+    }
+  });
 });
