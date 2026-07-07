@@ -7,6 +7,8 @@ import {
 } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { createRenderConfidentialityResolver } from "@commonfabric/runner/cfc";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -2963,6 +2965,101 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             .map((op) => op.text);
           assertEquals(renderedText.includes("Acting user's own note"), true);
           assertEquals(renderedText.includes("Other user's note"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // Epic H3b: the render gate resolves §15.2 principal shapes through the
+    // runner-side exchange evaluator (spec §8.10.6) before the fit check. The
+    // reconciler consumes the resolved label; a display-class BoundaryContext
+    // and the acting user's HasRole membership facts drive resolution.
+    await t.step(
+      "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
+      async () => {
+        const seedTx = runtime.edit();
+        const seedLabeled = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        // The cell's own space is the acting user's; a Space atom naming it is
+        // a verified reader fact (§4.9.3). A Space atom naming a different
+        // space Alice has no role in stays blocked (fail-closed).
+        const userLabeled = seedLabeled(
+          "cfc-h3b-user",
+          "User-scoped note",
+          cfcAtom.user(signer.did()),
+        );
+        const spaceMemberLabeled = seedLabeled(
+          "cfc-h3b-space-member",
+          "Team-space note",
+          cfcAtom.space(signer.did()),
+        );
+        const spaceOtherLabeled = seedLabeled(
+          "cfc-h3b-space-other",
+          "Other-space note",
+          cfcAtom.space("did:key:z6MkOtherSpaceOutsideRoles"),
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // The §8.10.6 default display ceiling: acting-user identity + personal
+        // space principal forms. Space principals resolve via HasRole exchange.
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+        });
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [
+            userLabeled as never,
+            spaceMemberLabeled as never,
+            spaceOtherLabeled as never,
+          ],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("User-scoped note"), true);
+          assertEquals(renderedText.includes("Team-space note"), true);
+          assertEquals(renderedText.includes("Other-space note"), false);
           assertEquals(renderedText.includes("Content hidden by policy"), true);
         } finally {
           cancel();

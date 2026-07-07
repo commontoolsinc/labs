@@ -342,8 +342,18 @@ describe("RuntimeInternals", () => {
     expect(options.renderConfidentialityCeiling).toEqual(
       defaultRenderConfidentialityCeiling(session.as.did()),
     );
-    // The profile's exact-match acting-user identity atom is the session
-    // identity's DID string — the same principal as trustSnapshot.
+    // The profile names the acting user's audience through the §15.2
+    // principal atom objects (User/PersonalSpace, resolved by the H3b render
+    // resolver) plus the legacy DID-string form — every entry names exactly
+    // this audience, admissible by construction (§8.10.6).
+    expect(options.renderConfidentialityCeiling?.atoms).toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: session.as.did(),
+    });
+    expect(options.renderConfidentialityCeiling?.atoms).toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+      owner: session.as.did(),
+    });
     expect(options.renderConfidentialityCeiling?.atoms).toContain(
       session.as.did(),
     );

@@ -6,6 +6,7 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { RenderConfidentialityResolver } from "@commonfabric/runner/cfc";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
@@ -349,6 +350,16 @@ export interface WorkerReconcilerOptions {
    * {@link RenderConfidentialityCeiling}.
    */
   renderConfidentialityCeiling?: RenderConfidentialityCeiling;
+
+  /**
+   * Runner-side resolver (Epic H3b) that rewrites a cell's confidentiality
+   * label through the display-boundary exchange rules (spec §8.10.6) before
+   * the ceiling fit check — the seam that admits `Space(...)`-via-`HasRole`
+   * principal forms. When absent, the ceiling admits by exact structural
+   * equality only (H3a behavior). Evaluation happens here, RUNNER-side; the
+   * reconciler only fits the resolved label against the ceiling.
+   */
+  resolveRenderConfidentiality?: RenderConfidentialityResolver;
 }
 
 /**

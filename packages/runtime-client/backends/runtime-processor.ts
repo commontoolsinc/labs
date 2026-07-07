@@ -34,7 +34,9 @@ import {
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
+  createRenderConfidentialityResolver,
   redactCaveatSourcesForDisplay,
+  type RenderConfidentialityResolver,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -330,6 +332,11 @@ export class RuntimeProcessor {
   // Host-supplied default render ceiling applied to every mount's
   // reconciler. Undefined preserves prior behavior (no ceiling).
   private renderConfidentialityCeiling?: RenderConfidentialityCeiling;
+  // Runner-side display-boundary resolver (Epic H3b) built once from the
+  // runtime's trust config + acting principal when a ceiling is in force.
+  // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
+  // `HasRole` principal forms resolve before the reconciler's ceiling fit.
+  private renderConfidentialityResolver?: RenderConfidentialityResolver;
 
   private constructor(
     runtime: Runtime,
@@ -466,6 +473,18 @@ export class RuntimeProcessor {
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     processor.renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    // Epic H3b: when a ceiling is in force, resolve principal-form atoms
+    // (Space-via-HasRole) at each render egress. The evaluator context comes
+    // from the runtime — its acting principal and deployment trust config —
+    // so resolution happens RUNNER-side; the reconciler only fits the result.
+    processor.renderConfidentialityResolver =
+      processor.renderConfidentialityCeiling === undefined
+        ? undefined
+        : createRenderConfidentialityResolver({
+          actingPrincipal: runtime.trustSnapshotProvider()?.actingPrincipal ??
+            identity.did(),
+          trustConfig: runtime.cfcTrustConfig,
+        });
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). Refusals
@@ -1497,6 +1516,7 @@ export class RuntimeProcessor {
     const reconciler = new WorkerReconciler({
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       renderConfidentialityCeiling: this.renderConfidentialityCeiling,
+      resolveRenderConfidentiality: this.renderConfidentialityResolver,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({

@@ -48,6 +48,7 @@ export declare const CFC_ATOM_TYPE: {
   readonly LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived";
   readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
   readonly PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified";
+  readonly PersonalSpace: "https://commonfabric.org/cfc/atom/PersonalSpace";
   readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
   readonly PromptSlotInfluence:
     "https://commonfabric.org/cfc/atom/PromptSlotInfluence";
@@ -118,6 +119,10 @@ export type CfcUserAtom = CfcAtomObject & {
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
   readonly id: string;
+};
+export type CfcPersonalSpaceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PersonalSpace;
+  readonly owner: string;
 };
 export type CfcExpiresAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Expires;
@@ -261,6 +266,7 @@ export declare const cfcAtom: {
   ) => CfcPromptSlotBoundAtom<Source, Role>;
   readonly user: (subject: string) => CfcUserAtom;
   readonly space: (id: string) => CfcSpaceAtom;
+  readonly personalSpace: (owner: string) => CfcPersonalSpaceAtom;
   readonly expires: (timestamp: number) => CfcExpiresAtom;
   readonly hasRole: (
     principal: string,
