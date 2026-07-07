@@ -8,6 +8,7 @@ import type {
   IFCLabel,
   LabelObservationClass,
 } from "./label-view-core.ts";
+import type { PolicySnapshot } from "./policy.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 
 export type {
@@ -439,6 +440,11 @@ export type CfcTxState = {
   // every recorded sink-request input (set once by the Runtime at tx creation;
   // see SinkMaxConfidentiality). Undefined = no ceilings declared.
   sinkMaxConfidentiality?: SinkMaxConfidentiality;
+  // Frozen deployment policy snapshot (Epic B2a) the exchange-rule evaluator
+  // runs under, set once by the Runtime at tx creation alongside the sink
+  // ceilings. Undefined = no policies configured (evaluation is a no-op; the
+  // B5 gates decide on un-rewritten labels).
+  policySnapshot?: PolicySnapshot;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything

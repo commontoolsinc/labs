@@ -75,6 +75,7 @@ import {
   flowReadExcluded,
   gatedSinkRequestExists,
   type ImplementationIdentity,
+  type PolicySnapshot,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
   preparedDigestFor,
@@ -264,6 +265,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcFlowLabelsPinned = false;
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
+  // Write-once pin for the deployment policy snapshot. Distinct from the
+  // slot's value being defined: the Runtime configures MANY tx with NO
+  // policies (`undefined`), and that "no policies" state must be just as
+  // write-once as a configured one — otherwise handler code reaching the
+  // concrete tx via `(cell.tx as any)` could install an attacker-supplied
+  // snapshot after the Runtime's `undefined` call left the slot open
+  // (codex P1 on #4562). Set on the FIRST call (always the Runtime's, in
+  // edit()), regardless of value.
+  #cfcPolicySnapshotPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -410,6 +420,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // let later mutation change the egress policy (review on #3993). Cheap:
     // deepFreeze short-circuits on the Runtime's already-frozen config.
     this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
+  }
+
+  // Deployment policy snapshot for the exchange-rule evaluator (Epic B2a),
+  // set once by the Runtime at tx creation. Write-once, off the public tx
+  // interface, deep-frozen on store. The pin (not the slot value) is what
+  // enforces write-once: the FIRST call — always the Runtime's, even when it
+  // configures no policies (`undefined`) — pins the slot, so a later
+  // `(cell.tx as any).setCfcPolicySnapshot(attackerSnapshot)` is ignored.
+  // (`buildCfcPolicySnapshot` already froze a configured snapshot; this
+  // deepFreeze is the cheap short-circuiting backstop for any other caller.)
+  setCfcPolicySnapshot(snapshot: PolicySnapshot | undefined): void {
+    if (this.#cfcPolicySnapshotPinned) return;
+    this.#cfcPolicySnapshotPinned = true;
+    this.#cfcState.policySnapshot = snapshot === undefined
+      ? undefined
+      : deepFreeze(snapshot);
   }
 
   markCfcRelevant(reason?: string): void {

@@ -71,6 +71,22 @@ export {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+export type { AtomPattern, AtomPatternBindings } from "./atom-pattern.ts";
+export {
+  atomEntails,
+  instantiateAtomPattern,
+  isAtomVarPlaceholder,
+  matchAtomPattern,
+  matchAtomPatternAgainstAtoms,
+  matchAtomPatternConjunction,
+} from "./atom-pattern.ts";
+export type {
+  CfcPolicyRecordInput,
+  ExchangeRule,
+  PolicyRecord,
+  PolicySnapshot,
+} from "./policy.ts";
+export { buildCfcPolicySnapshot } from "./policy.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
