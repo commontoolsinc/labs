@@ -43,6 +43,7 @@ import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -281,6 +282,16 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
 
   // No `sqliteExecute`: SQLite writes go through the commit fold
   // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
+
+  /**
+   * Whether the CONNECTED SERVER advertised commit-time row-label evaluation
+   * for folded sqlite writes (CFC Phase 3.c,
+   * `MemoryProtocolFlags.sqliteCommitRowLabelEval`). The runner's write gate
+   * relaxes its non-attributable-shape rejects only when this is true; a
+   * missing implementation, a not-yet-resolved session, or an old server all
+   * read as `false` — fail closed.
+   */
+  sqliteServerCommitRowLabelEval?(): boolean;
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
@@ -863,6 +874,11 @@ export interface IExtendedStorageTransaction
    * Anti-downgrade pinned: once enabled, disabling throws.
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
+  /**
+   * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
+   * Anti-downgrade pinned: once `enforce`, weakening throws.
+   */
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation

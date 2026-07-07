@@ -1170,16 +1170,21 @@ export class CellImpl<T extends FabricValue>
     // rule-bearing table computes the prospective row label from its bound
     // values; labeled inputs must be captured by it (no-laundering), and the
     // computed per-row labels are recorded as this write's CFC policy input
-    // (sink-request) before the commit. Unattributable shapes fail closed.
-    // No-op (zero cost) until a table declares a rule.
+    // (sink-request) before the commit. Unattributable shapes fail closed —
+    // unless the connected server advertised commit-time re-derivation (3.c),
+    // which admits them with unlabeled inputs and evaluates the committed
+    // rows server-side. No-op (zero cost) until a table declares a rule.
+    const owner = typeof (handle as { owner?: unknown }).owner === "string"
+      ? (handle as { owner: string }).owner
+      : undefined;
     const rowGate = checkSqliteRowLabelWrite({
       sql,
       params,
       tables,
-      owner: typeof (handle as { owner?: unknown }).owner === "string"
-        ? (handle as { owner: string }).owner
-        : undefined,
+      owner,
       confidentialityOf,
+      serverCommitEval: this.runtime.storageManager.open(this.space)
+        .sqliteServerCommitRowLabelEval?.() ?? false,
     });
     if ("error" in rowGate) throw new TypeError(rowGate.error);
     if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
@@ -1208,6 +1213,10 @@ export class CellImpl<T extends FabricValue>
         // / per-session on-disk file the read path resolves (stamped by
         // sqliteDatabase onto the handle value).
         scope: isCellScope(handle.scope) ? handle.scope : undefined,
+        // The db's owner resolves the rule's `dbOwner()` term in the SERVER's
+        // commit-time re-derivation (3.c) — same handle-stamped value the
+        // gate above used.
+        owner,
       },
       sql,
       params: encodeSqliteParams(sql, params),

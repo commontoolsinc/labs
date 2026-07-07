@@ -1,0 +1,230 @@
+#!/usr/bin/env -S deno run -A
+
+/**
+ * Integration test (CFC Phase 3.c): SERVER-SIDE commit-time row-label
+ * re-derivation, through the REAL toolshed server. The runner's write gate —
+ * seeing the server advertise `sqliteCommitRowLabelEval` — admits the shapes
+ * it cannot attribute (INSERT…SELECT, upsert), and the server evaluates the
+ * SHARED rule against the TRUE committed rows inside the commit transaction:
+ *
+ *  - an INSERT…SELECT that would commit a rule-violating row rolls back
+ *    ATOMICALLY — nothing persists, not even the valid rows riding the same
+ *    statement;
+ *  - an upsert re-derives from the POST-IMAGE: a violating flip rolls back
+ *    (the old row survives), a valid flip lands and the read side re-derives
+ *    the row's label from the NEW value.
+ */
+import app from "../../toolshed/app.ts";
+import { Identity } from "@commonfabric/identity";
+import { Runtime } from "../src/index.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
+
+const TIMEOUT_MS = 180000;
+
+async function runTest(base: URL) {
+  const account = await Identity.fromPassphrase(
+    "sqlite-cfc-commit-eval " + crypto.randomUUID(),
+  );
+  const runtime = new Runtime({
+    apiUrl: base,
+    storageManager: StorageManager.open({
+      as: account,
+      memoryHost: new URL(base),
+    }),
+  });
+  const space = account.did();
+
+  try {
+    const patternSource = await Deno.readTextFile(
+      new URL("./sqlite-cfc-commit-eval.test.tsx", import.meta.url),
+    );
+    const pattern = await runtime.patternManager.compilePattern(patternSource, {
+      space,
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      `sqlite-cfc-commit-eval-${crypto.randomUUID()}`,
+      pattern.resultSchema,
+    );
+    const result = await runtime.runSynced(resultCell, pattern, {});
+    const cancelSink = result.sink(() => {});
+
+    const send = (key: string) =>
+      runtime.editWithRetry((tx) => result.key(key).withTx(tx).send({}));
+
+    // A handler whose commit the server REFUSES re-runs through the
+    // scheduler's bounded retry budget before giving up loudly (~1s of
+    // requeue timers `settled()` cannot see). Drain that churn before
+    // sending the next handler, so the doomed re-runs' speculative rev bumps
+    // don't contend with — and starve — the successor's commit.
+    const drainDoomed = async () => {
+      for (let round = 0; round < 12; round++) {
+        await runtime.settled();
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+
+    const dumpQ = (k: string) => ({
+      pending: result.key(k).key("pending").getRaw(),
+      error: result.key(k).key("error").getRaw(),
+      result: result.key(k).key("result").getRaw(),
+    });
+
+    // Poll until `q` (and staging) reflect `predicate`; settles the scheduler
+    // and storage between probes so terminally-rejected commits drain too.
+    const waitFor = async (
+      what: string,
+      predicate: () => boolean,
+      ms = 30000,
+    ) => {
+      const deadline = Date.now() + ms;
+      while (Date.now() < deadline) {
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        if (predicate()) return;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(
+        `${what} never settled; q=${JSON.stringify(dumpQ("q"))} qStaging=${
+          JSON.stringify(dumpQ("qStaging"))
+        }`,
+      );
+    };
+
+    // Row COUNT probes read the raw array (links); row CONTENT reads resolve.
+    const qRowCount = () =>
+      ((result.key("q").key("result").getRaw() ?? []) as unknown[]).length;
+    const qRows = () =>
+      (result.key("q").key("result").get() ?? []) as {
+        id: number;
+        from_addr: string;
+      }[];
+
+    try {
+      // --- Seed: one valid guarded row; staging = 1 valid + 1 violating. ---
+      await send("seed");
+      await waitFor(
+        "seed",
+        () =>
+          (result.key("q").key("pending").get() as unknown) === false &&
+          qRowCount() === 1 &&
+          (result.key("qStaging").key("result").getRaw() as unknown[])
+              ?.length === 2,
+      );
+
+      // --- THE POINT (rollback): copy EVERY staging row into the guarded
+      // table. The runner gate admits the INSERT…SELECT (the server
+      // advertised 3.c); the server evaluates the two committed rows, the
+      // violating one refuses, and the WHOLE statement rolls back. ---
+      await send("copyBad");
+      await drainDoomed();
+      // The failed commit rolls back the db-handle rev bump too, so `q` does
+      // not re-run for it; the next SUCCESSFUL write re-queries server truth.
+      await send("copyGood");
+      await waitFor(
+        "copyGood after rolled-back copyBad",
+        () => qRowCount() === 2,
+      );
+      // Exactly the seed row + ONE valid copy. Had copyBad half-persisted,
+      // carol would appear twice (or the junk sender at all).
+      const afterCopy = qRows();
+      if (
+        afterCopy[0].from_addr !== "alice@a.example" ||
+        afterCopy[1].from_addr !== "carol@c.example" ||
+        afterCopy.some((r) => r.from_addr === "not an address")
+      ) {
+        throw new Error(
+          `copyBad must roll back atomically; got ${JSON.stringify(afterCopy)}`,
+        );
+      }
+
+      // --- Upsert, violating post-image: row 2's sender flips to junk ->
+      // the server re-derives the post-image, refuses, rolls back. ---
+      await send("upsertBad");
+      await drainDoomed();
+      // --- Upsert, valid post-image: row 1's sender flips to carol2. Its
+      // successful commit bumps the handle rev, forcing a FRESH query cycle
+      // against server truth (no dependency on rolled-back speculation). ---
+      await send("upsertGood");
+      await waitFor(
+        "upserts settled",
+        () =>
+          qRowCount() === 2 &&
+          qRows()[0]?.from_addr === "carol2@c.example",
+        60000,
+      );
+      const afterUpserts = qRows();
+      if (afterUpserts[1].from_addr !== "carol@c.example") {
+        throw new Error(
+          `upsertBad must roll back (row 2 keeps its sender); got ${
+            JSON.stringify(afterUpserts)
+          }`,
+        );
+      }
+
+      // --- The read side re-derives row 1's label from the POST-IMAGE. ---
+      const rowLabel = async (i: number) => {
+        const dtx = runtime.edit();
+        const leaf = result.key("q").key("result").key(i).key("body")
+          .withTx(dtx);
+        leaf.get();
+        const view = cfcLabelViewForDereferenceTraces(
+          dtx,
+          dtx.getCfcState().dereferenceTraces,
+        );
+        await dtx.commit();
+        const conf: unknown[] = [];
+        for (const entry of view?.entries ?? []) {
+          conf.push(...(entry.label.confidentiality ?? []));
+        }
+        return conf.map((a) => JSON.stringify(a));
+      };
+      const row0 = await rowLabel(0);
+      if (!row0.includes(JSON.stringify("did:mailto:carol2@c.example"))) {
+        throw new Error(
+          `row 1's label must re-derive from the upserted sender; got ${row0}`,
+        );
+      }
+      if (row0.includes(JSON.stringify("did:mailto:alice@a.example"))) {
+        throw new Error(
+          `row 1's label must NOT keep the pre-upsert sender; got ${row0}`,
+        );
+      }
+
+      console.log(
+        "=== TEST PASSED: 3.c server commit evaluation — violating " +
+          "INSERT…SELECT rolled back atomically; upsert re-derived from the " +
+          "post-image (violating flip rolled back, valid flip relabeled) ===",
+      );
+    } finally {
+      cancelSink();
+    }
+  } finally {
+    await runtime.dispose();
+  }
+}
+
+Deno.test({
+  name: "sqlite CFC 3.c server-side commit-time re-derivation (end to end)",
+  fn: async () => {
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
+        TIMEOUT_MS,
+      );
+    });
+    try {
+      await Promise.race([runTest(base), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+      await server.shutdown();
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

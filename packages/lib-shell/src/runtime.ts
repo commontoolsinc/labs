@@ -1,4 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import { CFC_CONCEPT_KIND } from "@commonfabric/api/cfc-atoms";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
@@ -29,6 +30,7 @@ const identityLogger = getLogger("lib-shell.identity", {
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  eagerSourceAnnotation?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<
@@ -43,6 +45,45 @@ export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
 
+export type RuntimeRenderConfidentialityCeiling = NonNullable<
+  RuntimeClientOptions["renderConfidentialityCeiling"]
+>;
+
+/**
+ * The §8.10.6 initial display-sink release ceiling (Epic H3a,
+ * docs/plans/cfc-future-work-implementation.md): what a display surface
+ * admits when no authored policy covers it. Exact-match forms only — the
+ * reconciler checks ceiling atoms by structural equality; principal forms
+ * that need exchange resolution (PersonalSpace/Space-via-HasRole) are H3b.
+ * Everything outside the ceiling fails closed at the render gate.
+ *
+ * Tighten-only evolution (spec §8.10.6): removing an entry needs no
+ * ceremony; admitting a new atom family or caveat kind is a release
+ * decision that needs authored policy or verified authority.
+ */
+export function defaultRenderConfidentialityCeiling(
+  actingUser: DID,
+): RuntimeRenderConfidentialityCeiling {
+  return {
+    // Acting-user identity atoms: the audience of a display sink is the
+    // acting user, so atoms naming exactly that audience are admissible by
+    // construction. DID-string form — the exact shape labels carry today.
+    atoms: [actingUser],
+    // Influence-class caveat kinds, whose canonical display release is the
+    // rendered-disclosure rule (§8.10.5). Deliberately excludes
+    // PromptInjectionRiskUnscreened: a material-risk kind that keeps its
+    // ordinary discharge evidence (screening), not display disclosure.
+    caveatKinds: [
+      // The canonical influence-class concept id.
+      CFC_CONCEPT_KIND.PromptInfluence,
+      // Short-form alias minted by shipped example patterns
+      // (cfc-spec-gallery, cfc-trusted-component-examples) and matched by
+      // the cf-cfc-label disclosure UI.
+      "prompt-influence",
+    ],
+  };
+}
+
 export type RuntimeNavigationTarget = { spaceDid: DID; pieceId: string };
 
 export type RuntimeInternalsCallbacks = {
@@ -50,6 +91,18 @@ export type RuntimeInternalsCallbacks = {
   onConsole?: (event: RuntimeClientEvents["console"][0]) => void;
   onError?: (event: RuntimeClientEvents["error"][0]) => void;
 };
+
+/**
+ * Optional telemetry sink for the client marker stream. When provided (browser
+ * OTel enabled), each marker is forwarded here IN ADDITION to the existing debug
+ * handling. Structurally matches the browser OTel bridge returned by
+ * packages/shell/src/lib/otel.ts, so this package pulls in no OTel code — the
+ * embedder owns SDK setup and passes the sink in. Absent = zero added work.
+ */
+export interface RuntimeTelemetrySink {
+  handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  shutdown(): void | Promise<void>;
+}
 
 export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
@@ -67,6 +120,15 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * persisting nothing — the measurement stage before "persist".
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  /**
+   * Populate the default render confidentiality ceiling (Epic H3a). When
+   * true, the worker's display sinks gate labeled values against the
+   * §8.10.6 profile for this identity and author-supplied render-boundary
+   * declassification is denied. Dogfood flag, default off (= today's
+   * unbounded rendering). Expect over-blocking while exchange resolution
+   * (H3b) is not implemented.
+   */
+  cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   /**
    * When true, forward the worker runtime's console output to the main
@@ -76,6 +138,11 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   forwardWorkerConsole?: boolean;
   getBuildHash?: () => Promise<string | undefined>;
   workerUrl?: URL;
+  /**
+   * Optional telemetry sink (browser OTel bridge). Purely additive and gated by
+   * the embedder: when omitted, no telemetry work happens.
+   */
+  telemetry?: RuntimeTelemetrySink;
 };
 
 const NavigationEventName = "cf-navigate";
@@ -137,6 +204,16 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
+  // Epic H3a: populate the render confidentiality ceiling. Off by default —
+  // a deployment-posture change to what the shell renders, enabled
+  // deliberately per host (shell dogfood flag). When on, display sinks
+  // admit only the §8.10.6 profile (the acting user's own identity atom
+  // plus display-dischargeable influence-class caveat kinds) and
+  // author-supplied render declassification is denied (audit S15); the
+  // reconciler's fail-closed narrowing does the enforcement. Exact-match
+  // forms only until H3b adds exchange resolution, so over-blocking is
+  // expected — that is the point of the dogfood stage.
+  cfcRenderCeiling = false,
   trustSnapshot,
   forwardWorkerConsole,
 }: {
@@ -146,6 +223,7 @@ export function createRuntimeClientOptions({
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   forwardWorkerConsole?: boolean;
 }) {
@@ -166,6 +244,14 @@ export function createRuntimeClientOptions({
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    ...(cfcRenderCeiling
+      ? {
+        renderDeclassificationPolicy: "deny" as const,
+        renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
+          session.as.did(),
+        ),
+      }
+      : {}),
     trustSnapshot: resolvedTrustSnapshot,
     forwardWorkerConsole,
   };
@@ -191,14 +277,18 @@ export class RuntimeInternals extends EventTarget {
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  // Optional OTel sink (browser telemetry enabled). Inert when undefined.
+  #telemetrySink?: RuntimeTelemetrySink;
 
   constructor(
     client: RuntimeClient,
     callbacks: RuntimeInternalsCallbacks = {},
+    telemetry?: RuntimeTelemetrySink,
   ) {
     super();
     this.#client = client;
     this.#callbacks = callbacks;
+    this.#telemetrySink = telemetry;
     this.#favorites = new FavoritesManager(client);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
@@ -373,6 +463,16 @@ export class RuntimeInternals extends EventTarget {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Flush + tear down telemetry first so buffered spans aren't dropped on
+    // runtime replacement/logout. Guarded — telemetry must never break disposal.
+    if (this.#telemetrySink) {
+      try {
+        await this.#telemetrySink.shutdown();
+      } catch (e) {
+        console.error("[RuntimeInternals] telemetry sink shutdown failed:", e);
+      }
+      this.#telemetrySink = undefined;
+    }
     await this.#client.dispose();
   }
 
@@ -479,6 +579,19 @@ export class RuntimeInternals extends EventTarget {
   #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {
     this.#telemetryMarkers.push(marker);
     this.dispatchEvent(new CustomEvent("telemetryupdate"));
+    // Additionally translate the marker into OTel spans/metrics when a sink is
+    // attached (browser telemetry enabled). Guarded so a bridge error never
+    // disrupts the existing debug telemetry pipeline.
+    if (this.#telemetrySink) {
+      try {
+        this.#telemetrySink.handleMarker(marker);
+      } catch (e) {
+        console.error(
+          "[RuntimeInternals] telemetry sink handleMarker failed:",
+          e,
+        );
+      }
+    }
   };
 
   #check() {
@@ -494,6 +607,7 @@ export class RuntimeInternals extends EventTarget {
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    cfcRenderCeiling,
     trustSnapshot,
     forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
@@ -501,6 +615,7 @@ export class RuntimeInternals extends EventTarget {
     navigate,
     onConsole,
     onError,
+    telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
     // One runtime per identity: the worker session is always the
     // identity's home session. Spaces — including derived named spaces —
@@ -536,6 +651,7 @@ export class RuntimeInternals extends EventTarget {
         experimental,
         cfcEnforcementMode,
         cfcFlowLabels,
+        cfcRenderCeiling,
         trustSnapshot,
         forwardWorkerConsole,
       }),
@@ -547,6 +663,7 @@ export class RuntimeInternals extends EventTarget {
     return new RuntimeInternals(
       client,
       { navigate, onConsole, onError },
+      telemetry,
     );
   }
 }

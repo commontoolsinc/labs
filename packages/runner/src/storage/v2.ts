@@ -4,6 +4,7 @@ import {
   cloneWithValueAtPath,
 } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type { Entity } from "@commonfabric/memory/interface";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -1118,6 +1119,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sqliteQuery(db, sql, params);
   }
 
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.replica.sqliteServerCommitRowLabelEval();
+  }
+
   registerSqliteDiskSource(
     id: string,
     path: string,
@@ -1205,6 +1210,9 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  /** The client of the last RESOLVED session handle — for synchronous
+   *  capability reads (`sqliteServerCommitRowLabelEval`). */
+  #sessionClient?: MemoryV2Client.Client;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
@@ -1321,6 +1329,18 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  /**
+   * Whether the server this replica is connected to advertised commit-time
+   * row-label evaluation (`sqliteCommitRowLabelEval`) in its handshake.
+   * Synchronous — the sqlite write gate runs inside `db.exec` — so it reads
+   * the LIVE client of the last resolved session: `false` until a session
+   * exists (fail closed; by the time a handler can call `db.exec`, its cells
+   * have synced through a session) and refreshed by reconnect handshakes.
+   */
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.#sessionClient?.serverFlags?.sqliteCommitRowLabelEval === true;
   }
 
   async registerSqliteDiskSource(
@@ -2780,7 +2800,10 @@ class SpaceReplica implements ISpaceReplica {
     session: MemoryV2Client.SpaceSession;
   }> {
     if (this.#sessionHandle === undefined) {
-      const handle = this.#createSession().catch((error) => {
+      const handle = this.#createSession().then((resolved) => {
+        this.#sessionClient = resolved.client;
+        return resolved;
+      }).catch((error) => {
         if (this.#sessionHandle === handle) {
           this.#sessionHandle = undefined;
         }
@@ -2845,20 +2868,27 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
+    // The conflicted entity: structured field when the error is in-process;
+    // parsed from the message when it crossed the wire (Error fields do not
+    // survive serialization, the message does — its format is owned by
+    // memory/v2/engine.ts's ConflictError construction).
+    const staleReadOf = (error as { of?: unknown })?.of ??
+      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
     const firstOperation = (commit as Partial<NativeStorageCommit>)
       .operations?.[0];
     const rejected: IConflictError = {
       name: "ConflictError",
       message,
       transaction: commit as Transaction,
-      // Diagnostic-only conflict descriptor: the storage layer surfaces a
-      // ConflictError by name/readyToRetry, not by inspecting these fields.
-      // `the`/`expected`/`actual` are placeholders; space and of are filled in
-      // so the debug log is accurate.
+      // Conflict descriptor: for stale-read conflicts `of` is authoritative
+      // (the memory engine names the conflicted entity structurally), so a
+      // retrier can pull exactly that doc before re-running (CT-1824).
+      // `the`/`expected`/`actual` remain placeholders.
       conflict: {
         space,
         the: DOCUMENT_MIME,
-        of: firstOperation?.id ?? "of:unknown",
+        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
+          firstOperation?.id ?? "of:unknown") as Entity,
         expected: null,
         actual: null,
         existsInHistory: false,
