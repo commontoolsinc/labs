@@ -3880,7 +3880,7 @@ export const prepareBoundaryCommit = (
   // attempt log, built once for the whole boundary pass. Each protected
   // write's input checks quantify over the reads in ITS prefix (see
   // verifyInputRequirements); the egress ceiling deliberately does not
-  // (collectConsumedConfidentiality stays transaction-global).
+  // (collectConsumedLabel stays transaction-global).
   const prefixBounds = buildWritePrefixBounds(tx);
   // A write to a document's ["cfc"] label-map path made outside the runtime's
   // privileged persistence scope forges the metadata that drives CFC derivation

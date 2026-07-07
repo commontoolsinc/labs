@@ -211,4 +211,116 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
       expect(result.message).toContain("requiredIntegrity failed");
     });
   });
+
+  // Epic D4 (docs/specs/cfc-write-prefix-provenance.md): the coherent floor
+  // quantifies over each write's READ PREFIX, not the transaction-global
+  // consumed set. A labeled read whose activity-clock position is at/after the
+  // last write attempt overlapping the protected path provably did not feed
+  // the committed value, so it is excluded from the witness set the floor is
+  // judged over. The read-side integration tests above keep BOTH reads in the
+  // prefix (they read then write), so they never exercise the prefix's effect
+  // on witness coverage; these do, by interleaving a read past the write.
+  describe("D4 read-prefix narrows the coherent-witness set", () => {
+    const sourceSchema = (id: string) =>
+      ({
+        type: "string",
+        ifc: {
+          confidentiality: ["s"],
+          integrity: [reviewedBy(id)],
+        },
+      }) as JSONSchema;
+
+    const sinkSchema = {
+      type: "object",
+      properties: {
+        out: {
+          type: "string",
+          ifc: { requiredIntegrity: [{ type: REVIEWED }] },
+        },
+      },
+      required: ["out"],
+    } as JSONSchema;
+
+    // Seed two labeled sources (witnesses A and B), then run one tx that reads
+    // A, WRITES the floored sink, and reads B. When `readBAfterWrite`, read B's
+    // clock position lands past the sink write's bound, so D4 drops it from
+    // /out's read prefix — the floor sees only leaf {A}. Otherwise both reads
+    // precede the write and both are in the prefix (the pre-D4 shape).
+    const runInterleaved = async (
+      witnessA: string,
+      witnessB: string,
+      readBAfterWrite: boolean,
+    ): Promise<{ ok: boolean; message?: string }> => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+      });
+      try {
+        for (const [index, witness] of [witnessA, witnessB].entries()) {
+          const seed = runtime.edit();
+          runtime.getCell(
+            signer.did(),
+            `prefix-src-${index}`,
+            sourceSchema(witness),
+            seed,
+          ).set(`value-${index}`);
+          seed.prepareCfc();
+          expect((await seed.commit()).ok).toBeDefined();
+        }
+
+        const tx = runtime.edit();
+        const readB = () =>
+          runtime.getCell(
+            signer.did(),
+            "prefix-src-1",
+            sourceSchema(witnessB),
+            tx,
+          ).get();
+        runtime.getCell(
+          signer.did(),
+          "prefix-src-0",
+          sourceSchema(witnessA),
+          tx,
+        )
+          .get();
+        if (!readBAfterWrite) readB();
+        runtime.getCell(signer.did(), "prefix-coherence-sink", sinkSchema, tx)
+          .set({ out: "derived" });
+        if (readBAfterWrite) readB();
+        tx.prepareCfc();
+        const result = await tx.commit();
+        return {
+          ok: result.ok !== undefined,
+          message: (result.error as Error | undefined)?.message,
+        };
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    };
+
+    it("admits a heterogeneous witness pair when the second read is past the write bound", async () => {
+      // r1 and r2 both match { type: REVIEWED } but via DIFFERENT atoms — the
+      // exact shape the coherence upgrade REJECTS when both reads are in the
+      // prefix (control below). Here read B (r2) lands after the sink write, so
+      // D4 excludes it: the floor is judged over the in-prefix leaf {r1} alone,
+      // a single coherent witness, and the write commits. The excluded read is
+      // neither demanded (its heterogeneity no longer forces a failure) nor
+      // counted as a satisfying witness.
+      const result = await runInterleaved("r1", "r2", true);
+      expect(result.ok).toBe(true);
+    });
+
+    it("control: the same heterogeneous pair rejects when both reads precede the write", async () => {
+      // Identical witnesses and sink, but read B stays in the prefix — so the
+      // floor sees leaves {r1},{r2} with no shared witness and rejects. This
+      // pins the admission above to the prefix narrowing, not to any change in
+      // witness matching.
+      const result = await runInterleaved("r1", "r2", false);
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("requiredIntegrity failed");
+    });
+  });
 });
