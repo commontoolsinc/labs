@@ -57,8 +57,11 @@ const copyGood = handler<Record<string, never>, { db: SqliteDb }>(
   },
 );
 
-// Upsert whose POST-IMAGE violates the rule (flips row 2's sender to junk):
-// the server re-derives from the post-image and rolls back.
+// Upsert whose POST-IMAGE violates the rule. Row id=2 exists by now — copyGood
+// (run before this in the driver) copied carol's staging row into `guarded`,
+// auto-assigning id=2 — so `ON CONFLICT(id)` FIRES and takes the DO UPDATE
+// branch, flipping row 2's sender to junk. The server re-derives from the
+// post-image and rolls back (row 2 keeps carol).
 const upsertBad = handler<Record<string, never>, { db: SqliteDb }>(
   (_, { db }) => {
     db.exec(

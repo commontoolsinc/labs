@@ -3248,7 +3248,10 @@ const applyCommitTransaction = (
       // Execute the SQL inside this commit's transaction (atomic with the cell
       // ops). It is NOT an entity revision — do not push to `revisions[]` so the
       // revision/head/snapshot/dirty machinery never sees it.
-      applySqliteOperation(engine, operation, sqliteAttachments);
+      applySqliteOperation(engine, operation, sqliteAttachments, {
+        principal,
+        sessionId,
+      });
       continue;
     }
     const revision = writeOperation(engine, {
@@ -3311,6 +3314,7 @@ const applySqliteOperation = (
   engine: Engine,
   op: SqliteOperation,
   attachments: ReadonlyMap<string, string> | undefined,
+  commitScope: { principal?: string; sessionId: SessionId },
 ): void => {
   // The server attaches exactly one cell-db (under an alias) before applyCommit;
   // assert it's present, then run the statement UNQUALIFIED. Unqualified table
@@ -3326,7 +3330,10 @@ const applySqliteOperation = (
   // which case the affected rows are read back and re-derived through the
   // shared evaluator, rolling back the commit on any violation (CFC Phase 3.c;
   // see sqlite/commit-eval.ts).
-  applySqliteCommitWrite(engine.database, resolveSqliteOpOwner(engine, op));
+  applySqliteCommitWrite(
+    engine.database,
+    resolveSqliteOpOwner(engine, op, commitScope),
+  );
 };
 
 /**
@@ -3335,14 +3342,18 @@ const applySqliteOperation = (
  * the field, and its writes must not start failing on `dbOwner()` rules under
  * a server-first rolling upgrade. The db handle CELL (`op.db.id`) carries the
  * owner stamped at creation — the same value the read side resolves — so a
- * value read of the committed handle doc recovers it. Best-effort and
- * fail-closed: a missing doc or owner (e.g. a user/session-scoped handle this
- * default-scope read can't see) leaves the op unchanged, and a `dbOwner()`
- * rule then refuses as before.
+ * value read of the committed handle doc recovers it. The handle doc lives at
+ * the db's DECLARED scope (`op.db.scope`), so the read is resolved with that
+ * scope plus the commit's principal / session — a `user`/`session`-scoped
+ * handle is missed by a default-scope read. Best-effort and fail-closed: a
+ * missing doc / owner (or a scoped handle whose scope key can't be resolved,
+ * e.g. an anonymous commit lacking a principal) leaves the op unchanged, and a
+ * `dbOwner()` rule then refuses as before.
  */
 const resolveSqliteOpOwner = (
   engine: Engine,
   op: SqliteOperation,
+  commitScope: { principal?: string; sessionId: SessionId },
 ): SqliteOperation => {
   if (
     op.db.owner !== undefined || op.db.tables === undefined ||
@@ -3350,7 +3361,20 @@ const resolveSqliteOpOwner = (
   ) {
     return op;
   }
-  const doc = read(engine, { id: op.db.id });
+  // `resolveScopeKey` (inside `read`) throws for a user/session scope missing a
+  // principal/session — a best-effort backfill must not abort the commit, so
+  // fail closed to the unchanged op instead.
+  let doc: EntityDocument | null;
+  try {
+    doc = read(engine, {
+      id: op.db.id,
+      scope: op.db.scope,
+      principal: commitScope.principal,
+      sessionId: commitScope.sessionId,
+    });
+  } catch {
+    return op;
+  }
   const owner = (doc?.value as { owner?: unknown } | undefined)?.owner;
   return typeof owner === "string" ? { ...op, db: { ...op.db, owner } } : op;
 };

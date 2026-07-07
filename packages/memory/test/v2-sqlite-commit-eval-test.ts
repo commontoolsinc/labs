@@ -369,6 +369,48 @@ Deno.test("a pre-3.c op without owner backfills dbOwner() from the handle doc", 
   });
 });
 
+Deno.test("a pre-3.c op against a USER-scoped handle backfills dbOwner() at that scope", async () => {
+  // The db handle cell is `user`-scoped, so its doc lives under the commit's
+  // user scope key — a default-scope backfill read would miss it and the op
+  // would wrongly fail closed. The backfill must resolve the handle at the op's
+  // declared scope (with the commit principal/session) to stay rolling-upgrade
+  // compatible for scoped dbs. commitSqlite runs as principal "did:key:alice".
+  await withAttached((engine, commitSqlite) => {
+    const scopedOwnerlessOp: Operation = {
+      op: "sqlite",
+      // no `owner` (old client) and `scope: "user"` — a user-scoped handle.
+      db: { id: DB_ID, tables: TABLES, scope: "user" },
+      sql: "INSERT INTO ownerOnly (note) SELECT ?",
+      params: ["scoped"],
+    };
+    // Seed the handle ONLY at the default scope: the user-scoped read must not
+    // find it, so a `dbOwner()` op still fails closed. Proves the read is
+    // genuinely scope-qualified (not silently falling back to default scope).
+    commitSqlite(1, [{
+      op: "set",
+      id: DB_ID,
+      value: { value: { id: DB_ID, owner: OWNER } },
+    }]);
+    assertThrows(
+      () => commitSqlite(2, [scopedOwnerlessOp]),
+      RowLabelCommitError,
+    );
+    // Now seed the handle at the USER scope (the way a user-scoped sqliteDatabase
+    // stamps it) — the same scoped op resolves the owner and lands.
+    commitSqlite(3, [{
+      op: "set",
+      id: DB_ID,
+      scope: "user",
+      value: { value: { id: DB_ID, owner: OWNER } },
+    }]);
+    commitSqlite(4, [scopedOwnerlessOp]);
+    assertEquals(
+      runQuery(engine.database, "SELECT note FROM ownerOnly"),
+      [{ note: "scoped" }],
+    );
+  });
+});
+
 Deno.test('a quoted identifier named "returning" does not trip the RETURNING scan', async () => {
   await withAttached((engine, commitSqlite) => {
     commitSqlite(1, [
