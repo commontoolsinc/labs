@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { pullSnapshot } from "./support/pull-snapshot.ts";
 
 /**
  * Regression for the CLI pattern-tool direct-invocation path
@@ -99,7 +100,7 @@ describe("patternTool direct invocation of a boundary-form pattern value", () =>
       resultCell as never,
     );
     await runtime.idle();
-    const value = JSON.parse(JSON.stringify(await result.pull()));
+    const value = await pullSnapshot(result);
 
     expect(value).toEqual({
       query: "tea",

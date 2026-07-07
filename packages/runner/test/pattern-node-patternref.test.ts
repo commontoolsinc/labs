@@ -24,6 +24,7 @@ import {
   getDispatchCensus,
   resetDispatchCensus,
 } from "../src/reactive-interpreter/dispatch.ts";
+import { pullSnapshot } from "./support/pull-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("pattern-node-patternref");
 const space = signer.did();
@@ -81,7 +82,7 @@ describe("pattern node $patternRef instantiation", () => {
         resultCell as never,
       );
       await runtime.idle();
-      const value = JSON.parse(JSON.stringify(await result.pull()));
+      const value = await pullSnapshot(result);
 
       // Correctness: Inner computes (5 + 1) * 2 = 12.
       assertEquals(value, { result: 12 });
@@ -162,7 +163,7 @@ describe("pattern node $patternRef instantiation", () => {
           await tx.commit();
           await runtime.idle();
           await runtime.storageManager.synced();
-          const value = JSON.parse(JSON.stringify(await result.pull()));
+          const value = await pullSnapshot(result);
           assertEquals(value, { child: { out: 6 } });
 
           // The child result cell (and thus the redirect the parent stores to

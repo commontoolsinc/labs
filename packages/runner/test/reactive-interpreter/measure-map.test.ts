@@ -26,6 +26,7 @@ import {
   nodeStats,
 } from "../support/interpreter-measure.ts";
 import { trustExecutable } from "../support/trusted-builder.ts";
+import { pullSnapshot } from "../support/pull-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -102,7 +103,7 @@ async function measureOnce(
       { items } as never,
       resultCell as never,
     );
-    const value = JSON.parse(JSON.stringify(await result.pull()));
+    const value = await pullSnapshot(result);
     await runtime.idle();
     const wallMs = performance.now() - t0;
     return {

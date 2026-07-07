@@ -28,6 +28,13 @@ import {
   resetDispatchCensus,
 } from "../../src/reactive-interpreter/dispatch.ts";
 import { trustExecutable } from "../support/trusted-builder.ts";
+// NOTE: this file deliberately keeps the raw `JSON.parse(JSON.stringify(...))`
+// idiom rather than `pullSnapshot`. Its segment-error-isolation tests rely on a
+// JSON quirk: a throwing leaf yields an `undefined` slot, and `JSON.stringify`
+// DROPS undefined-valued properties, so the throwing slots come out "absent"
+// (e.g. `{ good: 2 }`). `pullSnapshot` (via `nativeFromFabricValue`) correctly
+// PRESERVES `undefined`, which is more faithful but would surface the slots as
+// `{ boomA: undefined, ... }` and break those deliberate assertions.
 
 const signer = await Identity.fromPassphrase("ri2 cov-dispatch-runtime");
 const space = signer.did();

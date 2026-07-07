@@ -18,6 +18,7 @@ import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { getBuiltRog } from "../../src/reactive-interpreter/from-builder.ts";
 import { elementArgumentUsage } from "../../src/reactive-interpreter/collection-inline.ts";
+import { pullSnapshot } from "../support/pull-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("ri2 cov-collection-inline");
 const space = signer.did();
@@ -180,7 +181,7 @@ async function runMap(
       { items: items } as never,
       resultCell as never,
     );
-    const initial = JSON.parse(JSON.stringify(await result.pull()));
+    const initial = await pullSnapshot(result);
     return initial;
   } finally {
     popFrame(frame);

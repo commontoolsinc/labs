@@ -20,6 +20,7 @@ import {
   resetDispatchCensus,
 } from "../../src/reactive-interpreter/dispatch.ts";
 import { trustExecutable } from "../support/trusted-builder.ts";
+import { pullSnapshot } from "../support/pull-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -63,7 +64,7 @@ async function runOnce(
     );
     // Snapshot IMMEDIATELY: pull() returns a live view that would otherwise
     // reflect the post-edit state by the time we serialize.
-    const initial = JSON.parse(JSON.stringify(await result.pull()));
+    const initial = await pullSnapshot(result);
 
     // Reactivity: edit the argument, let the graph settle, re-read.
     const argCell = resultCell.getArgumentCell()!;
@@ -78,7 +79,7 @@ async function runOnce(
     (target as { set: (v: unknown) => void }).set(edit.value);
     tx.commit();
     await runtime.idle();
-    const afterEdit = JSON.parse(JSON.stringify(await result.pull()));
+    const afterEdit = await pullSnapshot(result);
 
     return { initial, afterEdit };
   } finally {
