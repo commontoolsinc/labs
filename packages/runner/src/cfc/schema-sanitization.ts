@@ -8,11 +8,15 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { resolveCfcSchemaRefs } from "./schema-refs.ts";
-import { evaluateExchangeRules } from "./exchange-eval.ts";
+import {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import { buildCfcPolicySnapshot } from "./policy.ts";
+import { clauseAlternatives } from "./clause.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
-  STANDARD_PROMPT_CAVEAT_POLICY,
+  MATERIAL_RISK_DISCHARGE_POLICY,
 } from "./standard-profile.ts";
 
 export const INJECTION_SAFE_ATOM = {
@@ -21,15 +25,17 @@ export const INJECTION_SAFE_ATOM = {
 
 const PROMPT_INJECTION_RISK_KINDS = new Set(MATERIAL_RISK_DISCHARGE_KINDS);
 
-// The standard §10.1 profile, built once. The sanitizer runs the material-risk
-// discharge over an instruction-inert path's observed confidentiality with its
-// freshly-minted InjectionSafe — the discharge is now an ordinary exchange-rule
-// firing (Epic B6), not a hardcoded strip. Trusted, local, and unconditional
-// (independent of the global cfcPolicyEvaluation dial): §10.1 sanctions the
-// trusted-schema sanitizer's InjectionSafe mint + discharge as the profile's
-// own transition rule.
-const STANDARD_PROFILE_SNAPSHOT = buildCfcPolicySnapshot(
-  STANDARD_PROMPT_CAVEAT_POLICY,
+// The material-risk discharge rules, built once. The sanitizer runs them over
+// an instruction-inert path's observed confidentiality with its freshly-minted
+// InjectionSafe — the discharge is now an ordinary exchange-rule firing (Epic
+// B6), not a hardcoded strip. Trusted, local, and unconditional (independent of
+// the global cfcPolicyEvaluation dial): §10.1 sanctions the trusted-schema
+// sanitizer's InjectionSafe mint + discharge as the profile's own transition
+// rule. This uses the SANITIZER-only policy, not the deployment profile:
+// bare-InjectionSafe discharge is value-local here (one path, that path's
+// evidence) but would be cross-value at a tx-wide boundary.
+const MATERIAL_RISK_SNAPSHOT = buildCfcPolicySnapshot(
+  MATERIAL_RISK_DISCHARGE_POLICY,
 );
 
 type AnnotationResult = {
@@ -80,13 +86,27 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
 const dischargeMaterialRiskAtoms = (
   atoms: readonly unknown[],
 ): ImmutableJSONValue[] => {
+  // Fuel budget scaled to the label (cubic P2 on #4567): the default 64 would
+  // exhaust on a label with more than ~64 droppable alternatives, and the
+  // sanitizer would then keep every material-risk caveat — a regression from
+  // the old strip, which removed ALL of them. This rule set is add-free (only
+  // drops), so it terminates in at most one firing per material-risk
+  // alternative; budgeting one per alternative plus the default headroom
+  // covers any label without ever risking a real (add/drop-cycle) runaway,
+  // which this set cannot have.
+  const alternativeCount = atoms.reduce(
+    (total: number, clause) => total + clauseAlternatives(clause).length,
+    0,
+  );
   const result = evaluateExchangeRules(
     { confidentiality: [...atoms] },
-    STANDARD_PROFILE_SNAPSHOT,
+    MATERIAL_RISK_SNAPSHOT,
     { integrity: [INJECTION_SAFE_ATOM] },
+    alternativeCount + DEFAULT_EXCHANGE_FUEL,
   );
-  // Fixpoint over the finite add-free discharge rule set cannot exhaust, but
-  // fail safe if it ever did: keep the un-discharged (more-restrictive) label.
+  // Fixpoint over the finite add-free discharge rule set cannot exhaust with
+  // the budget above, but fail safe if it ever did: keep the un-discharged
+  // (more-restrictive) label.
   return uniqueAtoms(
     result.exhausted ? atoms : result.label.confidentiality ?? [],
   );

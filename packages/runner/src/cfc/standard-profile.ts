@@ -8,15 +8,27 @@ import type { CfcPolicyRecordInput, ExchangeRule } from "./policy.ts";
  * runtime surfaces atoms (caveats in confidentiality, evidence in integrity,
  * `BoundaryContext` at release sites) and these rules decide discharge.
  *
- * Two consumers share this one definition:
- * - the trusted-schema sanitizer (`schema-sanitization.ts`), which runs the
- *   material-risk discharge over an instruction-inert path's confidentiality
- *   with its freshly-minted `InjectionSafe` — replacing the old hardcoded
+ * Two DISTINCT rule sets, because bare-`InjectionSafe` discharge is only sound
+ * where the evidence is known to be on the CURRENT value/path (§10.1):
+ * - `MATERIAL_RISK_DISCHARGE_POLICY` — the material-risk drop rules, guarded by
+ *   bare `InjectionSafe`. Consumed ONLY by the trusted-schema sanitizer
+ *   (`schema-sanitization.ts`), which runs them over ONE instruction-inert
+ *   path's confidentiality with THAT path's freshly-minted `InjectionSafe`, so
+ *   the discharge is value-local by construction — replacing the old hardcoded
  *   `filterMaterialRiskAtoms` strip with a rule firing (goldens prove
- *   equivalence);
- * - deployments, which spread `STANDARD_PROMPT_CAVEAT_POLICY` into
- *   `RuntimeOptions.cfcPolicyRecords` so the display/tier rules run at real
- *   boundaries under `cfcPolicyEvaluation`.
+ *   equivalence). This set is deliberately NOT in the deployment profile: at a
+ *   boundary the integrity pool is the whole consumed label's join, so a bare
+ *   `InjectionSafe` from one value would discharge a material-risk caveat on
+ *   another (cubic P1 on #4567 — the tx-wide-aggregation cross-value hole).
+ * - `STANDARD_PROMPT_CAVEAT_POLICY` — the tier upgrades, the value-screened
+ *   discharge, and the display/influence discharge, all SOURCE-bound (and, for
+ *   influence, SINK-bound) so they are safe against tx-wide integrity
+ *   aggregation. Deployments spread this into `RuntimeOptions.cfcPolicyRecords`
+ *   so it runs at real boundaries under `cfcPolicyEvaluation`. At a boundary a
+ *   material-risk caveat is handled through the screening gradient
+ *   (`CaveatScreened` evidence carries a `source`, so the tier rules correlate
+ *   it to the caveat) → value-screened discharge — never by bare
+ *   `InjectionSafe`.
  */
 
 /** Legacy single-risk kind: behaves as unscreened (§10.1). */
@@ -57,7 +69,9 @@ const injectionSafeGuard = { type: CFC_ATOM_TYPE.InjectionSafe } as const;
 // AtomPattern matches a single concrete `kind`. The pattern names ONLY `type`
 // and `kind` (subset semantics leave every other field unconstrained), so a
 // caveat with or without a `source` discharges alike — exactly the
-// source-generic, field-agnostic reach the old wholesale strip had.
+// source-generic, field-agnostic reach the old wholesale strip had. Guarded by
+// bare `InjectionSafe`, so these rules are SANITIZER-ONLY (path-local): see the
+// module doc for why they must not run at a tx-wide boundary.
 const materialRiskDischargeRules: ExchangeRule[] = MATERIAL_RISK_DISCHARGE_KINDS
   .map((kind) => ({
     id: `discharge-material-risk:${kind}`,
@@ -158,11 +172,20 @@ const valueScreenedDischargeRule: ExchangeRule = {
 
 // Influence-caveat display discharge (§8.10.5): PROMPT_INFLUENCE is released
 // only by disclosure/acknowledgment/disclaimer evidence that binds the same
-// `source` and sink context — NEVER by InjectionSafe (§10.1: "InjectionSafe
-// MUST NOT clear prompt-influence"). Each rule additionally gates on the
-// boundary context (sink class / field role) it is scoped to, so a
-// content-field disclaimer cannot release an influence caveat routed to an
-// action field.
+// `source` AND the same sink as the release site — NEVER by InjectionSafe
+// (§10.1: "InjectionSafe MUST NOT clear prompt-influence"). The sink binding
+// is load-bearing (cubic P1 on #4567): the evidence's `sink` field is unified
+// (`$sink`) with a `BoundaryContext{key:"sink"}` atom the boundary mints for
+// the CURRENT sink, so a disclosure/disclaimer rendered for one sink cannot
+// clear an influence caveat egressing to another. Each rule also gates on the
+// boundary's sink class / field role, so a content-field disclaimer cannot
+// release an influence caveat routed to an action field.
+const boundarySinkGuard = {
+  type: CFC_ATOM_TYPE.BoundaryContext,
+  key: "sink",
+  value: { var: "$sink" },
+} as const;
+
 const influenceDisclosureRenderedRule: ExchangeRule = {
   id: "discharge-influence-display-rendered",
   appliesTo: {
@@ -177,11 +200,14 @@ const influenceDisclosureRenderedRule: ExchangeRule = {
       source: { var: "$s" },
       sink: { var: "$sink" },
     }],
-    boundary: [{
-      type: CFC_ATOM_TYPE.BoundaryContext,
-      key: "sinkClass",
-      value: "display",
-    }],
+    boundary: [
+      {
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "sinkClass",
+        value: "display",
+      },
+      boundarySinkGuard,
+    ],
   },
   post: { dropClause: true },
 };
@@ -195,17 +221,24 @@ const influenceAcknowledgedRule: ExchangeRule = {
   },
   preCondition: {
     // Routing-sensitive action fields require explicit user acknowledgment
-    // (§10.1 conservative default), not a mere rendered disclosure.
+    // (§10.1 conservative default), not a mere rendered disclosure. The
+    // acknowledgment must name the SINK it was given for (`sink` is optional
+    // on the atom, so an acknowledgment minted without one fails closed — it
+    // cannot discharge at any sink).
     integrity: [{
       type: CFC_ATOM_TYPE.DisclosureAcknowledged,
       kind: CFC_CONCEPT_KIND.PromptInfluence,
       source: { var: "$s" },
+      sink: { var: "$sink" },
     }],
-    boundary: [{
-      type: CFC_ATOM_TYPE.BoundaryContext,
-      key: "fieldRole",
-      value: "routing",
-    }],
+    boundary: [
+      {
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "fieldRole",
+        value: "routing",
+      },
+      boundarySinkGuard,
+    ],
   },
   post: { dropClause: true },
 };
@@ -225,22 +258,40 @@ const influenceDisclaimerRule: ExchangeRule = {
       source: { var: "$s" },
       sink: { var: "$sink" },
     }],
-    boundary: [{
-      type: CFC_ATOM_TYPE.BoundaryContext,
-      key: "fieldRole",
-      value: "content",
-    }],
+    boundary: [
+      {
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "fieldRole",
+        value: "content",
+      },
+      boundarySinkGuard,
+    ],
   },
   post: { dropClause: true },
 };
 
 /**
- * The complete standard profile as a single policy record.
+ * The material-risk discharge rules, isolated as their own policy. Consumed
+ * ONLY by the trusted-schema sanitizer, which runs them path-locally with the
+ * path's own minted `InjectionSafe` (see module doc). NOT part of the
+ * deployment profile — bare-`InjectionSafe` discharge is unsound against the
+ * tx-wide integrity a boundary evaluates over.
+ */
+export const MATERIAL_RISK_DISCHARGE_POLICY: readonly CfcPolicyRecordInput[] = [{
+  id: "cfc:material-risk-discharge",
+  rules: [...materialRiskDischargeRules],
+}];
+
+/**
+ * The deployment standard profile: tier upgrades, value-screened discharge,
+ * and the source-and-sink-bound influence discharge. Every rule here is safe
+ * against tx-wide integrity aggregation, so it may run at real boundaries
+ * under `cfcPolicyEvaluation`. Material-risk discharge is deliberately absent
+ * (it lives in `MATERIAL_RISK_DISCHARGE_POLICY`, sanitizer-only).
  */
 export const STANDARD_PROMPT_CAVEAT_POLICY: readonly CfcPolicyRecordInput[] = [{
   id: "cfc:standard-prompt-caveat-profile",
   rules: [
-    ...materialRiskDischargeRules,
     ingressUpgradeRule,
     valueUpgradeRule,
     valueScreenedDischargeRule,

@@ -9,6 +9,7 @@ import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
+  MATERIAL_RISK_DISCHARGE_POLICY,
   STANDARD_PROMPT_CAVEAT_POLICY,
 } from "../src/cfc/standard-profile.ts";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
@@ -24,6 +25,13 @@ import { normalizeClause } from "../src/cfc/clause.ts";
 // value-stage re-binding blind spot.
 
 const PROFILE = buildCfcPolicySnapshot(STANDARD_PROMPT_CAVEAT_POLICY)!;
+// The sanitizer's path-local material-risk discharge (guarded by bare
+// InjectionSafe) — the goldens exercise THIS set, not the deployment profile
+// (which no longer carries bare-InjectionSafe material-risk drop; see B6
+// review, cubic P1 on #4567).
+const MATERIAL_RISK_PROFILE = buildCfcPolicySnapshot(
+  MATERIAL_RISK_DISCHARGE_POLICY,
+)!;
 
 const caveat = (kind: string, source: string = "of:hostile") =>
   cfcAtom.caveat(kind, source);
@@ -56,11 +64,12 @@ const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
       .filter((clause) => clause !== undefined),
   );
 
-// The new rule path, exactly as the sanitizer runs it.
+// The new rule path, exactly as the sanitizer runs it (path-local,
+// bare-InjectionSafe material-risk discharge).
 const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] => {
   const result = evaluateExchangeRules(
     { confidentiality: [...atoms] },
-    PROFILE,
+    MATERIAL_RISK_PROFILE,
     { integrity: [INJECTION_SAFE_ATOM] },
   );
   return uniqueCfcAtoms(
@@ -131,8 +140,23 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
       const input = [caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened)];
       const result = evaluateExchangeRules(
         { confidentiality: input },
-        PROFILE,
+        MATERIAL_RISK_PROFILE,
         { integrity: [] },
+      );
+      expect(result.label.confidentiality).toEqual(input);
+    });
+
+    it("the DEPLOYMENT profile never discharges material risk via bare InjectionSafe (cross-value hole)", () => {
+      // The bare-InjectionSafe material-risk discharge is sanitizer-only. At a
+      // boundary the integrity pool is the whole consumed label's join, so a
+      // benign InjectionSafe from one value must NOT clear a material-risk
+      // caveat on another. The deployment profile therefore carries no such
+      // rule (cubic P1 on #4567): the caveat survives.
+      const input = [caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened)];
+      const result = evaluateExchangeRules(
+        { confidentiality: input },
+        PROFILE,
+        { integrity: [INJECTION_SAFE_ATOM] },
       );
       expect(result.label.confidentiality).toEqual(input);
     });
@@ -291,22 +315,47 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
       expect(result.label.confidentiality).toEqual([influence]);
     });
 
-    it("releases PROMPT_INFLUENCE at a display sink via a rendered disclosure", () => {
+    const renderedFor = (sink: string) =>
+      cfcAtom.disclosureRendered({
+        kind: CFC_CONCEPT_KIND.PromptInfluence,
+        source,
+        sink,
+        renderRef: { seq: 1, rootRef: { "/": "root" } },
+        snapshotDigest: "sha256:snap",
+      });
+
+    it("releases PROMPT_INFLUENCE at a display sink via a rendered disclosure for THAT sink", () => {
       const result = evaluateExchangeRules(
         { confidentiality: [influence] },
         PROFILE,
         {
-          integrity: [cfcAtom.disclosureRendered({
-            kind: CFC_CONCEPT_KIND.PromptInfluence,
-            source,
-            sink: "chat",
-            renderRef: { seq: 1, rootRef: { "/": "root" } },
-            snapshotDigest: "sha256:snap",
-          })],
-          boundary: [cfcAtom.boundaryContext("sinkClass", "display")],
+          integrity: [renderedFor("chat")],
+          boundary: [
+            cfcAtom.boundaryContext("sinkClass", "display"),
+            cfcAtom.boundaryContext("sink", "chat"),
+          ],
         },
       );
       expect(result.label.confidentiality).toEqual([]);
+    });
+
+    it("does NOT release when the disclosure is for a DIFFERENT sink (cross-sink hole)", () => {
+      // A disclosure rendered for "chat" must not clear the influence caveat
+      // egressing to "sendMail", even though both are display-class (cubic P1
+      // on #4567). The sink binding correlates the evidence to the release
+      // site.
+      const result = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [renderedFor("chat")],
+          boundary: [
+            cfcAtom.boundaryContext("sinkClass", "display"),
+            cfcAtom.boundaryContext("sink", "sendMail"),
+          ],
+        },
+      );
+      expect(result.label.confidentiality).toEqual([influence]);
     });
 
     it("does not release a rendered disclosure without the display boundary context", () => {
@@ -314,13 +363,7 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
         { confidentiality: [influence] },
         PROFILE,
         {
-          integrity: [cfcAtom.disclosureRendered({
-            kind: CFC_CONCEPT_KIND.PromptInfluence,
-            source,
-            sink: "chat",
-            renderRef: { seq: 1, rootRef: { "/": "root" } },
-            snapshotDigest: "sha256:snap",
-          })],
+          integrity: [renderedFor("chat")],
           // No BoundaryContext — the site is not known to be a display sink.
         },
       );
@@ -328,13 +371,27 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
     });
 
     it("requires acknowledgment (not a mere rendered disclosure) for routing fields", () => {
-      const routingBoundary = [cfcAtom.boundaryContext("fieldRole", "routing")];
+      const routingBoundary = [
+        cfcAtom.boundaryContext("fieldRole", "routing"),
+        cfcAtom.boundaryContext("sink", "sendMail"),
+      ];
       // A rendered disclosure is NOT enough for a routing-sensitive field.
       const rendered = evaluateExchangeRules(
         { confidentiality: [influence] },
         PROFILE,
         {
-          integrity: [cfcAtom.disclosureRendered({
+          integrity: [renderedFor("sendMail")],
+          boundary: routingBoundary,
+        },
+      );
+      expect(rendered.label.confidentiality).toEqual([influence]);
+      // Explicit acknowledgment FOR THAT SINK discharges it.
+      const acknowledged = evaluateExchangeRules(
+        { confidentiality: [influence] },
+        PROFILE,
+        {
+          integrity: [cfcAtom.disclosureAcknowledged({
+            user: "did:key:alice",
             kind: CFC_CONCEPT_KIND.PromptInfluence,
             source,
             sink: "sendMail",
@@ -344,9 +401,10 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
           boundary: routingBoundary,
         },
       );
-      expect(rendered.label.confidentiality).toEqual([influence]);
-      // Explicit acknowledgment discharges it.
-      const acknowledged = evaluateExchangeRules(
+      expect(acknowledged.label.confidentiality).toEqual([]);
+      // An acknowledgment WITHOUT a sink cannot discharge (fail-closed): the
+      // rule's sink binding has nothing to unify against.
+      const unsinked = evaluateExchangeRules(
         { confidentiality: [influence] },
         PROFILE,
         {
@@ -360,7 +418,7 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
           boundary: routingBoundary,
         },
       );
-      expect(acknowledged.label.confidentiality).toEqual([]);
+      expect(unsinked.label.confidentiality).toEqual([influence]);
     });
   });
 

@@ -289,6 +289,35 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     expect(sanitized.properties.reason.ifc.addIntegrity).toBeUndefined();
   });
 
+  it("discharges ALL material-risk caveats on a large label (fuel scales past the default 64)", () => {
+    // A path carrying more than DEFAULT_EXCHANGE_FUEL (64) distinct
+    // material-risk caveats must still be fully discharged on an
+    // instruction-inert field — the old strip removed all of them, and the
+    // fuel budget must scale so the rule path matches that (cubic P2 on
+    // #4567). With a fixed 64-fuel budget this retains the tail.
+    const manyRisks = Array.from({ length: 90 }, (_, index) => ({
+      type: CFC_ATOM_TYPE.Caveat,
+      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      source: `of:hostile-${index}`,
+    }));
+    const schema = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["approve", "reject"] },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = schemaWithInjectionSafeAnnotations(
+      schema,
+      manyRisks,
+    ) as any;
+
+    const remaining = sanitized.properties.action.ifc.confidentiality ?? [];
+    expect(remaining.some(isPromptInjectionMaterialRiskAtom)).toBe(false);
+  });
+
   it("marks a whole closed object when every readable child is instruction-inert", () => {
     const schema = {
       type: "object",
