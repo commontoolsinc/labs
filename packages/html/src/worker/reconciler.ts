@@ -994,12 +994,7 @@ export class WorkerReconciler {
         return true;
       }
       if (useResolver) {
-        return this.resolvedConfidentialityRenderable(
-          schemaLabels,
-          [],
-          this.spaceOfCell(cell),
-          policy,
-        );
+        return this.resolvedConfidentialityRenderable(schemaLabels, [], policy);
       }
       return schemaLabels.every((atom) =>
         this.atomRenderableUnderPolicy(atom, policy)
@@ -1011,7 +1006,6 @@ export class WorkerReconciler {
       return this.resolvedConfidentialityRenderable(
         confidentiality,
         this.integrityLabels(labelView),
-        this.spaceOfCell(cell),
         policy,
       );
     }
@@ -1037,13 +1031,11 @@ export class WorkerReconciler {
   private resolvedConfidentialityRenderable(
     confidentiality: readonly unknown[],
     integrity: readonly unknown[],
-    space: string | undefined,
     policy: RenderPolicy,
   ): boolean {
     const resolved = this.resolveRenderConfidentiality!({
       confidentiality,
       integrity,
-      space,
     });
     const offending = atomsOutsideCeiling(resolved, policy.maxConfidentiality);
     for (const clause of offending) {

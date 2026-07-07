@@ -3006,9 +3006,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           });
           return cell;
         };
-        // The cell's own space is the acting user's; a Space atom naming it is
-        // a verified reader fact (§4.9.3). A Space atom naming a different
-        // space Alice has no role in stays blocked (fail-closed).
+        // A Space atom naming the acting user's OWN space resolves — the user
+        // is a verified reader of their own space (§4.9.3). A Space atom naming
+        // a space the user has no verified role in stays blocked (fail-closed),
+        // even though the cell is locally resident: residency is not authority.
         const userLabeled = seedLabeled(
           "cfc-h3b-user",
           "User-scoped note",
@@ -3016,7 +3017,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const spaceMemberLabeled = seedLabeled(
           "cfc-h3b-space-member",
-          "Team-space note",
+          "Own-space note",
           cfcAtom.space(signer.did()),
         );
         const spaceOtherLabeled = seedLabeled(
@@ -3027,9 +3028,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         assertEquals((await seedTx.commit()).ok !== undefined, true);
 
         // The §8.10.6 default display ceiling: acting-user identity + personal
-        // space principal forms. Space principals resolve via HasRole exchange.
+        // space principal forms. The acting user's own space is the one
+        // always-verifiable member fact (space DID == principal DID).
         const resolver = createRenderConfidentialityResolver({
           actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
         });
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
@@ -3058,7 +3061,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
           assertEquals(renderedText.includes("User-scoped note"), true);
-          assertEquals(renderedText.includes("Team-space note"), true);
+          assertEquals(renderedText.includes("Own-space note"), true);
           assertEquals(renderedText.includes("Other-space note"), false);
           assertEquals(renderedText.includes("Content hidden by policy"), true);
         } finally {

@@ -477,13 +477,21 @@ export class RuntimeProcessor {
     // (Space-via-HasRole) at each render egress. The evaluator context comes
     // from the runtime — its acting principal and deployment trust config —
     // so resolution happens RUNNER-side; the reconciler only fits the result.
+    // Reader membership is sourced ONLY from verified facts: the acting user's
+    // own space (space DID == principal DID) is the one always-verifiable
+    // member (a principal definitionally reads its own space, independent of
+    // deployment ACL mode). Broader cross-space membership awaits the §4.9.3
+    // membership lookup — until then, cross-space Space(...) labels fail closed
+    // rather than trusting a cell's mere local residency.
+    const renderActingPrincipal =
+      runtime.trustSnapshotProvider()?.actingPrincipal ?? identity.did();
     processor.renderConfidentialityResolver =
       processor.renderConfidentialityCeiling === undefined
         ? undefined
         : createRenderConfidentialityResolver({
-          actingPrincipal: runtime.trustSnapshotProvider()?.actingPrincipal ??
-            identity.did(),
+          actingPrincipal: renderActingPrincipal,
           trustConfig: runtime.cfcTrustConfig,
+          memberSpaces: [renderActingPrincipal],
         });
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation

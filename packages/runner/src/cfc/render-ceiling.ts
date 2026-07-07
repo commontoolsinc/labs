@@ -88,11 +88,18 @@ export type RenderConfidentialityResolverConfig = {
    */
   readonly trustConfig?: CfcTrustConfig;
   /**
-   * The acting user's verified reader spaces (§4.9.3): spaces for which the
-   * runtime mints `HasRole(actingPrincipal, space, reader)` membership facts.
-   * The cell's own storage space (passed per-resolution) is always treated as
-   * a verified reader space in addition to these — the runtime only syncs a
-   * space's data for a principal that may read it.
+   * The acting user's VERIFIED reader spaces (§4.9.3): spaces for which the
+   * runtime mints `HasRole(actingPrincipal, space, reader)` membership facts,
+   * so a `Space(...)` label naming one of them resolves to `User(actingUser)`.
+   *
+   * These MUST be spaces the acting user is a proven reader of, NOT merely
+   * spaces whose data is locally resident: residency is not read authority
+   * (a runtime can sync a space's bytes under an ACL-off deployment without
+   * the acting user being an authorized reader), so the cell's own storage
+   * space is deliberately NOT trusted as a membership fact. The acting user's
+   * own space (space DID == principal DID) is the one always-verifiable member
+   * — a principal definitionally reads its own space regardless of ACL mode;
+   * broader cross-space membership arrives with the §4.9.3 membership lookup.
    */
   readonly memberSpaces?: readonly string[];
 };
@@ -101,8 +108,6 @@ export type RenderConfidentialityResolverConfig = {
 export type RenderLabelInput = {
   readonly confidentiality: readonly unknown[];
   readonly integrity?: readonly unknown[];
-  /** The storage space of the cell — a verified reader space (§4.9.3). */
-  readonly space?: string;
 };
 
 /**
@@ -138,12 +143,6 @@ export const createRenderConfidentialityResolver = (
   );
   return (label) => {
     if (label.confidentiality.length === 0) return label.confidentiality;
-    // §4.9.3: the acting user's reader facts are minted by the trusted runtime
-    // from verified membership — the static member set plus this cell's own
-    // storage space (a space whose data the runtime synced for this reader).
-    const cellSpaceFacts = label.space === undefined
-      ? []
-      : mintReaderRoleFacts(config.actingPrincipal, [label.space]);
     const result = evaluateExchangeRules(
       {
         confidentiality: [...label.confidentiality],
@@ -151,7 +150,10 @@ export const createRenderConfidentialityResolver = (
       },
       STANDARD_RENDER_SNAPSHOT,
       {
-        integrity: [...staticRoleFacts, ...cellSpaceFacts],
+        // §4.9.3: role facts come ONLY from the verified member set, never
+        // from the cell's residency — so a `Space(X)` label the acting user
+        // cannot prove reader access to stays unresolved and fails closed.
+        integrity: staticRoleFacts,
         boundary,
         trustResolver,
         actingPrincipal: config.actingPrincipal,

@@ -56,16 +56,29 @@ describe("CFC render confidentiality resolver (H3b)", () => {
     expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([]);
   });
 
-  it("mints the reader fact from the cell's own storage space", () => {
-    // No static member set — the space the cell lives in (a space whose data
-    // the runtime synced for this reader) is a verified reader fact by itself.
+  it("does NOT mint a reader fact from cell residency alone (fail-closed)", () => {
+    // Residency is not read authority: a cell tagged Space(team) that is merely
+    // resident in the acting user's runtime (e.g. synced under an ACL-off
+    // deployment) must NOT resolve. HasRole facts come only from the verified
+    // member set (§4.9.3), never inferred from the cell's storage space.
     const resolve = createRenderConfidentialityResolver({
       actingPrincipal: ALICE,
     });
-    const resolved = resolve({
-      confidentiality: [cfcAtom.space(SPACE_TEAM)],
-      space: SPACE_TEAM,
+    const resolved = resolve({ confidentiality: [cfcAtom.space(SPACE_TEAM)] });
+    expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([
+      cfcAtom.space(SPACE_TEAM),
+    ]);
+  });
+
+  it("resolves the acting user's own space (a verified reader space)", () => {
+    // A principal definitionally reads its own space (space DID == principal
+    // DID), independent of deployment ACL mode — so the own space is always a
+    // sound verified member fact.
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      memberSpaces: [ALICE],
     });
+    const resolved = resolve({ confidentiality: [cfcAtom.space(ALICE)] });
     expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([]);
   });
 
