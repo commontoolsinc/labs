@@ -296,3 +296,28 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   RI2_DEBUG branches (guarded by the differential + resume integration
   suites) → honest small override, down from the inflated 9262. Full runner
   suite 820 passed, 0 failed.
+
+- (2026-07-07) **$patternRef binding chip → resolved-copy path REMOVED**
+  (`12c89bbd5`, net −548 lines). The chip (`3b028c786` + fixes `39b213e63`
+  argumentSchema/resultSchema, `ede6c5a7d` sentinel-to-run) made
+  `unwrapOneLevelAndBindtoDoc` bind referenced patterns as a `{$patternRef}`
+  resolved to the LIVE canonical instead of structurally copying them —
+  which was the ONLY source of derived-copy pattern objects reaching the
+  interpreter (measured 16/16 in the group-chat sim, all
+  `site=pattern-binding` via a per-site `noteDerivedCopy` tag probe). With
+  copies gone at the source, the derived-copy resolved-ROG dispatch path
+  (D-V2-RESOLVED-COPY / `87c1a1648`) became unreachable by any real pattern
+  (authored → hoisted → strict hit; reload re-runs the factory). Proven by a
+  disable-and-run experiment: stubbing the resolved branch to `no_rog` broke
+  ONLY its own 3 synthetic test blocks (817/820 flag-ON). REMOVED
+  `validatePositionalCorrespondence` + `sameBindingSkeleton` +
+  `deepStructuralEqual` + alias/opKind-class helpers + `interpretedViaResolved`
+  census + `BuiltRog.canonicalNodes`/`serializedNodes` + the dispatch branch
+  (now plain `no_rog`); `getBuiltRogResolved` stays (collection elements).
+  A ref-less hand-built/bare-Engine pattern that misses strict now runs
+  legacy (fail-safe). TRAP: the chip regressed `notes/note.test.tsx`
+  (`stream action argument is undefined` — the `$patternRef` sentinel
+  dropped argumentSchema/resultSchema); bisected to the chip (green pre-chip,
+  fails at chip HEAD with my changes stashed, flag-independent), fixed by the
+  chip author in `39b213e63`. Coverage improves structurally (the removed 250
+  dispatch lines held the last uncovered `sameBindingSkeleton` edges).
