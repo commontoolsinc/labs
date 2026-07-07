@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
+import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
@@ -273,6 +274,11 @@ export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
 
   for (const line of lcov.split(/\r?\n/)) {
     if (line.startsWith("SF:")) {
+      // Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
+      // normalized away at LCOV GENERATION (write-coverage-lcov.ts,
+      // `normalizeLcovInstancePaths` — CT-1861), so records arriving here
+      // already share one path per physical file; duplicate `SF:` sections
+      // accumulate into the same entry below.
       currentPath = path.normalize(line.slice(3));
       if (!files.has(currentPath)) {
         files.set(currentPath, { lineHits: new Map() });
@@ -337,7 +343,9 @@ export async function lcovFromCoverageProfile(
       throw new Error(`deno coverage failed: ${stderr.trim()}`);
     }
 
-    return await Deno.readTextFile(outputPath);
+    // Same generation-point normalization the CI artifact writer applies
+    // (write-coverage-lcov.ts) — this is the LOCAL generation path.
+    return normalizeLcovInstancePaths(await Deno.readTextFile(outputPath));
   } finally {
     try {
       await Deno.remove(tmpDir, { recursive: true });

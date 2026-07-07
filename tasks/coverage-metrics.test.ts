@@ -11,6 +11,7 @@ import {
   shouldTrackSourceFile,
   trackedSourceLineNumbers,
 } from "./coverage-metrics.ts";
+import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 Deno.test("parseLcov accumulates hits per source line", () => {
   const coverage = parseLcov([
@@ -25,6 +26,41 @@ Deno.test("parseLcov accumulates hits per source line", () => {
   const file = coverage.get("/repo/packages/example/src/mod.ts");
   assertEquals(file?.lineHits.get(1), 1);
   assertEquals(file?.lineHits.get(2), 3);
+  assertEquals(countUncoveredProfileLines(file!), 1);
+});
+
+Deno.test("instance-suffix normalization merges records of the same physical file", () => {
+  // Deno's coverage emits one record per module INSTANCE — the same file
+  // appears plain and as `?testRun=<uuid>` once per cache-busting import.
+  // The suffix is stripped at LCOV GENERATION (normalizeLcovInstancePaths,
+  // applied by write-coverage-lcov.ts and the local lcovFromCoverageProfile
+  // path) so every consumer sees one record set per physical file, and a
+  // line counts covered when ANY instance executed it. Without this the debt
+  // metric counted the same physical line once per instance that skipped it,
+  // flapping with test order and punishing added tests (CT-1861).
+  const normalized = normalizeLcovInstancePaths([
+    "SF:/repo/packages/example/src/mod.ts",
+    "DA:1,1",
+    "DA:2,0",
+    "end_of_record",
+    "SF:/repo/packages/example/src/mod.ts?testRun=aaaa-1111",
+    "DA:1,0",
+    "DA:2,2",
+    "DA:3,0",
+    "end_of_record",
+    "SF:/repo/packages/example/src/mod.ts?testRun=bbbb-2222",
+    "DA:3,0",
+    "end_of_record",
+  ].join("\n"));
+  const coverage = parseLcov(normalized);
+
+  assertEquals(coverage.size, 1);
+  const file = coverage.get("/repo/packages/example/src/mod.ts");
+  // Line 1 covered by the plain instance, line 2 by testRun aaaa; line 3 by
+  // neither — the ONLY genuinely uncovered line.
+  assertEquals(file?.lineHits.get(1), 1);
+  assertEquals(file?.lineHits.get(2), 2);
+  assertEquals(file?.lineHits.get(3), 0);
   assertEquals(countUncoveredProfileLines(file!), 1);
 });
 
