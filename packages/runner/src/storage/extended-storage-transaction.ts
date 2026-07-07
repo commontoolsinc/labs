@@ -266,6 +266,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcFlowLabelsPinned = false;
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
+  // Write-once pin for the deployment trust config. Distinct from the slot's
+  // value being defined: the Runtime configures many tx with NO trust config
+  // (`undefined`), and that "no config; every concept guard fails closed"
+  // state must be just as write-once as a configured one — otherwise handler
+  // code reaching the concrete tx via `(cell.tx as any)` could install an
+  // arbitrary config before the concept guards read it (codex P2 on #4563).
+  // Set on the FIRST call (always the Runtime's, in edit()), regardless of
+  // value.
+  #cfcTrustConfigPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -428,13 +437,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.policySnapshot = deepFreeze(snapshot);
   }
 
-  // Deployment trust config for concept-guard satisfaction (Epic B3), same
-  // write-once posture as the policy snapshot above.
+  // Deployment trust config for concept-guard satisfaction (Epic B3). The pin
+  // (not the slot value) enforces write-once: the FIRST call — always the
+  // Runtime's, even when it configures no trust (`undefined`) — pins the slot,
+  // so a later `(cell.tx as any).setCfcTrustConfig(attackerConfig)` is
+  // ignored and the "no config; concept guards fail closed" state holds.
   setCfcTrustConfig(config: CfcTrustConfig | undefined): void {
-    if (this.#cfcState.trustConfig !== undefined || config === undefined) {
-      return;
-    }
-    this.#cfcState.trustConfig = deepFreeze(config);
+    if (this.#cfcTrustConfigPinned) return;
+    this.#cfcTrustConfigPinned = true;
+    this.#cfcState.trustConfig = config === undefined
+      ? undefined
+      : deepFreeze(config);
   }
 
   markCfcRelevant(reason?: string): void {
