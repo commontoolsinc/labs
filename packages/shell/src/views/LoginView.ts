@@ -45,10 +45,9 @@ export class XLoginView extends BaseView {
   static override styles = css`
     :host {
       display: flex;
-      align-items: center;
-      justify-content: center;
       width: 100%;
       height: 100%;
+      overflow-y: auto;
       font-family: var(--font-primary);
     }
 
@@ -56,6 +55,12 @@ export class XLoginView extends BaseView {
       display: flex;
       flex-direction: column;
       align-items: center;
+      /* Auto margins center the card when it fits but — unlike
+        align-items/justify-content centering — keep the overflow
+        reachable by scrolling when the viewport is shorter than
+        the card (e.g. the recovery-phrase screen on mobile). */
+      margin: auto;
+      padding: 1rem 0;
     }
 
     .auth-action-container {
