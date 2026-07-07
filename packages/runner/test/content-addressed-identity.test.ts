@@ -92,10 +92,9 @@ describe("content-addressed action identity", () => {
     // The non-exported `bump` handler registers via the transformer's
     // `__cfReg` hoist; its symbol is the hoist/binding name.
     expect(typeof provenance!.symbol).toBe("string");
-    // The canonical fn.src points into the same module identity.
-    expect((fn as { src?: string }).src ?? "").toContain(
-      `cf:module/${provenance!.identity}`,
-    );
+    // (`fn.src` is no longer asserted here: it is lazy/debug-only and off by
+    // default, and identity no longer depends on it — provenance is the source
+    // of truth above.)
   });
 
   it("serializes javascript modules with $implRef only (no legacy fields)", async () => {
@@ -261,7 +260,10 @@ export default pattern<{ out: string }>(({ out }) => ({
       sourceLocation?: { line: number; column: number };
     };
     expect(verified.moduleIdentity).toBe(getVerifiedProvenance(fn)!.identity);
-    expect(verified.sourceLocation).toBeDefined();
+    // `.src`-derived `sourceLocation` is no longer populated: CFC identity is
+    // re-rooted onto provenance, so no `.src` is read (it can be lazy/absent at
+    // boot). The field stays optional in the type but is not set here.
+    expect(verified.sourceLocation).toBeUndefined();
   });
 
   it("a forged function with identical source fails closed", async () => {

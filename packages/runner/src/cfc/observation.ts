@@ -1,10 +1,12 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
+import { atomEntails, matchAtomPattern } from "./atom-pattern.ts";
 import {
   clauseAlternatives,
   clausesEqual,
@@ -153,21 +155,94 @@ export const cfcObservationFitsCeiling = (
 };
 
 /**
- * Integrity-floor membership (§8.10.3 / §8.12.4.1): every required atom must
- * be structurally present in the carried integrity. Exact-match today — this
- * is THE single shared predicate for the read-side gate
- * (`verifyInputRequirements`), the write-side floor (`verifyWriteFloor`, Epic
+ * Does carried atom `actual` satisfy floor requirement `required`
+ * (§8.10.3)? The requirement is an ATOM PATTERN — `matchAtomPattern`'s
+ * subset-field semantics let a floor name exactly the fields it demands
+ * (`{type: CaveatScreened, verdict: "pass"}` accepts any trusted mint with
+ * those fields) — with `atomEntails` layered for the ordered families.
+ * Exact structural equality is the degenerate case of both, so floors
+ * authored as concrete atoms keep their meaning. Concept-valued
+ * requirements via the trust closure are D5 (this stays a pure predicate).
+ */
+const integrityAtomSatisfies = (
+  required: unknown,
+  actual: unknown,
+): boolean =>
+  matchAtomPattern(required, actual) !== null || atomEntails(actual, required);
+
+/**
+ * Integrity-floor membership (§8.10.3 / §8.12.4.1): every required pattern
+ * must be satisfied by some carried integrity atom. This is THE single
+ * shared predicate for the read-side gate (`verifyInputRequirements`, via
+ * the coherent form below), the write-side floor (`verifyWriteFloor`, Epic
  * D3), and the tool-input floor (llm-dialog, Epic D2), so D5's upgrade to
- * pattern/concept matching (`matchAtomPattern` + `conceptSatisfied`) lands in
- * ONE place instead of diverging across three inlined copies.
+ * concept matching (`conceptSatisfied`) lands in ONE place instead of
+ * diverging across three inlined copies.
  */
 export const cfcIntegritySatisfiesFloor = (
   integrity: readonly unknown[],
   requiredIntegrity: readonly unknown[],
 ): boolean =>
   requiredIntegrity.every((required) =>
-    integrity.some((actual) => deepEqual(actual, required))
+    integrity.some((actual) => integrityAtomSatisfies(required, actual))
   );
+
+/**
+ * Witness key of a floor match (§8.10.3 `witnessKeyForRequiredMatch`): the
+ * canonical identity of the concrete atom that satisfied a requirement, used
+ * to demand ONE shared witness across consumed leaves. Value-bound atoms
+ * keyed by `scope.valueRef` drop `scope.projection` first — two projections
+ * of the same bound value are the same witness. `null` when the atom does
+ * not satisfy the requirement.
+ */
+export const cfcIntegrityWitnessKey = (
+  required: unknown,
+  actual: unknown,
+): string | null => {
+  if (!integrityAtomSatisfies(required, actual)) return null;
+  if (
+    isRecord(actual) && isRecord((actual as { scope?: unknown }).scope) &&
+    (actual as { scope: { valueRef?: unknown } }).scope.valueRef !== undefined
+  ) {
+    const scope = { ...(actual as { scope: Record<string, unknown> }).scope };
+    delete scope.projection;
+    return hashStringOf({ ...actual, scope });
+  }
+  return hashStringOf(actual);
+};
+
+/**
+ * Object-level coherent floor satisfaction (§8.10.3): when one
+ * `requiredIntegrity` requirement spans MULTIPLE consumed descendant leaves,
+ * each requirement must be satisfied by one SHARED witness atom across all
+ * of them — per requirement, the intersection of the leaves' witness-key
+ * sets must be non-empty. Heterogeneous per-leaf witnesses (leaf A satisfies
+ * via one screening atom, leaf B via a different one) fail: "each part was
+ * screened by someone" is not "the object was screened". The single-leaf
+ * case reduces exactly to `cfcIntegritySatisfiesFloor`; an empty leaf set is
+ * vacuously satisfied (nothing was consumed — the caller's quantification
+ * decides whether the gate even runs).
+ */
+export const cfcIntegritySatisfiesFloorCoherently = (
+  consumedIntegrity: readonly (readonly unknown[])[],
+  requiredIntegrity: readonly unknown[],
+): boolean =>
+  requiredIntegrity.every((required) => {
+    let common: Set<string> | undefined;
+    for (const integrity of consumedIntegrity) {
+      const keys = new Set<string>();
+      for (const actual of integrity) {
+        const key = cfcIntegrityWitnessKey(required, actual);
+        if (key !== null) keys.add(key);
+      }
+      if (keys.size === 0) return false;
+      common = common === undefined
+        ? keys
+        : new Set([...common].filter((key) => keys.has(key)));
+      if (common.size === 0) return false;
+    }
+    return true;
+  });
 
 /**
  * The confidentiality CLAUSES in `confidentiality` that fall OUTSIDE `ceiling`

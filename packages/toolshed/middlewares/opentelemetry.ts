@@ -1,5 +1,12 @@
 import { MiddlewareHandler } from "@hono/hono";
-import { context, Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  context,
+  Span,
+  SpanStatusCode,
+  type TextMapGetter,
+  trace,
+} from "@opentelemetry/api";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { getTracerProvider } from "@/lib/otel.ts";
 
 // Dynamically resolve the tracer so we don't capture the no-op global tracer
@@ -8,6 +15,17 @@ const obtainTracer = () => {
   return provider
     ? provider.getTracer("toolshed-middleware", "1.0.0")
     : trace.getTracer("toolshed-middleware", "1.0.0");
+};
+
+// Extract any inbound W3C `traceparent`/`tracestate` so a request span links to
+// the caller's trace (e.g. the browser shell, which stamps traceparent on its
+// telemetry/API calls). No global propagator is registered under Deno, so build
+// one explicitly. When no traceparent is present, `extract` returns the input
+// context unchanged and the span starts as a fresh root — identical to before.
+const propagator = new W3CTraceContextPropagator();
+const headersGetter: TextMapGetter<Headers> = {
+  keys: (carrier) => [...carrier.keys()],
+  get: (carrier, key) => carrier.get(key) ?? undefined,
 };
 
 export interface OtelConfig {
@@ -37,93 +55,114 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
     const path = c.req.path;
     const method = c.req.method;
 
-    await obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
-      span.setAttribute("http.method", method);
-      span.setAttribute("http.host", c.req.header("host") || "unknown");
-      span.setAttribute(
-        "http.user_agent",
-        c.req.header("user-agent") || "unknown",
-      );
+    // Start the request span as a child of any inbound traceparent context.
+    const parentCtx = propagator.extract(
+      context.active(),
+      c.req.raw.headers,
+      headersGetter,
+    );
 
-      // Add request ID if it exists in headers
-      const requestId = c.req.header("x-request-id");
-      if (requestId) {
-        span.setAttribute("http.request_id", requestId);
-      }
+    await context.with(
+      parentCtx,
+      () =>
+        obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
+          span.setAttribute("http.method", method);
+          span.setAttribute("http.host", c.req.header("host") || "unknown");
+          span.setAttribute(
+            "http.user_agent",
+            c.req.header("user-agent") || "unknown",
+          );
 
-      // Add custom attributes if configured
-      if (config.additionalAttributes) {
-        Object.entries(config.additionalAttributes).forEach(([key, value]) => {
-          span.setAttribute(key, value);
-        });
-      }
-
-      // Include request body if configured
-      if (config.includeRequestBody) {
-        try {
-          const bodyClone = c.req.raw.clone();
-          const body = await bodyClone.text();
-          if (body) {
-            span.setAttribute("http.request.body", body);
+          // Add request ID if it exists in headers
+          const requestId = c.req.header("x-request-id");
+          if (requestId) {
+            span.setAttribute("http.request_id", requestId);
           }
-        } catch (_) {
-          /* swallow */
-        }
-      }
 
-      try {
-        // Execute the downstream handlers while this span is active
-        await next();
+          // Add custom attributes if configured
+          if (config.additionalAttributes) {
+            Object.entries(config.additionalAttributes).forEach(
+              ([key, value]) => {
+                span.setAttribute(key, value);
+              },
+            );
+          }
 
-        // Capture status code from response if available
-        if (c.res?.status) {
-          span.setAttribute("http.status_code", c.res.status);
-        }
-
-        // Include response body if configured
-        if (config.includeResponseBody && c.res?.body) {
-          try {
-            const clonedResponse = c.res.clone();
-            const text = await clonedResponse.text();
-            if (text) {
-              span.setAttribute("http.response.body", text);
+          // Include request body if configured
+          if (config.includeRequestBody) {
+            try {
+              const bodyClone = c.req.raw.clone();
+              const body = await bodyClone.text();
+              if (body) {
+                span.setAttribute("http.request.body", body);
+              }
+            } catch (_) {
+              /* swallow */
             }
-          } catch (_) {
-            /* swallow */
           }
-        }
-      } catch (error) {
-        span.setAttribute("error", true);
-        span.setAttribute(
-          "error.message",
-          error instanceof Error ? error.message : String(error),
-        );
-        span.setAttribute(
-          "error.type",
-          error instanceof Error ? error.name : "UnknownError",
-        );
-        span.setStatus({
-          code: SpanStatusCode.ERROR,
-          message: error instanceof Error ? error.message : String(error),
-        });
 
-        if (error instanceof Error && error.stack) {
-          span.setAttribute("error.stack", error.stack);
-        }
+          try {
+            // Execute the downstream handlers while this span is active
+            await next();
 
-        throw error;
-      } finally {
-        // `c.req.routePath` only resolves to the matched route *template* (e.g.
-        // "/api/foo/:id") after `next()` has run; read before, it is this
-        // middleware's own "*", and `path` is the high-cardinality concrete URL.
-        // Set the template now so http.route and the span name aggregate
-        // per-route in the backend instead of exploding cardinality.
-        const route = c.req.routePath || path;
-        span.setAttribute("http.route", route);
-        span.updateName(`${method} ${route}`);
-        span.end();
-      }
-    });
+            // Capture status code from response if available
+            if (c.res?.status) {
+              span.setAttribute("http.status_code", c.res.status);
+            }
+
+            // Include response body if configured
+            if (config.includeResponseBody && c.res?.body) {
+              try {
+                const clonedResponse = c.res.clone();
+                const text = await clonedResponse.text();
+                if (text) {
+                  span.setAttribute("http.response.body", text);
+                }
+              } catch (_) {
+                /* swallow */
+              }
+            }
+          } catch (error) {
+            span.setAttribute("error", true);
+            span.setAttribute(
+              "error.message",
+              error instanceof Error ? error.message : String(error),
+            );
+            span.setAttribute(
+              "error.type",
+              error instanceof Error ? error.name : "UnknownError",
+            );
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: error instanceof Error ? error.message : String(error),
+            });
+
+            if (error instanceof Error && error.stack) {
+              span.setAttribute("error.stack", error.stack);
+            }
+
+            throw error;
+          } finally {
+            // `c.req.routePath` only resolves to the matched route *template* (e.g.
+            // "/api/foo/:id") after `next()` has run; read before, it is this
+            // middleware's own "*", and `path` is the high-cardinality concrete URL.
+            // Set the template now so http.route and the span name aggregate
+            // per-route in the backend instead of exploding cardinality.
+            const route = c.req.routePath || path;
+            span.setAttribute("http.route", route);
+            span.updateName(`${method} ${route}`);
+            // Attribute the request to its space when the route carries a
+            // `:spaceDid` param (resolved only after `next()`). Defensive: no-op if
+            // absent. `user.did` is set by the auth middleware while this span is
+            // active.
+            const spaceDid = c.req.param("spaceDid");
+            if (spaceDid) {
+              span.setAttribute("space.did", spaceDid);
+            }
+            span.end();
+          }
+        }),
+    );
   };
 }
 

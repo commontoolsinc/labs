@@ -43,6 +43,7 @@ import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -862,6 +863,11 @@ export interface IExtendedStorageTransaction
    * Anti-downgrade pinned: once enabled, disabling throws.
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
+  /**
+   * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
+   * Anti-downgrade pinned: once `enforce`, weakening throws.
+   */
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation

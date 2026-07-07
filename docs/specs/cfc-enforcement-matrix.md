@@ -4,14 +4,14 @@ _Epic H, stage H4 (first sub-step), of
 [`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
 Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
 the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
-**which combinations of the four CFC dials are conforming deployment states and
+**which combinations of the five CFC dials are conforming deployment states and
 in what order a deployment may advance them**, before H4 lands `enforce-strict`
 behavior and before H3a flips any shipped host — so the rollout ordering is
 written down first._
 
-## 1. The four dials (all runtime-configured, all orthogonal)
+## 1. The five dials (all runtime-configured, all orthogonal)
 
-CFC has four independent runtime dials. Each is a monotone ladder; none
+CFC has five independent runtime dials. Each is a monotone ladder; none
 subsumes another. Their current homes and defaults:
 
 | Dial | Values (weak → strict) | `Runtime` default | Governs |
@@ -20,6 +20,7 @@ subsumes another. Their current homes and defaults:
 | `cfcFlowLabels` | `off` · `observe` · `persist` | `off` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
 | `cfcWriteFloor` | `off` · `observe` · `enforce` | `off` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
 | `cfcTriggerReadGating` | `false` · `true` | `false` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
+| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `off` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fuelled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
 
 They are orthogonal because they gate different things: the **enforcement mode**
 decides what happens to a recorded reason (ignore / diagnose / reject); the
@@ -27,9 +28,12 @@ decides what happens to a recorded reason (ignore / diagnose / reject); the
 floor** is one more reason-source, itself dialable so it can be observed before
 it rejects; **trigger gating** widens what the existing gates count as consumed
 (a handler scheduled by a labeled write is treated as having read it, even if
-its executed branch never re-reads it). A deployment picks a point in the
-4 × 3 × 3 × 2 cube — but most points are not conforming, and the conforming
-ones are reachable only along a partial order.
+its executed branch never re-reads it); **policy evaluation** rewrites the label
+a gate fits *before* the fit, so a discharge/exchange rule can admit a flow the
+raw label would refuse (and, in `enforce`, a fuel-exhausted or unresolvable
+rewrite becomes a fail-closed reason rather than a silent pass-through). A
+deployment picks a point in the 4 × 3 × 3 × 2 × 3 cube — but most points are not
+conforming, and the conforming ones are reachable only along a partial order.
 
 ### What each enforcement level means
 
@@ -101,10 +105,27 @@ adds:
    read picks it up. Same shape as the write floor in #3: sound anywhere,
    **complete only once flow persists**.
 
+5. **`cfcPolicyEvaluation`: `observe` before `enforce`, and `enforce` only
+   *loosens*.** The evaluator adds alternatives (discharge/exchange), so a
+   rewritten label fits *more* ceilings than the raw one — turning it on can
+   only admit flows the raw label refused, never reject a flow the raw label
+   admitted, EXCEPT the deliberate fail-closed cases: in `enforce`, fuel
+   exhaustion or a policy-lookup failure records a reason instead of passing
+   the un-rewritten label through (invariant 6 — a policy violation disables
+   exchange, it never silently downgrades). So `observe` is the honest
+   dial-up step (diagnose which labels the rewrite would have changed, decide
+   on the un-rewritten label) before `enforce` lets the rewrite actually
+   admit. It is **sound at any flow / enforcement setting** — it consumes the
+   same consumed labels the sink-request and input gates already fit, only
+   rewritten first — so it may advance on its own schedule. It is only
+   *useful* once `cfcPolicyRecords` are configured (an empty policy set makes
+   evaluation a no-op at every setting).
+
 Everything else is free: a deployment may sit at any enforcement level with
 flow `off` (the floor and the explicit gate need no derived labels), and may
-advance `cfcWriteFloor` on its own schedule. The only forbidden moves are
-advancing a *consuming* enforcement ahead of the *production* dial it consumes.
+advance `cfcWriteFloor` / `cfcPolicyEvaluation` on their own schedules. The
+only forbidden moves are advancing a *consuming* enforcement ahead of the
+*production* dial it consumes.
 
 ```
 cfcFlowLabels:   off ──▶ observe ──▶ persist ─────────┐
@@ -113,6 +134,7 @@ cfcEnforcementMode: disabled ▶ observe ▶ enforce-explicit ┘   flow-derived
                                                              + render ceiling (H3b)
 cfcWriteFloor:   off ──▶ observe ──▶ enforce   (independent; complete once flow persists)
 cfcTriggerReadGating: false ──▶ true           (independent; one-hop until flow persists)
+cfcPolicyEvaluation: off ──▶ observe ──▶ enforce  (independent; only loosens, save fail-closed exhaustion)
 ```
 
 ## 3. Conforming deployment states
@@ -132,6 +154,14 @@ dial is not yet producing. The states a deployment is expected to pass through:
 Trigger gating may flip to `true` at any of these states (ordering constraint
 #4: it is sound anywhere) — the table shows it flipping at the end state
 because before `cfcFlowLabels: persist` it closes only the one-hop channel.
+
+`cfcPolicyEvaluation` is omitted from the state columns above because it is
+`off` in every shipped host today (no host passes `cfcPolicyRecords`, so the
+evaluator has no rules to run). It advances on its own schedule (ordering
+constraint #5: sound anywhere, only loosening save fail-closed exhaustion), so
+a deployment adds `observe` then `enforce` alongside whichever of the states
+above it is in, once it configures a policy set (e.g. the §10.1 standard
+prompt-caveat profile).
 
 **Non-conforming** examples (a linter/deploy-check should reject): any
 `enforce-strict` with `cfcFlowLabels ≠ persist` (strict consumes derived labels

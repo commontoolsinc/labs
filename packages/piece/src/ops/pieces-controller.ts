@@ -14,6 +14,7 @@ import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ACLManager } from "./acl-manager.ts";
 import { homeSchema } from "@commonfabric/home-schemas";
@@ -21,19 +22,24 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+// Same logger as manager.ts's timePiecePhase: timing stats record even while
+// the logger is disabled, so controller phases show up in the load summaries
+// (browser worker included) as `piece/phase/<label>`.
+const pieceTimingLogger = getLogger("piece", { enabled: false });
+
 async function timePiecesPhase<T>(
   label: string,
   run: () => T | Promise<T>,
 ): Promise<T> {
-  if (!PIECE_TRACE_TIMINGS) {
-    return await run();
-  }
   const start = performance.now();
   try {
     return await run();
   } finally {
-    const elapsed = Math.round(performance.now() - start);
-    console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+    pieceTimingLogger.time(start, "phase", label);
+    if (PIECE_TRACE_TIMINGS) {
+      const elapsed = Math.round(performance.now() - start);
+      console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+    }
   }
 }
 

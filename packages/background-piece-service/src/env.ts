@@ -56,6 +56,7 @@ const envSchema = z.object({
   // other boolean env vars in this file have the same latent bug.
   EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
+  EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: flagValue(),
   // Background Piece Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
