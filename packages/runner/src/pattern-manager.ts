@@ -32,6 +32,7 @@ import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
+  loadVerifiedSourceClosureOutcome,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
@@ -39,6 +40,10 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
+import {
+  isDeterministicCompileFailure,
+  markDeterministicCompileFailure,
+} from "./harness/compile-failure.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -144,6 +149,23 @@ export class PatternManager {
     string,
     Promise<Pattern | undefined>
   >();
+  // Negative-result memo for by-identity cold loads (CT-1838 companion
+  // hardening): without it, a deterministically-unloadable identity re-runs
+  // closure read + verify + compile-throw on EVERY referencing tick — the
+  // recurring throw loop that fed the CT-1840 CPU starvation picture. Keyed
+  // `${space}\0${entryIdentity}`, value records the runtimeVersion the
+  // failure was observed under (a version change re-opens the attempt).
+  // ONLY deterministic outcomes are memoized: verification mismatch over a
+  // COMPLETE closure, and compile failures the engine marked deterministic
+  // (pure compute over content-addressed bytes). NEVER absent/incomplete
+  // closures or storage/resolver errors — a boot-time blip must not brick a
+  // pattern for the session (see harness/compile-failure.ts). Session-scoped
+  // (instance field ⇒ cleared on runtime restart); bounded FIFO.
+  private coldLoadNegativeMemo = new Map<
+    string,
+    { runtimeVersion: string | undefined; reason: string }
+  >();
+  private static readonly COLD_LOAD_NEGATIVE_MEMO_MAX = 512;
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -866,8 +888,21 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Negative memo BEFORE the single-flight lookup: the follower-retry
+    // recursion below re-enters this method from the top, so followers of a
+    // deterministically-failed leader resolve here instead of each becoming
+    // the leader of one more full failed load per wave.
     const key = `${space}\0${entryIdentity}`;
+    if (this.coldLoadNegativeMemo.size > 0) {
+      const negative = this.coldLoadNegativeMemo.get(key);
+      if (
+        negative !== undefined &&
+        negative.runtimeVersion === await getCompileCacheRuntimeVersion()
+      ) {
+        return undefined;
+      }
+    }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.loadPatternByIdentityFromStorage(
@@ -986,6 +1021,39 @@ export class PatternManager {
   }
 
   /**
+   * Record a DETERMINISTIC by-identity cold-load failure so subsequent loads
+   * of the same `(space, identity)` short-circuit for the rest of the session
+   * (or until the runtimeVersion changes). Callers must only pass outcomes
+   * that are pure functions of the stored bytes — see `coldLoadNegativeMemo`.
+   * Logged at `error` once, at memo-write time; memo hits are silent.
+   */
+  private memoizeColdLoadFailure(
+    space: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+    reason: string,
+  ): void {
+    if (
+      this.coldLoadNegativeMemo.size >=
+        PatternManager.COLD_LOAD_NEGATIVE_MEMO_MAX
+    ) {
+      const oldest = this.coldLoadNegativeMemo.keys().next().value;
+      if (oldest !== undefined) this.coldLoadNegativeMemo.delete(oldest);
+    }
+    this.coldLoadNegativeMemo.set(`${space}\0${entryIdentity}`, {
+      runtimeVersion,
+      reason,
+    });
+    logger.error("load-pattern-by-identity-negative-memo", () => [
+      `entry=${entryIdentity}`,
+      `space=${space}`,
+      `runtimeVersion=${runtimeVersion}`,
+      `reason=${reason}`,
+      "further loads of this identity are memoized as failed for this session",
+    ]);
+  }
+
+  /**
    * Runtime-version-bump recovery for a content-addressed pattern reference:
    * recompile from the verified source closure, letting fabric imports refetch
    * their own source closures from the same space.
@@ -998,9 +1066,9 @@ export class PatternManager {
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
     const readTx = this.runtime.edit();
-    let sourceDocs;
+    let sourceLoad;
     try {
-      sourceDocs = await loadVerifiedSourceClosure(
+      sourceLoad = await loadVerifiedSourceClosureOutcome(
         this.runtime,
         space,
         entryIdentity,
@@ -1009,7 +1077,26 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
+    if (sourceLoad.outcome === "verify-failed") {
+      // Deterministic ONLY for identity mismatches over a COMPLETE closure:
+      // the loaded bytes do not hash to their keys, and content-addressed
+      // docs are immutable, so retrying cannot succeed. `missing` entries may
+      // be a transient partial sync — never memoized.
+      const { verification } = sourceLoad;
+      if (
+        verification.mismatches.length > 0 && verification.missing.length === 0
+      ) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          `source-closure verify mismatch (${verification.mismatches.length} module(s))`,
+        );
+      }
+      return undefined;
+    }
+    if (sourceLoad.outcome === "absent") return undefined;
+    const sourceDocs = sourceLoad.closure;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
 
@@ -1025,8 +1112,12 @@ export class PatternManager {
         { fabricImports: { space } },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw new Error(
-          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+        // Deterministic: recompiling the same content-addressed bytes yields
+        // the same identity every time.
+        throw markDeterministicCompileFailure(
+          new Error(
+            `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+          ),
         );
       }
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(
@@ -1073,6 +1164,18 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
+      // Memoize ONLY failures the engine marked deterministic (pure compute
+      // over the verified stored bytes — e.g. a compile/guard throw or an
+      // identity mismatch). Resolver/storage/evaluation errors stay
+      // unmemoized and are retried on the next load.
+      if (isDeterministicCompileFailure(error)) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          String(error),
+        );
+      }
       return undefined;
     }
   }
