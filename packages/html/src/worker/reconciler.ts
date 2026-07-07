@@ -775,15 +775,26 @@ export class WorkerReconciler {
     return schema;
   }
 
+  /**
+   * A cell's CFC label view, mirroring the render gate's resolution: the cell's
+   * own view, or — when it has none — the resolved (followed) target's view,
+   * whose label may carry the `Space(...)` atoms. May throw (each caller
+   * decides its own fail-closed handling). The SINGLE source of label
+   * resolution shared by the gate (`canRenderCellUnderPolicy`), the
+   * represents-principal read, and the Stage-2 membership watcher
+   * (`watchCellMembership`), so they can never drift out of lockstep.
+   */
+  private resolveCellLabelView(cell: Cell<unknown>): CfcLabelView | undefined {
+    return cfcLabelViewForCell(cell) ??
+      cfcLabelViewForCell(cell.resolveAsCell());
+  }
+
   private representsPrincipalSubjectForCell(
     cell: Cell<unknown>,
   ): string | undefined {
     let labelView: CfcLabelView | undefined;
     try {
-      labelView = cfcLabelViewForCell(cell);
-      if (labelView === undefined) {
-        labelView = cfcLabelViewForCell(cell.resolveAsCell());
-      }
+      labelView = this.resolveCellLabelView(cell);
     } catch {
       return undefined;
     }
@@ -998,10 +1009,7 @@ export class WorkerReconciler {
 
     let labelView: CfcLabelView | undefined;
     try {
-      labelView = cfcLabelViewForCell(cell);
-      if (labelView === undefined) {
-        labelView = cfcLabelViewForCell(cell.resolveAsCell());
-      }
+      labelView = this.resolveCellLabelView(cell);
     } catch {
       return false;
     }
@@ -1152,9 +1160,13 @@ export class WorkerReconciler {
     if (provider === undefined) {
       return;
     }
+    // Read the label the render gate reads (`resolveCellLabelView`, including
+    // the followed-target fallback) so the watcher and the fit stay in
+    // lockstep — a followed cell whose `Space(...)` label lives on the target
+    // is watched, not silently left un-upgradable.
     let labelView: CfcLabelView | undefined;
     try {
-      labelView = cfcLabelViewForCell(cell);
+      labelView = this.resolveCellLabelView(cell);
     } catch {
       labelView = undefined;
     }
