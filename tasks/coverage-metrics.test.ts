@@ -11,6 +11,7 @@ import {
   shouldTrackSourceFile,
   trackedSourceLineNumbers,
 } from "./coverage-metrics.ts";
+import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 Deno.test("parseLcov accumulates hits per source line", () => {
   const coverage = parseLcov([
@@ -28,14 +29,16 @@ Deno.test("parseLcov accumulates hits per source line", () => {
   assertEquals(countUncoveredProfileLines(file!), 1);
 });
 
-Deno.test("parseLcov merges per-instance records of the same physical file", () => {
+Deno.test("instance-suffix normalization merges records of the same physical file", () => {
   // Deno's coverage emits one record per module INSTANCE — the same file
-  // appears plain and as `?testRun=<uuid>` once per importing test file.
-  // Instances must merge so a line counts covered when ANY instance executed
-  // it; otherwise the debt metric counts the same physical line once per
-  // instance that skipped it, flapping with test order and punishing added
-  // tests (CT-1861).
-  const coverage = parseLcov([
+  // appears plain and as `?testRun=<uuid>` once per cache-busting import.
+  // The suffix is stripped at LCOV GENERATION (normalizeLcovInstancePaths,
+  // applied by write-coverage-lcov.ts and the local lcovFromCoverageProfile
+  // path) so every consumer sees one record set per physical file, and a
+  // line counts covered when ANY instance executed it. Without this the debt
+  // metric counted the same physical line once per instance that skipped it,
+  // flapping with test order and punishing added tests (CT-1861).
+  const normalized = normalizeLcovInstancePaths([
     "SF:/repo/packages/example/src/mod.ts",
     "DA:1,1",
     "DA:2,0",
@@ -49,6 +52,7 @@ Deno.test("parseLcov merges per-instance records of the same physical file", () 
     "DA:3,0",
     "end_of_record",
   ].join("\n"));
+  const coverage = parseLcov(normalized);
 
   assertEquals(coverage.size, 1);
   const file = coverage.get("/repo/packages/example/src/mod.ts");

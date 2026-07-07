@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
+import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
@@ -273,16 +274,12 @@ export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
 
   for (const line of lcov.split(/\r?\n/)) {
     if (line.startsWith("SF:")) {
-      // Strip any query suffix before keying: Deno's coverage emits a
-      // separate record per module INSTANCE (e.g. `foo.ts?testRun=<uuid>`
-      // per importing test file), and keying on the raw path counted the
-      // same physical line as debt once per instance that didn't execute
-      // it. That made the debt metric flap ±1-5 lines with test order and
-      // timing — and made ADDING a test able to increase "uncovered lines"
-      // (its fresh instances carry red lines for whatever they don't
-      // execute). Merging instances measures real per-file coverage: a line
-      // is covered when ANY instance executed it (CT-1861).
-      currentPath = path.normalize(line.slice(3).split("?")[0]);
+      // Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
+      // normalized away at LCOV GENERATION (write-coverage-lcov.ts,
+      // `normalizeLcovInstancePaths` — CT-1861), so records arriving here
+      // already share one path per physical file; duplicate `SF:` sections
+      // accumulate into the same entry below.
+      currentPath = path.normalize(line.slice(3));
       if (!files.has(currentPath)) {
         files.set(currentPath, { lineHits: new Map() });
       }
@@ -346,7 +343,9 @@ export async function lcovFromCoverageProfile(
       throw new Error(`deno coverage failed: ${stderr.trim()}`);
     }
 
-    return await Deno.readTextFile(outputPath);
+    // Same generation-point normalization the CI artifact writer applies
+    // (write-coverage-lcov.ts) — this is the LOCAL generation path.
+    return normalizeLcovInstancePaths(await Deno.readTextFile(outputPath));
   } finally {
     try {
       await Deno.remove(tmpDir, { recursive: true });
