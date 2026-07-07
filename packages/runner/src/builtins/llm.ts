@@ -70,8 +70,11 @@ const PARTIAL_BATCH_MS = 66;
 // stamp their model-output writebacks with an explicit `LlmDerived` provenance
 // atom — the same mark D1 attaches to dialog messages. `llm`/`generateText`
 // write `result`/`partial` through {@link LLM_DERIVED_RESULT_STAMP_SCHEMA};
-// `generateObject` merges the stamp into the (possibly custom) resultSchema root
-// via `withLlmDerivedStamp`. Both apply the stamp at the WRITE, not on the shared
+// `generateObject` merges the stamp into EVERY node of the (possibly custom)
+// resultSchema via `withLlmDerivedStamp`, so it also rides split child-document
+// writes (`asCell` fields, ID-anchored array items) whose descent via
+// `getSchemaAtPath` would otherwise drop `ifc.addIntegrity`. Both apply the
+// stamp at the WRITE, not on the shared
 // result schema, so the builtins' control-state writes (initial-run / error-path
 // `pending`/`result=undefined` resets, and the transient streaming `partial`
 // batches) stay CFC-inert — only the final model bytes are stamped and made
@@ -112,30 +115,98 @@ function setStampedModelOutput(
   cell.withTx(tx).set(value);
 }
 
+/** Merge `LlmDerived` into one schema node's `ifc.addIntegrity`, idempotently. */
+function mergeLlmDerivedIntoNode(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
+  const stamp = cfcAtom.llmDerived();
+  const already = addIntegrity.some((atom) =>
+    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+  );
+  return {
+    ...node,
+    ifc: {
+      ...ifc,
+      addIntegrity: already ? addIntegrity : [...addIntegrity, stamp],
+    },
+  };
+}
+
 /**
- * Merge the `LlmDerived` stamp into a generateObject result schema's ROOT
- * `ifc.addIntegrity`, so it rides the (possibly custom / injection-safe)
- * resultSchema write to wherever the object lands — inline at `["result"]` or a
- * split child doc — the way the InjectionSafe sanitizer's per-field annotations
- * already persist. An absent resultSchema defaults to a plain object schema.
+ * Deep-merge the `LlmDerived` stamp into a generateObject result schema's
+ * `ifc.addIntegrity` at EVERY node — the root AND every nested property / item /
+ * `$defs` / compound-branch node — so it rides the (possibly custom /
+ * injection-safe) resultSchema write to wherever the model bytes land, whether
+ * inline at `["result"]` or in a SPLIT CHILD DOCUMENT.
+ *
+ * A root-only merge is not enough: when a nested value redirects/splits into its
+ * own document (an `asCell` field, an ID-anchored array item), the child write
+ * descends via `runtime.cfc.getSchemaAtPath`, which carries ancestor
+ * confidentiality but NOT `ifc.addIntegrity`. The child doc that stores the
+ * model bytes would then persist as unstamped/ordinary output and the D1b
+ * provenance guarantee would be lost for structured results (codex P1). Stamping
+ * every node keeps `getSchemaAtPath` at any split-child path carrying the mark,
+ * so `walkIfcSchema` mints the `LlmDerived` labelMap entry on that child doc too.
+ *
+ * The merge is idempotent (an injection-safe schema that already carries the
+ * stamp on a node is left unchanged) and cycle-safe over recursive `$ref`
+ * schemas. An absent resultSchema defaults to a plain object schema.
  */
 function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
-  const base: Record<string, unknown> = isRecord(schema)
+  const seen = new Map<object, JSONSchema>();
+  const stampNode = (node: JSONSchema): JSONSchema => {
+    if (!isRecord(node)) return node;
+    const cached = seen.get(node);
+    if (cached !== undefined) return cached;
+    // Reserve the slot before recursing so a `$ref` cycle resolves to the same
+    // (in-progress) node rather than recursing forever. The placeholder is the
+    // stamped-but-not-yet-descended node; children are filled in below.
+    const stamped = mergeLlmDerivedIntoNode(node);
+    seen.set(node, stamped as JSONSchema);
+
+    const descend = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(descend);
+      if (isRecord(value)) return stampNode(value as JSONSchema);
+      return value;
+    };
+
+    for (
+      const key of [
+        "properties",
+        "$defs",
+        "patternProperties",
+      ]
+    ) {
+      const container = stamped[key];
+      if (isRecord(container)) {
+        stamped[key] = Object.fromEntries(
+          Object.entries(container).map(([k, v]) => [k, descend(v)]),
+        );
+      }
+    }
+    for (const key of ["items", "additionalProperties", "prefixItems"]) {
+      if (key in stamped) stamped[key] = descend(stamped[key]);
+    }
+    for (const key of ["anyOf", "oneOf", "allOf"]) {
+      if (Array.isArray(stamped[key])) stamped[key] = descend(stamped[key]);
+    }
+    return stamped as JSONSchema;
+  };
+
+  const base: JSONSchema = isRecord(schema)
     ? schema
-    : { type: "object" };
-  const ifc = isRecord(base.ifc) ? base.ifc : {};
-  const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
-  return internSchema({
-    ...base,
-    ifc: { ...ifc, addIntegrity: [...addIntegrity, cfcAtom.llmDerived()] },
-  } as JSONSchema);
+    : { type: "object" } as JSONSchema;
+  return internSchema(stampNode(base));
 }
 
 /**
  * Write a generateObject model-output object through its (possibly custom)
- * resultSchema, with the `LlmDerived` stamp merged into the schema root. When
- * CFC is disabled, writes through the bare resultSchema so no metadata is minted
- * — keeping the disabled deployment CFC-inert.
+ * resultSchema, with the `LlmDerived` stamp merged into every schema node (so it
+ * lands on split child documents too). When CFC is disabled, writes through the
+ * bare resultSchema so no metadata is minted — keeping the disabled deployment
+ * CFC-inert.
  */
 function setStampedObjectResult(
   tx: IExtendedStorageTransaction,

@@ -12,6 +12,8 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { parseLink } from "../src/link-utils.ts";
 import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -46,6 +48,36 @@ function resultIntegrity(result: Cell<any>): unknown[] {
 /** The persisted integrity on a builtin's model-output `partial` field. */
 function partialIntegrity(result: Cell<any>): unknown[] {
   return integrityAtomsAt(result.key("partial").resolveAsCell());
+}
+
+/**
+ * The integrity persisted in the labelMap of the OWN document a child cell
+ * splits into (a schema `asCell` field / ID-anchored item lands the model bytes
+ * in a separate doc). Read the child doc's persisted metadata directly by its
+ * own id — this is the label a downstream integrity check (a `requiredIntegrity`
+ * floor, a cross-space read) sees for those bytes, independent of any ancestor
+ * entry on the parent document that a label view would rebase over the child.
+ */
+function childDocIntegrity(
+  runtime: Runtime,
+  childCell: Cell<any>,
+): unknown[] {
+  const rtx = runtime.edit();
+  try {
+    const raw = childCell.withTx(rtx).getRaw();
+    const link = parseLink(raw);
+    if (link?.id === undefined) return [];
+    const metadata = readStoredCfcMetadata(rtx, {
+      space: link.space ?? space,
+      id: link.id,
+      scope: link.scope === "inherit" ? undefined : link.scope,
+    });
+    return (metadata?.labelMap.entries ?? []).flatMap(
+      (entry) => entry.label.integrity ?? [],
+    );
+  } finally {
+    rtx.commit();
+  }
 }
 
 function waitForPendingToBecomeFalse(result: Cell<any>) {
@@ -361,6 +393,85 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
 
     expect(result.key("result").get()).toEqual({ verdict: "model-produced" });
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
+  });
+
+  it("stamps a `generateObject` result whose schema splits model bytes into a child doc", async () => {
+    // Codex P1: when the resultSchema redirects/splits a nested value into its
+    // OWN document (here an `asCell` array item), the model-produced bytes land
+    // in that separate child doc. The D1b stamp is merged only into the schema
+    // ROOT (`withLlmDerivedStamp`); the child write descends via
+    // `runtime.cfc.getSchemaAtPath`, which carries ancestor confidentiality but
+    // NOT `ifc.addIntegrity`. So the child doc that actually stores the model
+    // bytes must still carry `LlmDerived` in its persisted labelMap — otherwise
+    // a later integrity check reading that child doc by its own id sees ordinary,
+    // unstamped output and the provenance guarantee is lost for structured
+    // results. A custom resultSchema only reaches the writeback with
+    // `schemaSanitizePromptInjection` on.
+    const testPrompt = "d1b-generateObject-child-doc-stamp";
+    const objectSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            // Each item splits into its own entity document on write.
+            asCell: ["cell"],
+          },
+        },
+      },
+      required: ["items"],
+    };
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.schema.type === "object",
+      {
+        object: { items: [{ name: "alpha" }, { name: "beta" }] },
+        id: "d1b-go-child-doc-1",
+      },
+    );
+
+    const testPattern = builder.pattern(() =>
+      builder.generateObject({
+        prompt: testPrompt,
+        schema: objectSchema,
+        schemaSanitizePromptInjection: true,
+      })
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "d1b-generateObject-child-doc-result",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("result").get()).toEqual({
+      items: [{ name: "alpha" }, { name: "beta" }],
+    });
+
+    // Each item is its own document; read the model bytes' OWN persisted label.
+    const items = result.key("result").key("items") as unknown as Cell<any>;
+    const firstItem = items.key(0) as unknown as Cell<any>;
+    const secondItem = items.key(1) as unknown as Cell<any>;
+
+    // Sanity: the items really do split into their own documents.
+    expect(parseLink(firstItem.withTx().getRaw())?.id).toBeDefined();
+
+    expect(childDocIntegrity(runtime, firstItem)).toContainEqual(
+      LLM_DERIVED_ATOM,
+    );
+    expect(childDocIntegrity(runtime, secondItem)).toContainEqual(
+      LLM_DERIVED_ATOM,
+    );
   });
 
   it("does not stamp the `llm` result when CFC enforcement is disabled", async () => {
