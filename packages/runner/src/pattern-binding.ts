@@ -480,7 +480,18 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       // binding channel, including the directly-invoked-sub-pattern node.
       const ref = getArtifactEntryRef(binding);
       if (ref !== undefined) {
-        return { $patternRef: { identity: ref.identity, symbol: ref.symbol } };
+        // Match `patternToJSON`'s JSON-boundary form EXACTLY (json-utils.ts):
+        // the ref PLUS the two schemas. The schemas "ride along so consumers
+        // can read them without resolving" (e.g. llm-dialog tool schemas) and,
+        // critically, satisfy the `Pattern` schema — `{ argumentSchema,
+        // resultSchema }` are required there, so a bare `{ $patternRef }` bound
+        // into a pattern-typed field would fail validation and stall the
+        // action/handler that reads it.
+        return {
+          $patternRef: { identity: ref.identity, symbol: ref.symbol },
+          argumentSchema: binding.argumentSchema,
+          resultSchema: binding.resultSchema,
+        };
       }
       // No entry ref: a manually-constructed / bare-Engine pattern with no live
       // canonical to resolve to. Preserve the legacy behavior — a callable

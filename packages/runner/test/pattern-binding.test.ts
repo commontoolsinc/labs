@@ -533,16 +533,19 @@ describe("pattern-binding", () => {
         resultCell,
       ) as { op: unknown };
 
-      // The pattern value is a compact sentinel, not a copied full graph.
+      // The pattern value is the compact JSON-boundary form (matching
+      // `patternToJSON`): the ref + the two schemas, NOT a copied full graph.
       expect(isPatternRefSentinel(result.op)).toBe(true);
-      expect(result.op).toEqual({
-        $patternRef: {
-          identity: entryRef!.identity,
-          symbol: entryRef!.symbol,
-        },
+      const op = result.op as Record<string, unknown>;
+      expect(op.$patternRef).toEqual({
+        identity: entryRef!.identity,
+        symbol: entryRef!.symbol,
       });
-      // It has NO embedded graph — no nodes/argumentSchema leaked through.
-      expect((result.op as Record<string, unknown>).nodes).toBeUndefined();
+      // Schemas ride along (consumers read them without resolving; satisfies
+      // the `Pattern` schema), but the node graph does NOT.
+      expect(op.argumentSchema).toEqual(compiled.argumentSchema);
+      expect(op.resultSchema).toEqual(compiled.resultSchema);
+      expect(op.nodes).toBeUndefined();
       // ...and it round-trips back to the exact live canonical object.
       expect(resolveStoredPattern(runtime, result.op)).toBe(compiled);
     });
