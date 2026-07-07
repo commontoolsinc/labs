@@ -59,8 +59,12 @@ export function isTerminalRejection(
  * The event-handler commit path treats the same rejection as the signal to
  * apply committed-write backpressure: re-running the handler against fresh
  * confirmed state and committing again can succeed, so a conflict is retried
- * with backoff rather than dropped. Handler-initiated aborts and system errors
- * are not conflicts and keep their bounded retry budget.
+ * with backoff rather than dropped. It windows the local stale-basis guard
+ * (`isStorageTransactionInconsistent`) the same way. Every other non-permanent
+ * rejection there — a handler-initiated abort, an authorization denial, a
+ * transport or malformed-store error — is not a stale basis and cannot converge
+ * by re-running, so it drops fast rather than entering the window (see
+ * `classifyCommitDisposition` in scheduler/events.ts).
  */
 export function isConflictRejection(
   error: { name?: string } | undefined | null,

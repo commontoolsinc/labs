@@ -286,8 +286,8 @@ describe("committed-write backpressure", () => {
       const terminalErrors: ErrorWithContext[] = [];
       runtime.scheduler.onError((error) => terminalErrors.push(error));
 
-      // Eight conflicts: well past DEFAULT_RETRIES_FOR_EVENTS (5). The old
-      // fixed-budget path gives up after ~6 attempts and drops the write.
+      // Eight conflicts: well past the old fixed budget of five. That path gave
+      // up after ~6 attempts and dropped the write; the window keeps retrying.
       const injector = rejectServerTransacts(storageManager, 8, {
         name: "ConflictError",
         message: "forced transient conflict",
@@ -309,6 +309,57 @@ describe("committed-write backpressure", () => {
         // The handler re-ran for each failed attempt plus the success.
         expect(piece.invocations()).toBeGreaterThanOrEqual(9);
         // The write converged, so no terminal error.
+        expect(terminalErrors).toHaveLength(0);
+      } finally {
+        injector.restore();
+      }
+    },
+  );
+
+  it(
+    "drops a write on a non-stale-basis transient error rather than windowing it",
+    async () => {
+      // Only a stale basis (a ConflictError, or a StorageTransactionInconsistent)
+      // is windowed, because only a stale basis converges by re-running. A
+      // non-permanent rejection that is not a stale basis — the server normalizes
+      // an unrecognized rejection name to "TransactionError" — cannot be resolved
+      // by re-running, so it fails fast: the handler runs once, the write drops,
+      // and the retry window is never entered.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-nonstalebasis-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const terminalErrors: ErrorWithContext[] = [];
+      runtime.scheduler.onError((error) => terminalErrors.push(error));
+
+      // Reject every commit with a non-stale-basis error. Were it wrongly
+      // windowed, the handler would re-run and ride past these injections.
+      const injector = rejectServerTransacts(storageManager, 8, {
+        name: "TransientCommitError",
+        message: "forced non-stale-basis transient error",
+      });
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-nonstalebasis:0:backpressure-nonstalebasis-root",
+        );
+
+        // Give any erroneous retry a chance to run, then confirm none did.
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await runtime.idle();
+
+        // Failed fast: the handler ran exactly once (no windowed re-queue) and
+        // the write did not land.
+        expect(piece.invocations()).toBe(1);
+        expect(piece.total()).toBe(0);
+        // A fast-fail drop is not a terminal convergence error.
         expect(terminalErrors).toHaveLength(0);
       } finally {
         injector.restore();

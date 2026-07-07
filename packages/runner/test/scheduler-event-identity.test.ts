@@ -62,7 +62,7 @@ describe("scheduler event identity", () => {
     }, {
       eventLink,
       event: { value: 1 },
-      retries: 1,
+      retries: true,
       doNotLoadPieceIfNotRunning: false,
       eventId: "evt:provided:0:of:event-stream",
       originTx,

@@ -379,7 +379,7 @@ add-wins-after-delete ordering, so a pin removed while a stale add is in flight
 would reappear, which is a semantic change worth weighing for an owner-protected
 list.
 
-## Residual: profile-append-during-rehydration (closed by mergeable-op retry windowing)
+## Residual: profile-append-during-rehydration (closed by stale-basis retry windowing)
 
 This work was motivated by profile creates being lost when issued while the home
 space is rehydrating. The mergeable-append mechanism here is necessary for that
@@ -407,19 +407,22 @@ whose `ProfileHome` exists but which is absent from the home list, so the durabl
 count of `profiles` ends at one.
 
 The fix routes the storm's stale-basis inconsistency through the windowed-retry
-path a `ConflictError` already used — rather than the fixed budget — when the
-commit carries a mergeable op. A `StorageTransactionInconsistent` is a same-basis
-race: a value the transaction read changed on this replica between the read and
-the commit, which re-running against fresh state resolves. A mergeable op's
-durable intent commutes, so retrying it is always safe and it lands once the
-storm clears. The extra windowing is scoped to that stale-basis error: an
-authorization failure, a malformed store op, or a transport error still keeps the
-fixed budget even with a mergeable op present, because re-running cannot resolve
-it. A commit that genuinely cannot converge within the retry window surfaces a
-loud `CommitConvergenceError` instead of silently dropping the append. See
-`classifyCommitDisposition` in `packages/runner/src/scheduler/events.ts`, and the
-regression test
-`packages/runner/test/mergeable-append-multispace-conflict.test.ts`, which
-injects a stale-basis inconsistency storm longer than the fixed budget on the
-home-space commit of a multi-space mergeable append and asserts the append
-survives durably.
+path a `ConflictError` already used, rather than the fixed budget. A
+`StorageTransactionInconsistent` is a same-basis race: a value the transaction
+read changed on this replica between the read and the commit, which re-running
+against fresh state resolves, so it is windowed like a conflict and lands once
+the storm clears. The mergeable append commutes, so retrying it is always safe.
+Windowing applies to every `StorageTransactionInconsistent`, whether or not the
+commit carries a mergeable op — an earlier version scoped it to mergeable-op
+commits, but a stale basis converges by re-running regardless, and the receipt
+machinery keeps the re-run from double-applying, so the gate was unnecessary. A
+non-stale-basis rejection — an authorization failure, a malformed store op, or a
+transport error — is not windowed: re-running cannot resolve it, so it drops on
+the first attempt rather than burning the window. A stale basis that cannot
+converge within the retry window surfaces a loud `CommitConvergenceError` instead
+of silently dropping the append. See `classifyCommitDisposition` in
+`packages/runner/src/scheduler/events.ts`, and the regression test
+`packages/runner/test/mergeable-append-multispace-conflict.test.ts`, which injects
+a stale-basis inconsistency storm on the home-space commit of a multi-space
+mergeable append and asserts the append survives durably, alongside a companion
+case that asserts a non-stale-basis rejection fails fast.
