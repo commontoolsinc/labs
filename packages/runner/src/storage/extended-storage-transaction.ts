@@ -64,6 +64,7 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsumedRead,
@@ -274,6 +275,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // (codex P1 on #4562). Set on the FIRST call (always the Runtime's, in
   // edit()), regardless of value.
   #cfcPolicySnapshotPinned = false;
+  // Write-once pin for the deployment trust config. Distinct from the slot's
+  // value being defined: the Runtime configures many tx with NO trust config
+  // (`undefined`), and that "no config; every concept guard fails closed"
+  // state must be just as write-once as a configured one — otherwise handler
+  // code reaching the concrete tx via `(cell.tx as any)` could install an
+  // arbitrary config before the concept guards read it (codex P2 on #4563).
+  // Set on the FIRST call (always the Runtime's, in edit()), regardless of
+  // value.
+  #cfcTrustConfigPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -422,7 +432,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
   }
 
-  // Deployment policy snapshot for the exchange-rule evaluator (Epic B2a),
   // set once by the Runtime at tx creation. Write-once, off the public tx
   // interface, deep-frozen on store. The pin (not the slot value) is what
   // enforces write-once: the FIRST call — always the Runtime's, even when it
@@ -436,6 +445,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.policySnapshot = snapshot === undefined
       ? undefined
       : deepFreeze(snapshot);
+  }
+
+  // Deployment trust config for concept-guard satisfaction (Epic B3). The pin
+  // (not the slot value) enforces write-once: the FIRST call — always the
+  // Runtime's, even when it configures no trust (`undefined`) — pins the slot,
+  // so a later `(cell.tx as any).setCfcTrustConfig(attackerConfig)` is
+  // ignored and the "no config; concept guards fail closed" state holds.
+  setCfcTrustConfig(config: CfcTrustConfig | undefined): void {
+    if (this.#cfcTrustConfigPinned) return;
+    this.#cfcTrustConfigPinned = true;
+    this.#cfcState.trustConfig = config === undefined
+      ? undefined
+      : deepFreeze(config);
   }
 
   markCfcRelevant(reason?: string): void {
