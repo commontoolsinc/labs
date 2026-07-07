@@ -161,6 +161,7 @@ export {
 export {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
+  type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloorCoherently,
   cfcIntegrityWitnessKey,
   cfcJsonPointerForPath,

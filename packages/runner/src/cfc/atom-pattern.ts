@@ -279,6 +279,54 @@ export const instantiateAtomPattern = (
   bindings: AtomPatternBindings,
 ): { value: unknown } | null => instantiateValue(pattern, bindings);
 
+/**
+ * A concept-valued integrity guard (spec §4.4.5): a CONCRETE `Concept` atom
+ * pattern. Satisfied exclusively via the acting principal's trust closure —
+ * never by pool-matching a literal Concept atom (which carried integrity
+ * cannot legitimately contain; the mint gate strips it). Returns `undefined`
+ * for non-concept-shaped patterns (they route to ordinary pool matching) and
+ * `{ uri: undefined }` — a concept guard that is NEVER satisfied — for any
+ * `Concept`-typed pattern that is not the EXACT concrete two-field shape
+ * `{ type, uri: <non-empty string> }`.
+ *
+ * The exact-shape requirement is load-bearing (codex/cubic P2 on #4564):
+ * concept guards are checked ONLY on `type` + trust closure, so extra
+ * constraint fields (`{ type: Concept, uri, subject: … }`) or a smuggled
+ * `var` key would be silently ignored — an over-constrained guard the author
+ * wrote as narrow would fire as broadly as the bare concept. Anything but the
+ * canonical shape fails closed.
+ *
+ * Shared by the exchange-rule evaluator (B4 rule guards) and the integrity
+ * floors (D5, observation.ts): one recognizer, so a Concept-typed entry means
+ * the same thing in a rule precondition and a `requiredIntegrity` floor.
+ */
+export const conceptGuard = (
+  pattern: unknown,
+): { uri: string | undefined } | undefined => {
+  // `isRecord` admits arrays (`typeof [] === "object"`), and an array can carry
+  // own `type`/`uri` properties — exclude it explicitly so only the canonical
+  // OBJECT shape `{ type, uri }` can route to trust-closure satisfaction. A
+  // Concept-shaped array is not the canonical shape and fails closed to
+  // ordinary matching, in keeping with the discipline below.
+  if (
+    !isRecord(pattern) || Array.isArray(pattern) ||
+    isAtomVarPlaceholder(pattern) ||
+    (pattern as { type?: unknown }).type !== CFC_ATOM_TYPE.Concept
+  ) {
+    return undefined;
+  }
+  const uri = (pattern as { uri?: unknown }).uri;
+  // Exactly `{ type, uri }`, uri a non-empty string. Extra fields (or a `var`
+  // key, which would push the key count past 2) → never satisfied.
+  if (
+    Object.keys(pattern).length !== 2 ||
+    typeof uri !== "string" || uri.length === 0
+  ) {
+    return { uri: undefined };
+  }
+  return { uri };
+};
+
 type ExpiresAtom = { type: string; timestamp: number };
 
 // Only the CANONICAL two-field `Expires` shape participates in timestamp
