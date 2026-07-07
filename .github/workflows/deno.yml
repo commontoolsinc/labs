@@ -144,11 +144,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-latest: standard runner (free on this public repo).
-        # ubuntu-22.04-large: 4-core / 16 GB. ubuntu-24.04-32-core: the 32-core
-        # runner currently behind `group: labs`, for an apples-to-apples baseline
-        # and its core-saturation profile.
-        runner: [ubuntu-latest, ubuntu-22.04-large, ubuntu-24.04-32-core]
+        # ubuntu-latest: standard runner (free on this public repo; the CPU
+        # sampler reports its actual core count). ubuntu-24.04-32-core: the
+        # 32-core runner currently behind `group: labs`, for an apples-to-apples
+        # baseline and its core-saturation profile.
+        # The 4-core ubuntu-22.04-large runner lives in a runner group this
+        # public repo cannot schedule from, so it is left out.
+        runner: [ubuntu-latest, ubuntu-24.04-32-core]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7

@@ -30,17 +30,49 @@ interface StatSample {
   total: number;
 }
 
+// The first read failure, kept so the summary can explain why CPU stats are
+// missing instead of guessing "no /proc/stat".
+let statError: string | null = null;
+
+// Read the first line of /proc/stat. procfs files report a size of 0, so a
+// size-hinted whole-file read can come back empty; read through an explicit
+// descriptor loop until the first newline instead.
+function readProcStatFirstLine(): string | null {
+  let file: Deno.FsFile;
+  try {
+    file = Deno.openSync("/proc/stat", { read: true });
+  } catch (e) {
+    statError ??= `open /proc/stat: ${e instanceof Error ? e.message : e}`;
+    return null;
+  }
+  try {
+    const decoder = new TextDecoder();
+    const buf = new Uint8Array(8192);
+    let text = "";
+    while (!text.includes("\n")) {
+      const n = file.readSync(buf);
+      if (n === null || n === 0) break;
+      text += decoder.decode(buf.subarray(0, n), { stream: true });
+    }
+    return text.split("\n", 1)[0];
+  } catch (e) {
+    statError ??= `read /proc/stat: ${e instanceof Error ? e.message : e}`;
+    return null;
+  } finally {
+    file.close();
+  }
+}
+
 // Parse the aggregate "cpu" line of /proc/stat into idle and total jiffies.
 // Fields after the label are: user nice system idle iowait irq softirq steal ...
 function readStat(): StatSample | null {
-  let line: string;
-  try {
-    line = Deno.readTextFileSync("/proc/stat").split("\n", 1)[0];
-  } catch {
+  const line = readProcStatFirstLine();
+  if (line === null) return null;
+  const fields = line.trim().split(/\s+/).slice(1).map(Number);
+  if (fields.length < 5 || fields.some((n) => !Number.isFinite(n))) {
+    statError ??= `unexpected /proc/stat first line: ${JSON.stringify(line)}`;
     return null;
   }
-  const fields = line.trim().split(/\s+/).slice(1).map(Number);
-  if (fields.length < 5 || fields.some((n) => !Number.isFinite(n))) return null;
   const idle = fields[3] + (fields[4] ?? 0); // idle + iowait
   const total = fields.reduce((sum, n) => sum + n, 0);
   return { idle, total };
@@ -96,7 +128,7 @@ if (overallStart && overallEnd) {
     `average cores busy: ${avg === null ? "n/a" : fmt(avg)} of ${cores}`,
   );
 } else {
-  lines.push("average cores busy: n/a (no /proc/stat)");
+  lines.push(`average cores busy: n/a (${statError ?? "no /proc/stat"})`);
 }
 if (intervalCores.length) {
   const sorted = [...intervalCores].sort((a, b) => a - b);
