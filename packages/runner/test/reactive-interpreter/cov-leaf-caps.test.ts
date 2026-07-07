@@ -224,7 +224,11 @@ describe("computeLeafCaps (leaf-caps.ts 119-121,139,158,182-184)", () => {
   });
 
   it("flags BOTH instantiatesPattern and async for an async body (line 139, 182-184)", () => {
+    // The async marker is the FIXTURE: scanInstantiatesPattern matches
+    // /^async[\s(]/, so the body must stay `async` (no await needed) to
+    // exercise the async-cap detection.
     const caps = computeLeafCaps(
+      // deno-lint-ignore require-await
       async (x: number) => x + 1,
       { type: "number" },
       { type: "number" },

@@ -139,7 +139,7 @@ describe("elementArgumentUsage scan", () => {
 /** Run a map pattern flag-on and return the mapped result. */
 async function runMap(
   items: unknown,
-  edit?: { path: string[]; value: unknown },
+  _edit?: { path: string[]; value: unknown },
 ): Promise<unknown> {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

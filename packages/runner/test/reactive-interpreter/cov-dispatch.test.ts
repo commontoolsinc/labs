@@ -10,7 +10,7 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { pattern, popFrame, pushFrame } from "../../src/builder/pattern.ts";
 import { lift } from "../../src/builder/module.ts";
-import type { Frame, Pattern } from "../../src/builder/types.ts";
+import type { Pattern } from "../../src/builder/types.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
