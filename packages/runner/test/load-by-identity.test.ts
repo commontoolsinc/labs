@@ -329,7 +329,13 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     toSpace = space,
   ) => {
     const tx = runtime.edit();
-    writeSourceDocs(runtime, toSpace, fixture.modules, fixture.entryIdentity, tx);
+    writeSourceDocs(
+      runtime,
+      toSpace,
+      fixture.modules,
+      fixture.entryIdentity,
+      tx,
+    );
     runtime.prepareTxForCommit(tx);
     expect((await tx.commit()).error).toBeUndefined();
     await runtime.storageManager.synced();
