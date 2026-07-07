@@ -3479,6 +3479,111 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    // The root-mounted cell is an egress too (codex P2): a Space(X) cell
+    // mounted AS the root gets the same reactive upgrade as a descendant.
+    await t.step(
+      "reactively re-renders a root-mounted Space(X) cell once its ACL grants READ",
+      async () => {
+        const teamSpace = "did:key:z6MkTeamSpaceStage4Root";
+        const seedTx = runtime.edit();
+        const teamCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+          undefined,
+          seedTx,
+        );
+        const teamLink = teamCell.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: teamLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Root team note",
+          cfc: {
+            version: 1,
+            schemaHash: "test-stage4-root-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: [cfcAtom.space(teamSpace)] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const teamLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+        );
+
+        let granted = false;
+        const listeners: Array<{ space: string; onChange: () => void }> = [];
+        const provider: SpaceMembershipProvider = {
+          readerRole: (space) =>
+            granted && space === teamSpace ? "reader" : null,
+          subscribe: (space, onChange) => {
+            const entry = { space, onChange };
+            listeners.push(entry);
+            return () => {
+              const index = listeners.indexOf(entry);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
+        };
+        const fireAcl = (space: string) => {
+          for (const listener of [...listeners]) {
+            if (listener.space === space) listener.onChange();
+          }
+        };
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          membershipProvider: provider,
+        });
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+          membershipProvider: provider,
+        });
+        // Mount the labeled cell AS the root.
+        const cancel = reconciler.mount(teamLabeled);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            listeners.some((listener) => listener.space === teamSpace),
+            true,
+          );
+
+          granted = true;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();

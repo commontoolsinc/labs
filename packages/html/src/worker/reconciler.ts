@@ -233,46 +233,72 @@ export class WorkerReconciler {
       // Ensure the current child is cancelled when the root is cancelled
       addCancel(() => wrapperState.cancel());
 
-      addCancel(
-        vnode.sink((resolvedVnode: unknown) => {
-          logger.debug("root-cell-update", () => ({ resolvedVnode }));
-          // The mounted cell is an egress like any descendant cell: gate its
-          // own label against the root policy (the host ceiling when
-          // configured) before rendering its resolved content. Checked per
-          // update so label changes re-evaluate, mirroring renderCellChild.
-          if (
-            !this.canRenderCellUnderPolicy(
-              vnode as Cell<unknown>,
-              this.rootRenderPolicy,
-            )
-          ) {
-            this.reconcileIntoWrapper(
-              ctx,
-              wrapperState,
-              this.blockedPlaceholderVNode(),
-              this.rootRenderPolicy,
-            );
-            this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
-            return;
-          }
-          // Validate that the resolved value is a valid render node
-          if (!this.isValidRenderNode(resolvedVnode)) {
-            this.onError?.(
-              new Error(
-                `Invalid VDOM content: expected WorkerVNode, string, or number, got ${typeof resolvedVnode}`,
-              ),
-            );
-            return;
-          }
+      // §4.9.3 Stage 2: the root cell is an egress too — if it is labeled
+      // Space(X) and X's ACL has not synced, it fails closed; watch X's ACL so
+      // a later grant re-renders (and a revoke re-blocks), mirroring
+      // renderCellChild. `renderRoot` is re-invoked with the last resolved
+      // value when an ACL changes.
+      let lastRootValue: unknown;
+      let rootHasRendered = false;
+      const rootWatchedSpaces = new Set<string>();
+      const watchRootMembershipSpaces = () => {
+        const provider = this.membershipProvider;
+        if (provider === undefined) return;
+        for (const space of this.spaceIdsForCellLabel(vnode as Cell<unknown>)) {
+          if (rootWatchedSpaces.has(space)) continue;
+          rootWatchedSpaces.add(space);
+          addCancel(
+            provider.subscribe(space, () => {
+              if (rootHasRendered) renderRoot(lastRootValue);
+            }),
+          );
+        }
+      };
+      const renderRoot = (resolvedVnode: unknown) => {
+        logger.debug("root-cell-update", () => ({ resolvedVnode }));
+        lastRootValue = resolvedVnode;
+        rootHasRendered = true;
+        watchRootMembershipSpaces();
+        // The mounted cell is an egress like any descendant cell: gate its
+        // own label against the root policy (the host ceiling when
+        // configured) before rendering its resolved content. Checked per
+        // update so label changes re-evaluate, mirroring renderCellChild.
+        if (
+          !this.canRenderCellUnderPolicy(
+            vnode as Cell<unknown>,
+            this.rootRenderPolicy,
+          )
+        ) {
           this.reconcileIntoWrapper(
             ctx,
             wrapperState,
-            resolvedVnode as WorkerRenderNode,
+            this.blockedPlaceholderVNode(),
             this.rootRenderPolicy,
           );
-          // Track the root child for cleanup
           this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
-        }),
+          return;
+        }
+        // Validate that the resolved value is a valid render node
+        if (!this.isValidRenderNode(resolvedVnode)) {
+          this.onError?.(
+            new Error(
+              `Invalid VDOM content: expected WorkerVNode, string, or number, got ${typeof resolvedVnode}`,
+            ),
+          );
+          return;
+        }
+        this.reconcileIntoWrapper(
+          ctx,
+          wrapperState,
+          resolvedVnode as WorkerRenderNode,
+          this.rootRenderPolicy,
+        );
+        // Track the root child for cleanup
+        this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
+      };
+
+      addCancel(
+        vnode.sink((resolvedVnode: unknown) => renderRoot(resolvedVnode)),
       );
     } else {
       // Static VNode - render directly into container
