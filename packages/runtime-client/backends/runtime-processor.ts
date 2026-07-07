@@ -35,8 +35,10 @@ import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
+  createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
   type RenderConfidentialityResolver,
+  type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -193,15 +195,22 @@ export function runtimeOptionsFromInitializationData(
  *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
  *    is the space `session.open` gated on, so an own-workspace `Space(...)`
  *    label resolves rather than over-blocking.
- * Broader cross-space membership awaits the §4.9.3 membership lookup; until
- * then other-space `Space(...)` labels fail closed. Returns undefined when no
- * ceiling is configured (no render gating — today's behavior).
+ *
+ * Broader cross-space membership comes from the §4.9.3 membership lookup: a
+ * runtime-backed `SpaceMembershipProvider` reads each other space's declared
+ * ACL doc and mints a reader fact only when it grants the acting user READ+
+ * (never from residency). Its cross-space guarantee is exactly as strong as
+ * the deployment `MEMORY_ACL_MODE`. Service DIDs are NOT threaded to the
+ * worker today (design §9), so `serviceDids` is `[]` and service principals —
+ * which rarely render — fail closed. Returns undefined when no ceiling is
+ * configured (no render gating — today's behavior).
  */
 export function renderConfidentialityResolverFor(
   runtime: Runtime,
   identity: Identity,
   ceiling: RenderConfidentialityCeiling | undefined,
   sessionSpace?: string,
+  membershipProvider?: SpaceMembershipProvider,
 ): RenderConfidentialityResolver | undefined {
   if (ceiling === undefined) {
     return undefined;
@@ -216,7 +225,34 @@ export function renderConfidentialityResolverFor(
     actingPrincipal,
     trustConfig: runtime.cfcTrustConfig,
     memberSpaces,
+    // Share the reconciler's provider instance when supplied (so Stage-2 ACL
+    // subscriptions and the resolver's reads observe the same cells); else
+    // build a private one — both read the same underlying runtime documents.
+    membershipProvider: membershipProvider ??
+      createRuntimeSpaceMembershipProvider(runtime, actingPrincipal),
   });
+}
+
+/**
+ * The §4.9.3 membership provider for a worker's renders — the reactive half of
+ * the render lookup. Built once per worker (same lifetime as the resolver) and
+ * threaded to BOTH `renderConfidentialityResolverFor` (as the resolver's
+ * lookup) and the reconciler (for Stage-2 ACL-change subscriptions), so the two
+ * share one instance. Undefined when no ceiling is configured — no render
+ * gating, so no membership lookup. Service DIDs are not threaded to the worker
+ * (design §9), so service principals fail closed.
+ */
+export function renderMembershipProviderFor(
+  runtime: Runtime,
+  identity: Identity,
+  ceiling: RenderConfidentialityCeiling | undefined,
+): SpaceMembershipProvider | undefined {
+  if (ceiling === undefined) {
+    return undefined;
+  }
+  const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
+    identity.did();
+  return createRuntimeSpaceMembershipProvider(runtime, actingPrincipal);
 }
 
 /**
@@ -377,6 +413,11 @@ export class RuntimeProcessor {
   // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
   // `HasRole` principal forms resolve before the reconciler's ceiling fit.
   private renderConfidentialityResolver?: RenderConfidentialityResolver;
+  // §4.9.3 Stage 2: the membership provider shared with the resolver above and
+  // handed to every mount's reconciler, so a `Space(X)`-labeled cell blocked
+  // before X's ACL synced re-renders once the ACL grants READ. Undefined when
+  // no ceiling is in force.
+  private renderMembershipProvider?: SpaceMembershipProvider;
 
   private constructor(
     runtime: Runtime,
@@ -513,11 +554,17 @@ export class RuntimeProcessor {
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     processor.renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    processor.renderMembershipProvider = renderMembershipProviderFor(
+      runtime,
+      identity,
+      processor.renderConfidentialityCeiling,
+    );
     processor.renderConfidentialityResolver = renderConfidentialityResolverFor(
       runtime,
       identity,
       processor.renderConfidentialityCeiling,
       space,
+      processor.renderMembershipProvider,
     );
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
@@ -1551,6 +1598,7 @@ export class RuntimeProcessor {
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       renderConfidentialityCeiling: this.renderConfidentialityCeiling,
       resolveRenderConfidentiality: this.renderConfidentialityResolver,
+      membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({

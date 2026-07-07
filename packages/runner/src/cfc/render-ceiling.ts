@@ -1,11 +1,14 @@
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
   type PolicySnapshot,
 } from "./policy.ts";
 import { evaluateExchangeRules } from "./exchange-eval.ts";
+import { clauseAlternatives } from "./clause.ts";
 import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
+import type { SpaceMembershipProvider } from "./space-membership.ts";
 
 /**
  * Display-sink render ceiling resolution (Epic H3b of
@@ -102,6 +105,49 @@ export type RenderConfidentialityResolverConfig = {
    * broader cross-space membership arrives with the §4.9.3 membership lookup.
    */
   readonly memberSpaces?: readonly string[];
+  /**
+   * The §4.9.3 membership lookup: a per-space capability oracle consulted for
+   * each `Space(id)` atom in the label being rendered. When it verifies the
+   * acting principal reads that space (its declared ACL grants READ+, never
+   * residency), the resolver mints `HasRole(actingPrincipal, id, reader)` so
+   * the clause resolves — the dynamic complement to the static `memberSpaces`
+   * fast path (own space + session space, which need no ACL read).
+   *
+   * The cross-space guarantee is exactly as strong as the deployment's
+   * `MEMORY_ACL_MODE`: under `enforce` the ACL is authoritative; under
+   * `observe`/`off` the lookup reads the same declared (creator-seeded) record
+   * — strictly better than residency, but only as strong as the posture. Fail
+   * closed throughout: a `null` role (absent/unsynced/malformed ACL, or a
+   * non-reader principal) mints nothing and the `Space(...)` clause stays
+   * blocked.
+   */
+  readonly membershipProvider?: SpaceMembershipProvider;
+};
+
+/**
+ * The `Space(id)` atom ids present in a confidentiality label, walking each
+ * clause's alternatives so a `Space` atom nested inside an `{ anyOf: [...] }`
+ * clause is discovered too (§4.3.4 multi-binding gives one access path per
+ * role held). Order-preserving and deduped, so the provider is consulted once
+ * per distinct space.
+ */
+export const spaceAtomIdsInConfidentiality = (
+  confidentiality: readonly unknown[],
+): readonly string[] => {
+  const ids: string[] = [];
+  for (const clause of confidentiality) {
+    for (const alternative of clauseAlternatives(clause)) {
+      if (
+        isRecord(alternative) &&
+        (alternative as { type?: unknown }).type === CFC_ATOM_TYPE.Space &&
+        typeof (alternative as { id?: unknown }).id === "string"
+      ) {
+        const id = (alternative as { id: string }).id;
+        if (!ids.includes(id)) ids.push(id);
+      }
+    }
+  }
+  return ids;
 };
 
 /** The label of the cell being rendered, as read at the display boundary. */
@@ -137,12 +183,24 @@ export const createRenderConfidentialityResolver = (
 ): RenderConfidentialityResolver => {
   const boundary = renderDisplayBoundary();
   const trustResolver = createTrustResolver(config.trustConfig);
-  const staticRoleFacts = mintReaderRoleFacts(
-    config.actingPrincipal,
-    config.memberSpaces ?? [],
-  );
+  const actingPrincipal = config.actingPrincipal;
+  const staticMemberSpaces = config.memberSpaces ?? [];
+  const provider = config.membershipProvider;
   return (label) => {
     if (label.confidentiality.length === 0) return label.confidentiality;
+    // §4.9.3: role facts come ONLY from verified membership, never from the
+    // cell's residency. The static fast-path members (own space + session
+    // space — implicit reads, no ACL lookup) plus any `Space(id)` atom in THIS
+    // label the provider confirms the acting principal reads. A space the user
+    // cannot prove reader access to mints nothing and fails closed.
+    const memberSpaces = new Set(staticMemberSpaces);
+    if (provider !== undefined && actingPrincipal !== undefined) {
+      for (const id of spaceAtomIdsInConfidentiality(label.confidentiality)) {
+        if (memberSpaces.has(id)) continue; // already a static fast-path member
+        if (provider.readerRole(id) !== null) memberSpaces.add(id);
+      }
+    }
+    const roleFacts = mintReaderRoleFacts(actingPrincipal, [...memberSpaces]);
     const result = evaluateExchangeRules(
       {
         confidentiality: [...label.confidentiality],
@@ -150,13 +208,10 @@ export const createRenderConfidentialityResolver = (
       },
       STANDARD_RENDER_SNAPSHOT,
       {
-        // §4.9.3: role facts come ONLY from the verified member set, never
-        // from the cell's residency — so a `Space(X)` label the acting user
-        // cannot prove reader access to stays unresolved and fails closed.
-        integrity: staticRoleFacts,
+        integrity: roleFacts,
         boundary,
         trustResolver,
-        actingPrincipal: config.actingPrincipal,
+        actingPrincipal,
       },
     );
     return result.exhausted

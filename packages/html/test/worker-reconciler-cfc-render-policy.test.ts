@@ -8,7 +8,10 @@ import {
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { createRenderConfidentialityResolver } from "@commonfabric/runner/cfc";
+import {
+  createRenderConfidentialityResolver,
+  type SpaceMembershipProvider,
+} from "@commonfabric/runner/cfc";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -3352,6 +3355,286 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             false,
           );
           assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's ACL
+    // has not yet synced fails closed (Stage 1); when the membership provider
+    // later reports X grants the acting user READ and fires its subscription,
+    // the cell re-renders and admits — WITHOUT a new value on the cell. Proves
+    // the reconciler wires the provider's ACL-change subscription into the
+    // cell's cancel group and re-evaluates the render gate on change.
+    await t.step(
+      "reactively re-renders a Space(X) cell once its ACL grants READ",
+      async () => {
+        const teamSpace = "did:key:z6MkTeamSpaceStage4Reactive";
+        const seedTx = runtime.edit();
+        const teamCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-team-note",
+          undefined,
+          seedTx,
+        );
+        const teamLink = teamCell.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: teamLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Team note",
+          cfc: {
+            version: 1,
+            schemaHash: "test-stage4-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: [cfcAtom.space(teamSpace)] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const teamLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-team-note",
+        );
+        // A sibling cell with NO stored label: the membership watcher must find
+        // no Space atom and set up no ACL subscription for it (labelView
+        // undefined path), while it renders normally under the ceiling.
+        const plainCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-plain-note",
+        );
+        {
+          const seed = runtime.edit();
+          plainCell.withTx(seed).set("Plain note");
+          assertEquals((await seed.commit()).ok !== undefined, true);
+        }
+
+        // Start denying (ACL unsynced), then grant + fire the subscription.
+        let granted = false;
+        const listeners: Array<{ space: string; onChange: () => void }> = [];
+        const provider: SpaceMembershipProvider = {
+          readerRole: (space) =>
+            granted && space === teamSpace ? "reader" : null,
+          subscribe: (space, onChange) => {
+            const entry = { space, onChange };
+            listeners.push(entry);
+            return () => {
+              const index = listeners.indexOf(entry);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
+        };
+        const fireAcl = (space: string) => {
+          for (const listener of [...listeners]) {
+            if (listener.space === space) listener.onChange();
+          }
+        };
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          membershipProvider: provider,
+        });
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+          membershipProvider: provider,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [teamLabeled as never, plainCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          // Before the ACL grants READ, the Space(team) label fails closed.
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            false,
+          );
+          // The unlabeled sibling renders (no Space atom to gate) and no ACL
+          // subscription was set up for it.
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Plain note"),
+            true,
+          );
+          // The reconciler subscribed to the labeled space's ACL doc.
+          assertEquals(
+            listeners.some((listener) => listener.space === teamSpace),
+            true,
+          );
+          assertEquals(listeners.length, 1);
+
+          // The ACL syncs in and grants READ; the subscription fires and the
+          // cell re-renders — the Stage-1 over-block upgrades to an admit with
+          // no new value on the cell.
+          granted = true;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            true,
+          );
+
+          // Revoke (admit -> block, the confidentiality-critical direction):
+          // the ACL drops READ, the subscription fires again, and the gate
+          // re-blocks the already-rendered cell — the content is removed and
+          // the blocked placeholder re-inserted. Guards against an upgrade-only
+          // re-eval regression that would leave admitted content on screen.
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // The root-mounted cell is an egress too (codex P2): a Space(X) cell
+    // mounted AS the root gets the same reactive upgrade as a descendant.
+    await t.step(
+      "reactively re-renders a root-mounted Space(X) cell once its ACL grants READ",
+      async () => {
+        const teamSpace = "did:key:z6MkTeamSpaceStage4Root";
+        const seedTx = runtime.edit();
+        const teamCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+          undefined,
+          seedTx,
+        );
+        const teamLink = teamCell.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: teamLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Root team note",
+          cfc: {
+            version: 1,
+            schemaHash: "test-stage4-root-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: [cfcAtom.space(teamSpace)] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const teamLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+        );
+
+        let granted = false;
+        const listeners: Array<{ space: string; onChange: () => void }> = [];
+        const provider: SpaceMembershipProvider = {
+          readerRole: (space) =>
+            granted && space === teamSpace ? "reader" : null,
+          subscribe: (space, onChange) => {
+            const entry = { space, onChange };
+            listeners.push(entry);
+            return () => {
+              const index = listeners.indexOf(entry);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
+        };
+        const fireAcl = (space: string) => {
+          for (const listener of [...listeners]) {
+            if (listener.space === space) listener.onChange();
+          }
+        };
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          membershipProvider: provider,
+        });
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+          membershipProvider: provider,
+        });
+        // Mount the labeled cell AS the root.
+        const cancel = reconciler.mount(teamLabeled);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            listeners.some((listener) => listener.space === teamSpace),
+            true,
+          );
+
+          granted = true;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            true,
+          );
+
+          // Revoke re-blocks the root-mounted cell too (admit -> block).
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
+            true,
+          );
         } finally {
           cancel();
         }
