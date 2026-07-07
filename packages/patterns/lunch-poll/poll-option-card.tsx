@@ -112,10 +112,13 @@ export interface PollOptionCardOutput {
    * Generated-art lifecycle for this row: `"stored"` once the option carries a
    * persisted image (every viewer), the underlying fetch state while the host's
    * client is generating, and `""` for non-hosts before anything is stored.
-   * The host-side persistence send lives in this computed, so reading it (the
-   * UI does) is what drives the sync.
+   * Pure read — persistence happens only through the host's explicit keep
+   * action (→ `setOptionImage`). Optional for the same reason as
+   * `GeneratedArtOutput.fetchState`: it is fetch-derived on the generating
+   * path, and a required declaration would gate boundary readers of
+   * non-generating rows.
    */
-  artSyncState: PollOptionArtSyncState;
+  artSyncState?: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -143,22 +146,23 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     // Generated cuisine thumbnail. The stored option image is the shared
     // truth every viewer renders; generation is gated to the host's client
     // (`shouldGenerate`) and only while nothing is stored (GeneratedArt
-    // skips the request once `sourceUrl` is set). Persistence is the child's
-    // `onGenerated` notification into the parent-owned stream — the parent
-    // never reads fetch-derived child outputs (CT-1811-family gap); once the
-    // handler stores the data URL, `sourceUrl` flows back in and generation
-    // stops everywhere.
+    // skips the request once `sourceUrl` is set). Persistence is the host's
+    // explicit keep action below: it reads the child's `imageDataUrl` output
+    // directly (fetch-derived child outputs materialize for parents since
+    // CT-1836) and sends it into the parent-owned stream; once the handler
+    // stores the data URL, `sourceUrl` flows back in and generation stops
+    // everywhere.
     const art = GeneratedArt({
       prompt: optionTitle,
       sourceUrl: option.imageUrl,
       shouldGenerate: isAdmin,
-      id: oid,
-      onGenerated: setOptionImage,
     });
 
-    // Row-level art state, from parent-owned cells only.
+    // Row-level art state: the stored option image wins; otherwise the live
+    // generation state read from the sub-pattern — `""` for non-hosts, whose
+    // instances never generate.
     const artSyncState = computed<PollOptionArtSyncState>(() =>
-      safeImageUrl(option.imageUrl) ? "stored" : ""
+      safeImageUrl(option.imageUrl) ? "stored" : (art.fetchState ?? "")
     );
 
     return {
@@ -180,7 +184,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
           {
             /* Generated-art thumbnail (call-form instance above): stored
               option image for everyone; host-gated generation while empty,
-              persisted via artSyncState → setOptionImage. */
+              persisted via the host's keep action → setOptionImage. */
           }
           {art[UI]}
           <span
@@ -265,6 +269,31 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                     onClick={() => logVisit.send({ optionId: oid })}
                   >
                     ✓ we went here
+                  </button>
+                )
+                : null}
+              {artSyncState === "generated"
+                ? (
+                  <button
+                    type="button"
+                    aria-label="Keep this art (host)"
+                    style={{
+                      background: "#eef2ff",
+                      border: "1px solid #c7d2fe",
+                      borderRadius: "9999px",
+                      padding: "2px 10px",
+                      color: "#4338ca",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                    onClick={() =>
+                      setOptionImage.send({
+                        optionId: oid,
+                        imageUrl: art.imageDataUrl ?? "",
+                      })}
+                  >
+                    ✦ keep this art
                   </button>
                 )
                 : null}

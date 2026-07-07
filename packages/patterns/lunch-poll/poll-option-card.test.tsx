@@ -47,8 +47,7 @@ const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
 const noopSetOptionImage = handler<SetOptionImageEvent, EmptyState>(() => {});
 
 // Carries a stored image so this admin-viewer card takes the stored-art path
-// (no generation request) — the generation flow itself is covered by
-// art-sync.test.tsx with a mocked image endpoint.
+// (no generation request).
 const STORED_OPTION: Option = {
   id: "opt-sushi",
   title: "Sushi Place",
@@ -56,6 +55,23 @@ const STORED_OPTION: Option = {
   imageUrl:
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
 };
+
+// Nothing stored: the admin card generates via the mocked endpoint below.
+const GENERATING_OPTION: Option = {
+  id: "opt-tacos",
+  title: "Taco Truck",
+  addedByName: "Alex",
+  imageUrl: "",
+};
+
+export const fetchMocks = [
+  {
+    urlIncludes: "/api/ai/img",
+    contentType: "image/png",
+    base64Body:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  },
+];
 
 const votes: Vote[] = [
   {
@@ -183,6 +199,42 @@ export default pattern(() => {
     ) !== undefined
   );
 
+  // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
+  const assert_no_keep_button_when_stored = computed(() =>
+    readValue(card.artSyncState) === "stored" &&
+    findNodeByProp(
+        card[UI],
+        "aria-label",
+        "Keep this art (host)",
+      ) === undefined
+  );
+
+  // The generation path: an admin card with nothing stored generates (mocked
+  // endpoint), surfaces the live fetch state through `artSyncState` (a direct
+  // fetch-derived read — post-CT-1836), and shows the keep affordance.
+  const generatingCard = PollOptionCard({
+    option: GENERATING_OPTION,
+    rank: 2,
+    me: "Alex",
+    isJoined: true,
+    isAdmin: true,
+    votes,
+    removeConfirmTarget,
+    castVote,
+    removeOption,
+    logVisit,
+    setOptionImage,
+  });
+
+  const assert_keep_button_when_generated = computed(() =>
+    readValue(generatingCard.artSyncState) === "generated" &&
+    findNodeByProp(
+        generatingCard[UI],
+        "aria-label",
+        "Keep this art (host)",
+      ) !== undefined
+  );
+
   return {
     tests: [
       { assertion: assert_my_green_vote_label_renders },
@@ -197,7 +249,13 @@ export default pattern(() => {
       { assertion: assert_remove_control_is_underlined },
       { assertion: assert_remove_separator_is_plain },
       { assertion: assert_log_visit_control_renders },
+      // Drives the generating card's mocked fetch to completion (and gives
+      // both cards' art state a settle beat before it is read directly).
+      { settle: true },
+      { assertion: assert_no_keep_button_when_stored },
+      { assertion: assert_keep_button_when_generated },
     ],
     card,
+    generatingCard,
   };
 });

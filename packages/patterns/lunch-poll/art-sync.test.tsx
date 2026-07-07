@@ -1,15 +1,19 @@
 /**
- * Test: lunch-poll generated-art wiring — host-gated generation + persistence
- * (the pre-#4325 structure, restored onto the GeneratedArt sub-pattern).
+ * Test: lunch-poll generated-art wiring — host-gated generation + explicit
+ * keep-action persistence (the post-CT-1836 structure: the card reads the
+ * GeneratedArt sub-pattern's fetch-derived outputs directly; nothing sends
+ * from inside a computed).
  *
  * Single-identity caveat (as main.test.tsx): this runtime's one identity IS
  * the host after joining, so the host path runs end-to-end: join → add an
  * option → the host-gated GeneratedArt fetches the mocked /api/ai/img
- * generation → the card's artSyncState persists the data URL onto the option
- * via setOptionImage → the option carries `imageUrl` and the stored <img>
- * renders. Every other viewer renders that same stored value by construction
- * (sourceUrl short-circuits generation); the gate itself (shouldGenerate) is
- * covered at the sub-pattern level in generated-art.test.tsx.
+ * generation (visible as the cf-image overlay) → the host keeps it — the
+ * card's keep button sends { optionId, imageUrl } into `setOptionImage`; this
+ * test drives that same stream directly with the imageUrl the button would
+ * read — → the option carries `imageUrl` and the stored <img> renders. Every
+ * other viewer renders that same stored value by construction (sourceUrl
+ * short-circuits generation); the gate itself (shouldGenerate) is covered at
+ * the sub-pattern level in generated-art.test.tsx.
  */
 
 import { action, computed, pattern, UI } from "commonfabric";
@@ -17,8 +21,9 @@ import CozyPoll from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
 // value is its exact data URL: FetchBinary bytes → base64 re-encode is an
-// identity round-trip on the same bytes. (Both plain literals: SES-mode
-// module scope rejects computed top-level values like template joins.)
+// identity round-trip on the same bytes, so the card's keep button and this
+// test send the same string. (Both plain literals: SES-mode module scope
+// rejects computed top-level values like template joins.)
 const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const EXPECTED_DATA_URL =
@@ -81,6 +86,18 @@ const findNodeByProp = (
     .find((child) => child !== undefined);
 };
 
+// Walk the rendered tree for a vnode by element name (e.g. "cf-image").
+const findNodeByName = (
+  root: unknown,
+  name: string,
+): unknown | undefined => {
+  const value = readValue(root);
+  if (isRecord(value) && readValue(value.name) === name) return value;
+  return childNodes(value)
+    .map((child) => findNodeByName(child, name))
+    .find((child) => child !== undefined);
+};
+
 export default pattern(() => {
   const poll = CozyPoll({});
 
@@ -96,21 +113,31 @@ export default pattern(() => {
     poll.options.length === 1 && poll.options[0]?.title === "Sushi Palace"
   );
 
-  // ── RUNTIME-GAP CANARY ─────────────────────────────────────────────────
-  // The INTENDED contract after `{ settle: true }` is:
-  //   readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL   (persisted)
-  //   findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
-  // Under the current pattern-test harness the sub-pattern APPEARS inert, but
-  // instrumentation (CT-1836, 2026-07-03) showed the fetch RUNS and COMPLETES
-  // — the defect is that consumer lifts inside the instantiated sub-pattern
-  // never fire over the fetch node result record (never-ran ⇒ never-subscribed
-  // ⇒ never-woken), so fetchState/imageDataUrl/notifyState never compute and
-  // the persisted value stays "". The assertion below PINS that gap: when the
-  // runtime fix lands this test goes red — replace it with the intended
-  // contract above.
-  const canary_generation_not_run_under_harness = computed(() =>
-    readValue(poll.options[0]?.imageUrl) === "" &&
-    findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) === undefined
+  // Post-settle the host's client has generated: the cf-image overlay
+  // (generated, not yet stored) is in the rendered tree — the fetch-derived
+  // read chain through both sub-pattern boundaries works. (Until CT-1836's
+  // traversal fix this file carried a canary pinning the opposite.)
+  const assert_generated_overlay_renders = computed(() =>
+    findNodeByName(poll[UI], "cf-image") !== undefined
+  );
+
+  // The host keeps the art: the same payload the card's keep button sends
+  // (the button reads `art.imageDataUrl`, which equals EXPECTED_DATA_URL for
+  // the mocked bytes — the identity round-trip noted above).
+  const action_keep_art = action(() => {
+    const optionId = readValue(poll.options[0]?.id);
+    poll.setOptionImage.send({
+      optionId: typeof optionId === "string" ? optionId : "",
+      imageUrl: EXPECTED_DATA_URL,
+    });
+  });
+
+  const assert_image_persisted = computed(() =>
+    readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL
+  );
+
+  const assert_stored_img_renders = computed(() =>
+    findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
   );
 
   return {
@@ -118,10 +145,15 @@ export default pattern(() => {
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },
-      // Drives the mocked generation fetch (which runs and completes — see
-      // CT-1836); the persistence sync it feeds is what never fires.
+      // Drives the mocked generation fetch to completion.
       { settle: true },
-      { assertion: canary_generation_not_run_under_harness },
+      { assertion: assert_generated_overlay_renders },
+      { action: action_keep_art },
+      { assertion: assert_image_persisted },
+      // One more settle beat: the persisted URL flows back into the card as
+      // `sourceUrl` and the stored-<img> branch re-renders.
+      { settle: true },
+      { assertion: assert_stored_img_renders },
     ],
     poll,
   };

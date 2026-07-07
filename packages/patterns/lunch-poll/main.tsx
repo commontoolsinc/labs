@@ -71,7 +71,7 @@ import {
 } from "commonfabric";
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
-import { type GeneratedArtEvent, safeImageUrl } from "./generated-art.tsx";
+import { safeImageUrl } from "./generated-art.tsx";
 
 export interface User {
   name: string;
@@ -127,10 +127,15 @@ export interface CastVoteEvent {
 }
 
 /**
- * Art persistence event — the `GeneratedArtEvent` shape the sub-pattern's
- * `onGenerated` stream sends ({ id: optionId, imageUrl: dataUrl }).
+ * Art persistence event: the host keeps a generated thumbnail by storing its
+ * data URL onto the option. Sent by the option card's host-only keep action,
+ * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
+ * (fetch-derived child outputs materialize for parents since CT-1836).
  */
-export type SetOptionImageEvent = GeneratedArtEvent;
+export interface SetOptionImageEvent {
+  optionId: string;
+  imageUrl: string;
+}
 
 export type ResetVotesEvent = Record<PropertyKey, never>;
 
@@ -497,19 +502,20 @@ const addOption = handler<AddOptionEvent, {
   optionDraft.set("");
 });
 
-// Host persists the generated cuisine thumbnail (a data URL from the
-// GeneratedArt sub-pattern) onto its option. Idempotent on the stored value,
-// keyed-collection addressed, and admin-gated like every other mutation —
-// only the host's client generates, but the gate holds regardless.
+// Host persists the generated cuisine thumbnail (a data URL read from the
+// GeneratedArt sub-pattern by the card's keep action) onto its option.
+// Idempotent on the stored value, keyed-collection addressed, and admin-gated
+// like every other mutation — only the host's client generates, but the gate
+// holds regardless.
 const setOptionImage = handler<SetOptionImageEvent, {
   options: OptionsCell;
   myName: NameCell;
   adminName: NameCell;
-}>(({ id, imageUrl }, { options, myName, adminName }) => {
+}>(({ optionId, imageUrl }, { options, myName, adminName }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  const option = options.elementById(id);
+  const option = options.elementById(optionId);
   const current = option.get();
   if (!current) return;
   const safe = safeImageUrl(imageUrl);
@@ -865,6 +871,7 @@ export interface CozyPollOutput {
   castVote: Stream<CastVoteEvent>;
   clearMyVote: Stream<ClearVoteEvent>;
   resetVotes: Stream<ResetVotesEvent>;
+  setOptionImage: Stream<SetOptionImageEvent>;
   logVisit: Stream<LogVisitEvent>;
   removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
   clearHistory: Stream<ClearHistoryEvent>;
@@ -1786,6 +1793,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       castVote: boundCastVote,
       clearMyVote: boundClearMyVote,
       resetVotes: boundResetVotes,
+      setOptionImage: boundSetOptionImage,
       logVisit: boundLogVisit,
       removeHistoryEntry: boundRemoveHistoryEntry,
       clearHistory: boundClearHistory,

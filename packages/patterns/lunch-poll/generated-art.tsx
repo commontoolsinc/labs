@@ -2,21 +2,11 @@ import {
   computed,
   Default,
   fetchBinary,
-  type FetchBinaryResult,
   NAME,
   pattern,
-  type Stream,
   UI,
   type VNode,
 } from "commonfabric";
-
-/** Notification sent when this instance's generation completes. */
-export interface GeneratedArtEvent {
-  /** The caller-supplied `id` input, passed back for correlation. */
-  id: string;
-  /** The generated image as a persistable `data:` URL. */
-  imageUrl: string;
-}
 
 // Cuisine illustration thumbnail. Callers can disable generation and pass a
 // stored source URL; a parent that owns item state can persist the returned
@@ -92,7 +82,7 @@ export type GeneratedArtFetchState =
  * Inputs for the generated thumbnail sub-pattern.
  *
  * Use JSX when embedding only the UI: `<GeneratedArt prompt={title} />`.
- * Instantiate with a function call when the parent needs `image` or
+ * Instantiate with a function call when the parent needs `imageDataUrl` or
  * `fetchState`.
  */
 export interface GeneratedArtInput {
@@ -104,20 +94,6 @@ export interface GeneratedArtInput {
 
   /** Whether this instance may call the image generation endpoint. */
   shouldGenerate?: boolean | Default<true>;
-
-  /** Correlation id echoed in `onGenerated` events (e.g. the option id). */
-  id?: string | Default<"">;
-
-  /**
-   * Parent-owned stream notified once with the generated image's data URL
-   * (plus the `id` input). The idiomatic persistence seam: the parent's
-   * handler stores the value and passes it back as `sourceUrl`, after which
-   * this instance stops generating. The notify runs INSIDE this pattern on
-   * purpose — computed outputs derived from fetch cells do not currently
-   * materialize for parent readers (see the CT-1811-family runtime gap), so
-   * parents must be told, not read.
-   */
-  onGenerated?: Stream<GeneratedArtEvent>;
 }
 
 /**
@@ -135,33 +111,25 @@ export interface GeneratedArtOutput {
   [UI]: VNode;
 
   /**
-   * Generated image bytes + media type once the fetch resolves; `undefined`
-   * while only the fallback shows. A parent that owns item state can persist
-   * these for other viewers.
-   */
-  image: FetchBinaryResult | undefined;
-
-  /**
    * The generated image as a `data:` URL (`""` until generated). The
    * persistence-friendly form: a parent stores this string in shared state
    * (e.g. an option's `imageUrl`) and passes it back as `sourceUrl`, after
    * which every viewer serves the stored value and no instance generates.
+   *
+   * Optional ON PURPOSE (as is `fetchState`): these are fetch-derived, so
+   * they are absent until the fetch machinery has written its cells. A
+   * required declaration makes boundary readers lower with a required input
+   * schema and gate silently on instances whose fetch never ran (stored /
+   * gated / empty-prompt) — the CT-1811-family required-gating leg.
    */
-  imageDataUrl: string;
+  imageDataUrl?: string;
 
-  /** Current image source/generation state. */
-  fetchState: GeneratedArtFetchState;
-
-  /**
-   * `"sent"` once the `onGenerated` notification fired (`""` otherwise).
-   * Drives the notify computed; NOT reliably readable by parents (fetch-cell
-   * derived — the same CT-1811-family gap as `fetchState`).
-   */
-  notifyState: string;
+  /** Current image source/generation state (see `imageDataUrl` on optionality). */
+  fetchState?: GeneratedArtFetchState;
 }
 
 export default pattern<GeneratedArtInput, GeneratedArtOutput>(
-  ({ prompt, sourceUrl, shouldGenerate, id, onGenerated }) => {
+  ({ prompt, sourceUrl, shouldGenerate }) => {
     const requestUrl = computed(() => {
       // Guard the transiently-unset prompt (a map element materializing):
       // without it a real generation request goes out with "undefined"/"" in
@@ -181,9 +149,10 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
       },
     });
 
-    const image = computed(() => generatedArt.result);
-    const imageBytes = computed(() => generatedArt.result?.bytes);
-    const imageMediaType = computed(() => generatedArt.result?.mediaType ?? "");
+    // NOTE: no computed here (or anywhere) returns the raw `FabricBytes` —
+    // the action-return validator rejects special objects as lift results
+    // (runner-utils `validateAndCheckReactives`); the UI below links the
+    // fetch node's `result.bytes` path directly instead.
     const imageDataUrl = computed(() => {
       const bytes = generatedArt.result?.bytes;
       const mediaType = generatedArt.result?.mediaType;
@@ -206,19 +175,6 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
       if (generatedArt.result?.bytes) return "generated";
       if (generatedArt.pending) return "pending";
       return generatedArt.error ? "error" : "requested";
-    });
-
-    // Notify the parent's persistence stream once the generation resolves
-    // (pre-#4325 idiom, kept child-internal — same-level fetch-cell reads).
-    // The parent's handler is idempotent on the stored value, and once it
-    // writes `sourceUrl` back, `requestUrl` goes empty and this instance
-    // stops generating — so re-runs converge instead of looping.
-    const notifyState = computed(() => {
-      if (!onGenerated) return "";
-      const generated = imageDataUrl;
-      if (!generated) return "";
-      onGenerated.send({ id: (id ?? "").trim(), imageUrl: generated });
-      return "sent";
     });
 
     return {
@@ -256,8 +212,8 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
             : hasGeneratedImage
             ? (
               <cf-image
-                bytes={imageBytes}
-                mediaType={imageMediaType}
+                bytes={generatedArt.result!.bytes}
+                mediaType={generatedArt.result!.mediaType}
                 alt=""
                 style={{
                   width: "100%",
@@ -268,10 +224,8 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
             : null}
         </div>
       ),
-      image,
       imageDataUrl,
       fetchState,
-      notifyState,
     };
   },
 );
