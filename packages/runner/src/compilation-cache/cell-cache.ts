@@ -606,8 +606,43 @@ export async function loadVerifiedSourceClosure(
   tx: IExtendedStorageTransaction,
   runtimeFingerprint = "",
 ): Promise<Map<string, SourceDoc> | undefined> {
+  const result = await loadVerifiedSourceClosureOutcome(
+    runtime,
+    space,
+    entryIdentity,
+    tx,
+    runtimeFingerprint,
+  );
+  return result.outcome === "ok" ? result.closure : undefined;
+}
+
+/**
+ * Discriminated result of {@link loadVerifiedSourceClosureOutcome}. The
+ * distinction between `absent` and `verify-failed` matters to callers that
+ * memoize failures (PatternManager's cold-load negative memo): an absent
+ * entry may be TRANSIENT (sync/storage blip), while a verification failure
+ * over loaded documents is a property of the stored bytes.
+ */
+export type SourceClosureLoadResult =
+  | { outcome: "ok"; closure: Map<string, SourceDoc> }
+  | { outcome: "absent" }
+  | { outcome: "verify-failed"; verification: SourceDocVerification };
+
+/**
+ * {@link loadVerifiedSourceClosure}, but reporting WHY there is no closure:
+ * `absent` (entry document missing — possibly transient) vs `verify-failed`
+ * (documents loaded but the recomputed Merkle identities do not match their
+ * keys, or import targets are missing from the set).
+ */
+export async function loadVerifiedSourceClosureOutcome(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Promise<SourceClosureLoadResult> {
   const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
-  if (closure === undefined) return undefined;
+  if (closure === undefined) return { outcome: "absent" };
   // Identity verification parses source (module hashing scans imports), and
   // every source-closure consumer parses further downstream (fabric-import
   // scans, recompiles) — this is the shared entry those flows funnel through,
@@ -624,9 +659,9 @@ export async function loadVerifiedSourceClosure(
       `mismatches=${verification.mismatches.length}`,
       `missing=${verification.missing.length}`,
     ]);
-    return undefined;
+    return { outcome: "verify-failed", verification };
   }
-  return closure;
+  return { outcome: "ok", closure };
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------

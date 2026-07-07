@@ -40,6 +40,7 @@ import {
   pretransformProgramForModules,
   transformInjectHelperModule,
 } from "./pretransform.ts";
+import { markDeterministicCompileFailure } from "./compile-failure.ts";
 import {
   type ModuleImportEdges,
   resolveModuleImports,
@@ -731,10 +732,26 @@ export class Engine extends EventTarget implements Harness {
     // Inject the helper BEFORE resolve so the resolver pulls the `commonfabric`
     // runtime `.d.ts` the transformer needs; identity is recomputed over the
     // authored bytes below and matches the stored keys.
-    const injectedInput = transformInjectHelperModule({
-      main: entryFilename,
-      files: resolvedFiles,
-    });
+    //
+    // `tolerateStoredLegacyEnvelope` (CT-1838): this input is storage-fetched
+    // and Merkle-verified (loadVerifiedSourceClosure), and PRE-#4158 spaces
+    // stored the helper-injected form — re-injecting those docs would trip
+    // the reserved-symbol guard and permanently brick every pre-#4158
+    // pattern. Exact-envelope legacy docs pass through unchanged; their
+    // stored bytes are exactly what their identities were computed over, so
+    // the identity check below still holds, and the successful compile
+    // writes back under the current runtimeVersion (self-heal on load).
+    // Failures here are deterministic in the input bytes (pure pretransform;
+    // no I/O) — marked so the caller's negative memo may cache them.
+    let injectedInput;
+    try {
+      injectedInput = transformInjectHelperModule({
+        main: entryFilename,
+        files: resolvedFiles,
+      }, { tolerateStoredLegacyEnvelope: true });
+    } catch (error) {
+      throw markDeterministicCompileFailure(error);
+    }
     const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: injectedInput.files },
       this.ctRuntime.staticCache,
@@ -747,94 +764,105 @@ export class Engine extends EventTarget implements Harness {
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
+    // NOT marked deterministic: resolution can perform storage/network I/O
+    // (fabric mount fetches), so its failures may be transient.
     const resolvedProgram = await this.resolve(resolver);
-    const mounts = fabricResolver?.mounts() ?? [];
-    const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
-    const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
-    // Fabric mounts are fetched as authored source; inject the helper for
-    // compilation (authored entry modules were injected before resolve above).
-    const resolvedForCompile = {
-      ...resolvedProgram,
-      files: injectMountSources(resolvedProgramFiles),
-    };
-    const moduleFiles = resolvedProgramFiles.filter((f) =>
-      !f.name.endsWith(".d.ts")
-    );
-    // Identity + stored source hash the AUTHORED bytes (recovered from the stored
-    // input, by stored filename); the resolved set above carries the injected
-    // form the compiler needs. Identities recompute prefix-free over the authored
-    // closure — they match the stored identities the source docs were keyed by.
-    const authoredByStoredName = new Map(
-      resolvedFiles.map((f) => [f.name, f.contents]),
-    );
-    const pristineModuleFiles = pristineModuleSources(
-      moduleFiles,
-      authoredByStoredName,
-      (name) => storedFilenameFor(name, undefined, mounts),
-    );
-    const identityByPath = computeFabricModuleIdentities(
-      pristineModuleFiles,
-      mounts,
-    );
+    // Everything below is pure compute over resolved bytes — deterministic
+    // in the (content-addressed, immutable) input, so failures are marked
+    // for the caller's negative memo.
+    try {
+      const mounts = fabricResolver?.mounts() ?? [];
+      const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
+      const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
+      // Fabric mounts are fetched as authored source; inject the helper for
+      // compilation (authored entry modules were injected before resolve
+      // above).
+      const resolvedForCompile = {
+        ...resolvedProgram,
+        files: injectMountSources(resolvedProgramFiles),
+      };
+      const moduleFiles = resolvedProgramFiles.filter((f) =>
+        !f.name.endsWith(".d.ts")
+      );
+      // Identity + stored source hash the AUTHORED bytes (recovered from the
+      // stored input, by stored filename); the resolved set above carries the
+      // injected form the compiler needs. Identities recompute prefix-free
+      // over the authored closure — they match the stored identities the
+      // source docs were keyed by.
+      const authoredByStoredName = new Map(
+        resolvedFiles.map((f) => [f.name, f.contents]),
+      );
+      const pristineModuleFiles = pristineModuleSources(
+        moduleFiles,
+        authoredByStoredName,
+        (name) => storedFilenameFor(name, undefined, mounts),
+      );
+      const identityByPath = computeFabricModuleIdentities(
+        pristineModuleFiles,
+        mounts,
+      );
 
-    const emitted = compiler.compileToModules(resolvedForCompile, {
-      runtimeModules: Engine.runtimeModuleNames(),
-      specifierAliases,
-      beforeTransformers: (program) => {
-        const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)({
-          moduleIdentities: identityByPath,
-        });
+      const emitted = compiler.compileToModules(resolvedForCompile, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        specifierAliases,
+        beforeTransformers: (program) => {
+          const pipeline = new (compilerStack()
+            .CommonFabricTransformerPipeline)({
+            moduleIdentities: identityByPath,
+          });
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+            getPolicyManifests: () => pipeline.getPolicyManifests(),
+          };
+        },
+      });
+      for (const file of moduleFiles) {
+        if (!emitted.has(file.name)) {
+          throw new Error(
+            `Recompile from source produced no body for '${file.name}'`,
+          );
+        }
+      }
+
+      const importEdges = resolveModuleImports({
+        main: "",
+        files: pristineModuleFiles,
+      });
+      const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
+        const out = emitted.get(file.name)!;
+        const identity = identityByPath.get(file.name)!;
+        const imports = cacheableImportsFor(
+          file.name,
+          importEdges,
+          identityByPath,
+          specifierAliases,
+        );
+        const policyManifests = validatePolicyManifestsForModule(
+          identity,
+          out.policyManifests,
+        );
         return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-          getPolicyManifests: () => pipeline.getPolicyManifests(),
+          identity,
+          filename: storedFilenameFor(file.name, undefined, mounts),
+          source: file.contents,
+          js: out.js,
+          ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+          ...(policyManifests === undefined ? {} : { policyManifests }),
+          imports,
         };
-      },
-    });
-    for (const file of moduleFiles) {
-      if (!emitted.has(file.name)) {
-        throw new Error(
-          `Recompile from source produced no body for '${file.name}'`,
+      });
+      for (const module of modules) {
+        this.ctRuntime.registerCfcPolicyManifests(
+          undefined,
+          module.policyManifests ?? [],
         );
       }
+      const entryIdentity = identityByPath.get(entryFilename)!;
+      return { modules, entryIdentity };
+    } catch (error) {
+      throw markDeterministicCompileFailure(error);
     }
-
-    const importEdges = resolveModuleImports({
-      main: "",
-      files: pristineModuleFiles,
-    });
-    const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
-      const out = emitted.get(file.name)!;
-      const identity = identityByPath.get(file.name)!;
-      const imports = cacheableImportsFor(
-        file.name,
-        importEdges,
-        identityByPath,
-        specifierAliases,
-      );
-      const policyManifests = validatePolicyManifestsForModule(
-        identity,
-        out.policyManifests,
-      );
-      return {
-        identity,
-        filename: storedFilenameFor(file.name, undefined, mounts),
-        source: file.contents,
-        js: out.js,
-        ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
-        ...(policyManifests === undefined ? {} : { policyManifests }),
-        imports,
-      };
-    });
-    for (const module of modules) {
-      this.ctRuntime.registerCfcPolicyManifests(
-        undefined,
-        module.policyManifests ?? [],
-      );
-    }
-    const entryIdentity = identityByPath.get(entryFilename)!;
-    return { modules, entryIdentity };
   }
 
   /**
@@ -1585,11 +1613,22 @@ function pristineModuleSources(
 // already resolved into the program by the authored entry's injected import, so
 // injecting here (after resolve) resolves cleanly. Non-mount and `.d.ts` files
 // pass through unchanged.
+//
+// Mount sources are ALWAYS storage-fetched (never author-typed), so the
+// legacy-envelope tolerance (CT-1838) applies unconditionally here: a mount
+// whose stored bytes are exactly the pre-#4158 injected envelope passes
+// through unchanged instead of tripping the reserved-symbol guard. This is
+// what lets a NEW pattern fabric-import a legacy pattern (warm/authoring
+// path, `compileToRecordGraph`) as well as the cold path recompile one. The
+// authoring guard for the pattern's OWN typed source is unaffected — it runs
+// in `pretransformProgramForModules` before resolution.
 function injectMountSources(files: readonly Source[]): Source[] {
   const mounts = files.filter((f) => f.name.startsWith(FABRIC_MOUNT_ROOT));
   if (mounts.length === 0) return [...files];
   const injected = new Map(
-    transformInjectHelperModule({ main: mounts[0].name, files: mounts }).files
+    transformInjectHelperModule({ main: mounts[0].name, files: mounts }, {
+      tolerateStoredLegacyEnvelope: true,
+    }).files
       .map((f) => [f.name, f.contents] as const),
   );
   return files.map((f) => {
