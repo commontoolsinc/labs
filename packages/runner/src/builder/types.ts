@@ -217,7 +217,13 @@ declare module "@commonfabric/api" {
     throttle?: number;
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
-    /** Input paths whose writable cells should become materializer envelopes */
+    /**
+     * Exhaustive analyzed record of input paths the module may write. Only
+     * writable-branded paths become materializer envelopes; stream paths
+     * stay in the record (they disqualify pure-derivation treatment) but
+     * are never collectible. Presence of this field, even empty, bypasses
+     * the opaque-result envelope fallback.
+     */
     materializerWriteInputPaths?: readonly (readonly string[])[];
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;

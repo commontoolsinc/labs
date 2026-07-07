@@ -44,6 +44,15 @@ export interface CapabilityParamSummary {
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  /**
+   * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
+   * may be incomplete. Set by unrecognized or dynamic method calls on
+   * cell-like receivers, and by `set`/`send` calls carrying an onCommit
+   * callback. Treat like `wildcard` and fail closed. Detection is per
+   * method-call dispatch: extracted method references
+   * (`const f = cell.send; f(x)`) are outside the contract.
+   */
+  readonly hasUnverifiedCellUse?: boolean;
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];

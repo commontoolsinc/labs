@@ -127,10 +127,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        boundCastVote: {
-            $ref: "#/$defs/VoteEvent",
-            asCell: ["stream"]
-        },
         item: {
             type: "object",
             properties: {
@@ -139,9 +135,13 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
                 }
             },
             required: ["id"]
+        },
+        boundCastVote: {
+            $ref: "#/$defs/VoteEvent",
+            asCell: ["stream"]
         }
     },
-    required: ["boundCastVote", "item"],
+    required: ["item", "boundCastVote"],
     $defs: {
         VoteEvent: {
             type: "object",
