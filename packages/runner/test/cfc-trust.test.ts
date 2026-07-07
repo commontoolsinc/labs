@@ -140,18 +140,41 @@ describe("CFC trust closure (B3)", () => {
       ).toBe(false);
     });
 
-    it("closes transitively over concept edges", () => {
+    it("closes transitively over concept edges and does NOT traverse them backward", () => {
+      // The atom implements AGE_ROUNDING; the privacy atom implements the
+      // DOWNSTREAM concept PRIVACY_PRESERVING. Both statements are delegated to
+      // ALICE, so every query below runs under an ADMITTED principal — the
+      // negative case then isolates edge DIRECTION, not principal scoping
+      // (cubic P3 on #4563: the old test's negative failed only because BOB
+      // lacked delegation, so a bidirectional-edge regression would pass it).
+      const privacyCodeAtom = {
+        type: "https://commonfabric.org/cfc/atom/CodeHash",
+        hash: "sha256:privacy-v1",
+      };
       const resolver = createTrustResolver(config({
+        statements: [
+          {
+            concrete: roundingCodeAtom,
+            implements: AGE_ROUNDING,
+            verifier: AUDITOR,
+          },
+          {
+            concrete: privacyCodeAtom,
+            implements: PRIVACY_PRESERVING,
+            verifier: AUDITOR,
+          },
+        ],
         delegations: [{
           delegator: ALICE,
           verifier: AUDITOR,
-          concepts: [AGE_ROUNDING],
+          concepts: [AGE_ROUNDING, PRIVACY_PRESERVING],
         }],
         conceptEdges: [
           { from: AGE_ROUNDING, to: LOCATION_ROUNDING },
           { from: LOCATION_ROUNDING, to: PRIVACY_PRESERVING },
         ],
       }));
+      // Forward: AGE_ROUNDING → LOCATION_ROUNDING → PRIVACY_PRESERVING.
       expect(
         resolver.conceptSatisfied(
           PRIVACY_PRESERVING,
@@ -159,11 +182,17 @@ describe("CFC trust closure (B3)", () => {
           ALICE,
         ),
       ).toBe(true);
-      // Edges are directed: nothing implements LOCATION_ROUNDING directly,
-      // so the reverse query fails.
+      // Reverse (same admitted principal): the downstream privacy atom does
+      // NOT satisfy the upstream AGE_ROUNDING — edges are directed and are not
+      // walked backward. A bidirectional-edge regression flips this to true.
       expect(
-        resolver.conceptSatisfied(AGE_ROUNDING, [roundingCodeAtom], BOB),
+        resolver.conceptSatisfied(AGE_ROUNDING, [privacyCodeAtom], ALICE),
       ).toBe(false);
+      // Sanity: the privacy atom DOES satisfy its own concept for ALICE (so
+      // the negative above is direction, not a missing delegation/statement).
+      expect(
+        resolver.conceptSatisfied(PRIVACY_PRESERVING, [privacyCodeAtom], ALICE),
+      ).toBe(true);
     });
 
     it("is cycle-safe and fails closed past the depth bound", () => {
@@ -374,7 +403,12 @@ describe("CFC trust closure (B3)", () => {
       }
     });
 
-    it("leaves trust unset (and revision unsuffixed) when not configured", async () => {
+    it("pins the no-config state write-once: a later injection is refused", async () => {
+      // No trust configured → every concept guard must fail closed for the
+      // whole tx. That "no config" state must be just as write-once as a
+      // configured one — handler code reaching the concrete tx must not be
+      // able to install a config after the Runtime's `undefined` call (codex
+      // P2 on #4563).
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
@@ -385,6 +419,16 @@ describe("CFC trust closure (B3)", () => {
         const tx = runtime.edit();
         expect(tx.getCfcState().trustConfig).toBeUndefined();
         expect(tx.getCfcState().trustSnapshot?.revision).toBe(runtime.id);
+        (tx as unknown as {
+          setCfcTrustConfig: (c: unknown) => void;
+        }).setCfcTrustConfig({
+          statements: [],
+          delegations: [],
+          conceptEdges: [],
+          digest: "injected",
+        });
+        // Still undefined — the injection was ignored.
+        expect(tx.getCfcState().trustConfig).toBeUndefined();
         tx.abort();
       } finally {
         await runtime.dispose();

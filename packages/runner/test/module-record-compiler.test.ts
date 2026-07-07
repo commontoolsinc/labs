@@ -58,6 +58,27 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.default()).toBe(42);
   });
 
+  it("never executes exported accessors during the defining-module stamp", () => {
+    // The stamp walks every export after the factory returns and keys on the
+    // artifact's `.implementation`. It must read the OWN DATA descriptor —
+    // a plain get would run this module-authored accessor during a
+    // host-initiated pass: the throw below would fail the module load AFTER
+    // its factory completed (and a getter's return value could receive the
+    // module's defining stamp).
+    const sources = files({
+      "/hostile.ts": `export const probe = {
+  get implementation(): number {
+    throw new Error("boom: accessor executed during a host pass");
+  },
+};
+export const ok = (): number => 7;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const entry = specifierByPath.get("/hostile.ts")!;
+    const ns = importModuleGraphNow(entry, { records }) as { ok(): number };
+    expect(ns.ok()).toBe(7);
+  });
+
   it("does not let a newline in a source name inject code via sourceURL", () => {
     // A file name with a newline must not break out of the `//# sourceURL=`
     // line comment and execute as code.

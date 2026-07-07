@@ -16,6 +16,10 @@
   },
   "imports": {
     "@lit/context": "npm:@lit/context@^1.1.5",
-    "@lit/task": "npm:@lit/task@^1.0.2"
+    "@lit/task": "npm:@lit/task@^1.0.2",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
+    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.46.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^1.19.0",
+    "@opentelemetry/sdk-trace-web": "npm:@opentelemetry/sdk-trace-web@^1.19.0"
   }
 }

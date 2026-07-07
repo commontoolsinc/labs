@@ -147,6 +147,34 @@ describe("CFC atom patterns", () => {
         ),
       ).toBeNull();
     });
+
+    it("rejects a malformed var-bearing VALUE before binding (either direction)", () => {
+      // A crafted atom carrying a `var` key in a non-placeholder arrangement
+      // must not bind to a catch-all placeholder — the value-side half of the
+      // reserved-key discipline (codex/cubic P2 on #4547).
+      const craftedAtom = { var: "$x", type: "https://example.com/atoms/Evil" };
+      expect(matchAtomPattern({ var: "$v" }, craftedAtom)).toBeNull();
+      expect(matchAtomPattern({ var: "$v" }, { var: 5 })).toBeNull();
+      // …nor satisfy a subset record pattern, even one whose named fields it
+      // otherwise carries.
+      expect(
+        matchAtomPattern(
+          { type: "https://example.com/atoms/Evil" },
+          craftedAtom,
+        ),
+      ).toBeNull();
+      // …nor as a nested field value.
+      expect(
+        matchAtomPattern(
+          { type: "t", field: { var: "$v" } },
+          { type: "t", field: craftedAtom },
+        ),
+      ).toBeNull();
+      // A well-formed placeholder-shaped value is a specific literal, not a
+      // wildcard, so it still binds (only MALFORMED var records are rejected).
+      expect(matchAtomPattern({ var: "$v" }, { var: "$x" }))
+        .toEqual({ "$v": { var: "$x" } });
+    });
   });
 
   describe("matchAtomPatternAgainstAtoms (multi-binding disjunction)", () => {
@@ -331,6 +359,20 @@ describe("CFC atom patterns", () => {
       expect(atomEntails(malformed, { ...malformed })).toBe(true);
       const nan = { type: CFC_ATOM_TYPE.Expires, timestamp: NaN };
       expect(atomEntails(nan, cfcAtom.expires(9))).toBe(false);
+      // A NON-CANONICAL Expires (extra fields) must NOT participate in
+      // timestamp ordering — else a ceiling Expires(1000) would admit it even
+      // though deepEqual rejects it (codex/cubic P1 on #4547). It only entails
+      // its structural equal.
+      const extraField = {
+        type: CFC_ATOM_TYPE.Expires,
+        timestamp: 2000,
+        scope: "x",
+      };
+      expect(atomEntails(cfcAtom.expires(1000), extraField)).toBe(false);
+      expect(atomEntails(extraField, cfcAtom.expires(3000))).toBe(false);
+      expect(atomEntails(extraField, { ...extraField })).toBe(true);
+      // …and it is outside a canonical Expires ceiling.
+      expect(clauseSubsumes(cfcAtom.expires(1000), extraField)).toBe(false);
       // No cross-family or structural-similarity order.
       expect(atomEntails(userA, spaceX)).toBe(false);
       expect(

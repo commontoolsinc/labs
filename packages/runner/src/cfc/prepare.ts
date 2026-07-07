@@ -2865,12 +2865,6 @@ const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   CFC_ATOM_TYPE.DisclosureAcknowledged,
   CFC_ATOM_TYPE.DisclosureRendered,
   CFC_ATOM_TYPE.HasRole,
-  // Conceptual principals live in trust statements and rule guards, never in
-  // carried integrity: concept guards resolve exclusively through the trust
-  // closure (exchange-eval), so a literal Concept atom in a value label is
-  // meaningless at best and bait for a config that pool-matches it at worst.
-  // Belt: schemas cannot mint one.
-  CFC_ATOM_TYPE.Concept,
 ]);
 
 const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
