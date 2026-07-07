@@ -90,6 +90,7 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import {
+  isPatternRefSentinel,
   type PatternRefSentinel,
   resolveStoredPattern,
 } from "./builtins/op-pattern-ref.ts";
@@ -706,6 +707,34 @@ export class Runner {
     }
     | undefined {
     let resolvedPatternOrModule = patternOrModule;
+
+    // A pattern read raw from a cell arrives as its JSON boundary serialization
+    // (refs-only since identity E4): `{ $patternRef, argumentSchema,
+    // resultSchema }` with NO `nodes`/`result`/`derivedInternalCells`. Resolve
+    // it back to the live canonical pattern (the object carrying the full graph
+    // the reactive interpreter keyed its ROG on) BEFORE any graph field is read
+    // downstream (`entryRefForPattern`, `patternNeedsOneShotPull`, node
+    // instantiation). The CLI's direct pattern-tool invocation
+    // (`cf piece call <patternToolField>`, packages/cli/lib/callable.ts) hands
+    // such a stored value straight to `run`/`setup`; llm-dialog's tool
+    // invocation performs the same resolution (via `resolveStoredPatternAsync`)
+    // before it calls `runtime.run`. Sync resolution hits in-session by
+    // construction — the boundary form is only stamped for a pattern the
+    // session-lifetime artifact index already carries.
+    if (isPatternRefSentinel(resolvedPatternOrModule)) {
+      const resolved = resolveStoredPattern(
+        this.runtime,
+        resolvedPatternOrModule,
+      );
+      if (!resolved) {
+        const { identity, symbol } = resolvedPatternOrModule.$patternRef;
+        throw new Error(
+          `Unknown pattern: ${identity}#${symbol} did not resolve to a live ` +
+            `canonical in this session`,
+        );
+      }
+      resolvedPatternOrModule = resolved;
+    }
 
     // No pattern in hand: resolve the previously-stored `{ identity, symbol }`
     // pointer synchronously from the in-session artifact index (the module is
