@@ -63,8 +63,9 @@ a distinct migration target but where B trends as RI + VNode-doc
 consolidation land: clients that *choose* not to speculate get a working,
 slightly-laggier UI for free.
 
-The load-bearing enablers are exactly the in-flight work: persistent
-scheduler state (cheap spin-up/down of per-piece graphs), scheduler v2
+The load-bearing enablers are mostly already in the tree behind flags:
+persistent scheduler state (cheap spin-up/down of per-piece graphs —
+BUILT behind `persistentSchedulerState`, §3.2), scheduler v2
 (bounded settle, static write surfaces, read-delta bookkeeping), source
 linking via the `source`/`pattern` doc annotations + content-addressed
 action identity (stale doc → producing piece → runnable action; §3.3.1's
@@ -170,28 +171,40 @@ walked, and whose settle loop is bounded — i.e., a graph that can be
 suspended, described, and resumed. That is precisely the shape a server
 executor must hold for hundreds of spaces.
 
-### 3.2 Persistent scheduler state (spec + partial implementation)
+### 3.2 Persistent scheduler state (BUILT behind a flag)
 
-On main: the observation snapshot
-(`SchedulerActionObservation` — `ownerSpace`, `branch`, `pieceId`,
-`actionId`, `actionKind`, `implementationFingerprint`, `observedAtSeq`,
-`reads`, `currentKnownWrites`, `declaredWrites`, gate options, status —
-`packages/runner/src/scheduler/persistent-observation.ts:22`), the
-rehydration entry points (`rehydrateActionFromStorage`,
-`packages/runner/src/scheduler.ts:666`), and the storage-provider seam
-(`listSchedulerActionSnapshots`,
-`packages/runner/src/storage/interface.ts:271`).
+Already on main AND #4288, behind the default-off runtime option
+`persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`):
+the full durable stack, not just shapes. Per-action observations
+(`SchedulerActionObservation` — `pieceId`, `actionId`, `actionKind`,
+`implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
+`declaredWrites`, gate options, status —
+`packages/runner/src/scheduler/persistent-observation.ts:22`) are attached
+to the live commit tx (`action-run.ts:646/708`) and persisted **inside the
+single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
+→ `upsertSchedulerObservationTransaction` `:3285`) across five tables
+(`scheduler_observation`, `scheduler_action_snapshot` LWW,
+`scheduler_read_index`, `scheduler_write_index`, `scheduler_action_state` —
+DDL `engine.ts:206`+). Cold start reads them back
+(`listSchedulerActionSnapshots` `engine.ts:1717` via the provider seam
+`storage/interface.ts:272`) and rehydrates without re-running unchanged
+actions (`rehydrateActionFromStorage` `scheduler.ts:666`, fingerprint-gated,
+fail-open). Restart-skip is proven by `reload-rehydration.test.ts` +
+`v2-scheduler-state-test.ts` (executed, passing). On #4288 the capability
+is identical; only the cold-start orchestration moved from `scheduler.ts`
+into the runner + `scheduler/facade.ts` (see W0.1).
 
-Missing (G4): the memory-side tables (`scheduler_observation`, read/write
-indexes, action state) wired into the commit pipeline; durable dirty
-markers (compare `observedAtSeq` against branch-head seq); and the
-**doc → readers index** derived from the persisted read sets, which is
-what lets the server answer *"commit touched doc X; which parked pieces
-have stale downstream state?"* without instantiating anything. The
-*producer* direction, by contrast, needs no index at all: it rides the
-docs themselves as the `source`/`pattern` annotation chain — the shape is
-in the data model today, and it becomes universal once §3.3.1's stamping
-ships (G6).
+Still missing (G4), and the real Phase-0 work: durable dirty markers
+consumed as a **wake query** — the tree marks readers dirty *inline* during
+commit (`findSchedulerReadersForWrite` `engine.ts:1849`,
+`markSchedulerReadersDirtyForWrites` `:1912`) but exposes no named
+`staleReadersFor(space, changedIds, seq)` batched query for a *parked*
+space (W0.2), and no wake-on-commit consumer of it (W1.3). The reverse
+*index* itself (`scheduler_read_index`) exists and is populated; what is
+absent is the query + the consumer. The *producer* direction needs no index
+at all: it rides the docs as the `source`/`pattern` annotation chain — the
+shape is in the data model today, universal once §3.3.1's stamping ships
+(G6).
 
 Contribution: spin-up/spin-down becomes cheap. An idle space's graph is a
 set of observation rows; waking it is `rehydrate` + running only actions
@@ -847,7 +860,7 @@ executor's own cross-space reads).
    anything — no notification gap between the rehydration snapshot and
    the live stream.
 4. The worker builds the runtime (in-process provider,
-   `persistSchedulerState`, executor identity), rehydrates observations
+   `persistentSchedulerState`, executor identity), rehydrates observations
    for the interested piece set, computes the stale set (`observedAtSeq`
    vs branch head), and pulls stale pieces; missing/invalid observations
    degrade to a full pull of that piece (fail-open).
@@ -1111,7 +1124,7 @@ means a design doc/decision is required before implementation.
 | G1 | First-class executor principal + executor-computed endorsement atom (`cf-compiler` / `LlmDerived` precedents) | A (principal); atom: Phase 2+ hardening, not a B-flip blocker | principal: needs-spec (small); atom: own CFC-owned mini-spec |
 | G2 | Per-space executor grant flow (owner opt-in → ACL WRITE for executor; revocation) | A | needs-spec; ACL mechanism exists |
 | G3 | Delegation/capability tokens (user → executor, scoped) | scoped-execution phase (user-scoped derivation); C | needs-spec (large); not needed for initial space-scoped B |
-| G4 | Persistent-state memory tables + commit-pipeline wiring + doc→readers index from persisted read sets (spec §9); doc→producer needs no *index* once G6 lands (`source`/`pattern` chain: data-model shape landed, §3.3.1 stamping not yet shipped) | A (wake-on-commit), B (watermarks) | spec exists; needs-impl |
+| G4 | Persistent-state memory tables + commit-pipeline wiring + `scheduler_read_index` **already BUILT** behind `persistentSchedulerState` (both refs). Remaining: named `staleReadersFor` batched wake query (W0.2) + a wake-on-commit consumer (W1.3); durable dirty markers exist inline but aren't exposed as a parked-space query. doc→producer needs no *index* once G6 lands (`source`/`pattern` chain: data-model shape landed, §3.3.1 stamping not yet shipped) | A (wake query+consumer), B (watermarks) | substrate shipped; wake query + consumer needs-impl |
 | G5 | Runner write split: route tx by originating action kind (rides the §3.3.1 tx provenance envelope); speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
 | G6 | Source attaching in the write path (§3.3.1: tx provenance envelope, transferred to created docs at apply) + one-time legacy audit/backfill of pre-stamping docs | catch-up completeness | needs-impl (mechanism); then audit |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
