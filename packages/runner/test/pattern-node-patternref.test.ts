@@ -130,67 +130,70 @@ describe("pattern node $patternRef instantiation", () => {
     }
   });
 
-  // A `.asScope("user")` sub-pattern node carries its declared scope on
+  // A `.asScope(...)` sub-pattern node carries its declared scope on
   // `module.defaultScope`, which `instantiatePatternNode` reads off the
   // RESOLVED `patternImpl` (`patternDefaultScope`). Resolving the `$patternRef`
   // to the live canonical must preserve that so the child result cell + its
-  // redirect still land at `user` scope. Verified under both flag states — the
-  // scope path is runner-level and must not depend on the interpreter.
-  for (const interpreter of [false, true]) {
-    it(`preserves a scoped sub-pattern's child result scope (interpreter=${interpreter})`, async () => {
-      const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-        experimental: { experimentalInterpreter: interpreter },
-      });
-      const tx = runtime.edit();
-      try {
-        const parent = await runtime.patternManager.compilePattern(
-          SCOPED_PROGRAM,
-        );
+  // redirect still land at the declared scope. Verified for PerUser and
+  // PerSession, under both flag states — the scope path is runner-level and must
+  // not depend on the interpreter.
+  for (const scope of ["user", "session"] as const) {
+    for (const interpreter of [false, true]) {
+      it(`preserves a ${scope}-scoped sub-pattern's child result scope (interpreter=${interpreter})`, async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { experimentalInterpreter: interpreter },
+        });
+        const tx = runtime.edit();
+        try {
+          const parent = await runtime.patternManager.compilePattern(
+            scopedProgram(scope),
+          );
 
-        const resultCell = runtime.getCell(
-          space,
-          `patternref-scoped-child-${interpreter}`,
-          undefined,
-          tx,
-        );
-        const result = runtime.run(
-          tx,
-          parent as never,
-          { v: 5 } as never,
-          resultCell as never,
-        );
-        await tx.commit();
-        await runtime.idle();
-        await runtime.storageManager.synced();
-        const value = JSON.parse(JSON.stringify(await result.pull()));
-        assertEquals(value, { child: { out: 6 } });
+          const resultCell = runtime.getCell(
+            space,
+            `patternref-scoped-child-${scope}-${interpreter}`,
+            undefined,
+            tx,
+          );
+          const result = runtime.run(
+            tx,
+            parent as never,
+            { v: 5 } as never,
+            resultCell as never,
+          );
+          await tx.commit();
+          await runtime.idle();
+          await runtime.storageManager.synced();
+          const value = JSON.parse(JSON.stringify(await result.pull()));
+          assertEquals(value, { child: { out: 6 } });
 
-        // The child result cell (and thus the redirect the parent stores to it)
-        // is scoped to `user`, not the base `space` scope.
-        const childLink = (result as never as {
-          key: (k: string) => {
-            resolveAsCell: () => {
-              getAsNormalizedFullLink: () => { scope: string };
+          // The child result cell (and thus the redirect the parent stores to
+          // it) is scoped to the declared scope, not the base `space` scope.
+          const childLink = (result as never as {
+            key: (k: string) => {
+              resolveAsCell: () => {
+                getAsNormalizedFullLink: () => { scope: string };
+              };
             };
-          };
-        })
-          .key("child")
-          .resolveAsCell()
-          .getAsNormalizedFullLink();
-        assertEquals(childLink.scope, "user");
-      } finally {
-        await runtime.dispose();
-        await storageManager.close();
-      }
-    });
+          })
+            .key("child")
+            .resolveAsCell()
+            .getAsNormalizedFullLink();
+          assertEquals(childLink.scope, scope);
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
   }
 });
 
-// A parent that invokes a `.asScope("user")` sub-pattern node.
-const SCOPED_PROGRAM: RuntimeProgram = {
+// A parent that invokes a `.asScope(<scope>)` sub-pattern node.
+const scopedProgram = (scope: "user" | "session"): RuntimeProgram => ({
   main: "/main.tsx",
   files: [
     {
@@ -202,9 +205,9 @@ const SCOPED_PROGRAM: RuntimeProgram = {
         "  return { out: inc({ x: n }) };",
         "});",
         "export default pattern<{ v: number }>(({ v }) => {",
-        "  return { child: Inner.asScope('user')({ n: v }) };",
+        `  return { child: Inner.asScope('${scope}')({ n: v }) };`,
         "});",
       ].join("\n"),
     },
   ],
-};
+});
