@@ -798,10 +798,12 @@ function tryBuildInlineCollectionNode(
       type: "raw",
       implementation,
       debugName: `ri2:${collectionOp}-inline`,
-      // Keep the CT-1623 by-identity op protocol (compact sentinel through
-      // the session artifact index; loud on miss).
-      ri2SubstituteOpRefs: collectionOp,
     } as unknown as Module,
+    // The op carried in these inputs keeps the CT-1623 by-identity protocol
+    // automatically: `unwrapOneLevelAndBindtoDoc`'s `convert` replaces any
+    // pattern-valued input with a `{ $patternRef }` sentinel at bind time
+    // (compact through the session artifact index; loud on miss), so this raw
+    // node needs no special-casing.
     inputs: original.inputs,
     outputs: original.outputs,
   };
