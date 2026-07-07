@@ -426,6 +426,110 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       expect(result.firings).toEqual([]);
     });
 
+    it("fails closed on an OVER-CONSTRAINED concept guard (extra fields ignored otherwise)", () => {
+      // A Concept guard is checked on type + trust closure only, so extra
+      // constraint fields would be silently dropped — an author's narrow guard
+      // `{type:Concept, uri:C, subject:X}` would fire as broadly as the bare
+      // concept (codex/cubic P2 on #4564). It must NOT fire even when C is
+      // satisfied; only the exact `{type, uri}` shape is a live guard.
+      const concept = "https://commonfabric.org/cfc/concepts/age-rounding";
+      const codeAtom = {
+        type: "https://commonfabric.org/cfc/atom/CodeHash",
+        hash: "sha256:rounding",
+      };
+      const trust = createTrustResolver(
+        buildCfcTrustConfig({
+          statements: [{
+            concrete: codeAtom,
+            implements: concept,
+            verifier: "did:key:auditor",
+          }],
+          delegations: [{
+            delegator: "*",
+            verifier: "did:key:auditor",
+            concepts: "*",
+          }],
+        })!,
+      );
+      const overConstrained: ExchangeRule = {
+        id: "over-constrained-concept",
+        appliesTo: spaceX,
+        preCondition: {
+          integrity: [{
+            type: CFC_ATOM_TYPE.Concept,
+            uri: concept,
+            subject: ALICE, // extra field → not the exact concrete shape
+          }],
+        },
+        post: { addAlternatives: [userAlice] },
+      };
+      const overResult = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [codeAtom] },
+        snapshot([overConstrained]),
+        { trustResolver: trust, actingPrincipal: ALICE },
+      );
+      expect(overResult.firings).toEqual([]);
+      // The exact-shape guard, same evidence, DOES fire — proving the negative
+      // above is the extra field, not a missing statement/delegation.
+      const exact: ExchangeRule = {
+        ...overConstrained,
+        id: "exact-concept",
+        preCondition: {
+          integrity: [{ type: CFC_ATOM_TYPE.Concept, uri: concept }],
+        },
+      };
+      const exactResult = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [codeAtom] },
+        snapshot([exact]),
+        { trustResolver: trust, actingPrincipal: ALICE },
+      );
+      expect(exactResult.firings.length).toBe(1);
+    });
+
+    it("drops each alternative once across sibling clauses under duplicate bindings", () => {
+      // Two integrity facts give the drop rule two bindings per matched
+      // alternative, so each (clauseIndex, alternative) is matched twice. This
+      // exercises BOTH no-op guards in the drop loop: the multi-alternative
+      // sibling clause reaches applyRuleMatch's `index < 0` deepEqual
+      // re-location (the alternative already removed), and the singleton clause
+      // reaches the `clauseIndex >= length` guard (its clause spliced). Each
+      // clause must lose ONLY the target alternative and no sibling is
+      // corrupted — the duplicate/stale drop matches no-op (cubic P2 on #4564:
+      // the corruption is unreachable, so the guards suffice; no dedup added).
+      const detectedA = {
+        type: "https://example.com/atoms/DetectedBy",
+        id: "a",
+      };
+      const detectedB = {
+        type: "https://example.com/atoms/DetectedBy",
+        id: "b",
+      };
+      const dropVarGuard: ExchangeRule = {
+        id: "drop-expires-var-guard",
+        appliesTo: { type: CFC_ATOM_TYPE.Expires, timestamp: { var: "$t" } },
+        preCondition: {
+          integrity: [{
+            type: "https://example.com/atoms/DetectedBy",
+            id: { var: "$d" },
+          }],
+        },
+        post: { dropClause: true },
+      };
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [
+            cfcAtom.expires(1000), // singleton — splices when dropped
+            { anyOf: [cfcAtom.expires(1000), userBob] },
+          ],
+          integrity: [detectedA, detectedB],
+        },
+        snapshot([dropVarGuard]),
+      );
+      // Clause 0 fully dropped; clause 1 keeps userBob (never corrupted).
+      expect(clauseSetsEqual(result.label.confidentiality ?? [], [userBob]))
+        .toBe(true);
+    });
+
     it("is the identity without a snapshot, rules, or confidentiality", () => {
       const label: IFCLabel = { confidentiality: [spaceX] };
       expect(evaluateExchangeRules(label, undefined).label).toBe(label);
@@ -515,6 +619,37 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       const again = evaluateExchangeRules(labelA, snapshotA);
       expect(again.label).toEqual(a.label);
       expect(again.firings).toEqual(a.firings);
+    });
+
+    it("(iii) evaluates rules in canonical UTF-8 order, not UTF-16 (astral ids)", () => {
+      // Rule id `rule-\u{1F4C6}` is astral (code point U+1F4C6); `rule-￰`
+      // is BMP. In canonical UTF-8 / code-point order U+FFF0 (65520) precedes
+      // U+1F4C6 (128198), so the BMP rule fires first. JS `<` compares UTF-16
+      // code UNITS, where the astral id's leading surrogate 0xD83D (55357) is
+      // BELOW 0xFFF0 — the OPPOSITE order. Each rule adds to its own clause, so
+      // the firings sequence exposes the iteration order (codex P2 on #4564).
+      const bmpId = "rule-￰";
+      const astralId = "rule-\u{1F4C6}";
+      const markerA = { type: "https://example.com/atoms/MarkerA" };
+      const markerB = { type: "https://example.com/atoms/MarkerB" };
+      const bmpRule: ExchangeRule = {
+        id: bmpId,
+        appliesTo: markerA,
+        post: { addAlternatives: [userAlice] },
+      };
+      const astralRule: ExchangeRule = {
+        id: astralId,
+        appliesTo: markerB,
+        post: { addAlternatives: [userBob] },
+      };
+      // Sanity: JS `<` would order these the other way.
+      expect(astralId < bmpId).toBe(true);
+      const result = evaluateExchangeRules(
+        { confidentiality: [markerA, markerB] },
+        snapshot([astralRule, bmpRule]),
+      );
+      expect(result.firings.map((firing) => firing.ruleId))
+        .toEqual([bmpId, astralId]);
     });
 
     it("(iv) fuel exhaustion returns the ORIGINAL label with the exhausted flag", () => {

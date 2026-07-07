@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  CompilerError,
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   type SourceMap,
@@ -81,6 +82,129 @@ describe("TypeScriptCompiler", () => {
     // No AMD wrapper / define() — this is bare CommonJS.
     expect(main.js).not.toContain("define(");
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
+  });
+
+  it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {
+    // The interleaved driver only changes WHERE the event loop can run
+    // (macrotask yields at module boundaries) — never what is emitted. Pin
+    // byte-for-byte equivalence across a multi-module program so the two
+    // drivers cannot drift.
+    const compiler = new TypeScriptCompiler(types);
+    const files = {
+      "/main.tsx":
+        "import { sub } from './math/subtract.ts';export const run = () => sub(10,2);export default run;",
+      "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
+      "/math/subtract.ts":
+        "import { add } from '../utils.ts';export const sub = (x:number,y:number)=>add(x,y*-1)",
+    };
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.tsx", files),
+    );
+    const sync = compiler.compileToModules(resolved);
+    const interleaved = await compiler.compileToModulesInterleaved(resolved);
+
+    expect(new Set(interleaved.keys())).toEqual(new Set(sync.keys()));
+    for (const [name, out] of sync) {
+      expect(interleaved.get(name)!.js).toBe(out.js);
+      expect(JSON.stringify(interleaved.get(name)!.sourceMap)).toBe(
+        JSON.stringify(out.sourceMap),
+      );
+    }
+  });
+
+  it("compileToModulesInterleaved surfaces type errors like compileToModules", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.tsx", {
+        "/main.tsx":
+          "function add(x:number, y:number): number {return x+y}; export default add(`0`, 2);",
+      }),
+    );
+    const expected =
+      "Argument of type 'string' is not assignable to parameter of type 'number'.";
+    expect(() => compiler.compileToModules(resolved)).toThrow(expected);
+    await expect(compiler.compileToModulesInterleaved(resolved)).rejects
+      .toThrow(expected);
+  });
+
+  it("aggregates type errors across multiple files identically in both drivers", async () => {
+    // The per-file type-check steps collect diagnostics from EVERY source file
+    // before throwing (aggregate-then-throw), so a program with errors in two
+    // files reports both in one CompilerError — in program order, byte-equal
+    // between the sync and interleaved drivers.
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.tsx", {
+        "/main.tsx":
+          "import { dep } from './dep.ts';\nexport const wrong: string = 123;\nexport default dep;",
+        "/dep.ts": "export const dep: number = 'not-a-number';",
+      }),
+    );
+
+    let syncError: CompilerError | undefined;
+    try {
+      compiler.compileToModules(resolved);
+    } catch (error) {
+      syncError = error as CompilerError;
+    }
+    expect(syncError).toBeInstanceOf(CompilerError);
+    // Both files' diagnostics, not just the first file's.
+    expect(syncError!.message).toContain(
+      "Type 'number' is not assignable to type 'string'.",
+    );
+    expect(syncError!.message).toContain(
+      "Type 'string' is not assignable to type 'number'.",
+    );
+    expect(syncError!.errors.map((e) => e.file).sort()).toEqual([
+      "/dep.ts",
+      "/main.tsx",
+    ]);
+
+    const interleavedError = await compiler.compileToModulesInterleaved(
+      resolved,
+    ).then(() => undefined, (error) => error as CompilerError);
+    expect(interleavedError).toBeInstanceOf(CompilerError);
+    expect(interleavedError!.message).toBe(syncError!.message);
+  });
+
+  it("surfaces declaration diagnostics in both drivers", async () => {
+    // A function-scoped unique symbol cannot be named in the exported
+    // declaration (TS4025), which only the DECLARATION check catches — the
+    // semantic check is clean. Pins that the per-file declaration-check step
+    // still runs and throws in both drivers.
+    const compiler = new TypeScriptCompiler(types);
+    const artifact = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents:
+          "function f() { const s: unique symbol = Symbol(); return { [s]: 1 }; }\n" +
+          "export const v = f();\nexport default v;",
+      }],
+    };
+    const expected = "Exported variable 'v' has or is using private name 's'.";
+    expect(() => compiler.compileToModules(artifact)).toThrow(expected);
+    await expect(compiler.compileToModulesInterleaved(artifact)).rejects
+      .toThrow(expected);
+  });
+
+  it("filters known exported-symbol declaration false positives", () => {
+    // Same TS4025 shape, but the private name is one of the
+    // KNOWN_EXPORTED_SYMBOLS (CELL_BRAND): TypeScript's declaration
+    // diagnostics report these commonfabric brand symbols spuriously, so the
+    // checker skips them and the compile succeeds.
+    const compiler = new TypeScriptCompiler(types);
+    const artifact = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents:
+          "function f() { const CELL_BRAND: unique symbol = Symbol(); return { [CELL_BRAND]: 1 }; }\n" +
+          "export const v = f();\nexport default v;",
+      }],
+    };
+    const modules = compiler.compileToModules(artifact);
+    expect(modules.get("/main.tsx")).toBeDefined();
   });
 
   it("Compiles programs that include authored .js sources", async () => {

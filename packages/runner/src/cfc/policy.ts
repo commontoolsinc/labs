@@ -135,6 +135,18 @@ const rejectUnknownKeys = (
   }
 };
 
+// A PLAIN object (prototype `Object.prototype` or null) — the shape authored
+// TS literals and parsed JSON produce. `isRecord` alone admits `Map`, `Set`,
+// and class instances, whose own-enumerable string keys are usually empty, so
+// the field-by-field validation below would read NO guards and wave through
+// an unguarded rule (cubic P1 on #4562). Config that is not a plain object
+// fails closed here.
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
+  if (!isRecord(value) || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
 const validatePatternArray = (
   value: unknown,
   where: string,
@@ -153,7 +165,7 @@ const validatePatternArray = (
 };
 
 const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
-  if (!isRecord(rule) || Array.isArray(rule)) {
+  if (!isPlainRecord(rule)) {
     throw new Error(`cfcPolicyRecords: ${where} must be a rule object`);
   }
   rejectUnknownKeys(rule, RULE_KEYS, where);
@@ -174,7 +186,7 @@ const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
     );
   }
   if (preCondition !== undefined) {
-    if (!isRecord(preCondition) || Array.isArray(preCondition)) {
+    if (!isPlainRecord(preCondition)) {
       throw new Error(
         `cfcPolicyRecords: ${ruleWhere} preCondition must be an object`,
       );
@@ -199,7 +211,7 @@ const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
       `cfcPolicyRecords: ${ruleWhere} preConfScope must be "targetClause" or "anywhere"`,
     );
   }
-  if (!isRecord(post) || Array.isArray(post)) {
+  if (!isPlainRecord(post)) {
     throw new Error(`cfcPolicyRecords: ${ruleWhere} needs a post object`);
   }
   rejectUnknownKeys(post, POST_KEYS, `${ruleWhere} post`);
@@ -284,7 +296,7 @@ export const buildCfcPolicySnapshot = (
   const records: PolicyRecord[] = [];
   const recordIds = new Set<string>();
   for (const input of inputs) {
-    if (!isRecord(input) || Array.isArray(input)) {
+    if (!isPlainRecord(input)) {
       throw new Error("cfcPolicyRecords: each record must be an object");
     }
     rejectUnknownKeys(input, RECORD_INPUT_KEYS, "policy record");
