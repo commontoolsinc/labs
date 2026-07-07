@@ -168,6 +168,7 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
+    globalThis.addEventListener("beforeunload", this._onBeforeUnload);
   }
 
   override disconnectedCallback(): void {
@@ -176,8 +177,22 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
+    globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
     super.disconnectedCallback();
   }
+
+  // A page teardown (reload, tab close, external navigation) terminates the
+  // runtime worker, dropping any commit the server has not yet confirmed. The
+  // worker mirrors its pending-commit state to `RuntimeClient.hasPendingWrites`
+  // on every transition, so this synchronous check is current; while writes are
+  // unconfirmed, ask the browser to confirm leaving instead of silently losing
+  // them. Commits confirm quickly (typically well under a second), so the
+  // prompt only appears in the narrow window a reload would actually lose data.
+  private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
+    if (this.runtime?.hasPendingWrites()) {
+      event.preventDefault();
+    }
+  };
 
   protected override updated(changedProperties: PropertyValues<this>): void {
     if (!changedProperties.has("app")) {

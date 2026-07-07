@@ -33,6 +33,7 @@ import {
   type LogLevel,
   NavigateRequestNotification,
   type PatternSourcesResponse,
+  PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -62,6 +63,7 @@ export type RuntimeClientEvents = {
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
+  pendingwriteschange: [{ pending: boolean }];
 };
 
 export const $conn = Symbol("$request");
@@ -71,6 +73,7 @@ export const $conn = Symbol("$request");
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
+  #pendingWrites = false;
 
   private constructor(
     conn: InitializedRuntimeConnection,
@@ -82,6 +85,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
+    this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
+  }
+
+  /**
+   * Whether the worker runtime has issued commits that the server has not yet
+   * confirmed. Mirrored from the worker's storage manager on every transition,
+   * so it is synchronously readable — e.g. from a beforeunload handler, where
+   * no async round-trip is possible. Tearing the page down while this is true
+   * loses those writes.
+   */
+  hasPendingWrites(): boolean {
+    return this.#pendingWrites;
   }
 
   /**
@@ -631,5 +646,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onTelemetry = (data: TelemetryNotification): void => {
     this.emit("telemetry", data.marker);
+  };
+
+  private _onPendingWritesChange = (
+    data: PendingWritesNotification,
+  ): void => {
+    this.#pendingWrites = data.pending;
+    this.emit("pendingwriteschange", { pending: data.pending });
   };
 }

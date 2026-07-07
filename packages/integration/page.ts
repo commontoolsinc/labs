@@ -33,10 +33,21 @@ export function pipeConsole(e: ConsoleEvent) {
 // ```ts
 // page.addEventListener("dialog", dismissDialogs);
 // ```
+//
+// A beforeunload confirmation is accepted ("Leave") rather than dismissed:
+// dismissing it cancels the navigation the test just requested, which then
+// times out. The shell raises this dialog when a reload would drop writes the
+// server has not yet confirmed; a test that navigates at that point means to
+// navigate anyway, and durability assertions belong to the runtime-idle
+// checkpoint, not to this prompt.
 export async function dismissDialogs(e: DialogEvent) {
   const dialog = e.detail;
   console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
-  await dialog.dismiss();
+  if (dialog.type === "beforeunload") {
+    await dialog.accept();
+  } else {
+    await dialog.dismiss();
+  }
 }
 
 // Wrapper around `@astral/astral`'s `Page`.

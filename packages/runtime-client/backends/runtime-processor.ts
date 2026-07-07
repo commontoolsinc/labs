@@ -462,6 +462,17 @@ export class RuntimeProcessor {
       spaceHostMap: data.spaceHostMap,
     });
 
+    // Mirror the durability barrier to the page: `pending` is true while any
+    // issued commit is still unconfirmed. The shell keeps the latest value and
+    // consults it from its beforeunload handler, so a reload with unconfirmed
+    // writes prompts the user instead of silently dropping them.
+    storageManager.subscribePendingCommits((pending) => {
+      self.postMessage({
+        type: NotificationType.PendingWritesChanged,
+        pending,
+      });
+    });
+
     let pieceManager: PieceManager | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
     const runtime = new Runtime({
