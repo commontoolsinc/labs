@@ -155,8 +155,11 @@ type RuleMatch = {
 
 /**
  * Collapses drop matches that target the same alternative in the same clause
- * (different bindings) to one — see the call site for why the duplicate is
- * unsafe under the splice-and-shift index discipline. Order-preserving.
+ * (different bindings) to one — a drop carries no binding-dependent
+ * postcondition, so they are the same removal. See the call site: this is
+ * defensive hardening (the duplicate is already a harmless no-op under the
+ * descending order + length guard), kept to make correctness independent of
+ * that argument. Order-preserving.
  */
 const dedupeDropMatches = (matches: readonly RuleMatch[]): RuleMatch[] => {
   const unique: RuleMatch[] = [];
@@ -398,10 +401,15 @@ export const evaluateExchangeRules = (
       // Drop matches are additionally DEDUPED by (clauseIndex, alternative)
       // (cubic P2 on #4564): a drop carries no postcondition, so distinct
       // bindings that select the same alternative in the same clause are the
-      // same removal. Without dedup, the first such match can empty+splice the
-      // clause, and the duplicate — same clauseIndex, now pointing at the
-      // clause that shifted into that slot — would deepEqual-search the WRONG
-      // clause and could erroneously drop an alternative from it.
+      // same removal. This is DEFENSIVE HARDENING, not a live-bug fix — the
+      // descending order above already fully processes a higher-index sibling
+      // clause before a lower-index one splices into a freed slot, so the
+      // shifted-in clause never still carries the target, and the
+      // `clauseIndex >= length` guard below plus applyRuleMatch's deepEqual
+      // re-location make the duplicate a harmless no-op (a differential sweep
+      // over exhaustive + 20k randomized labels found dedup-on/off
+      // byte-identical). The dedup makes correctness independent of that subtle
+      // ordering argument and trims redundant no-op iterations.
       const ordered = rule.post.dropClause === true
         ? dedupeDropMatches(matches).sort((a, b) =>
           b.clauseIndex - a.clauseIndex

@@ -487,11 +487,13 @@ describe("CFC exchange-rule evaluation (B4)", () => {
     });
 
     it("drops each alternative once across sibling clauses under duplicate bindings", () => {
-      // Two integrity facts give the drop rule two bindings per matched
-      // alternative; with singleton + multi-alternative sibling clauses that
-      // both carry the target, the per-(clause,alternative) drop dedup keeps
-      // the splice-and-shift index discipline from touching the wrong clause
-      // (cubic P2 on #4564). Each clause loses ONLY the target alternative.
+      // Contract test (not red-green): two integrity facts give the drop rule
+      // two bindings per matched alternative; with singleton + multi-alternative
+      // sibling clauses that both carry the target, each clause must lose ONLY
+      // the target alternative and no sibling is corrupted. The per-(clause,
+      // alternative) drop dedup is defensive hardening here — the descending
+      // order + length guard already make the duplicate a no-op — so this
+      // pins the observable invariant rather than a dedup-specific regression.
       const detectedA = {
         type: "https://example.com/atoms/DetectedBy",
         id: "a",
@@ -615,6 +617,37 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       const again = evaluateExchangeRules(labelA, snapshotA);
       expect(again.label).toEqual(a.label);
       expect(again.firings).toEqual(a.firings);
+    });
+
+    it("(iii) evaluates rules in canonical UTF-8 order, not UTF-16 (astral ids)", () => {
+      // Rule id `rule-\u{1F4C6}` is astral (code point U+1F4C6); `rule-￰`
+      // is BMP. In canonical UTF-8 / code-point order U+FFF0 (65520) precedes
+      // U+1F4C6 (128198), so the BMP rule fires first. JS `<` compares UTF-16
+      // code UNITS, where the astral id's leading surrogate 0xD83D (55357) is
+      // BELOW 0xFFF0 — the OPPOSITE order. Each rule adds to its own clause, so
+      // the firings sequence exposes the iteration order (codex P2 on #4564).
+      const bmpId = "rule-￰";
+      const astralId = "rule-\u{1F4C6}";
+      const markerA = { type: "https://example.com/atoms/MarkerA" };
+      const markerB = { type: "https://example.com/atoms/MarkerB" };
+      const bmpRule: ExchangeRule = {
+        id: bmpId,
+        appliesTo: markerA,
+        post: { addAlternatives: [userAlice] },
+      };
+      const astralRule: ExchangeRule = {
+        id: astralId,
+        appliesTo: markerB,
+        post: { addAlternatives: [userBob] },
+      };
+      // Sanity: JS `<` would order these the other way.
+      expect(astralId < bmpId).toBe(true);
+      const result = evaluateExchangeRules(
+        { confidentiality: [markerA, markerB] },
+        snapshot([astralRule, bmpRule]),
+      );
+      expect(result.firings.map((firing) => firing.ruleId))
+        .toEqual([bmpId, astralId]);
     });
 
     it("(iv) fuel exhaustion returns the ORIGINAL label with the exhausted flag", () => {
