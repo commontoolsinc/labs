@@ -151,34 +151,22 @@ function mergeLlmDerivedIntoNode(
  * so `walkIfcSchema` mints the `LlmDerived` labelMap entry on that child doc too.
  *
  * The merge is idempotent (an injection-safe schema that already carries the
- * stamp on a node is left unchanged) and cycle-safe over recursive `$ref`
- * schemas. An absent resultSchema defaults to a plain object schema.
+ * stamp on a node is left unchanged). The recursion follows the finite, acyclic
+ * JSON-Schema tree — `$ref` is a string this function does not dereference, so a
+ * recursive `$defs` self-reference is a leaf here — and the result is interned.
+ * An absent resultSchema defaults to a plain object schema.
  */
 function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
-  const seen = new Map<object, JSONSchema>();
-  const stampNode = (node: JSONSchema): JSONSchema => {
-    if (!isRecord(node)) return node;
-    const cached = seen.get(node);
-    if (cached !== undefined) return cached;
-    // Reserve the slot before recursing so a `$ref` cycle resolves to the same
-    // (in-progress) node rather than recursing forever. The placeholder is the
-    // stamped-but-not-yet-descended node; children are filled in below.
+  const stampNode = (node: Record<string, unknown>): JSONSchema => {
     const stamped = mergeLlmDerivedIntoNode(node);
-    seen.set(node, stamped as JSONSchema);
 
     const descend = (value: unknown): unknown => {
       if (Array.isArray(value)) return value.map(descend);
-      if (isRecord(value)) return stampNode(value as JSONSchema);
+      if (isRecord(value)) return stampNode(value);
       return value;
     };
 
-    for (
-      const key of [
-        "properties",
-        "$defs",
-        "patternProperties",
-      ]
-    ) {
+    for (const key of ["properties", "$defs", "patternProperties"]) {
       const container = stamped[key];
       if (isRecord(container)) {
         stamped[key] = Object.fromEntries(
@@ -195,9 +183,9 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
     return stamped as JSONSchema;
   };
 
-  const base: JSONSchema = isRecord(schema)
+  const base: Record<string, unknown> = isRecord(schema)
     ? schema
-    : { type: "object" } as JSONSchema;
+    : { type: "object" };
   return internSchema(stampNode(base));
 }
 

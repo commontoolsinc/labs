@@ -474,6 +474,121 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
   });
 
+  it("stamps split child docs across anyOf branches and recursive `$ref` shapes", async () => {
+    // The stamp is deep-merged into EVERY node of the result schema so it
+    // survives `getSchemaAtPath` descent at any split point — exercising the
+    // compound (`anyOf`) and recursive-`$defs` shapes, not just a flat
+    // `properties`/`items` object. Each element below lands in its OWN document
+    // (array items with `asCell`), so its persisted labelMap must carry the
+    // stamp: `tagged[*]` splits through an `anyOf` item schema; the tree's
+    // `children[*]` splits through an item schema that is a `$ref` back into
+    // `$defs.node`.
+    const testPrompt = "d1b-generateObject-compound-recursive-stamp";
+    const objectSchema: JSONSchema = {
+      type: "object",
+      $defs: {
+        node: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            children: {
+              type: "array",
+              // A `$ref` item that splits into its own document per element.
+              items: { $ref: "#/$defs/node", asCell: ["cell"] },
+            },
+          },
+          required: ["label"],
+          // A boolean schema keyword — the deep-stamp walk descends into it and
+          // passes it through untouched (a leaf that is neither object nor array).
+          additionalProperties: false,
+        },
+      },
+      properties: {
+        tagged: {
+          type: "array",
+          items: {
+            // Each item splits into its own document AND is a compound schema.
+            asCell: ["cell"],
+            anyOf: [
+              {
+                type: "object",
+                properties: { a: { type: "string" } },
+                required: ["a"],
+              },
+              {
+                type: "object",
+                properties: { b: { type: "number" } },
+                required: ["b"],
+              },
+            ],
+          },
+        },
+        tree: { $ref: "#/$defs/node" },
+      },
+      required: ["tagged", "tree"],
+    };
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.schema.type === "object",
+      {
+        object: {
+          tagged: [{ a: "x" }, { b: 2 }],
+          tree: { label: "root", children: [{ label: "leaf", children: [] }] },
+        },
+        id: "d1b-go-compound-recursive-1",
+      },
+    );
+
+    const testPattern = builder.pattern(() =>
+      builder.generateObject({
+        prompt: testPrompt,
+        schema: objectSchema,
+        schemaSanitizePromptInjection: true,
+      })
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "d1b-generateObject-compound-recursive-result",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("result").get()).toEqual({
+      tagged: [{ a: "x" }, { b: 2 }],
+      tree: { label: "root", children: [{ label: "leaf", children: [] }] },
+    });
+
+    const tagged = result.key("result").key("tagged") as unknown as Cell<any>;
+    const taggedFirst = tagged.key(0) as unknown as Cell<any>;
+    const taggedSecond = tagged.key(1) as unknown as Cell<any>;
+    const treeChild = ((result.key("result").key("tree") as unknown as Cell<any>)
+      .key("children") as unknown as Cell<any>).key(0) as unknown as Cell<any>;
+
+    // Sanity: every asserted element really split into its own document.
+    expect(parseLink(taggedFirst.withTx().getRaw())?.id).toBeDefined();
+    expect(parseLink(taggedSecond.withTx().getRaw())?.id).toBeDefined();
+    expect(parseLink(treeChild.withTx().getRaw())?.id).toBeDefined();
+
+    // anyOf-branch items carry the stamp on their own doc.
+    expect(childDocIntegrity(runtime, taggedFirst)).toContainEqual(
+      LLM_DERIVED_ATOM,
+    );
+    expect(childDocIntegrity(runtime, taggedSecond)).toContainEqual(
+      LLM_DERIVED_ATOM,
+    );
+    // Recursive-`$ref` item carries the stamp on its own doc.
+    expect(childDocIntegrity(runtime, treeChild)).toContainEqual(
+      LLM_DERIVED_ATOM,
+    );
+  });
+
   it("does not stamp the `llm` result when CFC enforcement is disabled", async () => {
     const disabledStorage = StorageManager.emulate({ as: signer });
     const disabledRuntime = new Runtime({
