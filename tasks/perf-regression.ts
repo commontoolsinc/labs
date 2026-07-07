@@ -24,10 +24,13 @@ import {
   apiHeaders,
   applyBaselineOverrides,
   type BaselineOverrides,
+  compileCacheFamilyForMetric,
+  type CompileCacheStates,
   computeBaseline,
   type DenoBenchResult,
   downloadAndParseJUnit,
-  downloadAndParsePerfMetrics,
+  downloadAndParsePerfMetricsDetailed,
+  dropColdSamples,
   escapeTableCell,
   extractBenchMetrics,
   extractMetrics,
@@ -458,6 +461,9 @@ async function main() {
   let artifactRunsProcessed = 0;
   let perfMetricRunsProcessed = 0;
   let logParseRunsProcessed = 0;
+  // Per-run compile cache states from tagged perf-metrics artifacts. Runs
+  // without a tag (pre-rollout, missing artifact) stay absent — unknown.
+  const cacheStatesByRunId = new Map<number, CompileCacheStates>();
   await mapConcurrent(
     [...jobsByRun],
     API_CONCURRENCY,
@@ -468,12 +474,15 @@ async function main() {
           (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
         );
         if (perfMetricsArtifact) {
-          const metrics = await downloadAndParsePerfMetrics(
+          const detailed = await downloadAndParsePerfMetricsDetailed(
             perfMetricsArtifact.id,
           );
-          if (metrics) {
+          if (detailed) {
+            if (detailed.compileCacheStates) {
+              cacheStatesByRunId.set(run.id, detailed.compileCacheStates);
+            }
             let hasTestMetrics = false;
-            for (const [name, sample] of metrics) {
+            for (const [name, sample] of detailed.metrics) {
               if (name.startsWith("test:") || name.startsWith("subtest:")) {
                 hasTestMetrics = true;
                 addSample(timelines, name, sample);
@@ -624,6 +633,29 @@ async function main() {
   // concurrent artifact fetches may have appended samples out of order.
   for (const timeline of timelines.values()) {
     timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  // Drop samples from known-cold runs for timing metrics inflated by a cold
+  // compile cache, so cold main runs skew neither the baseline nor the
+  // recent window. Runs without a recorded state are unknown and kept;
+  // metrics with no compile-cache family are untouched.
+  if (cacheStatesByRunId.size > 0) {
+    let coldSamplesDropped = 0;
+    for (const timeline of timelines.values()) {
+      const family = compileCacheFamilyForMetric(timeline.name);
+      if (!family) continue;
+      const kept = dropColdSamples(
+        timeline.samples,
+        (runId) => cacheStatesByRunId.get(runId)?.[family],
+      );
+      coldSamplesDropped += timeline.samples.length - kept.length;
+      timeline.samples = kept;
+    }
+    if (coldSamplesDropped > 0) {
+      console.log(
+        `Dropped ${coldSamplesDropped} sample(s) from cold-compile-cache runs.`,
+      );
+    }
   }
 
   // Apply baseline overrides (truncate timelines at override points)

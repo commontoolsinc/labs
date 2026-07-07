@@ -17,6 +17,13 @@ export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
 export const PERF_METRICS_FILE = "perf-metrics.json";
 export const PERF_METRICS_BACKFILL_ARTIFACT_NAME = "perf-metrics-backfill";
 export const PERF_METRICS_BACKFILL_FILE = "perf-metrics-backfill.json";
+
+/**
+ * Prefix of the per-shard artifacts the pattern jobs upload to record whether
+ * their compile byte cache restored (e.g. `cache-state-pattern-unit-3`). Each
+ * contains one JSON file matching {@link CacheStateRecord}.
+ */
+export const CACHE_STATE_ARTIFACT_PREFIX = "cache-state-";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
 export const COVERAGE_BASELINE_RESET_MARKER = "NEW_COVERAGE_BASELINE";
 
@@ -160,10 +167,59 @@ export interface PerfMetricRecord extends TimingSample {
   name: string;
 }
 
+/**
+ * Job families that restore a pattern compile byte cache (`actions/cache`
+ * keyed on the compiler fingerprint). A fingerprint-changing PR runs these
+ * jobs with a cold cache, which inflates their timing metrics and shifts
+ * their coverage profiles.
+ */
+export const COMPILE_CACHE_FAMILIES = [
+  "generated-patterns",
+  "pattern-integration",
+  "pattern-unit",
+] as const;
+
+export type CompileCacheFamily = (typeof COMPILE_CACHE_FAMILIES)[number];
+
+/**
+ * Compile cache state for one job family in one run. Cold means the cache
+ * missed entirely (full recompile); warm covers both exact and restore-key
+ * hits, since any hit implies the compiler fingerprint is unchanged.
+ */
+export type CompileCacheState = "cold" | "warm";
+
+/**
+ * Per-family compile cache states for a run. An absent family is unknown
+ * (pre-rollout runs, backfill-derived runs) and is treated like today: no
+ * filtering, no special status.
+ */
+export type CompileCacheStates = Partial<
+  Record<CompileCacheFamily, CompileCacheState>
+>;
+
+/**
+ * One shard's compile-cache restore result, as recorded by the workflow's
+ * cache-state artifact. `family` is a string (not `CompileCacheFamily`) so
+ * records from unknown families survive parsing; aggregation ignores them.
+ */
+export interface CacheStateRecord {
+  family: string;
+  shard: string;
+  /** The cache key `actions/cache` restored from; empty on a full miss. */
+  matchedKey: string;
+  /** True only when the primary key matched exactly. */
+  exactHit: boolean;
+}
+
 export interface PerfMetricsFile {
   version: 1;
   generatedAt: string;
   metrics: PerfMetricRecord[];
+  /**
+   * Per-family compile cache states for the run this file describes. Absent
+   * in files written before cache-state tagging rolled out.
+   */
+  compileCacheStates?: CompileCacheStates;
 }
 
 export interface PerfMetricsBackfillRun {
@@ -509,12 +565,17 @@ export async function downloadAndParseJUnit(
 
 export function serializePerfMetrics(
   metrics: Map<string, TimingSample>,
+  compileCacheStates?: CompileCacheStates,
 ): PerfMetricsFile {
-  return {
+  const file: PerfMetricsFile = {
     version: 1,
     generatedAt: new Date().toISOString(),
     metrics: metricsToRecords(metrics),
   };
+  if (compileCacheStates && Object.keys(compileCacheStates).length > 0) {
+    file.compileCacheStates = compileCacheStates;
+  }
+  return file;
 }
 
 function metricsToRecords(
@@ -555,6 +616,45 @@ export function parsePerfMetricsFile(
     });
   }
   return metrics;
+}
+
+/** Parsed perf metrics plus the run's compile cache states, when tagged. */
+export interface PerfMetricsDetailed {
+  metrics: Map<string, TimingSample>;
+  /** Null when the file predates cache-state tagging. */
+  compileCacheStates: CompileCacheStates | null;
+}
+
+const COMPILE_CACHE_FAMILY_SET: ReadonlySet<string> = new Set(
+  COMPILE_CACHE_FAMILIES,
+);
+
+/**
+ * Parse a perf metrics file, also surfacing its optional compile cache
+ * states. Metric validation matches {@link parsePerfMetricsFile}; unknown
+ * families and invalid state values are dropped rather than failing, so a
+ * malformed tag degrades to "unknown" instead of losing the run's metrics.
+ */
+export function parsePerfMetricsFileDetailed(
+  content: string,
+): PerfMetricsDetailed {
+  const metrics = parsePerfMetricsFile(content);
+  const parsed = JSON.parse(content) as Partial<PerfMetricsFile>;
+
+  const rawStates = parsed.compileCacheStates;
+  if (rawStates === undefined || rawStates === null) {
+    return { metrics, compileCacheStates: null };
+  }
+
+  const compileCacheStates: CompileCacheStates = {};
+  if (typeof rawStates === "object") {
+    for (const [family, state] of Object.entries(rawStates)) {
+      if (!COMPILE_CACHE_FAMILY_SET.has(family)) continue;
+      if (state !== "cold" && state !== "warm") continue;
+      compileCacheStates[family as CompileCacheFamily] = state;
+    }
+  }
+  return { metrics, compileCacheStates };
 }
 
 export function serializePerfMetricsBackfill(
@@ -601,10 +701,17 @@ export function parsePerfMetricsBackfillFile(
 export async function writePerfMetricsFile(
   path: string,
   metrics: Map<string, TimingSample>,
+  compileCacheStates?: CompileCacheStates,
 ): Promise<void> {
   await Deno.writeTextFile(
     path,
-    `${JSON.stringify(serializePerfMetrics(metrics), null, 2)}\n`,
+    `${
+      JSON.stringify(
+        serializePerfMetrics(metrics, compileCacheStates),
+        null,
+        2,
+      )
+    }\n`,
   );
 }
 
@@ -724,6 +831,31 @@ export async function downloadAndParsePerfMetrics(
     const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
     const content = await Deno.readTextFile(jsonPath);
     return parsePerfMetricsFile(content);
+  } catch {
+    return null;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+}
+
+/**
+ * Like {@link downloadAndParsePerfMetrics}, but also surfaces the run's
+ * compile cache states (null when the file predates cache-state tagging).
+ */
+export async function downloadAndParsePerfMetricsDetailed(
+  artifactId: number,
+): Promise<PerfMetricsDetailed | null> {
+  const tmpDir = await downloadAndExtractArtifact(
+    artifactId,
+    "perf-metrics-",
+  );
+  if (!tmpDir) return null;
+  try {
+    const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
+    const content = await Deno.readTextFile(jsonPath);
+    return parsePerfMetricsFileDetailed(content);
   } catch {
     return null;
   } finally {
@@ -1286,6 +1418,125 @@ export function extractTestFileMetrics(
   }
 
   return metrics;
+}
+
+// ---------------------------------------------------------------------------
+// Compile cache state
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the JSON contents of cache-state artifact files into records.
+ * Malformed entries are skipped with a warning: a broken tag must degrade to
+ * "unknown", never fail the gate.
+ */
+export function parseCacheStateFiles(contents: string[]): CacheStateRecord[] {
+  const records: CacheStateRecord[] = [];
+  for (const content of contents) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch (error) {
+      console.warn(
+        `  Warning: skipping malformed cache-state file: ${error}`,
+      );
+      continue;
+    }
+
+    const record = parsed as Partial<CacheStateRecord> | null;
+    if (
+      record === null || typeof record !== "object" ||
+      typeof record.family !== "string" ||
+      typeof record.shard !== "string" ||
+      typeof record.matchedKey !== "string" ||
+      typeof record.exactHit !== "boolean"
+    ) {
+      console.warn(
+        `  Warning: skipping invalid cache-state record: ${content.trim()}`,
+      );
+      continue;
+    }
+
+    records.push({
+      family: record.family,
+      shard: record.shard,
+      matchedKey: record.matchedKey,
+      exactHit: record.exactHit,
+    });
+  }
+  return records;
+}
+
+/**
+ * Aggregate per-shard cache-state records into one state per family: any
+ * full-miss shard (`matchedKey === ""`) makes the family cold, otherwise at
+ * least one record makes it warm (restore-key hits included — any hit implies
+ * the compiler fingerprint is unchanged). Families with no records stay
+ * absent (unknown); records from unknown families are ignored.
+ */
+export function aggregateCacheStates(
+  records: CacheStateRecord[],
+): CompileCacheStates {
+  const states: CompileCacheStates = {};
+  for (const record of records) {
+    if (!COMPILE_CACHE_FAMILY_SET.has(record.family)) continue;
+    const family = record.family as CompileCacheFamily;
+    states[family] = record.matchedKey === "" ? "cold" : (
+      states[family] ?? "warm"
+    );
+  }
+  return states;
+}
+
+/** Job-metric prefixes (aggregate and per-shard forms) per cache family. */
+const COMPILE_CACHE_JOB_METRIC_PREFIXES: readonly (readonly [
+  string,
+  CompileCacheFamily,
+])[] = [
+  ["job: Generated Patterns Integration Tests", "generated-patterns"],
+  ["job: Pattern Integration Tests", "pattern-integration"],
+  ["job: Pattern Unit Tests", "pattern-unit"],
+];
+
+/** The exact step-metric names emitted for the cache-restoring jobs. */
+const COMPILE_CACHE_STEP_METRIC_FAMILIES: Record<string, CompileCacheFamily> = {
+  "step: generated patterns integration": "generated-patterns",
+  "step: patterns integration": "pattern-integration",
+  "step: pattern unit tests": "pattern-unit",
+};
+
+/** Extracts the timing-artifact label from a `test:`/`subtest:` metric. */
+const COMPILE_CACHE_TEST_LABEL_RE = /^(?:sub)?test: ([^/]+)\//;
+
+/**
+ * Map a metric name to the compile-cache family whose cold cache inflates
+ * it, or null for metrics with no compile cache (Runner Tests,
+ * pattern-reload-integration, `coverage-debt:`, `bench:`, ...). The mapping
+ * mirrors the names `extractMetrics` and `extractTestFileMetrics` emit.
+ */
+export function compileCacheFamilyForMetric(
+  metric: string,
+): CompileCacheFamily | null {
+  for (const [prefix, family] of COMPILE_CACHE_JOB_METRIC_PREFIXES) {
+    if (
+      metric === prefix ||
+      (metric.startsWith(prefix) && metric[prefix.length] === " ")
+    ) {
+      return family;
+    }
+  }
+
+  const stepFamily = COMPILE_CACHE_STEP_METRIC_FAMILIES[metric];
+  if (stepFamily) return stepFamily;
+
+  const labelMatch = COMPILE_CACHE_TEST_LABEL_RE.exec(metric);
+  if (labelMatch) {
+    const label = labelMatch[1];
+    if (label === "generated-patterns") return "generated-patterns";
+    if (label === "pattern-integration") return "pattern-integration";
+    if (/^pattern-unit-\d+$/.test(label)) return "pattern-unit";
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2105,4 +2356,33 @@ export function applyBaselineOverrides(
       timeline.samples = timeline.samples.slice(latestOverrideIdx);
     }
   }
+}
+
+/**
+ * Drop samples from runs whose compile cache is known-cold for the metric's
+ * family, so a warm (or unknown) current run is not gated against inflated
+ * cold baselines. Unknown runs are kept — pre-rollout baselines behave
+ * exactly as they do today.
+ */
+export function dropColdSamples(
+  samples: TimingSample[],
+  stateOfRun: (runId: number) => CompileCacheState | undefined,
+): TimingSample[] {
+  return samples.filter((sample) => stateOfRun(sample.runId) !== "cold");
+}
+
+/**
+ * The latest sample whose run is not known-cold, for ratchets that compare
+ * against the most recent baseline (the coverage-debt gate). Falls back to
+ * the last sample when every sample is known-cold, preserving the
+ * override-truncation reset semantics of `samples.at(-1)`.
+ */
+export function latestNonColdSample(
+  samples: TimingSample[],
+  isRunCold: (runId: number) => boolean,
+): TimingSample | undefined {
+  for (let i = samples.length - 1; i >= 0; i--) {
+    if (!isRunCold(samples[i].runId)) return samples[i];
+  }
+  return samples.at(-1);
 }

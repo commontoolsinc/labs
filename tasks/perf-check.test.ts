@@ -2,6 +2,9 @@ import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
 import {
   type Artifact,
+  type BaselineOverrides,
+  type CompileCacheState,
+  type MetricTimeline,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   type PRInfo,
@@ -13,7 +16,9 @@ import {
   type BaselineRunContext,
   buildBaselineRunContexts,
   buildExtraBackfillContexts,
+  collectCurrentCacheStates,
   currentWorkflowRunFromEvent,
+  evaluateTimingMetric,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
   fetchCommitsBehindMain,
@@ -21,6 +26,7 @@ import {
   fetchPRForCommitWithError,
   formatBaselineSourceRunAge,
   formatCommitDistance,
+  formatCompileCacheStates,
   formatErrorForLog,
   formatMetricDelta,
   formatMetricValueForTable,
@@ -1045,7 +1051,10 @@ Deno.test("parsePerfMetricBackfillFromArtifacts uses newest backfill artifact", 
 });
 
 Deno.test("parsePerfMetricsFromArtifacts uses newest perf metrics artifact", async () => {
-  const parsed = new Map<string, TimingSample>([["job: Check", makeSample()]]);
+  const parsed = {
+    metrics: new Map<string, TimingSample>([["job: Check", makeSample()]]),
+    compileCacheStates: { "pattern-unit": "warm" as const },
+  };
   let parsedArtifactId = 0;
 
   const result = await parsePerfMetricsFromArtifacts(
@@ -1078,11 +1087,28 @@ Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async 
   assertEquals(
     await addPerfMetricsFromArtifacts(timelines, artifacts, (requested) => {
       assertEquals(requested, artifacts);
-      return Promise.resolve(new Map([["job: Check", sample]]));
+      return Promise.resolve({
+        metrics: new Map([["job: Check", sample]]),
+        compileCacheStates: { "generated-patterns": "cold" as const },
+      });
     }),
-    true,
+    { added: true, compileCacheStates: { "generated-patterns": "cold" } },
   );
   assertEquals(timelines.get("job: Check")?.samples, [sample]);
+
+  // An untagged (pre-rollout) artifact still adds samples, with null states.
+  assertEquals(
+    await addPerfMetricsFromArtifacts(
+      timelines,
+      artifacts,
+      () =>
+        Promise.resolve({
+          metrics: new Map([["job: Check", sample]]),
+          compileCacheStates: null,
+        }),
+    ),
+    { added: true, compileCacheStates: null },
+  );
 
   assertEquals(
     await addPerfMetricsFromArtifacts(
@@ -1090,8 +1116,266 @@ Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async 
       [],
       () => Promise.resolve(null),
     ),
-    false,
+    { added: false, compileCacheStates: null },
   );
+});
+
+function cacheStateJson(
+  family: string,
+  shard: string,
+  matchedKey: string,
+): string {
+  return JSON.stringify({
+    family,
+    shard,
+    matchedKey,
+    exactHit: matchedKey !== "",
+  });
+}
+
+Deno.test("collectCurrentCacheStates aggregates shard records per family", async () => {
+  const contentsById: Record<number, string[]> = {
+    1: [cacheStateJson("generated-patterns", "1", "")],
+    2: [cacheStateJson("generated-patterns", "2", "compile-abc")],
+    3: [cacheStateJson("pattern-integration", "1", "compile-abc")],
+  };
+  const downloaded: number[] = [];
+
+  const states = await collectCurrentCacheStates(
+    [
+      makeArtifact(1, "cache-state-generated-patterns-1"),
+      makeArtifact(2, "cache-state-generated-patterns-2"),
+      makeArtifact(3, "cache-state-pattern-integration-1"),
+      // Not cache-state artifacts, or expired — never downloaded.
+      makeArtifact(4, "test-timing-pattern-unit-1"),
+      makeArtifact(5, "cache-state-pattern-unit-1", true),
+    ],
+    (artifactId) => {
+      downloaded.push(artifactId);
+      return Promise.resolve(contentsById[artifactId] ?? []);
+    },
+  );
+
+  // One full-miss shard makes generated-patterns cold; pattern-integration is
+  // warm; pattern-unit has no usable records and stays unknown.
+  assertEquals(states, {
+    "generated-patterns": "cold",
+    "pattern-integration": "warm",
+  });
+  assertEquals(downloaded.sort((a, b) => a - b), [1, 2, 3]);
+});
+
+Deno.test("collectCurrentCacheStates keeps only the newest re-run duplicate", async () => {
+  const downloaded: number[] = [];
+
+  const states = await collectCurrentCacheStates(
+    [
+      // A re-run uploads a same-named artifact; the newest one wins, and a
+      // re-run is genuinely warm (the cold first attempt saved the cache).
+      makeArtifact(1, "cache-state-pattern-unit-1"),
+      makeArtifact(9, "cache-state-pattern-unit-1"),
+    ],
+    (artifactId) => {
+      downloaded.push(artifactId);
+      return Promise.resolve([
+        cacheStateJson(
+          "pattern-unit",
+          "1",
+          artifactId === 9 ? "compile-abc" : "",
+        ),
+      ]);
+    },
+  );
+
+  assertEquals(states, { "pattern-unit": "warm" });
+  assertEquals(downloaded, [9]);
+});
+
+Deno.test("collectCurrentCacheStates degrades to unknown on download failure", async () => {
+  const captured = await captureConsoleAsync(() =>
+    collectCurrentCacheStates(
+      [
+        makeArtifact(1, "cache-state-generated-patterns-1"),
+        makeArtifact(2, "cache-state-pattern-integration-1"),
+      ],
+      (artifactId) =>
+        Promise.resolve(
+          artifactId === 1
+            ? [cacheStateJson("generated-patterns", "1", "compile-abc")]
+            : null,
+        ),
+    )
+  );
+
+  // Partial data could mislabel a family, so any failure drops everything.
+  assertEquals(captured.result, {});
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not collect compile cache states",
+  );
+});
+
+Deno.test("formatCompileCacheStates shows every family, absent as unknown", () => {
+  assertEquals(
+    formatCompileCacheStates({ "generated-patterns": "cold" }),
+    "generated-patterns=cold, pattern-integration=unknown, pattern-unit=unknown",
+  );
+});
+
+const NO_OVERRIDES: BaselineOverrides = {
+  metrics: new Map(),
+  coverageBaselineReset: false,
+};
+
+function timingSampleAt(runId: number, durationSeconds: number): TimingSample {
+  return {
+    runId,
+    runUrl: `https://github.com/commontoolsinc/labs/actions/runs/${runId}`,
+    sha: SHA_A,
+    createdAt: `2026-06-18T10:00:${String(runId).padStart(2, "0")}Z`,
+    durationSeconds,
+  };
+}
+
+function timingTimeline(name: string, samples: TimingSample[]): MetricTimeline {
+  return { name, samples };
+}
+
+/** Runs 1-6 are warm at 10s; runs 7-8 are known-cold at 30s. */
+const MIXED_COLD_SAMPLES = [
+  ...[1, 2, 3, 4, 5, 6].map((runId) => timingSampleAt(runId, 10)),
+  timingSampleAt(7, 30),
+  timingSampleAt(8, 30),
+];
+
+function coldForRuns(
+  coldRunIds: number[],
+): (runId: number) => CompileCacheState | undefined {
+  return (runId) => coldRunIds.includes(runId) ? "cold" : undefined;
+}
+
+Deno.test("evaluateTimingMetric reports a cold-family metric as COLD, never a failure", () => {
+  const { row, failure } = evaluateTimingMetric({
+    metric: "step: patterns integration",
+    // Far over any threshold the warm baseline would allow.
+    current: 25,
+    timeline: timingTimeline(
+      "step: patterns integration",
+      [1, 2, 3, 4, 5].map((runId) => timingSampleAt(runId, 10)),
+    ),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: { "pattern-integration": "cold" },
+    stateOfRunForFamily: () => () => undefined,
+  });
+
+  assertEquals(row.status, "COLD");
+  assertEquals(failure, false);
+  assertEquals(row.median, undefined);
+  // A COLD row renders with a `-` baseline and no change column.
+  assertEquals(metricTableRows([row], true)[0], [
+    "COLD",
+    "-",
+    "25s",
+    "-",
+    "step",
+    "patterns integration",
+  ]);
+});
+
+Deno.test("evaluateTimingMetric reports COLD even without baseline samples", () => {
+  const { row, failure } = evaluateTimingMetric({
+    metric: "test: generated-patterns/foo.test.tsx",
+    current: 12,
+    timeline: undefined,
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: { "generated-patterns": "cold" },
+    stateOfRunForFamily: () => () => undefined,
+  });
+
+  assertEquals(row.status, "COLD");
+  assertEquals(failure, false);
+});
+
+Deno.test("evaluateTimingMetric keeps excl precedence over COLD", () => {
+  const { row, failure } = evaluateTimingMetric({
+    metric: "step: pattern unit tests",
+    current: 100,
+    timeline: undefined,
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: { "pattern-unit": "cold" },
+    stateOfRunForFamily: () => () => undefined,
+  });
+
+  assertEquals(row.status, "excl");
+  assertEquals(failure, false);
+});
+
+Deno.test("evaluateTimingMetric excludes known-cold baseline samples for a warm run", () => {
+  const { row, failure } = evaluateTimingMetric({
+    metric: "step: patterns integration",
+    current: 20,
+    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: { "pattern-integration": "warm" },
+    stateOfRunForFamily: () => coldForRuns([7, 8]),
+  });
+
+  // Against the six warm 10s samples the threshold is 15s, so 20s fails.
+  // With the two cold 30s samples included, the inflated stddev would have
+  // pushed the threshold past 35s and hidden the regression.
+  assertEquals(row.status, "OVER");
+  assertEquals(failure, true);
+  assertEquals(row.median, 10);
+  assertEquals(row.n, 6);
+});
+
+Deno.test("evaluateTimingMetric falls back to n/a when too few warm samples remain", () => {
+  const { row, failure } = evaluateTimingMetric({
+    metric: "step: patterns integration",
+    current: 20,
+    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => coldForRuns([3, 4, 5, 6, 7, 8]),
+  });
+
+  assertEquals(row.status, "n/a");
+  assertEquals(failure, false);
+  assertEquals(row.n, 2);
+});
+
+Deno.test("evaluateTimingMetric with all-unknown states matches pre-rollout behavior", () => {
+  const unknownEverywhere = {
+    metric: "step: patterns integration",
+    current: 20,
+    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => () => undefined,
+  };
+  const { row, failure } = evaluateTimingMetric(unknownEverywhere);
+
+  // All eight samples gate as before tagging: median 10s, stddev ~8.66s,
+  // threshold ~36s, so 20s stays OK.
+  assertEquals(row.status, "OK");
+  assertEquals(failure, false);
+  assertEquals(row.median, 10);
+  assertEquals(row.n, 8);
+
+  // A metric with no compile cache family ignores cache states entirely.
+  const noFamily = evaluateTimingMetric({
+    ...unknownEverywhere,
+    metric: "step: runner tests",
+    timeline: timingTimeline("step: runner tests", MIXED_COLD_SAMPLES),
+    currentCacheStates: {
+      "generated-patterns": "cold",
+      "pattern-integration": "cold",
+      "pattern-unit": "cold",
+    },
+    stateOfRunForFamily: () => coldForRuns([7, 8]),
+  });
+  assertEquals(noFamily.row.status, "OK");
+  assertEquals(noFamily.row.n, 8);
 });
 
 Deno.test("main runs informational check with mocked latest baseline data", async () => {
@@ -1181,6 +1465,10 @@ Deno.test("main runs informational check with mocked latest baseline data", asyn
 
     assertEquals(captured.result, 0);
     assertStringIncludes(output, "Current main head is");
+    assertStringIncludes(
+      output,
+      "Compile cache states: generated-patterns=unknown, pattern-integration=unknown, pattern-unit=unknown",
+    );
     assertStringIncludes(output, "Using 5 main-branch runs as baseline.");
     assertStringIncludes(output, "Baseline source runs:");
     assertStringIncludes(output, "All metrics within normal range.");

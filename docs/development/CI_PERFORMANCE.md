@@ -122,3 +122,41 @@ baseline for later PRs. Performance Check still requires the full expected
 coverage artifact set during that reset cycle. Jobs with no reportable covered
 files upload an empty LCOV report so missing artifacts mean the report upload
 itself failed.
+
+## Compile Cache State and Cold Runs
+
+The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
+over the compiler packages. A PR that changes that fingerprint runs cold: every
+pattern compiles from scratch, pattern tests run roughly 1.7–2× slower, and the
+timing gate would trip against warm baselines. The other direction is just as
+bad: a cold main run covers compile branches that only execute on a cold cache,
+which lowers the coverage-debt baseline, so later warm PRs fail the coverage
+ratchet with phantom uncovered lines.
+
+To compare like with like, each pattern job uploads a small `cache-state-*`
+artifact recording its cache restore result. Performance Check aggregates those
+into `compileCacheStates` in `perf-metrics.json`. A job family is cold when any
+of its shards had a full cache miss, meaning an empty `cache-matched-key`. A
+partial hit through a restore key counts as warm: both key forms start with the
+fingerprint hash, so any hit means the compiled bytes are current.
+
+The comparison rules follow from the tagging:
+
+- When the current run is cold for a family, that family's cache-sensitive
+  timing metrics get the non-blocking `COLD` status instead of being gated.
+  The remedy is to re-run the pattern jobs: the cold attempt already saved the
+  new cache, so the re-run is warm and gates normally.
+- When the current run is warm, known-cold baseline samples are excluded from
+  the timing comparison.
+- The coverage-debt ratchet uses the latest non-cold main sample, so a cold
+  main run cannot lower the baseline that warm PRs are held to.
+
+Runs with unknown cache state — anything before this mechanism rolled out, and
+backfill-derived runs — behave exactly as before: their samples are kept and
+their metrics gate normally.
+
+Two gaps remain. Cold compile duration itself is not gated, so a regression
+that only shows up on a cold cache passes unnoticed; a dedicated cold-compile
+bench could cover that later. And cold main runs from before the rollout stay
+unknown, so they can still skew baselines until they age out of the 20-run
+baseline window.
