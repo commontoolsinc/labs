@@ -518,16 +518,19 @@ export function evalRog(
           }
           return out;
         }
-        // flatMap (legacy contribute parity): array → spread; defined
-        // non-array → push the value itself; undefined → contributes
-        // nothing (legacy's "pending" has no meaning in a one-pass
-        // in-memory evaluation).
+        // flatMap (legacy contribute parity, byte-for-byte the builtin's
+        // `elemResult.forEach((v) => out.push(v))`): array → forEach
+        // (SKIPS holes in the returned array — a spread would materialize
+        // them as `undefined` — and no spread argument-limit blowup on
+        // large results); defined non-array → push the value itself;
+        // undefined → contributes nothing (legacy's "pending" has no
+        // meaning in a one-pass in-memory evaluation).
         {
           const out: unknown[] = [];
           for (let i = 0; i < rawList.length; i++) {
             if (!(i in rawList)) continue;
             const piece = evalElement(rawList[i], i);
-            if (Array.isArray(piece)) out.push(...piece);
+            if (Array.isArray(piece)) piece.forEach((v) => out.push(v));
             else if (piece !== undefined) out.push(piece);
           }
           return out;
