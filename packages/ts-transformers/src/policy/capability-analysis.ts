@@ -501,7 +501,6 @@ function getFixedTupleElementCount(
   if (!checker.isTupleType(type)) return undefined;
   const target = (type as ts.TypeReference).target as ts.TupleType;
   const elementFlags = target.elementFlags;
-  if (!elementFlags) return undefined;
   for (const flag of elementFlags) {
     if (flag !== ts.ElementFlags.Required) return undefined;
   }
