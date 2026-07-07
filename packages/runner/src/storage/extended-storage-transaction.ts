@@ -19,6 +19,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
+  IWriteAttempt,
   IWriteOptions,
   MemorySpace,
   Metadata,
@@ -41,6 +42,7 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
+  getTransactionWriteAttempts,
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 import {
@@ -78,6 +80,7 @@ import {
   flowReadExcluded,
   gatedSinkRequestExists,
   type ImplementationIdentity,
+  type OrderedWriteAttempt,
   type PolicySnapshot,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
@@ -779,15 +782,46 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // identity-stable cache keys (e.g. for the `hashStringOf()` WeakMap
     // cache) and matches the chokepoint freeze applied to dereference
     // traces and write-policy inputs.
-    const consumedReads: ConsumedRead[] = [];
+    // Activity-clock ranks for the digest: the prefix-provenance gate
+    // consumes only the RELATIVE order of non-internal reads and write
+    // attempts, so the digest binds dense ranks over exactly that set. Raw
+    // clock values would additionally encode how many runtime-internal
+    // (verifier-marked) reads interleaved — noise that must not perturb the
+    // enforcement identity of otherwise-identical transactions (pinned by
+    // the boundary test "does not let helper source-cell reads affect the
+    // prepared digest"). Any reorder among the ranked items still flips
+    // ranks, so the §6 invalidation property is intact.
+    const pendingReads: Array<{ read: IReadActivity; raw?: number }> = [];
+    const rawRanks: number[] = [];
     for (const read of this.getReadActivities()) {
       if (isInternalVerifierRead(read.meta)) {
         continue;
       }
+      pendingReads.push({ read, raw: read.journalIndex });
+      if (read.journalIndex !== undefined) {
+        rawRanks.push(read.journalIndex);
+      }
+    }
+    const rawAttempts = [...this.getWriteAttemptLog()];
+    for (const attempt of rawAttempts) {
+      rawRanks.push(attempt.journalIndex);
+    }
+    const rankByRaw = new Map<number, number>();
+    rawRanks.sort((a, b) => a - b).forEach((raw, rank) => {
+      rankByRaw.set(raw, rank);
+    });
+
+    const consumedReads: ConsumedRead[] = [];
+    for (const { read, raw } of pendingReads) {
+      // Strip the raw stamp before the spread; re-attach its rank (or leave
+      // the field absent when the backend never stamped one — an explicit
+      // undefined would hash differently from absence).
+      const { journalIndex: _raw, ...bare } = read;
       consumedReads.push(deepFreeze({
-        ...read,
+        ...bare,
         scope: normalizeCellScope(read.scope),
         path: canonicalizeLogicalPath(read.path),
+        ...(raw !== undefined ? { journalIndex: rankByRaw.get(raw)! } : {}),
       }));
     }
 
@@ -815,10 +849,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
     }
 
+    // The §6 order binding: the temporal write sequence, rank-stamped on the
+    // same scale as the consumed reads above. Paths stay RAW — see
+    // OrderedWriteAttempt.
+    const writeAttemptLog: OrderedWriteAttempt[] = [];
+    for (const attempt of rawAttempts) {
+      writeAttemptLog.push(deepFreeze({
+        space: attempt.space,
+        id: attempt.id,
+        scope: normalizeCellScope(attempt.scope),
+        path: [...attempt.path],
+        journalIndex: rankByRaw.get(attempt.journalIndex)!,
+      }));
+    }
+
     return {
       consumedReads,
       attemptedWrites,
       writes,
+      writeAttemptLog,
       dereferenceTraces: [...this.#cfcState.dereferenceTraces],
       triggerReads: [...this.#cfcState.triggerReads],
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
@@ -981,6 +1030,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getReadActivities(): Iterable<IReadActivity> {
     return getTransactionReadActivities(this.tx);
+  }
+
+  getWriteAttemptLog(): readonly IWriteAttempt[] {
+    // Absent source (a custom transaction with neither a native log nor a
+    // journal) degrades to an empty log; the CFC prefix gate then finds no
+    // overlapping attempt for any target and falls back to
+    // transaction-global gating (conservative), never to a too-early bound.
+    return getTransactionWriteAttempts(this.tx) ?? [];
   }
 
   getWriteDetails(
@@ -1596,6 +1653,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReadActivities(): Iterable<IReadActivity> {
     return this.wrapped.getReadActivities?.() ??
       getTransactionReadActivities(this.wrapped.tx);
+  }
+
+  getWriteAttemptLog(): readonly IWriteAttempt[] {
+    return this.wrapped.getWriteAttemptLog?.() ??
+      getTransactionWriteAttempts(this.wrapped.tx) ?? [];
   }
 
   getWriteDetails(

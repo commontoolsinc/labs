@@ -337,6 +337,31 @@ rebinding is re-authorization, not inheritance; `writeAuthorizedBy`
 references resolve against this pair. Replace §8.15.6's "no separate naming
 scheme" claim with the pair definition and state the rebinding rule.
 
+**SC-23 [interpretation] Per-write read-prefix provenance classed as
+decomposition-grade precision — §8.9.1/§8.9.2 (Epic D4).** The runner's
+input-requirement gate (`requiredIntegrity`/`maxConfidentiality` in
+`verifyInputRequirements`) quantifies each protected write over the reads
+whose activity-clock position precedes the LAST write attempt overlapping the
+protected path (either prefix direction, matching floor applicability),
+trigger reads joining every prefix at −∞. Interpretation call (owner note in
+`cfc-write-prefix-provenance.md` §7.4): this is treated as a **structural
+fact of the journal order in §8.9.1's decomposition class** — a read past the
+last overlapping write provably did not feed the committed value — so it is
+applied WITHOUT the `flow-taint-precision` trust gate; it is not an untrusted
+`L_claim`. Two boundaries of the interpretation, both deliberate: (a) the
+confidentiality **egress ceiling** stays transaction-global (a sink request
+records no per-write provenance — §8.10); (b) the flow-label join `J(tx)` and
+the D3 floor's flow-meet credit stay transaction-global too (one per-tx label
+is load-bearing for stamp-collapse and persist-credit coherence); per-write
+narrowing there needs per-path derived components first. The audit-#14
+read-side vacuous pass resolves by DELEGATION: with an empty prefix the only
+possible endorsement is the one the written value carries, which is exactly
+the D3 write floor's check (§8.12.4.1) under its staged dial — an
+unconditional read-side rejection would duplicate it under `enforce` and
+break the pinned dial-off/observe byte-compat. If the spec wants the read
+gate itself to reject empty-input floored writes independent of the floor
+dial, that needs its own normative text + rollout dial.
+
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
 
