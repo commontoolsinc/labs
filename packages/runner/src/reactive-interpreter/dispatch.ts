@@ -178,7 +178,6 @@ function fallback(reason: string): DispatchPlan {
   return { kind: "fallback", reason };
 }
 
-
 /**
  * Plan the interpreter instantiation for one pattern, or fall back.
  * Pure decision + closure construction; no runtime side effects.
