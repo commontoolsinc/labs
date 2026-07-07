@@ -819,6 +819,32 @@ export class StorageManager implements IStorageManager {
     this.#providers.clear();
   }
 
+  /**
+   * Close a SINGLE space's storage connection — the per-space counterpart to
+   * `close()`, and the "lifecycle follow-up work" `registerSpaceHost` refers to.
+   * Flushes the space's pending writes, destroys its provider, and forgets it,
+   * leaving every other space's connection untouched. A later `open(space)`
+   * re-establishes a fresh provider (at which point a re-pointed host hint can
+   * take effect). No-op when the space isn't open.
+   *
+   * The provider is removed from the map FIRST so a concurrent `open(space)`
+   * gets a fresh provider rather than the one being torn down; the detached
+   * provider still flushes its own pending writes before it is destroyed.
+   *
+   * This is the teardown primitive a space refcount drives (federation §14
+   * PR5 Part B) — long-lived workers that visit many federated spaces can
+   * release the ones no page or subscription references anymore.
+   */
+  async closeSpace(space: MemorySpace): Promise<void> {
+    const provider = this.#providers.get(space);
+    if (!provider) {
+      return;
+    }
+    this.#providers.delete(space);
+    await provider.synced();
+    await provider.destroy();
+  }
+
   edit(): IStorageTransaction {
     return V2Transaction.V2StorageTransaction.create(this);
   }
