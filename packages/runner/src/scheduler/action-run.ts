@@ -178,12 +178,15 @@ export function watchReactiveActionCommit(state: {
     // Permanent (precondition) and terminal (deterministic commit-rule refusal —
     // `isTerminalRejection`) rejections are never retried: re-running recomputes
     // the identical refused write, and the doomed re-runs would starve
-    // concurrent siblings. Skip BEFORE charging the retry budget — a no-retry
-    // outcome must not consume it, or an action that later re-runs on changed
-    // inputs and then hits a genuinely transient failure would start from the
-    // accumulated count and skip its own bounded retries. Resubscribe still
-    // happens (finalizeReactiveActionCommit), so a real input change re-triggers.
+    // concurrent siblings. This definitively ENDS the current retry sequence, so
+    // clear the counter — exactly like the success path above — before returning:
+    // a later re-run triggered by changed inputs is a fresh sequence that must
+    // keep its full bounded budget for a genuinely transient failure, not inherit
+    // a count accumulated by earlier transient attempts or the terminal one.
+    // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
+    // change re-triggers.
     if (isPermanentRejection(error) || isTerminalRejection(error)) {
+      state.retries.delete(state.action);
       return;
     }
 
