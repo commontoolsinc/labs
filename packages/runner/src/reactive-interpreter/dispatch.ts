@@ -81,6 +81,11 @@ export interface DispatchCensus {
   /** Collection ops evaluated SEGMENT-RESIDENT (transient, zero docs —
    * D-V2-TRANSIENT-COLLECTIONS) across interpreted patterns. */
   transientCollections: number;
+  /** Of `interpreted`, how many engaged via the DERIVED-COPY resolved-ROG
+   * path (strict WeakMap miss → validated canonical ROG) rather than a
+   * direct strict hit. Kept distinct so engagement via the resolved path is
+   * never conflated with strict hits (proxy-metric-decoupling). */
+  interpretedViaResolved: number;
 }
 
 const census: DispatchCensus = {
@@ -91,6 +96,7 @@ const census: DispatchCensus = {
   nodeOpsCollapsed: 0,
   boundariesByKind: {},
   transientCollections: 0,
+  interpretedViaResolved: 0,
 };
 
 export function getDispatchCensus(): DispatchCensus {
@@ -105,6 +111,7 @@ export function resetDispatchCensus(): void {
   census.nodeOpsCollapsed = 0;
   census.boundariesByKind = {};
   census.transientCollections = 0;
+  census.interpretedViaResolved = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +185,220 @@ function fallback(reason: string): DispatchPlan {
   return { kind: "fallback", reason };
 }
 
+/** The equivalence class a serialized/live node MODULE maps to, matching
+ * `emitOpForNode`'s classification (from-builder.ts). Robust to
+ * serialization: reads only module.type / wrapper / string-ref name, never a
+ * live implementation. */
+function moduleOpClass(module: unknown): string {
+  const mod = module as {
+    type?: string;
+    wrapper?: string;
+    implementation?: unknown;
+  } | undefined;
+  // A dynamic/reactive module (moduleOf → undefined) becomes a boundary
+  // effect op; but a complete canonical ROG has none (dynamic_module marks
+  // it incomplete), so a copy presenting one here is a divergence — map to
+  // "effect" so it mismatches any non-effect canonical op.
+  if (!mod || typeof mod.type !== "string") return "effect";
+  if (mod.type === "pattern") return "pattern";
+  if (mod.type === "ref") {
+    const name = mod.implementation;
+    if (typeof name === "string") {
+      if (name === "ifElse" || name === "when" || name === "unless") {
+        return "control";
+      }
+      if (name === "map" || name === "filter" || name === "flatMap") {
+        return "collection";
+      }
+      return "effect"; // every other ref is an io-effect boundary
+    }
+    return "unknown";
+  }
+  if (mod.type === "javascript") {
+    return mod.wrapper === "handler" ? "effect" : "leaf";
+  }
+  return mod.type;
+}
+
+/** The equivalence class a ROG node-op kind maps to (mirror of
+ * `moduleOpClass`). leaf/interpolate/expr all originate from a javascript
+ * non-handler module. */
+function opKindClass(kind: Op["kind"]): string {
+  if (kind === "leaf" || kind === "interpolate" || kind === "expr") {
+    return "leaf";
+  }
+  return kind; // effect | collection | control | pattern | construct
+}
+
+/** Is `v` a serialized legacy alias (`{ $alias: {...} }`)? */
+function isLegacyAliasValue(
+  v: unknown,
+): v is { $alias: Record<string, unknown> } {
+  return v !== null && typeof v === "object" &&
+    Object.hasOwn(v as object, "$alias");
+}
+
+/** The TARGET-identifying skeleton of a serialized alias, with the two
+ * documented LOSSLESS copy transforms erased so a copy still matches its
+ * canonical:
+ *   - `defer` (round-trip bumps the nesting level, never the target;
+ *     json-utils.ts round-trip) → dropped;
+ *   - `scope` folded into `schema` (foldDeclaredScopeIntoLinkSchema — an
+ *     annotation, not the target) → both `scope` and `schema` dropped.
+ * What remains is the actual target: `cell` (argument/result/id),
+ * `partialCause` (internal cells), and `path`. */
+function aliasSkeleton(alias: Record<string, unknown>): unknown {
+  return {
+    ...(alias.cell !== undefined ? { cell: alias.cell } : {}),
+    ...(alias.partialCause !== undefined
+      ? { partialCause: alias.partialCause }
+      : {}),
+    path: alias.path ?? [],
+  };
+}
+
+/** Structural equality of two serialized binding trees, treating aliases by
+ * their TARGET skeleton (defer/scope/schema erased) and everything else
+ * (const literals, container shape) verbatim. This is the correspondence
+ * test between a derived copy's node bindings and the canonical's: it passes
+ * for the two lossless copy transforms and FAILS on any reorder/retarget
+ * (the REORDER-OF-EQUALS hole). Exported for the hardening's unit proof. */
+export function sameBindingSkeleton(a: unknown, b: unknown): boolean {
+  const aAlias = isLegacyAliasValue(a);
+  const bAlias = isLegacyAliasValue(b);
+  if (aAlias || bAlias) {
+    if (!aAlias || !bAlias) return false;
+    return deepStructuralEqual(
+      aliasSkeleton(a.$alias),
+      aliasSkeleton(b.$alias),
+    );
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i++) {
+      if (!sameBindingSkeleton(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (
+    a !== null && b !== null && typeof a === "object" &&
+    typeof b === "object"
+  ) {
+    const ka = Object.keys(a as object);
+    const kb = Object.keys(b as object);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      if (!Object.hasOwn(b as object, k)) return false;
+      if (
+        !sameBindingSkeleton(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k],
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return Object.is(a, b);
+}
+
+/** Plain deep structural equality (for the already-normalized skeletons). */
+function deepStructuralEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((x, i) => deepStructuralEqual(x, b[i]));
+  }
+  if (
+    a !== null && b !== null && typeof a === "object" &&
+    typeof b === "object"
+  ) {
+    const ka = Object.keys(a as object);
+    const kb = Object.keys(b as object);
+    if (ka.length !== kb.length) return false;
+    return ka.every((k) =>
+      Object.hasOwn(b as object, k) &&
+      deepStructuralEqual(
+        (a as Record<string, unknown>)[k],
+        (b as Record<string, unknown>)[k],
+      )
+    );
+  }
+  return false;
+}
+
+/**
+ * A DERIVED COPY may bind against its canonical ROG only when it is
+ * POSITIONALLY FAITHFUL: the copy's `nodes[i]` is the same logical node the
+ * canonical's node `i` was (which produced ROG op `i`). Node-ops occupy ROG
+ * ids [0, N) (constructs are the appended suffix, `id === array index`).
+ *
+ * Checks, in order (each fails closed to legacy with a distinct census
+ * reason): (1) LENGTH — the copy has exactly N nodes; (2) per-position KIND
+ * class matches the canonical op; (3) per-position ALIAS CORRESPONDENCE —
+ * the copy's node inputs AND outputs carry the SAME alias targets as the
+ * canonical's serialized node (modulo the two lossless copy transforms).
+ *
+ * (1)+(2) alone are provably safe for every copy site that exists today (all
+ * order-preserving; verified 16/16 in the multi-user sim), but they are a
+ * PROXY: they cannot see a future/buggy copy site that REORDERS same-kind
+ * siblings or RETARGETS an alias. The dispatch trusts copy node `i` to be op
+ * `i` when it seeds cross-op reads from `pattern.nodes[i].outputs`
+ * (`buildSegmentNode` inputs.ops) and writes a segment op's value through
+ * `pattern.nodes[i].outputs` — a silent mis-wire otherwise. (3) makes the
+ * gate a PROOF: any non-order-preserving copy fails the target comparison
+ * and falls back. Returns a census fallback reason on mismatch, undefined
+ * when faithful.
+ */
+function validatePositionalCorrespondence(
+  pattern: Pattern,
+  resolved: BuiltRog,
+): string | undefined {
+  const ops = resolved.rog.ops;
+  const nodes = pattern.nodes ?? [];
+  const canonical = resolved.canonicalNodes;
+  // Node-op count = non-construct ops (constructs are the contiguous tail).
+  let nodeOpCount = 0;
+  for (const op of ops) if (op.kind !== "construct") nodeOpCount++;
+  if (nodes.length !== nodeOpCount) {
+    return `derived_len:${nodes.length}/${nodeOpCount}`;
+  }
+  // Defensive: the canonical skeletons must cover every node-op position.
+  if (canonical.length < nodeOpCount) return "derived_no_canonical";
+  for (let i = 0; i < nodes.length; i++) {
+    const op = ops[i];
+    // Given the length match and the contiguous-tail construct layout,
+    // ops[0..N-1] must be the node-ops; assert defensively.
+    if (!op || op.id !== i || op.kind === "construct") {
+      return `derived_layout:${i}`;
+    }
+    const node = nodes[i] as {
+      module?: unknown;
+      inputs?: unknown;
+      outputs?: unknown;
+    };
+    const nodeClass = moduleOpClass(node.module);
+    if (nodeClass !== opKindClass(op.kind)) {
+      return `derived_kind:${i}:${nodeClass}!=${opKindClass(op.kind)}`;
+    }
+    // ALIAS CORRESPONDENCE (the hardening): the copy's node inputs AND
+    // outputs must resolve to the same TARGETS as the canonical's, so the
+    // canonical ROG's op ids index the copy's bindings correctly.
+    if (!sameBindingSkeleton(node.outputs, canonical[i].outputs)) {
+      return `derived_edge:${i}:outputs`;
+    }
+    if (!sameBindingSkeleton(node.inputs, canonical[i].inputs)) {
+      return `derived_edge:${i}:inputs`;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Plan the interpreter instantiation for one pattern, or fall back.
  * Pure decision + closure construction; no runtime side effects.
@@ -188,8 +409,25 @@ export function planInterpreterDispatch(
 ): DispatchPlan {
   census.attempted++;
 
-  const built = getBuiltRog(pattern);
-  if (!built) return fallback("no_rog");
+  // Prefer the STRICT lookup (direct WeakMap key — the ROG's op ids are
+  // POSITIONAL against this exact object's `pattern.nodes`). On a miss the
+  // pattern may be a DERIVED COPY (reload rehydration, embedded/serialized
+  // sub-pattern) whose canonical ROG resolves via the derivation chain;
+  // bind against it ONLY when the copy is positionally faithful
+  // (validatePositionalCorrespondence), so the canonical ROG's op ids still
+  // index the copy's nodes correctly. A faithful copy is the common case in
+  // real instantiation (reload / nested patterns); recovering it converts
+  // the bulk of `no_rog` fallbacks into engagement.
+  let built = getBuiltRog(pattern);
+  let viaResolved = false;
+  if (!built) {
+    const resolved = getBuiltRogResolved(pattern);
+    if (!resolved) return fallback("no_rog");
+    const mismatch = validatePositionalCorrespondence(pattern, resolved);
+    if (mismatch !== undefined) return fallback(mismatch);
+    built = resolved;
+    viaResolved = true;
+  }
   if (built.rog.incomplete?.length) {
     return fallback(`incomplete:${built.rog.incomplete.join(",")}`);
   }
@@ -294,6 +532,7 @@ export function planInterpreterDispatch(
   }
 
   census.interpreted++;
+  if (viaResolved) census.interpretedViaResolved++;
   census.nodeOpsSeen += pattern.nodes.length;
   census.nodeOpsCollapsed += collapsed.size;
   census.transientCollections += inlineCollections.size;

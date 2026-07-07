@@ -552,6 +552,8 @@ function factoryFromPattern<T, R>(
     outputs,
     cellNameForCell,
     internalCauses: assignedInternalPartialCauses,
+    // Same order as `nodes`; captured for the derived-copy alias validation.
+    serializedNodes,
   });
 
   const pattern: Pattern & toJSON = {
