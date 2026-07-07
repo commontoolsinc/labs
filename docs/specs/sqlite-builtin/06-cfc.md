@@ -466,6 +466,15 @@ statement bound), a read-back/count mismatch, and any evaluator `{error}`.
 DELETE and rule-less target tables keep the plain write path; rule-less dbs
 pay nothing.
 
+A rolled-back commit is a **terminal** rejection: the server preserves the
+`RowLabelCommitError` name over the wire (it is not collapsed into a generic
+`TransactionError`), and the runner classifies it non-retryable
+([`storage/rejection.ts`](../../../packages/runner/src/storage/rejection.ts)
+`isTerminalRejection`). Re-running the identical handler would recompute the
+identical refused write, so the doomed handler stops immediately rather than
+consuming its retry budget — its per-attempt speculative rev bumps would only
+starve concurrent sibling commits that share reactive state.
+
 Trust note: `op.db.owner` is client-supplied like the rest of the db ref. A
 forged owner can only turn an ABSENT `dbOwner()` resolution into a present
 one — every structural failure the evaluator enforces (strict-if-present,
