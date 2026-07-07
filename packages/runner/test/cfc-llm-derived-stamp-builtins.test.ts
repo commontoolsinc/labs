@@ -43,6 +43,11 @@ function resultIntegrity(result: Cell<any>): unknown[] {
   return integrityAtomsAt(result.key("result").resolveAsCell());
 }
 
+/** The persisted integrity on a builtin's model-output `partial` field. */
+function partialIntegrity(result: Cell<any>): unknown[] {
+  return integrityAtomsAt(result.key("partial").resolveAsCell());
+}
+
 function waitForPendingToBecomeFalse(result: Cell<any>) {
   const liveResult = result.withTx();
   const timeoutMs = 5000;
@@ -190,6 +195,42 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
     await runtime.idle();
 
+    // Both model-output fields carry the stamp.
+    expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
+    expect(partialIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
+  });
+
+  it("stamps the `llm` builtin's array-of-parts result", async () => {
+    // `llm` result is `anyOf: [string, array-of-parts]`; the array variant is
+    // stamped on the `result` field as a whole.
+    const testPrompt = "d1b-llm-array-stamp";
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ),
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "part one" }],
+        id: "d1b-llm-array-1",
+      },
+    );
+
+    const testPattern = builder.pattern(() =>
+      builder.llm({ messages: [{ role: "user", content: testPrompt }] })
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "d1b-llm-array-result",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
   });
 
@@ -220,6 +261,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
 
     expect(result.key("result").get()).toBe("text reply");
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
+    expect(partialIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
   });
 
   it("stamps the `generateObject` direct-path model-output result", async () => {
@@ -362,6 +404,66 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
         .toBeUndefined();
       await disabledRuntime.idle();
 
+      expect(resultIntegrity(result)).not.toContainEqual(LLM_DERIVED_ATOM);
+    } finally {
+      await disabledRuntime.idle();
+      await disabledRuntime.dispose();
+      await disabledStorage.close();
+    }
+  });
+
+  it("does not stamp the `generateObject` result when CFC is disabled", async () => {
+    // Exercises setStampedObjectResult's disabled branch (writes through the
+    // bare resultSchema, minting no CFC metadata).
+    const disabledStorage = StorageManager.emulate({ as: signer });
+    const disabledRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: disabledStorage,
+      cfcEnforcementMode: "disabled",
+    });
+    const disabledTx = disabledRuntime.edit();
+    const { commonfabric } = createTrustedBuilder(disabledRuntime);
+
+    const testPrompt = "d1b-generateObject-disabled";
+    const objectSchema: JSONSchema = {
+      type: "object",
+      properties: { verdict: { type: "string" } },
+      required: ["verdict"],
+    };
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.schema.type === "object",
+      { object: { verdict: "unstamped" }, id: "d1b-go-disabled-1" },
+    );
+
+    try {
+      const testPattern = commonfabric.pattern(() =>
+        commonfabric.generateObject({
+          prompt: testPrompt,
+          schema: objectSchema,
+        })
+      );
+      const resultCell = disabledRuntime.getCell(
+        space,
+        "d1b-generateObject-disabled-result",
+        testPattern.resultSchema,
+        disabledTx,
+      );
+      const result = disabledRuntime.run(
+        disabledTx,
+        testPattern,
+        {},
+        resultCell,
+      );
+      disabledTx.commit();
+
+      await expect(waitForPendingToBecomeFalse(result)).resolves
+        .toBeUndefined();
+      await disabledRuntime.idle();
+
+      expect(result.key("result").get()).toEqual({ verdict: "unstamped" });
       expect(resultIntegrity(result)).not.toContainEqual(LLM_DERIVED_ATOM);
     } finally {
       await disabledRuntime.idle();

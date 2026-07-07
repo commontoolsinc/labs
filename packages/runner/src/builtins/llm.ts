@@ -73,11 +73,12 @@ const PARTIAL_BATCH_MS = 66;
 // `generateObject` merges the stamp into the (possibly custom) resultSchema root
 // via `withLlmDerivedStamp`. Both apply the stamp at the WRITE, not on the shared
 // result schema, so the builtins' control-state writes (initial-run / error-path
-// `pending`/`result=undefined` resets) stay CFC-inert — only the actual model
-// bytes are stamped and made CFC-relevant, mirroring D1's `pushModelMessages`.
-// The write is attributed to the builtin because `LlmDerived` is a runtime-minted
-// evidence family: the persist-time gate (`gateRuntimeMintedIntegrity`, audit S4)
-// admits it only from a builtin author, which also stops pattern code forging it.
+// `pending`/`result=undefined` resets, and the transient streaming `partial`
+// batches) stay CFC-inert — only the final model bytes are stamped and made
+// CFC-relevant, mirroring D1's `pushModelMessages`. The write is attributed to
+// the builtin because `LlmDerived` is a runtime-minted evidence family: the
+// persist-time gate (`gateRuntimeMintedIntegrity`, audit S4) admits it only from
+// a builtin author, which also stops pattern code forging it.
 
 /**
  * Attribute a model-output writeback tx to the builtin so the `LlmDerived` stamp
@@ -216,10 +217,6 @@ function createUpdatePartialCallback(
   runtime: Runtime,
   getCurrentRun: () => number,
   thisRun: number,
-  // D1b: builtin id for attributing the streaming `partial` writeback, so a
-  // `partial` field carrying the `LlmDerived` stamp keeps it during streaming
-  // (llm/generateText; omitted where the field carries no stamp).
-  builtinId?: string,
 ): { callback: (text: string) => void; cleanup: () => void } {
   let pendingText: string | null = null;
   let batchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -261,20 +258,8 @@ function createUpdatePartialCallback(
             return;
           }
           return runtime.editWithRetry((tx) => {
-            if (builtinId !== undefined) {
-              // D1b: attribute FIRST, then stamp — the streaming `partial` is
-              // model output too, so it carries `LlmDerived`.
-              attributeModelOutputWrite(tx, runtime, builtinId);
-              setStampedModelOutput(
-                tx,
-                runtime,
-                resultCell,
-                "partial",
-                textToWrite,
-              );
-            } else {
-              resultCell.key("partial").withTx(tx).set(textToWrite);
-            }
+            const partialCell = resultCell.key("partial").withTx(tx);
+            partialCell.set(textToWrite);
           });
         }).catch((e) => {
           console.warn("[LLM] Error writing partial update:", e);
@@ -711,7 +696,6 @@ export function llm(
         runtime,
         getRunForCancellation,
         thisRun,
-        "llm",
       );
 
     // Build tool catalog if tools are present, then start execution after the
@@ -1059,7 +1043,6 @@ export function generateText(
         runtime,
         getRunForCancellation,
         thisRun,
-        "generateText",
       );
 
     enqueuePostCommitLLMWork(
@@ -1459,7 +1442,6 @@ export function generateObject<T extends Record<string, unknown>>(
           runtime,
           queueName ? () => thisRun : () => currentRun,
           thisRun,
-          "generateObject",
         );
 
       // When queued, disable run cancellation — the queue manages lifecycle.
