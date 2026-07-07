@@ -121,4 +121,16 @@ describe("CFC render confidentiality resolver (H3b)", () => {
     });
     expect(resolve({ confidentiality: [] })).toEqual([]);
   });
+
+  it("mints no role facts without an acting principal (fail-closed)", () => {
+    // No acting principal → no HasRole facts can be minted for any member
+    // space, so a Space label cannot resolve.
+    const resolve = createRenderConfidentialityResolver({
+      memberSpaces: [SPACE_TEAM],
+    });
+    const resolved = resolve({ confidentiality: [cfcAtom.space(SPACE_TEAM)] });
+    expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([
+      cfcAtom.space(SPACE_TEAM),
+    ]);
+  });
 });

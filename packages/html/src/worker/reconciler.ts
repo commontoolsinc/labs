@@ -989,12 +989,13 @@ export class WorkerReconciler {
     if (labelView === undefined) {
       // Schema IFC is a constraint, not the data label. Use it only as a
       // conservative fallback when no stored/read label metadata is available.
+      // Exchange resolution is deliberately NOT applied here: schema IFC does
+      // not carry the runtime `Space(...)` principals resolution targets, and
+      // the per-atom exact-match fit stays fail-closed for anything it cannot
+      // admit — the resolver drives the stored-label path below.
       const schemaLabels = this.confidentialityLabelsFromCellSchema(cell);
       if (schemaLabels.length === 0) {
         return true;
-      }
-      if (useResolver) {
-        return this.resolvedConfidentialityRenderable(schemaLabels, [], policy);
       }
       return schemaLabels.every((atom) =>
         this.atomRenderableUnderPolicy(atom, policy)
