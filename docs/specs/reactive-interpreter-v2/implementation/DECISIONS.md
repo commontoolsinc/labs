@@ -233,3 +233,49 @@ pattern-node child scoping, and frame-result schema folds are all
 boundary territory (verbatim instantiation); legacy's simple javascript
 path IGNORES static scope for plain-value lifts (pinned by differential).
 Value-consumed inlining refuses scope-declaring children.
+
+## D-V2-RESOLVED-COPY — derived copies dispatch via the validated canonical ROG (2026-07-07)
+
+The STRICT `getBuiltRog` lookup (direct WeakMap key) misses for a DERIVED
+COPY of a pattern (reload rehydration, embedded/serialized sub-pattern),
+even though its canonical ROG resolves via the derivation chain. Measured
+on the multi-user chat sim: 16/16 `no_rog` misses were resolvable AND
+positionally faithful — a FALSE REJECTION, not a genuine plain-JSON tail.
+
+Dispatch now recovers them: on a strict miss it tries
+`getBuiltRogResolved` and binds the canonical ROG (structure + live
+side-car by op id) against the COPY's `pattern.nodes` (this-instantiation
+boundary modules + alias bindings), gated by a POSITIONAL-CORRESPONDENCE
+validation.
+
+**Why validation is load-bearing (not optional):** the canonical ROG's op
+ids are POSITIONAL against the canonical's nodes. The dispatch seeds
+cross-op reads from `pattern.nodes[i].outputs` and writes a segment op's
+value through `pattern.nodes[i].outputs`, trusting copy node `i` == op `i`.
+A copy that reordered same-kind siblings or retargeted an alias would
+silently mis-wire. A 6-lens adversarial soundness workflow found ZERO
+holes against the four current copy sites (all provably order-preserving)
+but flagged this REORDER-OF-EQUALS as a latent hole for future copy sites.
+
+**The validation predicate** (each check fails closed with a distinct
+census reason):
+1. LENGTH — copy node count == canonical node-op count (non-construct ops;
+   constructs are the appended id suffix).
+2. KIND — per-position module class matches the canonical op kind.
+3. ALIAS TARGET (the hardening) — per-position, the copy's node inputs AND
+   outputs carry the same alias TARGETS (cell/partialCause/path) as the
+   canonical's serialized node, CANONICALIZING AWAY the only two lossless
+   copy transforms: `defer`-count bumps (nesting, not target) and `scope`
+   folded into `schema` (annotation, not target). Kind+length alone is a
+   PROXY safe today; the alias digest makes it a PROOF against future copy
+   sites.
+
+`BuiltRog.canonicalNodes` carries the canonical's serialized input/output
+alias skeletons (from the `serializedNodes` already built at construction)
+so the resolved path can compare without the canonical Pattern. Census
+gains `interpretedViaResolved` (resolved-path engagement, counted distinct
+from strict hits — proxy-metric-decoupling). NOTE: recovered chat-sim
+patterns are boundary-heavy group-chat sub-patterns that stop at the
+`nothing_to_collapse` cost gate — the win is correctness/honesty of the
+metric + engagement for any reload/embedded pattern that DOES carry
+collapsible compute.
