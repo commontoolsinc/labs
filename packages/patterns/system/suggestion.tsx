@@ -7,7 +7,6 @@ import {
   ifElse,
   llmDialog,
   NAME,
-  nonPrivateRandom,
   pattern,
   patternTool,
   type Stream,
@@ -150,10 +149,6 @@ export default pattern<
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
-  const sandboxId = new Writable(
-    `suggestion-${nonPrivateRandom().toString(36).slice(2, 10)}`,
-  );
-
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
     const indexText = patternIndex
@@ -194,7 +189,7 @@ Use the user context above to personalize your suggestions when relevant.`;
     messages,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
-      bash: patternTool(bash, { sandboxId }),
+      bash: patternTool(bash),
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,
       }),
