@@ -278,3 +278,21 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⛔ blocked.
   session (flag on/off): micro map −56% docs/−65% wall, 6-lift chain −58%
   nodes/−70% wall; pattern-tests suite flat (fixed costs dominate); chat
   sim −3%. NEXT MEASUREMENT: corpus engagement delta from this fix.
+
+- (2026-07-07) **COVERAGE-DEBT PAID DOWN + test-glob bug fixed**
+  (`d6fa17efd`, `f4460c257`, `f9079ad81`). ROOT CAUSE of the
+  `coverage-debt: packages/runner` inflation: the runner `test` task globbed
+  `test/*.test.ts`, which does NOT match `test/reactive-interpreter/` — so
+  the 9 ri-v2 suites NEVER RAN in CI (dispatch 4%, interpret 1%, partition
+  4% by V8 line coverage) and weren't regression guards. Fix = discover from
+  `test/` (recursive). Then 6 cov-*.test.ts unit files (a 3-agent workflow +
+  a runtime-branch agent) drove the module tree 24.6% → 86.2% line coverage
+  (uncovered 2500ish → 396): interpret/leaf-caps/rog/builtin-markers 100%,
+  partition 93%, from-builder 91%, dispatch 78%, collection-inline 72%.
+  applyExprOp (25 ops), leaf-caps schema predicates, evalRog branches,
+  partition/from-builder classification, dispatch fallback + derived-copy
+  positional-FAILURE modes (derived_len/kind/edge), segment error isolation,
+  inline-collection refusals. Residual 396 = fail-closed degrade/resume +
+  RI2_DEBUG branches (guarded by the differential + resume integration
+  suites) → honest small override, down from the inflated 9262. Full runner
+  suite 820 passed, 0 failed.
