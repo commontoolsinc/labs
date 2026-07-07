@@ -273,7 +273,16 @@ export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
 
   for (const line of lcov.split(/\r?\n/)) {
     if (line.startsWith("SF:")) {
-      currentPath = path.normalize(line.slice(3));
+      // Strip any query suffix before keying: Deno's coverage emits a
+      // separate record per module INSTANCE (e.g. `foo.ts?testRun=<uuid>`
+      // per importing test file), and keying on the raw path counted the
+      // same physical line as debt once per instance that didn't execute
+      // it. That made the debt metric flap ±1-5 lines with test order and
+      // timing — and made ADDING a test able to increase "uncovered lines"
+      // (its fresh instances carry red lines for whatever they don't
+      // execute). Merging instances measures real per-file coverage: a line
+      // is covered when ANY instance executed it (CT-1861).
+      currentPath = path.normalize(line.slice(3).split("?")[0]);
       if (!files.has(currentPath)) {
         files.set(currentPath, { lineHits: new Map() });
       }
