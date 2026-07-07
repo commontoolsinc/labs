@@ -184,28 +184,38 @@ export function runtimeOptionsFromInitializationData(
  * ceiling is in force, each render egress resolves principal-form atoms
  * (Space-via-HasRole) RUNNER-side; the reconciler only fits the result.
  *
- * Reader membership is sourced ONLY from verified facts: the acting user's own
- * space (space DID == principal DID) is the one always-verifiable member — a
- * principal definitionally reads its own space, independent of deployment ACL
- * mode. Broader cross-space membership awaits the §4.9.3 membership lookup;
- * until then cross-space `Space(...)` labels fail closed rather than trusting a
- * cell's mere local residency. Returns undefined when no ceiling is configured
- * (no render gating — today's behavior).
+ * Reader membership is sourced ONLY from verified facts, never from a cell's
+ * mere local residency:
+ *  - the acting user's own identity space (space DID == principal DID) — a
+ *    principal definitionally reads its own space;
+ *  - the current session workspace (`sessionSpace` = the space the session was
+ *    authorized to open) — with `createSession({ spaceName })` the home space
+ *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
+ *    is the space `session.open` gated on, so an own-workspace `Space(...)`
+ *    label resolves rather than over-blocking.
+ * Broader cross-space membership awaits the §4.9.3 membership lookup; until
+ * then other-space `Space(...)` labels fail closed. Returns undefined when no
+ * ceiling is configured (no render gating — today's behavior).
  */
 export function renderConfidentialityResolverFor(
   runtime: Runtime,
   identity: Identity,
   ceiling: RenderConfidentialityCeiling | undefined,
+  sessionSpace?: string,
 ): RenderConfidentialityResolver | undefined {
   if (ceiling === undefined) {
     return undefined;
   }
   const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
     identity.did();
+  const memberSpaces = sessionSpace === undefined ||
+      sessionSpace === actingPrincipal
+    ? [actingPrincipal]
+    : [actingPrincipal, sessionSpace];
   return createRenderConfidentialityResolver({
     actingPrincipal,
     trustConfig: runtime.cfcTrustConfig,
-    memberSpaces: [actingPrincipal],
+    memberSpaces,
   });
 }
 
@@ -507,6 +517,7 @@ export class RuntimeProcessor {
       runtime,
       identity,
       processor.renderConfidentialityCeiling,
+      space,
     );
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation

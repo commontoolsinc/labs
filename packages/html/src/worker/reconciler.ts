@@ -1049,9 +1049,16 @@ export class WorkerReconciler {
       ) {
         return false;
       }
+      // Author declassification names an ATOM; after exchange resolution an
+      // offending clause may be an OR of alternatives, so match the
+      // declassified atom against the clause OR any of its alternatives —
+      // releasing one alternative of a disjunctive clause releases the clause.
       if (
         policy.declassifyConfidentiality.some((declassified) =>
-          deepEqual(declassified, clause)
+          deepEqual(declassified, clause) ||
+          clauseAlternatives(clause).some((alternative) =>
+            deepEqual(declassified, alternative)
+          )
         )
       ) {
         continue;

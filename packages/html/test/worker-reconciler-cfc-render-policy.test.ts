@@ -3131,6 +3131,18 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           "Author-released note",
           cfcAtom.space("did:key:z6MkDeclassSpace"),
         );
+        // An authored OR-clause: declassifying ONE alternative must release the
+        // whole disjunctive clause even after resolution keeps it an OR.
+        const declassOrCell = seed(
+          "cfc-h3b-declass-or",
+          "Author-released OR note",
+          {
+            anyOf: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+              cfcAtom.space("did:key:z6MkDeclassOrB"),
+            ],
+          },
+        );
         assertEquals((await seedTx.commit()).ok !== undefined, true);
 
         // Marker + caveat under a root ceiling that allow-lists the influence
@@ -3190,6 +3202,36 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           assertEquals(text.includes("Author-released note"), true);
         } finally {
           cancelDeclass();
+        }
+
+        // Declassifying one alternative of an OR-clause releases the clause.
+        const orCollector = createOpsCollector();
+        const orReconciler = new WorkerReconciler({
+          onOps: orCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelOr = orReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+            ],
+          },
+          children: [declassOrCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = orCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released OR note"), true);
+        } finally {
+          cancelOr();
         }
       },
     );

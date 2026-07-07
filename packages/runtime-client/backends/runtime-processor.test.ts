@@ -136,6 +136,47 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
       await storageManager.close();
     }
   });
+
+  it("resolves the session workspace when it differs from the principal DID", async () => {
+    // createSession({ spaceName }) derives a home-space DID distinct from the
+    // acting principal; the session-authorized workspace is a verified member,
+    // so its own Space(...) label resolves rather than over-blocking.
+    const { runtime, storageManager } = createRuntime();
+    const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
+    try {
+      const resolver = renderConfidentialityResolverFor(
+        runtime,
+        cfcSigner,
+        { atoms: [cfcAtom.user(cfcSigner.did())] },
+        sessionSpace,
+      );
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The session workspace resolves...
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(sessionSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // ...and the acting user's own identity space still resolves too.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A third, unrelated space stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkThird")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
 
 describe("page slug metadata", () => {
