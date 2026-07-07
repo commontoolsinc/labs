@@ -74,23 +74,61 @@ const viewSettledReady = (): boolean =>
 // the prior poll predicate: a not-yet-ready field (absent, hidden, disabled,
 // read-only) reports false without dispatching anything, so a re-check on the
 // next DOM mutation retries the fill; a ready field is filled once and verified.
+//
+// Each invocation keeps a progress ledger on `globalThis.__cfFillDiag`
+// (per selector): which phase it reached and when. waitForCondition never
+// re-enters a predicate whose promise is still pending, so if one of the
+// awaits below stalls (typically `commit()` waiting on a stuck cell
+// round-trip), the ledger's `phase` names the exact await the fill died in —
+// that is what `readCfInputProbe` reports on timeout.
 const fillAndVerify = async (
   probe: ProbeApi,
   selector: string,
   nextValue: string,
 ): Promise<boolean> => {
+  type FillDiag = {
+    attempts: number;
+    phase: string;
+    phaseAt: number;
+    startedAt: number;
+    commitStartedAt?: number;
+    lastInputValue?: string;
+  };
+  const registry = ((globalThis as typeof globalThis & {
+    __cfFillDiag?: Record<string, FillDiag>;
+  }).__cfFillDiag ??= {});
+  const diag: FillDiag = {
+    attempts: (registry[selector]?.attempts ?? 0) + 1,
+    phase: "collecting",
+    phaseAt: Date.now(),
+    startedAt: Date.now(),
+  };
+  registry[selector] = diag;
+  const phase = (name: string) => {
+    diag.phase = name;
+    diag.phaseAt = Date.now();
+  };
+
   const element = probe.collect(selector)[0];
-  if (!element) return false;
+  if (!element) {
+    phase("no-element");
+    return false;
+  }
   const input = element instanceof HTMLInputElement
     ? element
     : element.shadowRoot?.querySelector("input");
-  if (!(input instanceof HTMLInputElement)) return false;
+  if (!(input instanceof HTMLInputElement)) {
+    phase("no-inner-input");
+    return false;
+  }
 
+  phase("scrolling");
   input.scrollIntoView({ block: "center", inline: "center" });
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
   if (!probe.isVisible(input) || input.disabled || input.readOnly) {
+    phase("not-fillable");
     return false;
   }
 
@@ -106,6 +144,7 @@ const fillAndVerify = async (
     requestUpdate?: () => void | Promise<void>;
   };
 
+  phase("dispatching");
   input.focus();
   const valueSetter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -120,13 +159,20 @@ const fillAndVerify = async (
   // Ask the host to flush and durably commit the typed value (a no-op for
   // fields not bound to a cell), then re-render so the inner input reflects the
   // committed value before we read it back.
+  phase("committing");
+  diag.commitStartedAt = Date.now();
   await hostElement.commit?.();
+  phase("committed");
   await hostElement.requestUpdate?.();
+  phase("update-requested");
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
 
-  return input.value === nextValue;
+  diag.lastInputValue = input.value;
+  const verified = input.value === nextValue;
+  phase(verified ? "verified" : "value-mismatch");
+  return verified;
 };
 
 // Scroll the cf-button behind `selector` into view and tag its inner click
@@ -874,10 +920,36 @@ export interface BrowserLoadSummary {
    * signal: the main thread is waiting on a saturated worker.
    */
   ipc: TimingStatRow[];
+  /**
+   * Requests still in flight on the main thread when the summary was taken
+   * ({ type, ageMs }). The completed-timing rows above cannot show a request
+   * that never came back; this names it.
+   */
+  pendingIpc: Array<{ type: string; ageMs: number }>;
+  /**
+   * Worker-side request ledger (`runtime-worker.ipc` counts): how many
+   * requests of each type the worker received and answered. A main-side
+   * pending request that is missing here was never delivered (starved event
+   * loop); received-but-unanswered means the handler never returned; present
+   * in both means the response was lost in transit.
+   */
+  workerIpc: Record<string, number>;
   /** Worker-side scheduler/runner/storage timing — where the work happens. */
   worker: TimingStatRow[];
   /** Conflict / re-run counters — see {@link ChurnCounters}. */
   churn: ChurnCounters;
+  /**
+   * Send/settle timeline of the first IPC requests (the boot window), offsets
+   * in ms from the runtime connection's construction. The aggregate rows say a
+   * request was slow; this says WHEN it ran and what overlapped it — e.g. a
+   * pattern:getSpaceRoot spanning the whole boot vs one that queued behind it.
+   */
+  requestTimeline: Array<{
+    type: string;
+    sentAtMs: number;
+    doneAtMs?: number;
+    error?: boolean;
+  }>;
 }
 
 /**
@@ -929,14 +1001,45 @@ export async function collectBrowserLoadSummary(
             timing?: Record<string, Record<string, Stats>>;
             counts?: Record<string, Record<string, CountEntry>>;
           }>;
+          getPendingRequests?: () => Array<
+            { msgId: number; type: string; ageMs: number }
+          >;
+          getRequestTimeline?: () => Array<{
+            msgId: number;
+            type: string;
+            sentAtMs: number;
+            doneAtMs?: number;
+            error?: boolean;
+          }>;
         };
       };
     }).commonfabric;
 
     const mainTiming = cf?.getTimingStatsBreakdown?.() ?? {};
-    const ipc = toRows(mainTiming["runtime-client"], 12);
+    const ipc = toRows(mainTiming["runtime-client"], 14);
+    let pendingIpc: Array<{ type: string; ageMs: number }> = [];
+    let requestTimeline: Array<{
+      type: string;
+      sentAtMs: number;
+      doneAtMs?: number;
+      error?: boolean;
+    }> = [];
+    try {
+      pendingIpc = (cf?.rt?.getPendingRequests?.() ?? [])
+        .map(({ type, ageMs }) => ({ type, ageMs }));
+      requestTimeline = (cf?.rt?.getRequestTimeline?.() ?? [])
+        .map(({ type, sentAtMs, doneAtMs, error }) => ({
+          type,
+          sentAtMs,
+          ...(doneAtMs !== undefined ? { doneAtMs } : {}),
+          ...(error ? { error } : {}),
+        }));
+    } catch {
+      // A disposed runtime still yields a useful summary without this.
+    }
 
     let worker: ReturnType<typeof toRows> = [];
+    let workerIpc: Record<string, number> = {};
     const churn = {
       actionRuns: 0,
       commitConflicts: 0,
@@ -955,13 +1058,15 @@ export async function collectBrowserLoadSummary(
       // default-pattern ensure/resume); `runner.ipc`/`runner.loop` (worker
       // request delivery/handling + event-loop lag) ride the `runner` prefix;
       // `pattern-manager` carries the compile-cache read/evaluate spans that
-      // dominate a storage-resume boot.
+      // dominate a storage-resume boot; `js-compiler` the per-file
+      // program-build/type-check/emit spans that decompose a cold compile.
       const prefixes = [
         "scheduler",
         "runner",
         "storage",
         "piece",
         "pattern-manager",
+        "js-compiler",
       ];
       const includeLogger = (name: string): boolean =>
         name === "runtime-client.cfc-label" ||
@@ -975,7 +1080,7 @@ export async function collectBrowserLoadSummary(
           selected[`${name}/${key}`] = stats;
         }
       }
-      worker = toRows(selected, 16);
+      worker = toRows(selected, 28);
 
       const counts: Record<string, Record<string, CountEntry>> =
         workerCounts?.counts ?? {};
@@ -983,6 +1088,11 @@ export async function collectBrowserLoadSummary(
         const entry = counts[logger]?.[key];
         return typeof entry === "number" ? entry : entry?.total ?? 0;
       };
+      workerIpc = Object.fromEntries(
+        Object.keys(counts["runtime-worker.ipc"] ?? {}).sort().map((
+          key,
+        ) => [key, countOf("runtime-worker.ipc", key)]),
+      );
       churn.actionRuns = countOf("scheduler", "schedule-run-start");
       churn.commitConflicts = countOf("storage.v2", "commit-conflict");
       churn.commitReverts = countOf("storage.v2", "commit-revert");
@@ -994,13 +1104,16 @@ export async function collectBrowserLoadSummary(
       // the contention story.
     }
 
-    return { ipc, worker, churn };
+    return { ipc, pendingIpc, workerIpc, worker, churn, requestTimeline };
   });
   return {
     label,
     ipc: collected.ipc,
+    pendingIpc: collected.pendingIpc,
+    workerIpc: collected.workerIpc,
     worker: collected.worker,
     churn: collected.churn,
+    requestTimeline: collected.requestTimeline,
   };
 }
 
@@ -1057,9 +1170,45 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` commitRejected=${c.commitRejected}` +
     ` scheduleRunErrors=${c.scheduleRunErrors}` +
     ` eventLostRaces=${c.eventLostRaces}`;
+  const pendingLine = summary.pendingIpc.length === 0
+    ? "    (none)"
+    : summary.pendingIpc.map((row) =>
+      `    ${row.type.padEnd(30)} age=${row.ageMs}ms`
+    ).join("\n");
+  const workerIpcEntries = Object.entries(summary.workerIpc);
+  const workerIpcLine = workerIpcEntries.length === 0
+    ? "    (none)"
+    : workerIpcEntries.map(([key, count]) => `${key}=${count}`)
+      .reduce<string[]>((lines, part) => {
+        const last = lines[lines.length - 1];
+        if (last !== undefined && (last.length + part.length) < 96) {
+          lines[lines.length - 1] = `${last} ${part}`;
+        } else {
+          lines.push(`    ${part}`);
+        }
+        return lines;
+      }, [])
+      .join("\n");
+  // One request per line, in send order: `sent..done type` (offsets ms from
+  // connection construction). `..pending` marks a request never settled. Slow
+  // requests visibly nest/overlap here in a way the aggregate table can't show.
+  const timelineLine = summary.requestTimeline.length === 0
+    ? "    (none)"
+    : summary.requestTimeline.map((row) =>
+      `    ${String(row.sentAtMs).padStart(7)}..${
+        row.doneAtMs !== undefined
+          ? String(row.doneAtMs).padStart(7)
+          : "pending"
+      } ${row.type}${row.error ? " ERROR" : ""}`
+    ).join("\n");
   console.log(
     `\n[${summary.label}] main-thread runtime-client IPC round-trips (ms):\n` +
       `${formatRows(summary.ipc)}\n` +
+      `[${summary.label}] main-thread IPC still pending:\n${pendingLine}\n` +
+      `[${summary.label}] request timeline (sentAt..doneAt ms):\n` +
+      `${timelineLine}\n` +
+      `[${summary.label}] worker request ledger (received/responded):\n` +
+      `${workerIpcLine}\n` +
       `[${summary.label}] worker scheduler/runner/storage (ms):\n` +
       `${formatRows(summary.worker)}\n` +
       `[${summary.label}] churn / conflict counters:\n${churnLine}`,
@@ -1192,6 +1341,27 @@ type CfInputProbe = {
   readOnly: boolean;
   visible: boolean;
   hostTagName: string;
+  /** Whether the host custom element's definition was registered/upgraded. */
+  hostUpgraded?: boolean;
+  /** Whether the host exposes `commit()` (a cell-committing form field). */
+  hostHasCommit?: boolean;
+  /**
+   * The host's `value` property: `{ kind: "cell", id, space, path }` for a
+   * bound cell handle, otherwise `{ kind: typeof value }`. A fill that stalls
+   * in `commit()` with no bound cell points at binding materialization; with a
+   * bound cell it points at the cell:set round-trip.
+   */
+  hostValueBinding?: unknown;
+  /** Progress ledger left by fillAndVerify for this selector (see there). */
+  fill?: unknown;
+  /** In-flight runtime IPC requests at probe time ({ type, ageMs }). */
+  pendingIpc?: unknown;
+  /** Completed runtime IPC round-trips at probe time ({ count, maxMs }). */
+  completedIpc?: unknown;
+  /** Cell subscription totals (active instances, backend subscribes). */
+  subscriptionTotals?: unknown;
+  /** Bounded tail of the page's console messages (see Page wrapper). */
+  consoleTail?: unknown;
 };
 
 async function readCfInputProbe(
@@ -1210,6 +1380,66 @@ async function readCfInputProbe(
       }
     }
 
+    // Page-level context that is meaningful whether or not the element
+    // resolved: the fill's progress ledger, the runtime connection's pending
+    // and completed IPC requests, and the recent console tail. This is what
+    // turns a bare timeout into a diagnosis (which await stalled, on which
+    // request, with which page-side errors around it).
+    const g = globalThis as typeof globalThis & {
+      __cfFillDiag?: Record<string, unknown>;
+      __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
+      commonfabric?: {
+        rt?: {
+          getPendingRequests?: () => Array<
+            { msgId: number; type: string; ageMs: number }
+          >;
+          getSubscriptionDiagnostics?: () => { totals: unknown };
+        };
+        getTimingStatsBreakdown?: () => Record<
+          string,
+          Record<string, { count?: number; max?: number }>
+        >;
+      };
+    };
+    const fill = g.__cfFillDiag?.[targetSelector];
+    let pendingIpc: unknown;
+    try {
+      pendingIpc = g.commonfabric?.rt?.getPendingRequests?.()
+        .map(({ type, ageMs }) => ({ type, ageMs }));
+    } catch (error) {
+      pendingIpc = `unavailable: ${error}`;
+    }
+    let completedIpc: unknown;
+    try {
+      const rows = g.commonfabric?.getTimingStatsBreakdown?.()
+        ?.["runtime-client"];
+      completedIpc = rows
+        ? Object.fromEntries(
+          Object.entries(rows).map(([key, stats]) => [key, {
+            count: stats.count ?? 0,
+            maxMs: Math.round(stats.max ?? 0),
+          }]),
+        )
+        : undefined;
+    } catch (error) {
+      completedIpc = `unavailable: ${error}`;
+    }
+    let subscriptionTotals: unknown;
+    try {
+      subscriptionTotals = g.commonfabric?.rt?.getSubscriptionDiagnostics?.()
+        .totals;
+    } catch (error) {
+      subscriptionTotals = `unavailable: ${error}`;
+    }
+    const consoleTail = (g.__cfConsoleTail ?? []).slice(-40);
+    const context = {
+      fill,
+      pendingIpc,
+      completedIpc,
+      subscriptionTotals,
+      consoleTail,
+    };
+
     const matches: Element[] = [];
     collect(document, matches);
     const element = matches[0];
@@ -1222,6 +1452,7 @@ async function readCfInputProbe(
         readOnly: false,
         visible: false,
         hostTagName: "",
+        ...context,
       };
     }
     const input = element instanceof HTMLInputElement
@@ -1236,6 +1467,7 @@ async function readCfInputProbe(
         readOnly: false,
         visible: false,
         hostTagName: element.tagName.toLowerCase(),
+        ...context,
       };
     }
     const rect = input.getBoundingClientRect();
@@ -1247,6 +1479,31 @@ async function readCfInputProbe(
       style.visibility !== "hidden" && style.display !== "none";
     const root = input.getRootNode();
     const host = root instanceof ShadowRoot ? root.host : element;
+    const hostTagName = host.tagName.toLowerCase();
+    const hostValue = (host as Element & { value?: unknown }).value;
+    let hostValueBinding: unknown;
+    if (
+      hostValue !== null && typeof hostValue === "object" &&
+      typeof (hostValue as { ref?: unknown }).ref === "function"
+    ) {
+      try {
+        const ref = (hostValue as {
+          ref: () => { id?: unknown; space?: unknown; path?: unknown };
+        }).ref();
+        const trim = (v: unknown) =>
+          typeof v === "string" && v.length > 28 ? `${v.slice(0, 28)}…` : v;
+        hostValueBinding = {
+          kind: "cell",
+          id: trim(ref.id),
+          space: trim(ref.space),
+          path: ref.path,
+        };
+      } catch (error) {
+        hostValueBinding = { kind: "cell", error: String(error) };
+      }
+    } else {
+      hostValueBinding = { kind: typeof hostValue };
+    }
     return {
       selector: input.tagName.toLowerCase(),
       found: true,
@@ -1254,7 +1511,14 @@ async function readCfInputProbe(
       disabled: input.disabled,
       readOnly: input.readOnly,
       visible,
-      hostTagName: host.tagName.toLowerCase(),
+      hostTagName,
+      hostUpgraded: hostTagName.includes("-")
+        ? customElements.get(hostTagName) !== undefined
+        : true,
+      hostHasCommit:
+        typeof (host as Element & { commit?: unknown }).commit === "function",
+      hostValueBinding,
+      ...context,
     };
   }, { args: [selector] });
 }

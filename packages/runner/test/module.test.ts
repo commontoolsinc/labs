@@ -16,9 +16,12 @@ import {
 import {
   action,
   handler,
+  isEagerSourceAnnotationEnabled,
   lift,
   parseStackFrame,
+  resolveLocationFromFunctionSource,
   resolveSourceLocationFromStack,
+  setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -421,7 +424,68 @@ describe("module", () => {
     });
   });
 
+  describe("eagerSourceAnnotation runtime option", () => {
+    afterEach(() => setEagerSourceAnnotation(false));
+
+    it("skips annotation entirely for a non-extensible implementation", () => {
+      // Hardened/frozen fns cannot carry the debug annotation; the annotator
+      // must early-return rather than throw (with eager on OR off).
+      setEagerSourceAnnotation(true);
+      const frozen = Object.freeze((n: number) => n * 5);
+      const fact = lift(frozen);
+      expect(isModule(fact)).toBe(true);
+      expect((frozen as { src?: string }).src).toBe(undefined);
+    });
+
+    it("annotates the RAW (unmapped) stack location when eager annotation is on", () => {
+      // Builder calls from plain test code have no source map behind them, so
+      // the stack walk takes the raw-resolution arm (`file:line:col` of the
+      // first external frame). On main this arm ran for every unit-test
+      // builder call; with the annotation default-off it is only reachable
+      // through eager-on tests — keep it exercised.
+      setEagerSourceAnnotation(true);
+      const dbl = lift((n: number) => n * 2);
+      const impl = (dbl as unknown as Module).implementation as {
+        src?: string;
+      };
+      expect(impl.src).toMatch(/module\.test\.ts:\d+:\d+$/);
+    });
+
+    it("propagates an explicit option to the ambient flag; undefined leaves it alone", async () => {
+      const mk = (experimental?: { eagerSourceAnnotation?: boolean }) =>
+        new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          ...(experimental ? { experimental } : {}),
+        });
+
+      // Explicit true / false propagate (and read back on `experimental`).
+      const on = mk({ eagerSourceAnnotation: true });
+      expect(isEagerSourceAnnotationEnabled()).toBe(true);
+      expect(on.experimental.eagerSourceAnnotation).toBe(true);
+      await on.dispose();
+
+      const off = mk({ eagerSourceAnnotation: false });
+      expect(isEagerSourceAnnotationEnabled()).toBe(false);
+      expect(off.experimental.eagerSourceAnnotation).toBe(false);
+      await off.dispose();
+
+      // Undefined must NOT stomp the ambient flag — it doubles as the test
+      // seam (`setEagerSourceAnnotation` toggled directly around runtimes).
+      setEagerSourceAnnotation(true);
+      const inherit = mk();
+      expect(isEagerSourceAnnotationEnabled()).toBe(true);
+      expect(inherit.experimental.eagerSourceAnnotation).toBe(true);
+      await inherit.dispose();
+    });
+  });
+
   describe("source location tracking", () => {
+    // Eager source-location resolution is off by default (debug-only; the boot
+    // lever). This block tests that resolution, so enable it here.
+    beforeEach(() => setEagerSourceAnnotation(true));
+    afterEach(() => setEagerSourceAnnotation(false));
+
     const compileMain = async (source: string) => {
       const program = {
         main: "/main.tsx",
@@ -610,6 +674,93 @@ describe("module", () => {
           testCase.label,
         ).not.toContain("main.tsx:1:23");
       }
+    });
+  });
+
+  describe("source-location resolution helpers (direct)", () => {
+    // Annotation is off by default now, so these arms are only reachable
+    // through eager-on paths — exercise the helpers directly.
+    // resolveLocationFromFunctionSource is the `indexOf`-into-script path,
+    // the eager annotation's fallback when the stack capture yields nothing
+    // (in-worker, SES-censored stacks make it the MAIN path).
+    const makeFrame = (script: string, nextSearchOffset = 0) =>
+      ({
+        sourceLocationContext: {
+          filename: "/probe.tsx",
+          script,
+          nextSearchOffset,
+        },
+        runtime: { harness: { mapPosition: () => null } },
+      }) as unknown as Frame;
+
+    it("resolves file:line:col by locating the fn source in the script", () => {
+      const fn = (n: number) => n * 2;
+      const script = `// header line\nconst dbl = ${fn.toString()};\n`;
+      const result = resolveLocationFromFunctionSource(fn, makeFrame(script));
+      expect(result).toBe("/probe.tsx:2:12");
+    });
+
+    it("restarts the scan from the top when the offset overshoots", () => {
+      const fn = (n: number) => n + 1;
+      const script = `const inc = ${fn.toString()};\n// tail`;
+      // nextSearchOffset past the match forces the second indexOf pass.
+      const result = resolveLocationFromFunctionSource(
+        fn,
+        makeFrame(script, script.length - 3),
+      );
+      expect(result).toBe("/probe.tsx:1:12");
+    });
+
+    it("returns null when the source is not in the script or no frame context", () => {
+      const fn = (n: number) => n - 1;
+      expect(resolveLocationFromFunctionSource(fn, makeFrame("// nothing")))
+        .toBe(null);
+      expect(resolveLocationFromFunctionSource(fn, undefined)).toBe(null);
+    });
+
+    it("skips unmapped frames from the capturing file itself (thisFile)", () => {
+      // The first parsed frame names the file doing the capture; an unmapped
+      // frame from that same file later in the walk is self-referential and
+      // must be skipped in favor of the first genuinely external frame.
+      const stack = [
+        "Error",
+        "    at capture (/probe/self.ts:10:5)",
+        "    at alsoSelf (/probe/self.ts:11:9)",
+        "    at userCode (/probe/user-code.ts:42:7)",
+      ].join("\n");
+      const result = resolveSourceLocationFromStack(stack, () => null);
+      expect(result.location).toBe("/probe/user-code.ts:42:7");
+    });
+
+    it("returns null for an empty fn source", () => {
+      const fn = (n: number) => n;
+      Object.defineProperty(fn, "toString", { value: () => "" });
+      expect(resolveLocationFromFunctionSource(fn, makeFrame("anything")))
+        .toBe(null);
+    });
+
+    it("prefers the source-mapped location when the range maps", () => {
+      const fn = (n: number) => n * 3;
+      const script = `const tri = ${fn.toString()};`;
+      const frame = {
+        sourceLocationContext: {
+          filename: "/probe.tsx",
+          script,
+          nextSearchOffset: 0,
+        },
+        runtime: {
+          harness: {
+            mapPosition: () => ({
+              source: "/authored.tsx",
+              line: 7,
+              column: 3,
+              name: null,
+            }),
+          },
+        },
+      } as unknown as Frame;
+      const result = resolveLocationFromFunctionSource(fn, frame);
+      expect(result).toBe("/authored.tsx:7:3");
     });
   });
 

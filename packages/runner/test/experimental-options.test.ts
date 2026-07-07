@@ -42,6 +42,9 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        // Read back from the ambient flag (a test seam that deliberately does
+        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -60,6 +63,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -76,6 +80,9 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        // Read back from the ambient flag (a test seam that deliberately does
+        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();
