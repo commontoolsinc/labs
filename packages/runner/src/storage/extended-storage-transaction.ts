@@ -343,6 +343,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is pinned at "persist"`,
       );
     }
+    // The flow-labels mode drives prepareBoundaryCommit (which derived
+    // components are stamped and credited) but is not part of
+    // PreparedDigestInput, so a change after prepare must invalidate the
+    // prepared decision — otherwise a strengthen-after-prepare survives the
+    // commit-time digest recheck while the tx reports the stronger mode
+    // (same silent-downgrade class as the policy-evaluation setter below;
+    // review of #4566). Only a real change invalidates.
+    if (
+      this.#cfcState.flowLabelsMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("flow-labels-mode-changed");
+    }
     this.#cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
       this.#cfcFlowLabelsPinned = true;
@@ -359,6 +372,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
           `is pinned at "enforce"`,
       );
+    }
+    // The write-floor mode drives which SC-18 floor reasons prepare records
+    // but is not in PreparedDigestInput, so — like the flow-labels and
+    // policy-evaluation setters — a change after prepare must invalidate,
+    // else a strengthen (off/observe → enforce) after prepare could commit
+    // the stale permissive decision while the tx reports enforce.
+    if (
+      this.#cfcState.writeFloorMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("write-floor-mode-changed");
     }
     this.#cfcState.writeFloorMode = mode;
     if (mode === "enforce") {
