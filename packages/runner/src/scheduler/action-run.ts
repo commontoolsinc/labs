@@ -11,6 +11,7 @@ import type {
 import {
   isConflictRejection,
   isPermanentRejection,
+  isTerminalRejection,
 } from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
@@ -177,12 +178,18 @@ export function watchReactiveActionCommit(state: {
     // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
     // transport error, or the path-blind local StorageTransactionInconsistent
     // guard that fires before the engine's granular matcher — so they still
-    // warrant a bounded retry. Permanent (precondition) rejections are never
-    // retried. On every attempt we still resubscribe, so even after the budget
-    // is exhausted the action is re-triggered when its input data changes.
+    // warrant a bounded retry. Permanent (precondition) and terminal
+    // (deterministic commit-rule refusal — `isTerminalRejection`) rejections are
+    // never retried: re-running recomputes the identical refused write, and the
+    // doomed re-runs would starve concurrent siblings. On every attempt we still
+    // resubscribe, so even after the budget is exhausted (or a terminal skip)
+    // the action is re-triggered when its input data changes.
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
-    if (retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error)) {
+    if (
+      retries < MAX_RETRIES_FOR_REACTIVE && !isPermanentRejection(error) &&
+      !isTerminalRejection(error)
+    ) {
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
