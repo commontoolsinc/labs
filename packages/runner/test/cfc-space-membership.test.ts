@@ -102,6 +102,7 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
             sinks.set(link.id, set);
           }
           set.add(cb);
+          cb(); // real Cell.sink runs the action once synchronously at subscribe
           return () => set!.delete(cb);
         },
       };
@@ -157,14 +158,17 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
     expect(provider.readerRole(SPACE_TEAM)).toBeNull();
   });
 
-  it("subscribe fires onChange when the ACL cell changes, and cancels cleanly", () => {
+  it("subscribe fires onChange on CHANGE only (skips the at-subscribe fire), and cancels cleanly", () => {
     const { runtime, fire, sinks } = fakeRuntime({
       [SPACE_TEAM]: { [ALICE]: "READ" },
     });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     let changes = 0;
+    // subscribe triggers the underlying Cell.sink's synchronous at-subscribe
+    // fire, which the provider skips — so no onChange yet.
     const cancel = provider.subscribe(SPACE_TEAM, () => changes++);
-    fire(SPACE_TEAM);
+    expect(changes).toBe(0);
+    fire(SPACE_TEAM); // a real change
     expect(changes).toBe(1);
     cancel();
     fire(SPACE_TEAM);

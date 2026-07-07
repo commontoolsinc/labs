@@ -56,6 +56,8 @@ import {
   clauseAlternatives,
   markRendererTrustedEvent,
   type RenderConfidentialityResolver,
+  spaceAtomIdsInConfidentiality,
+  type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import type { VDomOp } from "../vdom-ops.ts";
 import { generateChildKeys } from "./keying.ts";
@@ -146,11 +148,16 @@ export class WorkerReconciler {
   // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
   // exact-match behavior.
   private readonly resolveRenderConfidentiality?: RenderConfidentialityResolver;
+  // §4.9.3 Stage 2: the membership provider whose `subscribe` lets a gated
+  // `Space(X)`-labeled cell re-render when X's ACL syncs/changes. Undefined =
+  // no reactive upgrade (the Stage-1 sync snapshot still gates soundly).
+  private readonly membershipProvider?: SpaceMembershipProvider;
 
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
     this.resolveRenderConfidentiality = options.resolveRenderConfidentiality;
+    this.membershipProvider = options.membershipProvider;
     // Security knob: a present-but-unknown value fails closed to "deny";
     // only an absent option keeps the documented "allow" default.
     this.renderDeclassificationPolicy = normalizeRenderDeclassificationPolicy(
@@ -1101,6 +1108,33 @@ export class WorkerReconciler {
         ...(entry.label.confidentiality ?? []),
       ]),
     );
+  }
+
+  /**
+   * The `Space(id)` ids in a cell's confidentiality label — the spaces whose
+   * ACL docs a Stage-2 reactive re-render must watch (§4.9.3). Empty unless a
+   * membership provider is wired; reads the same label the resolver consumes,
+   * so a resolved `Space(X)` and its watched ACL doc stay in lockstep. Any read
+   * failure is swallowed to `[]` (fail closed on watching — the render fit
+   * itself stays fail-closed independently).
+   */
+  private spaceIdsForCellLabel(cell: Cell<unknown>): readonly string[] {
+    if (this.membershipProvider === undefined) {
+      return [];
+    }
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
+    } catch {
+      return [];
+    }
+    if (labelView === undefined) {
+      return [];
+    }
+    return spaceAtomIdsInConfidentiality(this.confidentialityLabels(labelView));
   }
 
   private confidentialityLabelsFromCellSchema(
@@ -3386,250 +3420,276 @@ export class WorkerReconciler {
 
     let currentCancel: Cancel | undefined;
 
-    addCancel(
-      cell.sink((resolvedChild) => {
-        const isInitialRender = childState.nodeId === -1;
+    // §4.9.3 Stage 2: watch the ACL docs of the spaces this cell is labeled
+    // with, so a fail-closed over-block upgrades to an admit when a `Space(X)`
+    // ACL syncs in (and a revoke re-blocks) — a re-evaluation with the last
+    // resolved value, forced past the value-identity dedupe. Idempotent per
+    // space, and re-scanned on each render so a late-syncing label is caught.
+    const watchedSpaces = new Set<string>();
+    const watchMembershipSpaces = () => {
+      const provider = this.membershipProvider;
+      if (provider === undefined) return;
+      for (const space of this.spaceIdsForCellLabel(cell)) {
+        if (watchedSpaces.has(space)) continue;
+        watchedSpaces.add(space);
+        addCancel(
+          provider.subscribe(
+            space,
+            () => renderResolved(childState.currentValue, true),
+          ),
+        );
+      }
+    };
 
-        // Dedupe updates
-        if (!isInitialRender && resolvedChild === childState.currentValue) {
-          return;
-        }
-        childState.currentValue = resolvedChild;
+    const renderResolved = (resolvedChild: unknown, forced = false) => {
+      const isInitialRender = childState.nodeId === -1;
 
-        if (!this.canRenderCellUnderPolicy(cell, policy)) {
-          if (!isInitialRender) {
-            if (currentCancel) {
-              currentCancel();
-              currentCancel = undefined;
-            }
-            this.cleanupNodeHandlers(childState);
-            this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
-          }
+      // Dedupe updates. A forced re-eval (an ACL sync/change) bypasses the
+      // value-identity check: the value is unchanged but the render DECISION
+      // may have flipped.
+      if (
+        !forced && !isInitialRender && resolvedChild === childState.currentValue
+      ) {
+        return;
+      }
+      childState.currentValue = resolvedChild;
+      watchMembershipSpaces();
 
-          childState.nodeId = -1;
-          childState.elementState = undefined;
-          childState.isText = false;
-
-          const blockedState = this.createBlockedPlaceholder(ctx, policy);
-          childState.nodeId = blockedState.nodeId;
-          childState.elementState = blockedState;
-          childState.isText = false;
-          currentCancel = blockedState.cancel;
-
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([{
-            op: "insert-child",
-            parentId: parentState.nodeId,
-            childId: blockedState.nodeId,
-            beforeId,
-          }]);
-          return;
-        }
-
-        if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
-          if (!isInitialRender) {
-            if (currentCancel) {
-              currentCancel();
-              currentCancel = undefined;
-            }
-            this.cleanupNodeHandlers(childState);
-            this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
-          }
-
-          childState.nodeId = -1;
-          childState.elementState = undefined;
-          childState.isText = false;
-
-          const blockedState = this.createBlockedPlaceholder(
-            ctx,
-            policy,
-            "integrity",
-          );
-          childState.nodeId = blockedState.nodeId;
-          childState.elementState = blockedState;
-          childState.isText = false;
-          currentCancel = blockedState.cancel;
-
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([{
-            op: "insert-child",
-            parentId: parentState.nodeId,
-            childId: blockedState.nodeId,
-            beforeId,
-          }]);
-          return;
-        }
-
-        // Try to update in place if not initial render
-        if (
-          !isInitialRender &&
-          childState.nodeId !== -1
-        ) {
-          // Case 1: Text update
-          if (
-            childState.isText &&
-            (typeof resolvedChild === "string" ||
-              typeof resolvedChild === "number")
-          ) {
-            this.queueOps([{
-              op: "update-text",
-              nodeId: childState.nodeId,
-              text: String(resolvedChild),
-            }]);
-            return;
-          }
-
-          // Case 2: VNode in-place update (same tag)
-          if (childState.elementState) {
-            const newVNode = this.extractVNode(
-              resolvedChild as WorkerRenderNode,
-            );
-            if (newVNode) {
-              const sanitized = this.sanitizeNode(newVNode);
-              if (
-                sanitized &&
-                sanitized.name === childState.elementState.tagName
-              ) {
-                const childPolicy = this.childRenderPolicyForNode(
-                  sanitized,
-                  policy,
-                  childState.elementState.nodeId,
-                );
-                const policyChildren = this.childrenForRenderPolicy(
-                  sanitized,
-                  childPolicy,
-                );
-                const policyChanged = !this.renderPolicyEquals(
-                  childState.elementState.childRenderPolicy,
-                  childPolicy,
-                ) ||
-                  childState.elementState.childrenBlockedByPolicy !==
-                    policyChildren.blocked;
-                childState.elementState.renderPolicy = policy;
-                childState.elementState.childRenderPolicy = childPolicy;
-                childState.elementState.childrenBlockedByPolicy =
-                  policyChildren.blocked;
-                childState.elementState.sourceChildren = sanitized.children;
-                childState.elementState.sourceProps = sanitized.props;
-                // Same tag - update props in place
-                this.updatePropsInPlace(
-                  ctx,
-                  childState.elementState,
-                  sanitized.props,
-                );
-
-                if (policyChildren.children !== undefined) {
-                  const childrenSame = this.areChildrenSame(
-                    childState.elementState,
-                    policyChildren.children,
-                  );
-                  this.updateChildrenInPlace(
-                    ctx,
-                    childState.elementState,
-                    policyChildren.children,
-                    new Set(),
-                    childPolicy,
-                    policyChanged,
-                  );
-                  if (!childrenSame || policyChanged) {
-                    this.refreshTextIntegrityBoundaryState(
-                      childState.elementState,
-                      childPolicy,
-                    );
-                  }
-                }
-                return;
-              }
-            }
-          }
-        }
-
-        // Fallback: Replace (existing logic)
-        // Clean up previous (skip if initial render - nothing to clean)
+      if (!this.canRenderCellUnderPolicy(cell, policy)) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
             currentCancel = undefined;
           }
-          // Clean up event handlers before removing node
           this.cleanupNodeHandlers(childState);
-          // Log replacement
-          logger.debug(
-            "reconcile-cell-child",
-            () => ({
-              id: childState.nodeId,
-              cellId: this.getCellDebugId(cell),
-              type: "replace",
-              reason: "fallback",
-            }),
-          );
           this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
         }
 
-        // Reset nodeId
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
 
-        if (resolvedChild === null || resolvedChild === undefined) {
+        const blockedState = this.createBlockedPlaceholder(ctx, policy);
+        childState.nodeId = blockedState.nodeId;
+        childState.elementState = blockedState;
+        childState.isText = false;
+        currentCancel = blockedState.cancel;
+
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([{
+          op: "insert-child",
+          parentId: parentState.nodeId,
+          childId: blockedState.nodeId,
+          beforeId,
+        }]);
+        return;
+      }
+
+      if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
+        if (!isInitialRender) {
+          if (currentCancel) {
+            currentCancel();
+            currentCancel = undefined;
+          }
+          this.cleanupNodeHandlers(childState);
+          this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+        }
+
+        childState.nodeId = -1;
+        childState.elementState = undefined;
+        childState.isText = false;
+
+        const blockedState = this.createBlockedPlaceholder(
+          ctx,
+          policy,
+          "integrity",
+        );
+        childState.nodeId = blockedState.nodeId;
+        childState.elementState = blockedState;
+        childState.isText = false;
+        currentCancel = blockedState.cancel;
+
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([{
+          op: "insert-child",
+          parentId: parentState.nodeId,
+          childId: blockedState.nodeId,
+          beforeId,
+        }]);
+        return;
+      }
+
+      // Try to update in place if not initial render
+      if (
+        !isInitialRender &&
+        childState.nodeId !== -1
+      ) {
+        // Case 1: Text update
+        if (
+          childState.isText &&
+          (typeof resolvedChild === "string" ||
+            typeof resolvedChild === "number")
+        ) {
+          this.queueOps([{
+            op: "update-text",
+            nodeId: childState.nodeId,
+            text: String(resolvedChild),
+          }]);
           return;
         }
 
-        // Render new content. Primitive text from a Cell has already passed
-        // source-cell text integrity verification above, so do not reclassify
-        // it as an untrusted literal.
-        const newState = this.hasVisibleTextValue(resolvedChild) &&
-            (typeof resolvedChild === "string" ||
-              typeof resolvedChild === "number" ||
-              typeof resolvedChild === "boolean")
-          ? {
-            nodeId: this.createTextNode(
-              ctx,
-              this.stringifyText(resolvedChild),
-              policy,
-              { trustedText: true },
-            ).nodeId,
-            isText: true,
-            cancel: () => {},
-          }
-          : this.renderChildContent(
-            ctx,
-            resolvedChild,
-            new Set(visited),
-            policy,
+        // Case 2: VNode in-place update (same tag)
+        if (childState.elementState) {
+          const newVNode = this.extractVNode(
+            resolvedChild as WorkerRenderNode,
           );
-        if (newState) {
-          childState.nodeId = newState.nodeId;
-          childState.elementState = newState.elementState;
-          childState.isText = newState.isText;
-          currentCancel = newState.cancel;
+          if (newVNode) {
+            const sanitized = this.sanitizeNode(newVNode);
+            if (
+              sanitized &&
+              sanitized.name === childState.elementState.tagName
+            ) {
+              const childPolicy = this.childRenderPolicyForNode(
+                sanitized,
+                policy,
+                childState.elementState.nodeId,
+              );
+              const policyChildren = this.childrenForRenderPolicy(
+                sanitized,
+                childPolicy,
+              );
+              const policyChanged = !this.renderPolicyEquals(
+                childState.elementState.childRenderPolicy,
+                childPolicy,
+              ) ||
+                childState.elementState.childrenBlockedByPolicy !==
+                  policyChildren.blocked;
+              childState.elementState.renderPolicy = policy;
+              childState.elementState.childRenderPolicy = childPolicy;
+              childState.elementState.childrenBlockedByPolicy =
+                policyChildren.blocked;
+              childState.elementState.sourceChildren = sanitized.children;
+              childState.elementState.sourceProps = sanitized.props;
+              // Same tag - update props in place
+              this.updatePropsInPlace(
+                ctx,
+                childState.elementState,
+                sanitized.props,
+              );
 
-          // Always insert the child into its parent. On initial render,
-          // updateChildren also emits insert-child but may see nodeId=-1
-          // (Cell hasn't resolved yet), making that op a no-op. This
-          // ensures the node is inserted once it actually exists.
-          // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
-          const beforeId = this.findNextSiblingId(
-            parentState.children,
-            childKey,
-          );
-          this.queueOps([
-            {
-              op: "insert-child",
-              parentId: parentState.nodeId,
-              childId: newState.nodeId,
-              beforeId,
-            },
-          ]);
+              if (policyChildren.children !== undefined) {
+                const childrenSame = this.areChildrenSame(
+                  childState.elementState,
+                  policyChildren.children,
+                );
+                this.updateChildrenInPlace(
+                  ctx,
+                  childState.elementState,
+                  policyChildren.children,
+                  new Set(),
+                  childPolicy,
+                  policyChanged,
+                );
+                if (!childrenSame || policyChanged) {
+                  this.refreshTextIntegrityBoundaryState(
+                    childState.elementState,
+                    childPolicy,
+                  );
+                }
+              }
+              return;
+            }
+          }
         }
-      }),
-    );
+      }
+
+      // Fallback: Replace (existing logic)
+      // Clean up previous (skip if initial render - nothing to clean)
+      if (!isInitialRender) {
+        if (currentCancel) {
+          currentCancel();
+          currentCancel = undefined;
+        }
+        // Clean up event handlers before removing node
+        this.cleanupNodeHandlers(childState);
+        // Log replacement
+        logger.debug(
+          "reconcile-cell-child",
+          () => ({
+            id: childState.nodeId,
+            cellId: this.getCellDebugId(cell),
+            type: "replace",
+            reason: "fallback",
+          }),
+        );
+        this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+      }
+
+      // Reset nodeId
+      childState.nodeId = -1;
+      childState.elementState = undefined;
+      childState.isText = false;
+
+      if (resolvedChild === null || resolvedChild === undefined) {
+        return;
+      }
+
+      // Render new content. Primitive text from a Cell has already passed
+      // source-cell text integrity verification above, so do not reclassify
+      // it as an untrusted literal.
+      const newState = this.hasVisibleTextValue(resolvedChild) &&
+          (typeof resolvedChild === "string" ||
+            typeof resolvedChild === "number" ||
+            typeof resolvedChild === "boolean")
+        ? {
+          nodeId: this.createTextNode(
+            ctx,
+            this.stringifyText(resolvedChild),
+            policy,
+            { trustedText: true },
+          ).nodeId,
+          isText: true,
+          cancel: () => {},
+        }
+        : this.renderChildContent(
+          ctx,
+          resolvedChild,
+          new Set(visited),
+          policy,
+        );
+      if (newState) {
+        childState.nodeId = newState.nodeId;
+        childState.elementState = newState.elementState;
+        childState.isText = newState.isText;
+        currentCancel = newState.cancel;
+
+        // Always insert the child into its parent. On initial render,
+        // updateChildren also emits insert-child but may see nodeId=-1
+        // (Cell hasn't resolved yet), making that op a no-op. This
+        // ensures the node is inserted once it actually exists.
+        // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
+        const beforeId = this.findNextSiblingId(
+          parentState.children,
+          childKey,
+        );
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: parentState.nodeId,
+            childId: newState.nodeId,
+            beforeId,
+          },
+        ]);
+      }
+    };
+
+    addCancel(cell.sink((resolvedChild) => renderResolved(resolvedChild)));
 
     // When the cancel group fires (parent teardown), also cancel the current
     // rendered content. Without this, deeper sinks (e.g. children/props of the

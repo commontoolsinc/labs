@@ -86,9 +86,12 @@ export interface SpaceMembershipProvider {
    */
   readerRole(space: string): SpaceRole | null;
   /**
-   * Subscribe to a space's ACL doc; `onChange` fires when it syncs or changes.
-   * Returns a cancel. Used by the reconciler to re-render a gated
-   * `Space(...)`-labeled cell within its existing cancel group (§3.4 Stage 2).
+   * Subscribe to a space's ACL doc; `onChange` fires when it later syncs or
+   * changes — NOT synchronously at subscribe time (the initial snapshot is
+   * `readerRole`'s job). Returns a cancel. Used by the reconciler to re-render
+   * a gated `Space(...)`-labeled cell within its existing cancel group (§3.4
+   * Stage 2), so a fail-closed over-block upgrades to an admit when the ACL
+   * arrives (and a revoke re-blocks).
    */
   subscribe(space: string, onChange: () => void): Cancel;
 }
@@ -151,7 +154,18 @@ export const createRuntimeSpaceMembershipProvider = (
       return spaceReaderRole(acl, space, actingPrincipal, serviceDids);
     },
     subscribe(space, onChange) {
-      return aclCellFor(runtime, cells, space).sink(() => onChange());
+      // `Cell.sink` runs its action once synchronously at subscribe time (the
+      // current snapshot); skip that fire so `onChange` signals CHANGE only —
+      // the caller already has the snapshot from `readerRole`. Every later
+      // re-fire (the ACL syncing in, or a subsequent write) invokes `onChange`.
+      let primed = false;
+      return aclCellFor(runtime, cells, space).sink(() => {
+        if (!primed) {
+          primed = true;
+          return;
+        }
+        onChange();
+      });
     },
   };
 };

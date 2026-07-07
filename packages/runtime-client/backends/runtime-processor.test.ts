@@ -7,6 +7,7 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   renderConfidentialityResolverFor,
+  renderMembershipProviderFor,
   runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
@@ -218,6 +219,50 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
           ceiling,
         ),
       ).toEqual([cfcAtom.space(deniedSpace)]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
+describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(renderMembershipProviderFor(runtime, cfcSigner, undefined))
+        .toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("builds a runtime-backed provider that reads a space's ACL doc", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
+    try {
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const provider = renderMembershipProviderFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(provider).toBeDefined();
+      // The acting user's own space is an implicit OWNER (no ACL read).
+      expect(provider!.readerRole(cfcSigner.did())).toBe("owner");
+      // A space whose ACL grants READ resolves to a reader role.
+      expect(provider!.readerRole(grantedSpace)).toBe("reader");
+      // A space with no ACL doc fails closed.
+      expect(provider!.readerRole("did:key:z6MkNoAclProviderTest")).toBeNull();
     } finally {
       await runtime.dispose();
       await storageManager.close();
