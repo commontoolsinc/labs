@@ -129,6 +129,54 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  # Experiment: run the same workload as the "test" job above on several runner
+  # sizes and report each one's wall time and the number of cores it actually
+  # drove (see scripts/run-with-cpu-stats.ts). This decides whether Test can
+  # leave the 32-core runner. It is additive and non-blocking: the real "test"
+  # job is untouched, nothing depends on this job, and continue-on-error means a
+  # slow or unschedulable size cannot fail the run. No coverage is uploaded; only
+  # timing and CPU usage matter here. Delete this job once the sizing is decided.
+  test-runner-experiment:
+    name: "Test Experiment (${{ matrix.runner }})"
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest: standard runner (free on this public repo).
+        # ubuntu-22.04-large: 4-core / 16 GB. ubuntu-24.04-32-core: the 32-core
+        # runner currently behind `group: labs`, for an apples-to-apples baseline
+        # and its core-saturation profile.
+        runner: [ubuntu-latest, ubuntu-22.04-large, ubuntu-24.04-32-core]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 📦 Install Linux FUSE test dependencies
+        uses: ./.github/actions/apt-install
+        with:
+          packages: pkg-config gcc libfuse3-dev fuse3
+          cache-key: cfc-pattern-check
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧪 Run parallel workspace tests with CPU sampling
+        run: deno run --allow-read --allow-run --allow-env scripts/run-with-cpu-stats.ts deno task test
+        env:
+          DENO_COVERAGE_DIR: coverage/raw/workspace
+          TEST_DISABLED_PACKAGES: runner
+
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
