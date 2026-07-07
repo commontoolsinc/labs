@@ -277,10 +277,12 @@ const influenceDisclaimerRule: ExchangeRule = {
  * deployment profile — bare-`InjectionSafe` discharge is unsound against the
  * tx-wide integrity a boundary evaluates over.
  */
-export const MATERIAL_RISK_DISCHARGE_POLICY: readonly CfcPolicyRecordInput[] = [{
-  id: "cfc:material-risk-discharge",
-  rules: [...materialRiskDischargeRules],
-}];
+export const MATERIAL_RISK_DISCHARGE_POLICY: readonly CfcPolicyRecordInput[] = [
+  {
+    id: "cfc:material-risk-discharge",
+    rules: [...materialRiskDischargeRules],
+  },
+];
 
 /**
  * The deployment standard profile: tier upgrades, value-screened discharge,

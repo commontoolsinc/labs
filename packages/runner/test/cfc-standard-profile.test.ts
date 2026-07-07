@@ -12,7 +12,10 @@ import {
   MATERIAL_RISK_DISCHARGE_POLICY,
   STANDARD_PROMPT_CAVEAT_POLICY,
 } from "../src/cfc/standard-profile.ts";
-import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+import {
+  dischargeMaterialRiskAtoms,
+  INJECTION_SAFE_ATOM,
+} from "../src/cfc/schema-sanitization.ts";
 import { clauseAlternatives, clausesEqual } from "../src/cfc/clause.ts";
 import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
 import { normalizeClause } from "../src/cfc/clause.ts";
@@ -65,17 +68,11 @@ const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
   );
 
 // The new rule path, exactly as the sanitizer runs it (path-local,
-// bare-InjectionSafe material-risk discharge).
-const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] => {
-  const result = evaluateExchangeRules(
-    { confidentiality: [...atoms] },
-    MATERIAL_RISK_PROFILE,
-    { integrity: [INJECTION_SAFE_ATOM] },
-  );
-  return uniqueCfcAtoms(
-    result.exhausted ? atoms : result.label.confidentiality ?? [],
-  );
-};
+// bare-InjectionSafe material-risk discharge). This calls the REAL sanitizer
+// entry point — including its legacy bare-string normalization — so the golden
+// guards the shipped code, not a reimplementation (codex P2 on #4567).
+const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] =>
+  dischargeMaterialRiskAtoms(atoms);
 
 const clauseSetsEqual = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length &&
@@ -94,6 +91,30 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
         "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
       )]],
       ["bare-string alias", [caveat("prompt-injection-risk-value-screened")]],
+      // Legacy §4.7.3 bare-STRING atoms: the atom is the raw string, not a
+      // caveat record. The old strip removed these; the discharge rules match
+      // `{type:Caveat}`, so the sanitizer must normalize the string form first
+      // (codex P2 on #4567).
+      ["bare-string alias atom", ["prompt-injection-risk"]],
+      ["bare-string legacy URI atom", [
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      ]],
+      ["bare-string risk atom beside retained secret", [
+        "prompt-injection-risk-unscreened",
+        secret,
+      ]],
+      ["bare-string risk atom hidden as an OR-clause alternative", [
+        { anyOf: ["prompt-injection-risk", secret] },
+      ]],
+      ["OR-clause of only bare-string risk atoms", [
+        {
+          anyOf: [
+            "prompt-injection-risk",
+            "prompt-injection-risk-value-screened",
+          ],
+        },
+      ]],
+      ["non-risk bare string is retained", ["some-other-marker", secret]],
       ["risk beside retained influence + secret", [
         caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
         influence,

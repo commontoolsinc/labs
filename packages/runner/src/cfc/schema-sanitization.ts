@@ -13,7 +13,7 @@ import {
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
 import { buildCfcPolicySnapshot } from "./policy.ts";
-import { clauseAlternatives } from "./clause.ts";
+import { clauseAlternatives, isOrClause } from "./clause.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
   MATERIAL_RISK_DISCHARGE_POLICY,
@@ -83,7 +83,37 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
 // (`{anyOf:[risk, A]}` → `A`) — descending is load-bearing: a hidden caveat
 // alternative is not more-restrictive when preserved (a ceiling naming the
 // sibling subsumes the whole clause), so it must be discharged, not left.
-const dischargeMaterialRiskAtoms = (
+// Legacy §4.7.3 bare-STRING material-risk atoms — e.g. the raw string
+// "prompt-injection-risk" rather than a `{type:Caveat,kind}` record — predate
+// the caveat-record form. The discharge rules all match `{type:Caveat,kind}`,
+// so a bare string never fires one and would survive, regressing the old
+// strip's byte-for-byte reach (which classified the string form too). Normalize
+// any bare-string material-risk atom — top-level or nested as an OR-clause
+// alternative — into its canonical caveat-record form (§10.1 SHOULD-normalize
+// aliases before evaluation) so the ordinary rule then drops it. Non-risk
+// strings are left untouched (no rule matches them, exactly as before). This
+// keeps discharge a single rule-driven mechanism rather than reintroducing a
+// hardcoded strip (codex P2 on #4567).
+const normalizeMaterialRiskStringForms = (clause: unknown): unknown => {
+  if (typeof clause === "string") {
+    return PROMPT_INJECTION_RISK_KINDS.has(clause)
+      ? { type: CFC_ATOM_TYPE.Caveat, kind: clause }
+      : clause;
+  }
+  if (isOrClause(clause)) {
+    return {
+      anyOf: clause.anyOf.map((alternative) =>
+        typeof alternative === "string" &&
+          PROMPT_INJECTION_RISK_KINDS.has(alternative)
+          ? { type: CFC_ATOM_TYPE.Caveat, kind: alternative }
+          : alternative
+      ),
+    };
+  }
+  return clause;
+};
+
+export const dischargeMaterialRiskAtoms = (
   atoms: readonly unknown[],
 ): ImmutableJSONValue[] => {
   // Fuel budget scaled to the label (cubic P2 on #4567): the default 64 would
@@ -94,12 +124,13 @@ const dischargeMaterialRiskAtoms = (
   // alternative; budgeting one per alternative plus the default headroom
   // covers any label without ever risking a real (add/drop-cycle) runaway,
   // which this set cannot have.
-  const alternativeCount = atoms.reduce(
+  const normalized = atoms.map(normalizeMaterialRiskStringForms);
+  const alternativeCount = normalized.reduce(
     (total: number, clause) => total + clauseAlternatives(clause).length,
     0,
   );
   const result = evaluateExchangeRules(
-    { confidentiality: [...atoms] },
+    { confidentiality: normalized },
     MATERIAL_RISK_SNAPSHOT,
     { integrity: [INJECTION_SAFE_ATOM] },
     alternativeCount + DEFAULT_EXCHANGE_FUEL,
