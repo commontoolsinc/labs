@@ -24,6 +24,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { schemaAcceptsType } from "./traverse.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -271,64 +272,24 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 };
 
 /**
- * Sanctioned-machinery suppression for the scope-isolation warn (see
- * BRANCH_CELL_LINK below): the runtime itself writes narrower-scoped links
- * into scope-silent broader slots in a few known places (piece argument setup
- * wiring, pattern result-cell wiring for scoped outputs, navigateTo results,
- * cold-resume re-scope walks). Those writes wrap themselves in
- * `withScopeIsolationWarnSuppressed` — the wrapper call sites are the
- * greppable checklist for eventually declaring those slots' scopes and
- * flipping the author-facing warn to an error. Synchronous-only (the write
- * path is synchronous); do not use from user-land code.
- */
-let scopeIsolationWarnSuppressionDepth = 0;
-export function withScopeIsolationWarnSuppressed<T>(fn: () => T): T {
-  scopeIsolationWarnSuppressionDepth++;
-  try {
-    return fn();
-  } finally {
-    scopeIsolationWarnSuppressionDepth--;
-  }
-}
-
-/**
  * Whether a slot's schema would TOLERATE the value reading as missing —
  * i.e. it matches `undefined` or carries a `default` (ubik2's criterion on
  * #4561). Used to restrict the scope-isolation warn to slots where an
  * unresolvable link actually bites: a slot that accepts undefined (or
  * defaults) degrades harmlessly per reader, so storing a narrower-scoped
  * link there is a legitimate per-reader pattern rather than a footgun.
- * Deliberately conservative toward silence: permissive/absent schemas and
- * unresolved $refs count as tolerant (this is a lint-strength warn, not an
- * enforcement gate). Limitation: the PARENT's `required` list is not
- * visible at this write site, so an optional-but-strictly-typed slot still
- * warns; thread the parent schema if that proves noisy.
+ * Complemented by the parent-`required` threading (see normalizeAndDiff's
+ * `slotRequiredByParent`): the full criterion is "the read would actually
+ * reject the missing cell".
  */
 function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
-  if (schema === undefined || schema === true) return true;
-  if (schema === false) return true; // matches nothing; not the footgun shape
-  if (!isRecord(schema)) return true;
-  if (schema.default !== undefined) return true;
-  if ("$ref" in schema) {
-    // CTS-emitted slot schemas routinely carry $defs + $ref; resolve like the
-    // read side does. An unresolvable ref counts as tolerant (stay quiet).
-    const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (resolved === undefined || resolved === schema) return true;
-    return schemaToleratesMissing(resolved);
-  }
-  if (
-    Array.isArray(schema.anyOf) &&
-    schema.anyOf.some((branch) => schemaToleratesMissing(branch as JSONSchema))
-  ) {
-    return true;
-  }
-  const t = schema.type;
-  if (t === undefined) return !Array.isArray(schema.anyOf);
-  if (typeof t === "string") return t === "undefined" || t === "unknown";
-  if (Array.isArray(t)) {
-    return t.includes("undefined") || t.includes("unknown");
-  }
-  return true;
+  if (schema === undefined) return true;
+  if (isRecord(schema) && schema.default !== undefined) return true;
+  // Judged with the read side's own matcher (schemaAcceptsType wraps the
+  // canonical logic extracted from SchemaObjectTraverser.isValidType,
+  // including $ref resolution and allOf/anyOf/oneOf), so this warning and the
+  // read-side rejection cannot drift apart.
+  return schemaAcceptsType(schema, "undefined");
 }
 
 /**
@@ -435,6 +396,12 @@ export function normalizeAndDiff(
   options?: IReadOptions,
   seen: Map<any, NormalizedFullLink> = new Map(),
   precomputedCurrent: unknown = NO_PRECOMPUTED,
+  // Whether the PARENT object's schema lists this slot in `required`
+  // (threaded one hop by the object branch below; undefined = unknown).
+  // Consumed by the scope-isolation warn: a missing cell only voids the
+  // read when the parent requires the property, so optional slots stay
+  // quiet (ubik2's criterion on #4561).
+  slotRequiredByParent?: boolean,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -881,31 +848,33 @@ export function normalizeAndDiff(
       // readers see a permanent hole (the B2 reader-blackout investigation,
       // #4457/#4532). The slot's schema declaring the scope (the narrowing
       // branch above and scoped asCell entries) is the explicit opt-in to
-      // per-reader semantics. This is a WARN, not a throw, because the
-      // runtime's own machinery legitimately writes scoped links into
-      // scope-silent slots today (pattern factory .asScope() result links,
-      // navigateTo result cells, Runner.updateArgument setup wiring,
-      // cold-resume re-scope walks — enumerated on #4561); until those slots
-      // declare their scope, author footguns and sanctioned machinery writes
-      // are indistinguishable here. The warn is further restricted (ubik2's
-      // criterion) to slots whose schema would REJECT a missing value —
-      // doesn't match undefined and has no default — because that is where an
-      // unresolvable link actually bites (required-field void / degraded
-      // element); an undefined-tolerant or defaulted slot degrades harmlessly
-      // per reader, which is a legitimate pattern. Authors: share the value,
-      // or a space-scoped cell with a PerUser pointer to "mine" (pitfall #6
-      // shows the idiom).
+      // per-reader semantics. The warn fires only where the read would
+      // actually REJECT the missing cell (ubik2's criterion): the slot's
+      // schema doesn't match undefined and carries no default
+      // (schemaToleratesMissing, judged with the read side's own matcher),
+      // AND the parent's schema lists the slot in `required`
+      // (slotRequiredByParent, threaded by the object branch) — an
+      // undefined-tolerant, defaulted, or optional slot degrades harmlessly
+      // per reader, which is a legitimate pattern and also what the runtime's
+      // own scoped-link writes (.asScope() results, navigateTo result cells,
+      // updateArgument setup wiring, cold-resume re-scope walks) flow
+      // through. This is a WARN, not a throw, pending review of whether
+      // remaining machinery writes can ever hit the strict case; see #4561.
+      // Authors: share the value, or a space-scoped cell with a PerUser
+      // pointer to "mine" (pitfall #6 shows the idiom).
       if (scopeRank(parsedLink.scope) > scopeRank(link.scope)) {
         const declared = declaredCellScope(link.schema);
         if (
           (declared === undefined ||
             scopeRank(declared) < scopeRank(parsedLink.scope)) &&
-          !schemaToleratesMissing(link.schema)
+          !schemaToleratesMissing(link.schema) &&
+          // Optional slots (parent schema present, key not in `required`)
+          // degrade harmlessly when the cell is missing — only a required
+          // slot voids the read. Unknown parents (direct slot writes) keep
+          // the warn.
+          slotRequiredByParent !== false
         ) {
-          if (scopeIsolationWarnSuppressionDepth > 0) {
-            // Sanctioned machinery write (see withScopeIsolationWarnSuppressed
-            // call sites) — stays silent until those slots declare their scope.
-          } else {
+          {
             diffLogger.warn(
               "diff",
               () => [
@@ -1245,6 +1214,20 @@ export function normalizeAndDiff(
     // At this point currentValue is guaranteed to be a record
     const currentRecord = currentValue as Record<string, unknown>;
 
+    // Requiredness of each child slot, for the scope-isolation warn: only a
+    // parent-`required` property makes a missing cell void the read.
+    // A resolved object schema with no `required` array requires nothing —
+    // that is a known `false` for every key, not an unknown. Only an absent /
+    // unresolvable parent schema leaves requiredness unknown (undefined).
+    const resolvedForRequired = resolveSchema(link.schema);
+    const requiredProps = isRecord(resolvedForRequired)
+      ? new Set(
+        Array.isArray(resolvedForRequired.required)
+          ? (resolvedForRequired.required as readonly string[])
+          : [],
+      )
+      : undefined;
+
     for (const key in newValue) {
       diffLogger.debug("diff", () => {
         const childPath = [...link.path, key].join(".");
@@ -1274,6 +1257,7 @@ export function normalizeAndDiff(
         options,
         seen,
         currentRecord[key],
+        requiredProps === undefined ? undefined : requiredProps.has(key),
       );
       changes.push(...nestedChanges);
     }

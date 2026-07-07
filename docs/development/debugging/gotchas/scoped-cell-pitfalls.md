@@ -188,14 +188,16 @@ The runtime now **warns loudly at the write site** instead of leaving this a
 fully silent hole for other readers: storing a narrower-scoped link in a
 broader-scoped slot logs `Storing a <scope>-scoped link in <scope>-scoped
 data …` (`data-updating.ts`, scope-isolation write guard; unit pins in
-`packages/runner/test/data-updating.test.ts`). If per-reader resolution is
-genuinely intended, opt in by declaring the slot's schema scope (e.g.
-`PerUser<Cell<T>>` on the field type, or `scope: "user"` / a scoped `asCell`
-entry in the schema) — declared slots don't warn, and every reader resolves
-their own instance. It is a warn rather than an error because the runtime's
-own machinery still writes scoped links into scope-silent slots in sanctioned
-places (`.asScope()` result links, `navigateTo` result cells, argument setup
-wiring); once those slots declare their scope, the guard can become an error.
+`packages/runner/test/data-updating.test.ts`). The warn fires only where the
+read would actually reject the missing cell: the slot's schema doesn't match
+`undefined` and has no `default`, **and** the parent schema lists the slot in
+`required`. Optional, undefined-tolerant, or defaulted slots stay silent —
+per-reader resolution there degrades harmlessly, which is also how the
+runtime's own scoped-link writes (`.asScope()` result links, `navigateTo`
+result cells, argument setup wiring) stay quiet. If per-reader resolution is
+genuinely intended on a strict slot, opt in by declaring the slot's schema
+scope (e.g. `PerUser<Cell<T>>` on the field type, or `scope: "user"` / a
+scoped `asCell` entry in the schema).
 
 ## 7. `Math.random()` throws under SES
 

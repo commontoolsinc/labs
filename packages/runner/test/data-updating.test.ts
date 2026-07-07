@@ -1933,6 +1933,65 @@ describe("scope-isolation write guard", () => {
     expect(warnCounts()).toBe(before);
   });
 
+  it("warns when the parent schema requires the slot (write through the parent)", () => {
+    const dest = runtime.getCell<{ author?: string; profile?: unknown }>(
+      space,
+      "scope-guard-parent-required-dest",
+      {
+        type: "object",
+        properties: {
+          author: { type: "string" },
+          profile: { type: "object" },
+        },
+        required: ["author", "profile"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.getAsNormalizedFullLink(),
+      {
+        author: "alice",
+        profile: scopedLinkValue("scope-guard-parent-required-target", "user"),
+      },
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("does not warn for an optional slot, even when strictly typed (ubik2's criterion)", () => {
+    // The parent's `required` list is what makes a missing cell void the
+    // read; an optional property is simply dropped and the object survives —
+    // per-reader links there degrade harmlessly.
+    const dest = runtime.getCell<{ author?: string; profile?: unknown }>(
+      space,
+      "scope-guard-parent-optional-dest",
+      {
+        type: "object",
+        properties: {
+          author: { type: "string" },
+          profile: { type: "object" },
+        },
+        required: ["author"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.getAsNormalizedFullLink(),
+      {
+        author: "alice",
+        profile: scopedLinkValue("scope-guard-parent-optional-target", "user"),
+      },
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
   it("resolves $defs/$ref slot schemas before judging tolerance (still warns on strict refs)", () => {
     // CTS-emitted slot schemas routinely carry $defs + $ref (the original
     // convergence-chat repro's stored link schema had exactly this shape);

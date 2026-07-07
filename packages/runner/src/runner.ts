@@ -96,10 +96,7 @@ import {
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
-import {
-  diffAndUpdate,
-  withScopeIsolationWarnSuppressed,
-} from "./data-updating.ts";
+import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 export {
@@ -782,26 +779,21 @@ export class Runner {
       undefined,
       tx,
     );
-    // Argument setup wiring writes scoped cells (PerUser/PerSession inputs)
-    // as links into the scope-silent argument doc — a sanctioned machinery
-    // write; see withScopeIsolationWarnSuppressed in data-updating.ts.
-    withScopeIsolationWarnSuppressed(() => {
-      argumentCell.set(argument);
-      recordSetupProjectionPolicyInputs(
-        tx,
-        this.runtime,
-        argumentCell,
-        argumentSchema,
-        argument,
-      );
-      diffAndUpdate(
-        this.runtime,
-        tx,
-        argumentLink,
-        argument,
-        argumentLink,
-      );
-    });
+    argumentCell.set(argument);
+    recordSetupProjectionPolicyInputs(
+      tx,
+      this.runtime,
+      argumentCell,
+      argumentSchema,
+      argument,
+    );
+    diffAndUpdate(
+      this.runtime,
+      tx,
+      argumentLink,
+      argument,
+      argumentLink,
+    );
   }
 
   private updateResultSchemaMeta<R>(
