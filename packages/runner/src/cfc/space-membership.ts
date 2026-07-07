@@ -5,6 +5,10 @@ import {
   isACL,
   isCapable,
 } from "@commonfabric/memory/acl";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { Cancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import type { Runtime } from "../runtime.ts";
 
 /**
  * §4.9.3 render membership lookup (design:
@@ -64,4 +68,90 @@ export const spaceReaderRole = (
   // READ/WRITE/OWNER, so a valid grant always clears READ.
   if (!isCapable(cap, "READ")) return null;
   return capToRole[cap];
+};
+
+/**
+ * A synchronous membership oracle for the render fit (which runs inside a
+ * `cell.sink` callback and cannot await). `readerRole` gives a sync snapshot
+ * from the local replica; `subscribe` lets a gated render re-evaluate when a
+ * space's ACL later syncs or changes (Stage 2 reactive upgrade, §3.4).
+ */
+export interface SpaceMembershipProvider {
+  /**
+   * The acting principal's reader-or-higher role in `space` from the local
+   * replica, or `null` when unknown/not-a-member (both fail closed). Reads the
+   * space's ACL doc synchronously and — when it is not yet synced — kicks a
+   * background sync, so a later reactive tick (see `subscribe`) can upgrade an
+   * over-block to an admit.
+   */
+  readerRole(space: string): SpaceRole | null;
+  /**
+   * Subscribe to a space's ACL doc; `onChange` fires when it syncs or changes.
+   * Returns a cancel. Used by the reconciler to re-render a gated
+   * `Space(...)`-labeled cell within its existing cancel group (§3.4 Stage 2).
+   */
+  subscribe(space: string, onChange: () => void): Cancel;
+}
+
+/**
+ * The space-DID cell whose value is the space's ACL document — entity id
+ * `of:${space}` == the space DID, read in-space (mirrors `ACLManager` and the
+ * server's `aclDocId`). One Cell per space, reused across `readerRole` reads
+ * and `subscribe` so both observe the same reactive state.
+ */
+const aclCellFor = (
+  runtime: Pick<Runtime, "getCellFromLink">,
+  cache: Map<string, Cell<unknown>>,
+  space: string,
+): Cell<unknown> => {
+  let cell = cache.get(space);
+  if (cell === undefined) {
+    // The ACL doc's entity id IS the space DID (`aclDocId(space)` server-side),
+    // read in-space — the same link `ACLManager` uses.
+    cell = runtime.getCellFromLink<unknown>({
+      id: space as MemorySpace,
+      path: [],
+      space: space as MemorySpace,
+    });
+    cache.set(space, cell);
+  }
+  return cell;
+};
+
+/**
+ * A runtime-backed {@link SpaceMembershipProvider}: `readerRole` reads each
+ * space's ACL doc from the local replica via `Cell.get()` (sync value + a
+ * background-sync kick when unsynced) and runs {@link spaceReaderRole}.
+ *
+ * Deliberately NOT memoized: the ACL is the authority record, and a stale memo
+ * would keep admitting a `Space(...)` clause after a revoke (unsound) — so each
+ * call reflects the latest replica. `Cell.get()`'s per-transaction read cache
+ * already amortizes repeated reads within a single synchronous render pass, so
+ * a fresh read is cheap; the ACL doc is tiny and the whole path only runs when
+ * a ceiling is in force and the label carries a `Space(...)` atom.
+ *
+ * `serviceDids` grants implicit OWNER to configured service principals; the
+ * worker does not thread `MEMORY_SERVICE_DIDS` today (design §9), so callers
+ * pass `[]` and service principals — which rarely render — fail closed.
+ */
+export const createRuntimeSpaceMembershipProvider = (
+  runtime: Pick<Runtime, "getCellFromLink">,
+  actingPrincipal: string,
+  serviceDids: readonly string[] = [],
+): SpaceMembershipProvider => {
+  const cells = new Map<string, Cell<unknown>>();
+  return {
+    readerRole(space) {
+      // Own-space and service principals are implicit OWNER — decided WITHOUT
+      // reading (or syncing) any ACL doc.
+      if (space === actingPrincipal || serviceDids.includes(actingPrincipal)) {
+        return "owner";
+      }
+      const acl = aclCellFor(runtime, cells, space).get() as ACL | undefined;
+      return spaceReaderRole(acl, space, actingPrincipal, serviceDids);
+    },
+    subscribe(space, onChange) {
+      return aclCellFor(runtime, cells, space).sink(() => onChange());
+    },
+  };
 };

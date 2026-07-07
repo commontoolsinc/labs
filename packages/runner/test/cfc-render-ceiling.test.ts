@@ -5,6 +5,7 @@ import {
   createRenderConfidentialityResolver,
   RENDER_DISPLAY_SINK_CLASS,
 } from "../src/cfc/render-ceiling.ts";
+import type { SpaceMembershipProvider } from "../src/cfc/space-membership.ts";
 import { atomsOutsideCeiling } from "../src/cfc/observation.ts";
 
 // Epic H3b (docs/plans/cfc-future-work-implementation.md §7): the display-sink
@@ -132,5 +133,121 @@ describe("CFC render confidentiality resolver (H3b)", () => {
     expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([
       cfcAtom.space(SPACE_TEAM),
     ]);
+  });
+});
+
+// §4.9.3 per-label membership discovery: instead of a static member set, the
+// resolver mints HasRole facts PER-LABEL from the Space atoms present in the
+// label, consulting a SpaceMembershipProvider (the ACL-doc-backed lookup).
+const providerGranting = (
+  grantedSpaces: readonly string[],
+): SpaceMembershipProvider => ({
+  readerRole: (space) => grantedSpaces.includes(space) ? "reader" : null,
+  subscribe: () => () => {},
+});
+
+describe("CFC render resolver — per-label membership discovery (§4.9.3)", () => {
+  it("resolves a Space label the provider verifies the acting user reads", () => {
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      membershipProvider: providerGranting([SPACE_TEAM]),
+    });
+    const resolved = resolve({ confidentiality: [cfcAtom.space(SPACE_TEAM)] });
+    expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([]);
+  });
+
+  it("blocks a Space label the provider does not grant (fail-closed)", () => {
+    // The provider grants nothing for SPACE_OTHER — residency/an unsynced ACL
+    // mints no fact, so the clause stays outside the ceiling.
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      membershipProvider: providerGranting([SPACE_TEAM]),
+    });
+    const resolved = resolve({ confidentiality: [cfcAtom.space(SPACE_OTHER)] });
+    expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([
+      cfcAtom.space(SPACE_OTHER),
+    ]);
+  });
+
+  it("§4.9.4 conjunctive: admits iff EVERY Space clause resolves", () => {
+    // A value carrying two Space atoms gets an independent verified fact per
+    // space; both must resolve for the value to fit.
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      membershipProvider: providerGranting([SPACE_TEAM]),
+    });
+    // Only TEAM granted: OTHER stays offending.
+    const partial = resolve({
+      confidentiality: [cfcAtom.space(SPACE_TEAM), cfcAtom.space(SPACE_OTHER)],
+    });
+    expect(atomsOutsideCeiling(partial, aliceCeiling)).toEqual([
+      cfcAtom.space(SPACE_OTHER),
+    ]);
+    // Both granted: the whole conjunction fits.
+    const resolveBoth = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      membershipProvider: providerGranting([SPACE_TEAM, SPACE_OTHER]),
+    });
+    const both = resolveBoth({
+      confidentiality: [cfcAtom.space(SPACE_TEAM), cfcAtom.space(SPACE_OTHER)],
+    });
+    expect(atomsOutsideCeiling(both, aliceCeiling)).toEqual([]);
+  });
+
+  it("combines the static fast-path member set with per-label discovery", () => {
+    // Own space stays a static fast-path member (no ACL read); a cross-space
+    // Space atom is discovered per-label via the provider.
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      memberSpaces: [ALICE],
+      membershipProvider: providerGranting([SPACE_TEAM]),
+    });
+    const resolved = resolve({
+      confidentiality: [cfcAtom.space(ALICE), cfcAtom.space(SPACE_TEAM)],
+    });
+    expect(atomsOutsideCeiling(resolved, aliceCeiling)).toEqual([]);
+  });
+
+  it("does not consult the provider for a space in the static fast path", () => {
+    // The own/session fast path needs no ACL read; the provider must not be
+    // asked about spaces already trusted statically.
+    const consulted: string[] = [];
+    const provider: SpaceMembershipProvider = {
+      readerRole: (space) => {
+        consulted.push(space);
+        return null;
+      },
+      subscribe: () => () => {},
+    };
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      memberSpaces: [ALICE],
+      membershipProvider: provider,
+    });
+    resolve({ confidentiality: [cfcAtom.space(ALICE)] });
+    expect(consulted).not.toContain(ALICE);
+  });
+
+  it("discovers Space atoms nested inside an anyOf clause", () => {
+    // §4.3.4 multi-binding: a disjunctive clause offers one access path per
+    // role held; the provider is consulted for Space atoms inside anyOf too.
+    const consulted: string[] = [];
+    const provider: SpaceMembershipProvider = {
+      readerRole: (space) => {
+        consulted.push(space);
+        return space === SPACE_TEAM ? "reader" : null;
+      },
+      subscribe: () => () => {},
+    };
+    const resolve = createRenderConfidentialityResolver({
+      actingPrincipal: ALICE,
+      membershipProvider: provider,
+    });
+    resolve({
+      confidentiality: [{
+        anyOf: [cfcAtom.space(SPACE_TEAM), cfcAtom.user(MALLORY)],
+      }],
+    });
+    expect(consulted).toContain(SPACE_TEAM);
   });
 });
