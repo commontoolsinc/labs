@@ -506,4 +506,60 @@ describe("FormFieldController commit", () => {
 
     expect(cellSet).toBe("buffered");
   });
+
+  it("does not write out-of-band when inside a form context", async () => {
+    const host = new MockHost() as unknown as MockHost & HTMLElement;
+    let flushed = false;
+    let cellSet: string | undefined;
+    let setValueArg: string | undefined;
+    const cellController: CellControllerLike<string> = {
+      getValue: () => "cell-value",
+      setValue: (v: string) => {
+        setValueArg = v;
+      },
+      flush: () => {
+        flushed = true;
+      },
+      getCell: () => ({
+        set: (v: string) => {
+          cellSet = v;
+          return Promise.resolve();
+        },
+      }),
+    };
+
+    const formField = new FormFieldController(host, { cellController });
+
+    // Simulate being inside a cf-form: supply a form context to the controller's
+    // context consumer, plus a buffered edit as typing would produce, and an
+    // original baseline captured at registration.
+    const internals = formField as unknown as {
+      _formContextConsumer: { value: FormContext };
+      _buffer: string;
+      _hasBuffer: boolean;
+      _originalValue: string;
+    };
+    internals._formContextConsumer = { value: new MockFormContext() };
+    internals._buffer = "buffered";
+    internals._hasBuffer = true;
+    internals._originalValue = "original";
+
+    expect(formField.inFormContext).toBe(true);
+
+    await formField.commit();
+
+    // The form owns the atomic flush, so commit() writes nothing durable.
+    expect(cellSet).toBeUndefined();
+    expect(setValueArg).toBeUndefined();
+    expect(flushed).toBe(false);
+
+    // The edit stays buffered for the form to flush on submit.
+    expect(internals._hasBuffer).toBe(true);
+    expect(internals._buffer).toBe("buffered");
+
+    // Dirty tracking is not rebaselined: the buffered edit still counts as
+    // unsaved until the form submits.
+    expect(internals._originalValue).toBe("original");
+    expect(formField.isDirty()).toBe(true);
+  });
 });
