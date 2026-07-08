@@ -42,6 +42,7 @@
   "tasks": {
     "check": "./tasks/check.sh",
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
+    "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
     "cfcheck": "deno run -A ./tasks/cfcheck.ts",
     "check-skill-facts": "deno test --allow-read skills/cf-review/check-facts.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",

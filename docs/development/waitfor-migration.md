@@ -84,6 +84,24 @@ Browser tests, moved to `waitForCondition` / `waitForText` / `awaitViewSettled`:
   `waitForRuntimeSynced`, the `waitFor(() => helper(page))` wrappers dropped to
   bare awaits, the `app.serialize()` reads moved into `waitForCondition`, and the
   standalone view-settle waits changed to gate-then-settle.
+- `packages/patterns/integration/default-app.test.ts`,
+  `reload/default-app-notebook.test.ts`, and `nested-counter.test.ts` — the
+  shared button-click helpers (`clickButtonWithText` / `clickButtonWithExactText`
+  / `clickButtonWithTitle`, and `nested-counter.test.ts`'s `clickNthButton`,
+  which clicked the nth `[data-cf-button]` in a retry loop) were reshaped to the
+  `clickCfButton` form: a `waitForCondition` predicate finds the first visible
+  matching (or nth) button and marks its click target, then the test dispatches
+  a single trusted click. This replaced both the `waitFor(() => helper(...))`
+  presence loops and the bare find-and-click, so the button-appearance wait is
+  event-driven and the click fires once.
+- `packages/patterns/integration/default-app.test.ts` and
+  `reload/default-app-notebook.test.ts` — the `collectNoteTitlesInList` /
+  `collectNotebookRenderState` / `collectNotebookSourceState` waits moved into
+  `waitForCondition` predicates that inline each probe's in-page collection (the
+  rendered-title scan, the piece-cell read for `isNotebook` / `noteCount` /
+  rendered chips, and the argument/internal read with manifest resolution). The
+  standalone probe functions were kept where a later line still reads them for a
+  one-shot assertion or diagnostics.
 
 In-process tests, moved to a `defer()` resolved inside a callback the test
 already registers (a cell `sink`/`subscribe`, a subscription's notification
@@ -99,6 +117,13 @@ counter):
 - piece: `pull-materialization.test.ts`.
 - runtime-client: `client.test.ts` — the cell-subscribe, console, and navigation
   waits (the render-driven `MockDoc` waits stay; see below).
+- patterns / shell: `counter.test.ts`, `nested-counter.test.ts`, and
+  `shell/integration/piece.test.ts` — the polls that read a piece's committed
+  `result` value through the in-process controller now resolve a `defer()` from
+  the result-cell `sink()` the tests already register to keep the piece
+  reactive. The sink records the latest committed value and resolves a pending
+  waiter when its target lands, with a fast path for a value already at the
+  target (a re-set to the same value commits no change).
 
 A handful of now-dead poll loops that followed an already-awaited
 `provider.sync(...)` were dropped outright, since sync resolving already implies
@@ -109,6 +134,36 @@ Documentation:
 - `docs/development/UI_TESTING.md` — guidance and examples updated to teach the
   event-driven primitives instead of `waitFor`, and a stale reference to a
   non-existent `awaitRuntimeIdle` corrected to `waitForRuntimeIdle`.
+
+## Guard against new usage
+
+A check keeps new integration tests from importing the polling `waitFor` again.
+`tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
+directory beneath `packages/` (excluding the `@commonfabric/integration` package,
+which defines `waitFor`) and fails when one names `waitFor` in an import from
+`@commonfabric/integration` and is not on the check's allowlist. Run it with
+`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
+The error names the offending file and points at `waitForCondition`,
+`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+
+The allowlist inside `tasks/check-no-waitfor.ts` covers only the exceptions the
+check can see: the integration-test files that import the shared `waitFor` from
+`@commonfabric/integration`. That is a subset of the exceptions listed below.
+The others fall outside the scan and are not on the allowlist — the in-process
+`test/` files that each define their own local `waitFor` poll loop (the check
+never reads a named import there), the `MultiRuntimeHarness.waitFor` method and
+its callers (a different `waitFor`), `packages/runner/integration/sqlite-cfc-commit-eval.test.ts`
+(which waits through a local helper rather than the shared import), and
+`packages/integration/shell-utils.ts` (inside the excluded package that defines
+`waitFor`). Do not add those to the allowlist: the check never scans them, so the
+stale-entry test would reject the entry.
+
+For the in-scope entries, the check's own tests assert that the allowlist and the
+set of integration-test files still importing the shared `waitFor` stay in step:
+a new offender fails the check, and an allowlisted file that later drops `waitFor`
+fails the tests until its entry is removed. When a new in-scope usage is genuinely
+one of the exception shapes below, add the file to the allowlist with a one-line
+reason and record it here.
 
 ## Intentional exceptions: `waitFor` usages left in place
 
@@ -130,13 +185,12 @@ boundary the test can await without adding one to production code.
 - `packages/generated-patterns/integration/pattern-harness.ts` pulls a runtime
   `Cell` value and compares it, headless. No page; polling the pull until it
   converges is the honest wait.
-- The `waitFor` calls in `counter.test.ts`, `nested-counter.test.ts`, and
-  `piece.test.ts` that read a piece's committed `result` cell through the
-  in-process controller. These observe an off-page cell and are convertible by
-  resolving a `defer()` inside the `resultCell.sink(...)` the tests already
-  register; they were left because the browser+CLI suites they sit in verify the
-  browser interaction, and the cell-read waits are a small residual of that
-  larger flow rather than the CDP poll this effort targets.
+- `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
+  reloaded piece (`cc.get(pieceId, true)`), which has no registered sink, stays a
+  bounded poll on its own sync round trip. The sink-backed result-cell reads in
+  this file (and every such read in `counter.test.ts` and
+  `nested-counter.test.ts`) were converted to a `defer()` resolved from the
+  existing `resultCell.sink(...)`.
 
 ### Race, backpressure, and convergence tests
 
@@ -216,29 +270,6 @@ inside an in-page predicate for no reduction in flakiness.
 `cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
 `cf-checkbox.test.disabled.ts` hold many `waitFor` calls but never run.
 Migrating them only churns dead code.
-
-## Remaining migratable work (not yet done)
-
-The clean conversions above are done. What is left is a small residual that is
-convertible but was held back because it changes shared helper semantics or is a
-low-value tail:
-
-- **Shared button-click helpers in the default-app tests.**
-  `clickButtonWithText` / `clickButtonWithTitle` / `clickButtonWithExactText` in
-  `default-app.test.ts` and the notebook reload test are used both wrapped in
-  `waitFor` (to wait for presence) and bare (their success is asserted directly).
-  Converting them to a settle-then-single-click helper (like the `clickCfButton`
-  shape) would touch every caller at once, so it wants its own focused change
-  rather than riding along here. The same goes for the `clickNthButton` helper in
-  `nested-counter.test.ts`.
-- **Render/source-state probe waits in the default-app tests.** The
-  `collectNoteTitlesInList` / `collectNotebookRenderState` /
-  `collectNotebookSourceState` waits poll a `page.evaluate` probe. They can move
-  into `waitForCondition` by inlining each probe's in-page collection, one probe
-  at a time.
-- **The piece-result cell reads** in `counter.test.ts`, `nested-counter.test.ts`,
-  and `piece.test.ts` (see the exceptions above) can each become a `defer()`
-  resolved in the existing `resultCell.sink(...)`.
 
 ## Also noticed, since cleaned up
 
