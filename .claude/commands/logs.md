@@ -4,7 +4,7 @@ the logs of past sessions in this repository are stored in `~/.claude/projects/`
 
 1. **Use ripgrep (rg) for fast searching** across all log files:
    ```bash
-   rg "pattern" ~/.claude/projects/-Users-ben-code-labs/*.jsonl
+   rg "pattern" ~/.claude/projects/<project-folder>/*.jsonl
    ```
 
 2. **Log file structure**: Each line is a JSON object with:
