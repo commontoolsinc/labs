@@ -163,8 +163,9 @@ function reportViolations(violations: string[]): void {
   console.error(lines.join("\n"));
 }
 
-async function main(): Promise<number> {
-  const { violations } = await scan();
+/** Runs the check over `root`/packages, reports, and returns a process code. */
+export async function main(root: string = REPO_ROOT): Promise<number> {
+  const { violations } = await scan(root);
   if (violations.length > 0) {
     reportViolations(violations);
     return 1;
