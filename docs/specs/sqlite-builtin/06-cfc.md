@@ -1,7 +1,7 @@
 # 06 — CFC
 
 CFC carries **confidentiality and integrity** through SQLite **per column**
-(implemented) and **per row** (implemented — Phase 3.a). Per-column static
+(implemented) and **per row** (implemented — Phase 3.a–c). Per-column static
 `ifc` is honored — read-label propagation and write-time ceiling checks,
 derived from the labels declared on the table schema. Per-row, **data-derived**
 labels are computed from each row's own values by a declarative rule on the
@@ -89,9 +89,11 @@ a **per-field label schema** (`labelResultSchema`), so a consumer reading
 
 - An origin column's `ifc` is copied to its result field.
 - A `null`-origin column (expression / literal / aggregate) does NOT refuse the
-  query — it inherits the conservative combined label of the db's labeled columns
-  via the runtime's `mergeLabel` (the integrity-combine semantics for *derived*
-  data are an open question — see CT-1668).
+  query — it inherits the conservative combined label of the db's labeled
+  columns: confidentiality unions (a sound over-approximation), but integrity is
+  NOT unioned — CT-1668 settled the integrity cross-merge on the class-aware meet
+  (never union), so a computed value inherits no integrity evidence and is
+  conservatively dropped (full propagation classes pending).
 - Two columns projecting to the same output name **refuse** the query (the
   per-row label would be ambiguous).
 
@@ -206,8 +208,8 @@ returns a plain-JSON AST node):
 | `match(f.col, /re/, {group?, min?})` | run the regex (forced global) over the column's text ⟹ the ordered list of matches (or capture `group`). The universal field extractor — split + clean in one; subsumes JSON arrays and dirty `Name <addr>` lists. **Strict-if-present:** a non-empty value yielding zero matches fails closed at evaluation (never under-label); `min` makes the field a required anchor |
 | `principal(protocol, match(…))` | `did:<protocol>:<v>` for each extracted `v` (distributes over the match list). Normalization is protocol-implied: `mailto`/`web` lowercase + trim; `did:key` untouched (base58 is case-sensitive) |
 | `dbOwner()` | the db's owner — the principal that created the SqliteDb cell, resolved from the db ref (a fixed db property, so the rule stays pure; for a per-user-scoped db this is that user) |
-| `all(...t)` | separate **conjunctive** clauses, one per atom — today's only confidentiality combinator |
-| `any(...t)` | **one OR-clause**: any alternative satisfies it (CFC spec §3.1.8). Serializes, but **rejected at `table()` time** until the clause-aware profile lands — never silently lowered to the conjunctive form |
+| `all(...t)` | separate **conjunctive** clauses, one per atom — the default confidentiality combinator |
+| `any(...t)` | **one OR-clause**: any alternative satisfies it (CFC spec §3.1.8). Serializes into the rule as an authored OR-clause (un-reserved by Epic E1) — never silently lowered to the conjunctive form |
 | `intersect(...t)` | set ∩ over integrity atom sets (the trust-floor meet) — integrity only |
 | `whenMatches(f.col, /re/, term)` | include `term` only when the regex TESTS true against the column (gate trust, or a data-dependent conjunct, on extracted metadata). One **fused** helper — a bare `when(matches(…))` pair would collide with the builder's control-flow `when`, whose transformer lowering matches by NAME and mangles any local so named. NB: a gated confidentiality alternative is absent from some rows, so it never has the common-alternative property (CFC spec §8.17.4) |
 | `authoredBy(p)` / `endorsedBy(p)` | integrity (provenance) claims over a `principal(…)` term — minted as self-describing claim atoms, see below |
@@ -248,8 +250,8 @@ node, so the returned object literally **is** the AST — validates it, and
 attaches it to the table schema as `rowLabel`
 (`{version: 1, confidentiality?, integrity?}`), riding the existing
 `db.tables` wire paths unchanged. Validation throws at authoring on an unknown
-column, an unknown op, an `any()` node (until OR-clauses land), an
-integrity-only op in confidentiality position (and vice versa), or a regex
+column, an unknown op, an integrity-only op in confidentiality position (and
+vice versa), or a regex
 that fails the safety lint (length cap + nested-quantifier/ReDoS reject —
 author regexes run at the trusted evaluation points, so a pathological pattern
 would be a DoS vector). The same validation **re-runs on wire-supplied specs**
@@ -333,13 +335,13 @@ The ceiling is declared once: either the query's `maxConfidentiality` option
 or `ifc.maxConfidentiality` on the typed Row schema (declaring both errors).
 Placeholder atoms `{__ctCurrentPrincipal: true}` (the acting user) and
 `{__ctDbOwner: true}` (the db's owner) resolve before the check. A flat
-ceiling list keeps the **conjunctive** reading permanently — every entry
-required of the observer (clause subsumption restricted to singletons, CFC
-spec §8.10.3); the reader-enumeration reading ("observed by any of these") is
-an explicit `any([...])` ceiling and lands with OR-clauses. Honesty note:
-under today's conjunctive lowering a multi-participant row fits only a ceiling
-listing every participant, so narrow ceilings skip almost everything —
-per-user views become genuinely useful once OR-clauses land.
+ceiling list keeps the **conjunctive** reading — every entry required of the
+observer (clause subsumption restricted to singletons, CFC spec §8.10.3); the
+reader-enumeration reading ("observed by any of these") is an explicit
+`any([...])` ceiling, **implemented** with OR-clauses (Epic A2). A row modeled
+with an `any(...)` rule fits such a reader-enumeration ceiling, so per-user
+views are now genuinely useful; a flat conjunctive label of the same
+participants would still require a ceiling listing every one.
 
 `onExceed` governs a ceiling miss: **`"fail"`** (default) refuses the whole
 query; **`"skip"`** drops the offending rows and returns the rest. Skipping
@@ -487,16 +489,20 @@ re-derives.
 
 ### Fail-closed rules (consolidated)
 
-1. **Authoring:** unknown column, unknown op, unsafe regex, `any()` ⟶
-   `table()` throws. The same validation re-runs on wire-supplied specs before
-   evaluation.
+1. **Authoring:** unknown column, unknown op, unsafe regex, an integrity/
+   confidentiality op in the wrong position, or a malformed `any()` alternative
+   (a nested `all()`/`any()`) ⟶ `table()` throws. A well-formed `any(...)` is
+   accepted as an authored OR-clause (Epic E1). The same validation re-runs on
+   wire-supplied specs before evaluation.
 2. **Read, unresolvable input:** a rule input missing from the projection by
    origin, or ambiguous (two columns, same origin) ⟶ refuse the query.
 3. **Read, bad data:** evaluator `{error}` (non-string regex input,
    strict-if-present zero match, `min` miss, multi-match integrity subject) ⟶
    refuse the query.
-4. **Read, unattributable output:** any null-origin column on a rule-bearing
-   query ⟶ refuse; `skip` never applies to aggregates.
+4. **Read, unattributable output:** a null-origin column on a rule-bearing query
+   lifts by the common-alternative property (rule 2 / CFC spec §8.17.4) when a
+   reader is a static unconditional reader of every row; otherwise ⟶ refuse.
+   `skip` never applies to aggregates.
 5. **Read, ceiling exceeded:** `onExceed` decides — fail the query (default)
    or skip the row (declared opt-in, row-returning queries only).
 6. **Write, unattributable:** fail closed (Phase 2's set) — except the
@@ -519,12 +525,11 @@ Within a rule, clause shape is author-controlled and explicit (`any` / `all` /
 `intersect`), and confidentiality and integrity stay **separate** expressions —
 coupling them through one lattice op would nuke integrity the moment a
 confidentiality-only term (`dbOwner()`) joins. Folding the per-row label with
-Phase 2's per-column label is a join (flat-atom union today; clause
-concatenation once OR-clauses land — a merge must never union the
-*alternatives* of two different clauses, CFC spec §3.1.8). The integrity
-cross-merge remains a swappable seam pending CT-1668; the CFC spec endpoint is
-class-aware **intersection** whenever labels of different values fold into a
-derived one (CFC spec §3.1.6.2, §8.6.2).
+Phase 2's per-column label is a join — clause concatenation for confidentiality
+(a merge must never union the *alternatives* of two different clauses, CFC spec
+§3.1.8). CT-1668 settled the integrity cross-merge on the class-aware
+**intersection** the CFC spec endpoint prescribes (§3.1.6.2, §8.6.2) — integrity
+is never unioned when labels of different values fold into a derived one.
 
 Demos:
 [`cfc-row-label-mailbox`](../../../packages/patterns/cfc-row-label-mailbox/main.tsx)
@@ -557,15 +562,19 @@ function of its stored columns, recomputable at any time.
 3. **Phase 3.a — per-row: _implemented_** (#3974). The rule surface, AST +
    validation, the shared evaluator, read-side per-row labeling with declared
    ceilings and `onExceed`, and the runner-side write gate — everything above.
-   Deferred:
-   - **OR-clauses:** `any(...)` rules and `any([...])` reader-enumeration
-     ceilings, gated on the clause-aware label profile (CFC spec §18.5); also
-     unlocks common-alternative aggregate reads (CFC spec §8.17.4).
-   - **3.b — read-time clearance:** filtering by *who is asking* rather than a
-     declared ceiling; rides the same `onExceed` surface, needs OR-clauses to
-     be useful. Own design when it lands.
-   - **3.c — server-side commit evaluation: _implemented_** (Epic E4). The
-     shared evaluator runs against the **true** committed rows inside
+   - **OR-clauses: _implemented_.** The CNF clause kernel + digest-stable
+     `anyOf` canonicalization, clause-subsumption ceiling fit, clause-
+     concatenation join, and author-written disjunctive confidentiality (Epic
+     A1–A5, #4466–#4481); sqlite `any(...)` un-reserved (Epic E1, #4475);
+     common-alternative aggregate reads (CFC spec §8.17.4) via Epic E2 (#4477).
+     An authored `any(sender ∨ recipients ∨ owner)` now serializes into the rule
+     as one OR-clause instead of erroring at `table()` time.
+   - **3.b — read-time clearance: _implemented_** (Epic E3, #4478). Filtering by
+     *who is asking* via a separate `db.query({ readClearance: true })` option —
+     distinct from the declared-ceiling `onExceed`; it drops rows the reader
+     can't read regardless of `onExceed`.
+   - **3.c — server-side commit evaluation: _implemented_** (Epic E4, #4552).
+     The shared evaluator runs against the **true** committed rows inside
      `applyCommitTransaction` (read-back by rowid), rolling back on violation
      — covering the non-attributable writes the runner gate previously failed
      closed on (INSERT…SELECT, upsert, columnless INSERT, rule-input UPDATE),
@@ -573,3 +582,5 @@ function of its stored columns, recomputable at any time.
      `sqliteCommitRowLabelEval` capability. The no-laundering half stays
      runner-side (the server has no input-value labels). See "Server commit"
      above.
+   - **Deferred:** cross-rule joins — a query touching more than one
+     rule-bearing table fails closed (`row-label-read.ts`).
