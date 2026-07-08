@@ -7,6 +7,7 @@ import {
   MEMORY_STORAGE_PATH,
   toSpaceWebSocketAddress,
   toWebSocketAddress,
+  WebSocketTransport,
 } from "../src/storage/v2-remote-session.ts";
 import { StorageManager } from "../src/storage/v2.ts";
 
@@ -239,5 +240,100 @@ describe("StorageManager.registerSpaceHost", () => {
     const manager = await makeManager();
     expect(() => manager.registerSpaceHost(spaceLearned, "not a url"))
       .toThrow(`Invalid host for space ${spaceLearned}`);
+  });
+});
+
+describe("WebSocketTransport failure signalling", () => {
+  // A socket the test opens, closes, and errors by hand. Nothing here waits on
+  // a real connection or a timer: the transport reaches its close and error
+  // handlers because the test dispatches those events synchronously.
+  class DrivableWebSocket extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    static instances: DrivableWebSocket[] = [];
+    readyState = DrivableWebSocket.CONNECTING;
+    constructor(readonly url: string | URL) {
+      super();
+      DrivableWebSocket.instances.push(this);
+    }
+    send(_payload: string): void {}
+    close(): void {}
+  }
+
+  // Install the drivable socket, hand the body a transport and its socket, then
+  // always restore the real global. `send()` reaches `open()`, which constructs
+  // the socket synchronously, so `socket()` is available before any event.
+  function withTransport(
+    body: (
+      transport: WebSocketTransport,
+      socket: () => DrivableWebSocket,
+    ) => Promise<void>,
+  ): Promise<void> {
+    const realWebSocket = globalThis.WebSocket;
+    DrivableWebSocket.instances.length = 0;
+    (globalThis as { WebSocket: unknown }).WebSocket = DrivableWebSocket;
+    const transport = new WebSocketTransport(
+      new URL("wss://memory.test/api/storage/memory"),
+    );
+    return body(transport, () => DrivableWebSocket.instances.at(-1)!)
+      .finally(() => {
+        (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
+      });
+  }
+
+  it("rejects the in-flight send and closes cleanly when the socket closes before opening", async () => {
+    await withTransport(async (transport, socket) => {
+      let closeCalled = false;
+      let closeError: Error | undefined;
+      transport.setCloseReceiver((error) => {
+        closeCalled = true;
+        closeError = error;
+      });
+
+      const send = transport.send("frame");
+      socket().readyState = DrivableWebSocket.CLOSED;
+      socket().dispatchEvent(new Event("close"));
+
+      await expect(send).rejects.toThrow(
+        "memory websocket transport closed before opening",
+      );
+      // A close before opening is not an error, so the receiver gets none.
+      expect(closeCalled).toBe(true);
+      expect(closeError).toBeUndefined();
+    });
+  });
+
+  it("surfaces the underlying Error of a socket error to the close receiver", async () => {
+    await withTransport(async (transport, socket) => {
+      let closeError: Error | undefined;
+      transport.setCloseReceiver((error) => {
+        closeError = error;
+      });
+
+      const boom = new Error("connection refused");
+      const send = transport.send("frame");
+      socket().dispatchEvent(new ErrorEvent("error", { error: boom }));
+
+      await expect(send).rejects.toBeDefined();
+      expect(closeError).toBe(boom);
+    });
+  });
+
+  it("reports a generic transport error when the error event carries no Error", async () => {
+    await withTransport(async (transport, socket) => {
+      let closeError: Error | undefined;
+      transport.setCloseReceiver((error) => {
+        closeError = error;
+      });
+
+      const send = transport.send("frame");
+      socket().dispatchEvent(new Event("error"));
+
+      await expect(send).rejects.toBeDefined();
+      expect(closeError).toBeInstanceOf(Error);
+      expect(closeError?.message).toContain("memory websocket transport error");
+    });
   });
 });
