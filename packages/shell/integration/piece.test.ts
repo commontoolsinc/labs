@@ -7,6 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { clickPierce } from "./shadow-dom.ts";
 import { expect } from "@std/expect";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
@@ -123,6 +124,18 @@ describe("shell piece tests", () => {
     let piece: PieceController | undefined;
     let pieceSinkCancel: (() => void) | undefined;
     let identityPath: string | undefined;
+    // The piece's committed result value, tracked by the result-cell sink set
+    // up below, and a one-shot waiter the sink resolves when the value reaches
+    // a target. A fresh deferred per call keeps the sequential checks (0, then
+    // -1, then -2) independent.
+    let latestResultValue: number | undefined;
+    let resultWaiter: { target: number; deferred: Deferred } | undefined;
+    const awaitResultValue = (target: number): Promise<void> => {
+      if (latestResultValue === target) return Promise.resolve();
+      const deferred = defer();
+      resultWaiter = { target, deferred };
+      return deferred.promise;
+    };
     const logDebugSnapshot = async (label: string) => {
       console.log(label, {
         shellState: await shell.state(),
@@ -214,11 +227,17 @@ describe("shell piece tests", () => {
       piece = currentPiece;
 
       const resultCell = cc.manager().getResult(currentPiece.getCell());
-      pieceSinkCancel = resultCell.sink(() => {});
+      pieceSinkCancel = resultCell.sink((value) => {
+        latestResultValue = (value as { value?: number } | undefined)?.value;
+        if (resultWaiter && latestResultValue === resultWaiter.target) {
+          resultWaiter.deferred.resolve();
+          resultWaiter = undefined;
+        }
+      });
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === 0
-      );
+      await awaitResultValue(0);
+      // A fresh reload of the piece has no sink; poll until its own sync round
+      // trip reads the committed value back.
       await waitFor(async () => {
         const reloadedPiece = await cc.get(pieceId, true);
         return (await reloadedPiece.result.get(["value"])) === 0;
@@ -270,19 +289,13 @@ describe("shell piece tests", () => {
 
       await waitForActivePattern();
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === 0
-      );
+      await awaitResultValue(0);
 
       await clickPierce(page, "#counter-decrement");
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -1
-      );
+      await awaitResultValue(-1);
 
       await clickPierce(page, "#counter-decrement");
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -2
-      );
+      await awaitResultValue(-2);
 
       // Compilation-cache contract: the piece's cold compile above was written
       // back to the IDB-backed CachedCompiler. A FRESH worker must then load
@@ -343,9 +356,7 @@ describe("shell piece tests", () => {
         );
       }
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -2
-      );
+      await awaitResultValue(-2);
     } catch (error) {
       if (piece) {
         await logDebugSnapshot("shell piece test debug");

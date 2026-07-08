@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -11,6 +11,7 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import { waitForText } from "./cfc-browser-helpers.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -22,6 +23,22 @@ describe("counter direct operations test", () => {
   let cc: PiecesController;
   let piece: PieceController;
   let pieceSinkCancel: (() => void) | undefined;
+  // The piece's committed result value, tracked by the result-cell sink below,
+  // and a one-shot waiter the sink resolves when the value reaches a target.
+  let latestResultValue: number | undefined;
+  let resultWaiter: { target: number; deferred: Deferred } | undefined;
+
+  // Resolve once the piece's committed result value equals `target`. The sink
+  // fires with the current value on registration and on every committed change,
+  // so a value already at the target resolves immediately; otherwise the sink
+  // resolves the waiter when the target lands. A fresh deferred per call keeps
+  // the sequential value checks independent.
+  const awaitResultValue = (target: number): Promise<void> => {
+    if (latestResultValue === target) return Promise.resolve();
+    const deferred = defer();
+    resultWaiter = { target, deferred };
+    return deferred.promise;
+  };
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -46,9 +63,17 @@ describe("counter direct operations test", () => {
     );
 
     // In pull mode, create a sink to keep the piece reactive when inputs change.
-    // Without this, setting values won't trigger pattern re-computation.
+    // Without this, setting values won't trigger pattern re-computation. The
+    // sink also drives awaitResultValue: it records the latest committed value
+    // and resolves a pending waiter when its target is reached.
     const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
+    pieceSinkCancel = resultCell.sink((value) => {
+      latestResultValue = (value as { value?: number } | undefined)?.value;
+      if (resultWaiter && latestResultValue === resultWaiter.target) {
+        resultWaiter.deferred.resolve();
+        resultWaiter = undefined;
+      }
+    });
   });
 
   afterAll(async () => {
@@ -85,7 +110,7 @@ describe("counter direct operations test", () => {
     await waitForText(page, "#counter-result", "Counter is the 42nd number");
 
     // Verify we can also read the value back
-    await waitFor(async () => (await piece.result.get(["value"]) === 42));
+    await awaitResultValue(42);
   });
 
   it("should update counter value and verify after page refresh", async () => {
@@ -93,7 +118,7 @@ describe("counter direct operations test", () => {
 
     console.log("Setting counter value to 42 via direct operation");
     await piece.result.set(42, ["value"]);
-    await waitFor(async () => (await piece.result.get(["value"]) === 42));
+    await awaitResultValue(42);
 
     // Now refresh the page by navigating to the same URL
     console.log("Refreshing the page...");

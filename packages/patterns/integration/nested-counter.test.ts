@@ -2,7 +2,6 @@ import {
   env,
   Page,
   type ProbeApi,
-  waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -17,6 +16,7 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -28,6 +28,22 @@ describe("nested counter integration test", () => {
   let cc: PiecesController;
   let piece: PieceController;
   let pieceSinkCancel: (() => void) | undefined;
+  // The piece's committed result value, tracked by the result-cell sink below,
+  // and a one-shot waiter the sink resolves when the value reaches a target.
+  let latestResultValue: number | undefined;
+  let resultWaiter: { target: number; deferred: Deferred } | undefined;
+
+  // Resolve once the piece's committed result value equals `target`. The sink
+  // fires with the current value on registration and on every committed change,
+  // so a value already at the target resolves immediately; otherwise the sink
+  // resolves the waiter when the target lands. A fresh deferred per call keeps
+  // the sequential value checks independent.
+  const awaitResultValue = (target: number): Promise<void> => {
+    if (latestResultValue === target) return Promise.resolve();
+    const deferred = defer();
+    resultWaiter = { target, deferred };
+    return deferred.promise;
+  };
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -54,8 +70,16 @@ describe("nested counter integration test", () => {
     );
 
     // In pull mode, create a sink to keep the piece reactive when inputs change.
+    // The sink also drives awaitResultValue: it records the latest committed
+    // value and resolves a pending waiter when its target is reached.
     const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
+    pieceSinkCancel = resultCell.sink((value) => {
+      latestResultValue = (value as { value?: number } | undefined)?.value;
+      if (resultWaiter && latestResultValue === resultWaiter.target) {
+        resultWaiter.deferred.resolve();
+        resultWaiter = undefined;
+      }
+    });
   });
 
   afterAll(async () => {
@@ -84,13 +108,10 @@ describe("nested counter integration test", () => {
     const page = shell.page();
 
     // Click increment button (second button - first is decrement)
-    // Use retry logic to handle unstable box model during page settling
     await clickNthButton(page, "[data-cf-button]", 1);
 
-    // Wait for piece result update
-    await waitFor(async () => {
-      return await await piece.result.get(["value"]) === 1;
-    });
+    // Wait for the piece result to reflect the increment.
+    await awaitResultValue(1);
     await waitForCounter(page, "Counter is the 1st number");
   });
 
