@@ -2,7 +2,7 @@
 
 The browser integration tests (`packages/patterns/integration/`) are
 **self-diagnosing on failure**: a `Timed out filling cf input …` or
-`waitFor` timeout prints a probe that names the stuck layer. Read that
+`waitForCondition` timeout prints a probe that names the stuck layer. Read that
 output before adding any instrumentation of your own.
 
 What the failure probe contains, and where each piece lives:

@@ -5329,16 +5329,20 @@ $ rg -n "queueInitialActionRehydration|initialRehydrationTokens|canApplyInitialA
   - No new reviewer verdict marker was present after the latest Phase 7 progress
     entries at the start of this heartbeat.
 - Shape:
-  - `buildSchedulerActionObservation(...)` now emits `version: 2` and omits
-    `currentKnownWrites` / `declaredWrites` from new observations.
+  - `buildSchedulerActionObservation(...)` now emits `version: 2` and slims
+    only `declaredWrites` from new observations; `currentKnownWrites` is still
+    persisted (persistent-observation.ts:97-100) because rehydration needs it
+    to restore the write surface (the live ReactivityLog is gone after a
+    restart).
   - Runner and memory readers accept both v1 and v2 observation rows. V1 rows
     still require the old fields; v2 rows do not. Memory normalization and write
     indexing preserve old fields only when present.
   - Runtime fingerprint is now `runner:scheduler:v2`; old
     `runner:scheduler:pull` rows become fingerprint misses and cost one fresh
     node run on resume.
-  - Rehydration restores the write surface from the live action annotation, not
-    from persisted observation fields.
+  - Rehydration restores the write surface from the persisted
+    `currentKnownWrites` (facade.ts:638 `writes: observation.currentKnownWrites
+    ?? []`), not from the live action annotation.
   - Added memory coverage that slim v2 observations store and reload without
     the old fields.
 - Recordings:

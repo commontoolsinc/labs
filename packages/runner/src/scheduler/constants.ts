@@ -27,8 +27,11 @@ export const AUTO_DEBOUNCE_DELAY_MS = 100;
 export const EVENT_LOAD_PARK_TIMEOUT_MS = 10_000;
 
 // How long a resumed action's initial run may be held while waiting for its
-// space to finish syncing (the flag-off resume hold; see runner.ts
-// awaitSyncBeforeInitialRun). The sync completing releases the hold early; the
+// space to finish syncing (see runner.ts awaitSyncBeforeInitialRun). This hold
+// exists ONLY on the flag-off default: with persistent-scheduler-state
+// (flag-on) resume rehydrates from persisted observation snapshots and takes
+// no timed hold, so this path is retired as that flag promotes toward default.
+// The sync completing releases the hold early; the
 // timeout only bounds a slow or never-quiescing sync. The hold is an
 // anti-churn OPTIMIZATION (avoid re-deriving against half-synced inputs), not
 // a correctness gate — reads see whatever has synced either way — so its

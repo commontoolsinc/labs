@@ -799,9 +799,14 @@ migration plan, phase E).
 ### 7.7 Convergence bounds
 
 - `MAX_ITERS` iterations per pass (default 10).
-- `PASS_RUN_BUDGET` runs per node per pass (small, default 5 — v1's 100 was a
-  backstop, not a design point; with value-gated re-runs a node that runs 5×
-  in one pass is cycling, not converging).
+- `PASS_RUN_BUDGET` runs per node per pass (`= MAX_ITERS`, currently 10 —
+  v1's 100 was a backstop, not a design point). A node runs at most once per
+  iteration, so its per-pass run count is bounded by `MAX_ITERS` by
+  construction; the budget is that bound's backstop against any
+  multi-run-per-iteration path, **not** a depth limit. A budget below
+  `MAX_ITERS` misclassifies a healthy deep first-run chain (which legitimately
+  re-runs each downstream node once per unrolled level) as cycling, which is
+  why it was raised from 5 to `MAX_ITERS`.
 - Exhaustion (iterations or budget): remaining runnable nodes keep
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
