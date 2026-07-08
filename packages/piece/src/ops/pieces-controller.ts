@@ -539,11 +539,11 @@ export class PiecesController<T = unknown> {
 
     // 1. Flag gate. Home is held behind a second flag until its durable state
     //    is verified stable-key-addressed (spec § open question 4).
-    if (!runtime.experimental.systemPatternAutoUpdate) {
+    if (!runtime.experimental?.systemPatternAutoUpdate) {
       return "skipped-disabled";
     }
     const isHomeSpace = space === runtime.userIdentityDID;
-    if (isHomeSpace && !runtime.experimental.systemPatternAutoUpdateHome) {
+    if (isHomeSpace && !runtime.experimental?.systemPatternAutoUpdateHome) {
       return "skipped-disabled";
     }
 
