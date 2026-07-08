@@ -20,6 +20,7 @@ import {
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -83,10 +84,21 @@ type AppliedRecord = {
   applied: AppliedCommit;
   touched: TouchedWrite[];
 };
+type RejectionError = {
+  name: string;
+  message: string;
+  /**
+   * Mirrors the real server's retryable-conflict marker: the client attaches
+   * `readyToRetry` (the read-repair gate) ONLY when a ConflictError carries a
+   * numeric `retryAfterSeq`. Opt-in via the rejectConflict outcome — absent
+   * everywhere else so existing rejections stay gate-less.
+   */
+  retryAfterSeq?: number;
+};
 type RejectedRecord = {
   localSeq: number;
   commit: ClientCommit;
-  error: { name: string; message: string };
+  error: RejectionError;
 };
 type ScriptedOutcome =
   | {
@@ -99,6 +111,8 @@ type ScriptedOutcome =
     message?: string;
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    /** See {@link RejectionError.retryAfterSeq}. */
+    retryAfterSeq?: number;
   }
   | {
     kind: "dropThenReplayAccept";
@@ -173,10 +187,8 @@ class ScriptedServerModel {
     commit: ClientCommit,
   ): { type: "accept"; applied: AppliedCommit } | {
     type: "reject";
-    error: { name: string; message: string };
+    error: RejectionError;
   } | { type: "drop" } {
-    this.transactLocalSeqs.push(commit.localSeq);
-
     const priorApplied = this.applied.get(commit.localSeq);
     if (priorApplied) {
       return { type: "accept", applied: priorApplied.applied };
@@ -191,9 +203,21 @@ class ScriptedServerModel {
       this.applyRootCommit(scripted.remoteInterleave);
     }
 
+    // A scripted retryAfterSeq marks whichever ConflictError this commit
+    // produces (the natural stale-read error below included) as retryable,
+    // matching the real server attaching it to every conflict verdict.
+    const retryAfterSeq = scripted.kind === "rejectConflict"
+      ? scripted.retryAfterSeq
+      : undefined;
+
     const readError = this.validateReads(commit);
     if (readError) {
-      return this.reject(commit, readError);
+      return this.reject(
+        commit,
+        retryAfterSeq === undefined
+          ? readError
+          : { ...readError, retryAfterSeq },
+      );
     }
 
     const shouldDrop = scripted.kind === "dropThenReplayAccept" ||
@@ -205,6 +229,7 @@ class ScriptedServerModel {
       const rejected = this.reject(commit, {
         name: "ConflictError",
         message: scripted.message ?? "synthetic conflict",
+        ...(retryAfterSeq !== undefined ? { retryAfterSeq } : {}),
       });
       if (shouldDrop && !this.dropped.has(commit.localSeq)) {
         this.dropped.add(commit.localSeq);
@@ -223,7 +248,7 @@ class ScriptedServerModel {
 
   private validateReads(
     commit: ClientCommit,
-  ): { name: string; message: string } | null {
+  ): RejectionError | null {
     for (const read of commit.reads.pending) {
       const dependency = this.applied.get(read.localSeq);
       if (!dependency) {
@@ -263,7 +288,7 @@ class ScriptedServerModel {
 
   private reject(
     commit: ClientCommit,
-    error: { name: string; message: string },
+    error: RejectionError,
   ) {
     this.rejected.set(commit.localSeq, {
       localSeq: commit.localSeq,
@@ -393,6 +418,11 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
         });
         break;
       case "session.watch.set":
+      case "session.watch.add":
+        // Registers the watch but returns an empty sync: the harness NEVER
+        // volunteers document state — catch-up only arrives when a test
+        // explicitly delivers it via pushSync, so tests control the wire
+        // order of verdicts vs updates.
         this.respond({
           type: "response",
           requestId: message.requestId!,
@@ -418,6 +448,11 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
         });
         break;
       case "transact": {
+        // Receipt-time bookkeeping: `transactLocalSeqs` records that a commit
+        // reached the server even while its verdict is still gated. The
+        // cascade tests (and the stress bookkeeping) use it to distinguish
+        // "sent, verdict in flight" from "never sent".
+        this.model.transactLocalSeqs.push(message.commit!.localSeq);
         const responseGate = message.commit
           ? this.model.scripted.get(message.commit.localSeq)?.responseGate
           : undefined;
@@ -451,10 +486,53 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
     return Promise.resolve();
   }
 
+  /**
+   * Deliver an unsolicited server-push sync frame (the real server's
+   * timer-batched `session/effect` fan-out) to the client receiver. Opt-in:
+   * the harness never pushes sync on its own, so a test controls exactly
+   * when subscription catch-up arrives relative to commit verdicts.
+   */
+  pushSync(options: PushSyncOptions): void {
+    this.respond({
+      type: "session/effect",
+      space,
+      sessionId: this.model.sessionId,
+      effect: {
+        type: "sync",
+        fromSeq: this.model.serverSeq,
+        toSeq: this.model.serverSeq,
+        ...(options.caughtUpLocalSeq !== undefined
+          ? { caughtUpLocalSeq: options.caughtUpLocalSeq }
+          : {}),
+        upserts: (options.upserts ?? []).map((upsert) => ({
+          branch: "",
+          id: upsert.id,
+          seq: upsert.seq,
+          ...(upsert.deleted === true
+            ? { deleted: true as const }
+            : { doc: { value: upsert.value } }),
+        })),
+        removes: [],
+      },
+    });
+  }
+
   private respond(message: unknown): void {
     this.#receiver(jsonFromValue(message as FabricValue));
   }
 }
+
+type PushSyncOptions = {
+  upserts?: Array<{
+    id: URI;
+    seq: number;
+    value?: RootValue;
+    deleted?: true;
+  }>;
+  /** The server's caught-up marker: resolves client + runner read-repair
+   * waiters for every localSeq <= this value. */
+  caughtUpLocalSeq?: number;
+};
 
 type Harness = ReturnType<typeof createHarness>;
 
@@ -507,6 +585,14 @@ const createHarness = () => {
       since?: number;
       is?: FabricValue;
     } | undefined;
+    pull(
+      entries: Array<[{ id: URI; type: MIME }, undefined]>,
+    ): Promise<
+      { ok: Record<PropertyKey, never>; error?: undefined } | {
+        ok?: undefined;
+        error: { name?: string; message?: string };
+      }
+    >;
   };
 
   let nextLocalSeq = 1;
@@ -538,6 +624,7 @@ const createHarness = () => {
     replica,
     notifications,
     dispatch,
+    pushSync: (options: PushSyncOptions) => transport.pushSync(options),
     close: async () => {
       await storageManager.close();
       await new Promise((resolve) => setTimeout(resolve, 30));
@@ -879,6 +966,22 @@ const assertConflict = async (
   if (contains) {
     assert(String(result.error.message).includes(contains));
   }
+};
+
+// Poll until `predicate` holds (e.g. "commit N reached the wire") so a test
+// can gate server verdicts deterministically without racing the client's
+// pre-send awaits (session handshake, batch flush).
+const waitForCondition = async (
+  predicate: () => boolean,
+  label: string,
+): Promise<void> => {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${label}`);
 };
 
 const beginSet = (
@@ -1775,6 +1878,134 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
     );
     await assertResultOk(c1.promise);
     await assertResultOk(c2.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: conflict rejection delivered before the winning update holds the revert until read repair", async () => {
+  const harness = await createHarness();
+  try {
+    // Both sides at seq 1: A = v1.
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+
+    // Subscribe the runner to server pushes. The real runner always holds a
+    // watch over the docs it reads; without an active watch a pushed sync
+    // frame has no subscriber and the read-repair gate could never release.
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    // Client 2's write wins server-side (server seq 2). The harness never
+    // pushes sync on its own, so client 1 has not seen it yet.
+    harness.model.injectRemote({
+      label: "client-2-wins",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    assertEquals(winnerSeq, 2);
+
+    const conflictBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["commit-conflict"]?.debug ?? 0;
+
+    // Client 1 commits against its stale confirmed read (seq 1). The scripted
+    // retryAfterSeq makes the rejection retryable — exactly what engages
+    // finalizeRejection's waitForConflictReadRepair gate. The verdict is NOT
+    // gated: it is delivered immediately, BEFORE the catch-up carrying the
+    // winning value (the real server's fan-out is timer-batched, so
+    // rejection-first is the systematic wire order).
+    const mine = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+    let settled = false;
+    const commitResult = mine.promise.then((result) => {
+      settled = true;
+      return result;
+    });
+
+    // THE WINDOW: "commit-conflict" is counted synchronously in pushCommit's
+    // catch, right before finalizeRejection — so once the count moves, the
+    // rejection has demonstrably reached the runner while the winning update
+    // is still in flight. Give the held state a real chance to (wrongly)
+    // settle before asserting it did not.
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]
+          ?.debug ?? 0) > conflictBaseline,
+      "the conflict rejection to reach the runner",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Rejection processed-but-held: the commit promise must not settle, the
+    // optimistic value stays visible, and no revert is emitted before the
+    // read repair lands.
+    assertEquals(settled, false);
+    expectVisible(harness, { A: valueFor("v1mine") });
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "revert"),
+      [],
+    );
+
+    // Release: the subscription catch-up carrying client 2's winning value
+    // plus the caught-up marker covering the rejected commit's localSeq.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: mine.localSeq,
+    });
+
+    const result = await commitResult;
+    assertExists(result.error);
+    assertEquals(result.error.name, "ConflictError");
+    assert(String(result.error.message).includes("stale confirmed read"));
+
+    // §3.12 semantics: the repair was applied into confirmed BEFORE the
+    // revert snapshot completed — visible state lands on the winner, not on
+    // the reverted optimistic value and not on the stale v1.
+    expectVisible(harness, { A: valueFor("v2winner") });
+    assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
+
+    // Exactly one revert, scoped to A, whose changes read v1mine -> v2winner.
+    const reverts = harness.notifications.notifications.filter(
+      (notification) => notification.type === "revert",
+    );
+    assertEquals(reverts.length, 1);
+    const changes = [
+      ...(reverts[0] as unknown as {
+        changes: Iterable<{
+          address: { id: URI };
+          before?: { value?: RootValue };
+          after?: { value?: RootValue };
+        }>;
+      }).changes,
+    ];
+    assertEquals(changes.map((change) => change.address.id), [DOCS.A]);
+    assertEquals(changes[0].before?.value, valueFor("v1mine"));
+    assertEquals(changes[0].after?.value, valueFor("v2winner"));
+
+    // The surfaced rejection's retry gate is already satisfied: readyToRetry
+    // resolves immediately now that the catch-up has been applied.
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    const raced = await Promise.race([
+      readyToRetry().then(() => "ready" as const),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 500)
+      ),
+    ]);
+    assertEquals(raced, "ready");
   } finally {
     await harness.close();
   }
