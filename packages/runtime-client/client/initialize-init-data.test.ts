@@ -71,8 +71,17 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
     });
 
     let received: { space?: string; toolshedVersion?: string } | undefined;
+    let pending: boolean | undefined;
     client.on("versionskew", (msg) => (received = msg));
+    client.on("pendingwriteschange", (e) => (pending = e.pending));
 
+    // A pendingWrites notification first exercises the demux arm immediately
+    // above versionSkew, so both the versionSkew arm and the branch it chains
+    // off of are covered.
+    transport.simulateMessage({
+      type: NotificationType.PendingWritesChanged,
+      pending: true,
+    });
     // Worker → shell: the connection demuxes the notification and RuntimeClient
     // re-emits it (covers the guard, the connection dispatch arm, and the
     // client forwarder).
@@ -83,6 +92,7 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
       toolshedVersion: "t",
     });
 
+    expect(pending).toBe(true);
     expect(received?.space).toBe("did:key:z6Mk-skew");
     expect(received?.toolshedVersion).toBe("t");
   });

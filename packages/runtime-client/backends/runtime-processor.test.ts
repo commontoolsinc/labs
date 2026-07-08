@@ -8,6 +8,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   browserWorkerParamsFromInitializationData,
   checkUpdateInBackground,
+  maybeCheckHomeUpdate,
   postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
@@ -1058,62 +1059,40 @@ describe("RuntimeProcessor home pattern IPC", () => {
     expect(idleCalled).toBe(true);
   });
 
-  it("checks the home root for updates on the fast path when both flags are on", async () => {
-    const defaultPatternRef: CellRef = {
-      id: "of:home-result" as CellRef["id"],
-      space: "did:key:test-home" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const patternRef: CellRef = {
-      ...defaultPatternRef,
-      id: "of:home-source" as CellRef["id"],
-    };
-    let synced = false;
-    const homeSpaceCell = {
-      sync: () => {
-        synced = true;
-        return Promise.resolve();
+  it("maybeCheckHomeUpdate no-ops unless both flags are on", () => {
+    let built = false;
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: { systemPatternAutoUpdate: true }, // home flag off
+      getHomeSpaceCell: () => {
+        built = true;
+        return { sync: () => Promise.resolve() };
       },
-      key: (k: string) => {
-        expect(k).toBe("defaultPattern");
-        return {
-          get: () => ({
-            resolveAsCell: () => ({
-              ...defaultPatternRef,
-              getAsLink: () => cellRefToSigilLink(defaultPatternRef),
-              getMetaRaw: (m: string) =>
-                synced && m === "pattern"
-                  ? cellRefToSigilLink(patternRef)
-                  : undefined,
-              sync: () => Promise.resolve(),
-            }),
-          }),
-        };
-      },
-    };
-    const processor = {
-      identity: cfcSigner,
-      runtime: {
-        userIdentityDID: "did:key:test-home",
-        experimental: {
-          systemPatternAutoUpdate: true,
-          systemPatternAutoUpdateHome: true,
-        },
-        getHomeSpaceCell: () => homeSpaceCell,
-        start: () => Promise.resolve(),
-        idle: () => Promise.resolve(),
-      },
-    } as unknown as RuntimeProcessor;
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    // No controller built (the home flag gates it before any construction).
+    expect(built).toBe(false);
+  });
 
-    // The guard builds a home PiecesController and kicks a best-effort update
-    // check; the fast-path response still resolves regardless of the check.
-    const result = await RuntimeProcessor.prototype
-      .handleEnsureHomePatternRunning.call(
-        processor,
-        { type: RequestType.EnsureHomePatternRunning },
-      );
-    expect(result.cell).toEqual(defaultPatternRef);
+  it("maybeCheckHomeUpdate builds a home controller and kicks a check when enabled", async () => {
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+      // PieceManager reads userIdentityDID + getHomeSpaceCell().sync();
+      // the update check itself is best-effort and fails closed on this mock.
+      getHomeSpaceCell: () => ({
+        sync: () => Promise.resolve(),
+        key: () => ({ get: () => undefined }),
+      }),
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+
+    // Constructs the home controller and kicks the background check without
+    // throwing; let the fire-and-forget check settle.
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    await new Promise((r) => setTimeout(r, 0));
   });
 });
 

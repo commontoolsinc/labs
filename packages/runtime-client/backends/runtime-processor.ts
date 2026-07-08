@@ -203,6 +203,31 @@ export function checkUpdateInBackground(
 }
 
 /**
+ * Best-effort update check for the HOME root, gated behind its own flag
+ * (pending the stable-addressing audit). No-ops unless both auto-update flags
+ * are on — so the hot home fast path pays nothing when disabled — otherwise
+ * builds a home PiecesController and kicks a non-blocking check. Exported for
+ * testing.
+ */
+export function maybeCheckHomeUpdate(
+  identity: Identity,
+  runtime: Runtime,
+): void {
+  if (
+    !runtime.experimental?.systemPatternAutoUpdate ||
+    !runtime.experimental?.systemPatternAutoUpdateHome
+  ) {
+    return;
+  }
+  const homeSession: Session = {
+    as: identity,
+    space: runtime.userIdentityDID,
+  };
+  const homeCC = new PiecesController(new PieceManager(homeSession, runtime));
+  void checkUpdateInBackground(homeCC, runtime.userIdentityDID);
+}
+
+/**
  * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params (CT-1814): the shared first-party posture (CFC pins,
  * patternEnvironment from apiUrl) lives in the preset; this function only
@@ -1070,21 +1095,8 @@ export class RuntimeProcessor {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
       // The home root is held behind its own flag (pending the stable-addressing
-      // audit). Only build a controller to check for updates when enabled —
-      // avoids per-call construction on this hot fast path.
-      if (
-        this.runtime.experimental?.systemPatternAutoUpdate &&
-        this.runtime.experimental?.systemPatternAutoUpdateHome
-      ) {
-        const homeSession: Session = {
-          as: this.identity,
-          space: this.runtime.userIdentityDID,
-        };
-        const homeCC = new PiecesController(
-          new PieceManager(homeSession, this.runtime),
-        );
-        void checkUpdateInBackground(homeCC, this.runtime.userIdentityDID);
-      }
+      // audit); the helper no-ops on this hot fast path unless enabled.
+      maybeCheckHomeUpdate(this.identity, this.runtime);
       return {
         cell: createCellRef(defaultPatternCell),
       };
