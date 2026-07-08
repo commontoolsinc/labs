@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-run --allow-net --allow-read --allow-write --allow-env --allow-ffi
+#!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi
 
 // Draw a Gantt chart of a typical CI run from the last N workflow runs on GitHub.
 //
@@ -20,6 +20,8 @@
 //     --min-runs N          drop jobs seen in fewer than N runs (default: 10% of runs)
 //     --main-only           only fetch pushes to main, skipping pre-land PR runs
 //     --run-id ID           chart this workflow run ID, repeatable
+//     --theme NAME          color palette: "default" (light) or "dark"
+//     --colors JSON         override palette keys, e.g. '{"bar":"#6ea8fe"}'
 
 const args = Deno.args;
 function opt(name: string, def: string): string {
@@ -40,8 +42,8 @@ function numOpt(
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
     "Usage: scripts/ci-gantt.ts [--repo OWNER/REPO] [--workflow FILE] [--limit N]\n" +
-      "       [--out PATH] [--scale N] [--concurrency N] [--min-runs N]\n" +
-      "       [--main-only] [--run-id ID]",
+      "       [--out PATH] [--scale N] [--concurrency N] [--min-runs N] [--main-only]\n" +
+      "       [--run-id ID] [--theme default|dark] [--colors '<json>']",
   );
   Deno.exit(0);
 }
@@ -65,22 +67,81 @@ const SUCCESS_ONLY = !RUN_IDS.length && !args.includes("--all-conclusions");
 const MAIN_ONLY = args.includes("--main-only");
 
 // ---------------------------------------------------------------------------
-// Data fetching (shells out to the gh CLI, which carries the user's auth)
+// Data fetching: calls the GitHub REST API directly, authenticated with
+// GH_TOKEN or GITHUB_TOKEN. One of those must be set.
 // ---------------------------------------------------------------------------
 
-async function gh(ghArgs: string[]): Promise<string> {
-  const cmd = new Deno.Command("gh", {
-    args: ghArgs,
-    stdout: "piped",
-    stderr: "piped",
+const TOKEN = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN");
+if (!TOKEN) {
+  console.error(
+    "Set GH_TOKEN or GITHUB_TOKEN (a GitHub token with repo read).",
+  );
+  Deno.exit(1);
+}
+
+// The workflow-run fields the REST API returns that this chart uses.
+interface RestRun {
+  id: number;
+  run_attempt: number;
+  status: string;
+  conclusion: string | null;
+  event: string;
+  head_branch: string | null;
+  run_started_at: string;
+  name: string;
+}
+
+function toRun(r: RestRun): Run {
+  return {
+    attempt: r.run_attempt,
+    databaseId: r.id,
+    status: r.status,
+    conclusion: r.conclusion ?? "",
+    event: r.event,
+    headBranch: r.head_branch ?? undefined,
+    startedAt: r.run_started_at,
+    workflowName: r.name,
+  };
+}
+
+async function githubApi<T>(path: string): Promise<T> {
+  const res = await fetch(`https://api.github.com/${path.replace(/^\//, "")}`, {
+    headers: {
+      authorization: `Bearer ${TOKEN}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(15_000),
   });
-  const { success, stdout, stderr } = await cmd.output();
-  if (!success) {
-    throw new Error(
-      `gh ${ghArgs.join(" ")} failed:\n${new TextDecoder().decode(stderr)}`,
+  if (!res.ok) throw new Error(`GitHub API ${path} failed: HTTP ${res.status}`);
+  return await res.json() as T;
+}
+
+// The last LIMIT workflow runs. Pages by a constant 100-run size — so GitHub's
+// (page-1)*per_page offset stays consistent across pages — then over-fetches and
+// slices to LIMIT.
+async function fetchRuns(): Promise<Run[]> {
+  const runs: Run[] = [];
+  const per = Math.min(100, LIMIT);
+  for (let page = 1; runs.length < LIMIT; page++) {
+    const params = new URLSearchParams({
+      per_page: String(per),
+      page: String(page),
+    });
+    if (MAIN_ONLY) {
+      params.set("branch", "main");
+      params.set("event", "push");
+    }
+    const data = await githubApi<{ workflow_runs: RestRun[] }>(
+      `/repos/${REPO}/actions/workflows/${
+        encodeURIComponent(WORKFLOW)
+      }/runs?${params}`,
     );
+    const batch = data.workflow_runs ?? [];
+    for (const r of batch) runs.push(toRun(r));
+    if (batch.length < per) break; // reached the end of the runs
   }
-  return new TextDecoder().decode(stdout);
+  return runs.slice(0, LIMIT);
 }
 
 async function pool<T, R>(
@@ -135,13 +196,12 @@ async function fetchJobs(path: string): Promise<Job[]> {
   const jobs: Job[] = [];
   for (let page = 1;; page++) {
     const sep = path.includes("?") ? "&" : "?";
-    const body = await gh([
-      "api",
-      `${path}${sep}per_page=${JOBS_PER_PAGE}&page=${page}`,
-    ]);
-    const pageJobs = (JSON.parse(body).jobs ?? []) as Job[];
+    const url = `${path}${sep}per_page=${JOBS_PER_PAGE}&page=${page}`;
+    const pageJobs = (await githubApi<{ jobs?: Job[] }>(url)).jobs ?? [];
     jobs.push(...pageJobs);
-    if (pageJobs.length < JOBS_PER_PAGE) break;
+    if (pageJobs.length < JOBS_PER_PAGE) {
+      break;
+    }
   }
   return jobs;
 }
@@ -207,36 +267,14 @@ console.error(
       MAIN_ONLY ? " (main pushes only)" : ""
     } ...`,
 );
-const runJsonFields =
-  "attempt,databaseId,status,conclusion,event,headBranch,startedAt,workflowName";
 const runs: Run[] = RUN_IDS.length
-  ? await pool(RUN_IDS, CONCURRENCY, async (runId) =>
-    JSON.parse(
-      await gh([
-        "run",
-        "view",
-        runId,
-        "--repo",
-        REPO,
-        "--json",
-        runJsonFields,
-      ]),
-    ) as Run)
-  : JSON.parse(
-    await gh([
-      "run",
-      "list",
-      "--repo",
-      REPO,
-      "--workflow",
-      WORKFLOW,
-      "--limit",
-      String(LIMIT),
-      ...(MAIN_ONLY ? ["--branch", "main", "--event", "push"] : []),
-      "--json",
-      runJsonFields,
-    ]),
-  );
+  ? await pool(
+    RUN_IDS,
+    CONCURRENCY,
+    async (runId) =>
+      toRun(await githubApi<RestRun>(`/repos/${REPO}/actions/runs/${runId}`)),
+  )
+  : await fetchRuns();
 
 const completed = runs.filter((r) => r.status === "completed");
 console.error(
@@ -397,16 +435,60 @@ const chartW = maxEnd * pxPerSec;
 const totalW = Math.round(chartX0 + chartW + RIGHT_PAD);
 const x = (sec: number) => chartX0 + sec * pxPerSec;
 
-const C = {
-  bg: "#ffffff",
-  text: "#1f2328",
-  sub: "#57606a",
-  grid: "#e7e7e7",
-  axis: "#8a8a8a",
-  bar: "#3f7fb8",
-  main: "#8a897f",
-  whisker: "#2a2a2a",
+interface Palette {
+  bg: string;
+  text: string;
+  sub: string;
+  grid: string;
+  axis: string;
+  bar: string;
+  main: string;
+  whisker: string;
+}
+const THEMES: Record<string, Palette> = {
+  default: {
+    bg: "#ffffff",
+    text: "#1f2328",
+    sub: "#57606a",
+    grid: "#e7e7e7",
+    axis: "#8a8a8a",
+    bar: "#3f7fb8",
+    main: "#8a897f",
+    whisker: "#2a2a2a",
+  },
+  dark: {
+    bg: "#0d0e11",
+    text: "#e7e9ee",
+    sub: "#9aa0ab",
+    grid: "#23262d",
+    axis: "#6a7079",
+    bar: "#5f9ae6",
+    main: "#7c828c",
+    whisker: "#8a93a5",
+  },
 };
+// --theme picks a base palette; --colors '<json>' then overrides individual keys.
+const C: Palette = { ...(THEMES[opt("theme", "default")] ?? THEMES.default) };
+const colorsArg = opt("colors", "");
+if (colorsArg) {
+  // Accept only hex/rgb values for known palette keys, so an override can't
+  // inject markup into the SVG or set a nonsense fill.
+  const COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$|^rgba?\([\d.,\s%]+\)$/;
+  try {
+    const overrides = JSON.parse(colorsArg) as Record<string, unknown>;
+    for (const k of Object.keys(C) as (keyof Palette)[]) {
+      const v = overrides[k];
+      if (typeof v === "string" && COLOR_RE.test(v)) C[k] = v;
+      else if (v !== undefined) {
+        console.error(
+          `Ignoring invalid --colors value for "${k}": ${JSON.stringify(v)}`,
+        );
+      }
+    }
+  } catch {
+    console.error("Ignoring invalid --colors JSON.");
+  }
+}
 
 const body: string[] = [];
 const ticks: string[] = [];
