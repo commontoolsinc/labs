@@ -255,6 +255,104 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
   ts.forEachChild(node, (child) => setParentPointers(child, node));
 }
 
+/**
+ * Carry full lineage from `origin` onto a synthesized REPLACEMENT of it:
+ * textRange (pos/end), sourceMapRange, and the original-node chain. Apply it at
+ * sites that `factory.create*` a call standing in for the same semantic unit at
+ * the same site (the closure strategies' rebuilt builder calls) so
+ * `BuilderCallHoistingTransformer` (and the debug source resolution downstream)
+ * can still recover where each builder call was authored. `factory.update*`
+ * copies textRange + original automatically; this is the `create*` counterpart.
+ *
+ * Use it ONLY where the full gate proves textRange/original inert (see
+ * {@link preserveSourceMapRange} for why they are observable channels); when
+ * in doubt, carry position via {@link preserveSourceMapRange} alone — that is
+ * the channel the recovery walk and A′ read, and it is sufficient everywhere.
+ *
+ * `origin` is the node this one REPLACES in the emitted tree — same semantic
+ * unit, same site. `origin` may itself be synthetic mid-chain — the channels
+ * compose: original chains extend, getSourceMapRange propagates, and a pos=-1
+ * textRange copies as a harmless no-op while recovery still works through the
+ * chain.
+ *
+ * Origin-semantics constraint: the anchor MUST be the true semantic
+ * predecessor — full lineage claims the origin's IDENTITY, not just its
+ * position, and identity flows into more than sourcemaps: setTextRange feeds
+ * diagnostics / getText spans, and setOriginalNode feeds every
+ * getOriginalNode-fallback lookup (builder-kind resolution,
+ * getTypeAtLocationWithFallback, the cross-stage marker registries). Two
+ * corollaries, both enforced by the emit-invariance gate and the full suite
+ * (CT-1868):
+ *   - A node that WRAPS authored content (a wrapper arrow or applied wrapper
+ *     call whose body/argument IS the authored expression) is NOT that
+ *     content's semantic predecessor. Claiming its identity poisons
+ *     identity-sensitive classifiers — e.g. a compute wrapper whose original
+ *     points into the subtree `markSyntheticComputeOwnedSubtree` just marked
+ *     reads as compute-owned itself. Use {@link preserveSourceMapRange} there.
+ *   - Where position and checker-identity must point at DIFFERENT nodes (a
+ *     node has one `original` pointer), use `CFHelpers.preserveNodeSourceMap`
+ *     instead; use this where the two coincide.
+ */
+export function preserveLineage<T extends ts.Node>(
+  node: T,
+  origin: ts.Node,
+): T {
+  return ts.setOriginalNode(
+    ts.setSourceMapRange(
+      ts.setTextRange(node, origin),
+      ts.getSourceMapRange(origin),
+    ),
+    origin,
+  );
+}
+
+/**
+ * Carry ONLY the sourceMapRange from `origin` onto `node`. Use this instead of
+ * {@link preserveLineage} for synthesized CALLBACK arrows/functions: on a
+ * callback the other two lineage channels are NOT emit-safe, while
+ * sourceMapRange — the channel A′ debug resolution reads — is:
+ *
+ *   - `setTextRange` gives the arrow a real `pos`; when a later pass rebuilds it
+ *     via `factory.update*` (e.g. PatternCallbackTransform rewriting the first
+ *     parameter to `__cf_pattern_input`), the arrow ends up with a real `pos`
+ *     while its synthesized parameter keeps `pos:-1`, so the printer's
+ *     `canEmitSimpleArrowHead` `param.pos === arrow.pos` check flips and a bare
+ *     `x => …` head gets parenthesized to `(x) => …`.
+ *   - `setOriginalNode` feeds `getTypeAtLocationWithFallback`'s `getOriginalNode`
+ *     fallback, which SchemaInjection consults to derive a builder's argument /
+ *     result schema from its callback — a real original changes emitted schemas.
+ *
+ * The same reasoning applies beyond callbacks, making this the DEFAULT carrier
+ * for CT-1868 lineage:
+ *
+ *   - WRAPPER nodes (arrows or applied calls synthesized AROUND an authored
+ *     expression) are not the expression's semantic predecessor; claiming its
+ *     identity via setOriginalNode corrupts identity-sensitive classifiers
+ *     (e.g. a compute wrapper whose original points into the subtree
+ *     `markSyntheticComputeOwnedSubtree` just marked reads as compute-owned
+ *     itself and trips the array-method context invariant).
+ *   - SchemaInjection's rebuilt builder calls sit at their original JSX/module
+ *     sites when printed: a real textRange there changes the printer's
+ *     line-break layout (JSX ternaries/containers reflow), and an original
+ *     chain resurfaces typeRegistry entries through
+ *     `getTypeAtLocationWithFallback` (observed: module-scope-cf-data wrapping
+ *     a hoisted lift application it previously left bare).
+ *
+ * sourceMapRange rides `factory.update*` rebuilds (setOriginalNode merges
+ * emitNode data) and is read by neither the printer's text output nor
+ * schema/type resolution nor the marker registries, so it recovers the
+ * authored position with byte-identical emit and unchanged semantics (CT-1868;
+ * the emit-invariance gate and the fixture suite caught every perturbation
+ * above). Calls that genuinely replace a call at its own site AND are gate-
+ * proven inert take full {@link preserveLineage} instead.
+ */
+export function preserveSourceMapRange<T extends ts.Node>(
+  node: T,
+  origin: ts.Node,
+): T {
+  return ts.setSourceMapRange(node, ts.getSourceMapRange(origin));
+}
+
 // Import and re-export shared checks from schema-generator
 import {
   isDefaultAliasSymbol,
