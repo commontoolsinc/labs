@@ -22,6 +22,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -1061,6 +1062,59 @@ describe("event handling", () => {
       await runtime.idle();
 
       expect(attempts).toBe(1);
+    },
+  );
+
+  it(
+    "drops an event that needs inSpace-name resolution when the caller opted out (retries: false)",
+    async () => {
+      // RetryImmediately is the inSpace("name") resolution signal: the handler
+      // referenced a named pattern space that has just been resolved, and the
+      // scheduler re-runs the handler so it resolves synchronously from the
+      // cache. A retries: false event is a one-shot (a speculative lineage
+      // origin, an internal one-shot) and opts out of that re-run: it drops the
+      // write instead of re-running to resolve names.
+      const eventCell = runtime.getCell<number>(
+        space,
+        "retries-false-inspace-resolution",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      let onCommitStatus: string | undefined;
+      const handler: EventHandler = (_handlerTx, _event) => {
+        attempts++;
+        throw new RetryImmediately();
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      // retries: false opts out of both the commit-retry window and the
+      // inSpace-name resolution re-run. The final-outcome callback still fires
+      // once for the dropped one-shot.
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        false,
+        (committedTx) => {
+          onCommitStatus = committedTx.status().status;
+        },
+      );
+
+      await runtime.idle();
+      // Give any erroneous re-run a chance to run, then confirm none did.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
+
+      // The one-shot ran once and dropped without re-running to resolve names.
+      expect(attempts).toBe(1);
+      expect(onCommitStatus).toBeDefined();
     },
   );
 });
