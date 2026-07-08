@@ -45,6 +45,9 @@ Deno.test({
       modernCellRep: true,
       persistentSchedulerState: true,
       eagerSourceAnnotation: false,
+      // Default ON for the non-home root; home stays off.
+      systemPatternAutoUpdate: true,
+      systemPatternAutoUpdateHome: undefined,
     });
   },
 });
