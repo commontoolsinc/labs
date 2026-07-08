@@ -82,9 +82,15 @@ Key mechanism notes:
   validates the instrument against it (lineage there is true *by
   construction*; if the probe reports nulls there, the probe is broken).
 - `CfHelpers.createHelperCall` smr-preserves everything it builds (anchored to
-  its `originalNode` arg). That smr is the most fragile channel: it lives on
-  `emitNode`, which nothing copies — any later `create*` rebuild silently
-  drops it. That is exactly what SchemaInjection does.
+  its `originalNode` arg). smr lives on `emitNode`; a later `create*` rebuild
+  silently drops it — which is exactly what SchemaInjection did.
+  **Correction (2026-07-08, verified against TS 5.9.2 source during CT-1868):**
+  smr is NOT lost through `update*`/`setOriginalNode` — `setOriginalNode`
+  merges the original's `emitNode` (including `sourceMapRange`) onto the new
+  node (`typescript.js` `setOriginalNode`/`mergeEmitNode`). So smr dies only
+  at unanchored `create*` sites; it rides every `update*` rebuild for free.
+  This refuted the original N8 rationale (§5) and is why smr became the
+  shipped lineage carrier (§6a).
 - The hoisting stage itself is lineage-neutral (it relocates the inner call
   node and `update*`s the site) and already uses `setOriginalNode` for
   checker-identity (`__cfLift_N` identifier → inner call, so
@@ -179,24 +185,33 @@ gate (§8).
 
 ## 5. The narrow fix set (all sites probe- or read-verified on 39afdb62b)
 
-One shared helper (§6) applied at the sites below. Anchor = the authored-or-
-predecessor node, verified in scope at each site.
+Fix-shape column shows **what CT-1868 actually shipped** (2026-07-08) — the
+original plan (full `preserveLineage` everywhere + `create→update*` in
+SchemaInjection) was revised by the emit-invariance gate and the fixture
+suite, which proved textRange/original are observable channels at most sites;
+§6a has the shipped channel rules. Anchor = the authored-or-predecessor node,
+verified in scope at each site.
 
 | # | Site | Materializes | Anchor in scope | Fix shape |
 | --- | --- | --- | --- | --- |
-| N1 | `closures/utils/pattern-builder.ts:170` (`buildCallback`) and `:316` (`buildHandlerCallback`) | every rebuilt closure callback (computed-origin, array-method, inline-handler — all strategies route through here) | `originalCallback` param | `preserveLineage` on the returned function |
+| N1 | `closures/utils/pattern-builder.ts:170` (`buildCallback`) and `:316` (`buildHandlerCallback`) | every rebuilt closure callback (computed-origin, array-method, inline-handler — all strategies route through here) | `originalCallback` param | `preserveSourceMapRange` (smr-only; the full triple flips arrow-head printing and feeds schema derivation — §6a) |
 | N2 | `closures/strategies/lift-applied-strategy.ts:587` | outer lift-applied call | `inputCall` | `preserveLineage` |
-| N3 | `transformers/expression-rewrite/rewrite-helpers.ts:160` / `:177` | wrapper arrow + outer applied call | `expression` | `preserveLineage` |
-| N4 | `transformers/builtins/lift-applied.ts:224` / `:270` | wrapper arrow + outer applied call | `expression` | `preserveLineage` |
+| N3 | `transformers/expression-rewrite/rewrite-helpers.ts:160` / `:177` | wrapper arrow + outer applied call | `expression` | `preserveSourceMapRange` (a wrapper is NOT the wrapped expression's semantic predecessor — claiming its identity trips the compute-owned marker invariant; §6a) |
+| N4 | `transformers/builtins/lift-applied.ts:224` / `:270` | wrapper arrow + outer applied call | `expression` | `preserveSourceMapRange` (a wrapper is NOT the wrapped expression's semantic predecessor — claiming its identity trips the compute-owned marker invariant; §6a) |
 | N5 | `closures/strategies/array-method-transform.ts:297` | `mapWithPattern` call | `methodCall` | `preserveLineage` |
-| N6 | `closures/utils/capture-scaffold.ts:54` | outer applied handler call (inline-closure handlers) | `originalNode` | `preserveLineage` (direct parallel of N2/N3/N4 outers; sweep-found, spot-verified) |
-| N7 | `transformers/schema-injection.ts` builder-call rebuild family: `:1489`, `:2379–:2410` (self-verified) + `:2728`, `:3190`, `:3289`, `:3520`, `:3729`, `:3818`, `:3895`, `:3985`, `:4080` and cluster `:985`, `:3782` (sweep-enumerated; `:2728`/`:3190` spot-verified — re-verify each at implementation) | every builder call SchemaInjection rebuilds to splice/prepend/append schemas — the immediate predecessor of the hoisting stage, so this family alone strips whatever survives stages 8–12 | `node` / `innerLiftCall` | **create→`factory.update*`** (these are literally update-the-arguments operations; update* preserves textRange+original for free) |
-| N8 (optional strengthener) | `core/cf-helpers.ts` `createHelperCall` | inner helper calls | already smr-anchored | pass `identityNode` so the original-chain rides too |
+| N6 | `closures/utils/capture-scaffold.ts:54` | outer applied handler call (inline-closure handlers) | `originalNode` | `preserveSourceMapRange` (survives to the printer at its JSX site — a real textRange reflows ternary/JSX layout; sweep-found, spot-verified) |
+| N7 | `transformers/schema-injection.ts` builder-call rebuild family: `:1489`, `:2379–:2410` (self-verified) + `:2728`, `:3190`, `:3289`, `:3520`, `:3729`, `:3818`, `:3895`, `:3985`, `:4080` and cluster `:985`, `:3782` (sweep-enumerated; `:2728`/`:3190` spot-verified — re-verify each at implementation) | every builder call SchemaInjection rebuilds to splice/prepend/append schemas — the immediate predecessor of the hoisting stage, so this family alone strips whatever survives stages 8–12 | `node` / `innerLiftCall` | **`create*` + `preserveSourceMapRange`** — NOT the originally-planned `update*`: its "free" textRange/original are precisely the observable channels (kitchensink JSX reflow; typeRegistry resurfacing via `getTypeAtLocationWithFallback` made module-scope-cf-data wrap a hoisted lift). Shipped as 16 smr-carry sites; anchors: inner rebuilds → `innerLiftCall`, outers/direct → `node`, asScope callee → `node.expression` |
+| N8 (**DROPPED**) | `core/cf-helpers.ts` `createHelperCall` | inner helper calls | already smr-anchored | Implemented, then reverted: the premise (smr doesn't ride `update*`) was refuted at TS source level (§2 correction), so N8 added no recovery; and helper-call original chains are exactly the §6 identity hazard. `createHelperCall` at HEAD already suffices |
 
 "Narrow" here means **builder-path-complete**: every site that materializes or
 rebuilds what `BuilderCallHoistingTransformer` consumes (builder calls, inner
-calls, callbacks — hoisted AND in-place). ~22 edit sites total, the
-schema-injection family being mechanical create→update conversions.
+calls, callbacks — hoisted AND in-place). Shipped as ~24 edit sites; full
+`preserveLineage` survives only at N2/N5 (gate-proven inert — N2's channels
+are consumed and re-stripped at stage 13 before printing; N5's textRange is
+why the mapWithPattern outer recovers `self→`), smr-carry everywhere else.
+Acceptance verified per §4 (all 16 probe lines recover correct authored
+snippets) and guarded by `test/lineage-regression.test.ts` (bite-verified:
+reverting schema-injection.ts makes it fail).
 
 Notes:
 - N6/N7's `update*` switch also future-proofs against the smr-fragility class:
@@ -247,11 +262,15 @@ throughout).
   `__cfHelpers` identifier's original at the module's helper binding so the
   checker resolves it), position goes via smr and original carries identity.
   Same move as builder-call-hoisting's `setOriginalNode(name, innerCall)`.
-  Keep the name for now; a follow-up may fold its non-identity uses into
-  `preserveLineage` and rename what remains (candidate:
-  `preserveSourceMapRange`, aligning with the TS API it wraps). Reading note:
-  its `ts.getSourceMapRange(x) ?? x` has a dead `??` — `getSourceMapRange`
-  never returns undefined.
+  Keep the name for now. CT-1868 added a third helper,
+  `ast/utils.ts` **`preserveSourceMapRange(node, origin)`** (smr-only free
+  function, the shipped default carrier — §6a), which functionally overlaps
+  `preserveNodeSourceMap`'s no-`identityNode` mode; the acknowledged follow-up
+  (fold into the hygiene pass or CT-1869) is to migrate
+  `preserveNodeSourceMap`'s non-identity callers onto it, leaving the method
+  only for the genuine identity/position-divergence sites. Reading note:
+  `preserveNodeSourceMap`'s `ts.getSourceMapRange(x) ?? x` has a dead `??` —
+  `getSourceMapRange` never returns undefined.
 
 **Hazards (why this isn't a mechanical sweep):**
 
@@ -264,6 +283,37 @@ throughout).
   resolver walk originals). Giving rebuilt nodes real originals feeds those
   fallbacks new — almost certainly more-correct — answers. Mostly a feature;
   reason for the full gate per site and for broad needing per-site judgment.
+
+### 6a. Shipped channel rules (CT-1868 implementation findings, 2026-07-08)
+
+The hazards above were not theoretical — the emit-invariance gate and the
+fixture suite rejected the full triple at most sites. What shipped:
+**sourceMapRange is the lineage carrier; full lineage only where gate-proven
+inert.** The mechanisms, each observed and root-caused during implementation
+(full detail in the `preserveLineage`/`preserveSourceMapRange` doc comments,
+`ast/utils.ts`):
+
+- **`setTextRange` is an observable channel.** A real arrow `pos` alongside
+  `pos=-1` params flips the printer's `canEmitSimpleArrowHead`
+  (`x =>` → `(x) =>`); real positions on calls printed inside synthesized
+  containers reflow JSX/ternary line-breaks.
+- **`setOriginalNode` is an observable channel.** Originals feed
+  `getTypeAtLocationWithFallback` (changes derived schemas: `asCell`,
+  `items`, `$defs`), resurface `typeRegistry` entries
+  (module-scope-cf-data wrapped a hoisted lift application it previously
+  left bare), and hit the cross-stage marker registries
+  (`markSyntheticComputeOwnedSubtree` → `#hasWithOriginal`): a WRAPPER whose
+  original points into the subtree it wraps reads as compute-owned and trips
+  the array-method context invariant.
+- **`sourceMapRange` is observable by nothing but sourcemaps** — not the
+  printer's text output, not schema/type resolution, not the markers — and it
+  rides `update*` rebuilds via `setOriginalNode`'s emitNode merge (§2
+  correction). Hence: the safe-everywhere carrier, sufficient for A′.
+- **Wrapper-vs-replacement matters more than anticipated**: a node that WRAPS
+  authored content (wrapper arrow, applied wrapper call) is not that
+  content's semantic predecessor — position yes (smr), identity no. Only
+  same-semantic-unit replacements may take full `preserveLineage`, and only
+  after the gate proves the channels inert there (currently: N2, N5).
 
 ## 7. Narrow vs broad — decision and pricing
 
@@ -315,6 +365,13 @@ lowering), and none of it gates A′. It gets its own ticket with the sweep
 table as the work list, sequenced after A′'s injection design rather than
 before.
 
+**CT-1869 implementers, carry §6a:** the implementation proved the per-site
+judgment is not just "is the anchor's span correct" but **"does textRange
+reach the printer here"** and **"does an original reach a marker/typeRegistry
+consumer here."** Default to `preserveSourceMapRange`; escalate to full
+`preserveLineage` only with the emit-invariance check (byte-diff
+`--show-transformed` on corpus patterns) and the full fixture suite green.
+
 ## 8. Verification discipline for the fix PR
 
 - Full gate before green: fmt + lint + check + the FULL ts-transformers suite
@@ -336,8 +393,14 @@ before.
    - *Where to inject*: at `BuilderCallHoistingTransformer`, which already
      visits every hoisted builder AND every in-place/authored builder
      (`collectTopLevelBuilderArtifactNames`) AND `export default pattern(…)`;
-     recovered authored position = walk `getOriginalNode`/smr of the inner
-     call + callback (the §3 probe's `recovered` logic is the prototype).
+     recovered authored position = the `recoverPosition` walk in
+     `test/lineage-regression.test.ts` (own range → explicit sourceMapRange →
+     original-chain terminal) — that function is the A′ prototype. Post-1868,
+     **smr is the load-bearing channel** (§6a): read positions via
+     `getSourceMapRange`, do NOT rely on original chains (dropped at most
+     sites by design), and note the authored binding name for the `fn.name`
+     gap now comes from position→source-text lookup, not from an original
+     node.
    - *What shape*: open — candidates: extra argument on the builder call
      (schema-injection-style splice; runtime signature change), a property in
      the `__cfReg` registration (registrar contract change — note exported
