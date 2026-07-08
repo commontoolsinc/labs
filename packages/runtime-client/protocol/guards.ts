@@ -19,6 +19,7 @@ import {
   RequestType,
   TelemetryNotification,
   VDomBatchNotification,
+  VersionSkewNotification,
 } from "./types.ts";
 
 export function isCellRef(value: unknown): value is CellRef {
@@ -90,7 +91,8 @@ export function isIPCRemoteNotification(
   return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
-    isVDomBatchNotification(value) || isPendingWritesNotification(value);
+    isVDomBatchNotification(value) || isPendingWritesNotification(value) ||
+    isVersionSkewNotification(value);
 }
 
 export function isCellUpdateNotification(
@@ -163,5 +165,15 @@ export function isVDomBatchNotification(
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
     Array.isArray(value.ops)
+  );
+}
+
+export function isVersionSkewNotification(
+  value: unknown,
+): value is VersionSkewNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.VersionSkew &&
+    typeof value.space === "string"
   );
 }

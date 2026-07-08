@@ -363,6 +363,8 @@ export type MetaLinkField =
 export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
+  | "patternSource" // provenance: the source a piece tracks for updates (a
+  // toolshed pattern path, or later a `cf:` fabric ref)
   | "internal"
   | "schema"
   | "slug"

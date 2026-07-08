@@ -3,6 +3,10 @@ import { expect } from "@std/expect";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/patterns/patterns.index.ts";
+import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
+import { classifyPatternError } from "@/routes/patterns/patterns.handlers.ts";
+
+const IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -113,6 +117,99 @@ describe("Patterns API", () => {
         "/api/patterns/data:text",
       );
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe("?identity", () => {
+    it("returns the content identity of system/default-app.tsx as text/plain", async () => {
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toContain("text/plain");
+      const identity = (await response.text()).trim();
+      expect(identity).toMatch(IDENTITY_RE);
+    });
+
+    it("matches the shared resolveEntryIdentity over the real closure (HTTP-boundary drift guard)", async () => {
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+      );
+      const httpIdentity = (await response.text()).trim();
+      // The same value the shared helper computes over default-app.tsx's actual
+      // authored import closure — proves the endpoint wires through the runner
+      // helper AND that the real system pattern's closure resolves cleanly.
+      const direct = await new PatternsServer().identity(
+        "system/default-app.tsx",
+      );
+      expect(httpIdentity).toBe(direct);
+    });
+
+    it("computes an identity for system/home.tsx", async () => {
+      const response = await app.request(
+        "/api/patterns/system/home.tsx?identity",
+      );
+      expect(response.status).toBe(200);
+      expect((await response.text()).trim()).toMatch(IDENTITY_RE);
+    });
+
+    it("is stable across requests", async () => {
+      const a = await (await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+      )).text();
+      const b = await (await app.request(
+        "/api/patterns/system/default-app.tsx?identity",
+      )).text();
+      expect(a).toBe(b);
+    });
+
+    it("still serves source when identity is absent", async () => {
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx",
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toContain(
+        "text/typescript-jsx",
+      );
+      expect(await response.text()).toContain("export default pattern");
+    });
+
+    it("returns 404 for ?identity on a non-existent pattern", async () => {
+      const response = await app.request(
+        "/api/patterns/system/does-not-exist.tsx?identity",
+      );
+      expect(response.status).toBe(404);
+    });
+  });
+
+  describe("classifyPatternError", () => {
+    it("maps a not-found error to 404", () => {
+      expect(classifyPatternError(new Error("Pattern file not found: x")))
+        .toEqual({ status: 404, body: { error: "File not found" } });
+    });
+    it("maps an incomplete-closure error to 400 with the reason", () => {
+      const err = new Error("incomplete closure: './x' in '/y' ...");
+      expect(classifyPatternError(err)).toEqual({
+        status: 400,
+        body: { error: err.message },
+      });
+    });
+    it("maps a fabric-import error to 400 with the reason", () => {
+      const err = new Error("fabric import 'cf:pattern/a' in '/y' ...");
+      expect(classifyPatternError(err)).toEqual({
+        status: 400,
+        body: { error: err.message },
+      });
+    });
+    it("maps anything else to 500", () => {
+      expect(classifyPatternError(new Error("boom"))).toEqual({
+        status: 500,
+        body: { error: "Internal server error" },
+      });
+      expect(classifyPatternError("not an error")).toEqual({
+        status: 500,
+        body: { error: "Internal server error" },
+      });
     });
   });
 

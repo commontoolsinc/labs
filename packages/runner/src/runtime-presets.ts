@@ -93,6 +93,7 @@ import type {
   NavigateCallback,
   PieceCreatedCallback,
   RuntimeOptions,
+  VersionSkewHandler,
 } from "./runtime.ts";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,8 @@ import type {
 export const RUNTIME_OPTION_KEYS = [
   "apiUrl",
   "spaceHostMap",
+  "clientVersion",
+  "onVersionSkew",
   "storageManager",
   "consoleHandler",
   "errorHandlers",
@@ -167,6 +170,8 @@ export const EXPERIMENTAL_ENV_VARS = {
   // Scheduler-v2 lineage (#4090): no env exposure yet; set programmatically
   // by its tests. Wire an env var here (one line) when rollout wants it.
   commitPreconditions: null,
+  systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
+  systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -278,6 +283,8 @@ export interface PatternTestPresetParams extends CoreParams {
 export interface BrowserWorkerPresetParams extends CoreParams {
   /** Space DID → host base URL map (federation); decided by the shell host. */
   spaceHostMap?: Record<string, string>;
+  /** This client build's git sha, for the system-pattern update version gate. */
+  clientVersion?: string;
   /** Host-controlled rollout dials, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   cfcFlowLabels?: CfcFlowLabelsMode;
@@ -287,6 +294,8 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
+  /** System-pattern update version-skew signal → shell IPC. */
+  onVersionSkew?: VersionSkewHandler;
 }
 
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
@@ -390,6 +399,9 @@ export const runtimePresets = {
       ...(params.spaceHostMap !== undefined
         ? { spaceHostMap: params.spaceHostMap }
         : {}),
+      ...(params.clientVersion !== undefined
+        ? { clientVersion: params.clientVersion }
+        : {}),
       ...(params.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: params.cfcEnforcementMode }
         : {}),
@@ -413,6 +425,9 @@ export const runtimePresets = {
         : {}),
       ...(params.pieceCreatedCallback !== undefined
         ? { pieceCreatedCallback: params.pieceCreatedCallback }
+        : {}),
+      ...(params.onVersionSkew !== undefined
+        ? { onVersionSkew: params.onVersionSkew }
         : {}),
     };
   },
