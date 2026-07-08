@@ -1,9 +1,12 @@
 import {
   type Cell,
   entityIdFrom,
+  type EnvReader,
+  experimentalOptionsFromEnv,
   type JSONSchema,
   type ModuleByteCache,
   Runtime,
+  runtimePresets,
   RuntimeProgram,
   type Schema,
 } from "@commonfabric/runner";
@@ -26,6 +29,11 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 // the logger is disabled, so controller phases show up in the load summaries
 // (browser worker included) as `piece/phase/<label>`.
 const pieceTimingLogger = getLogger("piece", { enabled: false });
+
+// This module can load outside Deno (browser-safe storage import above), so
+// env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
+const readEnv: EnvReader = (key) =>
+  typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
 
 async function timePiecesPhase<T>(
   label: string,
@@ -162,20 +170,23 @@ export class PiecesController<T = unknown> {
     moduleByteCache?: ModuleByteCache;
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
-    const runtime = new Runtime({
+    // Shared first-party posture for client runtimes against a deployed API
+    // (CT-1814); the CFC pin this site previously restated lives in the
+    // preset core. Trust provenance stays a visible delta of this controller.
+    const runtime = new Runtime(runtimePresets.remoteClient({
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
         memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
-      cfcEnforcementMode: "enforce-explicit",
+      experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
       }),
-    });
+    }));
 
     const manager = new PieceManager(session, runtime);
     await manager.synced();

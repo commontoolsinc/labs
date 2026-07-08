@@ -1,21 +1,5 @@
 import { z } from "zod";
 
-/**
- * Results in `true` (on), `false` (off), or `undefined` (default).
- */
-function flagValue() {
-  return z.string().default("default").transform((v) => {
-    switch (v) {
-      case "default":
-        return undefined;
-      case "false":
-        return false;
-      default:
-        return true;
-    }
-  });
-}
-
 const envSchema = z.object({
   // Job queue settings
   //MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
@@ -48,15 +32,12 @@ const envSchema = z.object({
   ),
   OTEL_SERVICE_NAME: z.string().default("bg-piece-service"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
+  // EXPERIMENTAL_* feature flags are no longer declared here: the runtime
+  // construction site reads them through the canonical mapping
+  // (`experimentalOptionsFromEnv` / EXPERIMENTAL_ENV_VARS in
+  // @commonfabric/runner runtime-presets), shared with toolshed and the CLI
+  // so the wirings cannot drift (CT-1814).
 
-  // Experimental feature flags. See `ExperimentalOptions` in `runner`.
-  // Note: We intentionally avoid `z.coerce.boolean()` here. Zod's coerce uses
-  // `Boolean()`, which treats any non-empty string as truthy -- so setting an
-  // env var to the string `"false"` would incorrectly enable the flag. The
-  // other boolean env vars in this file have the same latent bug.
-  EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
-  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
-  EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: flagValue(),
   // Background Piece Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
