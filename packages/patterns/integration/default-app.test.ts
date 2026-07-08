@@ -487,9 +487,8 @@ describe("default-app flow test", () => {
       await waitForRuntimeIdle(page);
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
-      await waitFor(async () => {
-        const noteTitles = await collectNoteTitlesInList(page);
-        return noteTitles.length > noteCountBefore;
+      await waitForCondition(page, noteTitlesExceed, {
+        args: [noteCountBefore],
       });
 
       const noteTitlesAfter = await collectNoteTitlesInList(page);
@@ -675,9 +674,26 @@ describe("default-app flow test", () => {
       await clickButtonWithText(page, "Notes");
       await clickButtonWithText(page, "New Notebook");
       try {
-        await waitFor(async () => {
-          const state = await collectNotebookRenderState(page);
-          return state.isNotebook;
+        await waitForCondition(page, async () => {
+          const commonfabric = globalThis.commonfabric as
+            | { readCell?: (options: { id: string }) => Promise<unknown> }
+            | undefined;
+          const view = globalThis.app?.serialize?.()?.view;
+          const pieceId = view && typeof view === "object" &&
+              "pieceId" in view && typeof view.pieceId === "string"
+            ? view.pieceId
+            : undefined;
+          if (!pieceId || !commonfabric?.readCell) return false;
+          let current: unknown;
+          const originalLog = console.log;
+          try {
+            console.log = () => {};
+            current = await commonfabric.readCell({ id: pieceId });
+          } finally {
+            console.log = originalLog;
+          }
+          return (current as { isNotebook?: unknown } | undefined)
+            ?.isNotebook === true;
         });
       } catch (error) {
         console.log(
@@ -721,12 +737,8 @@ describe("default-app flow test", () => {
       );
 
       try {
-        await waitFor(async () => {
-          const state = await collectNotebookSourceState(page);
-          return state.argumentNotesLength === noteCreates &&
-            state.noteCount === noteCreates &&
-            state.showNewNotePrompt === false &&
-            state.usedCreateAnotherNote === false;
+        await waitForCondition(page, notebookSourceStateMatches, {
+          args: [noteCreates],
         });
         await waitForRuntimeSynced(page);
       } catch (_) {
@@ -1562,7 +1574,7 @@ async function waitForHomePageReady(
   }, { args: [options.spaceName] });
 
   if (options.expectNoteInList) {
-    await waitFor(() => findNoteInList(page));
+    await waitForCondition(page, noteTitlesExceed, { args: [0] });
   }
 
   await waitForRuntimeIdle(page);
@@ -1664,6 +1676,88 @@ async function collectNotebookSourceState(page: Page): Promise<{
     };
   });
 }
+
+// Serialized into the page by waitForCondition: read the notebook's argument
+// and internal cells and report whether the rapidly created notes have all
+// landed — `expectedCount` notes present, the new-note prompt closed, and the
+// "create another" flag cleared. Inlines the collection that
+// collectNotebookSourceState performs so the wait resolves the instant the
+// source state converges rather than on a polling tick.
+const notebookSourceStateMatches = async (
+  _probe: ProbeApi,
+  expectedCount: number,
+): Promise<boolean> => {
+  const api = globalThis.commonfabric as {
+    readCell?: (options: {
+      id: string;
+      path?: string[];
+      meta?: "argument" | "internal";
+    }) => Promise<unknown>;
+  } | undefined;
+
+  const view = globalThis.app?.serialize?.()?.view;
+  const notebookEntityId = view && typeof view === "object" &&
+      "pieceId" in view && typeof view.pieceId === "string"
+    ? view.pieceId
+    : undefined;
+  if (!notebookEntityId || !api?.readCell) return false;
+
+  const resolveInternalManifest = async (
+    manifest: unknown,
+  ): Promise<Record<string, unknown>> => {
+    const resolved: Record<string, unknown> = {};
+    if (!Array.isArray(manifest)) return resolved;
+    for (const entry of manifest) {
+      if (entry === null || typeof entry !== "object") continue;
+      const { partialCause, link } = entry as {
+        partialCause?: unknown;
+        link?: { sync?: () => Promise<unknown> };
+      };
+      const key = typeof partialCause === "string"
+        ? partialCause
+        : JSON.stringify(partialCause) ?? String(partialCause);
+      if (link && typeof link.sync === "function") {
+        resolved[key] = await link.sync();
+      }
+    }
+    return resolved;
+  };
+
+  let notebookArgument: unknown;
+  let notebookInternalManifest: unknown;
+  const originalLog = console.log;
+  try {
+    console.log = () => {};
+    notebookArgument = await api.readCell({
+      id: notebookEntityId,
+      meta: "argument",
+    });
+    notebookInternalManifest = await api.readCell({
+      id: notebookEntityId,
+      meta: "internal",
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  const notebookInternal = await resolveInternalManifest(
+    notebookInternalManifest,
+  );
+
+  const argumentNotes = (notebookArgument as { notes?: unknown[] } | undefined)
+    ?.notes;
+  const argumentNotesLength = Array.isArray(argumentNotes)
+    ? argumentNotes.length
+    : undefined;
+  const internal = notebookInternal as {
+    noteCount?: unknown;
+    showNewNotePrompt?: unknown;
+    usedCreateAnotherNote?: unknown;
+  };
+  return argumentNotesLength === expectedCount &&
+    internal.noteCount === expectedCount &&
+    internal.showNewNotePrompt === false &&
+    internal.usedCreateAnotherNote === false;
+};
 
 async function collectHomeLoadSummaryFromFreshPage(
   shell: ShellIntegration,
@@ -3464,6 +3558,23 @@ async function clickPieceLinkWithText(
 async function findNoteInList(page: Page): Promise<boolean> {
   return (await collectNoteTitlesInList(page)).length > 0;
 }
+
+// Serialized into the page by waitForCondition: count the unique rendered
+// "📝 New Note #<hash>" titles across the document and every shadow root and
+// report whether more than `minCount` are present. Inlines the collection that
+// collectNoteTitlesInList performs so the wait resolves the instant the list
+// grows rather than on a polling tick.
+const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
+  const titles = new Set<string>();
+  for (const element of probe.collect("*")) {
+    const text = element.textContent;
+    if (!text) continue;
+    for (const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)) {
+      titles.add(match[0]);
+    }
+  }
+  return titles.size > minCount;
+};
 
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {

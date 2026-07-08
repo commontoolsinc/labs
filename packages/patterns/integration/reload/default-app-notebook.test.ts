@@ -53,9 +53,26 @@ describe("default-app notebook reload integration test", () => {
     await waitForRuntimeIdle(page);
     await clickButtonWithText(page, "Notes");
     await clickButtonWithText(page, "New Notebook");
-    await waitFor(async () => {
-      const state = await collectNotebookRenderState(page);
-      return state.isNotebook;
+    await waitForCondition(page, async () => {
+      const commonfabric = globalThis.commonfabric as
+        | { readCell?: (options: { id: string }) => Promise<unknown> }
+        | undefined;
+      const view = globalThis.app?.serialize?.()?.view;
+      const pieceId = view && typeof view === "object" && "pieceId" in view &&
+          typeof view.pieceId === "string"
+        ? view.pieceId
+        : undefined;
+      if (!pieceId || !commonfabric?.readCell) return false;
+      let current: unknown;
+      const originalLog = console.log;
+      try {
+        console.log = () => {};
+        current = await commonfabric.readCell({ id: pieceId });
+      } finally {
+        console.log = originalLog;
+      }
+      return (current as { isNotebook?: unknown } | undefined)
+        ?.isNotebook === true;
     });
 
     await waitForCondition(
@@ -85,14 +102,10 @@ describe("default-app notebook reload integration test", () => {
       "Expected final Create click to succeed",
     );
 
-    await waitFor(async () => {
-      await waitForRuntimeIdle(page);
-      const state = await collectNotebookSourceState(page);
-      return state.argumentNotesLength === noteCreates &&
-        state.noteCount === noteCreates &&
-        state.showNewNotePrompt === false &&
-        state.usedCreateAnotherNote === false;
-    }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForCondition(page, notebookSourceStateMatches, {
+      args: [noteCreates],
+      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
+    });
 
     await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
 
@@ -101,12 +114,10 @@ describe("default-app notebook reload integration test", () => {
     await page.applyConsoleFormatter();
     await shell.login(identity);
 
-    await waitFor(async () => {
-      const state = await collectNotebookRenderState(page);
-      return state.isNotebook &&
-        state.noteCount === noteCreates &&
-        state.renderedNoteChips === noteCreates;
-    }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForCondition(page, notebookReloadRendered, {
+      args: [noteCreates],
+      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
+    });
     await waitForRuntimeIdle(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
 
     const reloadRenderState = await collectNotebookRenderState(page);
@@ -268,103 +279,128 @@ async function resetEventInvocationTrace(page: Page): Promise<boolean> {
   });
 }
 
-async function collectNotebookSourceState(page: Page): Promise<{
-  notebookEntityId?: string;
-  argumentNotesLength?: number;
-  noteCount?: number;
-  showNewNotePrompt?: boolean;
-  usedCreateAnotherNote?: boolean;
-}> {
-  return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: { idle?: () => Promise<void> };
-      readCell?: (options: {
-        id: string;
-        path?: string[];
-        meta?: "argument" | "internal";
-      }) => Promise<unknown>;
-    } | undefined;
-    await api?.rt?.idle?.();
+// Serialized into the page by waitForCondition: drain the worker, read the
+// notebook's argument and internal cells, and report whether the rapidly
+// created notes have all landed — `expectedCount` notes present, the new-note
+// prompt closed, and the "create another" flag cleared. Inlines the collection
+// that collectNotebookSourceState performs (including its runtime idle) so the
+// wait resolves the instant the source state converges rather than on a poll.
+const notebookSourceStateMatches = async (
+  _probe: ProbeApi,
+  expectedCount: number,
+): Promise<boolean> => {
+  const api = globalThis.commonfabric as {
+    rt?: { idle?: () => Promise<void> };
+    readCell?: (options: {
+      id: string;
+      path?: string[];
+      meta?: "argument" | "internal";
+    }) => Promise<unknown>;
+  } | undefined;
+  await api?.rt?.idle?.();
 
-    const appState = globalThis.app?.serialize?.();
-    const view = appState?.view;
-    const notebookEntityId = view && typeof view === "object" &&
-        "pieceId" in view && typeof view.pieceId === "string"
-      ? view.pieceId
-      : undefined;
-    if (!notebookEntityId || !api?.readCell) {
-      return { notebookEntityId };
-    }
+  const view = globalThis.app?.serialize?.()?.view;
+  const notebookEntityId = view && typeof view === "object" &&
+      "pieceId" in view && typeof view.pieceId === "string"
+    ? view.pieceId
+    : undefined;
+  if (!notebookEntityId || !api?.readCell) return false;
 
-    const resolveInternalManifest = async (
-      manifest: unknown,
-    ): Promise<Record<string, unknown>> => {
-      const resolved: Record<string, unknown> = {};
-      if (!Array.isArray(manifest)) return resolved;
-
-      for (const entry of manifest) {
-        if (entry === null || typeof entry !== "object") continue;
-        const { partialCause, link } = entry as {
-          partialCause?: unknown;
-          link?: { sync?: () => Promise<unknown> };
-        };
-        const key = typeof partialCause === "string"
-          ? partialCause
-          : JSON.stringify(partialCause) ?? String(partialCause);
-        if (link && typeof link.sync === "function") {
-          resolved[key] = await link.sync();
-        }
+  const resolveInternalManifest = async (
+    manifest: unknown,
+  ): Promise<Record<string, unknown>> => {
+    const resolved: Record<string, unknown> = {};
+    if (!Array.isArray(manifest)) return resolved;
+    for (const entry of manifest) {
+      if (entry === null || typeof entry !== "object") continue;
+      const { partialCause, link } = entry as {
+        partialCause?: unknown;
+        link?: { sync?: () => Promise<unknown> };
+      };
+      const key = typeof partialCause === "string"
+        ? partialCause
+        : JSON.stringify(partialCause) ?? String(partialCause);
+      if (link && typeof link.sync === "function") {
+        resolved[key] = await link.sync();
       }
-      return resolved;
-    };
-
-    let notebookArgument: unknown;
-    let notebookInternalManifest: unknown;
-    const originalLog = console.log;
-    try {
-      console.log = () => {};
-      notebookArgument = await api.readCell({
-        id: notebookEntityId,
-        meta: "argument",
-      });
-      notebookInternalManifest = await api.readCell({
-        id: notebookEntityId,
-        meta: "internal",
-      });
-    } finally {
-      console.log = originalLog;
     }
-    const notebookInternal = await resolveInternalManifest(
-      notebookInternalManifest,
-    );
+    return resolved;
+  };
 
-    return {
-      notebookEntityId,
-      argumentNotesLength: Array.isArray(
-          (notebookArgument as { notes?: unknown[] } | undefined)?.notes,
-        )
-        ? (notebookArgument as { notes: unknown[] }).notes.length
-        : undefined,
-      noteCount:
-        typeof (notebookInternal as { noteCount?: unknown } | undefined)
-            ?.noteCount === "number"
-          ? (notebookInternal as { noteCount: number }).noteCount
-          : undefined,
-      showNewNotePrompt:
-        typeof (notebookInternal as { showNewNotePrompt?: unknown } | undefined)
-            ?.showNewNotePrompt === "boolean"
-          ? (notebookInternal as { showNewNotePrompt: boolean })
-            .showNewNotePrompt
-          : undefined,
-      usedCreateAnotherNote: typeof (
-          notebookInternal as { usedCreateAnotherNote?: unknown } | undefined
-        )?.usedCreateAnotherNote === "boolean"
-        ? (notebookInternal as { usedCreateAnotherNote: boolean })
-          .usedCreateAnotherNote
-        : undefined,
-    };
-  });
-}
+  let notebookArgument: unknown;
+  let notebookInternalManifest: unknown;
+  const originalLog = console.log;
+  try {
+    console.log = () => {};
+    notebookArgument = await api.readCell({
+      id: notebookEntityId,
+      meta: "argument",
+    });
+    notebookInternalManifest = await api.readCell({
+      id: notebookEntityId,
+      meta: "internal",
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  const notebookInternal = await resolveInternalManifest(
+    notebookInternalManifest,
+  );
+
+  const argumentNotes = (notebookArgument as { notes?: unknown[] } | undefined)
+    ?.notes;
+  const argumentNotesLength = Array.isArray(argumentNotes)
+    ? argumentNotes.length
+    : undefined;
+  const internal = notebookInternal as {
+    noteCount?: unknown;
+    showNewNotePrompt?: unknown;
+    usedCreateAnotherNote?: unknown;
+  };
+  return argumentNotesLength === expectedCount &&
+    internal.noteCount === expectedCount &&
+    internal.showNewNotePrompt === false &&
+    internal.usedCreateAnotherNote === false;
+};
+
+// Serialized into the page by waitForCondition: report whether the reloaded
+// notebook has rehydrated to `expectedCount` notes — the piece cell reads back
+// as a notebook with that noteCount, and that many "📝 New Note" chips are
+// rendered across the document and every shadow root. Inlines the readCell and
+// cf-chip collection that collectNotebookRenderState performs.
+const notebookReloadRendered = async (
+  probe: ProbeApi,
+  expectedCount: number,
+): Promise<boolean> => {
+  const commonfabric = globalThis.commonfabric as
+    | { readCell?: (options: { id: string }) => Promise<unknown> }
+    | undefined;
+  const view = globalThis.app?.serialize?.()?.view;
+  const pieceId = view && typeof view === "object" && "pieceId" in view &&
+      typeof view.pieceId === "string"
+    ? view.pieceId
+    : undefined;
+  if (!pieceId || !commonfabric?.readCell) return false;
+  let current: { isNotebook?: unknown; noteCount?: unknown } | undefined;
+  const originalLog = console.log;
+  try {
+    console.log = () => {};
+    current = await commonfabric.readCell({ id: pieceId }) as typeof current;
+  } finally {
+    console.log = originalLog;
+  }
+  if (current?.isNotebook !== true || current.noteCount !== expectedCount) {
+    return false;
+  }
+  const renderedNoteChips = probe.collect("cf-chip").filter((element) => {
+    const label = String(
+      (element as { label?: unknown }).label ??
+        element.getAttribute("label") ?? "",
+    ).trim();
+    return label.startsWith("📝 New Note");
+  }).length;
+  return renderedNoteChips === expectedCount;
+};
 
 // Marker attribute a click predicate stamps on the button it resolved, so the
 // test can then resolve that exact element and dispatch a single trusted click
