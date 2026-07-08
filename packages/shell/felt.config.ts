@@ -19,6 +19,11 @@ const config: Config = {
       // Changing this path requires a matching update in
       // packages/shell/src/lib/runtime.ts (fetchBuildHash).
       out: "scripts/worker-runtime",
+      // The TypeScript compiler stack is reached only through the single
+      // dynamic import in deferred-compiler-stack.ts. Splitting emits it as a
+      // separate chunk loaded on first compile, so it stays out of the worker
+      // boot bundle. `index` above is a plain, unsplit bundle.
+      splitting: true,
     },
   ],
   outDir: "dist",
@@ -34,6 +39,11 @@ const config: Config = {
   esbuild: {
     sourcemap: !PRODUCTION,
     minify: PRODUCTION,
+    // Emit split chunks under scripts/ (next to worker-runtime.js) with a
+    // content hash in the name. Co-location keeps a chunk reachable by the same
+    // /scripts/* route as the worker and, being content-addressed, immutably
+    // cacheable — the worker's own hash-named import is the cache-bust.
+    chunkNames: "scripts/chunk-[hash]",
     external: [
       "source-map-support",
       "canvas",

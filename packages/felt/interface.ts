@@ -6,6 +6,12 @@ export interface EntryPoint {
   in: string;
   // JS output from `outDir`
   out: string;
+  // When set, build this entry with esbuild code splitting on, so its
+  // dynamically-imported subtree is emitted as a separate on-demand chunk
+  // instead of inlined into the entry bundle. `splitting` is a whole-build
+  // esbuild flag, so entries that opt in build in a pass isolated from those
+  // that don't — a non-splitting entry stays byte-for-byte unchanged.
+  splitting?: boolean;
 }
 
 export interface Config {
@@ -41,6 +47,13 @@ export interface Config {
 export interface ESBuildConfig {
   sourcemap?: boolean;
   minify?: boolean;
+  // esbuild `chunkNames` template applied to split output, e.g.
+  // "scripts/chunk-[hash]". Only meaningful for entries built with `splitting`.
+  // Point it at a served subdirectory so emitted chunks are reachable by the
+  // same route as the entry that imports them (and, in the dev server, are not
+  // caught by an index.html fallback for unknown top-level paths).
+  // https://esbuild.github.io/api/#chunk-names
+  chunkNames?: string;
   // https://esbuild.github.io/api/#external
   external?: string[];
   // Maps environment variables at build time to
@@ -59,6 +72,7 @@ export interface ESBuildConfig {
 export interface ResolvedEntryPoint {
   in: string;
   out: string;
+  splitting?: boolean;
 }
 
 export class ResolvedConfig {
@@ -74,6 +88,7 @@ export class ResolvedConfig {
     sourcemap: boolean;
     external: string[];
     minify: boolean;
+    chunkNames?: string;
     metafile?: string;
     define: Record<string, string | undefined>;
     supported?: Record<string, boolean>;
@@ -87,9 +102,10 @@ export class ResolvedConfig {
   constructor(partial: Config, cwd = Deno.cwd()) {
     this.cwd = cwd;
     this.outDir = join(cwd, partial.outDir ?? "dist");
-    this.entries = partial.entries.map(({ in: entry, out }) => ({
+    this.entries = partial.entries.map(({ in: entry, out, splitting }) => ({
       in: join(cwd, entry),
       out: join(this.outDir, out),
+      splitting,
     }));
     this.publicDir = join(cwd, partial?.publicDir ?? "public");
     this.watchDir = join(cwd, partial?.watchDir ?? "src");
@@ -103,6 +119,7 @@ export class ResolvedConfig {
     this.esbuild = {
       sourcemap: !!(partial?.esbuild?.sourcemap),
       minify: !!(partial?.esbuild?.minify),
+      chunkNames: partial?.esbuild?.chunkNames,
       external: partial?.esbuild?.external ?? [],
       define: partial?.esbuild?.define ?? {},
       metafile: partial?.esbuild?.metafile
