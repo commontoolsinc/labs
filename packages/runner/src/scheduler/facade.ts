@@ -82,9 +82,11 @@ import {
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
+  isConvergenceHoldActive,
   markExecuteStart,
   markNonSettlingEpisode,
   pushBoundedHistory,
+  recordBackoffEpisode,
   recordExecuteEnd,
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
@@ -1317,6 +1319,11 @@ export class Scheduler {
     settleResult: SchedulerSettleResult,
   ): void {
     if (!settleResult.backoffApplied) return;
+    // Advance the non-settling episode's backoff-pass counter BEFORE the
+    // continuation reads isConvergenceHoldActive(): the count for this pass must
+    // be reflected when idle() decides whether to hold. Must precede the
+    // markNonSettlingEpisode early-return below (which fires once per episode).
+    recordBackoffEpisode(this.settlingTracker);
     const nonSettlingTelemetry = markNonSettlingEpisode(this.settlingTracker);
     if (!nonSettlingTelemetry) return;
 
@@ -1596,7 +1603,26 @@ export class Scheduler {
       // the event-driven piece-start task (events.ts), so gating on it would
       // pause all pull scheduling on every piece-start.
       hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
+      // Reads the CURRENT settlingTracker (reassigned on reset), so it tracks
+      // the live episode counter rather than capturing a stale tracker.
+      isConvergenceHoldActive: () => this.isConvergenceHoldActive(),
+      isConvergenceBackoffDeferred: (action) =>
+        this.isConvergenceBackoffDeferred(action),
     };
+  }
+
+  private isConvergenceHoldActive(): boolean {
+    return isConvergenceHoldActive(this.settlingTracker);
+  }
+
+  // A node is convergence-backoff-deferred iff its `gate.backoffUntil` is in the
+  // future. For an already-ran computation `backoffUntil` is set exclusively by
+  // the settle-cap backoff (planBudgetBackoff); the resume initial-run hold that
+  // also rides `backoffUntil` only applies to never-ran nodes. Throttle and
+  // debounce use their own gate fields, so this cleanly excludes them.
+  private isConvergenceBackoffDeferred(action: Action): boolean {
+    const backoffUntil = this.nodes.get(action)?.gate.backoffUntil;
+    return backoffUntil !== undefined && backoffUntil > performance.now();
   }
 
   private createSubscriptionState(): SchedulerSubscriptionState {

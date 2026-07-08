@@ -10,6 +10,20 @@ export const MAX_ITERS = 10;
 export const PASS_RUN_BUDGET = MAX_ITERS;
 export const BACKOFF_BASE_MS = 250;
 export const BACKOFF_MAX_MS = 2000;
+
+// How many consecutive convergence-backoff passes an idle() waiter is held
+// across before the escape valve releases it. While a live subgraph keeps
+// hitting the settle cap, a deferred re-run of an already-ran demanded
+// computation (or a deferred effect) blocks idle() so a genuinely converging —
+// but slow (> MAX_ITERS levels) — wave is observed AFTER it settles rather than
+// mid-flight (the F1 early-resolution bug). But a truly non-converging (cyclic)
+// subgraph never settles, so after this many backoff passes idle() resolves
+// regardless (scheduler.non-settling telemetry has already fired) to keep the
+// system responsive. The bound is an episode counter, NOT `backoffStreak`:
+// markActionInvalid resets `backoffStreak` on every clean->invalid oscillation,
+// so a streak-based bound never escalates for a true cycle. See
+// SettlingTracker.backoffEpisodeCount / isConvergenceHoldActive.
+export const CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES = 8;
 export const MAX_SETTLE_STATS_HISTORY = 20;
 export const MAX_TRIGGER_TRACE_HISTORY = 400;
 export const MAX_ACTION_RUN_TRACE_HISTORY = 2000;

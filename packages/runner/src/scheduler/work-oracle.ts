@@ -64,6 +64,18 @@ export interface PullSchedulingState {
   readonly isLiveAction: (action: Action) => boolean;
   readonly hasActiveDebounceTimer: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  // True while a convergence-backoff-deferred idle-relevant node should still
+  // hold idle() open. Goes false once the current non-settling episode exhausts
+  // its backoff-pass budget, releasing idle() for a genuinely non-converging
+  // (cyclic) subgraph (the escape valve). See SettlingTracker.backoffEpisodeCount.
+  readonly isConvergenceHoldActive: () => boolean;
+  // True iff the action is deferred by a CONVERGENCE-backoff wake specifically
+  // (`gate.backoffUntil` in the future) — as opposed to a throttle/debounce
+  // freshness window. Throttle/debounce deferred re-runs of an already-ran
+  // computation must NOT block idle() (they are freshness bounds, not
+  // correctness gates); a convergence-backoff deferral means the wave has not
+  // settled and its re-run still owes a downstream effect its converged value.
+  readonly isConvergenceBackoffDeferred: (action: Action) => boolean;
   // True while ANY initial rehydration is in flight (resume from persisted
   // state). The runnable-seed set is status-based, and reload sync-fills mark
   // resuming never-ran/invalid nodes — so without a barrier the settle runs
@@ -150,11 +162,30 @@ export function assessPullWork(
   let nextWakeAt: number | undefined;
   let deferredIdleBlocking = false;
 
-  const futureRunWaitsForIdle = (action: Action): boolean =>
-    state.effects.has(action) ||
-    state.materializerIndex.isMaterializer(action) ||
-    state.pendingPullRunnableState
-      .shouldRunFirstPullComputationInDemandContext(action);
+  const futureRunWaitsForIdle = (action: Action): boolean => {
+    // Escape valve: once a non-settling episode has spent its backoff-pass
+    // budget, NO deferred node blocks idle(), so a genuinely non-converging
+    // (cyclic) subgraph still resolves idle() (the settle cap keeps the system
+    // responsive; scheduler.non-settling telemetry has fired). This gate is the
+    // reason the F1 hold below is cycle-safe.
+    if (!state.isConvergenceHoldActive()) return false;
+    return state.effects.has(action) ||
+      state.materializerIndex.isMaterializer(action) ||
+      state.pendingPullRunnableState
+        .shouldRunFirstPullComputationInDemandContext(action) ||
+      // F1: a CONVERGENCE-BACKOFF-deferred RE-RUN of an already-ran demanded
+      // computation blocks idle() until it runs. Its eventual run propagates to
+      // a live sink (isLive => its downstream cone reaches an effect/
+      // materializer) that an idle() waiter must observe; without this, idle()
+      // resolves mid-wave (the frontier hit the settle cap but its downstream
+      // effect is still clean) and callers sample a pre-convergence graph. The
+      // escape valve above bounds the hold so a true cycle (whose frontier is a
+      // perpetually-invalid demanded computation) still resolves idle(). NOTE:
+      // gated on isConvergenceBackoffDeferred — a throttle/debounce freshness
+      // window on an already-ran computation must still let idle() resolve.
+      (state.dirtyPullRunnableState.isDemandedPullComputation(action) &&
+        state.isConvergenceBackoffDeferred(action));
+  };
 
   // For a deferred idle-relevant action, fold its next eligibility into the
   // wake time and record whether idle() must wait for it. A waiting trailing

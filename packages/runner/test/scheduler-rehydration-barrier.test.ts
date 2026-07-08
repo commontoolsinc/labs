@@ -35,6 +35,8 @@ function makeState(opts: {
     hasActiveDebounceTimer: () => false,
     getNextEligibleRunTime: () => undefined,
     hasPendingInitialRehydrations: () => opts.rehydrationsPending,
+    isConvergenceHoldActive: () => true,
+    isConvergenceBackoffDeferred: () => false,
   };
 }
 

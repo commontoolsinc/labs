@@ -4,6 +4,7 @@ import type { SpaceScopeAndURI } from "./types.ts";
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
+  CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   PASS_RUN_BUDGET,
 } from "./constants.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
@@ -21,6 +22,16 @@ export interface SettlingTracker {
   lastExecuteStart: number;
   isExecuting: boolean;
   nonSettlingDetected: boolean;
+  // Count of consecutive execute passes in the current non-settling episode
+  // that applied convergence backoff. Episode-scoped: it lives as long as the
+  // tracker (the tracker is reset only on a fully quiescent continuation — a
+  // backoff-wake continuation preserves it), so it accumulates across the whole
+  // non-settling window and independently of the per-node `backoffStreak`
+  // (which markActionInvalid resets on every clean->invalid oscillation). Once
+  // it crosses CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES the convergence hold
+  // releases and idle() may resolve even with a backoff wake still armed — the
+  // escape valve for a genuinely non-converging cycle.
+  backoffEpisodeCount: number;
 }
 
 export function createSettlingTracker(): SettlingTracker {
@@ -30,7 +41,29 @@ export function createSettlingTracker(): SettlingTracker {
     lastExecuteStart: 0,
     isExecuting: false,
     nonSettlingDetected: false,
+    backoffEpisodeCount: 0,
   };
+}
+
+/**
+ * Record that this execute pass applied convergence backoff (iteration-cap or
+ * pass-budget). Called once per backoff pass; the count survives across backoff
+ * wakes (the tracker is not reset while a backoff wake is armed) and resets with
+ * the tracker when the scheduler reaches a fully quiescent continuation.
+ */
+export function recordBackoffEpisode(tracker: SettlingTracker): void {
+  tracker.backoffEpisodeCount++;
+}
+
+/**
+ * True while idle() should still be held open for deferred idle-relevant work
+ * (deferred effects/materializers and deferred re-runs of already-ran demanded
+ * computations). Returns false once the current non-settling episode has
+ * exhausted its backoff-pass budget, which is the escape valve that lets idle()
+ * resolve for a genuinely non-converging (cyclic) subgraph.
+ */
+export function isConvergenceHoldActive(tracker: SettlingTracker): boolean {
+  return tracker.backoffEpisodeCount < CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES;
 }
 
 export function markExecuteStart(
