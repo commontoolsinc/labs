@@ -489,16 +489,20 @@ re-derives.
 
 ### Fail-closed rules (consolidated)
 
-1. **Authoring:** unknown column, unknown op, unsafe regex, `any()` ⟶
-   `table()` throws. The same validation re-runs on wire-supplied specs before
-   evaluation.
+1. **Authoring:** unknown column, unknown op, unsafe regex, an integrity/
+   confidentiality op in the wrong position, or a malformed `any()` alternative
+   (a nested `all()`/`any()`) ⟶ `table()` throws. A well-formed `any(...)` is
+   accepted as an authored OR-clause (Epic E1). The same validation re-runs on
+   wire-supplied specs before evaluation.
 2. **Read, unresolvable input:** a rule input missing from the projection by
    origin, or ambiguous (two columns, same origin) ⟶ refuse the query.
 3. **Read, bad data:** evaluator `{error}` (non-string regex input,
    strict-if-present zero match, `min` miss, multi-match integrity subject) ⟶
    refuse the query.
-4. **Read, unattributable output:** any null-origin column on a rule-bearing
-   query ⟶ refuse; `skip` never applies to aggregates.
+4. **Read, unattributable output:** a null-origin column on a rule-bearing query
+   lifts by the common-alternative property (rule 2 / CFC spec §8.17.4) when a
+   reader is a static unconditional reader of every row; otherwise ⟶ refuse.
+   `skip` never applies to aggregates.
 5. **Read, ceiling exceeded:** `onExceed` decides — fail the query (default)
    or skip the row (declared opt-in, row-returning queries only).
 6. **Write, unattributable:** fail closed (Phase 2's set) — except the
@@ -566,8 +570,9 @@ function of its stored columns, recomputable at any time.
      An authored `any(sender ∨ recipients ∨ owner)` now serializes into the rule
      as one OR-clause instead of erroring at `table()` time.
    - **3.b — read-time clearance: _implemented_** (Epic E3, #4478). Filtering by
-     *who is asking* rather than a declared ceiling, on the same `onExceed`
-     surface.
+     *who is asking* via a separate `db.query({ readClearance: true })` option —
+     distinct from the declared-ceiling `onExceed`; it drops rows the reader
+     can't read regardless of `onExceed`.
    - **3.c — server-side commit evaluation: _implemented_** (Epic E4, #4552).
      The shared evaluator runs against the **true** committed rows inside
      `applyCommitTransaction` (read-back by rowid), rolling back on violation
