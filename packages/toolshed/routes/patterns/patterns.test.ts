@@ -4,6 +4,7 @@ import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/patterns/patterns.index.ts";
 import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
+import { classifyPatternError } from "@/routes/patterns/patterns.handlers.ts";
 
 const IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -178,6 +179,37 @@ describe("Patterns API", () => {
         "/api/patterns/system/does-not-exist.tsx?identity",
       );
       expect(response.status).toBe(404);
+    });
+  });
+
+  describe("classifyPatternError", () => {
+    it("maps a not-found error to 404", () => {
+      expect(classifyPatternError(new Error("Pattern file not found: x")))
+        .toEqual({ status: 404, body: { error: "File not found" } });
+    });
+    it("maps an incomplete-closure error to 400 with the reason", () => {
+      const err = new Error("incomplete closure: './x' in '/y' ...");
+      expect(classifyPatternError(err)).toEqual({
+        status: 400,
+        body: { error: err.message },
+      });
+    });
+    it("maps a fabric-import error to 400 with the reason", () => {
+      const err = new Error("fabric import 'cf:pattern/a' in '/y' ...");
+      expect(classifyPatternError(err)).toEqual({
+        status: 400,
+        body: { error: err.message },
+      });
+    });
+    it("maps anything else to 500", () => {
+      expect(classifyPatternError(new Error("boom"))).toEqual({
+        status: 500,
+        body: { error: "Internal server error" },
+      });
+      expect(classifyPatternError("not an error")).toEqual({
+        status: 500,
+        body: { error: "Internal server error" },
+      });
     });
   });
 

@@ -32,6 +32,7 @@ import {
   setPatternEnvironment,
   type SigilLink,
   unmarkUiInputBlindWriteTx,
+  type VersionSkewInfo,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -119,6 +120,7 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type VersionSkewNotification,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -160,6 +162,44 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
+}
+
+/** The worker→shell versionSkew IPC payload for a build-mismatch skip. */
+export function versionSkewNotification(
+  info: VersionSkewInfo,
+): VersionSkewNotification {
+  return {
+    type: NotificationType.VersionSkew,
+    space: info.space,
+    clientVersion: info.clientVersion,
+    toolshedVersion: info.toolshedVersion,
+  };
+}
+
+/** Post the versionSkew notification to the shell. Exported for testing. */
+export function postVersionSkew(info: VersionSkewInfo): void {
+  self.postMessage(versionSkewNotification(info));
+}
+
+/**
+ * Best-effort, non-blocking system-pattern update check for a space open. The
+ * check itself never throws (it is internally best-effort); this only logs a
+ * non-current outcome and defends against an unexpected rejection. Exported for
+ * testing.
+ */
+export function checkUpdateInBackground(
+  cc: Pick<PiecesController, "checkAndUpdateDefaultPattern">,
+  space: string,
+): void {
+  cc.checkAndUpdateDefaultPattern()
+    .then((outcome) => {
+      if (outcome === "updated" || outcome === "skipped-skew") {
+        console.log(`[space-root] update check for ${space}: ${outcome}`);
+      }
+    })
+    .catch((error) => {
+      console.warn(`[space-root] update check for ${space} threw`, error);
+    });
 }
 
 /**
@@ -559,14 +599,7 @@ export class RuntimeProcessor {
           });
         },
       ],
-      onVersionSkew: (info) => {
-        self.postMessage({
-          type: NotificationType.VersionSkew,
-          space: info.space,
-          clientVersion: info.clientVersion,
-          toolshedVersion: info.toolshedVersion,
-        });
-      },
+      onVersionSkew: postVersionSkew,
     }));
 
     if (!await runtime.healthCheck()) {
@@ -1050,10 +1083,7 @@ export class RuntimeProcessor {
         const homeCC = new PiecesController(
           new PieceManager(homeSession, this.runtime),
         );
-        void this.#checkUpdateInBackground(
-          homeCC,
-          this.runtime.userIdentityDID,
-        );
+        void checkUpdateInBackground(homeCC, this.runtime.userIdentityDID);
       }
       return {
         cell: createCellRef(defaultPatternCell),
@@ -1126,22 +1156,10 @@ export class RuntimeProcessor {
     // Best-effort, non-blocking: roll the root forward if its toolshed serves a
     // newer identity. The watcher re-instantiates in place; a failed check
     // never breaks space open, and we never block the response on it.
-    void this.#checkUpdateInBackground(cc, request.space);
+    void checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };
-  }
-
-  #checkUpdateInBackground(cc: PiecesController, space: string): void {
-    cc.checkAndUpdateDefaultPattern()
-      .then((outcome) => {
-        if (outcome === "updated" || outcome === "skipped-skew") {
-          console.log(`[space-root] update check for ${space}: ${outcome}`);
-        }
-      })
-      .catch((error) => {
-        console.warn(`[space-root] update check for ${space} threw`, error);
-      });
   }
 
   async handleRecreateSpaceRootPattern(

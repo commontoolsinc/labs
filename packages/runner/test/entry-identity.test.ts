@@ -170,6 +170,14 @@ describe("computeEntryIdentity (light, drift-free)", () => {
     ]);
     expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
+
+  it("throws when the entry itself is not among the files", () => {
+    expect(() =>
+      computeEntryIdentity("/missing.tsx", [
+        { name: "/other.ts", contents: SHARED },
+      ])
+    ).toThrow(/produced no identity/);
+  });
 });
 
 describe("resolveEntryIdentity (closure walk via readFile)", () => {
@@ -206,6 +214,31 @@ describe("resolveEntryIdentity (closure walk via readFile)", () => {
     expect(new Set(reads)).toEqual(
       new Set(["/system/app.tsx", "/lib/shared.ts"]),
     );
+  });
+
+  it("walks a diamond closure once and skips bare imports", async () => {
+    // entry → a, b; a → c, b → c (diamond: c visited once). entry also has a
+    // bare `commonfabric` import (an external specifier the walk skips).
+    const files = new Map<string, string>([
+      [
+        "/entry.tsx",
+        `import { a } from "./a.ts";\nimport { b } from "./b.ts";\nimport "commonfabric";\nexport default () => a + b;\n`,
+      ],
+      ["/a.ts", `import { c } from "./c.ts";\nexport const a = c;\n`],
+      ["/b.ts", `import { c } from "./c.ts";\nexport const b = c;\n`],
+      ["/c.ts", `export const c = 1;\n`],
+    ]);
+    const reads: string[] = [];
+    const walked = await resolveEntryIdentity("/entry.tsx", (name) => {
+      reads.push(name);
+      const c = files.get(name);
+      return c === undefined
+        ? Promise.reject(new Error(`nf: ${name}`))
+        : Promise.resolve(c);
+    });
+    // c is read exactly once despite being imported by both a and b.
+    expect(reads.filter((r) => r === "/c.ts").length).toBe(1);
+    expect(walked).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
   it("propagates a read failure for a genuinely missing dependency", async () => {

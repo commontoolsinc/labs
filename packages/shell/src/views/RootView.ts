@@ -96,6 +96,15 @@ export class XRootView extends BaseView {
   @state()
   private accessor _versionSkew = false;
 
+  // Handler for the worker's versionSkew IPC — raises the banner.
+  readonly _handleVersionSkew = (event: unknown): void => {
+    console.warn(
+      "[shell] version skew — a newer build is available",
+      event,
+    );
+    this._versionSkew = true;
+  };
+
   @property()
   accessor keyStore: KeyStore | undefined = undefined;
 
@@ -157,13 +166,7 @@ export class XRootView extends BaseView {
           // This client build's git sha, for the system-pattern auto-update
           // version-skew gate (compared to a space's toolshed /api/meta).
           clientVersion: COMMIT_SHA,
-          onVersionSkew: (event) => {
-            console.warn(
-              "[shell] version skew — a newer build is available",
-              event,
-            );
-            this._versionSkew = true;
-          },
+          onVersionSkew: this._handleVersionSkew,
           // Per-profile dogfood toggles: worker-console forwarding and the
           // Epic H3a render ceiling (see lib/host-toggles.ts).
           ...runtimeHostFlags(),

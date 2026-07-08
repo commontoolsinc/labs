@@ -95,6 +95,38 @@ describe("XRootView", () => {
     }
   });
 
+  it("raises the reload banner on a versionSkew, and renders it", async () => {
+    const restore = installBrowserGlobals();
+    const warnings: unknown[][] = [];
+    const origWarn = console.warn;
+    console.warn = (...a: unknown[]) => warnings.push(a);
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const bannerSlot = () =>
+        (view.render() as { values: unknown[] }).values[0];
+
+      // No banner by default (the conditional renders null).
+      expect(bannerSlot()).toBe(null);
+
+      // The worker's versionSkew handler warns and flips the banner state on.
+      view._handleVersionSkew({ space: "did:key:x" });
+      expect(warnings.length).toBe(1);
+      expect(
+        (view as unknown as { _versionSkew: boolean })._versionSkew,
+      ).toBe(true);
+
+      // Now the banner template is constructed and rendered in the slot.
+      const banner = bannerSlot();
+      expect(banner).not.toBe(null);
+      expect(templateStrings(banner)).toContain("version-skew-banner");
+      expect(templateStrings(banner)).toContain("Reload");
+    } finally {
+      console.warn = origWarn;
+      restore();
+    }
+  });
+
   it("guards a browser reload only while the runtime reports pending writes", async () => {
     const restore = installBrowserGlobals();
     try {

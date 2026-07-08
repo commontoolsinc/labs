@@ -7,10 +7,13 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   browserWorkerParamsFromInitializationData,
+  checkUpdateInBackground,
+  postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
+  versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -19,6 +22,7 @@ import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
+  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -1052,6 +1056,163 @@ describe("RuntimeProcessor home pattern IPC", () => {
     ).resolves.toEqual({ cell: defaultPatternRef });
     expect(startedCell).toBe(defaultPatternCell);
     expect(idleCalled).toBe(true);
+  });
+
+  it("checks the home root for updates on the fast path when both flags are on", async () => {
+    const defaultPatternRef: CellRef = {
+      id: "of:home-result" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      ...defaultPatternRef,
+      id: "of:home-source" as CellRef["id"],
+    };
+    let synced = false;
+    const homeSpaceCell = {
+      sync: () => {
+        synced = true;
+        return Promise.resolve();
+      },
+      key: (k: string) => {
+        expect(k).toBe("defaultPattern");
+        return {
+          get: () => ({
+            resolveAsCell: () => ({
+              ...defaultPatternRef,
+              getAsLink: () => cellRefToSigilLink(defaultPatternRef),
+              getMetaRaw: (m: string) =>
+                synced && m === "pattern"
+                  ? cellRefToSigilLink(patternRef)
+                  : undefined,
+              sync: () => Promise.resolve(),
+            }),
+          }),
+        };
+      },
+    };
+    const processor = {
+      identity: cfcSigner,
+      runtime: {
+        userIdentityDID: "did:key:test-home",
+        experimental: {
+          systemPatternAutoUpdate: true,
+          systemPatternAutoUpdateHome: true,
+        },
+        getHomeSpaceCell: () => homeSpaceCell,
+        start: () => Promise.resolve(),
+        idle: () => Promise.resolve(),
+      },
+    } as unknown as RuntimeProcessor;
+
+    // The guard builds a home PiecesController and kicks a best-effort update
+    // check; the fast-path response still resolves regardless of the check.
+    const result = await RuntimeProcessor.prototype
+      .handleEnsureHomePatternRunning.call(
+        processor,
+        { type: RequestType.EnsureHomePatternRunning },
+      );
+    expect(result.cell).toEqual(defaultPatternRef);
+  });
+});
+
+describe("system-pattern update wiring", () => {
+  it("versionSkewNotification builds the worker→shell payload", () => {
+    expect(
+      versionSkewNotification({
+        space: "did:key:z6Mk",
+        clientVersion: "c",
+        toolshedVersion: "t",
+      }),
+    ).toEqual({
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: "c",
+      toolshedVersion: "t",
+    });
+  });
+
+  it("postVersionSkew posts the notification to the shell", () => {
+    const posted: unknown[] = [];
+    const orig = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
+      posted.push(m);
+    try {
+      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
+    } finally {
+      (self as { postMessage: unknown }).postMessage = orig;
+    }
+    expect(posted).toEqual([{
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: undefined,
+      toolshedVersion: "t",
+    }]);
+  });
+
+  it("checkUpdateInBackground logs a non-current outcome and swallows a rejection", async () => {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => logs.push(a.join(" "));
+    console.warn = (...a: unknown[]) => warns.push(a.join(" "));
+    try {
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("updated") },
+        "did:key:a",
+      );
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("current") },
+        "did:key:b",
+      );
+      checkUpdateInBackground(
+        {
+          checkAndUpdateDefaultPattern: () => Promise.reject(new Error("boom")),
+        },
+        "did:key:c",
+      );
+      // Let the fire-and-forget promises settle.
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+    expect(logs.some((l) => l.includes("did:key:a") && l.includes("updated")))
+      .toBe(true);
+    expect(logs.some((l) => l.includes("did:key:b"))).toBe(false);
+    expect(warns.some((w) => w.includes("did:key:c"))).toBe(true);
+  });
+
+  it("handleGetSpaceRootPattern returns the page ref and kicks the background check", async () => {
+    const ref: CellRef = {
+      id: "of:root-result" as CellRef["id"],
+      space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
+    let checked = false;
+    const cc = {
+      ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
+      checkAndUpdateDefaultPattern: () => {
+        checked = true;
+        return Promise.resolve("current");
+      },
+    };
+    const processor = {
+      getSpaceCtx: () => ({ cc }),
+    } as unknown as RuntimeProcessor;
+
+    const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
+      .call(processor, {
+        type: RequestType.GetSpaceRootPattern,
+        space: "did:key:test-space",
+      });
+    expect(result.page.cell).toEqual(ref);
+    // The background check was kicked (fire-and-forget).
+    expect(checked).toBe(true);
   });
 });
 

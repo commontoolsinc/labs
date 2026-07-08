@@ -52,18 +52,14 @@ export function computeEntryIdentity(
   }));
   const entryKey = prefixName(main);
 
+  // Also validates the entry is present (throws if `main` is not among `files`),
+  // so `identities` is guaranteed to contain `entryKey` below.
   assertClosureComplete(main, entryKey, prefixed);
 
   const identities = computeModuleIdentities(prefixed, {
     idPrefix: `/${ENTRY_ID}`,
   });
-  const entry = identities.get(entryKey);
-  if (entry === undefined) {
-    throw new Error(
-      `entry '${main}' produced no identity (not present in the provided files?)`,
-    );
-  }
-  return entry;
+  return identities.get(entryKey)!;
 }
 
 // Walk the entry's reachable import closure and fail loudly on any dangling

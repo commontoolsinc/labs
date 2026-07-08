@@ -61,30 +61,30 @@ export const getPattern = async (
       },
     });
   } catch (error) {
-    if (error instanceof Error && error.message.includes("not found")) {
-      return c.json(
-        { error: "File not found" },
-        404,
-      );
-    }
-
-    // A structurally invalid entry (incomplete import closure, or a cf: fabric
-    // import the light identity path does not model) — surface the reason.
-    if (
-      error instanceof Error &&
-      (error.message.includes("incomplete closure") ||
-        error.message.includes("fabric import"))
-    ) {
-      return c.json(
-        { error: error.message },
-        400,
-      );
-    }
-
-    console.error("Error serving pattern file:", error);
-    return c.json(
-      { error: "Internal server error" },
-      500,
-    );
+    const { status, body } = classifyPatternError(error);
+    if (status === 500) console.error("Error serving pattern file:", error);
+    return c.json(body, status);
   }
 };
+
+/**
+ * Map a pattern-serving error to an HTTP status + body: a missing file → 404; a
+ * structurally invalid entry (incomplete import closure, or a `cf:` fabric
+ * import the light `?identity` path does not model) → 400 with the reason;
+ * anything else → 500. Exported for testing.
+ */
+export function classifyPatternError(
+  error: unknown,
+): { status: 404 | 400 | 500; body: { error: string } } {
+  if (error instanceof Error && error.message.includes("not found")) {
+    return { status: 404, body: { error: "File not found" } };
+  }
+  if (
+    error instanceof Error &&
+    (error.message.includes("incomplete closure") ||
+      error.message.includes("fabric import"))
+  ) {
+    return { status: 400, body: { error: error.message } };
+  }
+  return { status: 500, body: { error: "Internal server error" } };
+}
