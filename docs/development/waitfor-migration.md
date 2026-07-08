@@ -55,26 +55,60 @@ registers — a cell `sink`, a storage subscription's `next`, a scheduler
 
 ## What was migrated
 
+Every change below was verified by running its suite (the browser suites
+against real toolshed and shell servers, the in-process suites directly).
+
+Browser tests, moved to `waitForCondition` / `waitForText` / `awaitViewSettled`:
+
 - `packages/shell/integration/header-menu.test.ts`,
-  `packages/shell/integration/login.test.ts`,
-  `packages/shell/integration/blob-upload.test.ts` — menu open/close class,
-  breadcrumb text, aria-expanded, menu-item labels, piece-switcher dropdown
-  presence and absence, runtime-exposed and image-loaded checks, all moved to
-  `waitForCondition`. Several had abused a short `waitForSelector` timeout inside
-  a try/catch as their poll tick; those inverted patterns are gone.
+  `login.test.ts`, `blob-upload.test.ts` — menu open/close class, breadcrumb
+  text, aria-expanded, menu-item labels, piece-switcher dropdown presence and
+  absence, runtime-exposed and image-loaded checks. Several had abused a short
+  `waitForSelector` timeout inside a try/catch as their poll tick; those inverted
+  patterns are gone.
 - `packages/shell/integration/shadow-dom.ts` — the shared `clickPierce` helper
-  now finds its target through a `waitForCondition` predicate rather than a
-  `waitFor` scan.
+  now finds its target through a `waitForCondition` predicate.
 - `packages/shell/integration/piece.test.ts` — the slug-marker text, the
   app-view's resolved space-root and active pattern, and the runtime
-  exposed/torn-down checks moved to `waitForCondition`.
-- `packages/patterns/integration/counter.test.ts`,
-  `packages/patterns/integration/nested-counter.test.ts`,
-  `packages/patterns/integration/fetch-json.test.ts` — rendered-text waits moved
-  to `waitForText`; the "two nested displays agree" assertion to a single
-  `waitForCondition` predicate.
+  exposed/torn-down checks.
+- `packages/patterns/integration/counter.test.ts`, `nested-counter.test.ts`,
+  `fetch-json.test.ts` — rendered-text waits moved to `waitForText`; the "two
+  nested displays agree" assertion to a `waitForCondition` predicate.
+- `packages/patterns/integration/chatbot.test.ts`, `cfc-spec-gallery.test.ts`,
+  `cfc-authorship-chat.test.ts`, `cfc-group-chat-demo.test.ts` — chat-message
+  counts and the label / authorship probes moved into `waitForCondition`
+  predicates that inline the probe's own in-page collection.
+- `packages/patterns/integration/default-app.test.ts` and
+  `reload/default-app-notebook.test.ts` — the redundant local runtime-idle
+  helpers were deleted in favour of the shared `waitForRuntimeIdle` /
+  `waitForRuntimeSynced`, the `waitFor(() => helper(page))` wrappers dropped to
+  bare awaits, the `app.serialize()` reads moved into `waitForCondition`, and the
+  standalone view-settle waits changed to gate-then-settle.
+
+In-process tests, moved to a `defer()` resolved inside a callback the test
+already registers (a cell `sink`/`subscribe`, a subscription's notification
+recorder, a scheduler `onError`, a telemetry listener, or a test-owned transport
+counter):
+
+- runner: `memory-v2-subscription.test.ts`, `memory-v2-reconnect-race.test.ts`,
+  `scheduler-commit-backpressure.test.ts`, `integration/reconnection.test.ts`,
+  `integration/memory-v2-reactivity.test.ts` (plus a shared `onNotification`
+  hook on the `NotificationRecorder` helper).
+- memory: `v2-client-test.ts`, `v2-restore-flush-test.ts`.
+- toolshed: `routes/storage/memory/memory.test.ts`.
+- piece: `pull-materialization.test.ts`.
+- runtime-client: `client.test.ts` — the cell-subscribe, console, and navigation
+  waits (the render-driven `MockDoc` waits stay; see below).
+
+A handful of now-dead poll loops that followed an already-awaited
+`provider.sync(...)` were dropped outright, since sync resolving already implies
+the record is present.
+
+Documentation:
+
 - `docs/development/UI_TESTING.md` — guidance and examples updated to teach the
-  event-driven primitives instead of `waitFor`.
+  event-driven primitives instead of `waitFor`, and a stale reference to a
+  non-existent `awaitRuntimeIdle` corrected to `waitForRuntimeIdle`.
 
 ## Intentional exceptions: `waitFor` usages left in place
 
@@ -86,21 +120,23 @@ the reason migration was declined.
 These observe in-process state that becomes true as a side effect, with no event
 boundary the test can await without adding one to production code.
 
-- `packages/runtime-client/integration/client.test.ts` (every `waitFor`) drives
-  a `RuntimeClient` over a web-worker transport and renders into an in-memory
-  `MockDoc`. There is no browser page, so `waitForCondition` does not apply; the
-  waits observe in-process arrays, `CellHandle` values, and the mock's
-  `innerHTML`. Some could become `rt.idle()` / `cell.sync()` / subscription
-  awaits — a separate in-process refactor, not this browser-focused change.
+- `packages/runtime-client/integration/client.test.ts` — the remaining sixteen
+  waits observe the `MockDoc`'s rendered `innerHTML`, which the worker's render
+  pipeline applies with no completion callback the test can hook, or a fresh
+  `cell.sync()` round-trip with no registered subscription. There is no event
+  boundary to resolve a deferred from without adding a render hook to the mock
+  purely for the test. (The cell-subscribe, console, and navigation waits in this
+  file, which do have callbacks, were converted.)
 - `packages/generated-patterns/integration/pattern-harness.ts` pulls a runtime
   `Cell` value and compares it, headless. No page; polling the pull until it
   converges is the honest wait.
 - The `waitFor` calls in `counter.test.ts`, `nested-counter.test.ts`, and
   `piece.test.ts` that read a piece's committed `result` cell through the
-  in-process controller. These observe an off-page cell. They are technically
-  convertible by resolving a `defer()` inside the `resultCell.sink(...)` the
-  tests already register, but that conversion belongs with the non-browser
-  effort and needs the browser+CLI suite run to verify.
+  in-process controller. These observe an off-page cell and are convertible by
+  resolving a `defer()` inside the `resultCell.sink(...)` the tests already
+  register; they were left because the browser+CLI suites they sit in verify the
+  browser interaction, and the cell-read waits are a small residual of that
+  larger flow rather than the CDP poll this effort targets.
 
 ### Race, backpressure, and convergence tests
 
@@ -183,28 +219,26 @@ Migrating them only churns dead code.
 
 ## Remaining migratable work (not yet done)
 
-These have clean, event-driven replacements and are worth doing, but each needs
-the relevant suite run to verify and so was not bundled with the mechanical
-commits above.
+The clean conversions above are done. What is left is a small residual that is
+convertible but was held back because it changes shared helper semantics or is a
+low-value tail:
 
-- **Non-browser `defer()` conversions.** In `scheduler-commit-backpressure`
-  (telemetry-marker and `onError` waits), `memory-v2-subscription`,
-  `memory-v2-reconnect-race`, `memory-v2-reactivity`, `reconnection`,
-  `v2-client-test`, `v2-restore-flush-test`, `toolshed/.../memory.test.ts`, and
-  `piece/test/pull-materialization.test.ts`, the awaited transition already flows
-  through a callback the test registers (a cell `sink`, a subscription's `next`,
-  a scheduler `onError`, or a counter incremented inside a test-owned transport).
-  Resolving a `defer()` there and awaiting it removes the poll with no
-  production-code change. These are runnable and verifiable in-process.
-- **Browser probe-inlining.** In `chatbot.test.ts`, `cfc-group-chat-demo.test.ts`,
-  `cfc-spec-gallery.test.ts`, and `cfc-authorship-chat.test.ts`, a `page.evaluate`
-  probe can move into a `waitForCondition` predicate. In `default-app.test.ts` and
-  the notebook reload test, `waitFor(() => waitForRuntimeIdle(page))` and
-  `waitFor(() => awaitViewSettled(page))` wrappers can drop to the bare helper,
-  and the `clickButtonWithText` re-click helpers can become settle-then-single
-  `clickCfButton`. The `clickNthButton` helper in `nested-counter.test.ts`
-  likewise wants a settle-then-single-click rewrite rather than a mechanical
-  swap.
+- **Shared button-click helpers in the default-app tests.**
+  `clickButtonWithText` / `clickButtonWithTitle` / `clickButtonWithExactText` in
+  `default-app.test.ts` and the notebook reload test are used both wrapped in
+  `waitFor` (to wait for presence) and bare (their success is asserted directly).
+  Converting them to a settle-then-single-click helper (like the `clickCfButton`
+  shape) would touch every caller at once, so it wants its own focused change
+  rather than riding along here. The same goes for the `clickNthButton` helper in
+  `nested-counter.test.ts`.
+- **Render/source-state probe waits in the default-app tests.** The
+  `collectNoteTitlesInList` / `collectNotebookRenderState` /
+  `collectNotebookSourceState` waits poll a `page.evaluate` probe. They can move
+  into `waitForCondition` by inlining each probe's in-page collection, one probe
+  at a time.
+- **The piece-result cell reads** in `counter.test.ts`, `nested-counter.test.ts`,
+  and `piece.test.ts` (see the exceptions above) can each become a `defer()`
+  resolved in the existing `resultCell.sink(...)`.
 
 ## Also noticed (out of scope)
 
