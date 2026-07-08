@@ -37,6 +37,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { defer } from "@commonfabric/utils/defer";
 import { resolveLink } from "../src/link-resolution.ts";
 import {
   computeBackoffDelayMs,
@@ -94,20 +95,24 @@ function rejectServerTransacts(
 
 function collectEventCommitMarkers(runtime: Runtime): {
   markers: RuntimeTelemetryMarker[];
+  firstMarker: Promise<void>;
   dispose(): void;
 } {
   const markers: RuntimeTelemetryMarker[] = [];
+  const firstMarker = defer<void>();
   const listener = (event: Event) => {
     const marker = (event as CustomEvent<{
       marker: RuntimeTelemetryMarker;
     }>).detail.marker;
     if (marker.type === "scheduler.event.commit") {
       markers.push(marker);
+      firstMarker.resolve();
     }
   };
   runtime.telemetry.addEventListener("telemetry", listener);
   return {
     markers,
+    firstMarker: firstMarker.promise,
     dispose: () => runtime.telemetry.removeEventListener("telemetry", listener),
   };
 }
@@ -417,11 +422,7 @@ describe("committed-write backpressure", () => {
           "evt:backpressure-permanent:0:backpressure-permanent-root",
         );
 
-        await waitFor(
-          runtime,
-          () => commitTelemetry.markers.length >= 1,
-          "permanent rejection never reported a commit marker",
-        );
+        await commitTelemetry.firstMarker;
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -483,11 +484,7 @@ describe("committed-write backpressure", () => {
           "evt:backpressure-terminal:0:backpressure-terminal-root",
         );
 
-        await waitFor(
-          runtime,
-          () => commitTelemetry.markers.length >= 1,
-          "terminal rejection never reported a commit marker",
-        );
+        await commitTelemetry.firstMarker;
         // Give any erroneous retry a generous chance to run (a bounded-retry
         // misclassification would re-run the handler up to
         // DEFAULT_RETRIES_FOR_EVENTS more times), then confirm none did.
@@ -540,7 +537,13 @@ describe("committed-write backpressure", () => {
       await runtime.idle();
 
       const terminalErrors: ErrorWithContext[] = [];
-      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const gotConvergenceError = defer<void>();
+      runtime.scheduler.onError((error) => {
+        terminalErrors.push(error);
+        if (error.name === "CommitConvergenceError") {
+          gotConvergenceError.resolve();
+        }
+      });
 
       // Reject every commit: the conflict never clears.
       const injector = rejectServerTransacts(storageManager, Infinity, {
@@ -551,15 +554,7 @@ describe("committed-write backpressure", () => {
       try {
         piece.queueAdd(7, "evt:backpressure-stuck:0:backpressure-stuck-root");
 
-        await waitFor(
-          runtime,
-          () =>
-            terminalErrors.some((error) =>
-              error.name === "CommitConvergenceError"
-            ),
-          `non-converging write did not surface a terminal error ` +
-            `(invocations=${piece.invocations()}, total=${piece.total()})`,
-        );
+        await gotConvergenceError.promise;
 
         const convergence = terminalErrors.find((error) =>
           error.name === "CommitConvergenceError"
@@ -597,7 +592,13 @@ describe("committed-write backpressure", () => {
       await runtime.idle();
 
       const terminalErrors: ErrorWithContext[] = [];
-      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const gotConvergenceError = defer<void>();
+      runtime.scheduler.onError((error) => {
+        terminalErrors.push(error);
+        if (error.name === "CommitConvergenceError") {
+          gotConvergenceError.resolve();
+        }
+      });
 
       const injector = rejectServerTransacts(storageManager, Infinity, {
         name: "ConflictError",
@@ -610,15 +611,7 @@ describe("committed-write backpressure", () => {
           "evt:backpressure-zerowin:0:backpressure-zerowin-root",
         );
 
-        await waitFor(
-          runtime,
-          () =>
-            terminalErrors.some((error) =>
-              error.name === "CommitConvergenceError"
-            ),
-          `zero-window conflict did not surface a terminal error ` +
-            `(invocations=${piece.invocations()}, total=${piece.total()})`,
-        );
+        await gotConvergenceError.promise;
 
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();

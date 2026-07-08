@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -80,28 +80,77 @@ async function waitForAuthorshipStates(
 ) {
   let probe: AuthorshipProbe | undefined;
   try {
-    await waitFor(async () => {
-      probe = await readAuthorshipProbe(page);
-      return Object.entries(expected).every(([surface, state]) =>
-        probe?.hosts.some((host) =>
-          host.surface === surface &&
-          host.state === state &&
-          (state === "verified"
-            ? host.hasTrustedAvatar
-            : !host.hasTrustedAvatar) &&
-          (surface === "verified"
-            ? host.textIntegrityState === "ok" &&
-              host.renderedText.includes("signed off")
-            : host.textIntegrityState === "blocked" &&
-              host.renderedText.includes(
-                "Content hidden by integrity policy",
-              )) &&
-          !host.lightText.includes("Project chat") &&
-          !host.lightText.includes("Imported ticket thread")
-        )
-      );
-    });
+    await waitForCondition(
+      page,
+      (_probe, expectedEntries: Array<[string, string]>) => {
+        function collect(
+          root: Document | ShadowRoot,
+          result: Element[],
+        ): void {
+          for (const element of root.querySelectorAll("*")) {
+            if (element.tagName.toLowerCase() === "cf-cfc-authorship") {
+              result.push(element);
+            }
+            if (element.shadowRoot) {
+              collect(element.shadowRoot, result);
+            }
+          }
+        }
+
+        function deepText(root: ParentNode): string {
+          let text = root instanceof Element || root instanceof ShadowRoot
+            ? root.textContent ?? ""
+            : "";
+          for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) {
+              text += ` ${deepText(element.shadowRoot)}`;
+            }
+          }
+          return text;
+        }
+
+        const elements: Element[] = [];
+        collect(document, elements);
+        const hosts = elements.map((element) => {
+          const typedElement = element as unknown as {
+            authorshipState?: string;
+            textIntegrityState?: string;
+          };
+          return {
+            surface: element.getAttribute("data-authorship-surface"),
+            state: typedElement.authorshipState,
+            textIntegrityState: typedElement.textIntegrityState,
+            lightText: element.textContent ?? "",
+            renderedText: deepText(element),
+            hasTrustedAvatar: element.shadowRoot?.querySelector(
+              "[data-cfc-authorship-avatar]",
+            ) !== null,
+          };
+        });
+
+        return expectedEntries.every(([surface, state]) =>
+          hosts.some((host) =>
+            host.surface === surface &&
+            host.state === state &&
+            (state === "verified"
+              ? host.hasTrustedAvatar
+              : !host.hasTrustedAvatar) &&
+            (surface === "verified"
+              ? host.textIntegrityState === "ok" &&
+                host.renderedText.includes("signed off")
+              : host.textIntegrityState === "blocked" &&
+                host.renderedText.includes(
+                  "Content hidden by integrity policy",
+                )) &&
+            !host.lightText.includes("Project chat") &&
+            !host.lightText.includes("Imported ticket thread")
+          )
+        );
+      },
+      { args: [Object.entries(expected)] },
+    );
   } catch (cause) {
+    probe = await readAuthorshipProbe(page);
     throw new Error(
       `Timed out waiting for CFC authorship states. Last probe: ${
         JSON.stringify(probe, null, 2)

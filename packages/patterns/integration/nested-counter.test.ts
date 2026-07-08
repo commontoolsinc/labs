@@ -1,5 +1,11 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  env,
+  Page,
+  waitFor,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { waitForText } from "./cfc-browser-helpers.ts";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
@@ -67,19 +73,7 @@ describe("nested counter integration test", () => {
       identity,
     });
 
-    // Use try/catch because element may become stale between waitForSelector and innerText
-    // Use innerText() instead of evaluate() as it's more robust against stale handles
-    await waitFor(async () => {
-      try {
-        const counterResult = await page.waitForSelector("#counter-result", {
-          strategy: "pierce",
-        });
-        const initialText = await counterResult.innerText();
-        return initialText?.trim() === "Counter is the 0th number";
-      } catch (_) {
-        return false;
-      }
-    });
+    await waitForText(page, "#counter-result", "Counter is the 0th number");
 
     // Verify via direct operations that the nested structure works
     assertEquals(await piece.result.get(["value"]), 0);
@@ -128,44 +122,17 @@ describe("nested counter integration test", () => {
   it("should verify nested counter has multiple counter displays", async () => {
     const page = shell.page();
 
-    // Use try/catch because elements may become stale between $$ and innerText
-    // Use innerText() instead of evaluate() as it's more robust against stale handles
-    await waitFor(async () => {
-      try {
-        // Find all counter result elements (should be 2 for nested counter)
-        const counterResults = await page.$$("#counter-result", {
-          strategy: "pierce",
-        });
-        if (counterResults.length !== 2) {
-          return false;
-        }
-        // Verify both show the same value
-        for (const counter of counterResults) {
-          const text = await counter.innerText();
-          if (text?.trim() !== "Counter is the 5th number") {
-            return false;
-          }
-        }
-        return true;
-      } catch (_) {
-        return false;
-      }
-    });
+    // Both nested counter displays (there are two) must show the same value.
+    await waitForCondition(page, (probe, expected) => {
+      const results = probe.collect("#counter-result");
+      return results.length === 2 &&
+        results.every((el) => probe.deepText(el).trim() === expected);
+    }, { args: ["Counter is the 5th number"] });
   });
 });
 
 async function waitForCounter(page: Page, text: string) {
-  // Use try/catch because element may become stale between waitForSelector and innerText
-  await waitFor(async () => {
-    try {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      return (await counterResult?.innerText())?.trim() === text;
-    } catch (_) {
-      return false;
-    }
-  });
+  await waitForText(page, "#counter-result", text);
 }
 
 // Clicks the nth button matching selector, retrying if the element lacks a stable box model.

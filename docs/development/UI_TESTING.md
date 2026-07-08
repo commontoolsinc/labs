@@ -57,11 +57,12 @@ without traversing shadow roots.
      identity,
    });
 
-   // Use waitFor() for reliable async assertions (not sleep!)
-   await waitFor(async () => {
-     const element = await page.waitForSelector("cf-input[role='textbox']");
-     return element !== null;
-   });
+   // Wait for state event-drivenly — never sleep, never poll. waitForCondition
+   // installs a waiter inside the page that resolves the instant the DOM
+   // reflects the condition, instead of re-checking from the test process on a
+   // fixed interval.
+   await waitForCondition(page, (probe: ProbeApi) =>
+     probe.collect("cf-input[role='textbox']").length > 0);
    ```
 
 ## Why This Works
@@ -127,7 +128,11 @@ const path = ["x-root", "#shadow-root", "cf-input", "#shadow-root", "input"];
 
 ```typescript
 // Shown at module scope.
-import { env, waitFor } from "@commonfabric/integration";
+import {
+  awaitViewSettled,
+  env,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -168,24 +173,22 @@ describe("shadow DOM component test", () => {
       identity,
     });
 
-    // Prefer host semantics for cf-* controls.
-    await waitFor(async () => {
-      const input = await page.waitForSelector("cf-input[role='textbox']");
-      await input.type("Hello World");
-      return true;
-    });
+    // Settle the view so each control's handler is bound before acting (see
+    // "Waiting Until the UI Is Interactive" below), then act once.
+    await awaitViewSettled(page);
+    const input = await page.waitForSelector("cf-input[role='textbox']");
+    await input.type("Hello World");
 
+    await awaitViewSettled(page);
     const button = await page.waitForSelector("cf-button[role='button']");
     await button.click();
 
-    // Verify results with waitFor
-    await waitFor(async () => {
-      const result = await page.waitForSelector("#result", {
-        strategy: "pierce",
-      });
-      const text = await result.evaluate((el: HTMLElement) => el.textContent);
-      return text?.includes("Hello World");
-    });
+    // Verify the effect event-drivenly: waitForCondition resolves the instant
+    // the result text appears, with no test-side poll.
+    await waitForCondition(page, (probe) =>
+      probe.collect("#result").some((el) =>
+        probe.deepText(el).includes("Hello World")
+      ));
   });
 });
 ```
@@ -214,19 +217,31 @@ once all three stages are done, so a single click then lands on a bound handler:
 
 ```typescript
 // Shown at module scope.
-import { awaitViewSettled, waitFor } from "@commonfabric/integration";
+import {
+  awaitViewSettled,
+  waitForCondition,
+} from "@commonfabric/integration";
 
-// Before interacting: wait until the view is mounted and interactive.
-await waitFor(() => awaitViewSettled(page));
+// Before interacting: wait until the shell has exposed its settle hook, then
+// settle the view so the click lands on a bound handler.
+await waitForCondition(page, () =>
+  typeof globalThis.commonfabric?.viewSettled === "function");
+await awaitViewSettled(page);
 const button = await page.waitForSelector("cf-button[role='button']");
 await button.click(); // delivered to a bound handler
 
-// After interacting: settle, then wait for the click's specific effect.
-await waitFor(async () => {
-  await awaitViewSettled(page);
-  return (await page.$("cf-modal[open]", { strategy: "pierce" })) !== null;
-});
+// After interacting: settle once, then wait for the click's specific effect
+// event-drivenly. The modal opening is a DOM mutation, so waitForCondition's
+// in-page waiter resolves the instant it appears.
+await awaitViewSettled(page);
+await waitForCondition(page, (probe) =>
+  probe.collect("cf-modal[open]").length > 0);
 ```
+
+Pattern integration tests can reach for the higher-level wrappers in
+`packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
+`fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
+"settle the view, act once, wait for the effect" on top of these primitives.
 
 ### Do not reach for these instead
 
@@ -235,13 +250,14 @@ Each of the following is what `awaitViewSettled` replaces. They are either racy
 
 - **`await sleep(ms)`, `page.waitForTimeout(ms)`, or any fixed delay** — guesses
   at timing; too short flakes, too long wastes wall-clock.
-- **`await rt.idle()` or `awaitRuntimeIdle(page)` alone, then interact** — covers
-  stage 1 only. The element may be in the DOM with no handler bound, or be a
-  `cf-modal` whose `pointer-events` are still off.
+- **`await rt.idle()` or `waitForRuntimeIdle(page)` alone, then interact** —
+  covers stage 1 only. The element may be in the DOM with no handler bound, or
+  be a `cf-modal` whose `pointer-events` are still off.
 - **`await waitFor(() => findButtonWithText(page, "X"))` then click** — presence
-  is not interactivity, and every poll is a CDP `evaluate` round trip (the
-  default 50 ms interval also quantizes timing measurements; see
-  `packages/integration/utils.ts`).
+  is not interactivity, and every poll is a CDP `evaluate` round trip. The
+  `waitFor` helper re-runs its predicate from the test process on a fixed
+  interval; prefer `waitForCondition`, whose in-page waiter resolves on the DOM
+  mutation itself (see `packages/integration/utils.ts`).
 - **`await waitFor(() => clickButtonWithText(page, "X"))`, re-clicking until it
   "takes"** — fires the stimulus speculatively. It can double-fire (creating
   duplicate state) and, against a `dismissable` overlay such as `cf-modal`,

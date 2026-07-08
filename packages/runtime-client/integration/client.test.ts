@@ -7,6 +7,7 @@ import {
   Session,
 } from "@commonfabric/identity";
 import { env, waitFor } from "@commonfabric/integration";
+import { defer } from "@commonfabric/utils/defer";
 import {
   CellHandle,
   type JSONSchema,
@@ -183,18 +184,18 @@ describe("RuntimeClient", () => {
       await cell.sync();
 
       const receivedValues: { counter: number }[] = [];
+      const gotThree = defer<void>();
       const cancel = cell.subscribe((value) => {
         if (!value) throw new Error("cell was not synced");
         receivedValues.push(value);
+        if (receivedValues.length >= 3) gotThree.resolve();
       });
 
       cell.set({ counter: 1 });
       cell.set({ counter: 2 });
       cell.set({ counter: 3 });
 
-      await waitFor(() => Promise.resolve(receivedValues.length >= 3), {
-        timeout: 5000,
-      });
+      await gotThree.promise;
 
       cancel();
 
@@ -228,12 +229,14 @@ describe("RuntimeClient", () => {
         _updatedValue1 = value;
       });
       let _updatedValue2 = undefined;
+      const gotValue = defer<void>();
       const cancel2 = cell2.subscribe((value) => {
         _updatedValue2 = value;
+        if (cell2.get() === "my-value") gotValue.resolve();
       });
 
       await cell.set("my-value");
-      await waitFor(() => Promise.resolve(cell2.get() === "my-value"));
+      await gotValue.promise;
       cancel1();
       cancel2();
     });
@@ -300,18 +303,27 @@ describe("RuntimeClient", () => {
 
       // Subscribe cellA first - this establishes the backend subscription
       const valuesA: ({ message: string } | undefined)[] = [];
+      const valuesB: ({ message: string } | undefined)[] = [];
+      const gotInitialA = defer<void>();
+      const bothUpdated = defer<void>();
+      const checkBothUpdated = () => {
+        if (
+          valuesA.some((v) => v?.message === "updated") &&
+          valuesB.some((v) => v?.message === "updated")
+        ) {
+          bothUpdated.resolve();
+        }
+      };
       const cancelA = cellA.subscribe((v) => {
         valuesA.push(v);
+        if (valuesA.length > 0 && valuesA[valuesA.length - 1] !== undefined) {
+          gotInitialA.resolve();
+        }
+        checkBothUpdated();
       });
 
       // Wait for initial value to arrive from backend
-      await waitFor(
-        () =>
-          Promise.resolve(
-            valuesA.length > 0 && valuesA[valuesA.length - 1] !== undefined,
-          ),
-        { timeout: 5000 },
-      );
+      await gotInitialA.promise;
 
       // Verify cellA received the value
       assertEquals(
@@ -323,9 +335,9 @@ describe("RuntimeClient", () => {
       // Now subscribe cellB - this is the "late subscriber" that joins an
       // existing subscription. Before the fix, its initial callback would
       // receive undefined because no new backend request was made.
-      const valuesB: ({ message: string } | undefined)[] = [];
       const cancelB = cellB.subscribe((v) => {
         valuesB.push(v);
+        checkBothUpdated();
       });
 
       // The fix ensures cellB immediately receives the cached value
@@ -343,14 +355,8 @@ describe("RuntimeClient", () => {
 
       // Also verify both receive subsequent updates
       await cell.set({ message: "updated" });
-      await waitFor(
-        () =>
-          Promise.resolve(
-            valuesA.some((v) => v?.message === "updated") &&
-              valuesB.some((v) => v?.message === "updated"),
-          ),
-        { timeout: 5000 },
-      );
+      checkBothUpdated();
+      await bothUpdated.promise;
 
       cancelA();
       cancelB();
@@ -449,27 +455,25 @@ export default pattern((_) => {
       await using rt = await createRuntimeClient(session);
 
       const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const gotHello = defer<void>();
       rt.on(
         "console",
         (
           event,
         ) => {
           consoleEvents.push(event);
+          if (
+            consoleEvents.length > 0 && consoleEvents[0].args[0] === "hello"
+          ) {
+            gotHello.resolve();
+          }
         },
       );
 
       await rt.createPage(consoleProgram, session.space, { run: true });
       await rt.idle();
 
-      await waitFor(
-        () =>
-          Promise.resolve(
-            consoleEvents.length > 0 && consoleEvents[0].args[0] === "hello",
-          ),
-        {
-          timeout: 5000,
-        },
-      );
+      await gotHello.promise;
     });
   });
 
@@ -1132,8 +1136,10 @@ export default pattern<Record<string, never>>(() => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
       const navigations: string[] = [];
+      const gotNavigation = defer<void>();
       rt.on("navigaterequest", ({ cell }) => {
         navigations.push(cell.id());
+        if (navigations.length > 0) gotNavigation.resolve();
       });
 
       const cancel = render(root, page.cell() as any, renderOptions);
@@ -1148,10 +1154,7 @@ export default pattern<Record<string, never>>(() => {
 
       button.dispatchEvent({ type: "click", target: button });
 
-      await waitFor(
-        () => Promise.resolve(navigations.length > 0),
-        { timeout: 5000 },
-      );
+      await gotNavigation.promise;
       await rt.idle();
 
       assertEquals(navigations.length, 1);

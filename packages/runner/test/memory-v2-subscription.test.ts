@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { defer } from "@commonfabric/utils/defer";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -29,9 +30,11 @@ const space = signer.did();
 
 class Subscription implements IStorageNotification {
   notifications: StorageNotification[] = [];
+  onNotification?: (notification: StorageNotification) => void;
 
   next(notification: StorageNotification) {
     this.notifications.push(notification);
+    this.onNotification?.(notification);
     return { done: false };
   }
 
@@ -70,6 +73,17 @@ const waitFor = async (
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 };
+
+const notificationCarries = (
+  notification: StorageNotification,
+  uri: URI,
+  after: unknown,
+): boolean =>
+  "changes" in notification &&
+  [...notification.changes].some((change) =>
+    change.address.id === uri &&
+    JSON.stringify(change.after) === JSON.stringify(after)
+  );
 
 const visibleIds = (
   provider: { get(uri: URI): { value?: unknown } | undefined },
@@ -322,6 +336,12 @@ describe("Memory v2 storage notifications", () => {
     };
     await storageManager.open(space).sync(uri);
 
+    const gotVersion3 = defer<void>();
+    subscription.onNotification = (notification) => {
+      if (notificationCarries(notification, uri, { value: { version: 3 } })) {
+        gotVersion3.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -331,12 +351,7 @@ describe("Memory v2 storage notifications", () => {
         value: { value: { version: 3 } },
       }],
     });
-    await waitFor(() =>
-      JSON.stringify(
-        replica.get({ id: uri, type: "application/json" as MIME })?.is,
-      ) ===
-        JSON.stringify({ value: { version: 3 } })
-    );
+    await gotVersion3.promise;
 
     const source = staleReadSource(uri, 1);
 
@@ -409,15 +424,18 @@ describe("Memory v2 storage notifications", () => {
     await provider.sync(bUri);
 
     // Another writer advances ONLY B to b:3; A stays at a:1.
+    const gotB3 = defer<void>();
+    subscription.onNotification = (notification) => {
+      if (notificationCarries(notification, bUri, { value: { b: 3 } })) {
+        gotB3.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
       operations: [{ op: "set", id: bUri, value: { value: { b: 3 } } }],
     });
-    await waitFor(() =>
-      JSON.stringify(replica.get(bAddress)?.is) ===
-        JSON.stringify({ value: { b: 3 } })
-    );
+    await gotB3.promise;
 
     // Local tx writes both A and B optimistically; a stale read of B forces the
     // conflict. Whole tx is rejected.
@@ -486,6 +504,12 @@ describe("Memory v2 storage notifications", () => {
     };
     await provider.sync(uri);
 
+    const gotVersion1 = defer<void>();
+    subscription.onNotification = (notification) => {
+      if (notificationCarries(notification, uri, { value: { version: 1 } })) {
+        gotVersion1.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -495,12 +519,7 @@ describe("Memory v2 storage notifications", () => {
         value: { value: { version: 1 } },
       }],
     });
-    await waitFor(() =>
-      JSON.stringify(
-        replica.get({ id: uri, type: "application/json" as MIME })?.is,
-      ) ===
-        JSON.stringify({ value: { version: 1 } })
-    );
+    await gotVersion1.promise;
 
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
@@ -679,11 +698,6 @@ describe("Memory v2 storage notifications", () => {
       operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
     });
     await provider.sync(uri);
-    await waitFor(() =>
-      (provider.replica as unknown as {
-        get(a: { id: URI; type: MIME }): { is?: unknown } | undefined;
-      }).get({ id: uri, type: "application/json" as MIME }) !== undefined
-    );
 
     const read = (seq: number) => ({
       reads: { confirmed: [{ id: uri, path: [], seq }], pending: [] },
@@ -717,9 +731,6 @@ describe("Memory v2 storage notifications", () => {
         operations: [{ op: "set", id: uri, value: { value: { v: 1 } } }],
       });
       await provider.sync(uri);
-      await waitFor(() =>
-        replica.get({ id: uri, type: "application/json" as MIME }) !== undefined
-      );
 
       // Floor uri so a new commit reading it is held until caughtUpLocalSeq>=5.
       replica.recordStaleFloor({
