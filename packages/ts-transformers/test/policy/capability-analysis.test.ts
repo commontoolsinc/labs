@@ -1474,6 +1474,433 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis expands a fixed tuple spread into imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, Writable<Auth>] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.writePaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis maps each fixed tuple spread element to its own parameter capability",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell, Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: ReadonlyCell<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { ReadonlyCell, Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, ReadonlyCell<Auth>] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 flows to a Writable parameter (read and write); element 1 flows
+    // to a ReadonlyCell parameter (read only, no write).
+    assert(state.writePaths.includes("pair.0"));
+    assertEquals(state.writePaths.includes("pair.1"), false);
+    assert(state.readPaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not expand a variable-length array spread into imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: Writable<Auth>[] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.writePaths.includes("pair.0"), false);
+    assertEquals(state.writePaths.includes("pair.1"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps a tuple spread with a non-cell position conservatively read",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: number,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, number] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 maps to a Writable parameter, so its write is recorded. Element
+    // 1 is a plain value with no cell contract, so the spread source is not
+    // suppressed and its ordinary read is tracked conservatively.
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.readPaths.includes("pair"));
+  },
+);
+
+Deno.test(
+  "Capability analysis maps a leading fixed argument before a fixed tuple spread",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          first: Writable<Auth>,
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            pair,
+          }: {
+            first: Writable<Auth>;
+            pair: [Writable<Auth>, Writable<Auth>];
+          },
+        ) => {
+          client(first, ...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.writePaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis advances past a single-element tuple spread to a trailing argument",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            single,
+            tail,
+          }: {
+            single: [Writable<Auth>];
+            tail: Writable<Auth>;
+          },
+        ) => {
+          client(...single, tail);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // The single tuple element fills parameter 0, so the trailing argument must
+    // map to parameter 1 rather than colliding on parameter 0.
+    assert(state.writePaths.includes("single.0"));
+    assert(state.writePaths.includes("tail"));
+  },
+);
+
+Deno.test(
+  "Capability analysis stays conservative for a variadic tuple spread into fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { variadic }: { variadic: [Writable<Auth>, ...Writable<Auth>[]] },
+        ) => {
+          client(...variadic);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A tuple with a rest element has no statically fixed length, so signature
+    // mapping stops and the positions are not written.
+    assertEquals(state.writePaths.includes("variadic.0"), false);
+    assertEquals(state.writePaths.includes("variadic.1"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis wildcards a dynamically indexed fixed tuple spread",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            bag,
+            k,
+          }: {
+            bag: { [key: string]: [Writable<Auth>, Writable<Auth>] };
+            k: string;
+          },
+        ) => {
+          const local = bag;
+          client(...local[k]);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // The tuple is fixed-length, but the spread source is reached through a
+    // dynamic index, so the whole root is wildcarded rather than mapped to
+    // specific positions.
+    assert(state.wildcard);
+  },
+);
+
+Deno.test(
+  "Capability analysis maps writeonly, comparable, and opaque fixed tuple positions",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type {
+          ComparableCell,
+          OpaqueCell,
+          WriteonlyCell,
+        } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: WriteonlyCell<Auth>,
+          b: ComparableCell<Auth>,
+          c: OpaqueCell<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type {
+          ComparableCell,
+          OpaqueCell,
+          WriteonlyCell,
+        } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            triple,
+          }: {
+            triple: [
+              WriteonlyCell<Auth>,
+              ComparableCell<Auth>,
+              OpaqueCell<Auth>,
+            ];
+          },
+        ) => {
+          client(...triple);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 is write-only (write, no passing read), element 1 is a
+    // comparable cell (identity-cell path), element 2 is opaque.
+    assert(state.writePaths.includes("triple.0"));
+    assertEquals(state.readPaths.includes("triple.0"), false);
+    assert(state.identityCellPaths.includes("triple.1"));
+    assert(state.opaquePaths.includes("triple.2"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records nothing for a parenthesis-free imported construction",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export declare class Client {
+          constructor(auth: Writable<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client;
+          return auth;
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A construction written without an argument list has no arguments to map,
+    // so the constructor's declared cell contract records no write for the
+    // separately-read cell.
+    assertEquals(state.writePaths.includes("auth"), false);
+    assert(state.readPaths.includes("auth"));
+  },
+);
+
+Deno.test(
   "Capability analysis shrinks a root cell to readonly for a ReadonlyCell parameter",
   () => {
     const { program, sourceFile } = createProgramWithFiles({
