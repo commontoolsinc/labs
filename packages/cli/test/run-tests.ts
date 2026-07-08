@@ -10,6 +10,32 @@ const PERMISSIONS = [
   "--allow-net=127.0.0.1",
 ];
 
+// Type checking of the CLI package (including test/ and support/) is done by
+// `deno task check` (tasks/check.sh), so the test run skips it.
+const BASE_FLAGS = ["--no-check"];
+
+// Optional sharding for CI fan-out: CLI_TEST_SHARD="i/n" (1-based) runs only
+// the test files where (sorted index % n) == (i - 1), so the CLI suite spreads
+// across several workspace test shards instead of all landing in one. Mirrors
+// PATTERN_INTEGRATION_SHARD in packages/patterns/integration/all.test.ts.
+// Unset (local dev) runs every test file.
+function parseCliTestShard(): { index: number; count: number } {
+  const raw = Deno.env.get("CLI_TEST_SHARD");
+  if (!raw) return { index: 0, count: 1 };
+  const match = raw.match(/^(\d+)\/(\d+)$/);
+  if (!match) {
+    throw new Error(
+      `Invalid CLI_TEST_SHARD "${raw}"; expected "i/n" (1-based).`,
+    );
+  }
+  const index = Number(match[1]) - 1;
+  const count = Number(match[2]);
+  if (count < 1 || index < 0 || index >= count) {
+    throw new Error(`CLI_TEST_SHARD "${raw}" out of range.`);
+  }
+  return { index, count };
+}
+
 const SERIAL_TESTS = [
   "test/fuse.test.ts",
   "test/inspect-remote.test.ts",
@@ -50,7 +76,7 @@ async function run(
 
   console.log(`Running ${label} (${files.length} files)`);
   const result = await new Deno.Command(Deno.execPath(), {
-    args: ["test", ...PERMISSIONS, ...options, ...files],
+    args: ["test", ...PERMISSIONS, ...BASE_FLAGS, ...options, ...files],
     stdout: "inherit",
     stderr: "inherit",
   }).spawn().status;
@@ -59,11 +85,13 @@ async function run(
   }
 }
 
-const tests = (await Promise.all(["test", "support"].map(collectTests)))
+const allTests = (await Promise.all(["test", "support"].map(collectTests)))
   .flat()
   .sort();
 const serial = new Set(SERIAL_TESTS);
-const missingSerialTests = SERIAL_TESTS.filter((test) => !tests.includes(test));
+const missingSerialTests = SERIAL_TESTS.filter((test) =>
+  !allTests.includes(test)
+);
 if (missingSerialTests.length > 0) {
   console.error(
     `Serial CLI test file(s) not found: ${missingSerialTests.join(", ")}`,
@@ -71,8 +99,12 @@ if (missingSerialTests.length > 0) {
   Deno.exit(1);
 }
 
+const shard = parseCliTestShard();
+const tests = allTests.filter((_, i) => i % shard.count === shard.index);
+
 const parallelTests = tests.filter((test) => !serial.has(test));
+const serialTests = tests.filter((test) => serial.has(test));
 const denoTestArgs = Deno.args[0] === "--" ? Deno.args.slice(1) : Deno.args;
 
 await run("parallel CLI tests", ["--parallel", ...denoTestArgs], parallelTests);
-await run("serial CLI tests", denoTestArgs, SERIAL_TESTS);
+await run("serial CLI tests", denoTestArgs, serialTests);
