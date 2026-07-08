@@ -7,3 +7,4 @@ export type {
   TypeScriptHarnessProcessOptions,
 } from "./types.ts";
 export { Console, ConsoleEvent, ConsoleMethod } from "./console.ts";
+export { computeEntryIdentity } from "./entry-identity.ts";
