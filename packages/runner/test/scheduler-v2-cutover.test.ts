@@ -18,6 +18,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
+import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
   type DependencyGraphState,
   isLive,
@@ -1228,19 +1229,35 @@ describe("scheduler v2 cutover fixtures", () => {
         }, { isEffect: true }),
       );
 
-      const start = performance.now();
-      cells[0].withTx(tx).send(5);
-      await tx.commit();
-      tx = runtime.edit();
-      await runtime.scheduler.idle();
-      const elapsed = performance.now() - start;
+      // A healthy deep chain re-queues each pass immediately, so no
+      // iteration-cap backoff is applied and no non-settling episode is
+      // recorded. Assert that signal directly rather than racing a wall clock:
+      // a loaded CI runner could breach an elapsed-time bound with zero
+      // regressions, whereas `scheduler.non-settling` telemetry fires iff
+      // backoff was actually applied.
+      const nonSettlingMarkers: unknown[] = [];
+      const onTelemetry = (event: Event) => {
+        const marker = (event as RuntimeTelemetryEvent).marker;
+        if (marker.type === "scheduler.non-settling") {
+          nonSettlingMarkers.push(marker);
+        }
+      };
+      runtime.telemetry.addEventListener("telemetry", onTelemetry);
+      try {
+        cells[0].withTx(tx).send(5);
+        await tx.commit();
+        tx = runtime.edit();
+        await runtime.scheduler.idle();
+      } finally {
+        runtime.telemetry.removeEventListener("telemetry", onTelemetry);
+      }
 
       // Full propagation: tail sees source + DEPTH hops.
       expect(cells[DEPTH].get()).toBe(5 + DEPTH);
       // Healthy progress, not a cycle: no link approached the run budget.
       expect(maxRunsForAnyLink).toBeLessThan(5);
-      // No time-gated backoff pause (250ms). Generous bound for CI noise.
-      expect(elapsed).toBeLessThan(200);
+      // No iteration-cap backoff was applied (deterministic; no wall clock).
+      expect(nonSettlingMarkers.length).toBe(0);
     } finally {
       for (const cancel of cancels) cancel();
     }
