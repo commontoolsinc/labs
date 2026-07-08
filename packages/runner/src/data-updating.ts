@@ -870,8 +870,11 @@ export function normalizeAndDiff(
       // instance. When the write meant to SHARE data, it can never propagate;
       // readers see a permanent hole (the B2 reader-blackout investigation,
       // #4457/#4532). The slot's schema declaring the scope (the narrowing
-      // branch above and scoped asCell entries) is the explicit opt-in to
-      // per-reader semantics. The warn fires where the slot's shape says the
+      // branch above and scoped asCell entries) is a scope CAP (seefeld):
+      // content may be AT MOST that narrow — a same-or-broader link is
+      // correct usage and silent; a narrower-than-cap link still warns. The
+      // undeclared case has no cap, so the warn there is a sharing-intent
+      // heuristic, not cap enforcement. The warn fires where the slot's shape says the
       // author wanted SHARED data (ubik2's criterion): the slot's schema
       // doesn't match undefined and carries no effective default
       // (schemaToleratesMissing, judged with the read side's own matcher),

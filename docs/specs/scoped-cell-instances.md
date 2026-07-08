@@ -130,10 +130,11 @@ the write site) requires the slot — unless the slot's schema
 declares that scope (a scoped `asCell` entry or schema `scope`): because links
 do not encode the DID or session id, such a link resolves to a different
 instance for every reader, so data "shared" that way can never propagate — it
-reads as a permanent hole for everyone but the writer. A schema-declared scoped
-slot is the opt-in for deliberate per-reader resolution; optional, tolerant,
-or defaulted slots (including the runtime's own scoped-link-writing slots)
-degrade harmlessly and stay silent.
+reads as a permanent hole for everyone but the writer. A schema-declared scope on a
+slot is a cap: content may be at most that narrow, so a link at or broader
+than the cap is correct usage (and silent), while a narrower-than-cap link
+still warns. Optional, tolerant, or defaulted slots (including the runtime's
+own scoped-link-writing slots) degrade harmlessly and stay silent.
 
 ## Link Semantics
 

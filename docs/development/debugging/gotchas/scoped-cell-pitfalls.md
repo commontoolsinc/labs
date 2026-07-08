@@ -203,9 +203,12 @@ silent —
 per-reader resolution there degrades harmlessly, which is also how the
 runtime's own scoped-link writes (`.asScope()` result links, `navigateTo`
 result cells, argument setup wiring) stay quiet. If per-reader resolution is
-genuinely intended on a strict slot, opt in by declaring the slot's schema
-scope (e.g. `PerUser<Cell<T>>` on the field type, or `scope: "user"` / a
-scoped `asCell` entry in the schema).
+genuinely intended on a strict slot, declare the slot's schema scope (e.g.
+`PerUser<Cell<T>>` on the field type, or `scope: "user"` / a scoped `asCell`
+entry in the schema). A declared scope is a **cap**: content may be at most
+that narrow, so links at or broader than the cap are silent, while a
+narrower-than-cap link (e.g. a session link in a `PerUser` field) still
+warns.
 
 ## 7. `Math.random()` throws under SES
 
