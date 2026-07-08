@@ -25,6 +25,45 @@ Support and test packages (utils, test-support, deno-web-test, integration,
 generated-patterns, content-hash, leb128, felt, static, vendor-astral,
 fs-sync-example) sit outside the layer stack.
 
+## Documentation: live vs. historical
+
+Documentation in this repository is split into two kinds, and the split is
+load-bearing. See [`docs/README.md`](docs/README.md) for the map and
+[`docs/history/README.md`](docs/history/README.md) for the frozen archive.
+
+- **Live** documentation describes what the repo currently contains or intends
+  to contain — specs, concepts, guides, conventions, tutorials, and plans not
+  yet carried out. It lives everywhere under `docs/` except `docs/history/`, and
+  alongside the code it documents. **Keep it up to date:** when you change
+  behaviour, update the live docs that describe it in the same change.
+- **Historical** documentation is a point-in-time record — an executed plan, a
+  completed migration, an audit or investigation, a decision record, a removed
+  feature's design. It lives under `docs/history/`. **Never edit it to reflect
+  new reality;** it describes the past on purpose. If reality has moved on, write
+  a new live document instead of rewriting the record.
+
+The test for which is which: if the system changed, would someone edit this
+document, or write a new one? Edit it → live. Write a new one and leave this
+alone → historical.
+
+**When you create a historical artifact** — a writeup of a migration, a report
+on a plan you executed, an audit, an investigation's findings, a decision record
+— put it under `docs/history/`, mirroring where it would otherwise live, and
+start it (immediately under the title) with this exact header:
+
+```
+> **Historical — not maintained.** Created: YYYY-MM-DD.
+> <one line on why it is historical>. See `docs/history/README.md` for what "historical" means here.
+```
+
+`Created` is the date you authored it. Do not leave such artifacts in the live
+tree.
+
+**When a live document becomes historical** — a plan you executed, a migration
+that completed, a spec whose feature was removed or superseded — move it: add the
+header above, relocate it under `docs/history/` (mirroring its path), fix inbound
+links, and add an entry to the index in `docs/history/README.md`.
+
 ## Pattern Development
 
 If you are developing patterns, use the repo-local `pattern-dev` skill at

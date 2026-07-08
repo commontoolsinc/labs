@@ -17,3 +17,8 @@ Compatibility surfaces:
 
 When a skill is conceptually referenced in docs, prefer `skills/<name>/` unless
 the reference is specifically about Claude or Codex runtime behavior.
+
+Skills are **live** documentation: keep them current as the repo changes, and do
+not let a skill point at or restate a historical document. For the repository's
+live-versus-historical policy, see
+[AGENTS.md](../AGENTS.md#documentation-live-vs-historical).
