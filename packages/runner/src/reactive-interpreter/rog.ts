@@ -1,6 +1,6 @@
 /**
  * Reactive Operation Graph (ROG) v2 — the runtime IR the Reactive Interpreter
- * executes as data (design: docs/specs/reactive-interpreter-v2/02-ir.md).
+ * executes as data (spec: docs/specs/reactive-interpreter/README.md §4).
  *
  * This module defines the IR *types* plus small structural helpers — no
  * execution and no construction (the builder front-end records ops during

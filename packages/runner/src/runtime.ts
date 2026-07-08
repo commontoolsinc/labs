@@ -185,7 +185,7 @@ export interface ExperimentalOptions {
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
   /** Reactive Interpreter v2: dispatch eligible patterns through the ROG
-   * interpreter (docs/specs/reactive-interpreter-v2/). Default off; env
+   * interpreter (docs/specs/reactive-interpreter/). Default off; env
    * fallback `CF_EXPERIMENTAL_INTERPRETER=1`. Fail-closed: anything the
    * interpreter cannot represent falls back to legacy instantiation. */
   experimentalInterpreter?: boolean | undefined;
