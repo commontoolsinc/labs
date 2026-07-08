@@ -193,6 +193,11 @@ export type VersionSkewHandler = (info: VersionSkewInfo) => void;
  * propagated to the memory layer as ambient config.
  *
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
+ *
+ * Every experimental flag in the repository — these options, the CFC
+ * enforcement dials below, and the storage, memory-protocol, and shell flags —
+ * is catalogued in `docs/development/EXPERIMENTAL_OPTIONS.md`. Update that
+ * registry when adding, changing, or removing a flag.
  */
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */

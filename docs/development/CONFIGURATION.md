@@ -212,20 +212,26 @@ longer exist.
 
 ## Experimental flags
 
-See [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) for
-the full table, propagation paths (server / shell / bg-piece / CLI), and
-verification steps. Briefly:
+[`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) is the
+central registry of every experimental flag: what each gates, who added it, its
+default, its planned end state, and its removal path, plus the propagation paths
+(server / shell / bg-piece / CLI) and verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
 - Shell-side toggles are baked at build time — toggling requires a rebuild.
 - The same env var must be set everywhere the flag is read.
 
-Currently defined:
+The environment-backed flags (the only ones settable without editing code) are:
 
 | Flag | Env var |
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
-| `schedulerHistoricalMightWrite` | _(runtime-only; pass via `new Runtime({ experimental: { ... } })`)_ |
+| `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
+| `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
+
+The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
+storage, memory-protocol, and shell flags are documented in the registry. See it
+for the complete list.
 
 ---
 
