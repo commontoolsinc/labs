@@ -121,7 +121,8 @@ describe("computeEntryIdentity (light, drift-free)", () => {
       { name: "/shared.ts", contents: SHARED },
       {
         name: "/unrelated.tsx",
-        contents: `import { x } from "./does-not-exist.ts";\nexport default x;\n`,
+        contents:
+          `import { x } from "./does-not-exist.ts";\nexport default x;\n`,
       },
     ]);
     expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);

@@ -29,8 +29,7 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 
 // System space-root patterns, served as raw TSX by the toolshed patterns route.
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
-export const DEFAULT_APP_PATTERN_URL =
-  "/api/patterns/system/default-app.tsx";
+export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
 
 /**
  * The system space-root pattern URL a space of this type is created with — the

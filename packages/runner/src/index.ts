@@ -55,12 +55,12 @@ export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
   buildsMatch,
   computeEntryIdentity,
-  fetchToolshedGitSha,
-  resolveEntryIdentity,
   Console,
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  fetchToolshedGitSha,
+  resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";

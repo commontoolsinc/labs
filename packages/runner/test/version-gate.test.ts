@@ -62,8 +62,8 @@ describe("fetchToolshedGitSha", () => {
   });
 
   it("returns undefined when fetch throws", async () => {
-    const fetchImpl = (() =>
-      Promise.reject(new Error("offline"))) as typeof globalThis.fetch;
+    const fetchImpl =
+      (() => Promise.reject(new Error("offline"))) as typeof globalThis.fetch;
     expect(await fetchToolshedGitSha(fetchImpl, "https://host.example")).toBe(
       undefined,
     );
