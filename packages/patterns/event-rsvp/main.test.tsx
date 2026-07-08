@@ -336,23 +336,6 @@ export default pattern(() => {
       { action: action_set_message },
       { assertion: assert_message_set },
     ],
-    // The render smoke assertions resolve `subject[UI]` — which contains live
-    // `$`-bindings (`$value` / `$profile`). Resolving a `$`-bound VNode's props
-    // materializes a binding-target link (h.ts `bindingTargetLink` →
-    // `getAsLink`), and the runner's idempotency double-check (every
-    // computation is re-run in a second transaction and its WRITES compared)
-    // sees those link-materialization writes differ between the two runs. That
-    // is an expected artifact of rendering `$`-bound nodes inside a re-runnable
-    // assertion — exactly the side effect that makes `$`-bindings belong at a
-    // build-once static position — NOT a defect in the pattern's handlers.
-    //
-    // This flag scopes the relaxation to this file only. It does NOT weaken the
-    // render smoke test: the OLD broken structure (`$`-bindings inside
-    // `computed()`) fails via the independent RUNTIME-ERROR path — `h()` throws
-    // "Bidirectionally bound property … is not reactive", reported as a runtime
-    // error (allowRuntimeErrors stays false) — which this flag does not touch.
-    // The 15 value-assertions above still pin handler behavior exactly.
-    expectNonIdempotent: true,
     subject,
   };
 });
