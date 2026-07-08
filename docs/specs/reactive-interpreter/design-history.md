@@ -309,6 +309,93 @@ true — don't force it green.**
 
 ---
 
+## Part VII — Control emission (designed, deferred)
+
+### D-CONTROL-EMISSION — conditional expressions can fuse to one node, but the merge must *branch*
+
+Control ops (`ifElse`/`when`/`unless`, and the ternaries and `&&`/`||` that lower
+to them) are preserved boundaries today (spec §7, §9). That makes any *computed*
+predicate or branch its own node and document: `(a + b) ? c : d` keeps the
+`a + b` lift; `((a + b) ? (c + d) : (e + f)) * 2` is five nodes (three branch/
+predicate lifts, the `ifElse` link cell, the `* 2` lift). Since conditionals are
+among the most common shapes in real patterns, folding a whole conditional
+expression into a single interpreted node is the largest remaining doc win. The
+reasoning below is recorded because it took two wrong turns to reach the right
+rule, and both are easy to repeat.
+
+**What the builtins actually do (if-else.ts).** `ifElse` is not sugar for "pick a
+value." Its `populateDependencies` subscribes to the **condition only**; its
+action writes a *link* to the taken branch (`setRawUntyped(serializedRef, true)`),
+never a materialized value. So the active-branch subscription lives *downstream*:
+whoever reads the result follows the link into the taken branch and subscribes
+there, and never touches the other branch. **Conditional subscription — a false
+predicate means writes to the true-branch's inputs wake nothing — is the entire
+reason the op exists.** Any interpreted replacement must preserve it, not just
+compute the right value.
+
+**Wrong turn 1 — "fold it into a segment like anything else."** An ordinary pure
+segment reads *all* its ops' inputs (no short-circuit). Fusing `ifElse` plus both
+branch expressions into such a segment makes the node read both branches → (since
+subscription is the committed reactivity log, action-run.ts:574 — a node
+subscribes to what it *actually read*) it subscribes to both → the untaken branch
+now retriggers it. That silently converts a demand-driven op into an eager one.
+So a flat, union-read merge is forbidden.
+
+**Wrong turn 2 — "then never merge control at all; keep it its own boundary."**
+Also wrong, just less so: it leaves every computed predicate/branch as a separate
+document. The tell that this was too conservative: the merge *is* survivable,
+because subscription is dynamic. A control-aware executor that evaluates the
+predicate and then reads **only the taken branch** records only the active reads
+in its log → the scheduler subscribes to exactly `predicate-inputs ∪
+active-branch-inputs` → conditional subscription falls out for free.
+
+**The rule: merge is allowed, but the emitter must lower a real branch.** Native
+control emission is not "absorb control into a flat segment"; it is "emit
+data-dependent control *flow* inside the segment action — evaluate the predicate,
+then execute only the taken branch's ops." That is strictly more than transient
+collections needed (a collection has no data-dependent branch in its read-set;
+this does). Given that, the tiers are:
+
+- **Inline the predicate** — always safe (the predicate is read unconditionally),
+  and it directly reclaims the `(a + b) ? …` extra document.
+- **Inline pure branch expressions, conditionally** — safe *iff* the executor
+  short-circuits reads; `((a + b) ? (c + d) : (e + f)) * 2` then collapses to one
+  node reading `{a,b,c,d}` **or** `{a,b,e,f}`, one document.
+
+**The read/write axis, not the pure/reference axis (a correction).** An early
+framing limited branch inlining to "pure values only." Wrong: branch *results*
+compose as references — you forward a link and only force a read where a consumer
+actually reads the value, and only ever the active branch. Materialization is
+required only where a *read* consumes the value; where the control result is a
+**write-back binding target** (`(cond ? cellA : cellB)` bound to an input), the
+node must forward the link exactly as legacy does, so writes reach the right
+cell. `* 2`, interpolation, comparison — any read-consuming downstream — is
+unaffected. So the win is not restricted to pure branches.
+
+**The invariant to not regress** (also in spec §14): the fused control node's
+read-set must never exceed `predicate-inputs ∪ active-branch-inputs`. Reading
+both branches to "simplify" the emitter reintroduces exactly the eager-subscription
+regression of wrong turn 1.
+
+**Open sizing question before building:** whether the current lowering already
+computes the *inactive* branch eagerly (each branch lift is a standalone action
+subscribed to its own inputs; the `ifElse` only gates *propagation*, not the
+branch action's own scheduling — subject to whatever liveness/demand gating the
+scheduler applies). If it does, native emission saves documents *and* wasted
+recompute; if liveness already elides dead branches, it saves documents only.
+Measure this against the authored corpus (predicate/branch document share,
+inactive-branch recompute counts) before committing the emitter work.
+
+**Lesson (L-DEMAND-DRIVEN-IS-THE-POINT): when interpreting a conditional, the
+value is the easy part — the subscription shape is the contract.** A replacement
+that computes the right answer while widening the read-set has regressed the op,
+and no *value* differential will catch it (it's a reactivity/subscription
+property, like the membership-taint bug was a label property — see
+L-DIFFERENTIAL-IS-NECESSARY-NOT-SUFFICIENT). The oracle for this work is a
+subscription/trigger-count differential, not a result differential.
+
+---
+
 ## Appendix — commit trail
 
 Milestones, for archaeology (branch `claude/priceless-rubin-89ad5e`, PR #4514):

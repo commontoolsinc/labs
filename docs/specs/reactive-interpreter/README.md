@@ -310,7 +310,8 @@ is a pure function: a layered topological assignment plus union-find over
 same-layer pure↔pure edges.
 
 - **Boundaries** (`boundaryKindOf`): `effect`; `control` (legacy branch-link
-  semantics, kept verbatim); `collection` unless admitted transient (§11);
+  semantics, kept verbatim — native emission is future, §14); `collection`
+  unless admitted transient (§11);
   `pattern` unless admitted value-consumed (§6.3); `unresolved-leaf` (missing
   impl); `gated-leaf` (untrusted or capability-bearing, §6.2). Everything else
   is pure.
@@ -560,6 +561,28 @@ the missing case always falls back to legacy or to a preserved boundary.
   pure-method stdlib called from pattern code could lower to IR (interpreted
   natively, capability-gated, differential-oracle-verified); today they are
   opaque leaves. `call` is `NotInterpretedHere`.
+- **Native control emission** (§7, §9). `ifElse`/`when`/`unless` (and lowered
+  ternaries) are preserved boundaries: the interpreter never fuses a conditional
+  into a segment, so a computed predicate or branch stays its own node/document
+  (`(a + b) ? c : d` keeps the `a + b` lift; the branch lifts of
+  `((a + b) ? (c + d) : (e + f)) * 2` are five nodes today). Fusing a whole
+  conditional expression into **one** node that reads only the *active* side is
+  sound and is the largest remaining doc/reactivity win — but it is strictly more
+  than transient collections: the emitter must lower **data-dependent control
+  flow** into the segment action (evaluate the predicate, then execute only the
+  taken branch), *not* a flat union-read region. The enabling fact is that
+  subscription is the committed reactivity log (a node subscribes to what it
+  *read*, §10 / action-run.ts), so a short-circuiting executor gets conditional
+  subscription for free — **provided** it never reads both branches. The one
+  invariant a future implementer must not regress: **the fused control node's
+  read-set must never exceed `predicate-inputs ∪ active-branch-inputs`** —
+  reading both branches to "simplify" silently converts a demand-driven op into
+  an eager one, the exact property these builtins exist to provide. Branch
+  *results* compose as references — materialize where a read consumes the value,
+  forward the link (as legacy `ifElse` does, if-else.ts) where the result is a
+  write-back binding target — so the win is not limited to pure branches. See
+  design-history **D-CONTROL-EMISSION** for the full reasoning (including why
+  "don't merge" became "merge, but branch").
 - **`flatMap` materialized inline** (§11.2) — stays legacy by decision.
 - **Write-back (F4) partition edges** (§7) — deferred pending a measured
   conflict ratchet.
