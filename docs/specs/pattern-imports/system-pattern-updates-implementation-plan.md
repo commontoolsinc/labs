@@ -123,6 +123,7 @@ identity the runtime stores — without compiling.
 New file `packages/runner/src/harness/entry-identity.ts`:
 
 ```ts
+// Shown for illustration only.
 import type { Source } from "@commonfabric/js-compiler";
 import { pretransformProgramForModules } from "./pretransform.ts";
 import { computeModuleIdentities } from "../sandbox/module-record-compiler.ts";
@@ -190,6 +191,7 @@ File map (from the existing route):
 
 1. In `patterns-server.ts`, add a **memoized** identity resolver:
    ```ts
+   // Shown for illustration only.
    // Patterns are baked into the binary / fixed on disk for the process's
    // lifetime, so the identity map is computed once and cached forever.
    let identityMap: Map<string, string> | undefined;
@@ -247,6 +249,7 @@ exists; else an app-level request test):
 New `packages/lib-shell/src/version-gate.ts` (or nearest worker-side util):
 
 ```ts
+// Shown for illustration only.
 /** undefined = unknown (missing gitSha either side) → treated as "skew". */
 export async function toolshedGitSha(runtime, host): Promise<string | undefined>;
 export function clientGitSha(): string | undefined;
@@ -338,6 +341,7 @@ case; no update behavior yet.
 New method on `PiecesController` (`pieces-controller.ts`):
 
 ```ts
+// Shown for illustration only.
 /** Returns "updated" | "current" | "skipped-skew" | "skipped-disabled". */
 async checkAndUpdateDefaultPattern(space): Promise<UpdateOutcome>;
 ```

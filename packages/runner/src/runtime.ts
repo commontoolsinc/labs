@@ -1570,13 +1570,18 @@ export class Runtime {
       return entry.value;
     }
     const value = lookup();
-    cache.set(key, { at: now, value });
-    // Evict a failed lookup (or one that resolved to "unknown") so it retries.
+    const fresh = { at: now, value };
+    cache.set(key, fresh);
+    // Evict a failed lookup (or one that resolved to "unknown") so it retries —
+    // but only if it is still THIS entry (a later lookup may have replaced it).
+    const evictIfStale = () => {
+      if (cache.get(key) === fresh) cache.delete(key);
+    };
     value
       .then((v) => {
-        if (v === undefined) cache.delete(key);
+        if (v === undefined) evictIfStale();
       })
-      .catch(() => cache.delete(key));
+      .catch(evictIfStale);
     return value;
   }
 

@@ -646,6 +646,7 @@ export class RuntimeInternals extends EventTarget {
     navigate,
     onConsole,
     onError,
+    onVersionSkew,
     telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
     // One runtime per identity: the worker session is always the
@@ -694,7 +695,7 @@ export class RuntimeInternals extends EventTarget {
     // explicitly.
     return new RuntimeInternals(
       client,
-      { navigate, onConsole, onError },
+      { navigate, onConsole, onError, onVersionSkew },
       telemetry,
     );
   }
