@@ -4,8 +4,10 @@ import {
   type JSONSchema,
   type ModuleByteCache,
   Runtime,
+  type MemorySpace,
   RuntimeProgram,
   type Schema,
+  setPatternSource,
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
@@ -21,6 +23,32 @@ import { homeSchema } from "@commonfabric/home-schemas";
 
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+// System space-root patterns, served as raw TSX by the toolshed patterns route.
+export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
+export const DEFAULT_APP_PATTERN_URL =
+  "/api/patterns/system/default-app.tsx";
+
+/**
+ * The system space-root pattern URL a space of this type is created with — the
+ * home DID gets home.tsx, every other space the default app. Used to back-fill
+ * `patternSource` for spaces created before provenance stamping.
+ *
+ * Known v1 limitation: an existing *custom-app* space (whose root was seeded
+ * from home's `defaultAppUrl`) that carries no stored `patternSource` derives to
+ * default-app.tsx here. The auto-update check must therefore only act when a
+ * stored `patternSource` is present (or the running identity matches a known
+ * system identity) — otherwise it would roll a custom app to the default. See
+ * docs/specs/pattern-imports/pattern-updates.md risk list.
+ */
+export function deriveSystemPatternUrl(
+  space: MemorySpace,
+  runtime: Runtime,
+): string {
+  return space === runtime.userIdentityDID
+    ? HOME_PATTERN_URL
+    : DEFAULT_APP_PATTERN_URL;
+}
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
 // the logger is disabled, so controller phases show up in the load summaries
@@ -357,7 +385,7 @@ export class PiecesController<T = unknown> {
     if (isHomeSpace) {
       patternConfig = {
         name: "Home",
-        urlPath: "/api/patterns/system/home.tsx",
+        urlPath: HOME_PATTERN_URL,
         cause: "home-pattern",
       };
     } else {
@@ -367,7 +395,7 @@ export class PiecesController<T = unknown> {
       );
       patternConfig = {
         name: "DefaultPieceList",
-        urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+        urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
         cause: "space-root",
       };
     }
@@ -432,6 +460,10 @@ export class PiecesController<T = unknown> {
 
           // Run pattern setup within same transaction
           this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+
+          // Stamp the provenance the piece tracks for updates (the source it
+          // was born from) — the same transaction, one extra meta write.
+          setPatternSource(pieceCell, tx, patternConfig.urlPath);
 
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));

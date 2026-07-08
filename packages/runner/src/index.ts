@@ -95,7 +95,9 @@ export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
   getPatternIdentityRef,
+  getPatternSource,
   patternIdentityKey,
+  setPatternSource,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)

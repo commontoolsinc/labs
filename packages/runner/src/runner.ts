@@ -4447,6 +4447,32 @@ export function getPatternIdentityRef(
   return asPatternIdentityRef(raw);
 }
 
+/**
+ * Read a piece's `patternSource` provenance — the source it tracks for updates
+ * (a toolshed pattern path today; a `cf:` fabric ref in a later phase).
+ * Undefined for pieces created before provenance stamping, or hand-built ones.
+ */
+export function getPatternSource(
+  resultCell: Cell<unknown>,
+): string | undefined {
+  const raw = resultCell.getMetaRaw("patternSource", {
+    meta: ignoreReadForScheduling,
+  });
+  return typeof raw === "string" ? raw : undefined;
+}
+
+/**
+ * Stamp a piece's `patternSource` provenance. Meta writes are transactional, so
+ * a transaction is required (mirrors the `patternIdentity` write).
+ */
+export function setPatternSource(
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  url: string,
+): void {
+  resultCell.withTx(tx).setMetaRaw("patternSource", url);
+}
+
 /** Narrow a raw meta value to a `{ identity, symbol }` pattern ref, or undefined. */
 export function asPatternIdentityRef(
   raw: unknown,
