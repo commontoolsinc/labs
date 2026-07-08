@@ -28,7 +28,7 @@ in the same change.
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
-| [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (no env var) | off | Bernhard Seefeld (#4090) | graduate with scheduler-v2 speculation lineage | implemented, off by default |
+| [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic-only — in the canonical env registry) | off | Bernhard Seefeld (#4090) | graduate with scheduler-v2 speculation lineage | implemented, off by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
@@ -49,20 +49,31 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 
 ## Category 1: Runtime experimental options
 
-These four flags are the `ExperimentalOptions` interface in
+These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
-are passed as `new Runtime({ experimental: { ... } })`. Three of them
-(`modernCellRep`, `persistentSchedulerState`, `eagerSourceAnnotation`) are also
-wired to environment variables so the deployed processes can set them; see [How
-flags propagate](#how-flags-propagate). Each flag defaults to `undefined`, which
-means "take the built-in default"; the built-in default is `false` for all four.
+are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
+`undefined`, which means "take the built-in default"; the built-in default is
+`false` for every one of them.
+
+The mapping from environment variable to flag is defined once, canonically, as
+`EXPERIMENTAL_ENV_VARS` in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
+and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
+the background piece service all go through that one mapping, so their wirings
+cannot drift; the shell reads the same variables from its build-time defines.
+Three flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`); `commitPreconditions` is deliberately mapped to `null`
+there, which records "not env-reachable" as a decision rather than an omission.
+The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
+with a warning rather than coerced. See [How flags
+propagate](#how-flags-propagate).
 
 ### `modernCellRep`
 
-- **Toggle via.** `EXPERIMENTAL_MODERN_CELL_REP` environment variable (parsed in
-  toolshed, background piece service, and the shell build), or directly through
-  `RuntimeOptions.experimental.modernCellRep`. The ambient control point is
-  `setModernCellRepConfig` in
+- **Toggle via.** `EXPERIMENTAL_MODERN_CELL_REP` environment variable (through
+  the canonical mapping described in the category note above), or directly
+  through `RuntimeOptions.experimental.modernCellRep`. The ambient control point
+  is `setModernCellRepConfig` in
   [`packages/data-model/src/cell-rep.ts`](../../packages/data-model/src/cell-rep.ts).
 - **Added by.** Dan Bornstein, in "Define a new 'modern cell representation'
   experiment flag" (#3818, 2026-06-02).
@@ -88,8 +99,9 @@ means "take the built-in default"; the built-in default is `false` for all four.
 
 ### `persistentSchedulerState`
 
-- **Toggle via.** `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` environment variable,
-  or `RuntimeOptions.experimental.persistentSchedulerState`. The ambient control
+- **Toggle via.** `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` environment variable
+  (through the canonical mapping described in the category note above), or
+  `RuntimeOptions.experimental.persistentSchedulerState`. The ambient control
   point is `setPersistentSchedulerStateConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts) (the runner owns the
   feature, but the value has to be known at the memory client and server
@@ -117,11 +129,13 @@ means "take the built-in default"; the built-in default is `false` for all four.
 
 ### `commitPreconditions`
 
-- **Toggle via.** `RuntimeOptions.experimental.commitPreconditions` only. There
-  is no environment variable for it today: the toolshed and background-piece
-  environment mappers do not forward it, so it can be enabled only by
-  constructing a `Runtime` with the flag set (which is what the tests do). The
-  ambient control point is `setCommitPreconditionsConfig` in
+- **Toggle via.** `RuntimeOptions.experimental.commitPreconditions` only. It has
+  no environment variable today: it is mapped to `null` in the canonical
+  `EXPERIMENTAL_ENV_VARS` registry, which puts "not env-reachable" on the record
+  as a deliberate choice rather than leaving it absent from one wiring. Wiring an
+  environment variable is a one-line change there. Until then it can be enabled
+  only by constructing a `Runtime` with the flag set, which is what its tests do.
+  The ambient control point is `setCommitPreconditionsConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts).
 - **Added by.** Bernhard Seefeld, in "speculation lineage for event-launched
   work (scheduler-v2 E1)" (#4090, 2026-06-12).
@@ -164,8 +178,9 @@ means "take the built-in default"; the built-in default is `false` for all four.
   defaults it to on when the environment is `development`. Unlike the flags
   above, this one is not expected to graduate: it trades boot time for debug
   fidelity and stays off in production by design.
-- **Status on 2026-07-08.** Implemented and wired across the shell, the toolshed,
-  and the runtime.
+- **Status on 2026-07-08.** Implemented: reachable on the server through the
+  canonical environment mapping (like every env-backed flag), defaulted on in
+  shell development builds, and honored by the runtime.
 - **Path to removal.** There is no planned removal. It would only be deleted if
   the debug source-annotation mechanism itself were removed, which is unlikely
   because `.src` is a public debugging surface.
@@ -184,18 +199,32 @@ dial types live in
 
 Unlike the Category 1 flags, most of these are not simple on/off booleans; they
 are staged dials, usually `off` then `observe` (evaluate and emit diagnostics
-but do not reject) then `enforce` (reject on a violation). They also are not
-wired to environment variables in the deployed processes: the toolshed, shell,
-and background-piece entrypoints do not set them, so in the product they take
-their constructor defaults. The interactive `cf-harness` and the `fuse` mount
-expose the enforcement mode through `CF_CFC_MODE` for testing. The staging plan
-is tracked in the CFC design docs under
+but do not reject) then `enforce` (reject on a violation).
+
+They are not wired to environment variables. Instead, the first-party posture is
+set once in `coreOptions`, the shared core that every construction preset
+composes, in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts).
+`coreOptions` pins `cfcEnforcementMode` to `enforce-explicit`; the other CFC
+dials are deliberately left on their constructor defaults (`off` or none) there,
+with a comment marking `coreOptions` as the one place to flip a dial when a
+first-party rollout begins. So the place to advance a CFC rollout across the
+whole fleet is that one function, not each call site. A few presets accept
+per-environment overrides: `patternTest` and `unitTest` take a laxer
+`cfcEnforcementMode`, and `browserWorker` takes host-controlled
+`cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
+The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
+through `CF_CFC_MODE` for testing. Because these dials are keys of
+`RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
+makes adding a new one a compile error until it is classified across every
+preset. The staging plan is tracked in the CFC design docs under
 [`docs/specs/`](../specs/) (for example the S16 default-transition design and
 the per-epic implementation notes).
 
 ### `cfcEnforcementMode`
 
-- **Toggle via.** `RuntimeOptions.cfcEnforcementMode`. The cf-harness and fuse
+- **Toggle via.** `RuntimeOptions.cfcEnforcementMode`, pinned for first-party
+  processes in `coreOptions` (see the category note). The cf-harness and fuse
   read `CF_CFC_MODE` as an override.
 - **Added by.** Bernhard Seefeld, in "Implement runner commit-boundary" (#3263,
   2026-04-14).
@@ -206,11 +235,14 @@ the per-epic implementation notes).
   explicit labels; `enforce-strict` also rejects violations that come from
   inferred taint.
 - **Current default and planned end state.** The type-level default constant
-  (`DEFAULT_CFC_ENFORCEMENT_MODE`) is `disabled`, but the `Runtime` constructor
-  raises the effective product default to `enforce-explicit`, so boundary
-  enforcement is on by default in the product. The content-addressed compilation
-  cache is also gated on this being anything other than `disabled`. Over time
-  the default is expected to tighten toward `enforce-strict`.
+  (`DEFAULT_CFC_ENFORCEMENT_MODE`) is `disabled`, but both the `Runtime`
+  constructor and the shared `coreOptions` preset set `enforce-explicit`, so
+  boundary enforcement is on by default in the product. (The preset pins the same
+  value the constructor would default to, so that a future change to the
+  constructor default cannot silently relax first-party processes.) The
+  content-addressed compilation cache is also gated on this being anything other
+  than `disabled`. Over time the default is expected to tighten toward
+  `enforce-strict`.
 - **Status on 2026-07-08.** Active. All four rungs of the ladder are
   implemented; the ladder itself is a permanent part of the system rather than a
   temporary flag.
@@ -407,23 +439,30 @@ reach the runtime through the deployed processes. The runtime-only flags
 (`commitPreconditions`, the CFC dials) reach it only through the `RuntimeOptions`
 passed to `new Runtime(...)`.
 
-### Server-side (Deno processes)
+All first-party processes build their `RuntimeOptions` through a construction
+preset in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
+and the environment-backed flags reach the runtime through the one canonical
+mapping, `experimentalOptionsFromEnv`, in that same file. That mapping accepts
+exactly `"true"` and `"false"`: an unset variable stays `undefined`, which the
+runtime reads as "use the built-in default", and any other value is ignored with
+a warning. (The distinction between unset and an explicit `false` matters,
+because an explicit value overrides a built-in default that happens to be on.)
 
-Server-side propagation is straightforward: environment variables are parsed and
-passed directly into `new Runtime({ experimental: { ... } })`.
+### Server-side (Deno processes)
 
 ```
 Server Process (Deno)
   |
-  +-- ENV: EXPERIMENTAL_* = <value>
+  +-- ENV: EXPERIMENTAL_* = "true" | "false"
   |
-  +-- toolshed/env.ts        --> Zod parses the env vars (tri-state: true / false / unset)
-  +-- toolshed/index.ts      --> new Runtime({ experimental: runtimeExperimentalOptions(env) })
+  +-- runner/runtime-presets.ts  --> experimentalOptionsFromEnv(Deno.env.get)
+  +-- toolshed/runtime-options.ts --> runtimePresets.productionServer({ experimental, ... })
+  +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
 
-The tri-state parse matters: an unset flag stays `undefined`, which the runtime
-reads as "use the built-in default", and that is different from an explicit
-`false`.
+The background piece service and the CLI use the same mapping and the same
+presets, so the three server-side wirings agree on how a value parses.
 
 ### Browser-side (build-time injection)
 
@@ -440,27 +479,24 @@ Build Time (shell)
 Browser (main thread)
   +-- shell/runtime.ts --> reads EXPERIMENTAL from env.ts
   +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
-        |  postMessage (IPC), InitializationData carries experimental
+        |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
 Browser web worker
-  +-- new Runtime({ ..., experimental })
+  +-- runtime-client/backends/runtime-processor.ts
+        --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 
 Because the shell bakes the flags into the bundle at build time, changing a
 browser-side flag requires rebuilding the shell. Server-side flags take effect
-on restart without a rebuild.
+on restart without a rebuild. The browser is also the one place a CFC dial is
+host-controlled at construction: the `browserWorker` preset takes
+`cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
 
 ### Background piece service
 
-```
-packages/background-piece-service/src/main.ts
-  --> new Runtime({ experimental }) (from env.ts)
-  --> SpaceManager --> WorkerController --> worker.ts initialize({ experimental })
-  --> new Runtime({ experimental })
-```
-
-Set the same `EXPERIMENTAL_*` variables when starting the background piece
-service.
+The background piece service reads the same environment variables and builds its
+runtimes (the main process and each worker) through the `productionServer`
+preset, so set the same `EXPERIMENTAL_*` variables when starting it.
 
 ## Enabling flags locally
 
@@ -477,10 +513,17 @@ EXPERIMENTAL_EXAMPLE_NAME_2=true \
 deno task dev
 ```
 
-For the runtime-only flags and the CFC dials there is no environment variable in
-the deployed processes; enable them by constructing the `Runtime` with the option
-set (which is how the tests exercise them), or, for the enforcement mode in the
-interactive tools, through `CF_CFC_MODE`.
+Use exactly `true` or `false`. Values like `1`, `yes`, or `TRUE` used to be
+coerced (and, before the mapping was unified, in opposite directions in
+different processes); they are now ignored with a warning, leaving the built-in
+default in place.
+
+For the runtime-only flags and the CFC dials there is no environment variable;
+enable them by constructing the `Runtime` with the option set (which is how the
+tests exercise them). To advance a CFC dial for every first-party process at
+once, change its value in `coreOptions` in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts).
+For the enforcement mode in the interactive tools, use `CF_CFC_MODE`.
 
 ## Verifying flags are working
 
@@ -505,10 +548,17 @@ cd packages/runner
 deno test --allow-ffi --allow-env --allow-read test/experimental-options.test.ts
 ```
 
-This test passes as of 2026-07-08. It exercises the flag plumbing, not the full
-behavior of every feature under every flag combination; the per-feature test
-matrices live with each feature's specs (for example under
-[`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) and the CFC design docs).
+A second test, `packages/runner/test/runtime-presets.test.ts`, is a conformance
+golden: it pins the full `RuntimeOptions` each preset produces, including the
+`coreOptions` CFC pins, and the exact value each environment variable parses to
+through `experimentalOptionsFromEnv`. Any change to the fleet-wide posture or the
+env mapping shows up as a diff in that one file.
+
+Both tests pass as of 2026-07-08. They exercise the flag plumbing and the
+per-preset posture, not the full behavior of every feature under every flag
+combination; the per-feature test matrices live with each feature's specs (for
+example under [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) and the CFC
+design docs).
 
 ## Implementation details
 
@@ -517,6 +567,22 @@ The Category 1 flags are declared as the `ExperimentalOptions` interface in
 `Runtime` constructor merges the provided flags with the defaults (all `false`),
 propagates each one to its ambient control point, and then reads the effective
 state back so that `runtime.experimental.*` reflects what is actually in effect.
+
+First-party construction config is centralized in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
+which is the place to touch when adding or changing a flag that construction
+config reaches:
+
+- `EXPERIMENTAL_ENV_VARS` is the single environment-variable mapping for
+  `ExperimentalOptions`, typed as `Record<keyof ExperimentalOptions, string |
+  null>`, so every flag must be listed there (a real env var name, or `null` for
+  "programmatic-only"). `experimentalOptionsFromEnv` reads it.
+- `RUNTIME_OPTION_KEYS` is an exhaustive, compile-checked registry of every
+  `RuntimeOptions` key (including the CFC dials). Adding a new option to
+  `RuntimeOptions` without registering it there is a compile error, which forces
+  a decision about how each preset treats it.
+- `coreOptions` holds the shared first-party posture (today, the CFC pins) that
+  every preset composes.
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
