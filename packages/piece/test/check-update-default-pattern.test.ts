@@ -164,9 +164,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.idle();
 
     const root = (await manager.getDefaultPattern(false))!;
-    // Same piece entity — no new piece minted.
+    // Same piece entity — no new piece minted; the update wrote a new
+    // patternIdentity onto the existing result cell (the watcher re-instantiates
+    // the new pattern in place — its own machinery, exercised elsewhere).
     expect(JSON.stringify(root.getAsLink())).toBe(rootLinkBefore);
-    // patternIdentity now points at v2.
     const idV2 = getPatternIdentityRef(root)?.identity;
     expect(idV2).toBe(await identityForSource(SOURCE_V2));
     expect(idV2).not.toBe(idV1);
