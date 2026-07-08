@@ -37,6 +37,7 @@ import {
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
+  VersionSkewNotification,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -64,6 +65,7 @@ export type RuntimeClientEvents = {
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
   pendingwriteschange: [{ pending: boolean }];
+  versionskew: [VersionSkewNotification];
 };
 
 export const $conn = Symbol("$request");
@@ -86,6 +88,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
+    this.#conn.on("versionskew", this._onVersionSkew);
   }
 
   /**
@@ -653,5 +656,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ): void => {
     this.#pendingWrites = data.pending;
     this.emit("pendingwriteschange", { pending: data.pending });
+  };
+
+  private _onVersionSkew = (data: VersionSkewNotification): void => {
+    this.emit("versionskew", data);
   };
 }

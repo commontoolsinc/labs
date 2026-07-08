@@ -58,6 +58,31 @@ export class XRootView extends BaseView {
       height: 100%;
       width: 100%;
     }
+
+    #version-skew-banner {
+      position: fixed;
+      inset-block-start: 0;
+      inset-inline: 0;
+      z-index: 2000;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      font: 500 14px/1.4 system-ui, sans-serif;
+      color: #1a1a1a;
+      background: #ffe8a3;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    #version-skew-banner button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      padding: 2px 10px;
+      background: rgba(255, 255, 255, 0.6);
+    }
   `;
 
   @state()
@@ -65,6 +90,11 @@ export class XRootView extends BaseView {
 
   @state()
   private accessor _themePreference: ThemePreference = getThemePreference();
+
+  // Set when the worker reports a version-skew (a space's toolshed build differs
+  // from this client build). Surfaces a non-blocking "reload to update" banner.
+  @state()
+  private accessor _versionSkew = false;
 
   @property()
   accessor keyStore: KeyStore | undefined = undefined;
@@ -127,6 +157,13 @@ export class XRootView extends BaseView {
           // This client build's git sha, for the system-pattern auto-update
           // version-skew gate (compared to a space's toolshed /api/meta).
           clientVersion: COMMIT_SHA,
+          onVersionSkew: (event) => {
+            console.warn(
+              "[shell] version skew — a newer build is available",
+              event,
+            );
+            this._versionSkew = true;
+          },
           // Per-profile dogfood toggles: worker-console forwarding and the
           // Epic H3a render ceiling (see lib/host-toggles.ts).
           ...runtimeHostFlags(),
@@ -298,6 +335,19 @@ export class XRootView extends BaseView {
 
   override render() {
     return html`
+      ${this._versionSkew
+        ? html`
+          <div id="version-skew-banner" role="status">
+            <span>A newer version is available.</span>
+            <button @click="${() => globalThis.location.reload()}">
+              Reload
+            </button>
+            <button @click="${() => (this._versionSkew = false)}">
+              Dismiss
+            </button>
+          </div>
+        `
+        : null}
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
           .app="${this.app}"

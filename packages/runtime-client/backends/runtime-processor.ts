@@ -540,6 +540,15 @@ export class RuntimeProcessor {
           });
         },
       ],
+
+      onVersionSkew: (info) => {
+        self.postMessage({
+          type: NotificationType.VersionSkew,
+          space: info.space,
+          clientVersion: info.clientVersion,
+          toolshedVersion: info.toolshedVersion,
+        });
+      },
     });
 
     if (!await runtime.healthCheck()) {

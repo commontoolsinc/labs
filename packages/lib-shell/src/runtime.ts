@@ -98,6 +98,12 @@ export type RuntimeInternalsCallbacks = {
   navigate?: (target: RuntimeNavigationTarget) => void;
   onConsole?: (event: RuntimeClientEvents["console"][0]) => void;
   onError?: (event: RuntimeClientEvents["error"][0]) => void;
+  /**
+   * A space's toolshed build differs from this client build, so its
+   * system-pattern auto-update check was skipped. The shell surfaces a
+   * non-blocking "reload to update" banner.
+   */
+  onVersionSkew?: (event: RuntimeClientEvents["versionskew"][0]) => void;
 };
 
 /**
@@ -310,6 +316,7 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
+    this.#client.on("versionskew", this.#onVersionSkew);
     this.#client.on("telemetry", this.#onTelemetry);
   }
 
@@ -591,6 +598,10 @@ export class RuntimeInternals extends EventTarget {
       return;
     }
     console.error("[RuntimeClient Error]", event);
+  };
+
+  #onVersionSkew = (event: RuntimeClientEvents["versionskew"][0]) => {
+    this.#callbacks.onVersionSkew?.(event);
   };
 
   #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {

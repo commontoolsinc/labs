@@ -108,6 +108,7 @@ export enum NotificationType {
   Telemetry = "callback:telemetry",
   VDomBatch = "vdom:batch",
   PendingWritesChanged = "callback:pending-writes",
+  VersionSkew = "callback:versionskew",
 }
 
 export interface IPCClientMessage {
@@ -839,6 +840,20 @@ export interface TelemetryNotification {
 }
 
 /**
+ * Worker→shell signal that a space's toolshed build differs from this client
+ * build, so the system-pattern auto-update check was skipped for that space
+ * (the light `?identity` is only comparable within a build). The shell surfaces
+ * a non-blocking "newer version available — reload" affordance. Versions are
+ * git shas; either may be absent when a side's build sha is unknown.
+ */
+export interface VersionSkewNotification {
+  type: NotificationType.VersionSkew;
+  space: string;
+  clientVersion?: string;
+  toolshedVersion?: string;
+}
+
+/**
  * Worker-to-page mirror of the storage manager's durability barrier: `pending`
  * is true while any issued commit is still unconfirmed by the server, false
  * once the pending set drains. The shell consults the latest value from its
@@ -919,7 +934,8 @@ export type IPCRemoteNotification =
   | NavigateRequestNotification
   | ErrorNotification
   | VDomBatchNotification
-  | PendingWritesNotification;
+  | PendingWritesNotification
+  | VersionSkewNotification;
 
 export type Commands = {
   // Runtime requests

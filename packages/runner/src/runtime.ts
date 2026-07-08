@@ -169,6 +169,14 @@ export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
+/** A build-version mismatch detected while checking a space for updates. */
+export interface VersionSkewInfo {
+  space: string;
+  clientVersion?: string;
+  toolshedVersion?: string;
+}
+export type VersionSkewHandler = (info: VersionSkewInfo) => void;
+
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
  * independent piece of the new fabric-value pipeline so that the features
@@ -255,6 +263,13 @@ export interface RuntimeOptions {
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
+  /**
+   * Invoked when a system-pattern update check is skipped because the space's
+   * toolshed build differs from this client build. The worker backend forwards
+   * it to the shell as a `versionSkew` IPC notification (banner). Inert when
+   * omitted.
+   */
+  onVersionSkew?: VersionSkewHandler;
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
@@ -470,6 +485,7 @@ export class Runtime {
   readonly spaceHostMap?: Record<string, string>;
   /** This client build's git sha; see RuntimeOptions.clientVersion. */
   readonly clientVersion?: string;
+  readonly #onVersionSkew?: VersionSkewHandler;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
@@ -534,6 +550,7 @@ export class Runtime {
 
     this.id = options.storageManager.id;
     this.clientVersion = options.clientVersion;
+    this.#onVersionSkew = options.onVersionSkew;
     this.apiUrl = new URL(options.apiUrl);
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
@@ -1443,6 +1460,15 @@ export class Runtime {
    */
   hostForSpace(space: MemorySpace): URL {
     return new URL(this.mappedHostFor(space) ?? this.apiUrl);
+  }
+
+  /**
+   * Report a build-version mismatch found while checking a space for a
+   * system-pattern update. Forwarded (by the worker backend) to the shell as a
+   * `versionSkew` notification. Inert when no handler is configured.
+   */
+  reportVersionSkew(info: VersionSkewInfo): void {
+    this.#onVersionSkew?.(info);
   }
 
   /**
