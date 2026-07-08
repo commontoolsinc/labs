@@ -8,7 +8,6 @@ import {
   fillCfInput,
   submitViaEnter,
   waitForRuntimeIdle,
-  waitForRuntimeSynced,
   waitForText,
 } from "./cfc-browser-helpers.ts";
 
@@ -69,13 +68,6 @@ async function createProfile(
   { viaEnter = false }: { viaEnter?: boolean } = {},
 ) {
   await ensureProfileTabActive(page);
-  // Each profile lives in its own `inSpace` child space, so appending one is a
-  // cross-space commit. `waitForRuntimeIdle` returns once the scheduler queue
-  // drains; `waitForRuntimeSynced` additionally awaits every opened space to
-  // reconcile. Settle fully before submitting so the append does not interleave
-  // with commits still in flight from a prior navigation's rehydration, and
-  // again after so it reconciles before the caller navigates or appends again.
-  await waitForRuntimeSynced(page);
   await fillCfInput(page, "#wish-profile-picker-name-input", name);
   // Submit either by clicking the trusted "Create profile" button or by
   // pressing Enter in the field. Both ride a trusted gesture that carries the
@@ -85,7 +77,12 @@ async function createProfile(
   } else {
     await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
   }
-  await waitForRuntimeSynced(page);
+  // Each profile lives in its own `inSpace` child space, so appending one is a
+  // cross-space commit issued fire-and-forget by the event handler.
+  // `waitForRuntimeIdle` now includes commit durability: it awaits the storage
+  // manager's pending-commit barrier as well as scheduler quiescence, so the
+  // append is server-confirmed before the caller navigates or appends again.
+  await waitForRuntimeIdle(page);
 }
 
 // Regression coverage for creating a profile directly from the home space's
