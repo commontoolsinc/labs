@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -275,16 +275,86 @@ async function waitForAuthorshipState(
 ) {
   let probe: AuthorshipProbe | undefined;
   try {
-    await waitFor(async () => {
-      probe = await readAuthorshipProbe(page, containerSelector);
-      return probe.hosts.some((host) =>
-        host.state === "verified" &&
-        host.textIntegrityState === "ok" &&
-        host.renderedText.includes(expectedText) &&
-        host.hasTrustedAvatar
-      );
-    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
+    await waitForCondition(
+      page,
+      (_probe, targetContainerSelector: string | undefined, text: string) => {
+        function collect(
+          root: Document | ShadowRoot,
+          result: Element[],
+        ): void {
+          for (const element of root.querySelectorAll("*")) {
+            if (element.tagName.toLowerCase() === "cf-cfc-authorship") {
+              result.push(element);
+            }
+            if (element.shadowRoot) {
+              collect(element.shadowRoot, result);
+            }
+          }
+        }
+
+        function deepText(root: ParentNode): string {
+          let text = root instanceof Element || root instanceof ShadowRoot
+            ? root.textContent ?? ""
+            : "";
+          for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) {
+              text += ` ${deepText(element.shadowRoot)}`;
+            }
+          }
+          return text;
+        }
+
+        function isWithinContainer(
+          element: Element,
+          selector: string | undefined,
+        ): boolean {
+          if (!selector) {
+            return true;
+          }
+
+          let current: Node | null = element;
+          while (current) {
+            if (current instanceof Element) {
+              try {
+                if (current.matches(selector)) {
+                  return true;
+                }
+              } catch {
+                return false;
+              }
+            }
+            const root = current.getRootNode();
+            current = current.parentNode ??
+              (root instanceof ShadowRoot ? root.host : null);
+          }
+          return false;
+        }
+
+        const collected: Element[] = [];
+        collect(document, collected);
+        const elements = collected.filter((element) =>
+          isWithinContainer(element, targetContainerSelector)
+        );
+        return elements.some((element) => {
+          const typedElement = element as unknown as {
+            authorshipState?: string;
+            textIntegrityState?: string;
+          };
+          return typedElement.authorshipState === "verified" &&
+            typedElement.textIntegrityState === "ok" &&
+            deepText(element).includes(text) &&
+            element.shadowRoot?.querySelector(
+                "[data-cfc-authorship-avatar]",
+              ) !== null;
+        });
+      },
+      {
+        timeout: CFC_GROUP_CHAT_TIMEOUT,
+        args: [containerSelector, expectedText],
+      },
+    );
   } catch (cause) {
+    probe = await readAuthorshipProbe(page, containerSelector);
     throw new Error(
       `Timed out waiting for verified authorship row. Last probe: ${
         JSON.stringify(probe, null, 2)
@@ -300,17 +370,91 @@ async function waitForInvalidAuthorshipState(
 ) {
   let probe: AuthorshipProbe | undefined;
   try {
-    await waitFor(async () => {
-      probe = await readAuthorshipProbe(page, containerSelector);
-      return probe.hosts.some((host) =>
-        (host.state === "unknown" || host.state === "unverified") &&
-        !host.hasTrustedAvatar &&
-        IMPORTED_MESSAGE_MARKERS.some((marker) =>
-          host.renderedText.includes(marker)
-        )
-      );
-    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
+    await waitForCondition(
+      page,
+      (
+        _probe,
+        targetContainerSelector: string | undefined,
+        markers: readonly string[],
+      ) => {
+        function collect(
+          root: Document | ShadowRoot,
+          result: Element[],
+        ): void {
+          for (const element of root.querySelectorAll("*")) {
+            if (element.tagName.toLowerCase() === "cf-cfc-authorship") {
+              result.push(element);
+            }
+            if (element.shadowRoot) {
+              collect(element.shadowRoot, result);
+            }
+          }
+        }
+
+        function deepText(root: ParentNode): string {
+          let text = root instanceof Element || root instanceof ShadowRoot
+            ? root.textContent ?? ""
+            : "";
+          for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) {
+              text += ` ${deepText(element.shadowRoot)}`;
+            }
+          }
+          return text;
+        }
+
+        function isWithinContainer(
+          element: Element,
+          selector: string | undefined,
+        ): boolean {
+          if (!selector) {
+            return true;
+          }
+
+          let current: Node | null = element;
+          while (current) {
+            if (current instanceof Element) {
+              try {
+                if (current.matches(selector)) {
+                  return true;
+                }
+              } catch {
+                return false;
+              }
+            }
+            const root = current.getRootNode();
+            current = current.parentNode ??
+              (root instanceof ShadowRoot ? root.host : null);
+          }
+          return false;
+        }
+
+        const collected: Element[] = [];
+        collect(document, collected);
+        const elements = collected.filter((element) =>
+          isWithinContainer(element, targetContainerSelector)
+        );
+        return elements.some((element) => {
+          const typedElement = element as unknown as {
+            authorshipState?: string;
+          };
+          const state = typedElement.authorshipState;
+          const hasTrustedAvatar = element.shadowRoot?.querySelector(
+            "[data-cfc-authorship-avatar]",
+          ) !== null;
+          const renderedText = deepText(element);
+          return (state === "unknown" || state === "unverified") &&
+            !hasTrustedAvatar &&
+            markers.some((marker) => renderedText.includes(marker));
+        });
+      },
+      {
+        timeout: CFC_GROUP_CHAT_TIMEOUT,
+        args: [containerSelector, IMPORTED_MESSAGE_MARKERS],
+      },
+    );
   } catch (cause) {
+    probe = await readAuthorshipProbe(page, containerSelector);
     throw new Error(
       `Timed out waiting for invalid authorship row. Last probe: ${
         JSON.stringify(probe, null, 2)

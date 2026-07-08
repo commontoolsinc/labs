@@ -965,7 +965,6 @@ AUTO_DEBOUNCE_DELAY_MS = 100       // Debounce delay for slow actions
 CYCLE_DEBOUNCE_THRESHOLD_MS = 100  // Cycle time to trigger adaptive debounce
 CYCLE_DEBOUNCE_MIN_RUNS = 3        // Runs in cycle to be considered cycling
 CYCLE_DEBOUNCE_MULTIPLIER = 2      // Debounce = multiplier × cycle time
-DEFAULT_RETRIES_FOR_EVENTS = 5     // Retry count for commit conflicts
 MAX_RETRIES_FOR_REACTIVE = 10      // Retry count for reactive actions
 ```
 

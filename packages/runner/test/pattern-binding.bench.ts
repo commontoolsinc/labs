@@ -223,7 +223,7 @@ function time(
   for (let i = 0; i < iters; i++) op(binding, links);
   const ms = performance.now() - t0;
   const nsPerOp = (ms * 1e6) / iters;
-  console.log(label.padEnd(44), `${nsPerOp.toFixed(0).padStart(9)} ns/op`);
+  console.error(label.padEnd(44), `${nsPerOp.toFixed(0).padStart(9)} ns/op`);
 }
 
 if (import.meta.main) {
@@ -232,7 +232,9 @@ if (import.meta.main) {
     ? [custom]
     : [1, 10, 30, 100, 300, 1000];
 
-  console.log("\n# scaling: ns/op and ns/alias (pathDepth=2, link schema on)");
+  console.error(
+    "\n# scaling: ns/op and ns/alias (pathDepth=2, link schema on)",
+  );
   for (const aliases of sizes) {
     const binding = makeUiBinding({ aliases, pathDepth: 2 });
     const iters = aliases >= 300 ? 2000 : 20000;
@@ -241,14 +243,14 @@ if (import.meta.main) {
     for (let i = 0; i < iters; i++) op(binding);
     const ms = performance.now() - t0;
     const nsPerOp = (ms * 1e6) / iters;
-    console.log(
+    console.error(
       `aliases=${String(aliases).padStart(5)}`,
       `${nsPerOp.toFixed(0).padStart(9)} ns/op`,
       `${(nsPerOp / Math.max(1, aliases)).toFixed(0).padStart(6)} ns/alias`,
     );
   }
 
-  console.log("\n# what drives it (aliases=100, 20000 iters each)");
+  console.error("\n# what drives it (aliases=100, 20000 iters each)");
   const N = 100;
   time(
     "baseline (depth2, link schema)",

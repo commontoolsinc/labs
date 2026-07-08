@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitFor, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { dirname, join, resolve } from "@std/path";
@@ -65,23 +65,14 @@ async function waitForSlugPieceMarker(
   shell: ShellIntegration,
   expectedText: string,
 ): Promise<void> {
-  await waitFor(async () => {
-    return await shell.page().evaluate((expected) => {
-      function findText(root: Document | ShadowRoot): string | undefined {
-        const marker = root.querySelector("#slug-piece-marker");
-        if (marker?.textContent?.trim()) {
-          return marker.textContent.trim();
-        }
-        for (const element of root.querySelectorAll("*")) {
-          if (element.shadowRoot) {
-            const found = findText(element.shadowRoot);
-            if (found) return found;
-          }
-        }
-      }
-      return findText(document) === expected;
-    }, { args: [expectedText] });
-  });
+  await waitForCondition(
+    shell.page(),
+    (probe, expected) =>
+      probe.collect("#slug-piece-marker").some((el) =>
+        probe.deepText(el).trim() === expected
+      ),
+    { args: [expectedText] },
+  );
 }
 
 async function getClientEngineCompileCount(
@@ -100,22 +91,20 @@ async function getClientEngineCompileCount(
 async function waitForSpaceRootPattern(
   page: ReturnType<ShellIntegration["page"]>,
 ): Promise<void> {
-  await waitFor(async () => {
-    return await page.evaluate(() => {
-      const rootView = document.querySelector("x-root-view");
-      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-        | {
-          _patterns?: {
-            value?: {
-              spaceRootPattern?: {
-                id(): string;
-              };
+  await waitForCondition(page, () => {
+    const rootView = document.querySelector("x-root-view");
+    const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+      | {
+        _patterns?: {
+          value?: {
+            spaceRootPattern?: {
+              id(): string;
             };
           };
-        }
-        | null;
-      return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
-    });
+        };
+      }
+      | null;
+    return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
   });
 }
 
@@ -242,9 +231,7 @@ describe("shell piece tests", () => {
         identity,
       });
 
-      await waitFor(async () => {
-        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
-      });
+      await waitForCondition(page, () => !!globalThis.commonfabric?.rt);
       await waitForSpaceRootPattern(page);
       // First in-browser load of the piece: pieces are no longer eagerly
       // started when the space loads (CT-1623 — the header used to start every
@@ -263,24 +250,22 @@ describe("shell piece tests", () => {
       });
 
       const waitForActivePattern = async () => {
-        await waitFor(async () => {
-          return await page.evaluate((expectedPieceId) => {
-            const rootView = document.querySelector("x-root-view");
-            const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-              | {
-                _patterns?: {
-                  value?: {
-                    activePattern?: {
-                      id(): string;
-                    };
+        await waitForCondition(page, (_probe, expectedPieceId) => {
+          const rootView = document.querySelector("x-root-view");
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                value?: {
+                  activePattern?: {
+                    id(): string;
                   };
                 };
-              }
-              | null;
-            const activePattern = appView?._patterns?.value?.activePattern;
-            return activePattern?.id() === expectedPieceId;
-          }, { args: [pieceId] });
-        });
+              };
+            }
+            | null;
+          const activePattern = appView?._patterns?.value?.activePattern;
+          return activePattern?.id() === expectedPieceId;
+        }, { args: [pieceId] });
       };
 
       await waitForActivePattern();
@@ -322,9 +307,7 @@ describe("shell piece tests", () => {
         },
         identity,
       });
-      await waitFor(async () => {
-        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
-      });
+      await waitForCondition(page, () => !!globalThis.commonfabric?.rt);
       await waitForSpaceRootPattern(page);
       // Settle the space-root chain's own loads before baselining (a trailing
       // root compile landing inside the measurement window would show up as a
@@ -469,8 +452,9 @@ describe("shell piece tests", () => {
           identity: undefined,
         });
       });
-      await waitFor(async () =>
-        await shell.page().evaluate(() => !globalThis.commonfabric?.rt)
+      await waitForCondition(
+        shell.page(),
+        () => !globalThis.commonfabric?.rt,
       );
       // Let any disposal-raced async work settle before afterEach inspects the
       // recorded console errors.

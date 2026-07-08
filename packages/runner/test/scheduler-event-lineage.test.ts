@@ -338,15 +338,21 @@ describe("scheduler event lineage", () => {
       streamB.getAsNormalizedFullLink(),
     );
 
-    runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {}, 1);
+    // handlerTx.abort() aborts the commit locally (StorageTransactionAborted). A
+    // locally-aborted commit is deterministic, not contention: it cannot converge
+    // by retrying, so the event path drops it on the first attempt rather than
+    // retrying (it is neither a conflict nor a bounded-budget retry). The
+    // invariant under test is lineage gating: the payload-only same-space
+    // follow-up B queued by the failed origin attempt must not commit.
+    runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {}, true);
     await waitForSchedulerCondition(
       runtime,
-      () => originAttempts >= 2,
-      "permanent origin did not exhaust retries",
+      () => originAttempts >= 1,
+      "origin did not run",
     );
     await runtime.idle();
 
-    expect(originAttempts).toBe(2);
+    expect(originAttempts).toBe(1);
     expect(payloads.get()).toEqual([]);
   });
 
@@ -421,7 +427,11 @@ describe("scheduler event lineage", () => {
     const gate = delayNextServerTransact(storageManager);
 
     try {
-      runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {}, 0);
+      runtime.scheduler.queueEvent(
+        streamA.getAsNormalizedFullLink(),
+        {},
+        false,
+      );
       await waitForSignal(gate.started, "origin commit did not start");
       await waitForSchedulerCondition(
         runtime,
@@ -634,7 +644,11 @@ describe("scheduler event lineage", () => {
     );
 
     try {
-      runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {}, 0);
+      runtime.scheduler.queueEvent(
+        streamA.getAsNormalizedFullLink(),
+        {},
+        false,
+      );
       await waitForSignal(gate.started, "origin commit did not start");
       idlePromise = runtime.idle();
       await expectIdlePending(idlePromise);

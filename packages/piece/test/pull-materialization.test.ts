@@ -9,6 +9,7 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
@@ -132,20 +133,6 @@ function compiledMultiplierProgram(
       },
     ],
   };
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs: number = 1_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-  throw new Error(`Timed out waiting ${timeoutMs}ms`);
 }
 
 function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
@@ -305,6 +292,7 @@ describe("piece pull materialization", () => {
     );
     let setupResolved = false;
     let releaseSetup: (() => void) | undefined;
+    const setupCalled = defer<void>();
 
     manager.runtime.setup = ((...args) => {
       const piece = args[3];
@@ -313,6 +301,7 @@ describe("piece pull materialization", () => {
           setupResolved = true;
           resolve(piece);
         };
+        setupCalled.resolve();
       });
     }) as typeof manager.runtime.setup;
 
@@ -330,7 +319,7 @@ describe("piece pull materialization", () => {
 
     try {
       const pending = manager.setupPersistent(pattern, { input: 5 });
-      await waitFor(() => releaseSetup !== undefined);
+      await setupCalled.promise;
       expect(setupResolved).toBe(false);
       if (!releaseSetup) {
         throw new Error("Expected runtime.setup to be called");

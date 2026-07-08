@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env, Page, waitForCondition } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -143,17 +143,20 @@ describe("cfc spec gallery integration test", () => {
 });
 
 async function waitForCfcLabelText(page: Page, expected: string[]) {
-  let probe: CfcLabelProbe | undefined;
   try {
-    await waitFor(async () => {
-      probe = await readCfcLabelProbe(page);
-      const labels = probe.labels;
+    await waitForCondition(page, (probe, expected) => {
+      const labels = probe.collect("cf-cfc-label").map((element) => {
+        const shadowText = element.shadowRoot?.textContent ?? "";
+        const lightText = element.textContent ?? "";
+        return shadowText || lightText;
+      });
 
       return expected.every((label) =>
         labels.some((rendered) => rendered.includes(label))
       );
-    });
+    }, { args: [expected] });
   } catch (cause) {
+    const probe = await readCfcLabelProbe(page);
     throw new Error(
       `Timed out waiting for CFC labels. Last probe: ${
         JSON.stringify(probe, null, 2)

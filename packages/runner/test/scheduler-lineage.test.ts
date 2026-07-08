@@ -80,7 +80,7 @@ function queuedEvent(
     action: () => {},
     handler: () => {},
     event: { id },
-    retriesLeft: 0,
+    retry: false,
   };
 }
 

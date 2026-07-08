@@ -3,6 +3,7 @@ import {
   env,
   Page,
   waitFor,
+  waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
@@ -48,9 +49,7 @@ describe("default-app notebook reload integration test", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      return await awaitRuntimeIdle(page);
-    });
+    await waitForRuntimeIdle(page);
     await waitFor(async () => !!(await clickButtonWithText(page, "Notes")));
     await waitFor(async () =>
       !!(await clickButtonWithText(page, "New Notebook"))
@@ -60,7 +59,11 @@ describe("default-app notebook reload integration test", () => {
       return state.isNotebook;
     });
 
-    await waitFor(async () => await awaitViewSettled(page));
+    await waitForCondition(
+      page,
+      () => typeof globalThis.commonfabric?.viewSettled === "function",
+    );
+    await awaitViewSettled(page);
     assert(
       await clickButtonWithTitle(page, "New Note"),
       "Expected New Note click to succeed",
@@ -224,15 +227,6 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
       ),
       postRenderStableMs: round(postRenderStableMs)!,
     };
-  });
-}
-
-async function awaitRuntimeIdle(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.idle) return false;
-    await rt.idle();
-    return true;
   });
 }
 
