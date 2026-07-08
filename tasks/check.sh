@@ -29,6 +29,13 @@ baseDir="${cmdDir%/*}" # Parent of `cmdDir`, repo root in this case.
 cd "${baseDir}"
 
 # Collect all paths to check. Glob patterns will be expanded by bash.
+#
+# This list is the single type-checking point for the paths it names: the CI
+# test jobs and the package test tasks that cover these paths run
+# `deno test --no-check` and rely on this script (via the Check job's
+# "Type check codebase" step) for type safety. Before adding --no-check to a
+# test invocation, make sure every file it loads is under a path listed here.
+# Removing a path from this list removes its type checking entirely.
 FILES_TO_CHECK=()
 
 # Directory paths (no glob expansion needed)
@@ -38,6 +45,7 @@ DIRS=(
   "packages/piece"
   "packages/cli/test"
   "packages/cli/commands"
+  "packages/cli/support"
   "packages/deno-web-test"
   "packages/html"
   "packages/identity"

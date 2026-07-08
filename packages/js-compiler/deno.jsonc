@@ -1,7 +1,8 @@
 {
   "name": "@commonfabric/js-compiler",
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=UPDATE_GOLDENS,API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
+    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
+    "test": "deno test --no-check --allow-read --allow-write --allow-run --allow-env=UPDATE_GOLDENS,API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
     "typescript": "npm:typescript",

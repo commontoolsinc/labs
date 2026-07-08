@@ -24,6 +24,7 @@ import {
   apiHeaders,
   applyBaselineOverrides,
   type BaselineOverrides,
+  benchmarksRunsPath,
   computeBaseline,
   type DenoBenchResult,
   downloadAndParseJUnit,
@@ -551,9 +552,7 @@ async function main() {
   let benchRunsProcessed = 0;
   try {
     const benchRuns = (
-      await githubGet<{ workflow_runs: WorkflowRun[] }>(
-        `/repos/${REPO}/actions/workflows/benchmarks.yml/runs?branch=main&status=success&event=push&per_page=${MAX_RUNS_TO_FETCH}`,
-      )
+      await githubGet<{ workflow_runs: WorkflowRun[] }>(benchmarksRunsPath())
     ).workflow_runs;
 
     if (benchRuns.length > 0) {
