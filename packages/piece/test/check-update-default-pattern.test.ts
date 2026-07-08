@@ -213,4 +213,31 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
   });
+
+  it("holds the home root behind its own flag (M4.2)", async () => {
+    // A home space (session space == the identity DID), with the base flag on
+    // but the home flag off, must not auto-update — it short-circuits before
+    // any fetch.
+    versionSkews = [];
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      clientVersion: BUILD_SHA,
+      experimental: { systemPatternAutoUpdate: true },
+    });
+    const homeSession = await createSession({
+      identity: signer,
+      spaceDid: signer.did(),
+    });
+    expect(homeSession.space).toBe(runtime.userIdentityDID);
+    manager = new PieceManager(homeSession, runtime);
+    await manager.synced();
+    controller = new PiecesController(manager);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+      "skipped-disabled",
+    );
+    expect(stub.identityFetches()).toBe(0);
+  });
 });

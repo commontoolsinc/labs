@@ -5,6 +5,40 @@ patterns** (the space-root pattern: `default-app.tsx` first, then `home.tsx`).
 Read that doc first for the *why*; this plan is the *how*, written to be
 executed literally. When plan and spec disagree, stop and ask.
 
+## Implementation status (2026-07-08)
+
+M0–M4 are implemented behind the default-off `systemPatternAutoUpdate` flag
+(home behind a second `systemPatternAutoUpdateHome` flag). Five corrections
+surfaced during a ground-truth pass and while wiring the check — the plan below
+is otherwise accurate, but read these first:
+
+1. **`MetaField` is a closed union.** `"patternSource"` had to be added to it
+   (`packages/api/index.ts`) before `setMetaRaw("patternSource", …)` would
+   typecheck. The plan did not mention this.
+2. **Light identity hashes PRISTINE bytes, not `mapped.files`.** The engine
+   restores pre-injection authored source (`pristineModuleSources`) before
+   hashing, so `computeEntryIdentity` prefixes names but hashes the *original*
+   contents. Implementing the plan's steps 3–5 literally (feeding the
+   helper-injected `pretransformProgramForModules(...).files`) would have failed
+   the linchpin cross-check.
+3. **`?identity` must use URL-pathname names.** A module's identity folds in its
+   authored path, and the worker names modules by their URL pathname
+   (`HttpProgramResolver` → `/api/patterns/…`), so the toolshed computes
+   `?identity` over pathname-prefixed names, not patterns-root-relative ones.
+   Verified by a parity test compiling the real system patterns the worker's
+   way. (M0.2 originally used root-relative names and was wrong.)
+4. **The gate runs in the worker, not `lib-shell`.** The update check (and thus
+   `buildsMatch`) executes in the per-space worker (`PiecesController`), so the
+   gate helpers live in the runner (`harness/version-gate.ts`), and the client
+   build sha is threaded to the worker as `Runtime.clientVersion` via
+   `InitializationData` (sourced from the shell's `COMMIT_SHA`).
+5. **No storage-socket-reset event exists.** The `?identity`/gitSha caches use a
+   TTL backstop plus an explicit `clearPatternUpdateCaches()`; hanging
+   invalidation off a real reconnect event is a follow-up.
+
+The closure guard is also scoped to the entry's *reachable* set (BFS) rather
+than every module, so passing a superset of files is safe.
+
 ## How to work this plan
 
 - Milestones in order (M0 → M4). Within a milestone, tasks are dependency-

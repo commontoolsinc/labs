@@ -8,7 +8,11 @@ later phase) on demand for **published** patterns. Companion to `README.md`
 
 ## Status
 
-Design.
+Phase 1 implemented behind the default-off `systemPatternAutoUpdate` flag
+(non-home default-app root). See
+`system-pattern-updates-implementation-plan.md` for the milestone map and the
+corrections found during implementation. Home root and published-pattern
+updates remain design (Phases 2–4).
 
 ## Last Updated
 
@@ -155,14 +159,29 @@ onto the **same result cell**.
 
 ## System patterns v1 — the loop
 
-**Toolshed side (once per boot; patterns are fixed for a toolshed's
-lifetime).** Add a `?identity` query param to the pattern route
-(`patterns.routes.ts`). At boot, for each system pattern: resolve the local
-file closure (toolshed has the files) → `transformInjectHelperModule` (the
-inject-helper pretransform step) → `computeModuleIdentities` → cache
-`{ name → identity }`. Serve that on `?identity`. **No type-check, no emit** —
-the light computation; exact **within a build version** (all we ever compare
-within — see the gate).
+**Toolshed side (memoized per file for the process lifetime; patterns are fixed
+for a toolshed's lifetime).** Add a `?identity` query param to the pattern route
+(`patterns.routes.ts`). For a requested file: walk its authored import closure
+via single-file reads (works in a compiled binary — no directory enumeration) →
+hash the **pristine** authored bytes → return the entry identity. **No
+type-check, no emit** — the light computation (`resolveEntryIdentity` in the
+runner); exact **within a build version** (all we ever compare within — see the
+gate).
+
+Two implementation facts make the light identity equal what the worker stores as
+`patternIdentity`, verified by a parity test against the real `default-app.tsx`
+and `home.tsx`:
+
+- **Hash pristine, not injected.** The engine restores each module's original
+  pre-injection bytes (`pristineModuleSources`) before hashing, so the light
+  path must hash the authored source, not the helper-injected pretransform
+  output. Hashing the injected form silently diverges.
+- **Name modules by their URL pathname.** A module's identity folds in its
+  authored path (`computeModuleHashes`). The worker compiles system patterns
+  over HTTP, where `HttpProgramResolver` names every module by its URL pathname
+  (`/api/patterns/…`). The toolshed therefore computes `?identity` over
+  pathname-prefixed names — **not** patterns-root-relative names — or the two
+  identities never match and the check re-updates forever.
 
 **Runtime side (at space open, in the per-space worker).**
 

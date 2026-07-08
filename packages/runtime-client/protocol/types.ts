@@ -160,6 +160,10 @@ export interface InitializationData {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
     eagerSourceAnnotation?: boolean;
+    // Roll a space's system root pattern forward in place when its toolshed
+    // serves a newer identity. Default off; home held behind the second flag.
+    systemPatternAutoUpdate?: boolean;
+    systemPatternAutoUpdateHome?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
