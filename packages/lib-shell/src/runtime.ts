@@ -139,6 +139,12 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   /**
+   * This client build's git sha (the shell's `COMMIT_SHA`). Forwarded to the
+   * worker runtime for the system-pattern auto-update version-skew gate.
+   * Absent ⇒ never auto-update.
+   */
+  clientVersion?: string;
+  /**
    * When true, forward the worker runtime's console output to the main
    * thread so it reaches devtools and integration-test console capture.
    * Off by default.
@@ -223,6 +229,7 @@ export function createRuntimeClientOptions({
   // expected — that is the point of the dogfood stage.
   cfcRenderCeiling = false,
   trustSnapshot,
+  clientVersion,
   forwardWorkerConsole,
 }: {
   session: Session;
@@ -233,6 +240,7 @@ export function createRuntimeClientOptions({
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
+  clientVersion?: string;
   forwardWorkerConsole?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
@@ -261,6 +269,7 @@ export function createRuntimeClientOptions({
       }
       : {}),
     trustSnapshot: resolvedTrustSnapshot,
+    clientVersion,
     forwardWorkerConsole,
   };
 }
@@ -617,6 +626,7 @@ export class RuntimeInternals extends EventTarget {
     cfcFlowLabels,
     cfcRenderCeiling,
     trustSnapshot,
+    clientVersion,
     forwardWorkerConsole,
     getBuildHash = fetchBuildHash,
     workerUrl,
@@ -661,6 +671,7 @@ export class RuntimeInternals extends EventTarget {
         cfcFlowLabels,
         cfcRenderCeiling,
         trustSnapshot,
+        clientVersion,
         forwardWorkerConsole,
       }),
     );

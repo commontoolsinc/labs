@@ -28,7 +28,7 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
-import { ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
+import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 
@@ -124,6 +124,9 @@ export class XRootView extends BaseView {
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
+          // This client build's git sha, for the system-pattern auto-update
+          // version-skew gate (compared to a space's toolshed /api/meta).
+          clientVersion: COMMIT_SHA,
           // Per-profile dogfood toggles: worker-console forwarding and the
           // Epic H3a render ceiling (see lib/host-toggles.ts).
           ...runtimeHostFlags(),

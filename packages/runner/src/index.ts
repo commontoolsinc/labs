@@ -51,7 +51,9 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
+  buildsMatch,
   computeEntryIdentity,
+  fetchToolshedGitSha,
   resolveEntryIdentity,
   Console,
   type ConsoleEvent,

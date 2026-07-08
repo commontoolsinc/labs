@@ -149,6 +149,11 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
+  // This client build's git sha (the shell's COMMIT_SHA). Threaded to the
+  // worker runtime as `clientVersion` for the system-pattern auto-update
+  // version-skew gate (compared to a space's toolshed /api/meta gitSha).
+  // Absent (dev / unknown) ⇒ never auto-update.
+  clientVersion?: string;
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;

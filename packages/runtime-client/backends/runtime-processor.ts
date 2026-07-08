@@ -169,6 +169,7 @@ export function runtimeOptionsFromInitializationData(
   return {
     apiUrl: apiUrlObj,
     spaceHostMap: data.spaceHostMap,
+    clientVersion: data.clientVersion,
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,

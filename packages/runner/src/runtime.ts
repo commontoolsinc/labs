@@ -244,6 +244,14 @@ export interface RuntimeOptions {
    * one. Fixed for the runtime's lifetime.
    */
   spaceHostMap?: Record<string, string>;
+  /**
+   * This client build's git sha (the shell's `COMMIT_SHA`). Compared against a
+   * space's toolshed `/api/meta` `gitSha` to gate the system-pattern
+   * auto-update path — the light `?identity` is only trustworthy when client
+   * and toolshed are the same build. Absent (dev / unknown) ⇒ never
+   * auto-update. See `harness/version-gate.ts`.
+   */
+  clientVersion?: string;
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
@@ -460,6 +468,8 @@ export class Runtime {
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /** This client build's git sha; see RuntimeOptions.clientVersion. */
+  readonly clientVersion?: string;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
@@ -523,6 +533,7 @@ export class Runtime {
     );
 
     this.id = options.storageManager.id;
+    this.clientVersion = options.clientVersion;
     this.apiUrl = new URL(options.apiUrl);
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
