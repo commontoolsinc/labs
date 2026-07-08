@@ -1040,8 +1040,8 @@ export class RuntimeProcessor {
       // audit). Only build a controller to check for updates when enabled —
       // avoids per-call construction on this hot fast path.
       if (
-        this.runtime.experimental.systemPatternAutoUpdate &&
-        this.runtime.experimental.systemPatternAutoUpdateHome
+        this.runtime.experimental?.systemPatternAutoUpdate &&
+        this.runtime.experimental?.systemPatternAutoUpdateHome
       ) {
         const homeSession: Session = {
           as: this.identity,
