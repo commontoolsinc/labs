@@ -54,6 +54,50 @@ Deno.test("transformInjectHelperModule transforms by default and respects cf-dis
   assertNotMatch(plain.contents, /cf-disable-transform/);
 });
 
+Deno.test("transformInjectHelperModule warns only on an indented (ignored) cf-disable-transform", () => {
+  const run = (name: string, contents: string) => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const out = transformInjectHelperModule({
+        main: name,
+        files: [{ name, contents }],
+      });
+      return { warnings, contents: out.files[0]!.contents };
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+
+  // Indented directive: not honored, so the file is transformed as usual —
+  // and the author is warned, by file name, that it was ignored.
+  const indented = run(
+    "/indented.tsx",
+    ["  /// <cf-disable-transform />", "export const value = 1;"].join("\n"),
+  );
+  assertMatch(
+    indented.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
+  assertEquals(indented.warnings.length, 1);
+  assertMatch(indented.warnings[0]!, /\/indented\.tsx/);
+  assertMatch(indented.warnings[0]!, /column zero/);
+
+  // Column-zero directive: honored (transform disabled) and no warning.
+  const columnZero = run(
+    "/plain.tsx",
+    ["/// <cf-disable-transform />", "export const value = 1;"].join("\n"),
+  );
+  assertNotMatch(
+    columnZero.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
+  assertEquals(columnZero.warnings.length, 0);
+});
+
 Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js sources", () => {
   const program: RuntimeProgram = {
     main: "/main.tsx",
