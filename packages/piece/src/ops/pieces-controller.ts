@@ -553,10 +553,29 @@ export class PiecesController<T = unknown> {
       if (!root) return "current";
 
       // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
-      //    space must resolve against its own toolshed).
-      const url = getPatternSource(root) ??
-        deriveSystemPatternUrl(space, runtime);
+      //    space must resolve against its own toolshed). A non-home root
+      //    created before provenance stamping has no patternSource; we must NOT
+      //    derive default-app.tsx for it — a custom-app space (seeded from
+      //    home's defaultAppUrl) would be silently rolled to the default app.
+      //    Deriving is only safe for the home root (definitionally home.tsx).
+      //    Legacy non-home roots stay pinned until re-created stamps them; a
+      //    known-system-identity match could relax this later (spec M2.3).
+      const storedSource = getPatternSource(root);
+      if (storedSource === undefined && !isHomeSpace) {
+        return "current";
+      }
+      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+
+      // The version gate (step 4) validates `host`'s build, and the light
+      // ?identity is only trustworthy from that same build — so only act on a
+      // source served BY `host`. A cross-origin patternSource (a published /
+      // custom-app source on another host) would be gated against the wrong
+      // build; defer it to the cross-host published-pattern flow (Phase 4).
+      const target = new URL(url, host);
+      if (target.origin !== new URL(host).origin) {
+        return "current";
+      }
 
       // 4. Version gate: the light ?identity is only comparable within a build.
       const toolshedVersion = await runtime.toolshedGitSha(host);
@@ -579,7 +598,7 @@ export class PiecesController<T = unknown> {
 
       // 7. Apply: compile the new source, then swap patternIdentity in place.
       const program = await runtime.harness.resolve(
-        new HttpProgramResolver(new URL(url, host).href),
+        new HttpProgramResolver(target.href),
       );
       const pattern = await runtime.patternManager.compilePattern(program, {
         space,

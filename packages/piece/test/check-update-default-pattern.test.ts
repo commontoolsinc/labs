@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  getPatternSource,
   resolveEntryIdentity,
   Runtime,
   type VersionSkewInfo,
@@ -213,6 +214,24 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.failIdentity(true);
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
+  });
+
+  it("skips a legacy non-home root with no patternSource (custom-app safety)", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    // recreateDefaultPattern does NOT stamp patternSource — it stands in for a
+    // legacy root created before provenance existed (which might be a custom app
+    // seeded from home's defaultAppUrl, NOT the default app).
+    await controller.recreateDefaultPattern();
+    const root = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBeUndefined();
+    const before = getPatternIdentityRef(root)?.identity;
+
+    // Even though the toolshed serves a (different) default-app identity, we must
+    // NOT roll this space to default-app: skip without touching it or fetching.
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(root)?.identity).toBe(before);
+    expect(stub.identityFetches()).toBe(0);
   });
 
   it("holds the home root behind its own flag (M4.2)", async () => {
