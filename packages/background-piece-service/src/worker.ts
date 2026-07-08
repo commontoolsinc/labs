@@ -8,6 +8,7 @@ import {
   type ErrorWithContext,
   isStream,
   Runtime,
+  runtimePresets,
   Stream,
 } from "@commonfabric/runner";
 import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
@@ -163,18 +164,24 @@ export async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and piece manager
-  runtime = new Runtime({
-    apiUrl: new URL(toolshedUrl),
+  // Initialize runtime and piece manager. Shared first-party posture
+  // (CT-1814); `experimental` arrives as data from the main process so the
+  // service has one flag decision point (see main.ts createRuntime). The
+  // preset pins patternEnvironment to `apiUrl`, matching the explicit pin
+  // this site previously carried.
+  runtime = new Runtime(runtimePresets.productionServer({
+    apiUrl,
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(toolshedUrl),
     }),
-    patternEnvironment: { apiUrl },
+    // The IPC type allows absence, but the service always forwards the main
+    // runtime's resolved flags; `{}` (constructor defaults) covers a bare
+    // caller.
+    experimental: experimental ?? {},
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
-    experimental,
-  });
+  }));
   // Each worker is its own isolate: the provider main.ts registers doesn't
   // exist here, so initialize OTel in-worker (idempotent, fail-open) or the
   // bridge below would attach to no-op instruments.

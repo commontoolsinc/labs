@@ -9,6 +9,19 @@ export type {
   VersionSkewHandler,
   VersionSkewInfo,
 } from "./runtime.ts";
+export {
+  type BrowserWorkerPresetParams,
+  type EnvReader,
+  EXPERIMENTAL_ENV_VARS,
+  experimentalOptionsFromEnv,
+  type PatternTestPresetParams,
+  type ProductionServerPresetParams,
+  type RemoteClientPresetParams,
+  RUNTIME_OPTION_KEYS,
+  type RuntimeOptionKey,
+  runtimePresets,
+  type UnitTestPresetParams,
+} from "./runtime-presets.ts";
 export type {
   UnsafeHostTrust,
   UnsafeHostTrustOptions,

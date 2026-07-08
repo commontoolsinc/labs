@@ -6,14 +6,15 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
-  runtimeOptionsFromInitializationData,
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
@@ -1761,29 +1762,33 @@ describe("runtime-client CellRef conversion", () => {
   });
 });
 
-describe("runtimeOptionsFromInitializationData", () => {
-  it("threads CFC initialization settings into runtime options", () => {
+describe("browserWorkerParamsFromInitializationData", () => {
+  it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
-      typeof runtimeOptionsFromInitializationData
+      typeof browserWorkerParamsFromInitializationData
     >[2];
     const storageManager = {
       as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<typeof runtimeOptionsFromInitializationData>[1];
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
 
-    const options = runtimeOptionsFromInitializationData(
-      {
-        apiUrl: "http://worker.test/",
-        identity: {} as never,
-        spaceDid: "did:key:space",
-        cfcEnforcementMode: "enforce-explicit",
-        cfcFlowLabels: "observe",
-        trustSnapshot: {
-          id: "principal:did:key:worker",
-          actingPrincipal: "did:key:worker",
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          cfcEnforcementMode: "enforce-explicit",
+          cfcFlowLabels: "observe",
+          trustSnapshot: {
+            id: "principal:did:key:worker",
+            actingPrincipal: "did:key:worker",
+          },
         },
-      },
-      storageManager,
-      telemetry,
+        storageManager,
+        telemetry,
+      ),
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
@@ -1791,6 +1796,50 @@ describe("runtimeOptionsFromInitializationData", () => {
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",
+    });
+    // The preset pins patterns to the host's own API base.
+    expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
+  });
+
+  it("falls back to the shared CFC pin when the host sends no dial", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcFlowLabels).toBeUndefined();
+  });
+
+  it("threads the host-decided space-host map through to the runtime options", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          spaceHostMap: { "did:key:federated": "http://other-host.test/" },
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.spaceHostMap).toEqual({
+      "did:key:federated": "http://other-host.test/",
     });
   });
 });

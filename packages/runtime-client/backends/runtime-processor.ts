@@ -14,6 +14,7 @@ import {
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
 import {
+  type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
   convertCellsToLinks,
@@ -24,6 +25,7 @@ import {
   isCellResult,
   markUiInputBlindWriteTx,
   Runtime,
+  runtimePresets,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   setBlindStructuralTarget,
@@ -160,25 +162,39 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
-export function runtimeOptionsFromInitializationData(
+/**
+ * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
+ * params (CT-1814): the shared first-party posture (CFC pins,
+ * patternEnvironment from apiUrl) lives in the preset; this function only
+ * carries what the host actually decided. Exported for testing.
+ */
+export function browserWorkerParamsFromInitializationData(
   data: InitializationData,
   storageManager: RuntimeOptions["storageManager"],
   telemetry: RuntimeTelemetry,
-): RuntimeOptions {
-  const apiUrlObj = new URL(data.apiUrl);
+): BrowserWorkerPresetParams {
   return {
-    apiUrl: apiUrlObj,
-    spaceHostMap: data.spaceHostMap,
-    clientVersion: data.clientVersion,
+    apiUrl: new URL(data.apiUrl),
+    ...(data.clientVersion !== undefined
+      ? { clientVersion: data.clientVersion }
+      : {}),
     storageManager,
-    patternEnvironment: { apiUrl: apiUrlObj },
+    // The host decides the flags (shell build-time defines); absent ⇒ runtime
+    // defaults.
+    experimental: data.experimental ?? {},
     telemetry,
-    experimental: data.experimental,
-    cfcEnforcementMode: data.cfcEnforcementMode,
-    cfcFlowLabels: data.cfcFlowLabels,
-    trustSnapshotProvider: data.trustSnapshot
-      ? () => data.trustSnapshot
-      : undefined,
+    ...(data.spaceHostMap !== undefined
+      ? { spaceHostMap: data.spaceHostMap }
+      : {}),
+    ...(data.cfcEnforcementMode !== undefined
+      ? { cfcEnforcementMode: data.cfcEnforcementMode }
+      : {}),
+    ...(data.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: data.cfcFlowLabels }
+      : {}),
+    ...(data.trustSnapshot
+      ? { trustSnapshotProvider: () => data.trustSnapshot }
+      : {}),
   };
 }
 
@@ -476,8 +492,11 @@ export class RuntimeProcessor {
 
     let pieceManager: PieceManager | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
-    const runtime = new Runtime({
-      ...runtimeOptionsFromInitializationData(
+    // Everything below goes through the browserWorker preset (CT-1814):
+    // host-decided data via the params mapper, plus this worker's declared
+    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    const runtime = new Runtime(runtimePresets.browserWorker({
+      ...browserWorkerParamsFromInitializationData(
         data,
         storageManager,
         telemetry,
@@ -540,7 +559,6 @@ export class RuntimeProcessor {
           });
         },
       ],
-
       onVersionSkew: (info) => {
         self.postMessage({
           type: NotificationType.VersionSkew,
@@ -549,7 +567,7 @@ export class RuntimeProcessor {
           toolshedVersion: info.toolshedVersion,
         });
       },
-    });
+    }));
 
     if (!await runtime.healthCheck()) {
       throw new Error(`Could not connect to "${data.apiUrl}"`);
