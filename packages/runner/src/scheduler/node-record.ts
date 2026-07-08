@@ -16,6 +16,12 @@ export interface SchedulerGateState {
 
 export interface SchedulerNode {
   readonly action: Action;
+  // Monotonic registration ordinal, assigned once when the record is first
+  // created and preserved across re-subscribe and re-registration (first
+  // registration wins). The deterministic tie-break in `topologicalSort`
+  // (spec §7.4 rule 3) falls back to this so run order does not depend on the
+  // order actions were invalidated / arrived over the network.
+  readonly ordinal: number;
   // Mutable for the one sanctioned transition: computation → effect
   // promotion on re-registration ("once an effect, stays an effect").
   kind: NodeKind;
@@ -44,6 +50,8 @@ export class NodeRegistry {
   // registered node. Membership tracks both status AND active membership:
   // a removed node drops out even though its record persists in `records`.
   private invalidNodes = new Set<Action>();
+  // Source of monotonic registration ordinals (see SchedulerNode.ordinal).
+  private nextOrdinal = 0;
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
@@ -73,6 +81,7 @@ export class NodeRegistry {
 
     const record: SchedulerNode = {
       action,
+      ordinal: this.nextOrdinal++,
       kind,
       status: "never-ran",
       declaredReads: [],
@@ -106,6 +115,17 @@ export class NodeRegistry {
 
   get(action: Action): SchedulerNode | undefined {
     return this.records.get(action);
+  }
+
+  /**
+   * The stable registration ordinal for `action`, or `undefined` if it was
+   * never registered. Assigned once at first registration and preserved
+   * across re-subscribe/re-registration (the record persists in `records`
+   * even after `remove`), so it is a stable, arrival-order-independent
+   * tie-break key for `topologicalSort` (spec §7.4 rule 3).
+   */
+  getRegistrationOrdinal(action: Action): number | undefined {
+    return this.records.get(action)?.ordinal;
   }
 
   /**

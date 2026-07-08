@@ -55,7 +55,10 @@ export function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  nodes?: Pick<NodeRegistry, "get" | "parentActionOf">,
+  nodes?: Pick<
+    NodeRegistry,
+    "get" | "parentActionOf" | "getRegistrationOrdinal"
+  >,
   dependents?: WeakMap<Action, Set<Action>>,
   getAdditionalWrites?: (
     action: Action,
@@ -151,7 +154,14 @@ export function topologicalSort(
     }
   }
 
-  // Perform topological sort with cycle handling
+  // Perform topological sort with cycle handling.
+  //
+  // Once data edges (§7.4 rule 1) and parent tie-breaks (rule 2) are applied,
+  // remaining ties fall back to REGISTRATION ORDER (rule 3) rather than
+  // work-set / arrival order, so the run order — and last-writer-wins on any
+  // shared address — is identical regardless of the order actions were
+  // invalidated or arrived over the network.
+  const byRegistrationOrder = makeTieBreakComparator(actions, nodes);
   const queue: Action[] = [];
   const result: Action[] = [];
   const visited = new Set<Action>();
@@ -162,6 +172,7 @@ export function topologicalSort(
       queue.push(action);
     }
   }
+  queue.sort(byRegistrationOrder);
 
   while (queue.length > 0 || visited.size < actions.size) {
     if (queue.length === 0) {
@@ -184,8 +195,10 @@ export function topologicalSort(
         if (aHasUnvisitedParent && !bHasUnvisitedParent) return 1; // b first
         if (!aHasUnvisitedParent && bHasUnvisitedParent) return -1; // a first
 
-        // Fall back to in-degree
-        return (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
+        // Fall back to in-degree, then registration order (rule 3)
+        const byDegree = (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
+        if (byDegree !== 0) return byDegree;
+        return byRegistrationOrder(a, b);
       });
 
       queue.push(unvisited[0]);
@@ -197,11 +210,19 @@ export function topologicalSort(
     result.push(current);
     visited.add(current);
 
+    // Collect newly-unlocked neighbors and append them in registration order,
+    // so the sub-ordering of a batch of ready nodes is deterministic rather
+    // than reflecting graph/arrival insertion order.
+    let unlocked: Action[] | undefined;
     for (const neighbor of graph.get(current) || []) {
       inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
       if (inDegree.get(neighbor) === 0) {
-        queue.push(neighbor);
+        (unlocked ??= []).push(neighbor);
       }
+    }
+    if (unlocked) {
+      if (unlocked.length > 1) unlocked.sort(byRegistrationOrder);
+      for (const neighbor of unlocked) queue.push(neighbor);
     }
   }
 
@@ -305,6 +326,39 @@ function getOrderingReadLog(
     };
   }
   return dependencies.get(action);
+}
+
+/**
+ * Deterministic tie-break comparator for topological ordering (§7.4 rule 3).
+ *
+ * Primary key is the stable REGISTRATION ORDINAL from the node registry, so
+ * ties left by the read-edge DAG resolve to registration order rather than the
+ * order actions happened to enter the work set (which for remote commits is
+ * network-arrival order). Actions with no registration ordinal (e.g. bare
+ * materializers, or any call with `nodes` undefined) fall back to their
+ * work-set insertion index, preserving the pre-existing behavior for that case
+ * and keeping unregistered actions ordered after registered ones.
+ */
+function makeTieBreakComparator(
+  actions: Set<Action>,
+  nodes?: Pick<NodeRegistry, "getRegistrationOrdinal">,
+): (a: Action, b: Action) => number {
+  const fallbackIndex = new Map<Action, number>();
+  let index = 0;
+  for (const action of actions) fallbackIndex.set(action, index++);
+
+  const ordinalOf = (action: Action): number =>
+    nodes?.getRegistrationOrdinal(action) ?? Number.POSITIVE_INFINITY;
+
+  return (a, b) => {
+    const oa = ordinalOf(a);
+    const ob = ordinalOf(b);
+    // `!==` (not subtraction) so two unregistered actions (both +Infinity)
+    // compare equal and fall through to the stable insertion-order index
+    // instead of yielding NaN.
+    if (oa !== ob) return oa - ob;
+    return (fallbackIndex.get(a) ?? 0) - (fallbackIndex.get(b) ?? 0);
+  };
 }
 
 function addressesShareEntity(
