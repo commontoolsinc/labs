@@ -5,8 +5,13 @@ import {
   Page,
   renderProfileReport,
   waitFor,
+  waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import {
+  waitForRuntimeIdle,
+  waitForRuntimeSynced,
+} from "./cfc-browser-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
@@ -392,21 +397,17 @@ describe("default-app flow test", () => {
       });
 
       console.log(`Wait for note view (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return await page.evaluate(() => {
-          const state = globalThis.app?.serialize?.();
-          return !!state &&
-            !!state.view &&
-            typeof state.view === "object" &&
-            "pieceId" in state.view &&
-            typeof state.view.pieceId === "string" &&
-            state.view.pieceId.length > 0;
-        });
+      await waitForCondition(page, () => {
+        const state = globalThis.app?.serialize?.();
+        return !!state &&
+          !!state.view &&
+          typeof state.view === "object" &&
+          "pieceId" in state.view &&
+          typeof state.view.pieceId === "string" &&
+          state.view.pieceId.length > 0;
       });
 
-      await waitFor(async () => {
-        return await waitForRuntimeIdle(page);
-      });
+      await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
 
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
@@ -486,9 +487,7 @@ describe("default-app flow test", () => {
         return await clickPieceLinkWithText(page, spaceName);
       });
       await shell.waitForState({ view: { spaceName }, identity });
-      await waitFor(async () => {
-        return await waitForRuntimeIdle(page);
-      });
+      await waitForRuntimeIdle(page);
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
       await waitFor(async () => {
@@ -673,9 +672,7 @@ describe("default-app flow test", () => {
     });
 
     console.log("Await runtime idle for notebook regression...");
-    await waitFor(async () => {
-      return await awaitRuntimeIdle(page);
-    });
+    await waitForRuntimeIdle(page);
 
     try {
       await waitFor(async () => {
@@ -701,7 +698,11 @@ describe("default-app flow test", () => {
       // clicking. viewSettled resolves once the worker is idle and the
       // rendered view has caught up (vdom applied, Lit updates drained), so the
       // New Note button's handler is bound and a single click is not dropped.
-      await waitFor(async () => await awaitViewSettled(page));
+      await waitForCondition(
+        page,
+        () => typeof globalThis.commonfabric?.viewSettled === "function",
+      );
+      await awaitViewSettled(page);
       assert(
         await clickButtonWithTitle(page, "New Note"),
         "Expected New Note click to succeed",
@@ -734,7 +735,7 @@ describe("default-app flow test", () => {
             state.showNewNotePrompt === false &&
             state.usedCreateAnotherNote === false;
         });
-        await waitFor(async () => await waitForRuntimeSynced(page));
+        await waitForRuntimeSynced(page);
       } catch (_) {
         // Keep the final assertions below so failures include diagnostics.
       }
@@ -765,7 +766,7 @@ describe("default-app flow test", () => {
       assertEquals(summary.argumentNotesLength, noteCreates);
       assertEquals(summary.noteCount, noteCreates);
     } finally {
-      await waitFor(async () => await awaitRuntimeIdle(page)).catch(
+      await waitForRuntimeIdle(page).catch(
         (error) =>
           console.warn(
             "Failed to await runtime idle after notebook regression",
@@ -782,15 +783,6 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
     if (!rt) return false;
     await rt.setTriggerTraceEnabled(false);
     await rt.setTriggerTraceEnabled(true);
-    return true;
-  });
-}
-
-async function awaitRuntimeIdle(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.idle) return false;
-    await rt.idle();
     return true;
   });
 }
@@ -1540,24 +1532,6 @@ async function armActionRunTrace(page: Page): Promise<boolean> {
   });
 }
 
-async function waitForRuntimeIdle(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.idle) return false;
-    await rt.idle();
-    return true;
-  });
-}
-
-async function waitForRuntimeSynced(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.allSynced) return false;
-    await rt.allSynced();
-    return true;
-  });
-}
-
 async function disposeBrowserRuntime(page: Page): Promise<void> {
   await page.evaluate(async () => {
     try {
@@ -1579,30 +1553,26 @@ async function waitForHomePageReady(
   page: Page,
   options: { spaceName: string; expectNoteInList: boolean },
 ): Promise<void> {
-  await waitFor(async () => {
-    return await page.evaluate((spaceName: string) => {
-      const app = globalThis.app;
-      const rt = globalThis.commonfabric?.rt;
-      const state = app?.serialize?.();
-      const view = state?.view;
-      return !!(
-        rt &&
-        state &&
-        view &&
-        typeof view === "object" &&
-        "spaceName" in view &&
-        view.spaceName === spaceName
-      );
-    }, { args: [options.spaceName] });
-  });
+  await waitForCondition(page, (_probe, spaceName) => {
+    const app = globalThis.app;
+    const rt = globalThis.commonfabric?.rt;
+    const state = app?.serialize?.();
+    const view = state?.view;
+    return !!(
+      rt &&
+      state &&
+      view &&
+      typeof view === "object" &&
+      "spaceName" in view &&
+      view.spaceName === spaceName
+    );
+  }, { args: [options.spaceName] });
 
   if (options.expectNoteInList) {
     await waitFor(() => findNoteInList(page));
   }
 
-  await waitFor(async () => {
-    return await waitForRuntimeIdle(page);
-  });
+  await waitForRuntimeIdle(page);
 }
 
 async function collectNotebookSourceState(page: Page): Promise<{
