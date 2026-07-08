@@ -161,6 +161,32 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * Register an in-flight commit so the durability barrier
+   * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
+   * transaction layer at `commit()` entry, synchronously with the commit
+   * being issued, so there is no window where a commit is in flight but
+   * invisible to the barrier. The registration must tolerate rejection and
+   * drop the promise once it settles.
+   */
+  trackPendingCommit(promise: Promise<unknown>): void;
+
+  /**
+   * Whether any registered commit is still unconfirmed. Every write flows
+   * through `edit()` transactions, so this is the authoritative "are there
+   * unconfirmed local writes" signal — narrower than `synced()`, which also
+   * waits for pulls and cross-space read work.
+   */
+  hasPendingCommits(): boolean;
+
+  /**
+   * Wait for the currently pending commits to settle (server confirmation or
+   * terminal failure). One round only: commits issued after the call starts
+   * are not awaited — callers that need a fixpoint re-check `hasPendingCommits`
+   * after each round, as the scheduler's client-facing idle does.
+   */
+  pendingCommitsSettled(): Promise<void>;
+
+  /**
    * Add a promise to the list of cross-space promises.
    */
   addCrossSpacePromise(promise: Promise<void>): void;

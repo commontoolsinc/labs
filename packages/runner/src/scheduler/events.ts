@@ -726,7 +726,10 @@ export async function dispatchQueuedEvent(state: {
     // flight. Downstream dirtying below is based on those locally applied
     // changed writes, not server-confirmed durability. If the server rejects
     // the commit, dependent speculative transactions are rejected as well and
-    // the normal retry path reruns the event.
+    // the normal retry path reruns the event. Durability is still observable:
+    // commit() registers itself with the storage manager's pending-commit
+    // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
+    // waits on without blocking the scheduler loop here.
     tx.commit().then((result) => {
       const permanentRejection =
         result.error && isPermanentRejection(result.error)
