@@ -2522,6 +2522,155 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
   }
 });
 
+// CT-1872 1c: a resolutionOnly pending read asserts only that its dependency
+// localSeq resolved to a durable commit (a lower layer of the reader's pending
+// stack exists). It is exempt from the staleness check — that stays with the
+// top-of-stack pending read — so a later overlapping foreign write must NOT
+// reject it, while an unresolved dependency still must.
+Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but still require resolution", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ foo: 0 }),
+        }],
+      },
+    });
+
+    // The dependency: localSeq 2 commits durably (seq 2).
+    const dependency = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "replace", path: "/value/foo", value: 1 }],
+        }],
+      },
+    });
+    assertEquals(dependency.seq, 2);
+
+    // A LATER overlapping foreign write to the same doc (a whole-doc set is
+    // path-blind, so it overlaps ANY read of entity:source): a normal pending
+    // read via localSeq 2 is now stale.
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ foo: 2 }),
+        }],
+      },
+    });
+
+    // resolutionOnly + resolved dependency ⇒ ACCEPTED despite the later
+    // overlapping write: only existence of the seq-2 commit row is asserted.
+    const accepted = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            localSeq: 2,
+            resolutionOnly: true,
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:target",
+          value: toEntityDocument({ derived: true }),
+        }],
+      },
+    });
+    assertEquals(accepted.seq, 4);
+
+    // resolutionOnly does NOT waive resolution itself: a dependency that was
+    // never committed still rejects.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(4),
+          authorization,
+          commit: {
+            localSeq: 4,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: 99,
+                resolutionOnly: true,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:unresolved",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ConflictError,
+      "pending dependency not resolved",
+    );
+
+    // Control: the SAME shape without the flag is stale — the flag, not the
+    // scenario, is what admitted the commit above.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(5),
+          authorization,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: 2,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:control",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ConflictError,
+      "stale pending read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine reconstructs state across delete boundaries", async () => {
   const { engine, path } = await createEngine();
 
