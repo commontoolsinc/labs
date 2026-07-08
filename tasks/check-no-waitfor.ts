@@ -35,8 +35,6 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Headless cell pull: no page to attach an in-page waiter to.
   "packages/generated-patterns/integration/pattern-harness.ts",
   // Off-page piece-result cell reads through the in-process controller.
-  "packages/patterns/integration/counter.test.ts",
-  "packages/patterns/integration/nested-counter.test.ts",
   "packages/shell/integration/piece.test.ts",
   // Cross-page joint condition: the wait spans two separate browser pages, which
   // a single-page in-page waiter cannot express.
