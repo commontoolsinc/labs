@@ -2668,3 +2668,59 @@ for (
     await runStressSeed(seed);
   });
 }
+Deno.test("memory v2 stacked commits: surviving independent patch does not resurrect a dropped materialization's data", async () => {
+  const harness = await createHarness();
+  try {
+    // Confirmed base on BOTH sides: the container slot holds null.
+    await seedAccepted(harness, DOCS.A, { items: null });
+
+    // Another client materializes the container server-side and wins. The
+    // harness delivers no subscription updates, so this client's confirmed
+    // mirror stays at { items: null } — modeling the window (of any length)
+    // between a commit verdict and the corresponding catch-up novelty.
+    harness.model.injectRemote({
+      label: "client-2 wins the container",
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        value: { items: { theirs: "w" } },
+      }],
+    });
+
+    // C1: this client's own (losing) materialization of the same container,
+    // batched with a B write; it conflicts, so the WHOLE transaction rolls
+    // back — including its A materialization.
+    const c1 = beginBatch(harness, [
+      { op: "set", id: DOCS.A, value: { items: { seeded: "x" } } },
+      { op: "set", id: DOCS.B, value: valueFor("c1-b") },
+    ]);
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "rejectConflict",
+      message: "stale materialization lost the race",
+    });
+
+    // C2: a blind leaf write through the container C1 materialized — no read
+    // dependencies (like a UI vote), so it is independent and survives C1's
+    // drop. Its optimistic snapshot necessarily includes C1's seed data. The
+    // server accepts it: the authoritative state HAS the container (client
+    // 2's), so the strict server-side patch apply succeeds.
+    harness.model.setOutcome(c1.localSeq + 1, { kind: "accept" });
+    const c2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/mine", value: "hello" }],
+      { items: { seeded: "x", mine: "hello" } },
+    );
+
+    await assertConflict(c1.promise, "lost the race");
+    await assertResultOk(c2);
+
+    // The survivor was replayed (and, once accepted, PROMOTED into local
+    // confirmed) over the stale { items: null } mirror. Its own write must
+    // land; the DROPPED commit's data ("seeded") must not resurrect out of
+    // the survivor's stale snapshot.
+    expectVisible(harness, { A: { items: { mine: "hello" } } });
+  } finally {
+    await harness.close();
+  }
+});
