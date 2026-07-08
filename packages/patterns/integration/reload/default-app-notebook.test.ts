@@ -2,6 +2,7 @@ import {
   awaitViewSettled,
   env,
   Page,
+  type ProbeApi,
   waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
@@ -50,10 +51,8 @@ describe("default-app notebook reload integration test", () => {
     });
 
     await waitForRuntimeIdle(page);
-    await waitFor(async () => !!(await clickButtonWithText(page, "Notes")));
-    await waitFor(async () =>
-      !!(await clickButtonWithText(page, "New Notebook"))
-    );
+    await clickButtonWithText(page, "Notes");
+    await clickButtonWithText(page, "New Notebook");
     await waitFor(async () => {
       const state = await collectNotebookRenderState(page);
       return state.isNotebook;
@@ -367,26 +366,129 @@ async function collectNotebookSourceState(page: Page): Promise<{
   });
 }
 
+// Marker attribute a click predicate stamps on the button it resolved, so the
+// test can then resolve that exact element and dispatch a single trusted click
+// on it. Mirrors the CLICK_TARGET_ATTR flow of clickCfButton in
+// cfc-browser-helpers.ts.
+const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
+
+// Serialized into the page by waitForCondition: find the first visible
+// button/link whose text or title matches, scroll it into view, and stamp its
+// inner click target with `token`. Returns false until a match exists, so the
+// wait re-checks on the next DOM mutation instead of the caller retrying a
+// bare find-and-click loop.
+const markNoteButton = async (
+  probe: ProbeApi,
+  selector: string,
+  match: "includes" | "exact" | "title",
+  needle: string,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const target = probe.collect(selector).find((element) => {
+    if (!probe.isVisible(element)) return false;
+    if (match === "title") return element.getAttribute("title") === needle;
+    const text = (element.textContent ?? "").trim();
+    return match === "exact" ? text === needle : text.includes(needle);
+  }) as HTMLElement | undefined;
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
+    | HTMLElement
+    | null) ?? target;
+  clickTarget.setAttribute(attr, token);
+  return true;
+};
+
+// Remove every element carrying `attr=token`, descending through shadow roots.
+async function clearNoteButtonMark(
+  page: Page,
+  token: string,
+): Promise<void> {
+  await page.evaluate((targetToken, targetAttr) => {
+    function collect(root: Document | ShadowRoot, result: Element[]): void {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.getAttribute(targetAttr) === targetToken) {
+          result.push(element);
+        }
+        if (element.shadowRoot) collect(element.shadowRoot, result);
+      }
+    }
+    const matches: Element[] = [];
+    collect(document, matches);
+    for (const element of matches) element.removeAttribute(targetAttr);
+  }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
+}
+
+// Wait for a matching button to be present and interactive, then dispatch a
+// single trusted click on it. Throws if no matching button becomes clickable.
+async function settleAndClickNoteButton(
+  page: Page,
+  selector: string,
+  match: "includes" | "exact" | "title",
+  needle: string,
+): Promise<void> {
+  const token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, markNoteButton, {
+      args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
+    });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find a ${
+        match === "title" ? "button titled" : "button matching"
+      } "${needle}" to click`,
+      { cause },
+    );
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce" },
+    );
+    await clickTarget.click();
+  } finally {
+    await clearNoteButtonMark(page, token);
+  }
+}
+
+// The click helpers resolve `true` once the single click has landed (they throw
+// otherwise), so the call sites that assert the click succeeded keep reading.
 async function clickButtonWithText(
   page: Page,
   searchText: string,
 ): Promise<boolean> {
-  const button = await findButtonWithText(page, searchText);
-  if (!button) return false;
-  try {
-    await button.click();
-    return true;
-  } catch (_) {
-    return await page.evaluate((searchText: string) => {
-      for (const el of document.querySelectorAll("cf-button, button, a")) {
-        if (el.textContent?.trim().includes(searchText)) {
-          (el as HTMLElement).click();
-          return true;
-        }
-      }
-      return false;
-    }, { args: [searchText] });
-  }
+  await settleAndClickNoteButton(
+    page,
+    "cf-button, button, a",
+    "includes",
+    searchText,
+  );
+  return true;
+}
+
+async function clickButtonWithExactText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  await settleAndClickNoteButton(
+    page,
+    "cf-button, button, a",
+    "exact",
+    searchText,
+  );
+  return true;
+}
+
+async function clickButtonWithTitle(
+  page: Page,
+  title: string,
+): Promise<boolean> {
+  await settleAndClickNoteButton(page, "cf-button, button", "title", title);
+  return true;
 }
 
 async function findButtonWithText(
@@ -404,75 +506,6 @@ async function findButtonWithText(
     return null;
   } catch (_) {
     return null;
-  }
-}
-
-async function clickButtonWithExactText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  try {
-    const buttons = await page.$$("cf-button, button, a", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const text = await button.innerText();
-      if (text?.trim() === searchText) {
-        try {
-          await button.click();
-          return true;
-        } catch (_) {
-          return await page.evaluate((searchText: string) => {
-            for (
-              const el of document.querySelectorAll(
-                "cf-button, button, a",
-              )
-            ) {
-              if (el.textContent?.trim() === searchText) {
-                (el as HTMLElement).click();
-                return true;
-              }
-            }
-            return false;
-          }, { args: [searchText] });
-        }
-      }
-    }
-    return false;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function clickButtonWithTitle(
-  page: Page,
-  title: string,
-): Promise<boolean> {
-  try {
-    const buttons = await page.$$("cf-button, button", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const actualTitle = await button.getAttribute("title");
-      if (actualTitle === title) {
-        try {
-          await button.click();
-          return true;
-        } catch (_) {
-          return await page.evaluate((title: string) => {
-            const el = document.querySelector(
-              `cf-button[title="${title}"], button[title="${title}"]`,
-            );
-            if (!el) return false;
-            (el as HTMLElement).click();
-            return true;
-          }, { args: [title] });
-        }
-      }
-    }
-    return false;
-  } catch (_) {
-    return false;
   }
 }
 
