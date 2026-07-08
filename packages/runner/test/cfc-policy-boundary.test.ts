@@ -374,6 +374,34 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
       return result;
     };
 
+    // The B5×D4 seam: identical to readThenWrite but with the ORDER inverted —
+    // write the ceiling-protected path FIRST, then read the confidential cell.
+    // The read's activity-clock position is now at/after the write's D4 bound
+    // (the last write attempt overlapping /out), so it is excluded from the
+    // write's read prefix. `maxConfidentiality` quantifies over that prefix
+    // (`gating`), which is empty, so the ceiling check is SKIPPED — a read that
+    // cannot have fed the committed value is not a consumed input here. With
+    // the pre-D4 transaction-global quantification this same read would sit in
+    // the gate and reject.
+    const writeThenRead = (
+      runtime: Runtime,
+      id: string,
+    ): { reasons: readonly string[]; diagnostics: readonly string[] } => {
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), `${id}-sink`, sinkSchema, tx)
+        .set({ out: "derived" });
+      const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
+      expect(cell.key("secret").get()).toBe("rosebud");
+      tx.prepareCfc();
+      const state = tx.getCfcState();
+      const reasons = state.prepare.status === "invalidated"
+        ? [...state.prepare.reasons]
+        : [];
+      const result = { reasons, diagnostics: [...state.diagnostics] };
+      tx.abort();
+      return result;
+    };
+
     it("off: rejects on the raw label", async () => {
       await withRuntime(
         { policyEvaluation: "off", policyRecords: unguardedPolicy },
@@ -420,6 +448,31 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
               reason.includes("maxConfidentiality failed")
             ),
           ).toBe(true);
+        },
+      );
+    });
+
+    it("enforce: an empty gating prefix skips the ceiling (write-first read excluded by bound)", async () => {
+      // The D4 seam guard, dual to input-boundary-guarded above: SAME runtime
+      // (enforce, network-guarded POLICY that cannot rewrite [Space] at a
+      // write gate) and SAME confidential input, but the read now lands AFTER
+      // the protected write. It is therefore past the write's D4 bound and
+      // drops out of `gating`; with an empty gating set the `maxConfidentiality`
+      // check is skipped entirely and the write commits — even though [Space]
+      // is outside the [User(alice)] ceiling. This is intended delegation, not
+      // a hole: a read that could not have fed the value is not a consumed
+      // input. Flipping the gate's quantification back to the transaction-
+      // global consumed set re-admits this read and re-rejects (verified in
+      // the PR); the admission here is the regression guard for the skip.
+      await withRuntime(
+        { policyEvaluation: "enforce" }, // POLICY requires sinkClass network
+        async (runtime) => {
+          await seedSpaceLabeledCell(runtime, "input-empty-gating", {
+            confidentiality: [SPACE_ATOM],
+            integrity: [ROLE_ALICE],
+          });
+          const { reasons } = writeThenRead(runtime, "input-empty-gating");
+          expect(reasons).toEqual([]);
         },
       );
     });
@@ -541,6 +594,7 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
         consumedReads: [],
         attemptedWrites: [],
         writes: [],
+        writeAttemptLog: [],
         dereferenceTraces: [],
         triggerReads: [],
         writePolicyInputs: [],

@@ -7,7 +7,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  toSchema,
   UI,
   Writable,
 } from "commonfabric";
@@ -18,7 +17,6 @@ interface PatternState {
   cellRef: Writable<{ piece: any }>;
   isInitialized: Writable<boolean>;
 }
-const PatternStateSchema = toSchema<PatternState>();
 
 // what we pass into the pattern as input
 // wraps the piece reference in an object { piece: any }
@@ -46,9 +44,7 @@ const SimplePiece = pattern(({ id }: { id: string }) => ({
 //
 // We use a lift() here instead of executing inside of a handler because
 // we want to know the passed in piece is initialized
-const storePieceAndNavigate = lift(
-  PatternStateSchema,
-  undefined,
+const storePieceAndNavigate = lift<PatternState, any>(
   ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {

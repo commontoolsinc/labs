@@ -18,7 +18,14 @@ deno task cf check pattern.tsx --verbose-errors     # more error context
 pattern once, so it catches both type errors and graph-construction errors
 ("reactive reference outside context", handlers in the wrong scope, ...).
 `--show-transformed` is your X-ray: when behavior is mysterious, look at
-what your source actually compiled into before theorizing.
+what your source actually compiled into before theorizing. The transformed
+output is dense — pipe it into `cf view`, an interactive syntax-aware pager
+that colors builders, schemas, and closures and lets you navigate the
+structure tree:
+
+```bash
+deno task cf check pattern.tsx --show-transformed --no-run | deno task cf view
+```
 
 ## Set up identity and server
 
@@ -124,9 +131,13 @@ deno task cf test packages/patterns/my-pattern/      # all tests in a directory
 Notice what makes the subject *testable*: dual type parameters on
 `pattern<Input, Output>()` and exported `Stream<T>` actions. That's why
 Chapter 3 insisted on them. Keep assertions deterministic — no
-`safeDateNow()` or randomness inside them. The guidance from the canonical
-guide: primary verification is still runtime behavior; write tests for
-logic that's awkward or expensive to verify by clicking.
+`safeDateNow()` or randomness inside them. Patterns that fetch external data
+(`fetchJson` and friends) can still be tested deterministically: export a
+module-scope `fetchMocks` array from the test file and the harness injects
+it as the runtime's fetch (worked examples in
+`packages/patterns/examples/fetch-mock.test.tsx`). The guidance from the
+canonical guide: primary verification is still runtime behavior; write
+tests for logic that's awkward or expensive to verify by clicking.
 
 ## The gotcha checklist
 
@@ -159,7 +170,10 @@ failures (each links to a full writeup under
 
 When something still goes wrong: `docs/development/debugging/` has the error
 reference, and the repo-local `pattern-critic` agent/skill reviews a pattern
-against the full rule list mechanically.
+against the full rule list mechanically. For storage-level surprises ("what
+is actually stored?", "who overwrote this?"), `cf inspect` performs an
+offline autopsy of a space's SQLite database — see the `state-inspector`
+skill.
 
 ---
 

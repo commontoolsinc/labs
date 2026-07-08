@@ -8,6 +8,14 @@
 // non-column param (e.g. a `WHERE` filter value, a `DELETE` filter) maps to
 // `null` (no ceiling check needed). A complex `WHERE` is fine — its params are
 // simply `null` — only a complex SET/target fails closed.
+//
+// SHARED module (in `packages/memory` beside `row-label.ts` for the same
+// reason): the runner's write gates (`write-ceiling.ts`, `row-label-write.ts`)
+// and the server's commit-time row-label re-derivation (`commit-eval.ts`, CFC
+// Phase 3.c) attribute a write's target with the SAME parser, so the sides
+// cannot drift on which statements they consider attributable.
+//
+// Pure module: no FFI, no engine imports — safe for client-side import.
 
 /** Blank string literals and comments to spaces so `?`/keywords/`,` inside them
  *  can't fool the structural checks. Identifiers are left intact. */

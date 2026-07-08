@@ -117,7 +117,7 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
-const toggleSection = handler<unknown, { section: Writable<boolean> }>(
+const toggle = handler<unknown, { section: Writable<boolean> }>(
   (_event, { section }) => {
     section.set(!section.get());
   },
@@ -226,7 +226,7 @@ function buildSectionHeaderLabel(
   return `${arrow} ${label}${suffix}`;
 }
 
-function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
+function header(labelContent: any, onClick: any) {
   return (
     <cf-hstack
       style={{
@@ -236,7 +236,7 @@ function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
         paddingTop: "8px",
         borderTop: "1px solid #e5e7eb",
       }}
-      onClick={toggleSection({ section: expanded })}
+      onClick={onClick}
     >
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
         {labelContent}
@@ -282,10 +282,10 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   const showSocial = new Writable(false);
   const showNotes = new Writable(false);
 
-  const nameDetailsHeader = computed(() =>
+  const nameHeader = computed(() =>
     buildSectionHeaderLabel("Name Details", showNameDetails.get())
   );
-  const contactInfoHeader = computed(() =>
+  const contactHeader = computed(() =>
     buildSectionHeaderLabel("Contact Info", showContactInfo.get())
   );
   const addressesHeader = computed(() =>
@@ -390,7 +390,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Name Details Section */}
           <div>
-            {sectionHeader(nameDetailsHeader, showNameDetails)}
+            {header(nameHeader, toggle({ section: showNameDetails }))}
             {computed(() => {
               if (!showNameDetails.get()) return null;
               return (
@@ -495,7 +495,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
            */
           }
           <div>
-            {sectionHeader(contactInfoHeader, showContactInfo)}
+            {header(contactHeader, toggle({ section: showContactInfo }))}
             {computed(() => {
               if (!showContactInfo.get()) return null;
               return (
@@ -527,7 +527,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Addresses Section */}
           <div>
-            {sectionHeader(addressesHeader, showAddresses)}
+            {header(addressesHeader, toggle({ section: showAddresses }))}
             {computed(() => {
               if (!showAddresses.get()) return null;
               const addresses = person.key("addresses").get() || [];
@@ -611,7 +611,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Social Profiles Section */}
           <div>
-            {sectionHeader(socialHeader, showSocial)}
+            {header(socialHeader, toggle({ section: showSocial }))}
             {computed(() => {
               if (!showSocial.get()) return null;
               const profiles = person.key("socialProfiles").get() || [];
@@ -657,7 +657,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {sectionHeader(notesHeader, showNotes)}
+            {header(notesHeader, toggle({ section: showNotes }))}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

@@ -6,6 +6,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
 import {
+  candidateRoots,
   deriveSpaceDid,
   discoverSpaceDbs,
   quickStats,
@@ -63,17 +64,26 @@ Deno.test("discovery + resolution", async (t) => {
     await t.step("discovers both DBs by walking the cache base", () => {
       const found = discoverSpaceDbs({
         dirs: [`${dir}/cache/memory`],
-        cwd: dir,
+        defaultRoots: false,
       });
       assertEquals(found.length, 2);
       assertEquals(new Set(found.map((s) => s.did)), new Set([DID_1, DID_2]));
       assert(found.every((s) => s.sizeBytes > 0));
     });
 
+    await t.step("default roots find the DBs via the cwd walk", () => {
+      // No explicit dirs: the cwd walk must reach `<cwd>/cache/memory`. On a
+      // real machine the default roots may surface OTHER DBs too (env
+      // overrides, ~/.cache/cf-inspect), so assert superset, never counts.
+      const found = discoverSpaceDbs({ cwd: dir });
+      const dids = new Set(found.map((s) => s.did));
+      assert(dids.has(DID_1) && dids.has(DID_2));
+    });
+
     await t.step("resolveSpacePath matches by DID prefix", () => {
       const found = discoverSpaceDbs({
         dirs: [`${dir}/cache/memory`],
-        cwd: dir,
+        defaultRoots: false,
       });
       const path = resolveSpacePath("zAlpha", found);
       assert(path.endsWith(`${DID_1}.sqlite`));
@@ -87,7 +97,7 @@ Deno.test("discovery + resolution", async (t) => {
     await t.step("ambiguous prefix throws", () => {
       const found = discoverSpaceDbs({
         dirs: [`${dir}/cache/memory`],
-        cwd: dir,
+        defaultRoots: false,
       });
       assertThrows(
         () => resolveSpacePath("did:key:z", found),
@@ -113,7 +123,7 @@ Deno.test("discovery + resolution", async (t) => {
         makeSpace(`${engine}/${did}.sqlite`, 1);
         const found = discoverSpaceDbs({
           dirs: [`${dir}/cache/memory`],
-          cwd: dir,
+          defaultRoots: false,
         });
 
         const byName = await resolveSpace(name, found);
@@ -128,5 +138,35 @@ Deno.test("discovery + resolution", async (t) => {
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("candidateRoots orders env overrides before caches and cwd walk", () => {
+  const saved = {
+    MEMORY_DIR: Deno.env.get("MEMORY_DIR"),
+    DB_PATH: Deno.env.get("DB_PATH"),
+  };
+  const restore = (k: keyof typeof saved) =>
+    saved[k] === undefined ? Deno.env.delete(k) : Deno.env.set(k, saved[k]!);
+  try {
+    Deno.env.set("MEMORY_DIR", "/env/memory");
+    Deno.env.set("DB_PATH", "/env/db/space.sqlite");
+    const roots = candidateRoots("/a/b");
+    // env overrides first (a .sqlite DB_PATH contributes its directory)…
+    assertEquals(roots[0], "/env/memory");
+    assertEquals(roots[1], "/env/db");
+    // …then the remote-pull cache…
+    assert(roots[2].endsWith("/.cache/cf-inspect"));
+    // …then both cache layouts at each level of the upward walk.
+    assert(roots.includes("/a/b/packages/toolshed/cache/memory"));
+    assert(roots.includes("/a/b/cache/memory"));
+    assert(roots.includes("/a/cache/memory"));
+
+    // A bare relative DB_PATH filename resolves to ".", not an empty root.
+    Deno.env.set("DB_PATH", "space.sqlite");
+    assert(candidateRoots("/a/b").includes("."));
+  } finally {
+    restore("MEMORY_DIR");
+    restore("DB_PATH");
   }
 });

@@ -76,6 +76,23 @@ interface MutableCapabilityState {
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
+  /**
+   * Write-exhaustiveness is unverifiable for this parameter. Set by an
+   * unrecognized or dynamic (`cell[m]()`) method call on a cell-like
+   * receiver (the call could be a mutator this analysis does not know), and
+   * by recognized `set`/`send` calls carrying an onCommit callback (whose
+   * closure can escape into fresh transactions or external I/O after
+   * commit — writes this analysis cannot bound). Consumers asserting
+   * write exhaustiveness must fail closed
+   * on this, like `wildcard`; recognized reads/derivations are unaffected.
+   *
+   * Syntactic boundary: detection is per method-CALL dispatch. An extracted
+   * method reference (`const f = cell.send; f(x)`) bypasses it — marginal
+   * in practice (unbound cell methods break at runtime), but consumers
+   * treating `!wildcard && !hasUnverifiedCellUse` as a soundness
+   * certificate should know the contract's edge.
+   */
+  hasUnverifiedCellUse: boolean;
 }
 
 interface ObservedCapabilityUsage {
@@ -85,6 +102,7 @@ interface ObservedCapabilityUsage {
   readonly opaquePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly hasUnverifiedCellUse: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
@@ -147,9 +165,17 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
   MERGEABLE_OP_METHODS.filter((op) => op.kind === kind).map((op) => op.method);
 
+// `send` is a write: it delegates to set() on every receiver, but set()
+// forks on the receiver's kind. On a raw cell that is an ordinary
+// transactional write; on a stream the same set() call enqueues the event
+// instead of revising the stream cell, and the dispatched handler's writes
+// commit in their own transaction — effects this analysis cannot see or
+// bound. Either way a callback that sends must never summarize as
+// write-free.
 const WRITER_METHODS = new Set([
   "set",
   "update",
+  "send",
   ...mergeableMethods("scalar-writer"),
 ]);
 const ARRAY_IDENTITY_WRITER_METHODS = new Set([
@@ -460,6 +486,25 @@ function isRestParameter(parameter: ts.Symbol | undefined): boolean {
   const declaration = parameter?.valueDeclaration;
   return !!declaration && ts.isParameter(declaration) &&
     !!declaration.dotDotDotToken;
+}
+
+// A spread of a fixed-length tuple fills a statically known set of parameter
+// positions, so it can be expanded and matched positionally. Return the element
+// count for such a tuple, or undefined for anything whose length is not fixed at
+// compile time (a plain array, or a tuple with an optional, rest, or variadic
+// element such as `[A, ...B[]]`). Every element flag must be exactly
+// `Required`; any other flag admits a variable runtime length.
+function getFixedTupleElementCount(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): number | undefined {
+  if (!checker.isTupleType(type)) return undefined;
+  const target = (type as ts.TypeReference).target as ts.TupleType;
+  const elementFlags = target.elementFlags;
+  for (const flag of elementFlags) {
+    if (flag !== ts.ElementFlags.Required) return undefined;
+  }
+  return elementFlags.length;
 }
 
 function isLiteralElement(
@@ -1325,6 +1370,7 @@ function normalizeObservedCapabilityUsage(
     opaquePaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
+    hasUnverifiedCellUse: state.hasUnverifiedCellUse,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
       !state.hasNonIdentityUse &&
       state.reads.size === 0 &&
@@ -1430,6 +1476,7 @@ export function analyzeFunctionCapabilities(
           hasIdentityUse: false,
           hasNonIdentityUse: false,
           hasNonIdentityRootUse: false,
+          hasUnverifiedCellUse: false,
         };
         states.set(name, state);
       }
@@ -1469,6 +1516,15 @@ export function analyzeFunctionCapabilities(
       const state = ensureState(name);
       state.wildcard = true;
       state.hasNonIdentityUse = true;
+    };
+
+    // Unlike markWildcard this does NOT change shrinking or identity
+    // classification — it only poisons write-exhaustiveness for consumers
+    // that need `writes` to be a closed-world record, while everything else
+    // behaves as before.
+    const markUnverifiedCellUse = (name: string): void => {
+      const state = ensureState(name);
+      state.hasUnverifiedCellUse = true;
     };
 
     const markPassthrough = (
@@ -2279,17 +2335,94 @@ export function analyzeFunctionCapabilities(
       const args = call.arguments;
       if (!args) return handled;
 
-      for (let index = 0; index < args.length; index++) {
+      // `index` walks the argument list; `paramIndex` walks parameter
+      // positions. The two diverge only when a fixed-length tuple spread expands
+      // into several positions, so the loop update advances `paramIndex` by one
+      // per argument and the tuple branch adds the remaining positions.
+      for (
+        let index = 0, paramIndex = 0;
+        index < args.length;
+        index++, paramIndex++
+      ) {
         const argument = args[index];
         if (!argument) continue;
 
-        const parameter = getParameterAtArgument(signature, index);
+        const parameter = getParameterAtArgument(signature, paramIndex);
         const isSpreadArgument = ts.isSpreadElement(argument);
-        // An array spread has unknown runtime length, so it cannot be matched to
-        // later fixed parameters; stop signature mapping there. A spread into a
-        // rest parameter is a collection of rest elements, recorded below at the
-        // representative array-item path.
-        if (isSpreadArgument && !isRestParameter(parameter)) break;
+        // An array spread into a fixed parameter has unknown runtime length, so
+        // it cannot be matched to later fixed parameters. A spread of a
+        // fixed-length tuple is the exception: its positions are statically
+        // known, so expand each tuple element to its corresponding parameter. A
+        // spread into a rest parameter is a collection of rest elements,
+        // recorded below at the representative array-item path.
+        if (isSpreadArgument && !isRestParameter(parameter)) {
+          const tupleLength = getFixedTupleElementCount(
+            checker.getTypeAtLocation(argument.expression),
+            checker,
+          );
+          if (tupleLength === undefined) break;
+
+          const spreadSource = resolveSourceRef(argument.expression);
+          // Suppress the ordinary read of the spread source only when the
+          // contract accounts for every tuple position: a dynamic source is
+          // wholly wildcarded, and a static source qualifies only if every
+          // element maps to a recognized cell wrapper. A tuple with a non-cell
+          // position leaves that position to conservative read tracking.
+          const suppressOrdinaryRead = () => {
+            handled.add(index);
+            signatureCapabilityArgumentUses.add(
+              unwrapExpressionUsageSite(argument.expression),
+            );
+          };
+          if (spreadSource) {
+            if (spreadSource.dynamic) {
+              markWildcard(spreadSource.root);
+              suppressOrdinaryRead();
+            } else {
+              let mappedCount = 0;
+              for (let element = 0; element < tupleLength; element++) {
+                const elementParameter = getParameterAtArgument(
+                  signature,
+                  paramIndex + element,
+                );
+                const elementCellKind = getParameterDeclaredCellKind(
+                  elementParameter,
+                  checker,
+                );
+                if (!elementCellKind) continue;
+                mappedCount++;
+                const elementPath = [...spreadSource.path, String(element)];
+                switch (elementCellKind) {
+                  case "cell":
+                    trackRead(spreadSource.root, elementPath);
+                    trackWrite(spreadSource.root, elementPath);
+                    break;
+                  case "readonly":
+                    trackRead(spreadSource.root, elementPath);
+                    break;
+                  case "writeonly":
+                    trackWrite(spreadSource.root, elementPath);
+                    break;
+                  case "comparable":
+                    recordComparablePath(spreadSource.root, elementPath, {
+                      cellLike: true,
+                    });
+                    break;
+                  case "opaque":
+                  case "stream":
+                  case "sqlite":
+                    recordOpaquePath(spreadSource.root, elementPath);
+                    break;
+                }
+              }
+              if (mappedCount === tupleLength) suppressOrdinaryRead();
+            }
+          }
+          // The loop update advances `paramIndex` by one; the tuple fills
+          // `tupleLength` positions, so add the rest here.
+          paramIndex += tupleLength - 1;
+          continue;
+        }
 
         const capabilityArgument = isSpreadArgument
           ? argument.expression
@@ -2814,6 +2947,9 @@ export function analyzeFunctionCapabilities(
               markWildcard(source.root);
               continue;
             }
+            if (paramSummary.hasUnverifiedCellUse) {
+              markUnverifiedCellUse(source.root);
+            }
 
             for (const readPath of paramSummary.readPaths) {
               trackRead(source.root, [...source.path, ...readPath]);
@@ -2907,6 +3043,16 @@ export function analyzeFunctionCapabilities(
             const shouldTrackFullShape = !directReceiver &&
               (!methodName || !PRECISE_CHAIN_METHODS.has(methodName));
             if (!methodName) {
+              // A dynamic method name (`cell[m]()`) on a cell-like receiver
+              // is the open-world case par excellence: the method could be
+              // any mutator, so write-exhaustiveness fails closed exactly
+              // like the unknown-named fallback below.
+              if (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
               if (shouldTrackFullShape) {
                 trackFullShapeReadRef(receiver);
               } else {
@@ -2947,6 +3093,18 @@ export function analyzeFunctionCapabilities(
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
               recordMergeableNonAppendWrite(receiver);
+              // set(value, onCommit?) / send(event, onCommit?): onCommit runs
+              // after the commit settles, so the passed tx is no longer a
+              // write channel — but the closure can still write via captured
+              // cells, fresh transactions (cell.runtime.edit()), or external
+              // I/O, and the contract forbidding that is advisory. That
+              // residue is unboundable, so a second argument fails closed.
+              if (
+                (methodName === "set" || methodName === "send") &&
+                node.arguments.length > 1
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
               if (mergeablePushMisuseSink && !receiver.dynamic) {
@@ -3004,7 +3162,19 @@ export function analyzeFunctionCapabilities(
                 markOpaqueUse(receiver.root, receiver.path);
               }
             } else {
-              // Unknown method call over a tracked source reads at least the receiver path.
+              // Unknown method call over a tracked source reads at least the
+              // receiver path. On a CELL-LIKE receiver the unknown method
+              // could be a mutator this analysis does not recognize (the
+              // writer sets are a closed list against an evolving Cell API),
+              // so write-exhaustiveness is poisoned — fail closed. Value
+              // receivers (e.g. array methods on a `.get()` snapshot) cannot
+              // write through the cell and stay reads.
+              if (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              ) {
+                markUnverifiedCellUse(receiver.root);
+              }
               if (shouldTrackFullShape) {
                 trackFullShapeReadRef(receiver);
               } else if (directReceiver) {

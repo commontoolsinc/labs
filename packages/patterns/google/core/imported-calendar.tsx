@@ -72,7 +72,7 @@ const HOUR_HEIGHT = 60;
 const DAY_START = 6;
 const DAY_END = 22;
 const RESIZE_HANDLE_HEIGHT = 14;
-const SLOT_HEIGHT = HOUR_HEIGHT / 2;
+const SLOT_HEIGHT = 30;
 
 const COLORS = [
   "#93c5fd", // blue
@@ -231,19 +231,17 @@ const buildHours = (): Array<{ idx: number; label: string }> => {
 };
 
 const HOURS = buildHours();
-const GRID_HEIGHT = (DAY_END - DAY_START) * HOUR_HEIGHT;
+const GRID_HEIGHT = 960;
 const COLUMN_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-// Color assignment for calendars
-let globalColorIndex = 0;
-const calendarColorMap = new Map<string, string>();
-
-function getColorForCalendar(calendarId: string): string {
-  if (!calendarColorMap.has(calendarId)) {
-    calendarColorMap.set(calendarId, COLORS[globalColorIndex % COLORS.length]);
-    globalColorIndex++;
-  }
-  return calendarColorMap.get(calendarId)!;
+function getColorForCalendar(
+  calendarId: string,
+): string {
+  let hash = 0;
+  for (const char of calendarId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return `hsl(${hash % 360}, ${62 + (Math.floor(hash / 360) % 18)}%, ${
+    72 + (Math.floor(hash / 6480) % 8)
+  }%)`;
 }
 
 // ============ MODULE-SCOPE HANDLERS ============

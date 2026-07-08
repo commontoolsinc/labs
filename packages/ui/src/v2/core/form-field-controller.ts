@@ -169,16 +169,25 @@ export class FormFieldController<T> implements ReactiveController {
 
   /**
    * Flush the field's current value to the bound cell and await the set()
-   * round-trip. Uses the buffered value in a form context, otherwise the cell
-   * controller's value, draining any pending debounced/throttled write first.
-   * In a form context this commits the field immediately rather than waiting for
-   * the form's atomic submit, and rebaselines dirty/reset tracking to the
-   * committed value. Resolves once the local apply and the set() round-trip
-   * complete; it does not surface a remote-commit rejection (the underlying
-   * set() logs and swallows that). When no Cell is bound, it falls back to the
-   * cell controller's setValue, mirroring the form's flush.
+   * round-trip. This is for standalone fields: it drains any pending
+   * debounced/throttled write, then writes the current value (buffered value if
+   * present, otherwise the cell controller's value) to the bound cell, and
+   * rebaselines dirty/reset tracking to the committed value. Resolves once the
+   * local apply and the set() round-trip complete; it does not surface a
+   * remote-commit rejection (the underlying set() logs and swallows that). When
+   * no Cell is bound, it falls back to the cell controller's setValue.
+   *
+   * In a form context the form owns durable writes: each field buffers its edit
+   * and the form flushes them together on submit. So when this field is in a
+   * form, commit() returns without writing and without rebaselining; the edit
+   * stays in the buffer for the form to flush, and dirty tracking is unchanged
+   * so the value still counts as unsaved until the form submits.
    */
   async commit(): Promise<void> {
+    // In a form context the form owns durable writes via its atomic submit;
+    // leave the edit buffered and do not write or rebaseline here.
+    if (this._formContext) return;
+
     this._cellController.flush?.();
     const valueToFlush = this._hasBuffer
       ? this._buffer as T

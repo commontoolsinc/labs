@@ -71,10 +71,11 @@ your browser; your housemate is looking at the same list on their laptop.
    "remaining items" count, the list partition into active/completed — and
    re-runs exactly those. Your UI updates immediately (optimistically).
 3. **Sync.** The runtime's storage layer turns the transaction into a
-   *commit* — the operations plus a record of what was read, so the server
-   can detect conflicts — and sends it over a WebSocket to the server
-   (**Toolshed**), which validates it and appends it to the space's SQLite
-   log.
+   *commit* — the operations plus, for read-modify-write operations, a
+   record of what was read so the server can detect conflicts (a simple
+   toggle like this one ships as a last-write-wins write; Chapter 9) — and
+   sends it over a WebSocket to the server (**Toolshed**), which validates
+   it and appends it to the space's SQLite log.
 4. **Fan-out.** The server knows which sessions are watching queries that
    touch this document. It pushes a delta to your housemate's session.
 5. **Remote reactivity.** Their runtime integrates the delta into its local
@@ -92,11 +93,11 @@ the same stack with the *why* attached:
 
 | Layer | Packages | Why it has to exist |
 |---|---|---|
-| Foundation | `api`, `runner`, `identity`, `memory` | The cell/pattern abstractions, the scheduler that runs graphs, cryptographic identity, and the durable store. Everything else is expressed in these terms. |
+| Foundation | `api`, `data-model`, `runner`, `identity`, `memory` | The cell/pattern abstractions, the canonical value/link data model, the scheduler that runs graphs, cryptographic identity, and the durable store. Everything else is expressed in these terms. |
 | System | `schema-generator`, `ts-transformers`, `js-compiler`, `iframe-sandbox` | Patterns are authored as ordinary TypeScript, but the runtime needs *schemas* (to know what to subscribe to) and *graph nodes* (to schedule). A compiler pipeline extracts both. The sandbox exists because pattern code is untrusted. |
 | Capabilities | `piece`, `html`, `llm` | The things patterns can *do* beyond pure computation: be instantiated as pieces, render HTML, call LLMs. |
-| Operation | `background-piece-service`, `cli` | Run pieces with no browser open; drive the system from scripts and agents. |
-| Deployed product | `toolshed`, `shell` | The server (storage, sync, LLM proxy, blobs) and the browser app users actually open. |
+| Operation | `background-piece-service`, `cli`, `fuse`, `state-inspector`, `cf-harness` | Run pieces with no browser open; drive, mount, and inspect the system from scripts and agents. |
+| Deployed product | `toolshed`, `shell`, `lib-shell`, `runtime-client` | The server (storage, sync, LLM proxy, blobs), the browser app users actually open, and the shared shell logic and runtime-client seam that connect its UI thread to the worker-hosted runtime. |
 | UI | `ui` | The `cf-*` web-component library patterns build interfaces from. |
 | End-user programs | `patterns`, `home-schemas` | The patterns themselves — the point of the whole exercise. |
 

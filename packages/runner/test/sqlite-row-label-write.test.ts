@@ -351,3 +351,118 @@ describe("checkSqliteRowLabelWrite — review-round soundness fixes", () => {
     );
   });
 });
+
+describe("checkSqliteRowLabelWrite — 3.c relaxation (serverCommitEval)", () => {
+  const base = {
+    tables,
+    owner: OWNER,
+    confidentialityOf: unlabeled,
+    serverCommitEval: true,
+  };
+
+  it("admits INSERT…SELECT with unlabeled inputs (server derives; no policies)", () => {
+    const res = expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "INSERT INTO emails (from_addr) SELECT from_addr FROM emails",
+      params: [],
+    }));
+    assertEquals(res.policies, undefined);
+  });
+
+  it("admits an upsert with unlabeled bound values", () => {
+    const res = expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "INSERT INTO emails (id, from_addr) VALUES (?, ?) " +
+        "ON CONFLICT(id) DO UPDATE SET from_addr = excluded.from_addr",
+      params: [1, "alice@a.example"],
+    }));
+    assertEquals(res.policies, undefined);
+  });
+
+  it("admits a columnless INSERT (VALUES and DEFAULT VALUES forms)", () => {
+    expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "INSERT INTO emails VALUES (?, ?, ?, ?, ?)",
+      params: [1, "alice@a.example", "bob@example.com", "", "hi"],
+    }));
+    expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "INSERT INTO emails DEFAULT VALUES",
+      params: [],
+    }));
+  });
+
+  it("admits an UPDATE that writes a rule-input column (post-image is the server's)", () => {
+    const res = expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "UPDATE emails SET to_addrs = ? WHERE id = ?",
+      params: ["carol@c.example", 1],
+    }));
+    assertEquals(res.policies, undefined);
+  });
+
+  it("no-laundering STAYS runner-side: a labeled value on a relaxed shape fails closed", () => {
+    // The server never sees input-value labels, so the runner cannot defer
+    // the capture check — a labeled bound value on a shape the runner cannot
+    // evaluate keeps failing closed even with the capability.
+    expectError(
+      checkSqliteRowLabelWrite({
+        ...base,
+        sql: "INSERT INTO emails (from_addr, body) SELECT ?, ? FROM emails",
+        params: ["alice@a.example", "secret"],
+        confidentialityOf: (v) => (v === "secret" ? ["x"] : []),
+      }),
+      "labeled",
+    );
+    expectError(
+      checkSqliteRowLabelWrite({
+        ...base,
+        sql: "UPDATE emails SET to_addrs = ? WHERE id = ?",
+        params: ["secret", 1],
+        confidentialityOf: (v) => (v === "secret" ? ["x"] : []),
+      }),
+      "labeled",
+    );
+  });
+
+  it("shapes 3.c does NOT cover keep failing closed with the capability on", () => {
+    // Named params: bound values can't be attributed for the laundering check.
+    expectError(
+      checkSqliteRowLabelWrite({
+        ...base,
+        sql: "INSERT INTO emails (from_addr) VALUES (:f)",
+        params: { f: "alice@a.example" },
+      }),
+      "named params",
+    );
+    // Literal/expression SET stays unattributable.
+    expectError(
+      checkSqliteRowLabelWrite({
+        ...base,
+        sql: "UPDATE emails SET to_addrs = 'eve@evil.example' WHERE id = 1",
+        params: [],
+      }),
+      "fail closed",
+    );
+    // Undeclared target table.
+    expectError(
+      checkSqliteRowLabelWrite({
+        ...base,
+        sql: "INSERT INTO unknown_table (x) VALUES (?)",
+        params: ["v"],
+      }),
+      "undeclared",
+    );
+  });
+
+  it("an attributable INSERT still evaluates runner-side (policies recorded)", () => {
+    // The relaxation must not disable the 3.a fast path: evaluable shapes
+    // keep computing prospective labels for the sink-request seam.
+    const res = expectOk(checkSqliteRowLabelWrite({
+      ...base,
+      sql: "INSERT INTO emails (from_addr, to_addrs) VALUES (?, ?)",
+      params: ["alice@a.example", "bob@example.com"],
+    }));
+    assertEquals(res.policies?.length, 1);
+  });
+});

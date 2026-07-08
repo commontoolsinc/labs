@@ -705,6 +705,13 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // In-flight commits, registered synchronously by the transaction layer at
+  // commit() entry (see IStorageManager.trackPendingCommit). This is the
+  // write-durability barrier: distinct from #crossSpacePromises, which also
+  // carries cross-space READ work (link-target loads) and so must not gate
+  // "are there unconfirmed writes" questions.
+  #pendingCommits = new Set<Promise<unknown>>();
+  #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #spaceIdentity?: Signer;
   /** Seed map from Options — fixed for the manager's lifetime. */
@@ -829,6 +836,51 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.synced()),
     ).finally(() => this.resolveCrossSpace(resolve));
     return promise;
+  }
+
+  trackPendingCommit(promise: Promise<unknown>): void {
+    // Normalize so a rejected commit settles the barrier instead of leaking an
+    // unhandled rejection; the caller keeps the original promise for results.
+    const tracked = promise.then(() => {}, () => {});
+    this.#pendingCommits.add(tracked);
+    if (this.#pendingCommits.size === 1) {
+      this.#notifyPendingCommits(true);
+    }
+    tracked.finally(() => {
+      this.#pendingCommits.delete(tracked);
+      if (this.#pendingCommits.size === 0) {
+        this.#notifyPendingCommits(false);
+      }
+    });
+  }
+
+  hasPendingCommits(): boolean {
+    return this.#pendingCommits.size > 0;
+  }
+
+  async pendingCommitsSettled(): Promise<void> {
+    await Promise.allSettled([...this.#pendingCommits]);
+  }
+
+  /**
+   * Observe transitions of the pending-commit state: `true` when the set of
+   * unconfirmed commits becomes non-empty, `false` when it drains. Drives the
+   * client-side "unconfirmed writes" flag (e.g. the shell's before-unload
+   * guard). Returns an unsubscribe function.
+   */
+  subscribePendingCommits(callback: (pending: boolean) => void): () => void {
+    this.#pendingCommitsSubscribers.add(callback);
+    return () => this.#pendingCommitsSubscribers.delete(callback);
+  }
+
+  #notifyPendingCommits(pending: boolean): void {
+    for (const callback of this.#pendingCommitsSubscribers) {
+      try {
+        callback(pending);
+      } catch (error) {
+        console.error("pending-commits subscriber threw:", error);
+      }
+    }
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1183,6 +1235,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sqliteQuery(db, sql, params);
   }
 
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.replica.sqliteServerCommitRowLabelEval();
+  }
+
   registerSqliteDiskSource(
     id: string,
     path: string,
@@ -1270,6 +1326,9 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  /** The client of the last RESOLVED session handle — for synchronous
+   *  capability reads (`sqliteServerCommitRowLabelEval`). */
+  #sessionClient?: MemoryV2Client.Client;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
@@ -1388,6 +1447,18 @@ class SpaceReplica implements ISpaceReplica {
     return await session.sqliteQuery(db, sql, params);
   }
 
+  /**
+   * Whether the server this replica is connected to advertised commit-time
+   * row-label evaluation (`sqliteCommitRowLabelEval`) in its handshake.
+   * Synchronous — the sqlite write gate runs inside `db.exec` — so it reads
+   * the LIVE client of the last resolved session: `false` until a session
+   * exists (fail closed; by the time a handler can call `db.exec`, its cells
+   * have synced through a session) and refreshed by reconnect handshakes.
+   */
+  sqliteServerCommitRowLabelEval(): boolean {
+    return this.#sessionClient?.serverFlags?.sqliteCommitRowLabelEval === true;
+  }
+
   async registerSqliteDiskSource(
     id: string,
     path: string,
@@ -1414,8 +1485,22 @@ class SpaceReplica implements ISpaceReplica {
     this.#closed = true;
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
-    await this.synced();
+    // Settle any queued (not-yet-sent) watch refresh first so its pull promise
+    // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
+    // for any refresh already in flight.
     this.cancelQueuedWatchRefresh();
+    // Send any batched scheduler observations so they reach the server, but do
+    // not await commit confirmation here. A commit whose response is withheld
+    // past dispose — the server holding it for a gated read that never arrives —
+    // never settles on its own, so awaiting it before the client teardown below
+    // would deadlock close(), just as awaiting an in-flight read would. Kicking
+    // the flush issues the observation commit into `#commitPromises`; the client
+    // teardown rejects every in-flight request, reads and commits alike, and the
+    // post-teardown drain settles them.
+    const observationFlush = (this.#schedulerObservationBatch.length > 0 ||
+        this.#schedulerObservationFlushPromise)
+      ? this.flushSchedulerObservationBatch()
+      : undefined;
     this.#watchView?.close();
     this.#watchView = null;
     // Also close the view the update consumer is bound to, in case it diverged
@@ -1438,9 +1523,22 @@ class SpaceReplica implements ISpaceReplica {
         resolved = undefined;
       }
       if (resolved !== undefined) {
+        // Closing the client rejects every in-flight request (pulls/watch
+        // refreshes) with a ConnectionError and closes the session's watch
+        // view — the generic drain for any open watch, not just the two views
+        // tracked above.
         await resolved.client.close();
       }
     }
+    // With the client closed, every in-flight commit and read/watch pull has
+    // been rejected and now settles promptly. Awaiting them here can no longer
+    // hang and guarantees no transport promise is left pending when close()
+    // resolves.
+    await Promise.allSettled([
+      ...(observationFlush ? [observationFlush] : []),
+      ...this.#commitPromises,
+    ]);
+    await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
@@ -1515,6 +1613,9 @@ class SpaceReplica implements ISpaceReplica {
         // The session never opened cleanly; there is nothing to close.
       });
     }
+    // The fire-and-forget client.close() above rejects in-flight requests; drain
+    // their read pulls too so no transport promise is left pending.
+    void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
@@ -2845,7 +2946,10 @@ class SpaceReplica implements ISpaceReplica {
     session: MemoryV2Client.SpaceSession;
   }> {
     if (this.#sessionHandle === undefined) {
-      const handle = this.#createSession().catch((error) => {
+      const handle = this.#createSession().then((resolved) => {
+        this.#sessionClient = resolved.client;
+        return resolved;
+      }).catch((error) => {
         if (this.#sessionHandle === handle) {
           this.#sessionHandle = undefined;
         }
@@ -2947,6 +3051,21 @@ const toRejectedError = (
       rejected.readyToRetry = () => Promise.resolve(readyToRetry.call(error));
     }
     return rejected;
+  }
+
+  // A terminal commit rejection (a deterministic server-side refusal of the
+  // committed data — today `RowLabelCommitError`, storage/rejection.ts
+  // `isTerminalRejection`): preserve the wire name so the scheduler classifies
+  // it as non-retryable instead of collapsing it into a generic, bounded-retry
+  // TransactionError. Re-running the identical handler recomputes the identical
+  // refused write, so the doomed re-runs would only starve sibling commits.
+  if (name === "RowLabelCommitError") {
+    return {
+      name,
+      message,
+      cause: { name: "SystemError", message, code: 500 },
+      transaction: commit as Transaction,
+    } as unknown as TransactionError;
   }
 
   return {

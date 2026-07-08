@@ -22,14 +22,19 @@ the product needs server-side. Its route groups (`app.ts`) tell the story:
   (`GET /api/patterns/:filename`).
 - `integrations/*` — OAuth flows (Google, Discord, ...) so pieces can hold
   third-party credentials server-side; `webhooks` for inbound events.
+- `ingest` — `POST /api/ingest/:id`: a bearer-token channel for external,
+  DID-less sources (a phone beacon, a webhook emitter) to durably append
+  records to a channel's cell; everything arriving here carries the
+  runtime-minted `ExternalIngest` provenance mark (Chapter 10).
+- `agent-tools/*` (web-search, web-read), `link-preview`, `sandbox/exec` —
+  server-mediated capabilities for patterns and agents.
 - `whoami`, `meta`, `health` — introspection; `shell` — serves the web app
   itself.
 
 It boots its own `Runtime` instance too — the server is also a client of the
 fabric, which is what server-side piece execution rides on. Configuration is
-environment-driven (`HOST`, `PORT`, `MEMORY_DIR`/`DB_PATH`, compilation
-cache toggles); `docs/development/LOCAL_DEV_SERVERS.md` covers running it
-locally.
+environment-driven (`HOST`, `PORT`, `MEMORY_DIR`/`DB_PATH`, `CACHE_DIR`,
+...); `docs/development/LOCAL_DEV_SERVERS.md` covers running it locally.
 
 ## Shell: the browser client
 
@@ -90,13 +95,18 @@ ran `cf piece link` long ago to feed the list into a dashboard piece.
    pull-execution re-runs them; UI sinks fire; the row moves to "Completed"
    in Alice's DOM — all before any network round trip.
 3. **Commit** (Ch. 9). The storage manager emits a `ClientCommit` — a
-   `patch` op on the item document plus the journal's read set — over the
-   session opened at login (signed `session.open`, Ch. 10). Toolshed's
-   engine validates the reads against the space's SQLite history inside one
-   write transaction, appends commit + revision rows, advances the head.
-   Had Bob concurrently patched the same item's `title`, both commits would
-   land — disjoint paths don't conflict; had he patched `done`, the loser
-   would revert and retry (Ch. 8/9).
+   `patch` op on the item document — over the session opened at login
+   (signed `session.open`, Ch. 10). A scalar binding write like this
+   checkbox is *blind* (last-write-wins): its reads are recorded for
+   reactivity, not as commit preconditions. Toolshed's engine validates
+   whatever reads a commit does carry against the space's SQLite history
+   inside one write transaction, appends commit + revision rows, advances
+   the head. Had Bob concurrently patched the same item's `title`, both
+   commits would land — disjoint paths never conflict. Had he toggled
+   `done` at the same instant, the later write would simply win;
+   revert-and-retry is reserved for read-modify-write commits, and
+   mergeable ops (a `push` of a new item) merge instead of racing
+   (Ch. 8/9).
 4. **Fan-out** (Ch. 9). The engine marks the item document dirty. The
    debounced refresh re-walks affected watch graphs per session — Bob's
    watch covers the list's documents via its schema selectors, as does the
@@ -125,6 +135,9 @@ Common Fabric.
   scheduler (`packages/runner/src/scheduler.ts`) and the v2 engine
   (`packages/memory/v2/engine.ts`) are the two files most worth reading
   end to end.
-- **Open questions to watch in the code**: v2 space-level access control
-  (Ch. 10 caveat), branches/merge in the storage engine (Ch. 9), and the
-  CFC data-classification work (`packages/patterns/cfc-*`).
+- **Areas to watch in the code**: per-space ACL enforcement recently landed
+  behind a default-off dial (`MEMORY_ACL_MODE`, Ch. 10); branch
+  infrastructure exists in the storage engine's schema while merge remains
+  open (Ch. 9); and the CFC flow-control layer is evolving quickly
+  (`packages/runner/src/cfc/`, specs in `docs/specs/cfc-*.md`, demo
+  patterns in `packages/patterns/cfc-*`).

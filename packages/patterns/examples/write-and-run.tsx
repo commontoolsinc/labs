@@ -12,9 +12,32 @@ import {
   Writable,
 } from "commonfabric";
 
-// Template for the AI to reference
-const TEMPLATE =
-  `import { computed, handler, Default, NAME, pattern, UI } from "commonfabric";
+interface Input {
+  prompt: string | Default<"Create a simple counter">;
+}
+
+export interface Output {
+  prompt: string;
+}
+
+const updatePrompt = handler<
+  { detail: { message: string } },
+  { prompt: Writable<string> }
+>((event, { prompt }) => {
+  const newPrompt = event.detail?.message?.trim();
+  if (newPrompt) {
+    prompt.set(newPrompt);
+  }
+});
+
+const visit = handler<unknown, { result: Writable<any> }>((_, { result }) => {
+  return navigateTo(result);
+});
+
+export default pattern<Input, Output>(({ prompt }) => {
+  // Template for the AI to reference
+  const template =
+    `import { computed, handler, Default, NAME, pattern, UI } from "commonfabric";
 
 interface Input {
   value: number | Default<0>;
@@ -42,8 +65,8 @@ export default pattern<Input>(({ value }) => {
   };
 });`;
 
-const SYSTEM_PROMPT =
-  `You are a Common Fabric pattern generator. Given a user request, generate a complete TypeScript pattern file.
+  const systemPrompt =
+    `You are a Common Fabric pattern generator. Given a user request, generate a complete TypeScript pattern file.
 
 IMPORTANT RULES:
 1. CTS transforms are enabled by default; do not add /// <cf-disable-transform />
@@ -56,36 +79,13 @@ IMPORTANT RULES:
 8. Use computed() for derived values and data transformations
 
 TEMPLATE FOR REFERENCE:
-${TEMPLATE}
+${template}
 
 Generate ONLY the TypeScript code, no explanations or markdown.`;
 
-interface Input {
-  prompt: string | Default<"Create a simple counter">;
-}
-
-export interface Output {
-  prompt: string;
-}
-
-const updatePrompt = handler<
-  { detail: { message: string } },
-  { prompt: Writable<string> }
->((event, { prompt }) => {
-  const newPrompt = event.detail?.message?.trim();
-  if (newPrompt) {
-    prompt.set(newPrompt);
-  }
-});
-
-const visit = handler<unknown, { result: Writable<any> }>((_, { result }) => {
-  return navigateTo(result);
-});
-
-export default pattern<Input, Output>(({ prompt }) => {
   // Step 1: Generate pattern source code from prompt
   const generated = generateText({
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     prompt,
     model: "anthropic:claude-sonnet-4-5",
   });

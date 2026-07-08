@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -6,7 +7,8 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
-import { atomEntails, matchAtomPattern } from "./atom-pattern.ts";
+import { atomEntails, conceptGuard, matchAtomPattern } from "./atom-pattern.ts";
+import type { TrustResolver } from "./trust.ts";
 import {
   clauseAlternatives,
   clausesEqual,
@@ -155,20 +157,70 @@ export const cfcObservationFitsCeiling = (
 };
 
 /**
+ * Trust context threaded through the floor predicates for CONCEPT-valued
+ * requirements (Epic D5). A concept floor is satisfied only via the acting
+ * principal's trust closure, so the predicates need the resolver plus who is
+ * acting. Optional throughout: absent it (every pre-D5 caller, and every
+ * plain-atom floor) concept requirements fail closed and plain atoms behave
+ * exactly as before — the change is invisible to concrete/pattern floors.
+ */
+export type CfcFloorTrustContext = {
+  readonly trustResolver?: TrustResolver;
+  readonly actingPrincipal?: string;
+};
+
+/**
  * Does carried atom `actual` satisfy floor requirement `required`
- * (§8.10.3)? The requirement is an ATOM PATTERN — `matchAtomPattern`'s
- * subset-field semantics let a floor name exactly the fields it demands
- * (`{type: CaveatScreened, verdict: "pass"}` accepts any trusted mint with
- * those fields) — with `atomEntails` layered for the ordered families.
- * Exact structural equality is the degenerate case of both, so floors
- * authored as concrete atoms keep their meaning. Concept-valued
- * requirements via the trust closure are D5 (this stays a pure predicate).
+ * (§8.10.3)? Three cases, in order:
+ *
+ * - A CONCEPT-valued requirement (`{type: Concept, uri}`, recognized by
+ *   `conceptGuard`) is satisfied iff `actual` — a CONCRETE atom — reaches the
+ *   concept in the acting principal's trust closure (spec §4.8.9, D5). It is
+ *   NEVER pool-matched as a literal: a concept pattern is not structural data,
+ *   and carried integrity cannot legitimately contain a Concept atom (the mint
+ *   gate strips it). Evaluated per single atom — `conceptSatisfied` over a set
+ *   is the ∃-over-atoms disjunction, and concept edges form a graph whose
+ *   reachability from a set is the union of per-atom reachability, so testing
+ *   one atom at a time gives the same answer AND tells us WHICH concrete atom
+ *   is the witness (keeping the coherence machinery below well-defined).
+ *   Fails closed on a malformed concept shape (`conceptGuard` → `{uri:
+ *   undefined}`) or an absent resolver.
+ * - Otherwise the requirement is an ATOM PATTERN — `matchAtomPattern`'s
+ *   subset-field semantics let a floor name exactly the fields it demands
+ *   (`{type: CaveatScreened, verdict: "pass"}` accepts any trusted mint with
+ *   those fields) — with `atomEntails` layered for the ordered families.
+ * - Exact structural equality is the degenerate case of both, so floors
+ *   authored as concrete atoms keep their meaning.
  */
 const integrityAtomSatisfies = (
   required: unknown,
   actual: unknown,
-): boolean =>
-  matchAtomPattern(required, actual) !== null || atomEntails(actual, required);
+  trust?: CfcFloorTrustContext,
+): boolean => {
+  const concept = conceptGuard(required);
+  if (concept !== undefined) {
+    // A concept floor is satisfied ONLY by concrete evidence reaching the
+    // concept in the closure — NEVER by a literal Concept atom in carried
+    // integrity (spec §4.8: conceptual principals live in trust statements,
+    // not carried labels; the mint gate strips any Concept atom). Reject a
+    // Concept-typed `actual` locally, BEFORE the resolver, so a misconfigured
+    // trust statement whose `concrete` is itself Concept-shaped cannot let a
+    // smuggled `Concept` atom pool-match its way through — fail closed here
+    // rather than lean on the upstream mint gate. `isRecord` admits arrays, so
+    // this catches a Concept-typed array shape too.
+    return concept.uri !== undefined &&
+      !(isRecord(actual) &&
+        (actual as { type?: unknown }).type === CFC_ATOM_TYPE.Concept) &&
+      trust?.trustResolver !== undefined &&
+      trust.trustResolver.conceptSatisfied(
+        concept.uri,
+        [actual],
+        trust.actingPrincipal,
+      );
+  }
+  return matchAtomPattern(required, actual) !== null ||
+    atomEntails(actual, required);
+};
 
 /**
  * Integrity-floor membership (§8.10.3 / §8.12.4.1): every required pattern
@@ -177,14 +229,17 @@ const integrityAtomSatisfies = (
  * the coherent form below), the write-side floor (`verifyWriteFloor`, Epic
  * D3), and the tool-input floor (llm-dialog, Epic D2), so D5's upgrade to
  * concept matching (`conceptSatisfied`) lands in ONE place instead of
- * diverging across three inlined copies.
+ * diverging across three inlined copies. `trust` carries the acting
+ * principal's closure for CONCEPT-valued requirements; omit it for plain
+ * (concrete/pattern) floors.
  */
 export const cfcIntegritySatisfiesFloor = (
   integrity: readonly unknown[],
   requiredIntegrity: readonly unknown[],
+  trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) =>
-    integrity.some((actual) => integrityAtomSatisfies(required, actual))
+    integrity.some((actual) => integrityAtomSatisfies(required, actual, trust))
   );
 
 /**
@@ -198,8 +253,9 @@ export const cfcIntegritySatisfiesFloor = (
 export const cfcIntegrityWitnessKey = (
   required: unknown,
   actual: unknown,
+  trust?: CfcFloorTrustContext,
 ): string | null => {
-  if (!integrityAtomSatisfies(required, actual)) return null;
+  if (!integrityAtomSatisfies(required, actual, trust)) return null;
   if (
     isRecord(actual) && isRecord((actual as { scope?: unknown }).scope) &&
     (actual as { scope: { valueRef?: unknown } }).scope.valueRef !== undefined
@@ -221,18 +277,22 @@ export const cfcIntegrityWitnessKey = (
  * screened by someone" is not "the object was screened". The single-leaf
  * case reduces exactly to `cfcIntegritySatisfiesFloor`; an empty leaf set is
  * vacuously satisfied (nothing was consumed — the caller's quantification
- * decides whether the gate even runs).
+ * decides whether the gate even runs). For a CONCEPT-valued requirement the
+ * shared witness is the CONCRETE atom that reaches the concept (D5): two
+ * leaves each reaching the concept via a DIFFERENT concrete atom are
+ * incoherent, exactly as two different concrete screening atoms would be.
  */
 export const cfcIntegritySatisfiesFloorCoherently = (
   consumedIntegrity: readonly (readonly unknown[])[],
   requiredIntegrity: readonly unknown[],
+  trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) => {
     let common: Set<string> | undefined;
     for (const integrity of consumedIntegrity) {
       const keys = new Set<string>();
       for (const actual of integrity) {
-        const key = cfcIntegrityWitnessKey(required, actual);
+        const key = cfcIntegrityWitnessKey(required, actual, trust);
         if (key !== null) keys.add(key);
       }
       if (keys.size === 0) return false;

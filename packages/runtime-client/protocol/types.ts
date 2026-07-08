@@ -107,6 +107,7 @@ export enum NotificationType {
   ErrorReport = "callback:error",
   Telemetry = "callback:telemetry",
   VDomBatch = "vdom:batch",
+  PendingWritesChanged = "callback:pending-writes",
 }
 
 export interface IPCClientMessage {
@@ -833,6 +834,17 @@ export interface TelemetryNotification {
 }
 
 /**
+ * Worker-to-page mirror of the storage manager's durability barrier: `pending`
+ * is true while any issued commit is still unconfirmed by the server, false
+ * once the pending set drains. The shell consults the latest value from its
+ * beforeunload handler so a reload with unconfirmed writes prompts the user.
+ */
+export interface PendingWritesNotification {
+  type: NotificationType.PendingWritesChanged;
+  pending: boolean;
+}
+
+/**
  * VDOM operation for IPC.
  */
 export type VDomOp =
@@ -901,7 +913,8 @@ export type IPCRemoteNotification =
   | ConsoleNotification
   | NavigateRequestNotification
   | ErrorNotification
-  | VDomBatchNotification;
+  | VDomBatchNotification
+  | PendingWritesNotification;
 
 export type Commands = {
   // Runtime requests

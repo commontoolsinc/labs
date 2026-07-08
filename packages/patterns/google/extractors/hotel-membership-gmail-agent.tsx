@@ -7,6 +7,7 @@
  * Usage: wish({ query: "#hotelMemberships" }) to get discovered memberships.
  */
 import {
+  __cf_data,
   computed,
   Default,
   handler,
@@ -23,6 +24,7 @@ import {
   defineItemSchema,
   InferItem,
   listTool,
+  listToolHandler,
 } from "../core/util/agentic-tools.ts";
 
 // Scan mode: "full" = comprehensive all-time search, "recent" = last 7 days only
@@ -53,41 +55,43 @@ const EFFECTIVE_QUERIES = [
 // SCHEMA - DEFINED ONCE! (replaces interface + input type + JSON schema)
 // ============================================================================
 // The new elegant API: define schema once, get type-checked dedupe fields
-const MembershipSchema = defineItemSchema({
-  hotelBrand: {
-    type: "string",
-    description: "Hotel chain name (e.g., 'Marriott', 'Hilton')",
-  },
-  programName: {
-    type: "string",
-    description:
-      "Loyalty program name (e.g., 'Marriott Bonvoy', 'Hilton Honors')",
-  },
-  membershipNumber: {
-    type: "string",
-    description: "The membership number (digits only)",
-  },
-  tier: {
-    type: "string",
-    description:
-      "Status tier if known (Member, Silver, Gold, Platinum, Diamond)",
-  },
-  sourceEmailId: {
-    type: "string",
-    description: "The email ID from searchGmail results",
-  },
-  sourceEmailSubject: { type: "string", description: "The email subject" },
-  sourceEmailDate: { type: "string", description: "The email date" },
-  confidence: { type: "number", description: "0-100 confidence score" },
-}, [
-  "hotelBrand",
-  "programName",
-  "membershipNumber",
-  "sourceEmailId",
-  "sourceEmailSubject",
-  "sourceEmailDate",
-  "confidence",
-]);
+const MembershipSchema = __cf_data(
+  defineItemSchema({
+    hotelBrand: {
+      type: "string",
+      description: "Hotel chain name (e.g., 'Marriott', 'Hilton')",
+    },
+    programName: {
+      type: "string",
+      description:
+        "Loyalty program name (e.g., 'Marriott Bonvoy', 'Hilton Honors')",
+    },
+    membershipNumber: {
+      type: "string",
+      description: "The membership number (digits only)",
+    },
+    tier: {
+      type: "string",
+      description:
+        "Status tier if known (Member, Silver, Gold, Platinum, Diamond)",
+    },
+    sourceEmailId: {
+      type: "string",
+      description: "The email ID from searchGmail results",
+    },
+    sourceEmailSubject: { type: "string", description: "The email subject" },
+    sourceEmailDate: { type: "string", description: "The email date" },
+    confidence: { type: "number", description: "0-100 confidence score" },
+  }, [
+    "hotelBrand",
+    "programName",
+    "membershipNumber",
+    "sourceEmailId",
+    "sourceEmailSubject",
+    "sourceEmailDate",
+    "confidence",
+  ]),
+);
 
 // Derive TypeScript type from schema (for UI code)
 // Note: _fromWish is an internal property added by the wish system for imported records
@@ -431,7 +435,8 @@ Report memberships as you find them. Don't wait until the end.`,
         reportMembership: {
           description:
             "Report a found membership number. Call this IMMEDIATELY when you find a valid membership number. It will be saved automatically.",
-          handler: reportMembership, // Already bound - no second call needed!
+          inputSchema: reportMembership.inputSchema,
+          handler: listToolHandler(reportMembership.state),
         },
       },
       title: "🏨 Hotel Membership Extractor",

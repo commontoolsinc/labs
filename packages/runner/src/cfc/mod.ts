@@ -39,6 +39,7 @@ export type {
   EntityDocumentWithCfc,
   IFCLabel,
   ImplementationIdentity,
+  OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
   TrustSnapshot,
@@ -118,6 +119,23 @@ export {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+export type {
+  RenderConfidentialityResolver,
+  RenderConfidentialityResolverConfig,
+  RenderLabelInput,
+} from "./render-ceiling.ts";
+export {
+  createRenderConfidentialityResolver,
+  RENDER_DISPLAY_SINK_CLASS,
+  RENDER_SINK_NAME,
+  spaceAtomIdsInConfidentiality,
+  STANDARD_RENDER_EXCHANGE_RULES,
+} from "./render-ceiling.ts";
+export type { SpaceMembershipProvider, SpaceRole } from "./space-membership.ts";
+export {
+  createRuntimeSpaceMembershipProvider,
+  spaceReaderRole,
+} from "./space-membership.ts";
 export {
   flowLabelWorkExists,
   flowReadExcluded,
@@ -158,8 +176,10 @@ export {
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
 export {
+  atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
+  type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloorCoherently,
   cfcIntegrityWitnessKey,
   cfcJsonPointerForPath,

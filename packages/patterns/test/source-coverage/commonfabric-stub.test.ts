@@ -178,8 +178,18 @@ export function pattern<TInput, TOutput>(
 }
 
 export function handler<TEvent, TState>(
-  body: (event: TEvent, state: TState) => unknown,
+  ...args:
+    | [body: (event: TEvent, state: TState) => unknown]
+    | [
+      _inputSchema: unknown,
+      _stateSchema: unknown,
+      body: (event: TEvent, state: TState) => unknown,
+    ]
 ): (state: TState) => Stream<TEvent> {
+  const body = args[args.length - 1] as (
+    event: TEvent,
+    state: TState,
+  ) => unknown;
   return (state) => {
     const stream: Stream<TEvent> = {
       sendCount: 0,

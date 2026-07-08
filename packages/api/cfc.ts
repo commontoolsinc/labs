@@ -82,6 +82,12 @@ export const CFC_ATOM_TYPE = {
   // via the class-aware meet — present on an output only when present on
   // every input.
   PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified",
+  // Personal-space principal (confidentiality; spec §15.2): a per-user space,
+  // a convenience form for `Space(...)` that names its owner directly. The
+  // default display ceiling (§8.10.6) admits `PersonalSpace(actingUser)` by
+  // exact match — the acting user is the audience — so it needs no exchange
+  // rule, unlike a shared `Space(...)`.
+  PersonalSpace: "https://commonfabric.org/cfc/atom/PersonalSpace",
   PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound",
   PromptSlotInfluence: "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
   Resource: "https://commonfabric.org/cfc/atom/Resource",
@@ -204,6 +210,11 @@ export type CfcUserAtom = CfcAtomObject & {
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
   readonly id: string;
+};
+
+export type CfcPersonalSpaceAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PersonalSpace;
+  readonly owner: string;
 };
 
 export type CfcExpiresAtom = CfcAtomObject & {
@@ -433,6 +444,10 @@ export const cfcAtom = {
 
   space(id: string): CfcSpaceAtom {
     return { type: CFC_ATOM_TYPE.Space, id };
+  },
+
+  personalSpace(owner: string): CfcPersonalSpaceAtom {
+    return { type: CFC_ATOM_TYPE.PersonalSpace, owner };
   },
 
   expires(timestamp: number): CfcExpiresAtom {

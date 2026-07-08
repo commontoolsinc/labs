@@ -7,6 +7,11 @@ import {
 } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import {
+  createRenderConfidentialityResolver,
+  type SpaceMembershipProvider,
+} from "@commonfabric/runner/cfc";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -2884,6 +2889,356 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
+    // lib-shell's defaultRenderConfidentialityCeiling) uses the acting user's
+    // DID *string* as the exact-match identity atom. Pin that the string form
+    // gates correctly: the same ceiling admits the acting user's own content
+    // and fail-closes an identity atom it omits (another user's). Exchange
+    // resolution (PersonalSpace/HasRole forms) is H3b.
+    await t.step(
+      "acting-user DID-string ceiling admits own content, blocks another user's",
+      async () => {
+        const otherUserDid = "did:key:z6MkOtherUserOutsideCeiling";
+        const seedTx = runtime.edit();
+        const seedUserScoped = (id: string, value: string, atom: string) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-user-scoped-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { confidentiality: [atom] },
+                }],
+              },
+            },
+          });
+          return cell;
+        };
+        const ownContent = seedUserScoped(
+          "cfc-render-policy-own-user-content",
+          "Acting user's own note",
+          signer.did(),
+        );
+        const otherContent = seedUserScoped(
+          "cfc-render-policy-other-user-content",
+          "Other user's note",
+          otherUserDid,
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // The H3a initial profile shape: acting-user DID string plus the
+        // influence-class caveat-kind allow-list.
+        const h3aProfileCeiling = {
+          atoms: [signer.did()],
+          caveatKinds: [
+            "https://commonfabric.org/cfc/concepts/prompt-influence",
+            "prompt-influence",
+          ],
+        };
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: h3aProfileCeiling,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [ownContent as never, otherContent as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Acting user's own note"), true);
+          assertEquals(renderedText.includes("Other user's note"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // Epic H3b: the render gate resolves §15.2 principal shapes through the
+    // runner-side exchange evaluator (spec §8.10.6) before the fit check. The
+    // reconciler consumes the resolved label; a display-class BoundaryContext
+    // and the acting user's HasRole membership facts drive resolution.
+    await t.step(
+      "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
+      async () => {
+        const seedTx = runtime.edit();
+        const seedLabeled = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        // A Space atom naming the acting user's OWN space resolves — the user
+        // is a verified reader of their own space (§4.9.3). A Space atom naming
+        // a space the user has no verified role in stays blocked (fail-closed),
+        // even though the cell is locally resident: residency is not authority.
+        const userLabeled = seedLabeled(
+          "cfc-h3b-user",
+          "User-scoped note",
+          cfcAtom.user(signer.did()),
+        );
+        const spaceMemberLabeled = seedLabeled(
+          "cfc-h3b-space-member",
+          "Own-space note",
+          cfcAtom.space(signer.did()),
+        );
+        const spaceOtherLabeled = seedLabeled(
+          "cfc-h3b-space-other",
+          "Other-space note",
+          cfcAtom.space("did:key:z6MkOtherSpaceOutsideRoles"),
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // The §8.10.6 default display ceiling: acting-user identity + personal
+        // space principal forms. The acting user's own space is the one
+        // always-verifiable member fact (space DID == principal DID).
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
+        });
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [
+            userLabeled as never,
+            spaceMemberLabeled as never,
+            spaceOtherLabeled as never,
+          ],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("User-scoped note"), true);
+          assertEquals(renderedText.includes("Own-space note"), true);
+          assertEquals(renderedText.includes("Other-space note"), false);
+          assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // With the resolver active, the clause-aware fit still routes each
+    // still-offending clause through the same per-clause admission as the H3a
+    // path: the read-failure marker stays ungrantable (audit item 22), an
+    // allow-listed caveat kind renders, and an author-declassified atom renders.
+    await t.step(
+      "resolved-path fit honors marker / caveat-kind / declassification",
+      async () => {
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          memberSpaces: [signer.did()],
+        });
+        const influenceCaveat = {
+          type: "https://commonfabric.org/cfc/atom/Caveat",
+          kind: "prompt-influence",
+          source: {
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: signer.did(),
+          },
+        };
+        const seedTx = runtime.edit();
+        const seed = (id: string, value: string, atom: unknown) => {
+          const cell = runtime.getCell<string>(
+            signer.did(),
+            id,
+            undefined,
+            seedTx,
+          );
+          const link = cell.getAsNormalizedFullLink();
+          seedTx.writeOrThrow({
+            space: signer.did(),
+            id: link.id!,
+            type: "application/json",
+            path: [],
+          }, {
+            value,
+            cfc: {
+              version: 1,
+              schemaHash: "test-h3b-branch-schema",
+              labelMap: {
+                version: 1,
+                entries: [{ path: [], label: { confidentiality: [atom] } }],
+              },
+            },
+          });
+          return cell;
+        };
+        const markerCell = seed(
+          "cfc-h3b-marker",
+          "Marker content",
+          "cfc:label-read-failed",
+        );
+        const caveatCell = seed(
+          "cfc-h3b-caveat",
+          "Influence-caveated note",
+          influenceCaveat,
+        );
+        const declassCell = seed(
+          "cfc-h3b-declass",
+          "Author-released note",
+          cfcAtom.space("did:key:z6MkDeclassSpace"),
+        );
+        // An authored OR-clause: declassifying ONE alternative must release the
+        // whole disjunctive clause even after resolution keeps it an OR.
+        const declassOrCell = seed(
+          "cfc-h3b-declass-or",
+          "Author-released OR note",
+          {
+            anyOf: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+              cfcAtom.space("did:key:z6MkDeclassOrB"),
+            ],
+          },
+        );
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+
+        // Marker + caveat under a root ceiling that allow-lists the influence
+        // kind: the caveat renders, the marker stays blocked.
+        const rootCollector = createOpsCollector();
+        const rootReconciler = new WorkerReconciler({
+          onOps: rootCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+            caveatKinds: ["prompt-influence"],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelRoot = rootReconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [markerCell as never, caveatCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = rootCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Influence-caveated note"), true);
+          assertEquals(text.includes("Marker content"), false);
+        } finally {
+          cancelRoot();
+        }
+
+        // An authored boundary that declassifies the offending atom renders it
+        // even under the resolver path (renderDeclassificationPolicy "allow").
+        const declassCollector = createOpsCollector();
+        const declassReconciler = new WorkerReconciler({
+          onOps: declassCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelDeclass = declassReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassSpace"),
+            ],
+          },
+          children: [declassCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = declassCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released note"), true);
+        } finally {
+          cancelDeclass();
+        }
+
+        // Declassifying one alternative of an OR-clause releases the clause.
+        const orCollector = createOpsCollector();
+        const orReconciler = new WorkerReconciler({
+          onOps: orCollector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [cfcAtom.user(signer.did())],
+          },
+          resolveRenderConfidentiality: resolver,
+        });
+        const cancelOr = orReconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.user(signer.did())],
+            declassifyConfidentiality: [
+              cfcAtom.space("did:key:z6MkDeclassOrA"),
+            ],
+          },
+          children: [declassOrCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          const text = orCollector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          assertEquals(text.includes("Author-released OR note"), true);
+        } finally {
+          cancelOr();
+        }
+      },
+    );
+
     // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
     // "the label could not be read", so it must never fit a render policy —
     // even one that names the exported marker string — in either the
@@ -3000,6 +3355,286 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             false,
           );
           assertEquals(renderedText.includes("Content hidden by policy"), true);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's ACL
+    // has not yet synced fails closed (Stage 1); when the membership provider
+    // later reports X grants the acting user READ and fires its subscription,
+    // the cell re-renders and admits — WITHOUT a new value on the cell. Proves
+    // the reconciler wires the provider's ACL-change subscription into the
+    // cell's cancel group and re-evaluates the render gate on change.
+    await t.step(
+      "reactively re-renders a Space(X) cell once its ACL grants READ",
+      async () => {
+        const teamSpace = "did:key:z6MkTeamSpaceStage4Reactive";
+        const seedTx = runtime.edit();
+        const teamCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-team-note",
+          undefined,
+          seedTx,
+        );
+        const teamLink = teamCell.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: teamLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Team note",
+          cfc: {
+            version: 1,
+            schemaHash: "test-stage4-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: [cfcAtom.space(teamSpace)] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const teamLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-team-note",
+        );
+        // A sibling cell with NO stored label: the membership watcher must find
+        // no Space atom and set up no ACL subscription for it (labelView
+        // undefined path), while it renders normally under the ceiling.
+        const plainCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-plain-note",
+        );
+        {
+          const seed = runtime.edit();
+          plainCell.withTx(seed).set("Plain note");
+          assertEquals((await seed.commit()).ok !== undefined, true);
+        }
+
+        // Start denying (ACL unsynced), then grant + fire the subscription.
+        let granted = false;
+        const listeners: Array<{ space: string; onChange: () => void }> = [];
+        const provider: SpaceMembershipProvider = {
+          readerRole: (space) =>
+            granted && space === teamSpace ? "reader" : null,
+          subscribe: (space, onChange) => {
+            const entry = { space, onChange };
+            listeners.push(entry);
+            return () => {
+              const index = listeners.indexOf(entry);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
+        };
+        const fireAcl = (space: string) => {
+          for (const listener of [...listeners]) {
+            if (listener.space === space) listener.onChange();
+          }
+        };
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          membershipProvider: provider,
+        });
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+          membershipProvider: provider,
+        });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [teamLabeled as never, plainCell as never],
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          // Before the ACL grants READ, the Space(team) label fails closed.
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            false,
+          );
+          // The unlabeled sibling renders (no Space atom to gate) and no ACL
+          // subscription was set up for it.
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Plain note"),
+            true,
+          );
+          // The reconciler subscribed to the labeled space's ACL doc.
+          assertEquals(
+            listeners.some((listener) => listener.space === teamSpace),
+            true,
+          );
+          assertEquals(listeners.length, 1);
+
+          // The ACL syncs in and grants READ; the subscription fires and the
+          // cell re-renders — the Stage-1 over-block upgrades to an admit with
+          // no new value on the cell.
+          granted = true;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            true,
+          );
+
+          // Revoke (admit -> block, the confidentiality-critical direction):
+          // the ACL drops READ, the subscription fires again, and the gate
+          // re-blocks the already-rendered cell — the content is removed and
+          // the blocked placeholder re-inserted. Guards against an upgrade-only
+          // re-eval regression that would leave admitted content on screen.
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    // The root-mounted cell is an egress too (codex P2): a Space(X) cell
+    // mounted AS the root gets the same reactive upgrade as a descendant.
+    await t.step(
+      "reactively re-renders a root-mounted Space(X) cell once its ACL grants READ",
+      async () => {
+        const teamSpace = "did:key:z6MkTeamSpaceStage4Root";
+        const seedTx = runtime.edit();
+        const teamCell = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+          undefined,
+          seedTx,
+        );
+        const teamLink = teamCell.getAsNormalizedFullLink();
+        seedTx.writeOrThrow({
+          space: signer.did(),
+          id: teamLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: "Root team note",
+          cfc: {
+            version: 1,
+            schemaHash: "test-stage4-root-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: [cfcAtom.space(teamSpace)] },
+              }],
+            },
+          },
+        });
+        assertEquals((await seedTx.commit()).ok !== undefined, true);
+        const teamLabeled = runtime.getCell<string>(
+          signer.did(),
+          "cfc-stage4-root-note",
+        );
+
+        let granted = false;
+        const listeners: Array<{ space: string; onChange: () => void }> = [];
+        const provider: SpaceMembershipProvider = {
+          readerRole: (space) =>
+            granted && space === teamSpace ? "reader" : null,
+          subscribe: (space, onChange) => {
+            const entry = { space, onChange };
+            listeners.push(entry);
+            return () => {
+              const index = listeners.indexOf(entry);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
+        };
+        const fireAcl = (space: string) => {
+          for (const listener of [...listeners]) {
+            if (listener.space === space) listener.onChange();
+          }
+        };
+        const resolver = createRenderConfidentialityResolver({
+          actingPrincipal: signer.did(),
+          membershipProvider: provider,
+        });
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderConfidentialityCeiling: {
+            atoms: [
+              cfcAtom.user(signer.did()),
+              cfcAtom.personalSpace(signer.did()),
+            ],
+            caveatKinds: [],
+          },
+          resolveRenderConfidentiality: resolver,
+          membershipProvider: provider,
+        });
+        // Mount the labeled cell AS the root.
+        const cancel = reconciler.mount(teamLabeled);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            listeners.some((listener) => listener.space === teamSpace),
+            true,
+          );
+
+          granted = true;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            true,
+          );
+
+          // Revoke re-blocks the root-mounted cell too (admit -> block).
+          granted = false;
+          collector.clear();
+          fireAcl(teamSpace);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Root team note"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("create-text").map((op) => op.text)
+              .includes("Content hidden by policy"),
+            true,
+          );
         } finally {
           cancel();
         }

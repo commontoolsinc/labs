@@ -15,6 +15,7 @@ import {
   IPCRemoteResponse,
   NavigateRequestNotification,
   NotificationType,
+  PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   VDomBatchNotification,
@@ -89,7 +90,7 @@ export function isIPCRemoteNotification(
   return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
-    isVDomBatchNotification(value);
+    isVDomBatchNotification(value) || isPendingWritesNotification(value);
 }
 
 export function isCellUpdateNotification(
@@ -141,6 +142,16 @@ export function isTelemetryNotification(
     isRecord(value) &&
     value.type === NotificationType.Telemetry &&
     typeof value.marker === "object"
+  );
+}
+
+export function isPendingWritesNotification(
+  value: unknown,
+): value is PendingWritesNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.PendingWritesChanged &&
+    typeof value.pending === "boolean"
   );
 }
 

@@ -404,14 +404,86 @@ zero cost until a table declares a rule:
   assignments — attributed from the SQL text, not the bind params; a literal,
   expression, or subquery assignment is unattributable and **fails closed**
   (so `SET col = 'x'` cannot bypass the rule-input check). An attributable
-  UPDATE still may not write a rule-input column (the post-image row label
-  cannot be computed runner-side — the other inputs are unknown; server-side
-  3.c lifts this); one that writes only non-input columns with unlabeled
-  values passes, while a labeled value outside an evaluable INSERT fails
-  closed. DELETE stores nothing and passes.
+  UPDATE may write a rule-input column only when the server evaluates at
+  commit (the 3.c relaxation below); one that writes only non-input columns
+  with unlabeled values passes, while a labeled value outside an evaluable
+  INSERT fails closed. DELETE stores nothing and passes.
 - Everything the runner cannot attribute on a rule-bearing table —
   `INSERT…SELECT`, upsert, columnless INSERT, named params, an unparseable
-  target — **fails closed**.
+  target — **fails closed**, except the 3.c-covered shapes below.
+- **The 3.c relaxation (capability-gated).** When the connected server
+  advertises commit-time re-derivation (`sqliteCommitRowLabelEval` in its
+  `hello.ok` protocol flags — inherent to the server build, stored by the
+  memory client, read synchronously by the gate; absent/unknown reads
+  `false`), the shapes whose ONLY problem is that the runner cannot see the
+  committed row are admitted with **unlabeled** inputs: `INSERT…SELECT`,
+  upsert, columnless INSERT (including zero-param `DEFAULT VALUES`), and an
+  attributable UPDATE that writes a rule-input column. The server derives the
+  label from the true post-image (below). **No-laundering stays runner-side
+  regardless**: the server sees only stored values, never the CFC labels the
+  writer's bound inputs carry, so a labeled value bound to a shape the runner
+  cannot evaluate keeps failing closed — there is no computed row label to
+  verify capture against. Named params, a literal/expression SET, and an
+  unparseable/undeclared target also keep failing closed. Against an old
+  server (no advertisement) every reject stays exactly as before. Admitted
+  relaxed shapes record no runner-side policies; the read side re-derives.
+
+### Server commit — re-derive the committed row (implemented — Phase 3.c)
+
+The write's ground truth is the row the statement actually commits, whatever
+the statement's shape — so the server re-derives it there. Inside
+`applyCommitTransaction`
+([`commit-eval.ts`](../../../packages/memory/v2/sqlite/commit-eval.ts),
+called from `applySqliteOperation`), a folded `sqlite` write whose target
+table declares a rule:
+
+1. executes with an appended `RETURNING <rowid> AS __cf_rowid` (stepping to
+   completion applies the whole DML and yields the affected rowids; the
+   returned-row count must equal `sqlite3_changes` — a mismatch means the
+   suffix didn't take effect, e.g. an unterminated trailing comment swallowed
+   it — else fail closed);
+2. reads the affected rows **back by rowid** — the TRUE post-image, immune to
+   RETURNING's same-statement timing caveats — selecting exactly the rule's
+   input columns;
+3. runs the **shared evaluator** (`evaluateRowLabel`, the same one the write
+   gate and read re-derivation use) per row with `dbOwner` resolved from the
+   op's db ref, and **throws on any failure — rolling back the whole commit**,
+   cell ops included.
+
+Evaluation runs **unconditionally** (not gated on the client's protocol
+flags): it is the server's own soundness enforcement, so a stale or hostile
+client cannot skip it. Fail closed server-side, each rolling back the commit:
+an unattributable or undeclared target on a rule-bearing db (attributed with
+the SAME shared parser the runner gate uses,
+[`write-targets.ts`](../../../packages/memory/v2/sqlite/write-targets.ts)), an
+unrecognized leading keyword (CTE-fronted writes), an invalid wire-supplied
+spec, a statement that already carries RETURNING (a second clause cannot be
+appended soundly — and `db.exec` returns void, so it had no consumer), every
+rowid alias shadowed by declared columns, an affected-row count over the
+policy cap (`MAX_ROW_LABEL_EVAL_ROWS`; each row runs the rule's regexes on the
+shared engine connection, and INSERT…SELECT escapes the params-ride-the-
+statement bound), a read-back/count mismatch, and any evaluator `{error}`.
+DELETE and rule-less target tables keep the plain write path; rule-less dbs
+pay nothing.
+
+A rolled-back commit is a **terminal** rejection: the server preserves the
+`RowLabelCommitError` name over the wire (it is not collapsed into a generic
+`TransactionError`), and the runner classifies it non-retryable
+([`storage/rejection.ts`](../../../packages/runner/src/storage/rejection.ts)
+`isTerminalRejection`). Re-running the identical handler would recompute the
+identical refused write, so the doomed handler stops immediately rather than
+consuming its retry budget — its per-attempt speculative rev bumps would only
+starve concurrent sibling commits that share reactive state.
+
+Trust note: `op.db.owner` is client-supplied like the rest of the db ref. A
+forged owner can only turn an ABSENT `dbOwner()` resolution into a present
+one — every structural failure the evaluator enforces (strict-if-present,
+`min` anchors, unique integrity subjects, malformed nodes) is
+owner-independent — and the read side re-resolves the owner from the handle
+cell, never from a writer's claim. Residual (accepted): a mid-session server
+swap new→old behind one host could admit one relaxed write that neither side
+evaluates; no-laundering still ran runner-side, and the read side still
+re-derives.
 
 ### Fail-closed rules (consolidated)
 
@@ -427,10 +499,17 @@ zero cost until a table declares a rule:
    query ⟶ refuse; `skip` never applies to aggregates.
 5. **Read, ceiling exceeded:** `onExceed` decides — fail the query (default)
    or skip the row (declared opt-in, row-returning queries only).
-6. **Write, unattributable:** fail closed (Phase 2's set, plus rule-input
-   UPDATEs).
+6. **Write, unattributable:** fail closed (Phase 2's set) — except the
+   3.c-covered shapes with unlabeled inputs against a server that advertises
+   commit evaluation (rule-input UPDATE, INSERT…SELECT, upsert, columnless
+   INSERT).
 7. **Write, laundering:** a labeled input not captured by the computed row
-   label ⟶ reject the write.
+   label ⟶ reject the write — including on every 3.c-relaxed shape (the
+   runner cannot compute the label those would store it under).
+8. **Commit, server-side (3.c):** unattributable/undeclared target,
+   CTE-fronted write, pre-existing RETURNING, invalid wire spec, shadowed
+   rowid, row cap, read-back mismatch, evaluator `{error}` ⟶ throw, rolling
+   back the whole commit.
 
 Never treat "couldn't resolve / couldn't evaluate" as "no label".
 
@@ -452,7 +531,10 @@ Demos:
 (rule + ceiling + skip + aggregate refusal end to end) and
 [`cfc-row-label-records`](../../../packages/patterns/cfc-row-label-records/main.tsx)
 (per-row ∧ per-column composition on one row). e2e:
-[`sqlite-cfc-row-label.test.ts`](../../../packages/runner/integration/sqlite-cfc-row-label.test.ts).
+[`sqlite-cfc-row-label.test.ts`](../../../packages/runner/integration/sqlite-cfc-row-label.test.ts)
+(3.a/3.b) and
+[`sqlite-cfc-commit-eval.test.ts`](../../../packages/runner/integration/sqlite-cfc-commit-eval.test.ts)
+(3.c: atomic rollback + post-image upsert relabel).
 
 ## Why this stays declarative
 
@@ -482,9 +564,12 @@ function of its stored columns, recomputable at any time.
    - **3.b — read-time clearance:** filtering by *who is asking* rather than a
      declared ceiling; rides the same `onExceed` surface, needs OR-clauses to
      be useful. Own design when it lands.
-   - **3.c — server-side commit evaluation:** evaluate the shared evaluator
-     against the **true** committed row inside `applyCommitTransaction`
-     (read-back by rowid), roll back on violation — covers the
-     non-attributable writes the runner gate fails closed on today. The
-     no-laundering half stays runner-side (the server has no input-value
-     labels).
+   - **3.c — server-side commit evaluation: _implemented_** (Epic E4). The
+     shared evaluator runs against the **true** committed rows inside
+     `applyCommitTransaction` (read-back by rowid), rolling back on violation
+     — covering the non-attributable writes the runner gate previously failed
+     closed on (INSERT…SELECT, upsert, columnless INSERT, rule-input UPDATE),
+     relaxed at the gate only when the server advertises the
+     `sqliteCommitRowLabelEval` capability. The no-laundering half stays
+     runner-side (the server has no input-value labels). See "Server commit"
+     above.

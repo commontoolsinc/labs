@@ -33,6 +33,7 @@ import {
   type LogLevel,
   NavigateRequestNotification,
   type PatternSourcesResponse,
+  PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -62,6 +63,7 @@ export type RuntimeClientEvents = {
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
+  pendingwriteschange: [{ pending: boolean }];
 };
 
 export const $conn = Symbol("$request");
@@ -71,6 +73,7 @@ export const $conn = Symbol("$request");
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
+  #pendingWrites = false;
 
   private constructor(
     conn: InitializedRuntimeConnection,
@@ -82,6 +85,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
+    this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
+  }
+
+  /**
+   * Whether the worker runtime has issued commits that the server has not yet
+   * confirmed. Mirrored from the worker's storage manager on every transition,
+   * so it is synchronously readable — e.g. from a beforeunload handler, where
+   * no async round-trip is possible. Tearing the page down while this is true
+   * loses those writes.
+   */
+  hasPendingWrites(): boolean {
+    return this.#pendingWrites;
   }
 
   /**
@@ -174,16 +189,23 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle(this, response.cell);
   }
 
-  // TODO(unused)
+  /**
+   * Wait until the worker runtime is quiescent AND every issued commit has
+   * been confirmed by the server (or terminally failed). This is the client's
+   * "safe to navigate or reload" checkpoint: once it resolves, tearing the
+   * page down loses no writes. Waits for the joint fixpoint of reactive
+   * quiescence and commit durability (Scheduler.idleWithPendingCommits), not
+   * for pulls or subscription convergence — that is `allSynced()`.
+   */
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
   /**
-   * Await all in-flight compile-cache write-backs in the worker. Distinct from
-   * `idle()` (reactive/scheduler quiescence): this guarantees persistence
-   * durability, so a subsequent load of an already-compiled pattern reads the
-   * cached entry instead of recompiling in-client.
+   * Await all in-flight compile-cache write-backs in the worker. Narrower than
+   * `idle()`: it flushes only the compile cache, so a subsequent load of an
+   * already-compiled pattern reads the cached entry instead of recompiling
+   * in-client, without waiting for runtime quiescence.
    */
   async flushCompileCacheWrites(): Promise<void> {
     await this.#conn.request<RequestType.FlushCompileCacheWrites>({
@@ -624,5 +646,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onTelemetry = (data: TelemetryNotification): void => {
     this.emit("telemetry", data.marker);
+  };
+
+  private _onPendingWritesChange = (
+    data: PendingWritesNotification,
+  ): void => {
+    this.#pendingWrites = data.pending;
+    this.emit("pendingwriteschange", { pending: data.pending });
   };
 }

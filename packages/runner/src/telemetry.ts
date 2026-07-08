@@ -172,9 +172,10 @@ export type RuntimeTelemetryMarker = {
   /**
    * Set when the commit reached a terminal outcome: `permanent` for a
    * never-retried precondition failure, `convergence` for a transient conflict
-   * that exhausted the retry window and surfaced a terminal error.
+   * that exhausted the retry window and surfaced a terminal error, `rule` for a
+   * deterministic server-side commit-rule refusal (never retried).
    */
-  terminal?: "permanent" | "convergence";
+  terminal?: "permanent" | "convergence" | "rule";
 } | {
   type: "scheduler.event.preflight";
   handlerId: string;

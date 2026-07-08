@@ -19,7 +19,7 @@ Cell = {
 ```
 
 - `space` — the DID of the space the document lives in.
-- `id` — the entity id (`of:<hash>` URI) of the document.
+- `id` — the entity id (an `of:fid1:<hash>` URI) of the document.
 - `path` — a property path *within* the document (`["items", 2, "title"]`).
 - `schema` — the JSON schema (from Chapter 7) describing what's expected at
   that path — including `asCell`/`default`/`scope` annotations.
@@ -38,7 +38,9 @@ created by the same graph node gets the same id deterministically — which is
 what lets a server re-instantiate a piece and arrive at the same cells.
 
 **Links between documents** are stored as serializable references (sigil
-links: `{ "/": { "link@1": { id, path, space } } }`). When a read encounters
+links: `{ "/": { "link@1": { id, path, space } } }`; the modern cell
+representation holds these as atomic `FabricLink` values that serialize to
+that envelope). When a read encounters
 one, it resolves through to the target — transparently crossing documents
 and even spaces. This is the mechanism behind `cf piece link` (Chapter 5).
 Writes are subtler, and worth stating precisely: a write whose path
@@ -68,11 +70,12 @@ The runtime's event loop is the scheduler
    the scheduler doesn't care), the index marks the affected actions dirty
    and queues them.
 
-Two execution strategies exist (`scheduler/pull-execution.ts`,
-`push-execution.ts`): **push** re-runs anything dirty immediately; **pull**
-(the default) is lazy — only computations that something observable (a UI
-sink, an effect, an explicit `.pull()`) depends on get re-run, so an
-unobserved derived value costs nothing.
+Execution is **pull-based and lazy** (`scheduler/pull-execution.ts` and its
+sibling `pull-*` modules): only computations that something observable (a
+UI sink, an effect, an explicit `.pull()`) depends on get re-run, so an
+unobserved derived value costs nothing. (An eager "push" mode existed
+historically; it was removed in the scheduler-v2 rebuild — pull is now the
+only strategy.)
 
 Cycles and pathologies are contained by bounded iteration — an action that
 keeps dirtying itself (e.g. a `computed` that writes upstream, gotcha #2)
@@ -106,6 +109,17 @@ reactive actions a bounded number of times). This is the mechanism behind
 the Part I promise "optimistic but converge; you may see a write lose and
 re-apply."
 
+Not every write takes that compare-and-swap path, though. **Mergeable**
+operations (Chapter 2 — `push`, `addUnique`, `increment`, `removeByValue`)
+commit the *intent* of the write and drop their own incidental read of the
+container from the conflict set, so concurrent appends or increments merge
+on the server instead of conflicting
+(`packages/runner/src/storage/mergeable-ops.ts`). And plain scalar sets —
+notably the writes two-way UI bindings issue — are **blind**: their reads
+are recorded for reactivity but excluded from commit preconditions, making
+them last-write-wins. Revert-and-retry is the story for read-modify-write
+commits.
+
 Note the layering discipline: the scheduler only knows "transactions commit
 or conflict"; *how* conflicts are detected is entirely the storage layer's
 business (Chapter 9). That separation is what lets the same runtime run
@@ -120,8 +134,8 @@ the previous three sections together:
    where `default:` values materialize and `asCell` decides whether a node
    receives a value or a writable handle.
 2. Each `Node` in the graph becomes a scheduled action: `javascript` nodes
-   (lifts/computeds/handlers) wrap their compiled implementation (fetched
-   via the `implementationRef` function cache) and run in the SES sandbox;
+   (lifts/computeds/handlers) wrap their compiled implementation (resolved
+   via the `$implRef` executable registry) and run in the SES sandbox;
    `pattern` nodes recurse into sub-patterns; `ref`/`raw`/`passthrough`
    cover builtins and plumbing. (An `isolated` module type is declared in
    the API but not currently implemented by the runner.)

@@ -250,9 +250,40 @@ export type ConsumedRead =
   & Immutable<{
     meta?: Metadata;
     nonRecursive?: boolean;
+    /**
+     * Position on the transaction's activity clock (shared with write
+     * attempts — see `OrderedWriteAttempt`). Part of the prepared digest:
+     * the write-prefix provenance gate's decision depends on which reads
+     * precede which writes, so a post-prepare reorder that flips a read's
+     * prefix membership must invalidate the preparation
+     * (docs/specs/cfc-write-prefix-provenance.md §6). Absent only on
+     * backends without the clock; the gate then treats the read as
+     * preceding every write (conservative).
+     */
+    journalIndex?: number;
   }>;
 
 export type AttemptedWrite = CfcAddress;
+
+/**
+ * One applied write attempt in transaction order (§6 of
+ * docs/specs/cfc-write-prefix-provenance.md — the ordered full-address
+ * write-attempt log). Unlike every other CfcAddress in the digest input,
+ * `path` is the RAW storage path (`["value", ...]`, `["cfc"]`, `[]`),
+ * deliberately NOT canonicalized: the prefix gate must distinguish
+ * user-value writes from runtime surfaces, and the digest must bind the
+ * addresses at full fidelity so the commit recheck can re-derive the same
+ * last-overlapping-write bounds. Not reducible to one entry per exact
+ * address: the bound is the last OVERLAPPING write (either prefix
+ * direction), which an exact-address-keyed log cannot answer.
+ */
+export type OrderedWriteAttempt = Immutable<{
+  space: MemorySpace;
+  id: string;
+  scope: CellScope;
+  path: string[];
+  journalIndex: number;
+}>;
 
 export type CfcDereferenceTrace = Immutable<{
   source: CfcAddress;
@@ -335,6 +366,16 @@ export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
+  /**
+   * The ordered write-attempt log (see `OrderedWriteAttempt`). Mandatory in
+   * the digest: `consumedReads`/`writes` are canonicalized by address-sort,
+   * which discards order, but the write-prefix provenance gate's decision
+   * depends on the read|write interleaving — without this (plus each read's
+   * `journalIndex`) a post-prepare reordering that changes which reads fall
+   * inside a write's prefix would slip past the commit recheck (audit S2
+   * shape; docs/specs/cfc-write-prefix-provenance.md §6).
+   */
+  readonly writeAttemptLog: readonly OrderedWriteAttempt[];
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly triggerReads: readonly CfcAddress[];
   readonly writePolicyInputs: readonly WritePolicyInput[];
