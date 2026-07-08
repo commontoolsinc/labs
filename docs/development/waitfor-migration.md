@@ -240,9 +240,21 @@ low-value tail:
   and `piece.test.ts` (see the exceptions above) can each become a `defer()`
   resolved in the existing `resultCell.sink(...)`.
 
-## Also noticed (out of scope)
+## Also noticed, since cleaned up
 
-Two bare sleeps sit next to migrated waits and deserve their own cleanup:
-`packages/runner/integration/reconnection.test.ts` sleeps 100ms after restarting
-the server, and `packages/toolshed/routes/storage/memory/memory.test.ts` does the
-same. Both race server readiness rather than awaiting it.
+Three bare sleeps sat next to migrated waits, one in
+`packages/runner/integration/reconnection.test.ts` and two in
+`packages/toolshed/routes/storage/memory/memory.test.ts`. Each restarted the
+server on the same port and then slept a fixed 100 milliseconds before writing
+the value a subscriber was waiting for, racing server readiness rather than
+awaiting it.
+
+All three are gone. Each test already blocked on a `defer()` that its
+subscription sink resolves when the post-restart value arrives, so the sleep only
+added latency ahead of a wait that already covered the reconnection.
+`Deno.serve` binds and starts accepting connections synchronously before it
+returns, so the writer runtime created after the restart connects to an
+already-listening server, and on reconnect the subscriber re-issues its watch
+against the fresh server, which reads current committed state — so the update is
+delivered whether the write lands before or after the reconnect completes. The
+sleeps were removed with no replacement wait.

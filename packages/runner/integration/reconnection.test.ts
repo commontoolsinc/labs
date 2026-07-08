@@ -68,7 +68,6 @@ Deno.test(
 
       await server.shutdown();
       server = Deno.serve({ port }, app.fetch);
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const writerRuntime = createRuntime(identity, base);
       const writerCell = writerRuntime.getCell(

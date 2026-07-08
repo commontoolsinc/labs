@@ -1070,7 +1070,6 @@ serialTest(
 
       await server.shutdown();
       server = Deno.serve({ port }, app.fetch);
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const runtime2 = createRuntime(identity, base);
       const counterWriter = runtime2.getCell(
@@ -1222,7 +1221,6 @@ serialTest(
 
       await server.shutdown();
       server = Deno.serve({ port }, app.fetch);
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const runtime2 = createRuntime(identity, base);
       const targetCell2 = runtime2.getCell(
