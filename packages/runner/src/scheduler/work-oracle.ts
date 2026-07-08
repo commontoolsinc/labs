@@ -90,9 +90,9 @@ export function isTimeGated(
 export function isRunnableSchedulingSeed(
   state: PullSchedulingState,
   record: SchedulerNode,
+  now: number = performance.now(),
 ): boolean {
   const action = record.action;
-  const now = performance.now();
   return isInvalidOrNeverRan(record) &&
     (state.isLiveAction(action) || state.pending.has(action)) &&
     !state.dirtyPullRunnableStateWithDebounce.isThrottled(action) &&
@@ -105,10 +105,11 @@ export function isRunnableSchedulingSeed(
 export function isIdleMaterializerRunnable(
   state: PullSchedulingState,
   record: SchedulerNode,
+  now: number = performance.now(),
 ): boolean {
   const action = record.action;
   return state.materializerIndex.isMaterializer(action) &&
-    isRunnableSchedulingSeed(state, record) &&
+    isRunnableSchedulingSeed(state, record, now) &&
     !state.effects.has(action) &&
     state.dirtyPullRunnableStateWithDebounce
         .isDebouncedComputationWaiting(action) !== true;
@@ -183,9 +184,9 @@ export function assessPullWork(
         .shouldRunFirstPullComputationInDemandContext(action);
     if (!idleRelevant) continue;
     if (
-      isRunnableSchedulingSeed(state, record) &&
+      isRunnableSchedulingSeed(state, record, now) &&
       (isPendingPullActionRunnable(state.pendingPullRunnableState, action) ||
-        isIdleMaterializerRunnable(state, record))
+        isIdleMaterializerRunnable(state, record, now))
     ) {
       runnableNow = true;
       continue;
@@ -202,12 +203,12 @@ export function assessPullWork(
         .isDemandedPullComputation(action) ||
       state.materializerIndex.isMaterializer(action);
     if (
-      isRunnableSchedulingSeed(state, record) &&
+      isRunnableSchedulingSeed(state, record, now) &&
       (isDirtyPullActionRunnable(
         state.dirtyPullRunnableStateWithDebounce,
         action,
       ) ||
-        isIdleMaterializerRunnable(state, record))
+        isIdleMaterializerRunnable(state, record, now))
     ) {
       runnableNow = true;
       continue;

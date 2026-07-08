@@ -1901,31 +1901,42 @@ export class Runner {
       string,
       PersistedSchedulerObservationSnapshot
     >();
-    let cursor: SchedulerActionSnapshotCursor | undefined;
-    do {
-      const page = await listSnapshots.call(provider, {
-        ownerSpace: space,
-        pieceId: `${scope}:${id}`,
-        processGeneration: 0,
-        ...(cursor ? { cursor } : {}),
-      });
-      for (const snapshot of page.snapshots) {
-        if (!isSchedulerActionObservation(snapshot.observation)) continue;
-        snapshotsByActionId.set(snapshot.observation.actionId, {
-          observation: snapshot.observation,
-          ...(snapshot.directDirtySeq !== undefined
-            ? { directDirtySeq: snapshot.directDirtySeq }
-            : {}),
-          ...(snapshot.staleSeq !== undefined
-            ? { staleSeq: snapshot.staleSeq }
-            : {}),
-          ...(snapshot.unknownReason !== undefined
-            ? { unknownReason: snapshot.unknownReason }
-            : {}),
+    // A transient listing failure must degrade to "resume fresh" rather than
+    // hard-failing start(): returning undefined runs the piece without
+    // rehydrating persisted observations.
+    try {
+      let cursor: SchedulerActionSnapshotCursor | undefined;
+      do {
+        const page = await listSnapshots.call(provider, {
+          ownerSpace: space,
+          pieceId: `${scope}:${id}`,
+          processGeneration: 0,
+          ...(cursor ? { cursor } : {}),
         });
-      }
-      cursor = page.nextCursor;
-    } while (cursor !== undefined);
+        for (const snapshot of page.snapshots) {
+          if (!isSchedulerActionObservation(snapshot.observation)) continue;
+          snapshotsByActionId.set(snapshot.observation.actionId, {
+            observation: snapshot.observation,
+            ...(snapshot.directDirtySeq !== undefined
+              ? { directDirtySeq: snapshot.directDirtySeq }
+              : {}),
+            ...(snapshot.staleSeq !== undefined
+              ? { staleSeq: snapshot.staleSeq }
+              : {}),
+            ...(snapshot.unknownReason !== undefined
+              ? { unknownReason: snapshot.unknownReason }
+              : {}),
+          });
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+    } catch (error) {
+      logger.warn(
+        "Failed to list scheduler rehydration snapshots; resuming fresh",
+        error,
+      );
+      return undefined;
+    }
 
     return snapshotsByActionId;
   }

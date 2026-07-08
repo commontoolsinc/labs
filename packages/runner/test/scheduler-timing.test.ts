@@ -287,6 +287,51 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
+  // #4108: clearing/unsubscribing a debounced action must recompute the single
+  // shared wake timer. Otherwise the stale wake keeps idle() blocked until its
+  // dead deadline fires, even though no gated work remains.
+  it("resolves idle promptly after unsubscribing a debounced effect with an armed wake", async () => {
+    let runCount = 0;
+    const effect: Action = () => {
+      runCount++;
+    };
+
+    // A long debounce so the armed wake is far in the future; the fix must not
+    // wait for it.
+    runtime.scheduler.setDebounce(effect, 30_000);
+    const cancel = runtime.scheduler.subscribe(
+      effect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    // Let the settle pass arm the debounce wake. The first run is deferred, so
+    // the effect has not run yet.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runCount).toBe(0);
+
+    // idle() is blocked behind the armed wake + idle-blocking effect.
+    const idlePromise = runtime.idle();
+
+    // Unsubscribing clears the debounced node; the shared wake must be
+    // recomputed so idle() resolves now rather than after the 30s deadline.
+    cancel();
+
+    const timedOut = Symbol("timeout");
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), 1000);
+    });
+    const outcome = await Promise.race([
+      idlePromise.then(() => "idle" as const),
+      timeout,
+    ]);
+    clearTimeout(timer!);
+
+    expect(outcome).toBe("idle");
+    expect(runCount).toBe(0);
+  });
+
   it("should cancel pending debounce wake on dispose", async () => {
     const local = createSchedulerTestRuntime(`${import.meta.url}#dispose-wake`);
     let runCount = 0;

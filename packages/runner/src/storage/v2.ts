@@ -875,7 +875,12 @@ export class StorageManager implements IStorageManager {
   }
 
   loadsSettled(keys: readonly string[]): Promise<void> {
-    const pending = keys.filter((key) => this.#pendingLoads.has(key));
+    // Dedupe up front: `remaining` counts entries, but the shared onSettled is
+    // added once per entry's waiter Set and fires once. A duplicated key would
+    // inflate `remaining` without a matching callback, hanging the promise.
+    const pending = [...new Set(keys)].filter((key) =>
+      this.#pendingLoads.has(key)
+    );
     if (pending.length === 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
       let remaining = pending.length;

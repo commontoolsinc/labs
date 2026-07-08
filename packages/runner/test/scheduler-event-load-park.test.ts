@@ -169,4 +169,59 @@ describe("event dispatch parks on in-flight closure loads", () => {
     await runtime.idle();
     expect(handlerRuns).toBe(1);
   });
+
+  // F4d: loadsSettled counts remaining by keys.length but adds a single shared
+  // onSettled callback to each entry's waiter Set, which fires once per settled
+  // entry. A duplicated key inflates the count without adding a matching
+  // callback, so remaining never reaches zero and the promise hangs.
+  it("loadsSettled resolves when keys contains a duplicate", async () => {
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "loads-settled-dupe",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    const storage = runtime.storageManager as unknown as {
+      loadsSettled(keys: readonly string[]): Promise<void>;
+      pendingLoadAddresses(): readonly {
+        space: string;
+        scope: string;
+        id: string;
+      }[];
+    };
+
+    // Pin one in-flight load for the cold doc so a pending-load entry exists.
+    const release = holdSyncFor(coldDoc.getAsNormalizedFullLink().id);
+    const loadInFlight = runtime.storageManager.syncCell(coldDoc).catch(
+      () => {},
+    );
+    // Let the synchronous pending-load registration settle onto the map.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const addresses = storage.pendingLoadAddresses();
+    expect(addresses.length).toBe(1);
+    const { space: s, scope, id } = addresses[0];
+    const key = `${s}/${scope}/${id}`;
+
+    // Wait on the same key twice; a correct loadsSettled dedupes and resolves.
+    const settled = storage.loadsSettled([key, key]);
+
+    release();
+    await loadInFlight;
+
+    const timedOut = Symbol("timeout");
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), 500);
+    });
+    const outcome = await Promise.race([
+      settled.then(() => "settled" as const),
+      timeout,
+    ]);
+    clearTimeout(timer!);
+    expect(outcome).toBe("settled");
+  });
 });

@@ -450,6 +450,7 @@ export interface SchedulerUnsubscribeActionState {
     action: Action,
     options?: { cancelTimer?: boolean },
   ) => void;
+  readonly recomputeWakeAfterClear: () => void;
 }
 
 export function unsubscribeSchedulerAction(
@@ -555,4 +556,7 @@ function clearActionDelayState(
 ): void {
   state.cancelDebounceTimer(action);
   state.clearComputationDebounceState(action, { cancelTimer: false });
+  // The unsubscribed node may have held the shared wake; recompute it so a
+  // stale deadline does not keep idle() blocked (#4108).
+  state.recomputeWakeAfterClear();
 }

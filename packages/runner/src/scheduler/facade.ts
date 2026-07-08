@@ -1665,6 +1665,7 @@ export class Scheduler {
       cancelDebounceTimer: (target) => this.gates.cancelDebounceTimer(target),
       clearComputationDebounceState: (target, targetOptions) =>
         this.gates.clearComputationDebounceState(target, targetOptions),
+      recomputeWakeAfterClear: () => this.gates.recomputeWakeAfterClear(),
     };
   }
 

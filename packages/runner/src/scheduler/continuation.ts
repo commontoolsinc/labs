@@ -93,14 +93,19 @@ export function applyPullExecuteContinuation(
 ): void {
   // In pull mode, we consider ourselves done when there are no effects or
   // effect-demanded computations to execute.
+  //
+  // Read the clock once for the whole ready/parked decision: an event whose
+  // `notBefore` falls between two separate reads would be classed as neither
+  // ready nor parked, letting idle() resolve with it still queued.
+  const now = performance.now();
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
   const hasLoadParkedHeadEvent = state.hasLoadParkedHeadEvent();
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
-    !isHeadEventParked(state) &&
+    !isHeadEventParked(state, now) &&
     !hasPendingLineageHeadEvent &&
     !hasLoadParkedHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
-    (isHeadEventParked(state) || hasPendingLineageHeadEvent ||
+    (isHeadEventParked(state, now) || hasPendingLineageHeadEvent ||
       hasLoadParkedHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();

@@ -83,6 +83,7 @@ export class SchedulerGates {
     if (gate) delete gate.debounceMs;
     this.cancelDebounceTimer(action);
     this.clearComputationDebounceState(action, { cancelTimer: false });
+    this.recomputeWakeAfterClear();
   }
 
   setNoDebounce(action: Action, optOut: boolean): void {
@@ -344,6 +345,22 @@ export class SchedulerGates {
 
   hasWakeTimer(): boolean {
     return this.wakeTimer !== null;
+  }
+
+  /**
+   * Recompute the single shared wake after a node's gate fields were cleared
+   * (e.g. clearing a debounce or unsubscribing a debounced action). The wake is
+   * shared across every gated node and parked event, and the cleared node may
+   * have been the one it was armed for. `scheduleWake` only ever lowers the
+   * deadline, so a stale far wake would otherwise keep idle() blocked until it
+   * fires. Cancel it and nudge a fresh execution tick, which re-arms the wake
+   * to the true minimum over the remaining live work (or leaves it unarmed so
+   * idle() can resolve promptly).
+   */
+  recomputeWakeAfterClear(): void {
+    if (this.state.isDisposed()) return;
+    this.cancelWake();
+    this.state.queueExecution();
   }
 
   clearBackoff(node: SchedulerNode): void {
