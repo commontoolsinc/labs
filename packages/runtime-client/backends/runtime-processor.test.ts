@@ -1801,6 +1801,45 @@ describe("browserWorkerParamsFromInitializationData", () => {
     expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
   });
 
+  it("threads clientVersion through to the runtime options", () => {
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+
+    const withVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          clientVersion: "build-sha-xyz",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withVersion.clientVersion).toBe("build-sha-xyz");
+
+    // Absent → omitted (rides the constructor default of undefined).
+    const withoutVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withoutVersion.clientVersion).toBe(undefined);
+  });
+
   it("falls back to the shared CFC pin when the host sends no dial", () => {
     const options = runtimePresets.browserWorker(
       browserWorkerParamsFromInitializationData(

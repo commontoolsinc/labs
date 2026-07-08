@@ -3,10 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "../runtime-client.ts";
 import { EventEmitter } from "./emitter.ts";
-import { RequestType } from "../protocol/mod.ts";
+import { NotificationType, RequestType } from "../protocol/mod.ts";
 import type {
   IPCClientMessage,
   IPCClientNotification,
+  IPCRemoteMessage,
 } from "../protocol/mod.ts";
 import type { RuntimeTransport, RuntimeTransportEvents } from "./transport.ts";
 
@@ -29,6 +30,9 @@ class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
   }
   dispose(): Promise<void> {
     return Promise.resolve();
+  }
+  simulateMessage(message: IPCRemoteMessage): void {
+    this.emit("message", message);
   }
 }
 
@@ -54,5 +58,32 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
     const data = (init as { data: { data: { clientVersion?: string } } }).data
       .data;
     expect(data.clientVersion).toBe("client-sha-xyz");
+  });
+
+  it("re-emits a worker versionSkew notification as a client event", async () => {
+    const identity = await Identity.fromPassphrase("skew forward test");
+    const transport = new CapturingTransport();
+    const client = await RuntimeClient.initialize(transport, {
+      apiUrl: new URL("http://toolshed.test"),
+      identity,
+      spaceDid: identity.did(),
+      experimental: {},
+    });
+
+    let received: { space?: string; toolshedVersion?: string } | undefined;
+    client.on("versionskew", (msg) => (received = msg));
+
+    // Worker → shell: the connection demuxes the notification and RuntimeClient
+    // re-emits it (covers the guard, the connection dispatch arm, and the
+    // client forwarder).
+    transport.simulateMessage({
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk-skew",
+      clientVersion: "c",
+      toolshedVersion: "t",
+    });
+
+    expect(received?.space).toBe("did:key:z6Mk-skew");
+    expect(received?.toolshedVersion).toBe("t");
   });
 });
