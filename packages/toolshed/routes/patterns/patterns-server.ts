@@ -3,6 +3,12 @@ import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
 import { resolveEntryIdentity } from "@commonfabric/runner";
 
+// The URL prefix this route serves patterns under. A pattern's content identity
+// folds in each module's authored path, and the worker names modules by their
+// URL pathname (HttpProgramResolver), so the identity must be computed over
+// pathname-prefixed names to equal the worker's stored patternIdentity.
+const PATTERNS_ROUTE_PREFIX = "/api/patterns/";
+
 /**
  * Simple helper for serving pattern files from the patterns directory.
  * Works with both dev mode and compiled binaries.
@@ -78,9 +84,11 @@ export class PatternsServer {
   identity(filename: string): Promise<string> {
     let cached = this.identityCache.get(filename);
     if (!cached) {
+      // Name modules by their URL pathname so the identity equals the one the
+      // worker computes when it compiles the same source over HTTP.
       cached = resolveEntryIdentity(
-        `/${filename}`,
-        (name) => this.getText(name.replace(/^\//, "")),
+        `${PATTERNS_ROUTE_PREFIX}${filename}`,
+        (name) => this.getText(name.slice(PATTERNS_ROUTE_PREFIX.length)),
       );
       this.identityCache.set(filename, cached);
       cached.catch(() => this.identityCache.delete(filename));
