@@ -172,6 +172,18 @@ describe("scanner helpers", () => {
     );
   });
 
+  it("scans single bitwise operators and reads a regex after them", () => {
+    // A single `&` or `|` is its own token (distinct from `&&`/`||`), and each
+    // marks the scanner so a following `/.../ ` is a regex literal, not division
+    // or a comment.
+    expect(stripJsTrivia("a & b")).toBe("a&b");
+    expect(stripJsTrivia("a | b")).toBe("a|b");
+    expect(stripJsTrivia("a & /b/g")).toBe("a&/b/g");
+    expect(stripJsTrivia("a | /b/ // tail")).toBe("a|/b/");
+    // The doubled forms `&&`/`||` advance two characters as one token.
+    expect(stripJsTrivia("a && b || c")).toBe("a&&b||c");
+  });
+
   it("splits comma lists without splitting nested structures", () => {
     const source =
       `first, call(1, [2, 3]), { nested: /a,b/g }, \`hi, ${"${name}"}\``;
