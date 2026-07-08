@@ -110,6 +110,36 @@ Documentation:
   event-driven primitives instead of `waitFor`, and a stale reference to a
   non-existent `awaitRuntimeIdle` corrected to `waitForRuntimeIdle`.
 
+## Guard against new usage
+
+A check keeps new integration tests from importing the polling `waitFor` again.
+`tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
+directory beneath `packages/` (excluding the `@commonfabric/integration` package,
+which defines `waitFor`) and fails when one names `waitFor` in an import from
+`@commonfabric/integration` and is not on the check's allowlist. Run it with
+`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
+The error names the offending file and points at `waitForCondition`,
+`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+
+The allowlist inside `tasks/check-no-waitfor.ts` covers only the exceptions the
+check can see: the integration-test files that import the shared `waitFor` from
+`@commonfabric/integration`. That is a subset of the exceptions listed below.
+The others fall outside the scan and are not on the allowlist — the in-process
+`test/` files that each define their own local `waitFor` poll loop (the check
+never reads a named import there), the `MultiRuntimeHarness.waitFor` method and
+its callers (a different `waitFor`), `packages/runner/integration/sqlite-cfc-commit-eval.test.ts`
+(which waits through a local helper rather than the shared import), and
+`packages/integration/shell-utils.ts` (inside the excluded package that defines
+`waitFor`). Do not add those to the allowlist: the check never scans them, so the
+stale-entry test would reject the entry.
+
+For the in-scope entries, the check's own tests assert that the allowlist and the
+set of integration-test files still importing the shared `waitFor` stay in step:
+a new offender fails the check, and an allowlisted file that later drops `waitFor`
+fails the tests until its entry is removed. When a new in-scope usage is genuinely
+one of the exception shapes below, add the file to the allowlist with a one-line
+reason and record it here.
+
 ## Intentional exceptions: `waitFor` usages left in place
 
 These are the usages where a bounded poll is the right tool. They are grouped by

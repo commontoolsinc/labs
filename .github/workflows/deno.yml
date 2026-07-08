@@ -58,6 +58,9 @@ jobs:
       - name: 📄 Type-check docs code blocks
         run: deno task check-docs
 
+      - name: 🚧 Guard against new polling waitFor in integration tests
+        run: deno task check-no-waitfor
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types
