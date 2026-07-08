@@ -408,10 +408,13 @@ const notebookReloadRendered = async (
 // cfc-browser-helpers.ts.
 const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
 
-// Serialized into the page by waitForCondition: find the first visible
+// Serialized into the page by waitForCondition: find the first rendered
 // button/link whose text or title matches, scroll it into view, and stamp its
-// inner click target with `token`. Returns false until a match exists, so the
-// wait re-checks on the next DOM mutation instead of the caller retrying a
+// inner click target with `token`. "Rendered" means laid out and not
+// display:none/visibility:hidden — the same elements the innerText scan the
+// poll used could see — and is viewport-independent, so a match below the fold
+// is scrolled in rather than skipped. Returns false until a match exists, so
+// the wait re-checks on the next DOM mutation instead of the caller retrying a
 // bare find-and-click loop.
 const markNoteButton = async (
   probe: ProbeApi,
@@ -421,8 +424,14 @@ const markNoteButton = async (
   token: string,
   attr: string,
 ): Promise<boolean> => {
+  const isRendered = (element: Element): boolean => {
+    const style = globalThis.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
   const target = probe.collect(selector).find((element) => {
-    if (!probe.isVisible(element)) return false;
+    if (!isRendered(element)) return false;
     if (match === "title") return element.getAttribute("title") === needle;
     const text = (element.textContent ?? "").trim();
     return match === "exact" ? text === needle : text.includes(needle);
