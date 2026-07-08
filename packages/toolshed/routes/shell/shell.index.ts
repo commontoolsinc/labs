@@ -41,7 +41,7 @@ router.use(
 // COOP is set to the non-isolating `same-origin-allow-popups`, and COEP is
 // pinned to `unsafe-none`. These run after the handler so they override any
 // header an upstream change might set. See
-// docs/specs/sandboxing/cross-origin-isolation.md.
+// docs/history/specs/sandboxing/cross-origin-isolation.md.
 router.use("/*", async (c, next) => {
   await next();
   c.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");

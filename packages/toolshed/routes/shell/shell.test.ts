@@ -66,7 +66,7 @@ afterAll(async () => {
 // `Cross-Origin-Embedder-Policy`. These tests fail loudly if a future change
 // flips the served document to that isolating combination.
 //
-// See docs/specs/sandboxing/cross-origin-isolation.md.
+// See docs/history/specs/sandboxing/cross-origin-isolation.md.
 describe("Shell cross-origin isolation posture", () => {
   it("does not serve the isolating COOP+COEP header combination", async () => {
     const response = await app.request("/");

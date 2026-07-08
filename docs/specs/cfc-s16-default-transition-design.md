@@ -1,6 +1,6 @@
 # S16 Design — Default Label Transition (Flow-Label Propagation)
 
-Date: 2026-06-10. Companion to `cfc-spec-audit.md` (S16: value-copy laundering).
+Date: 2026-06-10. Companion to `docs/history/cfc-spec-audit.md` (S16: value-copy laundering).
 Spec inputs: §8.9 (propagation), §8.10 (boundaries), §8.11 (content vs flow),
 §8.12 (store monotonicity), §4.6 (reactive integration, storage envelope), ch.
 14.4.2 (contamination scoping). A running list of spec edits this design needs

@@ -120,8 +120,8 @@ intended as style references.
 `google/core/`.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
-`README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
-`test-ui-helpers.ts`, `tools/` (codegen tooling).
+`README.md`, `DEPRECATED_IDIOMS.md`, `test-ui-helpers.ts`, `tools/` (codegen
+tooling).
 
 ---
 

@@ -570,6 +570,6 @@ export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc
 ## Related Docs
 
 - [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
-- [LOOM_MIGRATION_NOTES.md](docs/LOOM_MIGRATION_NOTES.md)
+- [LOOM_MIGRATION_NOTES.md](../../docs/history/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
 - [runner README](../runner/README.md)
 - `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

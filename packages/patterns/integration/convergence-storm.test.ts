@@ -36,7 +36,7 @@
  *
  * Full context + measurements:
  * docs/plans/2026-06-30-profile-loading-investigation.md and
- * docs/plans/2026-07-02-convergence-evidence-appendix.md.
+ * docs/history/plans/2026-07-02-convergence-evidence-appendix.md.
  */
 
 import { assertEquals } from "@std/assert";

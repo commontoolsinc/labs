@@ -203,7 +203,7 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
    - Remove `.setDefault`; rely on schema-level defaults
    - Deprecate JSON pattern representation in favor of graph snapshots
 2. **Testing & documentation**
-   - Integration test harness (see `pattern-integration-tests.md`) - **DONE**
+   - Integration test harness (see `docs/history/specs/pattern-construction/pattern-integration-tests.md`) - **DONE**
    - Update builder/runner tests for new helper behavior and metadata
    - Document unified cell types and `.for()` usage for pattern authors
 

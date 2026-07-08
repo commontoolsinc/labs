@@ -34,7 +34,7 @@ Current Loom migration judgment:
 
 See also:
 
-- [LOOM_MIGRATION_NOTES.md](LOOM_MIGRATION_NOTES.md)
+- [LOOM_MIGRATION_NOTES.md](../../../docs/history/packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
 - [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md)
 
 ## Design Principles
