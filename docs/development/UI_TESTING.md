@@ -61,7 +61,7 @@ without traversing shadow roots.
    // installs a waiter inside the page that resolves the instant the DOM
    // reflects the condition, instead of re-checking from the test process on a
    // fixed interval.
-   await waitForCondition(page, (probe) =>
+   await waitForCondition(page, (probe: ProbeApi) =>
      probe.collect("cf-input[role='textbox']").length > 0);
    ```
 
