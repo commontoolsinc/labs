@@ -6,6 +6,8 @@ export type {
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
   RuntimeOptions,
   SpaceCellContents,
+  VersionSkewHandler,
+  VersionSkewInfo,
 } from "./runtime.ts";
 export type {
   UnsafeHostTrust,

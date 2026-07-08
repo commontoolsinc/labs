@@ -1018,6 +1018,25 @@ export class RuntimeProcessor {
     if (getMetaLink(defaultPatternCell, "pattern")) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
+      // The home root is held behind its own flag (pending the stable-addressing
+      // audit). Only build a controller to check for updates when enabled —
+      // avoids per-call construction on this hot fast path.
+      if (
+        this.runtime.experimental.systemPatternAutoUpdate &&
+        this.runtime.experimental.systemPatternAutoUpdateHome
+      ) {
+        const homeSession: Session = {
+          as: this.identity,
+          space: this.runtime.userIdentityDID,
+        };
+        const homeCC = new PiecesController(
+          new PieceManager(homeSession, this.runtime),
+        );
+        void this.#checkUpdateInBackground(
+          homeCC,
+          this.runtime.userIdentityDID,
+        );
+      }
       return {
         cell: createCellRef(defaultPatternCell),
       };
@@ -1086,9 +1105,25 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
+    // Best-effort, non-blocking: roll the root forward if its toolshed serves a
+    // newer identity. The watcher re-instantiates in place; a failed check
+    // never breaks space open, and we never block the response on it.
+    void this.#checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };
+  }
+
+  #checkUpdateInBackground(cc: PiecesController, space: string): void {
+    cc.checkAndUpdateDefaultPattern()
+      .then((outcome) => {
+        if (outcome === "updated" || outcome === "skipped-skew") {
+          console.log(`[space-root] update check for ${space}: ${outcome}`);
+        }
+      })
+      .catch((error) => {
+        console.warn(`[space-root] update check for ${space} threw`, error);
+      });
   }
 
   async handleRecreateSpaceRootPattern(

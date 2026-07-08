@@ -57,6 +57,7 @@ import {
   resolveCommitBackpressure,
 } from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
+import { fetchToolshedGitSha } from "./harness/version-gate.ts";
 import {
   CellLink,
   isCellLink,
@@ -169,6 +170,13 @@ export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
+/**
+ * TTL backstop for the system-pattern update caches (toolshed git sha and
+ * ?identity). Bounds how long a stale value survives a toolshed redeploy
+ * mid-session; the primary invalidation is clearPatternUpdateCaches().
+ */
+const PATTERN_UPDATE_CACHE_TTL_MS = 5 * 60_000;
+
 /** A build-version mismatch detected while checking a space for updates. */
 export interface VersionSkewInfo {
   space: string;
@@ -201,6 +209,20 @@ export interface ExperimentalOptions {
    * see `setEagerSourceAnnotation` (builder/module.ts).
    */
   eagerSourceAnnotation?: boolean | undefined;
+  /**
+   * Roll a space's system root pattern (default-app / home) forward in place
+   * when its toolshed serves a newer content identity. Default off; enabled per
+   * deployment once CI golden-replay coverage exists. The home root has an
+   * additional gate ({@link systemPatternAutoUpdateHome}) pending the
+   * stable-addressing audit. See docs/specs/pattern-imports/pattern-updates.md.
+   */
+  systemPatternAutoUpdate?: boolean | undefined;
+  /**
+   * Also auto-update the HOME space root (favorites/journal/spaces). Requires
+   * {@link systemPatternAutoUpdate}. Held separately until home.tsx addresses
+   * its durable state by stable key/cause (spec § open question 4).
+   */
+  systemPatternAutoUpdateHome?: boolean | undefined;
 }
 
 /**
@@ -1469,6 +1491,93 @@ export class Runtime {
    */
   reportVersionSkew(info: VersionSkewInfo): void {
     this.#onVersionSkew?.(info);
+  }
+
+  // --- System-pattern update caches ---------------------------------------
+  // A toolshed's build sha and each pattern's content identity are fixed for
+  // its process lifetime, so both are cached. Keyed by host / (host,url), with
+  // single-flight in-flight sharing. A failed (undefined) lookup is evicted so
+  // it retries. Cleared explicitly by clearPatternUpdateCaches() and, as a
+  // backstop against a toolshed redeploy mid-session (we have no
+  // storage-socket-reset event to hang invalidation on yet), after a TTL.
+  #toolshedGitShaCache = new Map<
+    string,
+    { at: number; value: Promise<string | undefined> }
+  >();
+  #patternIdentityCache = new Map<
+    string,
+    { at: number; value: Promise<string | undefined> }
+  >();
+
+  /** A space's toolshed build git sha (cached). See version-gate.ts. */
+  toolshedGitSha(host: string | URL): Promise<string | undefined> {
+    const key = host.toString();
+    return this.#cachedLookup(
+      this.#toolshedGitShaCache,
+      key,
+      () => fetchToolshedGitSha(this.fetch, host),
+    );
+  }
+
+  /**
+   * A pattern file's content identity from its toolshed (cached), via
+   * `GET {host}{url}?identity`. Undefined on any failure. Equals the
+   * patternIdentity the worker would compile for the same source at the same
+   * build (see the toolshed parity test).
+   */
+  cachedPatternIdentity(
+    host: string | URL,
+    url: string,
+  ): Promise<string | undefined> {
+    const key = `${host.toString()} ${url}`;
+    return this.#cachedLookup(
+      this.#patternIdentityCache,
+      key,
+      () => this.#fetchPatternIdentity(host, url),
+    );
+  }
+
+  /** Drop the update caches (e.g. on a storage-socket reset). */
+  clearPatternUpdateCaches(): void {
+    this.#toolshedGitShaCache.clear();
+    this.#patternIdentityCache.clear();
+  }
+
+  async #fetchPatternIdentity(
+    host: string | URL,
+    url: string,
+  ): Promise<string | undefined> {
+    try {
+      const u = new URL(url, host.toString());
+      u.searchParams.set("identity", "");
+      const res = await this.fetch(u);
+      if (!res.ok) return undefined;
+      const body = (await res.text()).trim();
+      return body.length > 0 ? body : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  #cachedLookup(
+    cache: Map<string, { at: number; value: Promise<string | undefined> }>,
+    key: string,
+    lookup: () => Promise<string | undefined>,
+  ): Promise<string | undefined> {
+    const now = Date.now();
+    const entry = cache.get(key);
+    if (entry && now - entry.at < PATTERN_UPDATE_CACHE_TTL_MS) {
+      return entry.value;
+    }
+    const value = lookup();
+    cache.set(key, { at: now, value });
+    // Evict a failed lookup (or one that resolved to "unknown") so it retries.
+    value
+      .then((v) => {
+        if (v === undefined) cache.delete(key);
+      })
+      .catch(() => cache.delete(key));
+    return value;
   }
 
   /**

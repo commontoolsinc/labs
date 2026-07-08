@@ -1,10 +1,13 @@
 import {
+  buildsMatch,
   type Cell,
   entityIdFrom,
+  getPatternIdentityRef,
+  getPatternSource,
   type JSONSchema,
+  type MemorySpace,
   type ModuleByteCache,
   Runtime,
-  type MemorySpace,
   RuntimeProgram,
   type Schema,
   setPatternSource,
@@ -54,6 +57,17 @@ export function deriveSystemPatternUrl(
 // the logger is disabled, so controller phases show up in the load summaries
 // (browser worker included) as `piece/phase/<label>`.
 const pieceTimingLogger = getLogger("piece", { enabled: false });
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
+
+/** The result of a system-pattern update check. */
+export type UpdateOutcome =
+  | "updated"
+  | "current"
+  | "skipped-skew"
+  | "skipped-disabled";
 
 async function timePiecesPhase<T>(
   label: string,
@@ -495,5 +509,94 @@ export class PiecesController<T = unknown> {
     );
 
     return new PieceController<NameSchema>(this.#manager, finalPattern);
+  }
+
+  /**
+   * Roll the space's system root pattern forward in place if its toolshed
+   * serves a newer content identity than the running one. Best-effort: every
+   * failure logs and returns without throwing — a failed check must never break
+   * space open. The apply is a `patternIdentity` meta write; the existing
+   * pattern watcher (runner.ts) cancels the old nodes and re-instantiates the
+   * new pattern onto the SAME result cell (no new piece, state preserved by
+   * stable key). Never calls run()/stop()/recreateDefaultPattern.
+   *
+   * Call it AFTER {@link ensureDefaultPattern} has resolved (the root must be
+   * running for the watcher to be live).
+   */
+  async checkAndUpdateDefaultPattern(): Promise<UpdateOutcome> {
+    const runtime = this.#manager.runtime;
+    const space = this.#manager.getSpace();
+
+    // 1. Flag gate. Home is held behind a second flag until its durable state
+    //    is verified stable-key-addressed (spec § open question 4).
+    if (!runtime.experimental.systemPatternAutoUpdate) {
+      return "skipped-disabled";
+    }
+    const isHomeSpace = space === runtime.userIdentityDID;
+    if (isHomeSpace && !runtime.experimental.systemPatternAutoUpdateHome) {
+      return "skipped-disabled";
+    }
+
+    try {
+      // 2. The running root piece's result cell (no re-run).
+      const root = await this.#manager.getDefaultPattern(false);
+      if (!root) return "current";
+
+      // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
+      //    space must resolve against its own toolshed).
+      const url = getPatternSource(root) ??
+        deriveSystemPatternUrl(space, runtime);
+      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+
+      // 4. Version gate: the light ?identity is only comparable within a build.
+      const toolshedVersion = await runtime.toolshedGitSha(host);
+      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
+        runtime.reportVersionSkew({
+          space,
+          clientVersion: runtime.clientVersion,
+          toolshedVersion,
+        });
+        return "skipped-skew";
+      }
+
+      // 5. Current identity from the toolshed (cached).
+      const currentId = await runtime.cachedPatternIdentity(host, url);
+      if (currentId === undefined) return "current"; // unresolved → skip
+
+      // 6. Compare to the running identity.
+      const running = getPatternIdentityRef(root)?.identity;
+      if (currentId === running) return "current";
+
+      // 7. Apply: compile the new source, then swap patternIdentity in place.
+      const program = await runtime.harness.resolve(
+        new HttpProgramResolver(new URL(url, host).href),
+      );
+      const pattern = await runtime.patternManager.compilePattern(program, {
+        space,
+      });
+      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
+        { identity: currentId, symbol: "default" };
+      const { error } = await runtime.editWithRetry((tx) => {
+        root.withTx(tx).setMetaRaw("patternIdentity", {
+          identity: entryRef.identity,
+          symbol: entryRef.symbol,
+        });
+        setPatternSource(root, tx, url); // back-fill provenance
+      });
+      if (error) {
+        pieceUpdateLogger.warn(
+          "swap-failed",
+          () => ["checkAndUpdateDefaultPattern: swap failed", space, error],
+        );
+        return "current";
+      }
+      return "updated";
+    } catch (error) {
+      pieceUpdateLogger.warn(
+        "check-failed",
+        () => ["checkAndUpdateDefaultPattern: check failed", space, error],
+      );
+      return "current";
+    }
   }
 }
