@@ -1,6 +1,7 @@
 import { decode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
+import { resolveEntryIdentity } from "@commonfabric/runner";
 
 /**
  * Simple helper for serving pattern files from the patterns directory.
@@ -8,6 +9,11 @@ import { toFileUrl } from "@std/path/to-file-url";
  */
 export class PatternsServer {
   private baseUrl: URL;
+  // Pattern files are fixed for the process's lifetime (baked into the binary
+  // or static on disk), so each file's content identity is computed once and
+  // cached forever. A rejected computation is evicted so a transient failure
+  // (e.g. an incomplete closure during a partial deploy) can be retried.
+  private identityCache = new Map<string, Promise<string>>();
 
   constructor() {
     // Simple path resolution - works for both dev and compiled
@@ -56,5 +62,29 @@ export class PatternsServer {
   async getText(filename: string): Promise<string> {
     const buffer = await this.get(filename);
     return decode(buffer);
+  }
+
+  /**
+   * Compute (and memoize) the content-addressed identity of a pattern entry —
+   * the same `patternIdentity.identity` the runtime would store for this source
+   * at this build. Walks the entry's authored import closure via `getText`
+   * (single-file reads only, so it works in a compiled binary) and hashes the
+   * pristine bytes; no compiler, runtime, or storage is involved.
+   *
+   * `filename` is the same root-relative path `getText` accepts, e.g.
+   * `system/default-app.tsx`. Rejects if the closure is incomplete or reaches a
+   * `cf:` fabric import (unsupported by the light path).
+   */
+  identity(filename: string): Promise<string> {
+    let cached = this.identityCache.get(filename);
+    if (!cached) {
+      cached = resolveEntryIdentity(
+        `/${filename}`,
+        (name) => this.getText(name.replace(/^\//, "")),
+      );
+      this.identityCache.set(filename, cached);
+      cached.catch(() => this.identityCache.delete(filename));
+    }
+    return cached;
   }
 }

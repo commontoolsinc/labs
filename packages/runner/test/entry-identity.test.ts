@@ -6,7 +6,10 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { computeEntryIdentity } from "../src/harness/entry-identity.ts";
+import {
+  computeEntryIdentity,
+  resolveEntryIdentity,
+} from "../src/harness/entry-identity.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import { transformInjectHelperModule } from "../src/harness/pretransform.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
@@ -165,5 +168,58 @@ describe("computeEntryIdentity (light, drift-free)", () => {
       { name: "/shared.ts", contents: SHARED },
     ]);
     expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+});
+
+describe("resolveEntryIdentity (closure walk via readFile)", () => {
+  const APP =
+    `import { shared } from "../lib/shared.ts";\nexport default () => shared(1);\n`;
+  const disk = new Map<string, string>([
+    ["/system/app.tsx", APP],
+    ["/lib/shared.ts", SHARED],
+    ["/system/unused.tsx", `import { gone } from "./missing.ts";\n`],
+  ]);
+  const reads: string[] = [];
+  const readFile = (name: string): Promise<string> => {
+    reads.push(name);
+    const contents = disk.get(name);
+    if (contents === undefined) {
+      return Promise.reject(new Error(`not found: ${name}`));
+    }
+    return Promise.resolve(contents);
+  };
+
+  it("walks only the reachable closure and matches computeEntryIdentity", async () => {
+    reads.length = 0;
+    const walked = await resolveEntryIdentity("system/app.tsx", readFile);
+
+    // Same value as feeding the closure explicitly.
+    const explicit = computeEntryIdentity("/system/app.tsx", [
+      { name: "/system/app.tsx", contents: APP },
+      { name: "/lib/shared.ts", contents: SHARED },
+    ]);
+    expect(walked).toBe(explicit);
+
+    // It read exactly the entry and its one sibling — never the unrelated
+    // (broken) file.
+    expect(new Set(reads)).toEqual(
+      new Set(["/system/app.tsx", "/lib/shared.ts"]),
+    );
+  });
+
+  it("propagates a read failure for a genuinely missing dependency", async () => {
+    const broken = new Map([[
+      "/system/app.tsx",
+      `import { gone } from "./missing.ts";\nexport default gone;\n`,
+    ]]);
+    await expect(
+      resolveEntryIdentity(
+        "/system/app.tsx",
+        (name) =>
+          broken.has(name)
+            ? Promise.resolve(broken.get(name)!)
+            : Promise.reject(new Error(`not found: ${name}`)),
+      ),
+    ).rejects.toThrow(/not found/);
   });
 });

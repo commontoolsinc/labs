@@ -1,6 +1,11 @@
 import type { Source } from "@commonfabric/js-compiler";
+import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
 import { computeModuleIdentities } from "../sandbox/module-record-compiler.ts";
 import { resolveModuleImports } from "./module-identity.ts";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./deferred-compiler-stack.ts";
 
 // A fixed, arbitrary program id. `computeModuleIdentities` strips this prefix
 // before hashing (see `stripIdentityPrefix`), so its exact value never reaches
@@ -115,4 +120,55 @@ function assertClosureComplete(
 function unprefix(name: string): string {
   const p = `/${ENTRY_ID}`;
   return name.startsWith(`${p}/`) ? name.slice(p.length) : name;
+}
+
+/**
+ * Read the entry's full internal import closure via `readFile`, then compute its
+ * light identity (see {@link computeEntryIdentity}). `readFile(name)` receives a
+ * root-relative module path (leading `/`, e.g. `/system/default-app.tsx`) and
+ * returns its authored source; it must throw if the file does not exist.
+ *
+ * Only relative (`./`, `../`) imports are followed. Fabric authored sources use
+ * explicit file extensions, so each relative specifier resolves to an exact
+ * path — no suffix guessing, no directory enumeration. Bare and `cf:` specifiers
+ * are left to {@link computeEntryIdentity}'s guard.
+ *
+ * Uses `readFile` alone, so it behaves identically in dev and in a compiled
+ * binary's embedded file system (which supports single-file reads but not
+ * necessarily directory listing).
+ */
+export async function resolveEntryIdentity(
+  main: string,
+  readFile: (name: string) => Promise<string>,
+): Promise<string> {
+  const entry = main.startsWith("/") ? main : `/${main}`;
+  const files = await collectEntryClosure(entry, readFile);
+  return computeEntryIdentity(entry, files);
+}
+
+async function collectEntryClosure(
+  entry: string,
+  readFile: (name: string) => Promise<string>,
+): Promise<Source[]> {
+  // Import scanning parses with the TS parser (compilerStack).
+  await ensureCompilerStack();
+  const { collectImportSpecifiers, ts } = compilerStack();
+  const byName = new Map<string, Source>();
+  const queue: string[] = [entry];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (byName.has(name)) continue;
+    const source: Source = { name, contents: await readFile(name) };
+    byName.set(name, source);
+    for (
+      const specifier of collectImportSpecifiers(source, ts.ScriptTarget.ES2023)
+    ) {
+      const resolved = resolveImportSpecifier(specifier, source);
+      // resolveImportSpecifier returns the specifier unchanged for bare/`cf:`
+      // imports; a changed value means it was relative and resolved to a path.
+      if (resolved === specifier) continue;
+      if (!byName.has(resolved)) queue.push(resolved);
+    }
+  }
+  return [...byName.values()];
 }

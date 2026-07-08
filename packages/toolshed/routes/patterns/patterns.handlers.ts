@@ -31,6 +31,22 @@ export const getPattern = async (
       );
     }
 
+    // `?identity`: return the file's content-addressed identity (the value the
+    // runtime would store as patternIdentity.identity for this source at this
+    // build) as plain text, instead of the source itself.
+    if (new URL(c.req.url).searchParams.has("identity")) {
+      const identity = await patternsServer.identity(filename);
+      return new Response(identity, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    }
+
     // Get the file content from server
     const content = await patternsServer.getText(filename);
 
@@ -49,6 +65,19 @@ export const getPattern = async (
       return c.json(
         { error: "File not found" },
         404,
+      );
+    }
+
+    // A structurally invalid entry (incomplete import closure, or a cf: fabric
+    // import the light identity path does not model) — surface the reason.
+    if (
+      error instanceof Error &&
+      (error.message.includes("incomplete closure") ||
+        error.message.includes("fabric import"))
+    ) {
+      return c.json(
+        { error: error.message },
+        400,
       );
     }
 

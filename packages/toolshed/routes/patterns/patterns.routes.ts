@@ -13,12 +13,23 @@ export const getPattern = createRoute({
         "The pattern file path to retrieve (supports subdirectories)",
       ),
     }),
+    query: z.object({
+      identity: z.string().optional().describe(
+        "When present, return the file's content-addressed identity as " +
+          "text/plain instead of its source.",
+      ),
+    }),
   },
   responses: {
     200: {
-      description: "Pattern file content",
+      description:
+        "Pattern file content, or the file's content identity when `identity` " +
+        "is present.",
       content: {
         "text/typescript-jsx": {
+          schema: z.string(),
+        },
+        "text/plain": {
           schema: z.string(),
         },
       },
