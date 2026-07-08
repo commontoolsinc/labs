@@ -60,7 +60,7 @@ if (DIAGNOSTICS) {
 if (DIAGNOSTICS) {
   globalThis.addEventListener("unload", () => {
     for (const [name, m] of lastMetrics) {
-      console.log(
+      console.error(
         `[diagnostics] ${name}: invocations=${m.invocations} ` +
           `schemaCalls=${m.traverseWithSchemaCalls} ` +
           `pointer=${m.traversePointerCalls} array=${m.traverseArrayCalls} ` +
@@ -71,7 +71,7 @@ if (DIAGNOSTICS) {
       );
       const latency = lastLatency.get(name);
       if (latency !== undefined) {
-        console.log(`[diagnostics] ${name}: latency ${latency}`);
+        console.error(`[diagnostics] ${name}: latency ${latency}`);
       }
     }
   });
