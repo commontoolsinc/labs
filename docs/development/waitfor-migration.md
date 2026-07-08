@@ -110,6 +110,25 @@ Documentation:
   event-driven primitives instead of `waitFor`, and a stale reference to a
   non-existent `awaitRuntimeIdle` corrected to `waitForRuntimeIdle`.
 
+## Guard against new usage
+
+A check keeps new integration tests from importing the polling `waitFor` again.
+`tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
+directory beneath `packages/` (excluding the `@commonfabric/integration` package,
+which defines `waitFor`) and fails when one names `waitFor` in an import from
+`@commonfabric/integration` and is not on the check's allowlist. Run it with
+`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
+The error names the offending file and points at `waitForCondition`,
+`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+
+The allowlist inside `tasks/check-no-waitfor.ts` holds exactly the files listed
+as intentional exceptions below, and the check's own tests assert that the
+allowlist and the set of files still using the polling `waitFor` stay in step: a
+new offender fails the check, and an allowlisted file that later drops `waitFor`
+fails the tests until its entry is removed. When a new usage is genuinely one of
+the exception shapes below, add the file to the allowlist with a one-line reason
+and record it here.
+
 ## Intentional exceptions: `waitFor` usages left in place
 
 These are the usages where a bounded poll is the right tool. They are grouped by

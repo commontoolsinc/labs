@@ -269,6 +269,12 @@ Each of the following is what `awaitViewSettled` replaces. They are either racy
 The shape is always: settle the view, click once, then wait for the effect —
 never poll-and-pray, and never re-click.
 
+A CI check enforces this for the polling `waitFor`: `deno task check-no-waitfor`
+fails when an integration test imports `waitFor` from
+`@commonfabric/integration`. See
+[`waitfor-migration.md`](./waitfor-migration.md) for the rationale, the full
+event-driven toolkit, and the allowlist of intentional exceptions.
+
 ## Best Practices
 
 1. **Use roles first**: `button`, `textbox`, `checkbox`, etc.
