@@ -891,17 +891,25 @@ the fingerprint string is versioned so v1 observations are simply misses.
 - **`fresh`** (new piece, locally re-run after stop): nodes register
   `never-ran`; demand decides everything else.
 - **`resume`** (piece loaded from storage): the runner awaits the space's
-  sync **once per piece** before registering nodes (subsumes v1's per-action
-  `awaitSync` + shared-deadline machinery), then registers each node in
-  resume mode: look up the observation; on fingerprint match, install
-  `reads` (+ gate config) directly into the indexes, set `status = clean`,
-  or `invalid` if durable dirty markers say so; on miss/mismatch/timeout,
-  degrade that node to `fresh`.
+  sync and **one space-wide snapshot listing** before registering nodes
+  (subsumes v1's per-action `awaitSync` + shared-deadline machinery). The
+  listing is bucketed per piece doc, so the resume phase covers the whole
+  resumed piece **tree**: descendants — sub-pattern nodes and
+  map/filter/flatMap per-element runs, each persisted under its own
+  `pieceId` — register against their own bucket from the same listing
+  (`per-doc-rehydration.md`). Each node registers in resume mode: look up
+  the observation; on fingerprint match, install `reads` (+ gate config)
+  directly into the indexes, set `status = clean`, or `invalid` if durable
+  dirty markers say so; on miss/mismatch, degrade that node to `fresh`
+  behind a synced-hold (it runs after the space syncs instead of racing the
+  data). Child-starting coordinators (map/filter/flatMap reconciles) never
+  rehydrate clean — they run on resume to re-attach their children, which
+  then rehydrate individually.
 
 Rehydrated-clean nodes cost index inserts only. The v1 race-guard apparatus
 (per-action rehydration tokens, superseded checks, per-action timeout sharing)
-collapses because resume is a piece-level phase that completes before the
-piece's nodes can be scheduled at all.
+collapses because resume stays a boot-level phase — one listing loaded before
+registration — rather than per-action async lookups.
 
 ### 9.3 Observation payload (slimmed)
 
