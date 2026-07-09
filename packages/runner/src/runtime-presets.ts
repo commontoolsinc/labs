@@ -54,6 +54,8 @@
  * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcPolicyRecords           | core-default (none declared) — same              |
+ * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
+ * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
@@ -128,6 +130,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcTriggerReadGating",
   "cfcPolicyEvaluation",
   "cfcPolicyRecords",
+  "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
   "cfcSinkMaxConfidentiality",
   "trustSnapshotProvider",

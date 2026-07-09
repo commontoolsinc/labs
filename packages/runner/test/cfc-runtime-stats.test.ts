@@ -38,6 +38,15 @@ describe("CFC runtime stats", () => {
       cfcOutboxFlushes: 0,
       sinkDedupHits: 0,
       sinkReleaseRejects: 0,
+      prefixProvenanceSummaries: 0,
+      prefixProtectedWrites: 0,
+      prefixGatedReads: 0,
+      prefixTxGlobalGatedReads: 0,
+      prefixBoundReal: 0,
+      prefixBoundInfinityFallback: 0,
+      prefixBoundClockLess: 0,
+      prefixS7ExemptionFires: 0,
+      prefixClockLessReads: 0,
     });
 
     const preparedTx = runtime.edit();
@@ -163,6 +172,18 @@ describe("CFC runtime stats", () => {
       cfcOutboxFlushes: 2,
       sinkDedupHits: 1,
       sinkReleaseRejects: 0,
+      // Stage-0 prefix-provenance counters stay untouched without the
+      // cfcPrefixProvenanceStats opt-in — the hook-absent default collects
+      // nothing even across relevant, rejected, and invalidated prepares.
+      prefixProvenanceSummaries: 0,
+      prefixProtectedWrites: 0,
+      prefixGatedReads: 0,
+      prefixTxGlobalGatedReads: 0,
+      prefixBoundReal: 0,
+      prefixBoundInfinityFallback: 0,
+      prefixBoundClockLess: 0,
+      prefixS7ExemptionFires: 0,
+      prefixClockLessReads: 0,
     });
   });
 });
