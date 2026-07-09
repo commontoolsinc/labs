@@ -17,6 +17,10 @@ concurrency:
 env:
   BINARIES: "toolshed bg-piece-service cf"
 
+# Every step name must begin with a phase-marker emoji (setup / work / shutdown).
+# scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
+# "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
+# vocabulary and which emoji belongs to which phase.
 jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
@@ -357,7 +361,7 @@ jobs:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         env:
           TOOLSHED_PORT: 8000
         run: |
@@ -458,7 +462,7 @@ jobs:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
@@ -601,7 +605,7 @@ jobs:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
           CFTS_AI_GATEWAY_URL="" \
@@ -1018,7 +1022,7 @@ jobs:
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
-      - name: 🔍 Verify binary attestations
+      - name: 🔎 Verify binary attestations
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1074,7 +1078,7 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: 🚀 Upload artifacts to Google Cloud Storage
+      - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
           gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
