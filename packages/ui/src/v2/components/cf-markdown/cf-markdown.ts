@@ -55,12 +55,17 @@ export class CFMarkdown extends BaseElement {
       :host {
         display: block;
         box-sizing: border-box;
-        /* Allow the host to shrink below its content width when it is a flex
-         * child (e.g. inside a cf-vstack). Without this, min-width:auto keeps
-         * the host as wide as a wide table, pushing horizontal overflow up to
-         * an ancestor that clips it (cf-screen sets overflow-x:hidden) instead
-         * of letting the table's own .table-scroll wrapper scroll. */
+        /* Keep the host within its container so a wide table scrolls inside
+         * the .table-scroll wrapper instead of blowing the host out. Two
+         * cases: as a normal block, max-width:100% is a no-op; as a
+         * non-stretched flex child (e.g. inside a cf-vstack with
+         * align-items:flex-start), max-width caps the host at the column width
+         * — otherwise the host grows to the table's content width and gets
+         * clipped by an ancestor (cf-screen sets overflow-x:hidden) with no
+         * scroll. min-width:0 lets it shrink below content in the flex main
+         * axis for the same reason. */
         min-width: 0;
+        max-width: 100%;
         font-family: var(
           --cf-theme-font-family,
           system-ui,
