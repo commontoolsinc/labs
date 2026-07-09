@@ -7,7 +7,7 @@ inputs:
   deno-version:
     description: "Deno version to install"
     # Keep in sync with `./tasks/check.sh` version
-    default: "2.8.1"
+    default: "2.9.2"
 runs:
   using: "composite"
   steps:
