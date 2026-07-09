@@ -106,7 +106,7 @@ direction with prior art:
 
 | Class | Signature | Fix direction / prior art |
 |---|---|---|
-| WRITE-CONTENTION | high conflict share, commit retries, churn counters | keyed mergeable writes (`keyed-collection-writes.md`), row-local writes (#4346), `CF_CONFLICT_ADMISSION` |
+| WRITE-CONTENTION | high conflict share, commit retries, churn counters | keyed mergeable writes (`docs/development/keyed-collection-writes.md`), row-local writes (#4346), `CF_CONFLICT_ADMISSION` |
 | GRAPH-GROWTH | graph size scales with data volume | keyed collections (#4141: 254s→105s on 10×5 add-options) |
 | HOT-ACTION | one actionId dominates A | localize/memoize/index the derive |
 | FANOUT-AMPLIFICATION | fanout duration ∝ subscribers | fanout batching / audience work |
