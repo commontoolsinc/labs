@@ -276,6 +276,25 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
     });
   });
 
+  describe("ungrantable read-failed marker", () => {
+    it("keeps a committed spelling of the marker ungrantable", () => {
+      // The Stage 1 transform never commits the marker (a bare string atom,
+      // not a classified field), so a {digestOf} spelling is crafted — and
+      // it must stay outside every declared ceiling, exactly like the
+      // string form (audit item 22).
+      const committedMarker = commitCfcFieldValue("cfc:label-read-failed");
+      expect(
+        atomsOutsideCeiling([committedMarker], [committedMarker]),
+      ).toEqual([committedMarker]);
+      expect(
+        atomsOutsideCeiling(
+          [{ anyOf: [committedMarker, { type: CFC_ATOM_TYPE.User, subject: reader }] }],
+          ["cfc:label-read-failed"],
+        ).length,
+      ).toBe(1);
+    });
+  });
+
   describe("Space.id stays public — §4.9.3 membership release regression", () => {
     it("releases a cross-space label via plaintext Space.id + membership while the committed User clause matches the digested reader", () => {
       // A cross-space transformed label: Space.id PLAINTEXT (the table's

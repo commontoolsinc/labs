@@ -7,6 +7,7 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
+import { commitmentAwareEquals } from "./label-representation.ts";
 import { atomEntails, conceptGuard, matchAtomPattern } from "./atom-pattern.ts";
 import type { TrustResolver } from "./trust.ts";
 import {
@@ -36,9 +37,15 @@ export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 // `{anyOf:[MARKER, …]}` — must still be ungrantable, otherwise a ceiling that
 // names the marker would subsume the wrapping clause and admit it, reopening
 // the allow-list bypass the marker exists to prevent (audit item 22).
+// Commitment-aware (inv-12 Stage 1): the Stage 1 transform never commits the
+// marker itself (it is a bare string atom, not a classified field), so a
+// `{digestOf: H(marker)}` spelling can only be crafted — and with atom
+// equality now commitment-aware, a marker-naming ceiling would otherwise
+// subsume that spelling. Recognize it here so BOTH forms stay ungrantable.
 const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
   clauseAlternatives(clause).some((alternative) =>
-    deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM)
+    deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM) ||
+    commitmentAwareEquals(alternative, CFC_LABEL_READ_FAILED_ATOM)
   );
 
 export interface CfcOpaqueLink {
