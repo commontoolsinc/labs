@@ -2,6 +2,7 @@ export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
+  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
 } from "./link-label-view.ts";
 export {

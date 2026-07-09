@@ -40,6 +40,7 @@ import {
   createRenderConfidentialityResolver,
   createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
+  redactSigilCfcLabelViewsForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
@@ -880,12 +881,19 @@ export class RuntimeProcessor {
       }
     }
     const value = cell.get();
-    const converted = convertCellsToLinks(value, {
-      includeSchema: true,
-      keepAsCell: KeepAsCell.All,
-      doNotConvertCellResults: true,
-      includeCfcLabelView: true,
-    });
+    // The sigil links inside the response carry cfcLabelView copies; redact
+    // Caveat.source in those too (inv-12 Stage 0, same display redaction as
+    // the top-level cfcLabel below). Display-only: the worker neither
+    // persists nor re-imports inbound views, so the redacted copies cannot
+    // round-trip into under-labeled state.
+    const converted = redactSigilCfcLabelViewsForDisplay(
+      convertCellsToLinks(value, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+        doNotConvertCellResults: true,
+        includeCfcLabelView: true,
+      }),
+    ) as JSONValue | undefined;
     if (!request.includeCfcLabel) {
       return { value: converted };
     }
@@ -986,12 +994,16 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      const converted = convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      });
+      // As in handleCellGet: redact Caveat.source in the cfcLabelView copies
+      // riding sigil links inside the update value (inv-12 Stage 0).
+      const converted = redactSigilCfcLabelViewsForDisplay(
+        convertCellsToLinks(value, {
+          includeSchema: true,
+          keepAsCell: KeepAsCell.All,
+          doNotConvertCellResults: true,
+          includeCfcLabelView: true,
+        }),
+      );
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel

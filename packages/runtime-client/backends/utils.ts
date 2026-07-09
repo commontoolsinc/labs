@@ -5,7 +5,10 @@ import {
   parseLink,
   SigilLink,
 } from "@commonfabric/runner";
-import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewForCell,
+  redactCaveatSourcesForDisplay,
+} from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
 import { Runtime } from "@commonfabric/runner";
 import { linkRefFrom } from "@commonfabric/runner/shared";
@@ -76,7 +79,11 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   }
   const cfcLabelView = cfcLabelViewForCell(cell);
   if (cfcLabelView !== undefined) {
-    cellRef.cfcLabelView = cfcLabelView;
+    // Ref-attached views are main-thread display copies like the in-value
+    // sigil views: redact Caveat.source before they cross (inv-12 Stage 0).
+    // The worker never re-imports them (see getCell / cellRefToSigilLink),
+    // so the redacted copy cannot round-trip into label state.
+    cellRef.cfcLabelView = redactCaveatSourcesForDisplay(cfcLabelView);
   }
   return cellRef;
 }

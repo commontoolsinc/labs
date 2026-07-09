@@ -1,6 +1,8 @@
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isLinkRef, linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isRecord } from "@commonfabric/utils/types";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
+import { redactCaveatSourcesForDisplay } from "./label-view-core.ts";
 
 /**
  * A cell-link payload that additionally carries a CFC label view. The label
@@ -25,4 +27,58 @@ export function setLinkCfcLabelView(
   view: CfcLabelView,
 ): void {
   (linkRefPayload(link) as CfcCellLinkRefPayload).cfcLabelView = view;
+}
+
+/**
+ * Redact `Caveat.source` identities from every `cfcLabelView` riding a sigil
+ * link inside a main-thread-facing response value (inv-12 Stage 0 / SC-14 /
+ * SC-25) — the same display redaction `redactCaveatSourcesForDisplay` applies
+ * to the top-level `cfcLabel` at the three IPC response sites, extended to
+ * the in-value view copies that `convertCellsToLinks(..., { includeCfcLabelView:
+ * true })` attaches.
+ *
+ * Safe only because the worker no longer consumes inbound views: the persist
+ * seam re-derives link-origin labels from stored source metadata, and the IPC
+ * ingress does not forward ref-carried views — so a redacted copy that
+ * round-trips can never persist as an under-labeled entry. Display-only, like
+ * its top-level sibling: enforcement paths read unredacted views through the
+ * worker's own seams.
+ *
+ * Copy-on-write: unchanged subtrees are returned by reference (converted
+ * response values can be large; the common labelless case allocates nothing).
+ * Input trees are link-converted response values, so they are acyclic.
+ */
+export function redactSigilCfcLabelViewsForDisplay(value: unknown): unknown {
+  if (isLinkRef(value)) {
+    const payload = linkRefPayload(
+      value as SigilLink,
+    ) as CfcCellLinkRefPayload;
+    if (payload.cfcLabelView === undefined) {
+      return value;
+    }
+    return linkRefFrom<CfcCellLinkRefPayload>({
+      ...payload,
+      cfcLabelView: redactCaveatSourcesForDisplay(payload.cfcLabelView),
+    });
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const out = value.map((item) => {
+      const next = redactSigilCfcLabelViewsForDisplay(item);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? out : value;
+  }
+  if (isRecord(value)) {
+    let changed = false;
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      const next = redactSigilCfcLabelViewsForDisplay(item);
+      if (next !== item) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : value;
+  }
+  return value;
 }
