@@ -62,6 +62,25 @@ describe("cf-markdown", () => {
     expect(rendered).toContain("cf-copy-button");
   });
 
+  it("should wrap tables in a horizontal scroll container", () => {
+    const el = new CFMarkdown();
+    const markdown = [
+      "| Airport | Flights | Notes |",
+      "| --- | --- | --- |",
+      "| Haneda | Terminal 1 North Wing | Arrive early |",
+    ].join("\n");
+
+    const rendered = (el as any)._renderMarkdown(markdown);
+
+    // The table is rendered...
+    expect(rendered).toContain("<table");
+    // ...and wrapped so it can scroll horizontally on narrow screens
+    // instead of cramming its columns.
+    expect(rendered).toContain('<div class="table-scroll">');
+    // The wrapper opens before the table and closes after it.
+    expect(rendered).toMatch(/<div class="table-scroll"><table[\s\S]*<\/table><\/div>/);
+  });
+
   it("should get content value from string", () => {
     const el = new CFMarkdown();
     el.content = "test content";
