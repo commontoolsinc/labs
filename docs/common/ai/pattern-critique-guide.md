@@ -247,14 +247,24 @@ Applies only to patterns with multiple people or a "current user" concept. **N/A
 
 | Check | What to verify | Fix |
 |-------|----------------|-----|
-| people rendered as data | a person shown as `{name}` text or a raw `<img>` | render with `cf-avatar` (others) or `cf-profile-badge` (the viewer) |
+| people rendered as data | a person shown as `{name}` text or a raw `<img>` | render **every** participant with `cf-profile-badge` bound to their profile cell; `cf-avatar` + snapshot only as an explicit offline fallback |
+| others rendered as `cf-avatar` when a live cell exists | `cf-avatar` used for co-participants even though their `#profile` cell is (or could be) stored on join | store each joiner's profile cell in the shared roster and badge it — cross-space reads resolve (CT-1667/1687). `cf-avatar` is only for snapshot-only cases |
 | current viewer | a "type your name" / "who am I" text field used as the viewer's identity | resolve via `wish({ query: "#profile" })` (+ `#profileName` / `#profileAvatar`) |
 | per-user isolation | stored DIDs / user-ids / name strings used to fake isolation | use `PerUser` / `PerSpace` scope; let the scope select the instance |
-| roster construction | a participant list built from typed names | join + snapshot: each viewer pushes their own `{ displayName, avatar }` from `#profile` |
+| roster construction | a participant list built from typed names | join by profile cell: each viewer pushes their own live `#profile` cell (plus a `{ displayName, avatar }` snapshot fallback) into the shared roster |
 | identity comparison | dedup or "is this me?" by display-name equality | compare a cell reference with `equals()`, never the mutable name |
 | ownership / authorship | "who created / wrote this" stored as a bare name | snapshot the actor's profile, or attest with CFC `AuthoredByCurrentUser` / `RepresentsCurrentUser` |
 
-See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/common/components/COMPONENTS.md#identity-components`. Severity: a forgeable / dead-string **current-viewer** identity is MAJOR (wrong behavior across users); rendering others as name strings is MINOR–MAJOR per case.
+See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/common/components/COMPONENTS.md#identity-components`. Severity: a forgeable / dead-string **current-viewer** identity is MAJOR (wrong behavior across users); rendering others as name strings is MINOR–MAJOR per case; rendering a co-participant with `cf-avatar` when their live profile cell is available is MINOR (misses the trusted seal and live data).
+
+**Do NOT flag** (false positives seen in review):
+
+- A `computed()` or cell **bound into a handler-state slot typed as its plain value**
+  (e.g. `viewerName: string` in a `handler<…, { viewerName: string }>`) is resolved
+  to that plain value at dispatch. Reading it directly inside the handler body — no
+  `.get()` — is correct. Do not report a "missing `.get()`"; adding `.get()` on a
+  resolved string/number is the actual defect, and `cf check` would reject the
+  handler-state type mismatch if the binding were unresolved.
 
 ## Output Format
 

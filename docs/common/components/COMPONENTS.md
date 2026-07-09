@@ -785,11 +785,13 @@ and (for the current viewer) a verified seal that user-space cannot forge.
 
 | You are showing… | Use | Why |
 | --- | --- | --- |
-| the **current viewer** ("You"), whose profile cell you resolved via `wish` | `cf-profile-badge` | trusted; draws name + avatar + a DID-derived verified seal |
-| **anyone else** in a roster (you only hold a name/avatar snapshot) | `cf-avatar` + their name | untrusted, safe for any value; needs no profile cell |
+| **any participant** whose live profile cell you hold — the viewer (via `wish`) or anyone who contributed their cell on join | `cf-profile-badge` bound to that cell | trusted; draws name + avatar + a DID-derived verified seal; cross-space reads resolve for every viewer (CT-1667/1687) |
+| a person you hold **only a snapshot** for — a self-contained piece, or an offline remote profile space | `cf-avatar` + their name | untrusted fallback, safe for any value; needs no profile cell |
 
-See [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
-for the end-to-end flow (resolve the viewer, snapshot the roster, mark "me").
+`cf-profile-badge` is the one preferred way to render an identity; `cf-avatar` is
+the explicit fallback for when no live profile cell is available. See
+[multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
+for the end-to-end flow (resolve the viewer, store each joiner's profile cell, mark "me").
 
 ### cf-avatar
 
@@ -807,14 +809,17 @@ Untrusted avatar primitive — safe for any code to render, for any person.
 - `name`: drives the initials fallback and the accessible label — always set it.
 - `size`: `xs | sm | md | lg | xl`. `shape`: `circle | square`.
 
-Use `cf-avatar` for every participant in a shared roster; you snapshot their
-`name`/`avatar` when they join.
+Use `cf-avatar` as the **fallback** when you hold only a snapshot of a person — a
+self-contained piece, or a participant whose remote profile space is offline. When
+you have the live profile cell (which you do for every participant who joined by
+contributing it), prefer `cf-profile-badge`.
 
 ### cf-profile-badge
 
-Trusted presentation of the **current viewer's own profile**. Bind a profile
-**cell** (not strings) via `$profile`; it renders name + avatar + a verified seal
-derived from the owner's identity that user-space cannot mint.
+Trusted presentation of **a participant's profile** — the viewer's own, or anyone
+whose profile cell you stored on join. Bind a profile **cell** (not strings) via
+`$profile`; it renders name + avatar + a verified seal derived from the owner's
+identity that user-space cannot mint.
 
 ```tsx
 const profileWish = wish({ query: "#profile" }); // resolves the viewer's profile cell
@@ -822,14 +827,20 @@ const profileWish = wish({ query: "#profile" }); // resolves the viewer's profil
 <cf-profile-badge $profile={profileWish.result} size="sm" />
 ```
 
-- `$profile`: the viewer's profile **cell** — bind `wish({ query: "#profile" }).result`
-  (the `.result`, not the wish object).
+- `$profile`: a profile **cell** — the viewer's own is
+  `wish({ query: "#profile" }).result` (the `.result`, not the wish object); for
+  other participants, bind the profile cell they contributed to the shared roster
+  on join.
 - `size`: `xs | sm | md | lg | xl`.
 - The verified seal only appears for a live, runtime-attested profile cell (it
   will not show in stories or `--no-run` checks — that is expected, not a failure).
-- **Only the current viewer** has a reachable profile cell. You cannot render
-  `cf-profile-badge` for other participants today (no cross-space profile cell —
-  see CT-1667); use `cf-avatar` for them.
+- **Every participant** with a stored profile cell can be badged — not just the
+  viewer. Cross-space profile reads resolve for any authorized viewer (CT-1667/1687),
+  so store each person's `#profile` cell in the shared `PerSpace` roster on join and
+  bind `$profile={p.profile}`. See
+  [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
+  and the live demo `packages/patterns/profile-roster-live-demo.tsx`. Only fall back
+  to `cf-avatar` when you deliberately hold just a snapshot.
 - ⚠️ **Bind it at a STATIC `[UI]` position.** Like every `$`-bidirectional binding
   (`$value`, `$checked`, …), `$profile` must be bound where the JSX is constructed
   once — **never inside a `{computed(() => …)}` subtree**. Inside a computed the
