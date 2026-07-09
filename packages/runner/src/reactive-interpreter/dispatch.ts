@@ -1457,9 +1457,20 @@ function makeSegmentImplementation(
         const out: Record<string, unknown> = {};
         const outScopes: Record<string, string> = {};
         for (const opId of outputOpIds) {
-          out[String(opId)] = controlHandles.has(opId)
-            ? controlHandles.get(opId)
-            : opValues.get(opId);
+          if (controlHandles.has(opId)) {
+            out[String(opId)] = controlHandles.get(opId);
+            // Legacy ifElse parity: the alias holds a LINK whose target
+            // carries its own (possibly narrower) scope — readers narrow at
+            // deref, and the alias write itself is not scope-routed (raw
+            // builtins never thread narrowestReadScope). Routing it at the
+            // derived scope would mint a first-write REDIRECT at the alias
+            // that a subsequent identical run rewrites differently — a
+            // state-dependent write encoding the idempotency recheck
+            // correctly flags.
+            outScopes[String(opId)] = "space";
+            continue;
+          }
+          out[String(opId)] = opValues.get(opId);
           outScopes[String(opId)] = opScopes.get(opId) ?? "space";
         }
         ri2SetOutputScopes(out, outScopes);
