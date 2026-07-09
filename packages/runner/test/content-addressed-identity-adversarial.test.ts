@@ -19,7 +19,7 @@ import type { HarnessedFunction } from "../src/harness/types.ts";
 
 /**
  * C5 red-team gate for PR C (content-addressed `$implRef` + CFC provenance) of
- * docs/specs/content-addressed-action-identity-implementation-plan.md.
+ * docs/history/specs/content-addressed-action-identity-implementation-plan.md.
  *
  * Each test is an attack on a fail-closed property; the assertion is the
  * defended outcome. The mirror style is test/cfreg-security.test.ts (pin the

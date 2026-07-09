@@ -12,7 +12,7 @@ import type { Runtime } from "../runtime.ts";
 
 /**
  * §4.9.3 render membership lookup (design:
- * docs/specs/cfc-render-membership-lookup.md). The verified source of the
+ * docs/history/specs/cfc-render-membership-lookup.md). The verified source of the
  * `HasRole(actingUser, space, reader)` facts the render ceiling mints to admit
  * a cross-space `Space(...)` label — sourced from the space's declared ACL
  * document, NEVER from a cell's mere local residency (residency is not read

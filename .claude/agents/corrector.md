@@ -44,6 +44,11 @@ This is not about technical completeness for its own sake - it's about **communi
    - Remove what's outdated or contradictory
    - Ensure consistency across all related content
    - Maintain clear, accessible language
+   - Never edit `docs/history/` — those are frozen point-in-time records (see
+     `docs/history/README.md`). If a correction's subject is covered only by a
+     historical document, write the current truth into a live document instead
+     and, if helpful, add a `superseded-by` key to the historical document's
+     header.
 
 4. **Update FAQ Index** (if one exists at `docs/FAQ.md`):
    - Add a pointer to the relevant documentation

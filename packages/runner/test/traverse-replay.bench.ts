@@ -41,7 +41,8 @@ for (const { name, path } of listFixturePaths()) {
 const lastLatency = new Map<string, string>();
 if (DIAGNOSTICS) {
   // One latency-collected pass per fixture for tail tracking (p99/max are
-  // the tail metrics; see OPTIMIZATION-JOURNAL.md "tail round").
+  // the tail metrics; see docs/history/packages/runner/test/traverse-replay/
+  // OPTIMIZATION-JOURNAL.md "tail round").
   for (const { name, path } of listFixturePaths()) {
     const fixture = await loadFixture(path);
     replayFixture(fixture); // warm

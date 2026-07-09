@@ -613,7 +613,7 @@ path during the content-addressed module-loading rollout. (An early draft of the
 plan called it `EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then
 the flag, the AMD bundle pipeline, and the AMD compilation cache were all
 removed; the ESM loader is now the only loader. See
-[`docs/specs/module-loading-implementation-plan.md`](../specs/module-loading-implementation-plan.md),
+[`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 
 ### `EXPERIMENTAL_MODERN_DATA_MODEL` (never implemented)

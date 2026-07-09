@@ -127,6 +127,7 @@
     "npm:esbuild@0.25.12": "0.25.12",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:fake-indexeddb@6.0.0": "6.0.0",
+    "npm:fuse-native@*": "2.2.6",
     "npm:gcp-metadata@6.1.0": "6.1.0",
     "npm:hash-wasm@^4.12.0": "4.12.0",
     "npm:hono-pino@0.7": "0.7.2_hono@4.10.5_pino@9.14.0",
@@ -1529,6 +1530,34 @@
     "function-bind@1.1.2": {
       "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="
     },
+    "fuse-native@2.2.6": {
+      "integrity": "sha512-Y5wXd7vUsWWWIIHbjluv7jKZgPZaSVA5YWaW3I5fXIJfcGWL6IRUgoBUveQAq+D8cG9cCiGNahv9CeToccCXrw==",
+      "dependencies": [
+        "fuse-shared-library",
+        "nanoresource",
+        "napi-macros",
+        "node-gyp-build"
+      ],
+      "scripts": true,
+      "bin": true
+    },
+    "fuse-shared-library-darwin@1.1.3": {
+      "integrity": "sha512-4Q8gMxyMl1+gwHGpiYUoKKpi7xq8WcPo0TvJvjZzHMuCiszouu2GgEs6SJAqPB3LjfmEkl6kPV+2Oluczr0Nig=="
+    },
+    "fuse-shared-library-linux-arm@1.0.0": {
+      "integrity": "sha512-Dj4ssxo1/MKGvOsVWRblSRu+o5F5OJTrVPDkjSyGDU2yKvVnIzQSwy1deiWA0qCcS/Q8iJMlZaCpCcZWSwvoug=="
+    },
+    "fuse-shared-library-linux@1.0.1": {
+      "integrity": "sha512-07MQRSobrBKwW4D7oKm0gM2TwgvZWb+gC08JdiYDG4KBTncxk9ssqEDiDMKll8hpseZufsY2w1yc/feOu2DPmQ=="
+    },
+    "fuse-shared-library@1.1.1": {
+      "integrity": "sha512-EfgTo/eS1euZFUe7x8KqyA40hV4DwP7kqp1VNZApu2nlPnJv8SanraBE3VXyX7ff41sxw7M0oWY7re3G3wnZVA==",
+      "dependencies": [
+        "fuse-shared-library-darwin",
+        "fuse-shared-library-linux",
+        "fuse-shared-library-linux-arm"
+      ]
+    },
     "gaxios@6.7.1": {
       "integrity": "sha512-LDODD4TMYx7XXdpwxAVRAIAuB0bzv0s+ywFonY46k126qzQHT9ygyoa9tncmOiQmmDrik65UYsEkv3lbfqQ3yQ==",
       "dependencies": [
@@ -1646,6 +1675,9 @@
         "debug"
       ]
     },
+    "inherits@2.0.4": {
+      "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ=="
+    },
     "internmap@2.0.3": {
       "integrity": "sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg=="
     },
@@ -1757,11 +1789,24 @@
     "multiformats@13.4.1": {
       "integrity": "sha512-VqO6OSvLrFVAYYjgsr8tyv62/rCQhPgsZUXLTqoFLSgdkgiUYKYeArbt1uWLlEpkjxQe+P0+sHlbPEte1Bi06Q=="
     },
+    "nanoresource@1.3.0": {
+      "integrity": "sha512-OI5dswqipmlYfyL3k/YMm7mbERlh4Bd1KuKdMHpeoVD1iVxqxaTMKleB4qaA2mbQZ6/zMNSxCXv9M9P/YbqTuQ==",
+      "dependencies": [
+        "inherits"
+      ]
+    },
+    "napi-macros@2.2.2": {
+      "integrity": "sha512-hmEVtAGYzVQpCKdbQea4skABsdXW4RUh5t5mJ2zzqowJS2OyXZTU1KhDVFhx+NlWZ4ap9mqR9TcDO3LTTttd+g=="
+    },
     "node-fetch@2.7.0": {
       "integrity": "sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==",
       "dependencies": [
         "whatwg-url"
       ]
+    },
+    "node-gyp-build@4.8.4": {
+      "integrity": "sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==",
+      "bin": true
     },
     "on-exit-leak-free@2.1.2": {
       "integrity": "sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA=="

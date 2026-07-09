@@ -97,7 +97,7 @@ Phase 4 is COMPLETE: there is one resolution model — content-addressed
 The last parallel addressing scheme — the `pattern:<createRef>` patternId and
 the pattern meta cell — is now also retired (patternId is the same content
 address in a second, non-canonical encoding). See
-[pattern-id-retirement](./pattern-id-retirement.md): `{ identity, symbol }` is
+[pattern-id-retirement](../history/specs/pattern-id-retirement.md): `{ identity, symbol }` is
 the only pattern pointer; cold recovery recompiles from the `pattern:<identity>`
 source docs.
 

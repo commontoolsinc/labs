@@ -17,3 +17,8 @@ Compatibility surfaces:
 
 When a skill is conceptually referenced in docs, prefer `skills/<name>/` unless
 the reference is specifically about Claude or Codex runtime behavior.
+
+Skills are live documentation in the sense of `docs/README.md`: they must track
+the current system. If a change alters behavior a skill describes, update the
+skill in the same change (see `docs/development/skill-authoring.md` and the
+audit mechanisms in `docs/development/skill-audit.md`).

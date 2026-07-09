@@ -2,7 +2,7 @@
  * Identity-shape benchmarks for value hashing and deep-freeze.
  *
  * Motivated by CPU profiles of the default-app integration test
- * (docs/development/performance/default-app-note-create.md): in steady-state
+ * (docs/history/development/performance/default-app-note-create.md): in steady-state
  * note creation, ~29% of runtime-worker busy CPU is value hashing
  * (`feedPlainObject` + wasm SHA-256) and ~12% is deep-freeze walks
  * (`deepFreeze()`/`isDeepFrozen()`).
