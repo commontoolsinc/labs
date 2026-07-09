@@ -13,6 +13,7 @@ import {
 } from "../src/cfc/label-representation.ts";
 import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-label-metadata-protection",
@@ -664,6 +665,110 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
     } finally {
       await runtime.dispose();
     }
+  });
+
+  describe("legacy maxConfidentiality fit on committed labels (policy evaluation off)", () => {
+    // The default `cfcPolicyEvaluation: "off"` decision path for schema
+    // `maxConfidentiality` froze the pre-dial deepEqual membership check. A
+    // consumed read whose stored label carries a COMMITTED clause must still
+    // fit a plaintext ceiling naming the same principal (digest the
+    // candidate and compare — same-form matching), and still reject a
+    // ceiling naming someone else (codex/cubic P1 on this PR).
+    const seedCommitted = async (runtime: Runtime, name: string) => {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(spaceB, name, undefined, seed).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: spaceB,
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "classified" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [{
+                  type: CFC_ATOM_TYPE.User,
+                  subject: commitCfcFieldValue("did:key:alice"),
+                }],
+              },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+    };
+
+    const writeUnderCeiling = async (
+      runtime: Runtime,
+      sourceName: string,
+      targetName: string,
+      ceiling: unknown[],
+    ) => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(spaceB, sourceName, undefined, tx);
+      expect((source.getRaw() as { secret?: string }).secret).toBe(
+        "classified",
+      );
+      const targetSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "string",
+            ifc: { maxConfidentiality: ceiling } as never,
+          },
+        },
+        required: ["out"],
+      };
+      const target = runtime.getCell<{ out: string }>(
+        spaceB,
+        targetName,
+        targetSchema as never,
+        tx,
+      );
+      target.set({ out: "derived" });
+      tx.prepareCfc();
+      return await tx.commit();
+    };
+
+    it("fits a committed User clause under a plaintext ceiling naming the same principal", async () => {
+      const { runtime } = makeRuntime(undefined);
+      try {
+        await seedCommitted(runtime, "legacy-fit-source");
+        const result = await writeUnderCeiling(
+          runtime,
+          "legacy-fit-source",
+          "legacy-fit-target",
+          [userAtom],
+        );
+        expect(result.ok).toBeDefined();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("still rejects a committed clause under a ceiling naming another principal", async () => {
+      const { runtime } = makeRuntime(undefined);
+      try {
+        await seedCommitted(runtime, "legacy-reject-source");
+        const result = await writeUnderCeiling(
+          runtime,
+          "legacy-reject-source",
+          "legacy-reject-target",
+          [{ type: CFC_ATOM_TYPE.User, subject: "did:key:bob" }],
+        );
+        expect(result.error?.message).toContain("maxConfidentiality failed");
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 
   it("uses cfcAtom helpers consistently (guard against constant drift)", () => {

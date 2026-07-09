@@ -175,6 +175,20 @@ const transformValue = (
 };
 
 /**
+ * The commitment-normal form of one atom (or any label value): every
+ * commitment-classified field replaced by its digest marker; identity on
+ * already-committed and unclassified values. Injective across distinct
+ * atoms (digest collision resistance) and FORM-INSENSITIVE: a plaintext
+ * atom and its committed persisted form normalize identically. This is the
+ * canonical identity `cfcIntegrityWitnessKey` keys coherent-floor witnesses
+ * by, so the same logical evidence consumed in plaintext form from one leaf
+ * and committed form from another (the documented mixed migration period)
+ * counts as ONE shared witness.
+ */
+export const cfcCommitmentNormalForm = (atom: unknown): unknown =>
+  transformValue(atom, undefined, []);
+
+/**
  * The Stage 1 persist transform: every commitment-classified source-bearing
  * atom field in `label` (confidentiality clauses — including `anyOf`
  * alternatives and atoms nested inside other atoms — and integrity atoms)

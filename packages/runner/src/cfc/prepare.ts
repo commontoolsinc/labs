@@ -60,7 +60,11 @@ import {
 import { evaluateExchangeRules } from "./exchange-eval.ts";
 import { createTxCfcGrantResolver } from "./grants.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
-import { transformCfcLabelForCrossSpacePersist } from "./label-representation.ts";
+import {
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  transformCfcLabelForCrossSpacePersist,
+} from "./label-representation.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   type ReadClassSelection,
@@ -3068,10 +3072,24 @@ const verifyInputRequirements = (
     if (maxConfidentiality !== undefined && gating.length > 0) {
       // The pre-dial membership check, kept verbatim as the `off` path (and
       // the `observe` decision path — observe evaluates but never decides
-      // differently).
+      // differently) — EXCEPT for commitment forms (inv-12 Stage 1): a
+      // consumed label whose clause was persisted committed
+      // (`User({digestOf: H(alice)})`) must still fit a plaintext ceiling
+      // naming the same principal, independent of the policy-evaluation
+      // dial — the deepEqual freeze predates the representation transform
+      // and would otherwise reject legitimately-protected cross-space
+      // entries (codex/cubic P1 on the Stage 1 PR). Pre-Stage-1 data
+      // carries no markers, so the extra arm is byte-inert for it; the
+      // containment pre-check keeps the dominant plaintext path a single
+      // deepEqual per pair.
       const fitsLegacy = (confidentiality: readonly unknown[]): boolean =>
         confidentiality.every((value) =>
-          maxConfidentiality.some((allowed) => deepEqual(allowed, value))
+          maxConfidentiality.some((allowed) =>
+            deepEqual(allowed, value) ||
+            ((containsCfcFieldCommitment(value) ||
+              containsCfcFieldCommitment(allowed)) &&
+              commitmentAwareEquals(allowed, value))
+          )
         );
       const mode = tx.getCfcState().policyEvaluationMode;
       const ok = gating.every((read) => {
@@ -4753,8 +4771,67 @@ export const prepareBoundaryCommit = (
       // The carried label view is author-influenceable; gate runtime-minted
       // evidence atoms unless a builtin authored the link write (audit S4
       // review).
+      //
+      // "Can only add" must hold under LONGEST-PREFIX shadowing too (cubic
+      // P1 on the Stage 1 PR): within the link component a more-specific
+      // entry REPLACES its ancestor for reads at/below it, so a crafted
+      // carried entry at a sub-path the authoritative state does not cover
+      // would swap the ancestor's confidentiality for the view's — a
+      // weakening through the very loop meant to be additive. Each carried
+      // entry therefore JOINS the label of the most-specific AUTHORITATIVE
+      // entry covering its path (the source-path label from
+      // `derivePersistedLinkLabel`, or the nearest re-derived-view
+      // ancestor-or-equal), so what it shadows rides along and the entry is
+      // at least as restrictive as the resolution it displaces. Both halves
+      // join: confidentiality is the leak the shadow would open; integrity
+      // at the covered path (e.g. the LinkReference provenance) would
+      // otherwise silently drop out of sub-path reads.
+      const authoritativeEntries: Array<{
+        path: readonly string[];
+        label: IFCLabel;
+      }> = [
+        ...(result.label !== undefined && hasLabelValues(result.label)
+          ? [{ path: [] as readonly string[], label: result.label }]
+          : []),
+        ...(rederivedView?.entries ?? []).map((entry) => ({
+          path: canonicalizeLogicalPath(entry.path),
+          label: entry.label,
+        })),
+      ];
+      const authoritativeCoverFor = (
+        entryPath: readonly string[],
+      ): IFCLabel | undefined => {
+        let best: { path: readonly string[]; label: IFCLabel } | undefined;
+        for (const auth of authoritativeEntries) {
+          if (!isPrefix(auth.path, entryPath)) continue;
+          if (best === undefined || auth.path.length > best.path.length) {
+            best = auth;
+          } else if (auth.path.length === best.path.length) {
+            // Source-path label and a re-derived root entry share path [];
+            // join defensively rather than pick one.
+            best = {
+              path: best.path,
+              label: mergeLabels(best.label, auth.label),
+            };
+          }
+        }
+        return best?.label;
+      };
       for (const entry of input.cfcLabelView?.entries ?? []) {
-        pushGatedLinkEntry(entry);
+        const gated = gateRuntimeMintedIntegrity(
+          cloneLabel(entry.label),
+          linkIdentity,
+        );
+        if (!hasLabelValues(gated)) {
+          continue;
+        }
+        const entryPath = canonicalizeLogicalPath(entry.path);
+        const cover = authoritativeCoverFor(entryPath);
+        persistedLabelEntries.push(markLinkEntry({
+          path: [...targetPath, ...entryPath],
+          label: cover !== undefined ? mergeLabels(cover, gated) : gated,
+          origin: "link",
+        }));
       }
     }
 

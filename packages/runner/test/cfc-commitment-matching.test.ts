@@ -7,8 +7,14 @@ import {
 } from "@commonfabric/api/cfc";
 import { atomEntails, matchAtomPattern } from "../src/cfc/atom-pattern.ts";
 import { clauseSubsumes } from "../src/cfc/clause.ts";
-import { atomsOutsideCeiling } from "../src/cfc/observation.ts";
-import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
+import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloorCoherently,
+} from "../src/cfc/observation.ts";
+import {
+  commitCfcFieldValue,
+  transformCfcLabelForCrossSpacePersist,
+} from "../src/cfc/label-representation.ts";
 import {
   dischargeMaterialRiskAtoms,
   schemaWithInjectionSafeAnnotations,
@@ -274,6 +280,47 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
         [committedUserAtom],
       ) as { ifc?: { confidentiality?: unknown[] } };
       expect(annotated.ifc?.confidentiality).toContainEqual(committedUserAtom);
+    });
+  });
+
+  describe("coherent integrity witnesses across representation forms", () => {
+    // §8.10.3 coherent floors demand ONE shared witness atom across every
+    // consumed leaf. During the documented mixed migration period the same
+    // logical evidence can be consumed in plaintext form from one leaf and
+    // committed form from another; the witness KEY must normalize across
+    // forms or a genuinely shared witness is rejected (codex/cubic P2 on
+    // this PR).
+    const plainRole = {
+      type: CFC_ATOM_TYPE.HasRole,
+      principal: reader,
+      space: "did:key:spaceA",
+      role: "reader",
+    };
+    const committedRole = transformCfcLabelForCrossSpacePersist({
+      integrity: [plainRole],
+    }).integrity![0];
+    const requirement = [{ type: CFC_ATOM_TYPE.HasRole, role: "reader" }];
+
+    it("coheres one witness consumed in plaintext and committed forms", () => {
+      expect(
+        cfcIntegritySatisfiesFloorCoherently(
+          [[plainRole], [committedRole]],
+          requirement,
+        ),
+      ).toBe(true);
+    });
+
+    it("still rejects genuinely different witnesses across forms", () => {
+      const otherRole = { ...plainRole, principal: stranger };
+      const committedOther = transformCfcLabelForCrossSpacePersist({
+        integrity: [otherRole],
+      }).integrity![0];
+      expect(
+        cfcIntegritySatisfiesFloorCoherently(
+          [[plainRole], [committedOther]],
+          requirement,
+        ),
+      ).toBe(false);
     });
   });
 

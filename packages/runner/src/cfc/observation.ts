@@ -7,7 +7,10 @@ import {
   cfcLabelPathPrefixMatches,
   type CfcLabelView,
 } from "./label-view-core.ts";
-import { commitmentAwareEquals } from "./label-representation.ts";
+import {
+  cfcCommitmentNormalForm,
+  commitmentAwareEquals,
+} from "./label-representation.ts";
 import { atomEntails, conceptGuard, matchAtomPattern } from "./atom-pattern.ts";
 import type { TrustResolver } from "./trust.ts";
 import {
@@ -256,6 +259,16 @@ export const cfcIntegritySatisfiesFloor = (
  * keyed by `scope.valueRef` drop `scope.projection` first — two projections
  * of the same bound value are the same witness. `null` when the atom does
  * not satisfy the requirement.
+ *
+ * Keys hash the COMMITMENT-NORMAL form (inv-12 Stage 1): a plaintext atom
+ * and its committed persisted form (`{digestOf}` fields) normalize
+ * identically, so the same logical evidence consumed in both representation
+ * forms across leaves — the documented mixed migration period — counts as
+ * one shared witness instead of two (codex/cubic P2 on the Stage 1 PR).
+ * Keys are evaluation-local (compared only within one coherence check), so
+ * re-keying every atom by its normal form is invisible beyond that
+ * coalescing; injectivity across distinct atoms is the digest's collision
+ * resistance.
  */
 export const cfcIntegrityWitnessKey = (
   required: unknown,
@@ -269,9 +282,9 @@ export const cfcIntegrityWitnessKey = (
   ) {
     const scope = { ...(actual as { scope: Record<string, unknown> }).scope };
     delete scope.projection;
-    return hashStringOf({ ...actual, scope });
+    return hashStringOf(cfcCommitmentNormalForm({ ...actual, scope }));
   }
-  return hashStringOf(actual);
+  return hashStringOf(cfcCommitmentNormalForm(actual));
 };
 
 /**
