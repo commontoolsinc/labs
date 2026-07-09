@@ -24,7 +24,7 @@ import { preparedDigestFor } from "../src/cfc/canonical.ts";
 import type { PreparedDigestInput } from "../src/cfc/types.ts";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { clauseAlternatives, clausesEqual } from "../src/cfc/clause.ts";
+import { clausesEqual } from "../src/cfc/clause.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-grant-records");
 
