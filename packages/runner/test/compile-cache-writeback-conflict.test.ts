@@ -5,7 +5,11 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import { setCompileCacheRuntimeVersionForTesting } from "../src/compilation-cache/cell-cache.ts";
+import {
+  setCompileCacheRuntimeVersionForTesting,
+  sourceDocKey,
+  WRITE_TARGET_EDGE_SYNC_SCHEMA,
+} from "../src/compilation-cache/cell-cache.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // Shared-server helper (same shape as cell-cache.test.ts): several managers —
@@ -140,6 +144,130 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       expect(warm).toBeDefined();
       expect(runtimeC.patternManager.getCompileCacheStats().byIdentityHits)
         .toBeGreaterThan(0);
+    } finally {
+      restoreVersion();
+      await runtimeC?.dispose();
+      await runtimeB?.dispose();
+      await runtimeA.dispose();
+      await smC?.close();
+      await smB?.close();
+      await smA.close();
+      await server.close();
+    }
+  });
+});
+
+// CT-1848: the write-target pre-sync carries the one-hop edge selector, so
+// the per-edge element docs (the derived docs the cell layer hoists each
+// `imports[i]` into) are client-known BEFORE the re-write. A schema-less
+// pre-sync normalizes to the rejecting selector and delivers only the root
+// doc; in the browser the re-write then touches the element docs blind and
+// the engine reveals the conflicts one per attempt (the CT-1824 loop,
+// converged only by the retry budget). NOTE: the blind-conflict itself does
+// not reproduce in-process (this fixture's flows warm the element docs some
+// other way — same limitation as the healing test above); the conflict-free
+// attempt-1 property is verified live on the browser rig. What IS pinned
+// here, differentially, is the selector semantics the fix rides on: the
+// edge-schema sync materializes the element docs into a cold replica, the
+// schema-less sync does not.
+describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
+  it("edge-schema sync delivers element docs to a cold replica; schema-less does not", async () => {
+    const server = newSharedServer();
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "import { double } from './dep.ts';",
+            "export default pattern<{ value: number }>(({ value }) => {",
+            "  return { result: double(value) };",
+            "});",
+          ].join("\n"),
+        },
+        {
+          name: "/dep.ts",
+          contents: [
+            "import { lift } from 'commonfabric';",
+            "export const double = lift((x: number) => x * 2);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const restoreVersion = setCompileCacheRuntimeVersionForTesting(
+      "ct1848-version-A",
+    );
+    const smA = SharedServerStorageManager.connectTo(server, { as: signer });
+    const runtimeA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+    });
+    let smB: SharedServerStorageManager | undefined;
+    let runtimeB: Runtime | undefined;
+    let smC: SharedServerStorageManager | undefined;
+    let runtimeC: Runtime | undefined;
+    try {
+      const txA = runtimeA.edit();
+      const compiled = await runtimeA.patternManager.compilePattern(program, {
+        space,
+        tx: txA,
+      });
+      const ref = runtimeA.patternManager.getArtifactEntryRef(compiled)!;
+      await runtimeA.patternManager.flushCompileCacheWrites();
+      await txA.commit();
+      await smA.synced();
+
+      // Arm 1 — COLD replica, sync the entry under the one-hop edge schema
+      // (what the write-target pre-sync now uses): the element docs arrive.
+      smB = SharedServerStorageManager.connectTo(server, { as: signer });
+      runtimeB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smB,
+      });
+      const edgeCell = runtimeB.getCell(
+        space,
+        sourceDocKey(ref.identity),
+        WRITE_TARGET_EDGE_SYNC_SCHEMA,
+      );
+      await edgeCell.sync();
+      const parentUri = edgeCell.getAsNormalizedFullLink().id;
+      const providerB = smB.open(space);
+      // deno-lint-ignore no-explicit-any
+      const rawParent = (providerB as any).get(parentUri);
+      expect(rawParent).toBeDefined();
+      const importsRaw = rawParent?.value?.imports;
+      expect(Array.isArray(importsRaw)).toBe(true);
+      expect((importsRaw as unknown[]).length).toBeGreaterThan(0);
+      const elementIds: string[] = [];
+      for (
+        const el of importsRaw as { "/"?: { "link@1"?: { id?: string } } }[]
+      ) {
+        const id = el?.["/"]?.["link@1"]?.id;
+        expect(typeof id).toBe("string");
+        elementIds.push(id!);
+        // deno-lint-ignore no-explicit-any
+        expect((providerB as any).get(id)).toBeDefined();
+      }
+
+      // Arm 2 — another COLD replica, schema-less sync (the pre-fix
+      // behavior): the root arrives, the element docs do NOT. This is the
+      // differential that makes the edge selector load-bearing.
+      smC = SharedServerStorageManager.connectTo(server, { as: signer });
+      runtimeC = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smC,
+      });
+      const bareCell = runtimeC.getCell(space, sourceDocKey(ref.identity));
+      await bareCell.sync();
+      const providerC = smC.open(space);
+      // deno-lint-ignore no-explicit-any
+      expect((providerC as any).get(parentUri)).toBeDefined();
+      for (const id of elementIds) {
+        // deno-lint-ignore no-explicit-any
+        expect((providerC as any).get(id)).toBeUndefined();
+      }
     } finally {
       restoreVersion();
       await runtimeC?.dispose();
