@@ -4,9 +4,11 @@ import {
   type AtomPatternBindings,
   conceptGuard,
   instantiateAtomPattern,
+  isAtomVarPlaceholder,
   matchAtomPattern,
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   type CfcConfClause,
   clauseAlternatives,
@@ -63,6 +65,36 @@ export type RuleFiring = {
   readonly dropped?: unknown;
 };
 
+/**
+ * The point-query a `policyState` guard sends to the grant resolver: the
+ * guard's concrete `kind` plus every guard field that is concrete under the
+ * current binding environment (a literal value, or a pattern whose variables
+ * are all bound). Fields still carrying free variables are omitted — they are
+ * bound FROM the resolved grant's fields, not queried by.
+ */
+export type CfcGrantResolverQuery = {
+  readonly kind: string;
+  readonly fields: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Resolves durable grant records for a `policyState` guard (spec §8.12.7
+ * route 2a). Supplied on the context by the RUNNER (the evaluator itself
+ * stays pure — all I/O lives in this closure): the runner-side implementation
+ * computes candidate content addresses from `(kind + bound fields)`, point-
+ * reads them fail-closed (§4.9.3 discipline: absent/malformed/unsynced
+ * resolve nothing, never enumeration), verifies each record against its
+ * address, filters revoked/expired grants against the runner clock, and
+ * returns the surviving grants EXPANDED one fact per audience entry, in
+ * canonical (content-address, then audience) order — so evaluation stays
+ * deterministic. The evaluator matches the guard pattern against the returned
+ * facts exactly as atom patterns match. A resolver that throws fails the
+ * guard CLOSED (the rule does not fire); it must not crash evaluation.
+ */
+export type CfcGrantResolver = (
+  query: CfcGrantResolverQuery,
+) => readonly unknown[];
+
 export type ExchangeEvalContext = {
   /**
    * Integrity evidence available to rule guards BEYOND the label's own
@@ -75,6 +107,11 @@ export type ExchangeEvalContext = {
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
   readonly actingPrincipal?: string;
+  /**
+   * Grant lookup for `policyState` guards (route 2a). Absent → every
+   * policyState guard is unsatisfied and its rule never fires (fail closed).
+   */
+  readonly grantResolver?: CfcGrantResolver;
 };
 
 export type ExchangeEvalResult = {
@@ -111,6 +148,89 @@ type RuleMatch = {
   readonly clauseIndex: number;
   readonly alternative: unknown;
   readonly bindings: AtomPatternBindings;
+};
+
+/**
+ * Builds the {@link CfcGrantResolverQuery} for one `policyState` guard
+ * pattern under one binding environment, or `undefined` when the pattern is
+ * not queryable (fail closed): not a plain record, or its `kind` is not a
+ * concrete non-empty string (boot validation enforces this for configured
+ * policies; the evaluator re-checks because patterns are `unknown` and a
+ * hand-built snapshot must not bypass the discipline). Query fields are the
+ * guard fields that INSTANTIATE under the environment — a bound variable or a
+ * fully concrete value; fields with free variables are omitted (they bind
+ * FROM the grant). Explicit-`undefined` fields (absence requirements) are
+ * omitted from the query; the full pattern re-match below still enforces
+ * them against the returned facts.
+ */
+const grantGuardQuery = (
+  pattern: unknown,
+  bindings: AtomPatternBindings,
+): CfcGrantResolverQuery | undefined => {
+  if (
+    !isRecord(pattern) || Array.isArray(pattern) ||
+    isAtomVarPlaceholder(pattern)
+  ) {
+    return undefined;
+  }
+  const kind = (pattern as { kind?: unknown }).kind;
+  if (typeof kind !== "string" || kind.length === 0) {
+    return undefined;
+  }
+  const fields: Record<string, unknown> = {};
+  for (const [key, fieldPattern] of Object.entries(pattern)) {
+    if (key === "kind" || fieldPattern === undefined) continue;
+    const instantiated = instantiateAtomPattern(fieldPattern, bindings);
+    if (instantiated !== null) {
+      fields[key] = instantiated.value;
+    }
+  }
+  return { kind, fields };
+};
+
+/**
+ * Extends each environment through one `policyState` guard pattern: per
+ * environment, the resolver is point-queried with the guard's kind + bound
+ * fields, and the guard pattern then matches the returned grant facts
+ * exactly as atom patterns match a pool (binding free variables from grant
+ * fields, unifying already-bound ones). Everything fails CLOSED to "no
+ * extension" — no resolver, an unqueryable pattern, a resolver throw, or no
+ * matching fact all leave the guard unsatisfied for that environment.
+ */
+const extendThroughGrantGuard = (
+  environments: readonly AtomPatternBindings[],
+  pattern: unknown,
+  resolver: CfcGrantResolver | undefined,
+): AtomPatternBindings[] => {
+  if (resolver === undefined) return [];
+  const next: AtomPatternBindings[] = [];
+  for (const environment of environments) {
+    const query = grantGuardQuery(pattern, environment);
+    if (query === undefined) continue;
+    let facts: readonly unknown[];
+    try {
+      facts = resolver(query);
+    } catch {
+      // Fail closed: a resolver failure (storage error, malformed state)
+      // must never fire the rule — and must not abort evaluation of the
+      // other rules/clauses either. The runner-side resolver diagnoses
+      // through the transaction before rethrowing/soft-failing.
+      continue;
+    }
+    if (!Array.isArray(facts)) continue;
+    for (
+      const extended of matchAtomPatternAgainstAtoms(
+        pattern,
+        facts,
+        environment,
+      )
+    ) {
+      if (!next.some((existing) => deepEqual(existing, extended))) {
+        next.push(extended);
+      }
+    }
+  }
+  return next;
 };
 
 /**
@@ -189,6 +309,21 @@ const matchRule = (
           environments,
           pattern,
           ctx.boundary ?? [],
+        );
+        if (environments.length === 0) break;
+      }
+      if (environments.length === 0) continue;
+
+      // policyState guards (§8.12.7 route 2a): durable grant records resolved
+      // through the context's grant resolver. Evaluated LAST so the query
+      // benefits from every binding the other guards established (the
+      // point-query fields). Fail closed throughout — see
+      // `extendThroughGrantGuard`.
+      for (const pattern of rule.preCondition?.policyState ?? []) {
+        environments = extendThroughGrantGuard(
+          environments,
+          pattern,
+          ctx.grantResolver,
         );
         if (environments.length === 0) break;
       }
