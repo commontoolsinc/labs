@@ -40,6 +40,7 @@ import {
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
+  CfcAddress,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -204,6 +205,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * observe held, not-yet-loaded state. This is the safe composition of
    * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
    * wiring the self-removing `finally` by hand at each call site.
+   *
+   * `work` must eventually settle (resolve or reject). A chain that never
+   * settles stays registered and keeps `Cell.pull()`/`idle()` from observing
+   * convergence until the scheduler's convergence bound trips, so a caller that
+   * wraps an external `sync()` should ensure it cannot hang unbounded.
    */
   trackUntilSettled(work: Promise<unknown>): void;
 
@@ -961,6 +967,15 @@ export interface IExtendedStorageTransaction
    * flows into the digest input is immutable.
    */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+
+  /**
+   * Declares a list-coordinator result container (filter/flatMap) whose
+   * `structure` label must be re-derived from this transaction's flow-join J
+   * (its selection criteria) — independent of whether the container value is
+   * written this tx. See `CfcTxState.structureContainers`. The address is
+   * `deepFreeze()`d on entry.
+   */
+  recordCfcStructureContainer(address: CfcAddress): void;
 
   /**
    * Runs CFC boundary verification for this transaction and records the
