@@ -29,10 +29,18 @@ a diagnosis.
 
 | Question | Harness | Telemetry |
 |---|---|---|
-| Scaling/contention ("slow with N users / M options") | `deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --options=10 --users=5 --rounds=3` (or `--cases=1x2,3x5,10x5`, `--quick`) | JSON output alone is a complete artifact. Add `OTEL_ENABLED=true OTEL_SERVICE_NAME=perf-<pattern>-<harness>-<yyyymmdd> OTEL_EXPORTER_OTLP_ENDPOINT=<collector>` to also export |
-| Cross-runtime regression | `packages/patterns/lunch-poll/multi-user.test.tsx` | same env vars |
-| Real-browser latency | `packages/patterns/integration/lunch-poll-vote.test.ts` (two browsers) | server: `OTEL_ENABLED=true`; browser: `localStorage["telemetryEnabled"]="true"` per profile, then reload |
+| Scaling/contention ("slow with N users / M options") | `deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --options=10 --users=5 --rounds=3` (or `--cases=1x2,3x5,10x5`, `--quick`) | JSON output alone is a complete artifact. To also export spans: `OTEL_DENO=true OTEL_SERVICE_NAME=perf-<pattern>-<harness>-<yyyymmdd> OTEL_EXPORTER_OTLP_ENDPOINT=<collector> deno run --unstable-otel -A …` — the harness has no OTel init of its own, so export rides **Deno's native OTel** (`OTEL_ENABLED` does nothing here) |
+| Cross-runtime regression | `packages/patterns/lunch-poll/multi-user.test.tsx` | same `OTEL_DENO`/`--unstable-otel` mechanism |
+| Real-browser latency | `packages/patterns/integration/lunch-poll-vote.test.ts` (two browsers) | server: `OTEL_ENABLED=true` (toolshed inits its own SDK — a *different* mechanism from the headless rows); browser: `localStorage["telemetryEnabled"]="true"` per profile, then reload |
 | Manual multi-user poke | N browser profiles | same localStorage flag; drive headlessly with `agent-browser eval` |
+
+Headless-run caveats (verified 2026-07-09): exports carry `memory.*` spans
+only — `ct.*` metrics and scheduler spans need the OTel bridge, which
+currently attaches only in the browser shell and bg-piece workers, so
+scheduler numbers come from the harness JSON / pull diagnostics. The
+`space.did` span attribute is an opaque DID and the harness JSON does not
+record it — find your run's spaces by grouping the run's `memory.transact`
+spans by `space.did`, scoped to your `OTEL_SERVICE_NAME`.
 
 The single `telemetryEnabled` localStorage flag gates the debugger, marker
 forwarding over IPC, preflight markers, **and** browser OTel export (via the
@@ -48,9 +56,8 @@ toolshed same-origin relay `/api/telemetry/v1/traces`) — one switch.
 - `cf piece set`/`call` do not recompute — run `cf piece step` before reading
   computed values.
 
-Use readable space names in harness runs (the diagnose tool's
-`lunch-poll-diagnostics-5u-…` convention): opaque `did:key` spaces make runs
-unfindable in any backend.
+Always use a distinctive `perf-*` `OTEL_SERVICE_NAME` per run — the service
+name is what makes a run findable in the backend (space DIDs are opaque).
 
 ## Step 2 — Compute four numbers
 
@@ -93,7 +100,11 @@ They route the whole investigation:
 - Slow or conflicted `memory.transact` → take its `commit.seq` + `space.did`
   → `cf inspect history/diff/value-at` shows *what* was written and by whom;
   `cf inspect hot`/`conflicts` show contention shape (healthy store = zero
-  stale-reads).
+  stale-reads). This join applies to **toolshed-backed** sessions (local dev
+  stack, or staging via `--remote`) — the diagnose harness's
+  `StandaloneMemoryServer` store is non-persistent, so for harness runs the
+  "what was written" half comes from the harness JSON's action-run traces
+  instead.
 - Scheduler anomaly in exported metrics → the same session's pull
   diagnostics carry the detail (same markers, second consumer).
 - Stored vs rendered mismatch → `cf inspect overlay` (ground truth) vs
