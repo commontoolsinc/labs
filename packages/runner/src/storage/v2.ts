@@ -1473,7 +1473,15 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return { serverSeq: 0, snapshots: [] };
     }
-    const { session } = await this.sessionHandle();
+    const { client, session } = await this.sessionHandle();
+    // Optional capability, negotiated at hello: a server that did not
+    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
+    // older build may not know the message at all) — treat as "no snapshots"
+    // so the resume path degrades to running fresh, instead of depending on
+    // a capability-specific RPC the server never offered.
+    if (client.serverFlags?.persistentSchedulerState !== true) {
+      return { serverSeq: 0, snapshots: [] };
+    }
     return await session.listSchedulerActionSnapshots(query);
   }
 
@@ -1973,6 +1981,17 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return Promise.resolve({ ok: {} });
     }
+    // Known-unsupported server (hello already negotiated): drop the
+    // observation without batching. The flush-time gate below is the
+    // authoritative check; this just spares every action commit the
+    // batch/flush round once the session has established that scheduler
+    // payloads have nowhere to go.
+    if (
+      this.#sessionClient !== undefined &&
+      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
+    ) {
+      return Promise.resolve({ ok: {} });
+    }
     const localSeq = this.#nextLocalSeq++;
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
@@ -2038,7 +2057,27 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = this.pushCommit(localSeq, [], commit, undefined)
+    const promise = (async (): Promise<
+      Result<Unit, StorageTransactionRejected>
+    > => {
+      // Persistent scheduler state is an OPTIONAL capability negotiated at
+      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
+      // different scheduler flags must still share memory data. A server that
+      // did not advertise it strips scheduler payloads at `transact`, so this
+      // observation-only commit would arrive as zero operations and be
+      // TERMINALLY rejected ("memory v2 commit requires at least one
+      // operation") — and the flush-before-semantic-commit ordering in
+      // pushCommit would then spread that rejection to every subsequent
+      // semantic commit (event handlers drop their writes without retry;
+      // the whole session's writes starve). Fail closed instead: drop the
+      // observations — the feature degrades to flag-off semantics (resumes
+      // re-run fresh) while semantic traffic proceeds untouched.
+      const { client } = await this.sessionHandle();
+      if (client.serverFlags?.persistentSchedulerState !== true) {
+        return { ok: {} };
+      }
+      return await this.pushCommit(localSeq, [], commit, undefined);
+    })()
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
