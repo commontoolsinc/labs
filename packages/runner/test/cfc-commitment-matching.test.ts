@@ -1,10 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFC_ATOM_TYPE, CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import {
-  atomEntails,
-  matchAtomPattern,
-} from "../src/cfc/atom-pattern.ts";
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  cfcAtom,
+} from "@commonfabric/api/cfc";
+import { atomEntails, matchAtomPattern } from "../src/cfc/atom-pattern.ts";
 import { clauseSubsumes } from "../src/cfc/clause.ts";
 import { atomsOutsideCeiling } from "../src/cfc/observation.ts";
 import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
@@ -288,7 +289,12 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
       ).toEqual([committedMarker]);
       expect(
         atomsOutsideCeiling(
-          [{ anyOf: [committedMarker, { type: CFC_ATOM_TYPE.User, subject: reader }] }],
+          [{
+            anyOf: [committedMarker, {
+              type: CFC_ATOM_TYPE.User,
+              subject: reader,
+            }],
+          }],
           ["cfc:label-read-failed"],
         ).length,
       ).toBe(1);

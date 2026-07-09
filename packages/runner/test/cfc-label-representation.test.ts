@@ -184,7 +184,12 @@ describe("CFC label representation transform (inv-12 Stage 1)", () => {
     it("commits HasRole principal+space and ExternalIngest audience in integrity", () => {
       const transformed = transformCfcLabelForCrossSpacePersist({
         integrity: [
-          { type: CFC_ATOM_TYPE.HasRole, principal: alice, space: bob, role: "reader" },
+          {
+            type: CFC_ATOM_TYPE.HasRole,
+            principal: alice,
+            space: bob,
+            role: "reader",
+          },
           cfcAtom.externalIngest("email", alice, "123", "digest"),
         ],
       });
