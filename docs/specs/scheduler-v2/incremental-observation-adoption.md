@@ -86,30 +86,67 @@ receiver adopts a prefix and runs the not-yet-covered suffix; both converge
 to the same values, so the overlap is wasted CPU at worst, never
 incorrectness.
 
-## 4. Transport
+## 4. Transport (concretized against the traced push chain)
 
-- The client already attaches `schedulerObservation` /
-  `schedulerObservationBatch` to `transact` commits; the server extracts
-  and persists them during `applyCommit`. The change: when the server
-  pushes a commit's doc updates to a subscribed session, it includes the
-  commit's observations — **only** for sessions whose protocol handshake
-  carries `persistentSchedulerState` (the flags surface already exists:
-  `getMemoryProtocolFlags()`), and **not** to the writer's own session
-  (echo suppression; the writer has live state).
-- Payload: the same slim encoded observation the store keeps (volatile
-  fields normalized out), plus the accepted commit seq as `observedAtSeq` —
-  identical shape to a boot-listing row, so the client-side validation and
-  apply paths are shared with reload.
-- The client surfaces received observations alongside the doc updates it
-  hands the runtime's storage subscription; the scheduler consumes them at
-  the §3 point.
-- Scoping: observations ride only commits the session receives anyway, in
-  spaces it is authorized to read. The boot listing already exposes the
-  whole space's snapshot rows to any session that can list, so this adds no
-  new disclosure class; the addresses inside `reads` are opaque doc ids.
-  Flag for the standing CFC review pass regardless (existence-channel
-  precedent). Observations remain scheduling metadata — never authorization
-  or label evidence.
+The subscription push is a **batched doc diff**, not a commit stream: the
+server accumulates dirty doc ids per space (`markSpaceDirty` on accepted
+commits), flushes on a short timer, re-evaluates each session's watch set,
+and pushes `SessionEffectMessage{effect: SessionSync}` where `SessionSync =
+{fromSeq, toSeq, upserts: [{id, scope, seq, doc}], removes}` — per-doc
+snapshots with per-doc seqs, no operations, no per-commit boundaries.
+Observations currently exist only on the inbound path (extracted from
+commits in `applyCommit` and persisted); observation-only commits carry no
+operations, mark nothing dirty, and are invisible to the fan-out.
+
+- **Server:** retain the client's `persistentSchedulerState` handshake flag
+  per connection (mirroring the existing `#syncSchemaTable` negotiation —
+  the precedent that push payloads may be flag-conditioned per connection).
+  When building a session's `SessionSync` with non-empty upserts and both
+  the connection flag and the global flag are on, query the snapshot store
+  for observation rows with `commit_seq` in the sync's `(fromSeq, toSeq]`
+  window (the store already denormalizes `commit_seq` and `observed_at_seq`
+  per row; the existing listing query gains a commit-seq window filter) and
+  attach them as a new optional `SessionSync.observations` field, decoded
+  the same way a boot-listing row is. Echo: the fan-out already skips the
+  writer's own doc revisions via `DirtyOrigin{sessionId, seq}`; skip
+  observation rows the same way (rows whose `commit_seq` matches an origin
+  seq from the receiving session). Sourcing from the store makes the push
+  idempotent and batching-agnostic: a re-pushed or coalesced window carries
+  the same rows.
+- **Client:** zero memory-client changes — the field rides `SessionSync`
+  through `WatchView.applySync`'s emit. The runner's `applySessionSync`
+  (storage/v2.ts) applies the upserts, fires the existing `integrate`
+  notification (synchronous scheduler invalidation), then fires a new
+  `scheduler-observations` storage notification carrying the rows; the
+  scheduler facade handles it by calling `adoptRemoteObservations` — still
+  inside the synchronous turn, before the deferred `execute()` dispatch.
+  This is exactly the §3 window: writes applied → readers marked dirty →
+  adoption clears the dirt the writer already resolved → dispatch sees the
+  remainder.
+- **Oracles:** per-doc seq currency reads the replica's
+  `record.confirmed.seq` (already maintained per doc on integrate); the
+  pending-local-write check reads the provider's pending-commit set (the
+  same source `idleWithPendingCommits` uses). Both surface as small
+  optional provider methods.
+- **Adoptable rows only:** live adoption applies only `status: "success"`
+  rows without durable dirty/stale markers — a dirty or failed row must
+  not wake or re-run work on receivers; those semantics belong to the
+  reload path, which owns marker handling.
+- **No-op runs:** an observation-only or no-op commit triggers no push
+  itself (nothing became dirty), but because the attach step sources rows
+  from the store by seq window, such observations ride the NEXT push whose
+  window covers their commit seq. A cascade's later stages can therefore
+  lag one window behind their data — the receiver may redundantly run a
+  cheap laggard (measured: the map coordinator's reconcile) before its
+  observation arrives; the per-element ops adopt in-window (§3's benign
+  race, value-identical no-op).
+- Scoping: observations ride only sync pushes the session receives anyway,
+  in spaces it is authorized to read. The boot listing already exposes the
+  whole space's snapshot rows to any session that can list, so this adds
+  no new disclosure class; the addresses inside `reads` are opaque doc
+  ids. Flag for the standing CFC review pass regardless (existence-channel
+  precedent). Observations remain scheduling metadata — never
+  authorization or label evidence.
 
 ## 5. What this buys, concretely
 

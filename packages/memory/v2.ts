@@ -367,6 +367,15 @@ export interface SessionSync {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
+  // Scheduler observation rows for commits inside this sync's
+  // (fromSeq, toSeq] window, so subscribers can ADOPT the writer's action
+  // runs instead of re-running them
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
+  // Present only when both the server flag and the receiving connection's
+  // negotiated persistentSchedulerState flag are on. Same row shape as the
+  // scheduler.snapshot.list result; `observation` is intentionally
+  // `unknown` — the runner owns validation.
+  observations?: SchedulerActionSnapshotResult[];
 }
 
 export interface WatchSetResult {
@@ -541,6 +550,12 @@ export interface SchedulerActionSnapshotQuery {
   pieceId?: string;
   processGeneration?: number;
   actionId?: string;
+  // Commit-seq window (exclusive since, inclusive through): rows whose
+  // carrying commit landed inside a subscription sync's (fromSeq, toSeq]
+  // window — the incremental-adoption fan-out query. Rows with a NULL
+  // commit seq never match a window filter.
+  sinceCommitSeq?: number;
+  throughCommitSeq?: number;
   limit?: number;
   cursor?: SchedulerActionSnapshotCursor;
 }

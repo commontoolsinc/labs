@@ -781,6 +781,17 @@ export class Scheduler {
     for (const snapshot of snapshots) {
       const observation = snapshot.observation;
       if (!isSchedulerActionObservation(observation)) continue;
+      // Live adoption applies only clean successful runs: a dirty or failed
+      // row must not wake or re-run work on receivers (marker semantics
+      // belong to the reload path).
+      if (
+        observation.status !== "success" ||
+        snapshot.directDirtySeq !== undefined ||
+        snapshot.staleSeq !== undefined ||
+        snapshot.unknownReason !== undefined
+      ) {
+        continue;
+      }
       // Computations only: effects render locally, and event handlers only
       // run at their origin.
       if (observation.actionKind !== "computation") continue;
@@ -1697,6 +1708,31 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
+    if (notification.type === "scheduler-observations") {
+      // Subscription-carried observations arrive AFTER their sync's
+      // integrate notification (same synchronous turn): the writes have been
+      // applied and their readers marked dirty; adoption now clears the dirt
+      // the writer already resolved, before the deferred dispatch runs.
+      // Payload validation happens inside adoptRemoteObservations.
+      this.adoptRemoteObservations(
+        notification.observations.map((row) => ({
+          observation: row.observation as SchedulerActionObservation,
+          ...(row.directDirtySeq !== undefined
+            ? { directDirtySeq: row.directDirtySeq }
+            : {}),
+          ...(row.staleSeq !== undefined ? { staleSeq: row.staleSeq } : {}),
+          ...(row.unknownReason !== undefined
+            ? { unknownReason: row.unknownReason }
+            : {}),
+        })),
+        {
+          readsCurrentAtSeq: notification.seqCurrentAtOrBelow,
+          hasPendingLocalWriteOverlapping:
+            notification.hasPendingWriteOverlapping,
+        },
+      );
+      return;
+    }
     processStorageNotification(
       this.storageNotificationState,
       notification,

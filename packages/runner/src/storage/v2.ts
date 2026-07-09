@@ -2574,6 +2574,50 @@ class SpaceReplica implements ISpaceReplica {
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
     }
+    // Subscription-carried scheduler observations — other clients' committed
+    // action runs for this sync window. Handed to the scheduler AFTER the
+    // integrate invalidation above (same synchronous turn, before the
+    // deferred dispatch), so adoption clears exactly the dirt these writes
+    // caused. See incremental-observation-adoption.md §4.
+    if (
+      type === "integrate" &&
+      sync.observations !== undefined &&
+      sync.observations.length > 0 &&
+      getPersistentSchedulerStateConfig()
+    ) {
+      this.#subscription.next({
+        type: "scheduler-observations",
+        space: this.#space,
+        observations: sync.observations,
+        seqCurrentAtOrBelow: (reads, seq) => {
+          for (const read of reads) {
+            // Cross-space reads cannot be verified against this replica:
+            // refuse adoption (conservative; cross-space adoption is out of
+            // scope).
+            if (read.space !== this.#space) return false;
+            const record = this.#docs.get(
+              docKey(read.id as URI, read.scope as CellScope | undefined),
+            );
+            if (record !== undefined && record.confirmed.seq > seq) {
+              return false;
+            }
+          }
+          return true;
+        },
+        hasPendingWriteOverlapping: (reads) => {
+          for (const read of reads) {
+            if (read.space !== this.#space) continue;
+            const record = this.#docs.get(
+              docKey(read.id as URI, read.scope as CellScope | undefined),
+            );
+            if (record !== undefined && record.pending.length > 0) {
+              return true;
+            }
+          }
+          return false;
+        },
+      } as StorageNotification);
+    }
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
 

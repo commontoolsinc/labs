@@ -1722,6 +1722,11 @@ export const listSchedulerActionSnapshots = (
     pieceId?: string;
     processGeneration?: number;
     actionId?: string;
+    // Commit-seq window (exclusive since, inclusive through) for the
+    // incremental-adoption fan-out; rows with a NULL commit seq never
+    // match a window filter.
+    sinceCommitSeq?: number;
+    throughCommitSeq?: number;
     limit?: number;
     cursor?: SchedulerActionSnapshotCursor;
   } = {},
@@ -1761,6 +1766,14 @@ export const listSchedulerActionSnapshots = (
       )
       AND (:action_id IS NULL OR s.action_id = :action_id)
       AND (
+        :since_commit_seq IS NULL OR
+        COALESCE(s.commit_seq, o.commit_seq) > :since_commit_seq
+      )
+      AND (
+        :through_commit_seq IS NULL OR
+        COALESCE(s.commit_seq, o.commit_seq) <= :through_commit_seq
+      )
+      AND (
         :cursor_owner_space IS NULL OR
         s.owner_space > :cursor_owner_space OR
         (
@@ -1789,6 +1802,8 @@ export const listSchedulerActionSnapshots = (
     piece_id: options.pieceId ?? null,
     process_generation: options.processGeneration ?? null,
     action_id: options.actionId ?? null,
+    since_commit_seq: options.sinceCommitSeq ?? null,
+    through_commit_seq: options.throughCommitSeq ?? null,
     cursor_owner_space: cursorOwnerSpace,
     cursor_piece_id: options.cursor?.pieceId ?? null,
     cursor_process_generation: options.cursor?.processGeneration ?? null,

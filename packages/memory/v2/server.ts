@@ -340,6 +340,12 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  // Negotiated persistentSchedulerState: when both sides carry the flag,
+  // subscription sync pushes to this connection include the scheduler
+  // observation rows of the sync window, so its runtimes can ADOPT other
+  // clients' action runs instead of re-running them
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
+  #persistentSchedulerState = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -546,6 +552,9 @@ class Connection {
       const serverFlags = parseMemoryProtocolFlags(response.flags);
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
+      this.#persistentSchedulerState =
+        clientFlags?.persistentSchedulerState === true &&
+        serverFlags?.persistentSchedulerState === true;
       this.#ready = true;
       return;
     }
@@ -675,6 +684,7 @@ class Connection {
         sessionId,
         dirtyIds,
         dirtyOrigins,
+        { adoptionObservations: this.#persistentSchedulerState },
       );
       if (this.#closed) {
         return;
@@ -2224,6 +2234,7 @@ export class Server {
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    options?: { adoptionObservations?: boolean },
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
@@ -2244,7 +2255,9 @@ export class Server {
           const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
           const hasPendingCatchUp =
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
-          const finishCatchUp = (sync: SessionSync): SessionEffectMessage => {
+          const finishCatchUp = async (
+            sync: SessionSync,
+          ): Promise<SessionEffectMessage> => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
                 session.caughtUpLocalSeq,
@@ -2255,6 +2268,13 @@ export class Server {
               }
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
+            await this.attachAdoptionObservations(
+              space,
+              sessionId,
+              sync,
+              dirtyOrigins,
+              options,
+            );
             return {
               type: "session/effect",
               space,
@@ -2272,7 +2292,7 @@ export class Server {
             const serverSeq = toSeq ??
               Engine.serverSeq(await this.openEngine(space));
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
-            return finishCatchUp({
+            return await finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq: serverSeq,
@@ -2374,7 +2394,7 @@ export class Server {
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            return finishCatchUp({
+            return await finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq,
@@ -2408,12 +2428,82 @@ export class Server {
           if (isEmptySync(sync)) {
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          return finishCatchUp(sync);
+          return await finishCatchUp(sync);
         } finally {
           span.end();
         }
       },
     );
+  }
+
+  // Attach the sync window's scheduler observation rows so the receiving
+  // client can ADOPT other clients' committed action runs instead of
+  // re-running them (incremental-observation-adoption.md §4). Only for
+  // connections that negotiated persistentSchedulerState, only when the sync
+  // carries doc changes, echo-suppressed like the doc upserts (rows whose
+  // carrying commit originated from the receiving session are skipped).
+  // Adoption is an optimization: a failed observation query must never fail
+  // the sync push.
+  private async attachAdoptionObservations(
+    space: string,
+    sessionId: string,
+    sync: SessionSync,
+    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    options?: { adoptionObservations?: boolean },
+  ): Promise<void> {
+    if (
+      options?.adoptionObservations !== true ||
+      !getPersistentSchedulerStateConfig() ||
+      sync.upserts.length === 0 ||
+      sync.toSeq <= sync.fromSeq
+    ) {
+      return;
+    }
+    try {
+      const engine = await this.openEngine(space);
+      const page = Engine.listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: sync.fromSeq,
+        throughCommitSeq: sync.toSeq,
+      });
+      let ownCommitSeqs: Set<number> | undefined;
+      if (dirtyOrigins !== undefined) {
+        for (const origin of dirtyOrigins.values()) {
+          if (origin.sessionId === sessionId) {
+            (ownCommitSeqs ??= new Set()).add(origin.seq);
+          }
+        }
+      }
+      const observations = page.snapshots
+        .filter((snapshot) =>
+          snapshot.commitSeq === null ||
+          !ownCommitSeqs?.has(snapshot.commitSeq)
+        )
+        .map((snapshot) => ({
+          observationId: snapshot.observationId,
+          commitSeq: snapshot.commitSeq,
+          observedAtSeq: snapshot.observedAtSeq,
+          observation: snapshot.observation,
+          ...(snapshot.directDirtySeq !== undefined
+            ? { directDirtySeq: snapshot.directDirtySeq }
+            : {}),
+          ...(snapshot.staleSeq !== undefined
+            ? { staleSeq: snapshot.staleSeq }
+            : {}),
+          ...(snapshot.unknownReason !== undefined
+            ? { unknownReason: snapshot.unknownReason }
+            : {}),
+        }));
+      // A window with more rows than one page (nextCursor set) sends the
+      // first page only; receivers degrade to running the remainder.
+      if (observations.length > 0) {
+        sync.observations = observations;
+      }
+    } catch (error) {
+      console.warn(
+        "attachAdoptionObservations failed; sync pushed without observations",
+        error,
+      );
+    }
   }
 
   markSpaceDirty(
