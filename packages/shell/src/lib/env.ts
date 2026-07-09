@@ -66,11 +66,12 @@ export const EXPERIMENTAL = {
   eagerSourceAnnotation:
     flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
       (ENVIRONMENT === "development"),
-  // Auto-update the space-root system pattern in place. Default off until CI
-  // golden-replay coverage exists; the home root needs the second flag too.
-  systemPatternAutoUpdate: flagValue(
-    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE,
-  ),
+  // Auto-update the NON-HOME space-root system pattern (default-app) in place.
+  // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
+  // can force it off. The home root stays off — it carries real user data and
+  // needs the second flag, pending the stable-addressing audit.
+  systemPatternAutoUpdate:
+    flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
   systemPatternAutoUpdateHome: flagValue(
     EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE,
   ),
