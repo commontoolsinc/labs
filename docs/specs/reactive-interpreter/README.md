@@ -24,8 +24,10 @@ The reactive interpreter is a **graph-compression pass**. It collapses each
 maximal connected region of pure nodes into a single synthetic **segment**
 action that evaluates that region's computation *in memory* — one action, and
 (for result-tree-only outputs) zero extra documents — while leaving every
-effectful, handler, control, and list-coordinator node exactly as the legacy
-builder produced it.
+effectful, handler, and list-coordinator node exactly as the legacy builder
+produced it. Control ops (`ifElse`/`when`/`unless`) fuse into segments too,
+with demand-driven branch evaluation that preserves their conditional
+subscription exactly (§7.1).
 
 The single most important property: **it is not a new execution model.** The
 scheduler remains the reactive engine. A segment is an ordinary scheduler node;
@@ -297,8 +299,8 @@ swaps its coordinator for the inline one (§11). A **cost gate** refuses when
 fewer than two node-actions would collapse and no collection inlined (1→1 is
 neutral). It records an honest **census** (attempted / interpreted /
 fallbackByReason / nodeOpsSeen / nodeOpsCollapsed / boundariesByKind /
-transientCollections) so engagement is measured, never assumed from "it didn't
-error."
+transientCollections / controlsFused / controlOpsGated) so engagement is
+measured, never assumed from "it didn't error."
 
 ---
 
@@ -309,9 +311,8 @@ error."
 is a pure function: a layered topological assignment plus union-find over
 same-layer pure↔pure edges.
 
-- **Boundaries** (`boundaryKindOf`): `effect`; `control` (legacy branch-link
-  semantics, kept verbatim — native emission is future, §14); `collection`
-  unless admitted transient (§11);
+- **Boundaries** (`boundaryKindOf`): `effect`; `control` unless admitted
+  fused (§7.1); `collection` unless admitted transient (§11);
   `pattern` unless admitted value-consumed (§6.3); `unresolved-leaf` (missing
   impl); `gated-leaf` (untrusted or capability-bearing, §6.2). Everything else
   is pure.
@@ -329,6 +330,57 @@ handler's input construct references the very cell it writes — a binding, not 
 read-after-write), and under pull scheduling the hazard is re-run churn, not
 value correctness. This stays an open, measured item (see design-history,
 D-F4-DEFER).
+
+### 7.1 Native control emission (fused controls)
+
+`ifElse`/`when`/`unless` (and the ternaries that lower to them) exist to
+provide **conditional subscription**: the legacy builtin depends on the
+predicate only and forwards a *link* to the taken branch, so writes to the
+untaken branch's inputs wake nothing. Fusing a control into a segment
+preserves exactly that — the merge **branches**, it is never a flat
+union-read region:
+
+- **R-CONTROL-READS** (the invariant, oracle-enforced): a fused segment's
+  run reads at most `predicate-inputs ∪ active-branch-inputs`. Because
+  subscription is the committed reactivity log, the short-circuiting
+  executor gets conditional subscription for free.
+- **Demand-driven evaluation** (§10): a control-fused segment evaluates
+  from its written aliases by memoized demand; a `control` op demands its
+  predicate, then only the taken side. Branch-gated inputs are carved out
+  of the eager input read into per-key lazy reads, and the argument is
+  read **per path** — an untaken branch's argument link is never
+  dereferenced.
+- **Gated ops**: an op consumed only through fused-control branch positions
+  (transitively — computed by a monotone forced/gated fixpoint over
+  branch-tagged consumption edges) has its alias write **elided**: its
+  documents vanish and it evaluates only when its side is taken. Everything
+  externally consumed (result tree, effects, boundaries, other segments)
+  stays forced.
+- **Reference passthrough**: a retained fused control whose taken side is a
+  bare ref (external cell, argument path, upstream alias, unproduced
+  internal) forwards the resolved **link** via a live cell handle
+  (identity-only resolution) — write-through and flip-retargeting behave
+  exactly like the legacy builtin's branch link. Computed sides materialize
+  by value.
+- **Fail-closed admission** (`findFusableControls`): a control that
+  declares static scope routing stays a boundary; a **possibly-retained**
+  control whose branch value closure contains structured producers
+  (construct / collection / pattern) stays a boundary — legacy writes a
+  link-bearing tree there (per-position scope annotations, live sub-links)
+  that a value write would flatten. Bare refs and scalar chains
+  (leaf/expr/interpolate/access) are safe; value-consumed controls are
+  exempt (their branch values live in memory only).
+- Control ops also no longer disqualify collection **elements** or
+  value-consumed children (eager both-sides evaluation there — value and
+  error parity with the legacy child, whose branch lifts also both run),
+  with one exception: the materialized inline **filter** refuses
+  control-bearing predicates until its membership-taint machinery is
+  calibrated for branched predicates.
+
+Under pull scheduling legacy is *already* quiet on untaken-branch writes
+(no demand flows into the unselected branch), so the win is documents and
+action-count, not avoided recompute — and the trigger-count oracle's job is
+guarding that fusion never regresses that quietness.
 
 ---
 
@@ -389,6 +441,13 @@ runtime errors (for scheduler `onError` parity).
   `undefined` downstream and records an error, exactly matching legacy per-node
   containment. A structural "cannot interpret this here" (`NotInterpretedHere`)
   propagates to the dispatch → legacy fallback; it is never silently isolated.
+- **Demand mode** (control-fused segments, §7.1): ops evaluate by memoized
+  demand from the segment's written aliases (`demandRoots`); a `control` op
+  demands its predicate plus the taken side only. Ops reachable only through
+  an untaken side never run — no reads, no errors, no scope. Lazy input
+  thunks and per-path argument reads land inside the demanding op's scope
+  bracket. For control-free ROGs, demand over the topological order is
+  byte-identical to the eager pass, which elements and probes stay on.
 - **`resolve`** dereferences a `ValueRef`: `const` → its value; `argument` →
   navigate the argument; `opOut`/`internal`/`external` → navigate the produced/
   seeded value; `result` → the dispatch's materialized result cell.
@@ -460,14 +519,19 @@ nodes. Key properties:
 - **Read isolation**: each element effect reads only its slot, in its own tx →
   structurally pointwise CFC. The coordinator's own container reads are
   identity-only (link-resolution probes), keeping its flow-join empty.
-- **`filter` membership taint (batch-first-pass)**: which elements survive is a
-  secret, and the container's *shape* must carry the join of every considered
-  element's label — even when the result is `[]`, and even though later
-  membership diffs never touch the container root again. So an element's **first**
-  predicate evaluation runs inline in the coordinator's own tx (the content read
-  is deliberately journaled — it *is* the taint), handing subsequent changes to
-  the pointwise per-element effects. Coarse first stamp, pointwise refinement —
-  exactly legacy's labelling contract.
+- **`filter` membership taint (S16 structure-container contract)**: which
+  elements survive is a secret, and the container's *shape* must carry the
+  join of the selection **criteria** — even when the result is `[]`. The
+  coordinator declares its container (`tx.recordCfcStructureContainer`), and
+  the membership stamp re-derives from its per-tx join **every reconcile**
+  (replace-from-criteria, decoupled from value writes — growth and no-write
+  re-stamps land through the declaration). An element's **first** predicate
+  evaluation runs inline in the coordinator's own tx so its genuine reads
+  (element content only when the predicate consumes it) are the stamp;
+  subsequent changes go through the pointwise per-element effects, whose
+  predicate-result reads keep feeding the join. The list root read is
+  value-class (never probe-marked — a followRef would join every element's
+  per-slot link-origin label, the index-only over-taint).
 - **Monotonic degrade**: scoped lists/elements, runtime op swaps, and resumed
   coordinators degrade to the *real* legacy builtin (identical signature +
   container cause, so the handoff is seamless). Once degraded, stay degraded.
@@ -538,10 +602,18 @@ Consequences that fall out of the architecture:
   class-aware integrity-meet (`deriveFlowJoin`); label *views* carry path labels
   but never derive them (the union-raises-integrity trap).
 - **Materialized collections** get pointwise labels structurally (per-element
-  tx), and `filter` membership taint is handled by the batch-first-pass (§11.2).
-  Transient collections are sound by construction: the segment's journaled deep
-  list read joins element labels into the per-tx join, and there is no
-  materialized container shape to stamp.
+  tx); `filter` membership taint rides the S16 structure-container contract —
+  the coordinator declares its container (`recordCfcStructureContainer`) and
+  the membership stamp re-derives every reconcile from exactly the criteria
+  reads in its per-tx join (the first-pass predicate evaluation reads element
+  content only when the predicate consumes it; the list root read is
+  value-class, never a followRef). Transient collections are sound by
+  construction: the segment's journaled deep list read joins element labels
+  into the per-tx join, and there is no materialized container shape to stamp.
+- **Fused controls narrow soundly**: the untaken branch is never read, so its
+  label never joins — the same join a legacy reader gets (the legacy result
+  link dereferences into the taken branch only). Which branch was selected is
+  covered by the predicate's label, read in the same bracket.
 
 ---
 
@@ -561,28 +633,13 @@ the missing case always falls back to legacy or to a preserved boundary.
   pure-method stdlib called from pattern code could lower to IR (interpreted
   natively, capability-gated, differential-oracle-verified); today they are
   opaque leaves. `call` is `NotInterpretedHere`.
-- **Native control emission** (§7, §9). `ifElse`/`when`/`unless` (and lowered
-  ternaries) are preserved boundaries: the interpreter never fuses a conditional
-  into a segment, so a computed predicate or branch stays its own node/document
-  (`(a + b) ? c : d` keeps the `a + b` lift; the branch lifts of
-  `((a + b) ? (c + d) : (e + f)) * 2` are five nodes today). Fusing a whole
-  conditional expression into **one** node that reads only the *active* side is
-  sound and is the largest remaining doc/reactivity win — but it is strictly more
-  than transient collections: the emitter must lower **data-dependent control
-  flow** into the segment action (evaluate the predicate, then execute only the
-  taken branch), *not* a flat union-read region. The enabling fact is that
-  subscription is the committed reactivity log (a node subscribes to what it
-  *read*, §10 / action-run.ts), so a short-circuiting executor gets conditional
-  subscription for free — **provided** it never reads both branches. The one
-  invariant a future implementer must not regress: **the fused control node's
-  read-set must never exceed `predicate-inputs ∪ active-branch-inputs`** —
-  reading both branches to "simplify" silently converts a demand-driven op into
-  an eager one, the exact property these builtins exist to provide. Branch
-  *results* compose as references — materialize where a read consumes the value,
-  forward the link (as legacy `ifElse` does, if-else.ts) where the result is a
-  write-back binding target — so the win is not limited to pure branches. See
-  design-history **D-CONTROL-EMISSION** for the full reasoning (including why
-  "don't merge" became "merge, but branch").
+- **Control-emission residuals** (§7.1). Native control emission is built;
+  three refusal classes remain deliberately conservative: retained controls
+  with structured (construct/collection/pattern) branch closures stay
+  boundaries (a value write would flatten legacy's link-bearing tree);
+  scope-declaring control nodes stay boundaries; and the materialized inline
+  filter refuses control-bearing predicates pending membership-taint
+  calibration. Each is a measured follow-up, not a correctness gap.
 - **`flatMap` materialized inline** (§11.2) — stays legacy by decision.
 - **Write-back (F4) partition edges** (§7) — deferred pending a measured
   conflict ratchet.
@@ -628,6 +685,9 @@ and `measure-map.test.ts`):
 | `map`, N=10 | documents | 54 | 24 | −56% |
 | | scheduler nodes | 46 | 26 | −43% |
 | | wall | ~89ms | ~31ms | −65% |
+| `((a+b)>0 ? c+d : e+f)*2` | actions per taken-branch write | 10 | 2 | −80% |
+| (fused control, §7.1) | actions per predicate flip | 15 | 2 | −87% |
+| | actions per untaken-branch write | 0 | 0 | parity |
 
 Engagement on the authored corpus: ~71% of patterns interpret, ~59% of
 node-ops collapse. Integration suites are flat-to-slightly-faster (fixed compile/

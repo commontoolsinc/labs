@@ -309,9 +309,16 @@ true — don't force it green.**
 
 ---
 
-## Part VII — Control emission (designed, deferred)
+## Part VII — Control emission (built — spec §7.1)
 
 ### D-CONTROL-EMISSION — conditional expressions can fuse to one node, but the merge must *branch*
+
+> **Status: built.** Demand-driven evaluation + branch-gated alias elision +
+> lazy per-key/per-path input reads + reference-passthrough handles landed
+> behind the flag, with the trigger-count oracle
+> (`control-emission.test.ts`) enforcing R-CONTROL-READS. The sections below
+> record the reasoning that got there; post-build findings follow at the
+> end of this Part.
 
 Control ops (`ifElse`/`when`/`unless`, and the ternaries and `&&`/`||` that lower
 to them) are preserved boundaries today (spec §7, §9). That makes any *computed*
@@ -377,14 +384,17 @@ read-set must never exceed `predicate-inputs ∪ active-branch-inputs`. Reading
 both branches to "simplify" the emitter reintroduces exactly the eager-subscription
 regression of wrong turn 1.
 
-**Open sizing question before building:** whether the current lowering already
-computes the *inactive* branch eagerly (each branch lift is a standalone action
-subscribed to its own inputs; the `ifElse` only gates *propagation*, not the
-branch action's own scheduling — subject to whatever liveness/demand gating the
-scheduler applies). If it does, native emission saves documents *and* wasted
-recompute; if liveness already elides dead branches, it saves documents only.
-Measure this against the authored corpus (predicate/branch document share,
-inactive-branch recompute counts) before committing the emitter work.
+**Open sizing question before building** — ANSWERED during the build: under
+pull scheduling, legacy is *already* quiet on untaken-branch writes (with a
+standing sink, an untaken-input write re-runs **zero** actions — no demand
+flows into the unselected branch lift). So native emission saves documents
+and per-propagation action count (taken-branch writes 10→2, predicate flips
+15→2 on the oracle pattern), **not** avoided recompute — and the trigger
+oracle's real job is guarding that a union-read merge never *regresses* the
+quietness legacy already has. A corollary worth remembering: the first
+harness draft measured a **dormant** graph (no sink → pull-based scheduling
+maintains no standing subscriptions → every write appeared "quiet" and every
+value appeared frozen); reactive-behavior oracles must install a sink first.
 
 **Lesson (L-DEMAND-DRIVEN-IS-THE-POINT): when interpreting a conditional, the
 value is the easy part — the subscription shape is the contract.** A replacement
@@ -393,6 +403,43 @@ and no *value* differential will catch it (it's a reactivity/subscription
 property, like the membership-taint bug was a label property — see
 L-DIFFERENTIAL-IS-NECESSARY-NOT-SUFFICIENT). The oracle for this work is a
 subscription/trigger-count differential, not a result differential.
+
+### Post-build findings (D-CONTROL-EMISSION)
+
+- **D-CONTROL-RETAINED-STRUCTURED — retained + structured branches refuse.**
+  The first cut fused every control. The scope oracle
+  (`ifElse selected VNode branch materializes map over session-derived
+  list`) failed: a retained control whose branch is an `h(...)` construct
+  referencing a map boundary had its alias written as a **value**,
+  flattening legacy's link-bearing tree — per-position scope annotations
+  and live sub-links gone. Admission now refuses possibly-retained controls
+  whose branch *value closure* contains construct/collection/pattern
+  producers; bare refs (link forward) and scalar chains (exactly one value
+  doc in legacy too) fuse. Value-consumed controls are exempt — their
+  branch values never touch a doc. The render-conditional idiom
+  (`ifElse(empty, <span/>, <div>{rows}</div>)`) therefore stays a boundary
+  for now; fusing it needs construct emission that writes links-in-trees,
+  a measured follow-up.
+- **D-CONTROL-FILTER-PREDICATES — the inline filter keeps refusing
+  branched predicates.** Unlocking controls in elements let control-bearing
+  filter predicates onto the inline coordinator, whose membership-taint
+  machinery is calibrated for straight-line predicates; the pointwise
+  oracle disagreed. Map coordinators, transient collections, and inlined
+  children take the unlock.
+- **L-MERGE-BREAKS-YOUR-ORACLES — a catch-up merge can invalidate flag-on
+  assumptions the same day they're formed.** Mid-build, the three pointwise
+  filter failures bisected NOT to the control work but to that morning's
+  main merge: #4391 rebuilt the legacy filter's membership-taint mechanism
+  (identity-only input reads; structure label re-derived from the per-tx J
+  via `recordCfcStructureContainer` every reconcile), and CI validates
+  flag-off only — so the inline filter silently implemented a superseded
+  contract. The port surfaced a subtle observation-class rule the inline
+  map had already documented but the inline filter violated: **the list
+  root read must be value-class (unmarked)** — probe-marking it becomes a
+  followRef observation post-C1 and joins every element's per-slot
+  link-origin label into J (the index-only over-taint). When a flag-on
+  suite goes red right after a merge, bisect against the merge commit
+  before assuming the new feature is at fault.
 
 ---
 
@@ -412,3 +459,7 @@ Milestones, for archaeology (branch `claude/priceless-rubin-89ad5e`, PR #4514):
 - Coverage/test-glob fix; fabric-safe snapshot helper.
 - Watch-drain on replica close (#4590) — fixed the map/list resume exit-leak; the
   filter variant is a tracked follow-up.
+- Native control emission (W8): red-first trigger oracle (`b056b0197`),
+  demand-driven fusion + gating + reference passthrough (`711b10d3e`),
+  element/child unlock + retained-structured and filter-predicate gates
+  (`5f4cf0415`), inline-filter S16 structure-label port (`537614732`).
