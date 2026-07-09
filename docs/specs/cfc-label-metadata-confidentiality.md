@@ -134,10 +134,13 @@ revisited when invariant 12 is implemented." This is that revisit:
    overlap the SC-4/SC-8 envelope-population design (same machinery — build
    once). The interim rule, implementable now without new persisted metadata:
    a source-bearing field's observation label = the source identity's
-   confidentiality when known, else the source value's **effective
-   confidentiality** (the label the entry itself guards), else fail closed —
-   computable from the entry in hand. `type`/`kind`/presence stay public per
-   the default profile.
+   confidentiality when known, else — **for derived-component entries only** —
+   the entry's own effective confidentiality (sound because the §8.9.2
+   conservative join already contains each influencing source's
+   confidentiality; declared/authored entries carry no such containment
+   guarantee and stay fail-closed), else fail closed. Computable from the
+   entry in hand, no cross-space resolution. `type`/`kind`/presence stay
+   public per the default profile.
 4. **Runtime enforcement reads stay outside the consumed set** (verifier
    reads are not observations — §8.10.1), unchanged. What changes is that
    *application-visible* projections of label metadata always pass through

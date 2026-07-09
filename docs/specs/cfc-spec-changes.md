@@ -393,8 +393,10 @@ entries and sigil-carried label views, with same-form matching semantics.
 Initial-assignment exception to record: `Space.id` in confidentiality clauses
 stays `public` because §4.9.3's ACL point query must dereference it. Also:
 §4.6.4.2 gains the interim population rule (source-identity confidentiality
-when known, else the entry's own effective confidentiality, else fail closed
-— computable without new persisted metadata), and SC-6's "revisit when
+when known; else, for **derived-component** entries only, the entry's own
+effective confidentiality — sound because the §8.9.2 conservative join
+contains each influencing source's confidentiality; else fail closed —
+computable without new persisted metadata), and SC-6's "revisit when
 invariant 12 is implemented" note is discharged by the introspection-surface
 observation channel. `open`.
 
