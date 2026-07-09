@@ -14,6 +14,7 @@ import {
   type CfcPrefixProvenanceSummary,
   prepareBoundaryCommit,
 } from "../src/cfc/mod.ts";
+import { parsePointer } from "../../memory/v2/path.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-prefix-provenance");
 
@@ -483,6 +484,57 @@ describe("CFC prefix-provenance summary (direct gate probes)", () => {
       expect(summary.prefixGatedReads).toBe(
         width * summary.writes[0].prefixGatedReads,
       );
+
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("per-write paths RFC-6901-escape property names containing '/' and '~'", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      await seedLabeledDoc(runtime, "d4-esc-endorsed", "endorsed", {
+        integrity: [FLOOR_ATOM],
+      });
+      // A raw join would emit "/a/b~c" — indistinguishable from the nested
+      // path ["a", "b~c"]. The summary must escape per RFC 6901 so a
+      // consumer can map writes[].path back to the exact schema entry.
+      const trickyField = "a/b~c";
+      const trickySchema = {
+        type: "object",
+        properties: {
+          [trickyField]: {
+            type: "string",
+            ifc: { requiredIntegrity: [FLOOR_ATOM] },
+          },
+        },
+      } as JSONSchema;
+
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "d4-esc-endorsed", undefined, tx).get();
+      const sink = runtime.getCell(
+        signer.did(),
+        "d4-esc-sink",
+        trickySchema,
+        tx,
+      );
+      sink.set({ [trickyField]: "x" });
+
+      const summaries: CfcPrefixProvenanceSummary[] = [];
+      const reasons = prepareBoundaryCommit(tx, {
+        onPrefixProvenance: (summary) => summaries.push(summary),
+      });
+      expect(reasons).toEqual([]);
+      expect(summaries.length).toBe(1);
+      const summary = summaries[0];
+      expect(summary.protectedWrites).toBe(1);
+      expect(summary.writes.length).toBe(1);
+      expect(summary.writes[0].path).toBe("/a~1b~0c");
+      // Round-trip: the pointer decodes to the exact schema-entry segments.
+      expect(parsePointer(summary.writes[0].path)).toEqual([trickyField]);
 
       tx.abort();
     } finally {

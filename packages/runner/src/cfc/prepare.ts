@@ -2655,7 +2655,11 @@ export type CfcPrefixBoundSource =
 export type CfcPrefixProvenanceWrite = {
   /** Document id of the protected write's target. */
   id: string;
-  /** Protected schema-entry path, pointer-style (e.g. "/out"). */
+  /**
+   * Protected schema-entry path as an RFC 6901 JSON pointer (e.g. "/out";
+   * "" is the root; "~"/"/" in property names escape as "~0"/"~1"), so
+   * consumers can recover the exact segments via parsePointer.
+   */
   path: string;
   boundSource: CfcPrefixBoundSource;
   /** Gated reads within this write's D4 prefix (post-S7-exemption). */
@@ -2979,7 +2983,13 @@ const verifyInputRequirements = (
       if (provenance.writes.length < CFC_PREFIX_PROVENANCE_MAX_WRITES) {
         provenance.writes.push({
           id: target.id,
-          path: `/${entry.path.join("/")}`,
+          // RFC 6901 escaping, so a consumer can round-trip the pointer to
+          // the exact schema-entry segments even when a property name
+          // contains "/" or "~" (parsePointer is the inverse). Deliberately
+          // NOT logicalPathToPointer: entry.path is already value-relative,
+          // and its canonicalization would strip a root property literally
+          // named "value".
+          path: encodePointer(entry.path),
           boundSource,
           prefixGatedReads: gating.length,
           txGlobalGatedReads,
