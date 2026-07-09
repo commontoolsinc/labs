@@ -66,8 +66,8 @@ const entry = (
  * The design §2 initial-assignment table, one entry per classified field.
  * Rationales quoted from the design doc; revisable per family.
  */
-export const LABEL_FIELD_CLASSIFICATION: readonly LabelFieldClassificationEntry[] =
-  Object.freeze([
+export const LABEL_FIELD_CLASSIFICATION:
+  readonly LabelFieldClassificationEntry[] = Object.freeze([
     // "Caveat.source, nested caveat sources → commitment — consumed by
     // equality-shaped evidence binding; the audit's named leak."
     entry({ type: CFC_ATOM_TYPE.Caveat }, ["source"], "commitment"),

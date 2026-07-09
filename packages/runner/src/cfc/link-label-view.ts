@@ -1,4 +1,8 @@
-import { isLinkRef, linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";

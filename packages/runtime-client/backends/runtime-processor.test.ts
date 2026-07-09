@@ -1196,7 +1196,7 @@ describe("system-pattern update wiring", () => {
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
-  it("fails closed on the raw meta:\"cfc\" seam (inv-12 Stage 0 / SC-25)", () => {
+  it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
     const ref: CellRef = {
       id: "of:cfc-raw-meta-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],

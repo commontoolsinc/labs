@@ -1433,9 +1433,12 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
   });
 
   it("returns unchanged subtrees by reference (copy-on-write)", () => {
-    const viewless = { nested: { list: [1, 2, 3] }, link: {
-      "/": { [LINK_V1_TAG]: { id: "of:c", space: "did:key:test", path: [] } },
-    } };
+    const viewless = {
+      nested: { list: [1, 2, 3] },
+      link: {
+        "/": { [LINK_V1_TAG]: { id: "of:c", space: "did:key:test", path: [] } },
+      },
+    };
     expect(redactSigilCfcLabelViewsForDisplay(viewless)).toBe(viewless);
 
     const mixed = { untouched: viewless.nested, tagged: linkWithView("of:d") };
