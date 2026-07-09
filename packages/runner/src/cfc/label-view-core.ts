@@ -222,7 +222,7 @@ export const mergeCfcLabelViews = (
     }
     for (const entry of view.entries) {
       const path = canonicalizeCfcLogicalPath(entry.path);
-      const key = `${entry.observes ?? ""} ${cfcLabelViewPathKey(path)}`;
+      const key = `${entry.observes ?? ""}\u0000${cfcLabelViewPathKey(path)}`;
       const existing = byKey.get(key);
       byKey.set(key, {
         path,

@@ -2550,6 +2550,14 @@ type WritePrefixBounds = {
     },
     path: readonly string[],
   ): number;
+  /**
+   * Stage-0 instrumentation only (docs/specs/cfc-value-level-provenance.md
+   * §6): whether the transaction logged ANY value-surface write attempt.
+   * False means the order source was absent or empty — every +Infinity
+   * bound then degrades for lack of a clock, not for lack of an
+   * overlapping attempt. Never consulted by enforcement.
+   */
+  sawLoggedAttempts(): boolean;
 };
 
 const buildWritePrefixBounds = (
@@ -2611,8 +2619,107 @@ const buildWritePrefixBounds = (
       }
       return bound === -Infinity ? Infinity : bound;
     },
+    sawLoggedAttempts() {
+      return load().size > 0;
+    },
   };
 };
+
+// ---------------------------------------------------------------------------
+// Stage 0 of the value-level-provenance design
+// (docs/specs/cfc-value-level-provenance.md §6, SC-24): per-prepare
+// precision counters measuring how much the shipped D4 prefix narrows the
+// gated-read set versus the pre-D4 transaction-global gate, before any span
+// machinery exists. Measurement only: nothing here feeds an enforcement
+// decision, the summary is collected exclusively when a hook consumes it,
+// and the hook-absent path pays one presence check.
+
+/** How a protected write's activity-clock bound was obtained. */
+export type CfcPrefixBoundSource =
+  /** A logged overlapping write attempt — the prefix engaged. */
+  | "real"
+  /**
+   * +Infinity fallback: the transaction logged write attempts, but none
+   * overlapped this path (e.g. the entry was made applicable by an
+   * attempted-but-unapplied write). Transaction-global gating for this
+   * write.
+   */
+  | "infinityFallback"
+  /**
+   * The transaction logged no ordered write attempt at all — a backend
+   * without the activity clock, or a transaction whose only overlapping
+   * writes were never applied. Every bound degrades to +Infinity.
+   */
+  | "clockLess";
+
+/** Per-protected-write detail row of a CfcPrefixProvenanceSummary. */
+export type CfcPrefixProvenanceWrite = {
+  /** Document id of the protected write's target. */
+  id: string;
+  /**
+   * Protected schema-entry path as an RFC 6901 JSON pointer (e.g. "/out";
+   * "" is the root; "~"/"/" in property names escape as "~0"/"~1"), so
+   * consumers can recover the exact segments via parsePointer.
+   */
+  path: string;
+  boundSource: CfcPrefixBoundSource;
+  /** Gated reads within this write's D4 prefix (post-S7-exemption). */
+  prefixGatedReads: number;
+  /** What the pre-D4 transaction-global gate would have counted. */
+  txGlobalGatedReads: number;
+  /** Provenance-only reads within the prefix the S7 exemption excluded. */
+  s7ExemptionFires: number;
+};
+
+/**
+ * Per-prepare D4 precision summary, emitted at most once per
+ * prepareBoundaryCommit — and only when at least one protected write
+ * (a schema entry with requiredIntegrity or maxConfidentiality applying to
+ * an attempted write) was measured.
+ */
+export type CfcPrefixProvenanceSummary = {
+  /** Protected writes measured (may exceed writes.length — see the cap). */
+  protectedWrites: number;
+  /** Sum of per-write prefix-gated read counts. */
+  prefixGatedReads: number;
+  /** Sum of per-write pre-D4 transaction-global gated-read counts. */
+  txGlobalGatedReads: number;
+  /** Bound-source classification counts across protected writes. */
+  boundSources: {
+    real: number;
+    infinityFallback: number;
+    clockLess: number;
+  };
+  /** Total S7 provenance-only exemption fires within prefixes. */
+  s7ExemptionFires: number;
+  /**
+   * Non-internal read activities without an activity-clock position,
+   * treated at -Infinity (joining every prefix). Deliberate -Infinity
+   * trigger reads are not counted. Same read set for every protected
+   * write, so this is per-prepare, not per-write.
+   */
+  clockLessReads: number;
+  /** Per-write detail, capped at CFC_PREFIX_PROVENANCE_MAX_WRITES. */
+  writes: CfcPrefixProvenanceWrite[];
+};
+
+/** Cap on the per-write detail list in a CfcPrefixProvenanceSummary. */
+export const CFC_PREFIX_PROVENANCE_MAX_WRITES = 16;
+
+/** Optional measurement hooks threaded into prepareBoundaryCommit. */
+export type CfcPrepareInstrumentation = {
+  onPrefixProvenance?: (summary: CfcPrefixProvenanceSummary) => void;
+};
+
+const createPrefixProvenanceSummary = (): CfcPrefixProvenanceSummary => ({
+  protectedWrites: 0,
+  prefixGatedReads: 0,
+  txGlobalGatedReads: 0,
+  boundSources: { real: 0, infinityFallback: 0, clockLess: 0 },
+  s7ExemptionFires: 0,
+  clockLessReads: 0,
+  writes: [],
+});
 
 // Structural-link provenance atoms the runtime mints when a value is
 // dereferenced / fetched. They describe HOW a value was obtained, never an
@@ -2695,6 +2802,10 @@ const verifyInputRequirements = (
   // the per-path last-overlapping-write bounds each entry's input checks
   // quantify under.
   prefixBounds: WritePrefixBounds,
+  // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
+  // accumulated across the boundary pass. undefined — the default, whenever
+  // no onPrefixProvenance hook is installed — skips all measurement.
+  provenance?: CfcPrefixProvenanceSummary,
 ): string | undefined => {
   // The labeled reads the per-entry checks below quantify over, each carrying
   // its activity-clock position. Distinct from the egress side's consumed set
@@ -2707,15 +2818,24 @@ const verifyInputRequirements = (
   //
   // Provenance-only reads are NOT filtered here (unlike before D4): the S7
   // exemption is applied per entry, inside that entry's prefix.
+  // Stage-0 measurement: read activities lacking a clock position (counted
+  // below only while a hook collects; the enforcement path pays a
+  // short-circuited presence check per read, nothing else).
+  let clockLessReads = 0;
   const gatedReads = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
-    ).map((read) => ({
-      ...read,
-      // A read without a clock position (journal-less backend) is treated as
-      // preceding every write: it joins every prefix — conservative.
-      journalIndex: read.journalIndex ?? -Infinity,
-    })),
+    ).map((read) => {
+      if (provenance !== undefined && read.journalIndex === undefined) {
+        clockLessReads += 1;
+      }
+      return {
+        ...read,
+        // A read without a clock position (journal-less backend) is treated
+        // as preceding every write: it joins every prefix — conservative.
+        journalIndex: read.journalIndex ?? -Infinity,
+      };
+    }),
     // §8.9.2 / SC-3 (H5): the trigger reads join the gate when enabled — a
     // handler scheduled by a labeled write must satisfy requiredIntegrity even
     // if its branch never re-reads that write. Empty when the flag is off.
@@ -2750,6 +2870,19 @@ const verifyInputRequirements = (
     // membership.
     hasLabelValues(read.label)
   );
+
+  // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
+  // quantified over every labeled read with the S7 provenance-only exemption
+  // applied transaction-globally — so the baseline is the label filter
+  // without the prefix condition. The gate-visible read set is the same on
+  // every call within one prepare, hence assignment (not accumulation) for
+  // the per-prepare clock-less count.
+  const txGlobalGatedReads = provenance === undefined ? 0 : gatedReads
+    .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
+    .length;
+  if (provenance !== undefined) {
+    provenance.clockLessReads = clockLessReads;
+  }
 
   for (const entry of walkIfcSchema(schema)) {
     if (
@@ -2803,6 +2936,8 @@ const verifyInputRequirements = (
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     const maxConfidentiality = ifc?.maxConfidentiality;
+    const protectedEntry = requiredIntegrity.length > 0 ||
+      maxConfidentiality !== undefined;
     // D4: quantify this entry's input checks over its own read prefix —
     // labeled reads whose clock position precedes the last write attempt
     // overlapping this path. A read at-or-after that write provably did not
@@ -2810,8 +2945,7 @@ const verifyInputRequirements = (
     // longer gates this entry. A +Infinity bound (order unknown for this
     // path) keeps every read: transaction-global, the pre-D4 conservative
     // behavior.
-    const bound = requiredIntegrity.length > 0 ||
-        maxConfidentiality !== undefined
+    const bound = protectedEntry
       ? prefixBounds.boundFor(target, entry.path)
       : -Infinity;
     // Provenance-only reads (link/origin/current-principal, no
@@ -2824,6 +2958,46 @@ const verifyInputRequirements = (
       read.journalIndex < bound &&
       !isProvenanceOnlyConsumedLabel(read.label!)
     );
+    // Stage-0 precision counters (cfc-value-level-provenance.md §6): what
+    // the shipped prefix did for THIS protected write versus the pre-D4
+    // transaction-global quantification. Recorded before the entry's own
+    // checks so a rejecting write is still measured; nothing below reads
+    // these values.
+    if (provenance !== undefined && protectedEntry) {
+      let inPrefix = 0;
+      for (const read of gatedReads) {
+        if (read.journalIndex < bound) inPrefix += 1;
+      }
+      // Within-prefix reads excluded as provenance-only structural plumbing
+      // — exactly where the S7 exemption still fires under D4.
+      const s7ExemptionFires = inPrefix - gating.length;
+      const boundSource: CfcPrefixBoundSource = bound !== Infinity
+        ? "real"
+        : prefixBounds.sawLoggedAttempts()
+        ? "infinityFallback"
+        : "clockLess";
+      provenance.protectedWrites += 1;
+      provenance.prefixGatedReads += gating.length;
+      provenance.txGlobalGatedReads += txGlobalGatedReads;
+      provenance.boundSources[boundSource] += 1;
+      provenance.s7ExemptionFires += s7ExemptionFires;
+      if (provenance.writes.length < CFC_PREFIX_PROVENANCE_MAX_WRITES) {
+        provenance.writes.push({
+          id: target.id,
+          // RFC 6901 escaping, so a consumer can round-trip the pointer to
+          // the exact schema-entry segments even when a property name
+          // contains "/" or "~" (parsePointer is the inverse). Deliberately
+          // NOT logicalPathToPointer: entry.path is already value-relative,
+          // and its canonicalization would strip a root property literally
+          // named "value".
+          path: encodePointer(entry.path),
+          boundSource,
+          prefixGatedReads: gating.length,
+          txGlobalGatedReads,
+          s7ExemptionFires,
+        });
+      }
+    }
     // An empty gating set passes here — but it is NOT the pre-D4 vacuous
     // pass (audit #14, "a requiredIntegrity gate whose consumed set is empty
     // passes"). The prefix makes the empty case a sound DELEGATION: with no
@@ -3902,6 +4076,7 @@ const verifyWriteFloor = (
 
 export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
+  instrumentation?: CfcPrepareInstrumentation,
 ): string[] => {
   const reasons: string[] = [];
   const state = tx.getCfcState();
@@ -3911,6 +4086,12 @@ export const prepareBoundaryCommit = (
   // verifyInputRequirements); the egress ceiling deliberately does not
   // (collectConsumedLabel stays transaction-global).
   const prefixBounds = buildWritePrefixBounds(tx);
+  // Stage-0 precision counters (cfc-value-level-provenance.md §6): the
+  // summary is allocated only when a hook will consume it — the default
+  // path pays this one presence check.
+  const prefixProvenance = instrumentation?.onPrefixProvenance !== undefined
+    ? createPrefixProvenanceSummary()
+    : undefined;
   // A write to a document's ["cfc"] label-map path made outside the runtime's
   // privileged persistence scope forges the metadata that drives CFC derivation
   // for other writes (audit S18). Each was recorded at the extended-tx write
@@ -4130,6 +4311,7 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
       prefixBounds,
+      prefixProvenance,
     );
     // A verification failure records a reason (which rejects the whole commit
     // in enforcing modes) and skips persisting this target's declared label.
@@ -4883,5 +5065,11 @@ export const prepareBoundaryCommit = (
     }, metadata as unknown as FabricValue);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
+  // Stage-0 summary: at most once per prepare, and only when a protected
+  // write was measured — a prepare that gated nothing has no precision to
+  // report.
+  if (prefixProvenance !== undefined && prefixProvenance.protectedWrites > 0) {
+    instrumentation!.onPrefixProvenance!(prefixProvenance);
+  }
   return reasons;
 };

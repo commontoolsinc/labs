@@ -67,7 +67,13 @@ describe("op-pattern-ref helpers", () => {
     );
   });
 
-  it("passes a non-sentinel value through unchanged (legacy graph)", () => {
+  it("passes a non-sentinel value through unchanged (stored-keyless remnant)", () => {
+    // Post-CT-1812 only a graph deserialized from a STORED no-entry-ref
+    // pattern value arrives embedded (a live op whose original is a trusted
+    // builder pattern is minted a keyless identity at instantiation and
+    // arrives as a sentinel — see keyless-op-identity.test.ts). The stored
+    // form must keep executing: stored-pattern-rehydration.test.ts pins that
+    // contract end-to-end.
     const graph = { nodes: [], result: {} } as never;
     const resolved = resolveOpPattern({} as never, graph, "map");
     expect(resolved).toBe(graph);

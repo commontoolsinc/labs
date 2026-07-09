@@ -147,10 +147,17 @@ export {
   spaceReaderRole,
 } from "./space-membership.ts";
 export {
+  CFC_PREFIX_PROVENANCE_MAX_WRITES,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
   prepareBoundaryCommit,
+} from "./prepare.ts";
+export type {
+  CfcPrefixBoundSource,
+  CfcPrefixProvenanceSummary,
+  CfcPrefixProvenanceWrite,
+  CfcPrepareInstrumentation,
 } from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,
