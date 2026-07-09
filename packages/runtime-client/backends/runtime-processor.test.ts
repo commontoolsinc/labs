@@ -28,7 +28,11 @@ import {
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { cellRefToSigilLink } from "./utils.ts";
+import {
+  cellRefToSigilLink,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
@@ -1196,6 +1200,53 @@ describe("system-pattern update wiring", () => {
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
+  it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
+    const ref: CellRef = {
+      id: "of:cfc-raw-meta-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    // The raw envelope this seam used to return verbatim — Caveat.source and
+    // friends, unredacted. If the handler ever reaches getMetaRaw for "cfc"
+    // again, this is what would leak.
+    const rawEnvelope = {
+      version: 1,
+      schemaHash: "test-schema",
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.Caveat,
+              kind: "derived-from",
+              source: "did:key:alice",
+            }],
+          },
+        }],
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "labelled data",
+          getMetaRaw: () => rawEnvelope,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
+    // that still sends it must get an error, never the raw metadata.
+    expect(() =>
+      RuntimeProcessor.prototype.handleCellGet.call(processor, {
+        type: RequestType.CellGet,
+        cell: ref,
+        meta: "cfc" as never,
+      })
+    ).toThrow(/cfc/);
+  });
+
   it("returns a label view for a cell ref", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
@@ -1297,6 +1348,210 @@ describe("RuntimeProcessor CFC label IPC", () => {
     // The caveat survives with its kind/type, but the source identity is gone.
     expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
+  });
+
+  // Inv-12 Stage 0, step 3: the display redaction applied to the top-level
+  // cfcLabel at the three IPC response sites also covers the cfcLabelView
+  // copies riding sigil links INSIDE response values (attached by
+  // convertCellsToLinks includeCfcLabelView). Safe now that the worker
+  // neither persists nor re-imports inbound views (steps 1–2).
+  it("redacts Caveat.source in sigil label views inside handleCellGet values", () => {
+    const ref: CellRef = {
+      id: "of:cfc-value-view-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-value-view-linked",
+          space: "did:key:test",
+          path: [],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [{
+                  type: CFC_ATOM_TYPE.Caveat,
+                  kind: "derived-from",
+                  source: "did:key:alice",
+                }],
+              },
+            }],
+          },
+        },
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => ({ nested: linkWithView }),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+    const responseLink = (response.value as {
+      nested: {
+        "/": {
+          "link@1": {
+            cfcLabelView: {
+              entries: Array<
+                { label: { confidentiality: Array<Record<string, unknown>> } }
+              >;
+            };
+          };
+        };
+      };
+    }).nested["/"]["link@1"];
+    const atom = responseLink.cfcLabelView.entries[0].label.confidentiality[0];
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
+  });
+
+  it("redacts Caveat.source in sigil label views inside subscription updates", async () => {
+    const ref: CellRef = {
+      id: "of:cfc-subscribe-view-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+      schema: { type: "object", additionalProperties: true },
+    };
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-subscribe-view-linked",
+          space: "did:key:test",
+          path: [],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [{
+                  type: CFC_ATOM_TYPE.Caveat,
+                  kind: "derived-from",
+                  source: "did:key:alice",
+                }],
+              },
+            }],
+          },
+        },
+      },
+    };
+    const processor = {
+      subscriptions: new Map(),
+      runtime: {
+        getCellFromLink: () => ({
+          sink: (
+            callback: (value: unknown, cfcLabel: unknown) => void,
+          ) => {
+            callback({ nested: linkWithView }, undefined);
+            return () => {};
+          },
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const posted: Array<{ value?: unknown }> = [];
+    const orig = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (m: { value?: unknown }) =>
+      posted.push(m);
+    try {
+      RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+        type: RequestType.CellSubscribe,
+        cell: ref,
+      });
+      // The sink posts from a microtask.
+      await Promise.resolve();
+    } finally {
+      (self as { postMessage: unknown }).postMessage = orig;
+    }
+
+    expect(posted.length).toBe(1);
+    const notifiedLink = (posted[0].value as {
+      nested: {
+        "/": {
+          "link@1": {
+            cfcLabelView: {
+              entries: Array<
+                { label: { confidentiality: Array<Record<string, unknown>> } }
+              >;
+            };
+          };
+        };
+      };
+    }).nested["/"]["link@1"];
+    const atom = notifiedLink.cfcLabelView.entries[0].label.confidentiality[0];
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect("source" in atom).toBe(false);
+  });
+
+  it("redacts Caveat.source in label views on response cell refs", () => {
+    const sourceRef: CellRef = {
+      id: "of:cfc-ref-view-source" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const resolvedRef: CellRef = {
+      id: "of:cfc-ref-view-resolved" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const resolvedCell = {
+      getAsLink: () => ({
+        "/": {
+          "link@1": resolvedRef,
+        },
+      }),
+      getAsNormalizedFullLink: () => resolvedRef,
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => ({
+            value: "resolved value",
+            cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: {
+                    confidentiality: [{
+                      type: CFC_ATOM_TYPE.Caveat,
+                      kind: "derived-from",
+                      source: "did:key:alice",
+                    }],
+                  },
+                }],
+              },
+            },
+          }),
+        }),
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
+      processor,
+      { type: RequestType.CellResolveAsCell, cell: sourceRef },
+    );
+    const atom = response.cell.cfcLabelView?.entries[0].label
+      .confidentiality?.[0] as Record<string, unknown>;
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect("source" in atom).toBe(false);
   });
 
@@ -1872,7 +2127,14 @@ describe("RuntimeProcessor CFC commit preparation", () => {
 });
 
 describe("runtime-client CellRef conversion", () => {
-  it("preserves carried label views in transient sigil links", () => {
+  // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
+  // CellRef is a main-thread display artifact — round-tripped through
+  // CellHandle.deserialize and back — and must not re-enter the worker as
+  // label state. Forwarding it onto the written sigil link previously fed
+  // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
+  // persisted as link-origin labels; the worker now re-derives those from
+  // its own stored source metadata instead.
+  it("does not forward an inbound label view into worker sigil links", () => {
     const cfcLabelView: CfcLabelView = {
       version: 1,
       entries: [{
@@ -1895,10 +2157,123 @@ describe("runtime-client CellRef conversion", () => {
           space: ref.space,
           scope: "space",
           path: ref.path,
-          cfcLabelView,
         },
       },
     });
+  });
+
+  it("does not seed worker cells from an inbound label view", () => {
+    const cfcLabelView: CfcLabelView = {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["main-thread-claim"] },
+      }],
+    };
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:z6MkrX123abc" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+      cfcLabelView,
+    };
+    const seen: unknown[] = [];
+    const runtime = {
+      getCellFromLink: (...args: unknown[]) => {
+        seen.push(args[3]);
+        return {};
+      },
+    } as unknown as Runtime;
+
+    getCell(runtime, ref);
+    expect(seen).toEqual([undefined]);
+  });
+
+  // Raw sigil links inside inbound values (hand-crafted JSON, or a
+  // CellHandle serialized into CustomEvent.detail via toJSON) bypass the
+  // CellRef path — the value walker must drop their label views too
+  // (codex/cubic review on the Stage 0 PR).
+  it("strips label views from raw sigil links in inbound values", () => {
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-raw-link",
+          space: "did:key:z6MkrX123abc",
+          path: ["value"],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: ["main-thread-claim"] },
+            }],
+          },
+        },
+      },
+    };
+    const mapped = mapCellRefsToSigilLinks({
+      nested: [linkWithView],
+    }) as { nested: Array<{ "/": { "link@1": Record<string, unknown> } }> };
+    const payload = mapped.nested[0]["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-raw-link");
+    expect("cfcLabelView" in payload).toBe(false);
+  });
+});
+
+describe("RuntimeProcessor VDom event label-view ingress", () => {
+  // CustomEvent.detail is JSON.stringify'd on the main thread (invoking
+  // CellHandle.toJSON) and re-enters the worker here, bypassing
+  // getCell/cellRefToSigilLink — a handler writing event.detail.sourceCell
+  // would persist the ref's view through the sigil-link write path. The
+  // worker strips inbound views at this ingress too (codex/cubic review).
+  it("strips label views from sigil links in inbound VDOM events", () => {
+    const dispatched: unknown[] = [];
+    const processor = {
+      vdomMounts: new Map([[
+        "mount-1",
+        {
+          reconciler: {
+            dispatchEvent: (_handlerId: string, event: unknown) => {
+              dispatched.push(event);
+              return true;
+            },
+          },
+        },
+      ]]),
+    } as unknown as RuntimeProcessor;
+
+    RuntimeProcessor.prototype.handleVDomEvent.call(processor, {
+      type: ClientNotificationType.VDomEvent,
+      mountId: "mount-1",
+      handlerId: "handler-1",
+      event: {
+        type: "drop",
+        detail: {
+          sourceCell: {
+            "/": {
+              "link@1": {
+                id: "of:cfc-event-link",
+                space: "did:key:z6MkrX123abc",
+                path: ["value"],
+                cfcLabelView: {
+                  version: 1,
+                  entries: [{
+                    path: [],
+                    label: { confidentiality: ["main-thread-claim"] },
+                  }],
+                },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(dispatched.length).toBe(1);
+    const payload = (dispatched[0] as {
+      detail: { sourceCell: { "/": { "link@1": Record<string, unknown> } } };
+    }).detail.sourceCell["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-event-link");
+    expect("cfcLabelView" in payload).toBe(false);
   });
 });
 
