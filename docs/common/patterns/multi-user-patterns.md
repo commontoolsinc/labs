@@ -265,7 +265,7 @@ const profileNameWish = wish<string>({ query: "#profileName" });
 const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 const myName = computed(() => (profileNameWish.result ?? "").trim());
 const myAvatar = computed(() => (profileAvatarWish.result ?? "").trim());
-const hasProfile = computed(() => myName.get() !== "");
+const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
 ```
 
 **Never** add a "type your name" field and treat that string as the current user.

@@ -41,8 +41,10 @@ testability.
 - `docs/common/concepts/handler.md` - handler() for reusable logic
 - `docs/common/concepts/identity.md` - equals() for object comparison
 - `docs/common/patterns/multi-user-patterns.md` - Presenting Identity (viewer
-  via `#profile`, `cf-profile-badge` vs `cf-avatar`, roster by join+snapshot)
-  when the pattern has multiple people or a current-user concept
+  via `#profile`, every participant rendered with `cf-profile-badge` bound to
+  their stored profile cell — `cf-avatar` + snapshot only as an offline
+  fallback, roster built by join storing the live profile cell) when the pattern
+  has multiple people or a current-user concept
 
 For Pattern Factory Build, do not start implementation until you have read the
 Build guide plus the two foundational reactivity/local-cell references above.
