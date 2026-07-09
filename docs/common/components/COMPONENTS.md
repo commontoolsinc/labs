@@ -798,6 +798,7 @@ for the end-to-end flow (resolve the viewer, store each joiner's profile cell, m
 Untrusted avatar primitive — safe for any code to render, for any person.
 
 ```tsx
+// Shown for illustration only.
 <cf-avatar name="Ada Lovelace" src={person.avatar} size="sm" /> // data: URI image
 <cf-avatar name="Grace Hopper" src="🦊" />                       // emoji glyph
 <cf-avatar name="Alan Turing" />                                 // initials "AT"
@@ -822,6 +823,7 @@ whose profile cell you stored on join. Bind a profile **cell** (not strings) via
 identity that user-space cannot mint.
 
 ```tsx
+// Shown for illustration only.
 const profileWish = wish({ query: "#profile" }); // resolves the viewer's profile cell
 ...
 <cf-profile-badge $profile={profileWish.result} size="sm" />

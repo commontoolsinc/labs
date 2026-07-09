@@ -260,6 +260,7 @@ A pattern cannot ask "what is my DID" directly. Resolve the viewer's profile wit
 `wish` (it reads the active user's home space):
 
 ```tsx
+// Shown inside a pattern body.
 const profileWish = wish({ query: "#profile" });            // the viewer's profile CELL
 const profileNameWish = wish<string>({ query: "#profileName" });
 const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
@@ -274,6 +275,7 @@ The viewer is whoever the runtime says they are; `#profile` is how you read it.
 ### Show every participant with `cf-profile-badge`
 
 ```tsx
+// Shown for illustration only.
 // the viewer — badge bound to their own profile CELL
 <cf-profile-badge $profile={profileWish.result} size="sm" />
 
