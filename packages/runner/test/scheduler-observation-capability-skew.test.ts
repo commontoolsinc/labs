@@ -98,7 +98,10 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
           // The one divergence from this realm's ambient flags: the server
           // never advertises persistentSchedulerState (an off-flag or older
           // deployment). Everything else mirrors the real handshake.
-          flags: { ...getMemoryProtocolFlags(), persistentSchedulerState: false },
+          flags: {
+            ...getMemoryProtocolFlags(),
+            persistentSchedulerState: false,
+          },
           sessionOpen: TEST_HELLO_SESSION_OPEN,
         });
         break;
