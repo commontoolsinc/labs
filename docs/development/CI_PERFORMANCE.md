@@ -62,6 +62,88 @@ Jobs and steps for a run:
 `GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
 
+## Step Phase Markers
+
+`scripts/ci-gantt.ts` draws each job as a bar and splits that bar into three
+segments — setup, work, and shutdown — so the shared scaffolding around a job is
+visually separated from the job's own work. For a matrix job this shows, per
+shard, how much wall time is setup that every shard repeats versus the unique
+work that one shard does.
+
+The chart decides a step's phase from the emoji its name starts with. The emoji
+is the marker: the script never reads step wording, only the leading emoji. Every
+step we control — in `.github/workflows/*` and in the composite actions under
+`.github/actions/*` — must begin with a marker emoji from the table below, and
+each emoji belongs to exactly one phase. When you add a step, pick an emoji whose
+phase matches what the step does. When you add a genuinely new kind of step,
+choose a new emoji, then add it to both this table and the `PHASE_MARKERS` array
+in `scripts/ci-gantt.ts`, keeping the one-emoji-one-phase rule.
+
+**setup** — fetch code, install tools and dependencies, restore caches,
+authenticate, and bring test servers and devices up before the real work:
+
+| Emoji | Used for |
+| --- | --- |
+| 📥 | checkout, download inputs |
+| 🦕 | set up Deno |
+| 🔍 | verify the lock file and install, resolve refs |
+| 📦 | install packages, cache dependencies |
+| ♻️ | restore or save a build cache |
+| 🛡️ | relax the sandbox for browser tests |
+| 🔧 | enable a device |
+| ⚙️ | set up an external SDK |
+| 🔑 | authenticate to a cloud |
+| 🔌 | start a local server for tests |
+| ⏳ | wait for a service to be ready |
+| 💾 | restore or save a cache |
+| 🧮 | compute a cache identity |
+
+**work** — the job's actual purpose:
+
+| Emoji | Used for |
+| --- | --- |
+| 🔎 | checks (format, type, patterns, attestations) |
+| 🚧 | guard that fails the build on a banned pattern |
+| 🧪 | run tests |
+| 🧩 | run integration tests |
+| 🧹 | lint |
+| 🧭 | check skill facts |
+| 📄 | type-check docs |
+| 🏗️ | build binaries or assets |
+| 🏋️ | run benchmarks |
+| 📊 | produce performance metrics or status reports |
+| 🧬 | combine coverage |
+| 📝 | generate attestations |
+| 🔐 | sign binaries |
+| 🚀 | deploy |
+| 💬 | post a pull-request comment |
+
+**shutdown** — post-work reports, artifact uploads, log capture, teardown:
+
+| Emoji | Used for |
+| --- | --- |
+| 🧾 | write a coverage report |
+| 📤 | upload artifacts |
+| 📋 | capture logs on failure |
+
+A few markers were chosen so the phase stays unambiguous, which is worth knowing
+before you "correct" a step name back to a more obvious emoji:
+
+- 🚀 means deploy, which is work. A step that starts a local server for tests is
+  setup, so it uses 🔌 instead of 🚀. A step that uploads artifacts to cloud
+  storage is shutdown, so it uses 📤.
+- 🔍 means verify-then-install, which is setup. Verifying binary attestations is
+  work, so that step uses 🔎.
+- Downloading logs after a failure is shutdown, so those steps use 📋 rather than
+  the 📥 or 📦 download markers.
+
+The steps GitHub injects into every job — `Set up job`, `Post …`, and
+`Complete job` — carry no marker, so the script classifies them by name (setup
+for `Set up job`, shutdown for the other two). Any other step that reaches the
+chart without a recognized marker is counted as "other", drawn in gray, and
+listed on standard error when the script runs, so a missing marker is easy to
+find and fix.
+
 ## Root Test Job Shape
 
 The `Test (n/6)` jobs in `.github/workflows/deno.yml` run the root
