@@ -7,6 +7,7 @@ export {
   stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
 export {
+  CLASSIFIED_KIND_FAMILIES,
   classifyAtomField,
   classifyLabelField,
   LABEL_FIELD_CLASSIFICATION,
@@ -14,6 +15,14 @@ export {
   type LabelFieldClassificationEntry,
   type LabelFieldRepresentationClass,
 } from "./label-field-classification.ts";
+export {
+  type CfcFieldCommitment,
+  commitCfcFieldValue,
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  isCfcFieldCommitment,
+  transformCfcLabelForCrossSpacePersist,
+} from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,

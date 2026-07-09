@@ -139,6 +139,24 @@ const CLASSIFICATION_BY_KEY: ReadonlyMap<
 );
 
 /**
+ * Kind-shaped families the table actually classifies. Used by the Stage 1
+ * transform's walk to decide whether a `kind`-bearing record (with no `type`)
+ * is a claim-family ATOM (resets the classification context) or an ordinary
+ * nested record that merely happens to carry a `kind` field — e.g. the
+ * `ImplementationIdentity` record inside `TransformedBy.identity`, whose
+ * `kind: "verified"` is a variant discriminator, not an atom family. Only a
+ * table-classified kind resets context; everything else extends the current
+ * atom's field path so multi-segment rows keep resolving.
+ */
+export const CLASSIFIED_KIND_FAMILIES: ReadonlySet<string> = new Set(
+  LABEL_FIELD_CLASSIFICATION.flatMap((row) =>
+    "kind" in row.family && typeof row.family.kind === "string"
+      ? [row.family.kind]
+      : []
+  ),
+);
+
+/**
  * Representation class for one atom field, or `undefined` when the
  * (family, field) pair is not in the table.
  */
