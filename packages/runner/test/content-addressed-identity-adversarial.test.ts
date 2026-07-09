@@ -130,19 +130,20 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       expect(identity?.kind).not.toBe("verified");
     });
 
-    it("a forged twin that ALSO steals the real fn's canonical src still gets no provenance", async () => {
+    it("a forged twin carrying a plausible canonical src still gets no provenance", async () => {
       const pattern = await setup();
       const real = handlerModules(pattern)[0]
         .implementation as HarnessedFunction;
-      const stolenSrc = (real as { src?: string }).src!;
-      expect(stolenSrc).toContain("cf:module/");
+      expect(getVerifiedProvenance(real)).toBeDefined();
 
-      // The forged fn carries the genuine canonical src — but src is just an
-      // own-property; verification keys on the provenance WeakMap, which has no
-      // entry for this object.
+      // The forged fn carries a plausible canonical src — but `.src` is just an
+      // own-property (and now identity-inert / debug-only anyway); verification
+      // keys on the provenance WeakMap, which has no entry for this object. (We
+      // fabricate the src rather than read the real one, which is lazy/unset by
+      // default — precisely because src can no longer confer identity.)
       const forged = Object.assign(
         new Function(`return ${Function.prototype.toString.call(real)}`)(),
-        { src: stolenSrc },
+        { src: "cf:module/FORGED_HASH/main.tsx:1:0" },
       ) as HarnessedFunction;
       expect(getVerifiedProvenance(forged)).toBeUndefined();
 
@@ -670,9 +671,19 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     // These probe resolveProvenanceImplementationIdentity directly: we fabricate
     // a provenance entry (the trusted channel's effect) on a function WE control,
     // then mismatch its src. recordVerifiedProvenance is the exact write the real
-    // indexer performs; here we use it to isolate the src↔provenance check.
+    // indexer performs; here we use it to isolate the identity↔src relationship.
+    //
+    // RE-ROOT (workstream C prerequisite): `.src` is no longer consulted for CFC
+    // identity. The WeakMap provenance IS the anti-spoof proof — a function the
+    // attacker controls has NO entry and gets NO identity (see "provenance-less
+    // function stays untrusted"). Since `.src` is attacker-controllable, the
+    // *security* property is that spoofing it is INERT: identity resolves to the
+    // function's REAL provenance module, never the spoofed target, and never
+    // escalates. (The former src-consistency check only ever DOWNGRADED a genuine
+    // identity to `unsupported`; it granted nothing, so dropping it opens no hole
+    // and removes an over-restriction that denied legitimate writes.)
 
-    it("a verified fn whose src names a DIFFERENT module than its provenance fails closed", () => {
+    it("a verified fn whose src names a DIFFERENT module is resolved by PROVENANCE, not the spoofed src", () => {
       const fn = Object.assign(() => undefined, {
         src: "cf:module/REAL_MODULE_A/main.tsx:4:12",
       });
@@ -680,17 +691,22 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         identity: "REAL_MODULE_A",
         symbol: "ownerHandler",
       });
-      // Now spoof src to claim it belongs to a different (victim) module.
+      // Spoof src to claim it belongs to a different (victim) module.
       (fn as { src: string }).src = "cf:module/VICTIM_MODULE_B/main.tsx:4:12";
 
       const identity = resolvePolicyFacingImplementationIdentity(
         { type: "javascript" } as Module,
         { implementation: fn },
       );
-      expect(identity?.kind).toBe("unsupported");
+      // The spoof is inert: identity is the REAL provenance module (A), never the
+      // spoofed victim (B) — so it can never gain B's write authority.
+      expect(identity?.kind).toBe("verified");
+      const v = identity as { kind: "verified"; moduleIdentity?: string };
+      expect(v.moduleIdentity).toBe("REAL_MODULE_A");
+      expect(v.moduleIdentity).not.toBe("VICTIM_MODULE_B");
     });
 
-    it("a verified fn whose src OMITS the cf:module prefix fails closed (no identity to extract)", () => {
+    it("a verified fn whose src OMITS the cf:module prefix is still resolved by provenance", () => {
       const fn = Object.assign(() => undefined, {
         src: "/main.tsx:4:12", // no cf:module/<hash>/ prefix
       });
@@ -702,11 +718,13 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         { type: "javascript" } as Module,
         { implementation: fn },
       );
-      // identityFromCanonicalSource("/main.tsx...") is undefined ≠ provenance id.
-      expect(identity?.kind).toBe("unsupported");
+      // `.src` is inert; identity comes from provenance regardless of its shape.
+      expect(identity?.kind).toBe("verified");
+      const v = identity as { kind: "verified"; moduleIdentity?: string };
+      expect(v.moduleIdentity).toBe("SOME_MODULE");
     });
 
-    it("a verified fn whose src matches its provenance resolves verified (check is not vacuous)", () => {
+    it("a verified fn whose src matches its provenance resolves verified", () => {
       const fn = Object.assign(() => undefined, {
         src: "cf:module/CONSISTENT_MODULE/main.tsx:7:3",
       });
@@ -749,7 +767,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       expect(getVerifiedProvenance(fn)!.symbol).toBeUndefined();
     });
 
-    it("a dynamic-provenance fn whose src disagrees with its identity still fails closed", () => {
+    it("a dynamic-provenance fn whose src disagrees with its identity is resolved by provenance (src inert)", () => {
       const fn = Object.assign(() => undefined, {
         src: "cf:module/OTHER_MODULE/main.tsx:2:1",
       });
@@ -758,7 +776,12 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         { type: "javascript" } as Module,
         { implementation: fn },
       );
-      expect(identity?.kind).toBe("unsupported");
+      // Same as attack 6 for the dynamic path: the spoofed src is inert; identity
+      // is the real (dynamic) provenance module. A dynamic artifact still carries
+      // no symbol, so it has no cross-session $implRef authority (next test).
+      expect(identity?.kind).toBe("verified");
+      const v = identity as { kind: "verified"; moduleIdentity?: string };
+      expect(v.moduleIdentity).toBe("DYN_MODULE");
     });
 
     it("a dynamic artifact (no symbol) serializes without $implRef", async () => {

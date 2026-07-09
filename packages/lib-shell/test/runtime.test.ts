@@ -7,6 +7,7 @@ type MockRuntimeClientEvents = {
   navigaterequest: [{ cell: { id(): string; space(): DID } }];
   error: [unknown];
   telemetry: [unknown];
+  versionskew: [unknown];
 };
 
 class MockRuntimeClient {
@@ -200,6 +201,26 @@ describe("RuntimeInternals", () => {
     }
   });
 
+  it("forwards a client versionskew event to the onVersionSkew callback", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const client = new MockRuntimeClient();
+    const received: unknown[] = [];
+    const runtime = new RuntimeInternals(client as any, {
+      onVersionSkew: (event) => received.push(event),
+    });
+    try {
+      const event = {
+        space: "did:key:z6Mk-skew",
+        clientVersion: "c",
+        toolshedVersion: "t",
+      };
+      client.emit("versionskew", event);
+      expect(received).toEqual([event]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("logs a navigation-convergence failure without escaping as unhandled", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const space = "did:key:z6Mk-lib-shell-nav-fail" as DID;
@@ -309,6 +330,71 @@ describe("RuntimeInternals", () => {
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
     expect(options.experimental).toBe(experimental);
+    // Epic H3a: the render ceiling is a dogfood flag, default OFF — absent
+    // fields keep today's unbounded rendering (no ceiling, author
+    // declassification honored).
+    expect(options.renderDeclassificationPolicy).toBeUndefined();
+    expect(options.renderConfidentialityCeiling).toBeUndefined();
+  });
+
+  it("populates the §8.10.6 render ceiling when cfcRenderCeiling is on", async () => {
+    const { createRuntimeClientOptions, defaultRenderConfidentialityCeiling } =
+      await import("@commonfabric/lib-shell");
+    const { createSession, Identity } = await import(
+      "@commonfabric/identity"
+    );
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling",
+    });
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: true,
+    });
+
+    // Author-supplied render-boundary declassification is denied under the
+    // ceiling posture (audit S15) — a pattern cannot release a secret upward
+    // through a render boundary.
+    expect(options.renderDeclassificationPolicy).toBe("deny");
+    expect(options.renderConfidentialityCeiling).toEqual(
+      defaultRenderConfidentialityCeiling(session.as.did()),
+    );
+    // The profile names the acting user's audience through the §15.2
+    // principal atom objects (User/PersonalSpace, resolved by the H3b render
+    // resolver) plus the legacy DID-string form — every entry names exactly
+    // this audience, admissible by construction (§8.10.6).
+    expect(options.renderConfidentialityCeiling?.atoms).toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: session.as.did(),
+    });
+    expect(options.renderConfidentialityCeiling?.atoms).toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+      owner: session.as.did(),
+    });
+    expect(options.renderConfidentialityCeiling?.atoms).toContain(
+      session.as.did(),
+    );
+    // Influence-class caveat kinds are display-dischargeable (rendered
+    // disclosure); material-risk kinds (e.g. injection-risk-unscreened) are
+    // deliberately NOT allow-listed.
+    expect(options.renderConfidentialityCeiling?.caveatKinds).toContain(
+      "https://commonfabric.org/cfc/concepts/prompt-influence",
+    );
+    expect(options.renderConfidentialityCeiling?.caveatKinds).not.toContain(
+      "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
+    );
+
+    const off = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: false,
+    });
+    expect(off.renderDeclassificationPolicy).toBeUndefined();
+    expect(off.renderConfidentialityCeiling).toBeUndefined();
   });
 
   it("allows hosts to override CFC policy and trust snapshot", async () => {
@@ -377,17 +463,26 @@ describe("RuntimeInternals", () => {
   });
 
   // create() builds the client options and sends the Initialize request; this
-  // covers that path end to end and asserts the worker-console flag reaches the
-  // worker. A stub worker completes the READY handshake, then fails Initialize
-  // so create() aborts without a real runtime.
-  describe("create() forwards the worker-console flag to the worker", () => {
-    it("includes forwardWorkerConsole in the Initialize request", async () => {
-      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+  // covers that path end to end and asserts the host flags reach the worker.
+  // A stub worker completes the READY handshake, then fails Initialize so
+  // create() aborts without a real runtime.
+  describe("create() forwards host flags to the worker", () => {
+    type CapturedInitData = {
+      forwardWorkerConsole?: boolean;
+      renderDeclassificationPolicy?: string;
+      renderConfidentialityCeiling?: {
+        atoms?: unknown[];
+        caveatKinds?: string[];
+      };
+    };
+
+    it("includes forwardWorkerConsole and the render ceiling in the Initialize request", async () => {
+      const { RuntimeInternals, defaultRenderConfidentialityCeiling } =
+        await import("@commonfabric/lib-shell");
       const { Identity } = await import("@commonfabric/identity");
       const identity = await Identity.generate({ implementation: "noble" });
 
-      const initRequests: Array<{ data: { forwardWorkerConsole?: boolean } }> =
-        [];
+      const initRequests: Array<{ data: CapturedInitData }> = [];
       class StubWorker extends EventTarget {
         constructor(_url: URL | string) {
           super();
@@ -398,13 +493,11 @@ describe("RuntimeInternals", () => {
         postMessage(message: unknown): void {
           const msg = message as {
             msgId?: number;
-            data?: { type?: string; data?: { forwardWorkerConsole?: boolean } };
+            data?: { type?: string; data?: CapturedInitData };
           };
           if (typeof msg?.msgId !== "number") return;
           if (msg.data?.type === "initialize") {
-            initRequests.push(
-              msg.data as { data: { forwardWorkerConsole?: boolean } },
-            );
+            initRequests.push(msg.data as { data: CapturedInitData });
           }
           queueMicrotask(() =>
             this.dispatchEvent(
@@ -427,6 +520,7 @@ describe("RuntimeInternals", () => {
             workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
             getBuildHash: () => Promise.resolve(undefined),
             forwardWorkerConsole: true,
+            cfcRenderCeiling: true,
           }),
         ).rejects.toThrow("stub init failure");
       } finally {
@@ -435,6 +529,12 @@ describe("RuntimeInternals", () => {
 
       expect(initRequests).toHaveLength(1);
       expect(initRequests[0].data.forwardWorkerConsole).toBe(true);
+      // Epic H3a: the ceiling crosses the worker IPC as InitializationData —
+      // exactly the fields the worker-side reconciler consumes.
+      expect(initRequests[0].data.renderDeclassificationPolicy).toBe("deny");
+      expect(initRequests[0].data.renderConfidentialityCeiling).toEqual(
+        defaultRenderConfidentialityCeiling(identity.did()),
+      );
     });
   });
 

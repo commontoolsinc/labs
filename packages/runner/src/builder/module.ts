@@ -579,6 +579,39 @@ export function __setSrcAnnotationTransformForTest(
   srcAnnotationTransformForTest = transform;
 }
 
+/**
+ * Gate for the eager per-primitive source-location resolution. Default OFF.
+ *
+ * Resolving `.src` for every lift/handler/computed at module-eval —
+ * `getExternalSourceLocation` (a `new Error().stack` capture per primitive) plus
+ * the source-map walk in `resolveLocationFromFunctionSource` — is the boot
+ * floor's #1 cost (~83ms across the full system-app module graph). `.src` /
+ * `.name` / `.sourceLocationSample` are now DEBUG-ONLY: scheduler identity and
+ * CFC verified-identity were re-rooted off `.src` (content-addressed
+ * `{ identity, symbol }` provenance — see cfc/implementation-identity.ts and the
+ * `src-garble-identity-invariant` harness), so nothing load-bearing reads them.
+ * With this OFF the resolution is skipped and that cost is not paid; `.preview`
+ * (a cheap `fn.toString` slice) is always kept.
+ *
+ * Enablement: shell DEVELOPMENT builds turn this on by default (so `.src`
+ * debugging keeps working locally — `ENVIRONMENT === "development"` in
+ * shell/src/lib/env.ts), production builds leave it off; either is overridable
+ * via the `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` define/env everywhere the
+ * experimental flags flow (shell, toolshed, background-piece-service, cf CLI —
+ * `ExperimentalOptions.eagerSourceAnnotation`). Tests toggle the ambient flag
+ * directly via {@link setEagerSourceAnnotation}; the Runtime constructor only
+ * propagates an EXPLICIT option so it never stomps that seam.
+ */
+let eagerSourceAnnotationEnabled = false;
+
+export function setEagerSourceAnnotation(enabled: boolean): void {
+  eagerSourceAnnotationEnabled = enabled;
+}
+
+export function isEagerSourceAnnotationEnabled(): boolean {
+  return eagerSourceAnnotationEnabled;
+}
+
 function annotateFunctionDebugMetadata(
   fn: (...args: any[]) => unknown,
 ): void {
@@ -586,29 +619,33 @@ function annotateFunctionDebugMetadata(
     return;
   }
 
-  const { location, sample } = getExternalSourceLocation();
-  const fallbackLocation = location ?? resolveLocationFromFunctionSource(fn);
-  // The test-only seam garbles the annotated location (both `.src` and the
-  // `name` mirror below); identity must not move as a result.
-  const finalLocation = fallbackLocation && srcAnnotationTransformForTest
-    ? srcAnnotationTransformForTest(fallbackLocation)
-    : fallbackLocation;
-  if (finalLocation) {
-    if (location) {
-      Object.defineProperty(fn, "name", {
-        value: finalLocation,
-        configurable: true,
-      });
-    }
-    // Also set .src as backup (name can be finicky)
-    (fn as {
-      src?: string;
-      sourceLocationSample?: Record<string, unknown>;
-    }).src = finalLocation;
-    if (sample) {
+  // Skip the expensive source-location resolution unless debugging is on (the
+  // ~83ms boot lever). `.src` is debug-only; identity does not read it.
+  if (eagerSourceAnnotationEnabled) {
+    const { location, sample } = getExternalSourceLocation();
+    const fallbackLocation = location ?? resolveLocationFromFunctionSource(fn);
+    // The test-only seam garbles the annotated location (both `.src` and the
+    // `name` mirror below); identity must not move as a result.
+    const finalLocation = fallbackLocation && srcAnnotationTransformForTest
+      ? srcAnnotationTransformForTest(fallbackLocation)
+      : fallbackLocation;
+    if (finalLocation) {
+      if (location) {
+        Object.defineProperty(fn, "name", {
+          value: finalLocation,
+          configurable: true,
+        });
+      }
+      // Also set .src as backup (name can be finicky)
       (fn as {
+        src?: string;
         sourceLocationSample?: Record<string, unknown>;
-      }).sourceLocationSample = sample;
+      }).src = finalLocation;
+      if (sample) {
+        (fn as {
+          sourceLocationSample?: Record<string, unknown>;
+        }).sourceLocationSample = sample;
+      }
     }
   }
 

@@ -54,6 +54,7 @@ import {
   ensureTables,
 } from "./sqlite/exec.ts";
 import { assertReadOnly } from "./sqlite/guard.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
@@ -86,8 +87,15 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
+
+// Global OTel API tracer. Interface-only and inert when no provider is
+// registered, so this is a no-op unless the host process (toolshed) has an
+// OTLP SDK installed. Spans created here are purely additive observability and
+// do not affect write/fan-out behavior.
+const tracer = trace.getTracer("memory-server", "1.0.0");
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
@@ -1564,157 +1572,214 @@ export class Server {
     }
   }
 
-  async transact(
+  transact(
     message: TransactRequest,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return respondTypedError<Engine.AppliedCommit>(
+      return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
-      );
+      ));
     }
 
-    try {
-      const engine = await this.openEngine(message.space);
-      // ACL-document writes change who may access the space — OWNER only.
-      const aclTouched = commitTouchesAclDoc(
-        message.commit.operations,
-        message.space,
-      );
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        aclTouched ? "OWNER" : "WRITE",
-      );
-      if (deny) {
-        return respondTypedError<Engine.AppliedCommit>(message.requestId, deny);
-      }
-      const schedulerStateEnabled = getPersistentSchedulerStateConfig();
-      const commitPayload = schedulerStateEnabled ? message.commit : {
-        ...message.commit,
-        schedulerObservation: undefined,
-        schedulerObservationBatch: undefined,
-      };
-      const schedulerObservations = schedulerStateEnabled
-        ? schedulerObservationsFromCommit(commitPayload)
-        : [];
-      const previousReadSpaces = new Map<number, Set<string>>();
-      for (const { localSeq, observation } of schedulerObservations) {
-        previousReadSpaces.set(
-          localSeq,
-          this.schedulerObservationReadSpaces(
-            Engine.getLatestSchedulerActionSnapshot(engine, {
-              branch: message.commit.branch ?? "",
-              ownerSpace: message.space,
-              pieceId: observation.pieceId,
-              processGeneration: observation.processGeneration,
-              actionId: observation.actionId,
-            })?.observation,
-          ),
-        );
-      }
-      // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
-      // cannot run inside a transaction); the engine executes them inside the
-      // commit txn (atomic with cell ops). Detach in finally.
-      const sqliteAttachments = this.#attachCommitSqliteDbs(
-        engine,
-        message.space,
-        commitPayload.operations,
-        { principal: session.principal, sessionId: message.sessionId },
-      );
-      let commit: Engine.AppliedCommit;
-      try {
-        commit = Engine.applyCommit(engine, {
-          sessionId: message.sessionId,
-          space: message.space,
-          principal: session.principal,
-          commit: commitPayload,
-          sqliteAttachments,
-        });
-      } finally {
-        // Detach BEFORE any await. `engine.database` is shared per space, so
-        // holding a cell-db attached across the post-commit await would let a
-        // concurrent connection's commit attach a SECOND cell-db — breaking the
-        // ≤1-attached invariant that unqualified-name resolution relies on
-        // (B1). `applyCommit` is synchronous and is the only step that needs the
-        // attachments.
-        for (const alias of sqliteAttachments.values()) {
-          detachDatabase(engine.database, alias);
+    return tracer.startActiveSpan(
+      "memory.transact",
+      async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
+        span.setAttribute("space.did", message.space);
+        if (
+          session.principal !== undefined &&
+          session.principal !== ANYONE_USER
+        ) {
+          span.setAttribute("user.did", session.principal);
         }
-      }
-      if (aclTouched) {
-        this.#invalidateAclCapabilities(message.space);
-        // Pass the writing session so it isn't sent the terminal revocation
-        // before its own transact response (the client treats session/revoked
-        // as terminal). It's still dropped from the registry, so a
-        // self-deauthorized writer receives no further pushes.
-        this.#revokeDeauthorizedSessions(
-          engine,
-          message.space,
-          message.sessionId,
-        );
-      }
-      // An acknowledged-but-dropped computed commit wrote no revisions:
-      // nothing to broadcast to other sessions, and its scheduler observation
-      // was deliberately not persisted, so there are no side effects to run.
-      if (commit.droppedComputed === undefined) {
-        await this.runPostCommitSchedulerSideEffects(
-          message.space,
-          commit,
-          schedulerObservations,
-          previousReadSpaces,
-          session,
-        );
-        this.markSpaceDirty(
-          message.space,
-          message.commit.operations
-            .filter((operation) => operation.op !== "sqlite")
-            .map((operation) =>
-              toDirtyKey(operation.id, declaredScope(operation.scope))
-            ),
-          {
-            sessionId: message.sessionId,
-            seq: commit.seq,
-          },
-        );
-      }
-      return {
-        type: "response",
-        requestId: message.requestId,
-        ok: commit,
-      };
-    } catch (error) {
-      let retryAfterSeq: number | undefined;
-      if (error instanceof Engine.ConflictError) {
-        this.stageConflictRefreshDirtyIds(
-          message.space,
-          session,
-          message.commit,
-        );
-        const engine = await this.openEngine(message.space);
-        retryAfterSeq = Engine.serverSeq(engine);
-      }
-      const messageText = error instanceof Error
-        ? error.message
-        : String(error);
-      const preconditionError = toPreconditionFailedError(error, messageText);
-      const responseError = preconditionError ? preconditionError : toError(
-        error instanceof Engine.ConflictError
-          ? "ConflictError"
-          : error instanceof Engine.ProtocolError
-          ? "ProtocolError"
-          : "TransactionError",
-        messageText,
-      );
-      if (retryAfterSeq !== undefined) {
-        responseError.retryAfterSeq = retryAfterSeq;
-      }
-      return respondTypedError<Engine.AppliedCommit>(
-        message.requestId,
-        responseError,
-      );
-    }
+        if (message.requestId !== undefined) {
+          span.setAttribute("request.id", message.requestId);
+        }
+        if (message.commit.branch !== undefined) {
+          span.setAttribute("branch", message.commit.branch);
+        }
+        try {
+          const engine = await this.openEngine(message.space);
+          // ACL-document writes change who may access the space — OWNER only.
+          const aclTouched = commitTouchesAclDoc(
+            message.commit.operations,
+            message.space,
+          );
+          const deny = await this.#authorizeMessage(
+            message.space,
+            session.principal,
+            aclTouched ? "OWNER" : "WRITE",
+          );
+          if (deny) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              deny,
+            );
+          }
+          const schedulerStateEnabled = getPersistentSchedulerStateConfig();
+          const commitPayload = schedulerStateEnabled ? message.commit : {
+            ...message.commit,
+            schedulerObservation: undefined,
+            schedulerObservationBatch: undefined,
+          };
+          const schedulerObservations = schedulerStateEnabled
+            ? schedulerObservationsFromCommit(commitPayload)
+            : [];
+          const previousReadSpaces = new Map<number, Set<string>>();
+          for (const { localSeq, observation } of schedulerObservations) {
+            previousReadSpaces.set(
+              localSeq,
+              this.schedulerObservationReadSpaces(
+                Engine.getLatestSchedulerActionSnapshot(engine, {
+                  branch: message.commit.branch ?? "",
+                  ownerSpace: message.space,
+                  pieceId: observation.pieceId,
+                  processGeneration: observation.processGeneration,
+                  actionId: observation.actionId,
+                })?.observation,
+              ),
+            );
+          }
+          // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
+          // cannot run inside a transaction); the engine executes them inside the
+          // commit txn (atomic with cell ops). Detach in finally.
+          const sqliteAttachments = this.#attachCommitSqliteDbs(
+            engine,
+            message.space,
+            commitPayload.operations,
+            { principal: session.principal, sessionId: message.sessionId },
+          );
+          let commit: Engine.AppliedCommit;
+          try {
+            commit = tracer.startActiveSpan(
+              "memory.commit.persist",
+              (persistSpan) => {
+                try {
+                  return Engine.applyCommit(engine, {
+                    sessionId: message.sessionId,
+                    space: message.space,
+                    principal: session.principal,
+                    commit: commitPayload,
+                    sqliteAttachments,
+                  });
+                } finally {
+                  persistSpan.end();
+                }
+              },
+            );
+          } finally {
+            // Detach BEFORE any await. `engine.database` is shared per space, so
+            // holding a cell-db attached across the post-commit await would let a
+            // concurrent connection's commit attach a SECOND cell-db — breaking the
+            // ≤1-attached invariant that unqualified-name resolution relies on
+            // (B1). `applyCommit` is synchronous and is the only step that needs the
+            // attachments.
+            for (const alias of sqliteAttachments.values()) {
+              detachDatabase(engine.database, alias);
+            }
+          }
+          if (aclTouched) {
+            this.#invalidateAclCapabilities(message.space);
+            // Pass the writing session so it isn't sent the terminal revocation
+            // before its own transact response (the client treats session/revoked
+            // as terminal). It's still dropped from the registry, so a
+            // self-deauthorized writer receives no further pushes.
+            this.#revokeDeauthorizedSessions(
+              engine,
+              message.space,
+              message.sessionId,
+            );
+          }
+          // An acknowledged-but-dropped computed commit wrote no revisions:
+          // nothing to broadcast to other sessions, and its scheduler
+          // observation was deliberately not persisted, so there are no side
+          // effects to run.
+          if (commit.droppedComputed === undefined) {
+            await this.runPostCommitSchedulerSideEffects(
+              message.space,
+              commit,
+              schedulerObservations,
+              previousReadSpaces,
+              session,
+            );
+            this.markSpaceDirty(
+              message.space,
+              message.commit.operations
+                .filter((operation) => operation.op !== "sqlite")
+                .map((operation) =>
+                  toDirtyKey(operation.id, declaredScope(operation.scope))
+                ),
+              {
+                sessionId: message.sessionId,
+                seq: commit.seq,
+              },
+            );
+          }
+          span.setAttribute("commit.seq", commit.seq);
+          span.setAttribute(
+            "entity.count",
+            message.commit.operations.filter((operation) =>
+              operation.op !== "sqlite"
+            ).length,
+          );
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: commit,
+          };
+        } catch (error) {
+          let retryAfterSeq: number | undefined;
+          if (error instanceof Engine.ConflictError) {
+            span.setAttribute("ct.conflict", true);
+            this.stageConflictRefreshDirtyIds(
+              message.space,
+              session,
+              message.commit,
+            );
+            const engine = await this.openEngine(message.space);
+            retryAfterSeq = Engine.serverSeq(engine);
+          }
+          const messageText = error instanceof Error
+            ? error.message
+            : String(error);
+          const preconditionError = toPreconditionFailedError(
+            error,
+            messageText,
+          );
+          const responseError = preconditionError ? preconditionError : toError(
+            error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              // A RowLabelCommitError (Phase 3.c commit-time row-label refusal,
+              // sqlite/commit-eval.ts) is TERMINAL: re-running recomputes the
+              // identical refused write, so the client must not retry it.
+              // Preserve the class name unchanged — the runner classifies by it
+              // (storage/rejection.ts `isTerminalRejection`); collapsing it into
+              // a generic TransactionError would let the doomed handler burn its
+              // retry budget and starve concurrent siblings.
+              : error instanceof RowLabelCommitError
+              ? "RowLabelCommitError"
+              : "TransactionError",
+            messageText,
+          );
+          if (retryAfterSeq !== undefined) {
+            responseError.retryAfterSeq = retryAfterSeq;
+          }
+          span.recordException(
+            error instanceof Error ? error : new Error(messageText),
+          );
+          span.setStatus({ code: SpanStatusCode.ERROR, message: messageText });
+          return respondTypedError<Engine.AppliedCommit>(
+            message.requestId,
+            responseError,
+          );
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async graphQuery(
@@ -2157,7 +2222,7 @@ export class Server {
     };
   }
 
-  async syncSessionForConnection(
+  syncSessionForConnection(
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
@@ -2165,161 +2230,193 @@ export class Server {
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
-      return null;
+      return Promise.resolve(null);
     }
-    const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
-    const hasPendingCatchUp =
-      pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
-    const finishCatchUp = (sync: SessionSync): SessionEffectMessage => {
-      if (hasPendingCatchUp) {
-        session.caughtUpLocalSeq = Math.max(
-          session.caughtUpLocalSeq,
-          pendingCaughtUpLocalSeq,
-        );
-        if (session.pendingCaughtUpLocalSeq <= session.caughtUpLocalSeq) {
-          session.pendingCaughtUpLocalSeq = 0;
+    return tracer.startActiveSpan(
+      "memory.subscriber.sync",
+      async (span): Promise<SessionEffectMessage | null> => {
+        span.setAttribute("space.did", space);
+        if (
+          session.principal !== undefined &&
+          session.principal !== ANYONE_USER
+        ) {
+          span.setAttribute("user.did", session.principal);
         }
-        sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
-      }
-      return {
-        type: "session/effect",
-        space,
-        sessionId,
-        effect: sync,
-      };
-    };
-    const emptyCatchUp = async (
-      fromSeq = session.lastSyncedSeq,
-      toSeq?: number,
-    ): Promise<SessionEffectMessage | null> => {
-      if (!hasPendingCatchUp) {
-        return null;
-      }
-      const serverSeq = toSeq ?? Engine.serverSeq(await this.openEngine(space));
-      session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
-      return finishCatchUp({
-        type: "sync",
-        fromSeq,
-        toSeq: serverSeq,
-        upserts: [],
-        removes: [],
-      });
-    };
-    if (session.watches.length === 0) {
-      return await emptyCatchUp();
-    }
-    if (dirtyIds !== undefined) {
-      const startedAt = performance.now();
-      let touched = false;
-      for (const dirtyId of dirtyIds) {
-        if (session.trackedIds.has(dirtyId)) {
-          touched = true;
-          break;
-        }
-      }
-      if (!touched) {
-        return await emptyCatchUp();
-      }
-
-      const engine = await this.openEngine(space);
-      const fromSeq = session.lastSyncedSeq;
-      const updates = new Map<string, SessionCacheEntry>();
-
-      for (const graph of session.graphs.values()) {
-        const refreshed = refreshTrackedGraph(
-          space,
-          engine,
-          graph,
-          dirtyIds,
-        );
-        if (refreshed === null) {
-          continue;
-        }
-        for (const entity of refreshed.updates.values()) {
-          const entry = toCacheEntry(entity);
-          updates.set(
-            cacheKeyForEntity(
-              entry.branch,
-              entry.id,
-              declaredScope(entry.scope),
-            ),
-            entry,
-          );
-        }
-      }
-
-      if (updates.size === 0) {
-        return await emptyCatchUp();
-      }
-
-      const upserts: SessionCacheEntry[] = [];
-      for (const [key, entry] of updates) {
-        const previous = session.entities.get(key);
-        session.entities.set(key, entry);
-        session.trackedIds.add(
-          toDirtyKey(entry.id, declaredScope(entry.scope)),
-        );
-        if (!sameSnapshot(previous, entry)) {
-          const dirtyKey = toDirtyKey(entry.id, declaredScope(entry.scope));
-          const origin = dirtyOrigins?.get(dirtyKey);
-          if (
-            origin === undefined ||
-            origin.sessionId !== sessionId ||
-            origin.seq !== entry.seq
-          ) {
-            upserts.push(entry);
+        span.setAttribute("watch.count", session.watches.length);
+        try {
+          const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
+          const hasPendingCatchUp =
+            pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
+          const finishCatchUp = (sync: SessionSync): SessionEffectMessage => {
+            if (hasPendingCatchUp) {
+              session.caughtUpLocalSeq = Math.max(
+                session.caughtUpLocalSeq,
+                pendingCaughtUpLocalSeq,
+              );
+              if (session.pendingCaughtUpLocalSeq <= session.caughtUpLocalSeq) {
+                session.pendingCaughtUpLocalSeq = 0;
+              }
+              sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
+            }
+            return {
+              type: "session/effect",
+              space,
+              sessionId,
+              effect: sync,
+            };
+          };
+          const emptyCatchUp = async (
+            fromSeq = session.lastSyncedSeq,
+            toSeq?: number,
+          ): Promise<SessionEffectMessage | null> => {
+            if (!hasPendingCatchUp) {
+              return null;
+            }
+            const serverSeq = toSeq ??
+              Engine.serverSeq(await this.openEngine(space));
+            session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
+            return finishCatchUp({
+              type: "sync",
+              fromSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [],
+            });
+          };
+          if (session.watches.length === 0) {
+            return await emptyCatchUp();
           }
-        }
-      }
-      const toSeq = Engine.serverSeq(engine);
-      if (upserts.length === 0) {
-        // The watched set was re-evaluated current as of toSeq even though it
-        // produced no net upserts; advance the watermark so a later default
-        // fromSeq is not stale. emptyCatchUp receives the original fromSeq
-        // explicitly, so this does not mutate the bounds of this sync (the
-        // Cubic fix keeps fromSeq pinned to the pre-refresh value).
-        session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
-        return await emptyCatchUp(fromSeq, toSeq);
-      }
-      session.lastSyncedSeq = toSeq;
-      recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
-        watches: session.watches.length,
-      });
-      return finishCatchUp({
-        type: "sync",
-        fromSeq,
-        toSeq,
-        upserts: upserts.toSorted((left, right) =>
-          left.branch.localeCompare(right.branch) ||
-          left.id.localeCompare(right.id)
-        ),
-        removes: [],
-      });
-    }
+          if (dirtyIds !== undefined) {
+            const startedAt = performance.now();
+            let touched = false;
+            for (const dirtyId of dirtyIds) {
+              if (session.trackedIds.has(dirtyId)) {
+                touched = true;
+                break;
+              }
+            }
+            span.setAttribute("ct.touched", touched);
+            if (!touched) {
+              return await emptyCatchUp();
+            }
 
-    const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
-      space,
-      session.watches,
-      undefined,
-      {
-        principal: session.principal,
-        sessionId,
+            const engine = await this.openEngine(space);
+            const fromSeq = session.lastSyncedSeq;
+            const updates = new Map<string, SessionCacheEntry>();
+
+            for (const graph of session.graphs.values()) {
+              const refreshed = tracer.startActiveSpan(
+                "memory.watch.refresh",
+                (watchSpan) => {
+                  watchSpan.setAttribute("space.did", space);
+                  try {
+                    return refreshTrackedGraph(
+                      space,
+                      engine,
+                      graph,
+                      dirtyIds,
+                    );
+                  } finally {
+                    watchSpan.end();
+                  }
+                },
+              );
+              if (refreshed === null) {
+                continue;
+              }
+              for (const entity of refreshed.updates.values()) {
+                const entry = toCacheEntry(entity);
+                updates.set(
+                  cacheKeyForEntity(
+                    entry.branch,
+                    entry.id,
+                    declaredScope(entry.scope),
+                  ),
+                  entry,
+                );
+              }
+            }
+
+            if (updates.size === 0) {
+              return await emptyCatchUp();
+            }
+
+            const upserts: SessionCacheEntry[] = [];
+            for (const [key, entry] of updates) {
+              const previous = session.entities.get(key);
+              session.entities.set(key, entry);
+              session.trackedIds.add(
+                toDirtyKey(entry.id, declaredScope(entry.scope)),
+              );
+              if (!sameSnapshot(previous, entry)) {
+                const dirtyKey = toDirtyKey(
+                  entry.id,
+                  declaredScope(entry.scope),
+                );
+                const origin = dirtyOrigins?.get(dirtyKey);
+                if (
+                  origin === undefined ||
+                  origin.sessionId !== sessionId ||
+                  origin.seq !== entry.seq
+                ) {
+                  upserts.push(entry);
+                }
+              }
+            }
+            const toSeq = Engine.serverSeq(engine);
+            if (upserts.length === 0) {
+              // The watched set was re-evaluated current as of toSeq even though it
+              // produced no net upserts; advance the watermark so a later default
+              // fromSeq is not stale. emptyCatchUp receives the original fromSeq
+              // explicitly, so this does not mutate the bounds of this sync (the
+              // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+              session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
+              return await emptyCatchUp(fromSeq, toSeq);
+            }
+            session.lastSyncedSeq = toSeq;
+            recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
+              watches: session.watches.length,
+            });
+            return finishCatchUp({
+              type: "sync",
+              fromSeq,
+              toSeq,
+              upserts: upserts.toSorted((left, right) =>
+                left.branch.localeCompare(right.branch) ||
+                left.id.localeCompare(right.id)
+              ),
+              removes: [],
+            });
+          }
+
+          const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
+            space,
+            session.watches,
+            undefined,
+            {
+              principal: session.principal,
+              sessionId,
+            },
+          );
+          const sync = buildDiffSync(
+            session.entities,
+            entities,
+            session.lastSyncedSeq,
+            serverSeq,
+          );
+          session.graphs = graphs;
+          session.entities = entities;
+          session.trackedIds = trackedIdsFromEntries(entities.values());
+          session.lastSyncedSeq = serverSeq;
+          if (isEmptySync(sync)) {
+            return await emptyCatchUp(sync.fromSeq, sync.toSeq);
+          }
+          return finishCatchUp(sync);
+        } finally {
+          span.end();
+        }
       },
     );
-    const sync = buildDiffSync(
-      session.entities,
-      entities,
-      session.lastSyncedSeq,
-      serverSeq,
-    );
-    session.graphs = graphs;
-    session.entities = entities;
-    session.trackedIds = trackedIdsFromEntries(entities.values());
-    session.lastSyncedSeq = serverSeq;
-    if (isEmptySync(sync)) {
-      return await emptyCatchUp(sync.fromSeq, sync.toSeq);
-    }
-    return finishCatchUp(sync);
   }
 
   markSpaceDirty(
@@ -2498,9 +2595,27 @@ export class Server {
         if (dirtyOrigins !== undefined) {
           this.#dirtyOriginsBySpace.delete(space);
         }
-        for (const connection of this.#connections.values()) {
-          await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
-        }
+        // Fan-out is a scheduled/batched timer decoupled from transact, so it
+        // must be its own root span. `root: true` makes that explicit — the
+        // context manager propagates the active context into timer callbacks,
+        // so without it this span could parent under whichever memory.transact
+        // happened to schedule the refresh.
+        await tracer.startActiveSpan(
+          "memory.fanout",
+          { root: true },
+          async (span) => {
+            span.setAttribute("space.did", space);
+            span.setAttribute("subscriber.count", this.#connections.size);
+            span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
+            try {
+              for (const connection of this.#connections.values()) {
+                await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+              }
+            } finally {
+              span.end();
+            }
+          },
+        );
       }
 
       if (initial !== undefined) {

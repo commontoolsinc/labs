@@ -7,15 +7,18 @@ import {
   Session,
 } from "@commonfabric/identity";
 import { env, waitFor } from "@commonfabric/integration";
+import { defer } from "@commonfabric/utils/defer";
 import {
+  $conn,
   CellHandle,
   type JSONSchema,
+  RequestType,
   RuntimeClient,
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { Program } from "@commonfabric/js-compiler";
 import { render } from "@commonfabric/html/client";
@@ -183,18 +186,18 @@ describe("RuntimeClient", () => {
       await cell.sync();
 
       const receivedValues: { counter: number }[] = [];
+      const gotThree = defer<void>();
       const cancel = cell.subscribe((value) => {
         if (!value) throw new Error("cell was not synced");
         receivedValues.push(value);
+        if (receivedValues.length >= 3) gotThree.resolve();
       });
 
       cell.set({ counter: 1 });
       cell.set({ counter: 2 });
       cell.set({ counter: 3 });
 
-      await waitFor(() => Promise.resolve(receivedValues.length >= 3), {
-        timeout: 5000,
-      });
+      await gotThree.promise;
 
       cancel();
 
@@ -228,12 +231,14 @@ describe("RuntimeClient", () => {
         _updatedValue1 = value;
       });
       let _updatedValue2 = undefined;
+      const gotValue = defer<void>();
       const cancel2 = cell2.subscribe((value) => {
         _updatedValue2 = value;
+        if (cell2.get() === "my-value") gotValue.resolve();
       });
 
       await cell.set("my-value");
-      await waitFor(() => Promise.resolve(cell2.get() === "my-value"));
+      await gotValue.promise;
       cancel1();
       cancel2();
     });
@@ -300,18 +305,27 @@ describe("RuntimeClient", () => {
 
       // Subscribe cellA first - this establishes the backend subscription
       const valuesA: ({ message: string } | undefined)[] = [];
+      const valuesB: ({ message: string } | undefined)[] = [];
+      const gotInitialA = defer<void>();
+      const bothUpdated = defer<void>();
+      const checkBothUpdated = () => {
+        if (
+          valuesA.some((v) => v?.message === "updated") &&
+          valuesB.some((v) => v?.message === "updated")
+        ) {
+          bothUpdated.resolve();
+        }
+      };
       const cancelA = cellA.subscribe((v) => {
         valuesA.push(v);
+        if (valuesA.length > 0 && valuesA[valuesA.length - 1] !== undefined) {
+          gotInitialA.resolve();
+        }
+        checkBothUpdated();
       });
 
       // Wait for initial value to arrive from backend
-      await waitFor(
-        () =>
-          Promise.resolve(
-            valuesA.length > 0 && valuesA[valuesA.length - 1] !== undefined,
-          ),
-        { timeout: 5000 },
-      );
+      await gotInitialA.promise;
 
       // Verify cellA received the value
       assertEquals(
@@ -323,9 +337,9 @@ describe("RuntimeClient", () => {
       // Now subscribe cellB - this is the "late subscriber" that joins an
       // existing subscription. Before the fix, its initial callback would
       // receive undefined because no new backend request was made.
-      const valuesB: ({ message: string } | undefined)[] = [];
       const cancelB = cellB.subscribe((v) => {
         valuesB.push(v);
+        checkBothUpdated();
       });
 
       // The fix ensures cellB immediately receives the cached value
@@ -343,14 +357,8 @@ describe("RuntimeClient", () => {
 
       // Also verify both receive subsequent updates
       await cell.set({ message: "updated" });
-      await waitFor(
-        () =>
-          Promise.resolve(
-            valuesA.some((v) => v?.message === "updated") &&
-              valuesB.some((v) => v?.message === "updated"),
-          ),
-        { timeout: 5000 },
-      );
+      checkBothUpdated();
+      await bothUpdated.promise;
 
       cancelA();
       cancelB();
@@ -449,27 +457,25 @@ export default pattern((_) => {
       await using rt = await createRuntimeClient(session);
 
       const consoleEvents: { method: string; args: unknown[] }[] = [];
+      const gotHello = defer<void>();
       rt.on(
         "console",
         (
           event,
         ) => {
           consoleEvents.push(event);
+          if (
+            consoleEvents.length > 0 && consoleEvents[0].args[0] === "hello"
+          ) {
+            gotHello.resolve();
+          }
         },
       );
 
       await rt.createPage(consoleProgram, session.space, { run: true });
       await rt.idle();
 
-      await waitFor(
-        () =>
-          Promise.resolve(
-            consoleEvents.length > 0 && consoleEvents[0].args[0] === "hello",
-          ),
-        {
-          timeout: 5000,
-        },
-      );
+      await gotHello.promise;
     });
   });
 
@@ -1132,8 +1138,10 @@ export default pattern<Record<string, never>>(() => {
       const { document, renderOptions } = mock;
       const root = document.getElementById("root")!;
       const navigations: string[] = [];
+      const gotNavigation = defer<void>();
       rt.on("navigaterequest", ({ cell }) => {
         navigations.push(cell.id());
+        if (navigations.length > 0) gotNavigation.resolve();
       });
 
       const cancel = render(root, page.cell() as any, renderOptions);
@@ -1148,10 +1156,7 @@ export default pattern<Record<string, never>>(() => {
 
       button.dispatchEvent({ type: "click", target: button });
 
-      await waitFor(
-        () => Promise.resolve(navigations.length > 0),
-        { timeout: 5000 },
-      );
+      await gotNavigation.promise;
       await rt.idle();
 
       assertEquals(navigations.length, 1);
@@ -1268,6 +1273,105 @@ export default pattern<Record<string, never>>(() => {
       } finally {
         cancel();
       }
+    });
+  });
+
+  describe("CFC label-metadata seam (inv-12 Stage 0)", () => {
+    it('fails closed on the raw meta:"cfc" cell/get seam over real IPC', async () => {
+      // The retired seam returned the raw ["cfc"] envelope (unredacted
+      // Caveat.source et al.) via getMetaRaw. "cfc" is no longer a MetaField,
+      // but the wire is untyped JSON — a client that still sends it must get
+      // an error response, never raw label metadata. This drives the REAL
+      // worker IPC path (request -> handleCellGet guard -> error response ->
+      // rejected promise), not a mocked processor.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const cell = await rt.getCell<{ note: string }>(
+        session.space,
+        "cfc-raw-meta-seam-" + crypto.randomUUID(),
+        {
+          type: "object",
+          properties: { note: { type: "string" } },
+        } as const satisfies JSONSchema,
+      );
+      await cell.set({ note: "labelled" });
+      await rt.idle();
+
+      await assertRejects(
+        () =>
+          rt[$conn]().request<RequestType.CellGet>({
+            type: RequestType.CellGet,
+            cell: cell.ref(),
+            meta: "cfc" as never,
+          }),
+        Error,
+        "cfc",
+      );
+    });
+
+    it("drops label views from raw sigil links in inbound write values", async () => {
+      // A hand-crafted sigil link with a cfcLabelView riding a write value —
+      // the raw-link ingress that bypasses the CellRef path (CellHandle
+      // serialized into CustomEvent.detail has the same shape). The write
+      // must succeed with the link intact; the main-thread view is display
+      // freight the worker discards at ingress, so it must not surface as
+      // label state on the linked read.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const nonce = crypto.randomUUID();
+      const target = await rt.getCell<{ note: string }>(
+        session.space,
+        "cfc-raw-link-target-" + nonce,
+        {
+          type: "object",
+          properties: { note: { type: "string" } },
+        } as const satisfies JSONSchema,
+      );
+      await target.set({ note: "linked" });
+      await rt.idle();
+      const targetRef = target.ref();
+
+      const holder = await rt.getCell<{ item: unknown }>(
+        session.space,
+        "cfc-raw-link-holder-" + nonce,
+        {
+          type: "object",
+          properties: { item: { type: "object", additionalProperties: true } },
+        } as const satisfies JSONSchema,
+      );
+      await holder.set({
+        item: {
+          "/": {
+            "link@1": {
+              id: targetRef.id,
+              space: targetRef.space,
+              path: [],
+              cfcLabelView: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { confidentiality: ["main-thread-claim"] },
+                }],
+              },
+            },
+          },
+        },
+      });
+      await rt.idle();
+
+      // The link survives the strip and still resolves to the target value.
+      const synced = await holder.sync() as
+        | { item: { note?: string } }
+        | undefined;
+      assertEquals(synced?.item?.note, "linked");
+      // And the fabricated main-thread view never became the target's label.
+      const label = await target.getCfcLabel();
+      assertEquals(
+        JSON.stringify(label ?? {}).includes("main-thread-claim"),
+        false,
+      );
     });
   });
 });

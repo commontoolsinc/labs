@@ -143,7 +143,7 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
-const toggleSection = handler<unknown, { section: Writable<boolean> }>(
+const toggle = handler<unknown, { section: Writable<boolean> }>(
   (_event, { section }) => {
     section.set(!section.get());
   },
@@ -164,7 +164,7 @@ function buildSectionHeaderLabel(
   return `${arrow} ${label}${suffix}`;
 }
 
-function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
+function header(labelContent: any, onClick: any) {
   return (
     <cf-hstack
       style={{
@@ -174,7 +174,7 @@ function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
         paddingTop: "8px",
         borderTop: "1px solid #e5e7eb",
       }}
-      onClick={toggleSection({ section: expanded })}
+      onClick={onClick}
     >
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
         {labelContent}
@@ -225,7 +225,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
   const showGifts = new Writable(false);
   const showNotes = new Writable(false);
 
-  const familyInfoHeader = computed(() =>
+  const familyHeader = computed(() =>
     buildSectionHeaderLabel("Family Info", showFamilyInfo.get())
   );
   const healthHeader = computed(() =>
@@ -326,7 +326,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
            */
           }
           <div>
-            {sectionHeader(familyInfoHeader, showFamilyInfo)}
+            {header(familyHeader, toggle({ section: showFamilyInfo }))}
             {computed(() => {
               if (!showFamilyInfo.get()) return null;
               return (
@@ -353,7 +353,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Health & Diet Section */}
           <div>
-            {sectionHeader(healthHeader, showHealth)}
+            {header(healthHeader, toggle({ section: showHealth }))}
             {computed(() => {
               if (!showHealth.get()) return null;
               return (
@@ -383,7 +383,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Gift Ideas Section */}
           <div>
-            {sectionHeader(giftIdeasHeader, showGifts)}
+            {header(giftIdeasHeader, toggle({ section: showGifts }))}
             {computed(() => {
               if (!showGifts.get()) return null;
               return (
@@ -399,7 +399,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {sectionHeader(notesHeader, showNotes)}
+            {header(notesHeader, toggle({ section: showNotes }))}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

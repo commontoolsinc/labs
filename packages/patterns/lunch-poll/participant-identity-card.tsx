@@ -83,6 +83,13 @@ const claimHost = handler<ClaimHostEvent, {
  * taking over admin duties. The resolved identity outputs (`me`, `isJoined`,
  * and `isAdmin`) are intended for downstream sub-patterns such as per-option
  * cards.
+ *
+ * Joining is profile-first: when `#profileName` resolves, the surface offers a
+ * one-click "Join as <name>" (carrying the profile name and avatar) with a
+ * "Use a different name" escape hatch. The manual name input is the FALLBACK,
+ * shown by default only when no profile resolves. This keeps the shared profile
+ * — not a hand-typed name — the primary identity, so avatars aren't dropped and
+ * viewers aren't asked to retype who they already are.
  */
 
 /**
@@ -154,6 +161,19 @@ export default pattern<
     });
     const boundClaimHost = claimHost({ myName, adminName });
 
+    // The join name/avatar default to the viewer's shared profile; the manual
+    // input is only a fallback for when no profile resolves (or the viewer
+    // deliberately wants a one-off name). `useCustomName` reveals that input
+    // even when a profile IS present.
+    const useCustomName = Writable.perSession.of<boolean>(false);
+    const profileDisplayName = computed(() =>
+      trimmedName(profileNameWish.result ?? "")
+    );
+    const hasProfile = computed(() => profileDisplayName !== "");
+    const showManualEntry = computed(() =>
+      profileDisplayName === "" || useCustomName.get()
+    );
+
     const me = computed(() => trimmedName(myName.get()));
     const isJoined = computed(() => trimmedName(myName.get()) !== "");
     const isAdmin = computed(() => {
@@ -205,29 +225,75 @@ export default pattern<
               >
                 {joinHint}
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  alignItems: "center",
-                }}
-              >
-                <cf-input
-                  id="lp-join-name"
-                  $value={joinName}
-                  placeholder="Your name…"
-                  aria-label="Your name"
-                  timing-strategy="immediate"
-                  style="flex:1"
-                />
-                <cf-button
-                  id="lp-join-button"
-                  aria-label="Join the poll"
-                  onClick={() => boundJoin.send({})}
-                >
-                  Join
-                </cf-button>
-              </div>
+              {showManualEntry
+                ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <cf-input
+                      id="lp-join-name"
+                      $value={joinName}
+                      placeholder="Your name…"
+                      aria-label="Your name"
+                      timing-strategy="immediate"
+                      style="flex:1"
+                    />
+                    <cf-button
+                      id="lp-join-button"
+                      aria-label="Join the poll"
+                      onClick={() => boundJoin.send({})}
+                    >
+                      Join
+                    </cf-button>
+                    {hasProfile
+                      ? (
+                        <cf-button
+                          variant="ghost"
+                          size="sm"
+                          aria-label="Use my profile name instead"
+                          onClick={() => {
+                            useCustomName.set(false);
+                            joinName.set("");
+                          }}
+                        >
+                          Cancel
+                        </cf-button>
+                      )
+                      : null}
+                  </div>
+                )
+                : (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <cf-button
+                      id="lp-join-button"
+                      variant="primary"
+                      aria-label="Join the poll with your profile name"
+                      onClick={() => boundJoin.send({})}
+                    >
+                      Join as {profileDisplayName}
+                    </cf-button>
+                    <cf-button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Use a different name"
+                      onClick={() => useCustomName.set(true)}
+                    >
+                      Use a different name
+                    </cf-button>
+                  </div>
+                )}
             </div>
           )}
 

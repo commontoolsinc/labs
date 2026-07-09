@@ -19,6 +19,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
+  IWriteAttempt,
   IWriteOptions,
   MemorySpace,
   Metadata,
@@ -41,6 +42,7 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
+  getTransactionWriteAttempts,
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 import {
@@ -59,24 +61,35 @@ import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
   CFC_ENFORCING_STRICTNESS,
+  CFC_GRANT_ID_PREFIX,
+  type CfcAddress,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcGrantWriteInput,
+  type CfcPolicyEvaluationMode,
+  type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
   type CfcTxState,
   type CfcWriteFloorMode,
+  type ConsultedGrant,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
   type ImplementationIdentity,
+  type OrderedWriteAttempt,
+  type PolicySnapshot,
   type PostCommitSideEffect,
   prepareBoundaryCommit,
+  prepareCfcGrantWrite,
   preparedDigestFor,
   type PreparedDigestInput,
   type SinkMaxConfidentiality,
@@ -104,6 +117,10 @@ type CfcInstrumentationHooks = {
   onSinkReleaseReject?(
     info: { sink: string; effectId: string; detail: string },
   ): void;
+  // Stage-0 D4 precision counters (cfc-value-level-provenance.md §6, SC-24):
+  // one summary per prepared transaction that measured a protected write.
+  // When absent — the default — the prepare gate skips all measurement.
+  onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -241,8 +258,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     flowLabelsMode: DEFAULT_CFC_FLOW_LABELS_MODE,
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
+    policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
+    structureContainers: [],
     triggerReads: [],
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
@@ -250,6 +269,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     outbox: [],
     diagnostics: [],
     unprivilegedSystemWrites: [],
+    consultedGrants: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
@@ -264,6 +284,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcFlowLabelsPinned = false;
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
+  #cfcPolicyEvaluationPinned = false;
+  // Write-once pin for the deployment policy snapshot. Distinct from the
+  // slot's value being defined: the Runtime configures MANY tx with NO
+  // policies (`undefined`), and that "no policies" state must be just as
+  // write-once as a configured one — otherwise handler code reaching the
+  // concrete tx via `(cell.tx as any)` could install an attacker-supplied
+  // snapshot after the Runtime's `undefined` call left the slot open
+  // (codex P1 on #4562). Set on the FIRST call (always the Runtime's, in
+  // edit()), regardless of value.
+  #cfcPolicySnapshotPinned = false;
+  // Write-once pin for the deployment trust config. Distinct from the slot's
+  // value being defined: the Runtime configures many tx with NO trust config
+  // (`undefined`), and that "no config; every concept guard fails closed"
+  // state must be just as write-once as a configured one — otherwise handler
+  // code reaching the concrete tx via `(cell.tx as any)` could install an
+  // arbitrary config before the concept guards read it (codex P2 on #4563).
+  // Set on the FIRST call (always the Runtime's, in edit()), regardless of
+  // value.
+  #cfcTrustConfigPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -337,6 +376,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is pinned at "persist"`,
       );
     }
+    // The flow-labels mode drives prepareBoundaryCommit (which derived
+    // components are stamped and credited) but is not part of
+    // PreparedDigestInput, so a change after prepare must invalidate the
+    // prepared decision — otherwise a strengthen-after-prepare survives the
+    // commit-time digest recheck while the tx reports the stronger mode
+    // (same silent-downgrade class as the policy-evaluation setter below;
+    // review of #4566). Only a real change invalidates.
+    if (
+      this.#cfcState.flowLabelsMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("flow-labels-mode-changed");
+    }
     this.#cfcState.flowLabelsMode = mode;
     if (mode === "persist") {
       this.#cfcFlowLabelsPinned = true;
@@ -353,6 +405,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         `CFC write-floor mode cannot be weakened to "${mode}": transaction ` +
           `is pinned at "enforce"`,
       );
+    }
+    // The write-floor mode drives which SC-18 floor reasons prepare records
+    // but is not in PreparedDigestInput, so — like the flow-labels and
+    // policy-evaluation setters — a change after prepare must invalidate,
+    // else a strengthen (off/observe → enforce) after prepare could commit
+    // the stale permissive decision while the tx reports enforce.
+    if (
+      this.#cfcState.writeFloorMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("write-floor-mode-changed");
     }
     this.#cfcState.writeFloorMode = mode;
     if (mode === "enforce") {
@@ -375,6 +438,36 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.triggerReadGating = enabled;
     if (enabled) {
       this.#cfcTriggerReadGatingPinned = true;
+    }
+  }
+
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — code reaching the tx cannot weaken it
+    // to `observe`/`off` so the boundary gates decide on un-rewritten labels
+    // again (or skip the exhaustion fail-close). Strengthening is allowed.
+    if (this.#cfcPolicyEvaluationPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC policy-evaluation mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    // A strengthen after prepare (e.g. off/observe → enforce) changes which
+    // label a gate decides on and whether fuel exhaustion fails closed, but
+    // the mode is not part of PreparedDigestInput — so a prepared decision
+    // computed under the old mode must be invalidated, or the commit-time
+    // recheck would pass it through while the tx now reports `enforce`
+    // (codex P2 on #4566). Only a real change invalidates (the Runtime's
+    // idempotent set at tx creation, before prepare, does not).
+    if (
+      this.#cfcState.policyEvaluationMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("policy-evaluation-mode-changed");
+    }
+    this.#cfcState.policyEvaluationMode = mode;
+    if (mode === "enforce") {
+      this.#cfcPolicyEvaluationPinned = true;
     }
   }
 
@@ -410,6 +503,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // let later mutation change the egress policy (review on #3993). Cheap:
     // deepFreeze short-circuits on the Runtime's already-frozen config.
     this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
+  }
+
+  // set once by the Runtime at tx creation. Write-once, off the public tx
+  // interface, deep-frozen on store. The pin (not the slot value) is what
+  // enforces write-once: the FIRST call — always the Runtime's, even when it
+  // configures no policies (`undefined`) — pins the slot, so a later
+  // `(cell.tx as any).setCfcPolicySnapshot(attackerSnapshot)` is ignored.
+  // (`buildCfcPolicySnapshot` already froze a configured snapshot; this
+  // deepFreeze is the cheap short-circuiting backstop for any other caller.)
+  setCfcPolicySnapshot(snapshot: PolicySnapshot | undefined): void {
+    if (this.#cfcPolicySnapshotPinned) return;
+    this.#cfcPolicySnapshotPinned = true;
+    this.#cfcState.policySnapshot = snapshot === undefined
+      ? undefined
+      : deepFreeze(snapshot);
+  }
+
+  // Deployment trust config for concept-guard satisfaction (Epic B3). The pin
+  // (not the slot value) enforces write-once: the FIRST call — always the
+  // Runtime's, even when it configures no trust (`undefined`) — pins the slot,
+  // so a later `(cell.tx as any).setCfcTrustConfig(attackerConfig)` is
+  // ignored and the "no config; concept guards fail closed" state holds.
+  setCfcTrustConfig(config: CfcTrustConfig | undefined): void {
+    if (this.#cfcTrustConfigPinned) return;
+    this.#cfcTrustConfigPinned = true;
+    this.#cfcState.trustConfig = config === undefined
+      ? undefined
+      : deepFreeze(config);
   }
 
   markCfcRelevant(reason?: string): void {
@@ -455,6 +576,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // prepareBoundaryCommit, so the record stays inert there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
+    // Reserved grant documents (§8.12.7 route 2a, cfc/grants.ts): the WHOLE
+    // document is policy state — a forged grant at the derived address would
+    // spend another principal's release authority — so any unprivileged
+    // write at ANY path (value, root, or cfc sibling) is recorded. The one
+    // sanctioned writer is `writeCfcGrant` below, which validates and then
+    // writes inside the privileged scope.
+    if (address.id.startsWith(CFC_GRANT_ID_PREFIX)) {
+      this.markCfcRelevant("unprivileged-cfc-grant-write");
+      this.#cfcState.unprivilegedSystemWrites.push(
+        `${address.id}/${address.path.join("/")}`,
+      );
+      return;
+    }
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.
     if (address.path[0] !== "cfc") return;
@@ -617,6 +751,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.#cfcState.structureContainers.push(deepFreeze(address));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("structure-container-added");
+    }
+  }
+
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
     this.#cfcState.trustSnapshot = snapshot;
     if (this.#cfcState.prepare.status === "prepared") {
@@ -652,6 +793,89 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcConsultedGrant(consulted: ConsultedGrant): void {
+    // Dedup by address: the resolver memoizes per query, but two different
+    // guards can compute the same candidate — one digest entry per document.
+    // The journal snapshot keeps re-reads stable WITHIN one evaluation, but a
+    // consulted grant can legitimately change ACROSS evaluations of the same
+    // transaction (a privileged writeCfcGrant between prepares lands in the
+    // journal), so a re-consultation carrying a DIFFERENT digest replaces the
+    // stale record — the prepared digest must bind the grant state the
+    // LATEST boundary evaluation consumed, never a superseded one (cubic P1
+    // on #4627).
+    const index = this.#cfcState.consultedGrants.findIndex((existing) =>
+      existing.space === consulted.space && existing.id === consulted.id
+    );
+    if (index !== -1) {
+      if (this.#cfcState.consultedGrants[index].digest === consulted.digest) {
+        return;
+      }
+      this.#cfcState.consultedGrants[index] = deepFreeze(consulted);
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("consulted-grant-changed");
+      }
+      return;
+    }
+    this.#cfcState.consultedGrants.push(deepFreeze(consulted));
+    // Grants are consulted DURING prepare (the boundary gates); recording
+    // after a prepare stamped its digest means the decision inputs grew —
+    // same invalidation posture as every other recorder above.
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("consulted-grant-added");
+    }
+  }
+
+  writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
+    this.assertWritable("writeCfcGrant()");
+    // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
+    // soundness condition 1): validation — trusted-writer identity (below),
+    // audience principal-like (§3.1.8), owner === the transaction's acting
+    // principal (release authority; the fuller §13.4.3 intent-evidence
+    // chain arrives with intents), lifecycle shape — happens INSIDE this
+    // method, atomically with the privileged write, so no caller can reach
+    // the reserved namespace with unvalidated content.
+    //
+    // Trusted-writer gate (codex P1 on #4627): a grant is DURABLE release
+    // state — far stronger than a single gated egress — so authoring it
+    // requires the transaction's current implementation identity to be a
+    // trusted BUILTIN, exactly the arm `writeAuthorizedBy` and the
+    // runtime-mint gate (`gateRuntimeMintedIntegrity`) trust for
+    // runtime-evidence writes today. Ordinary pattern/handler code runs
+    // under a `verified` (or no) identity and is refused; the share
+    // surface's trusted builtin writer sets its identity the way the llm /
+    // compile-cache builtins do. The §13.4.3 intent-evidence verification
+    // (rendered-state match, trusted surface concept) strengthens this gate
+    // when the §6 intent substrate lands.
+    const identity = this.#cfcState.implementationIdentity;
+    if (identity?.kind !== "builtin") {
+      throw new Error(
+        "cfc-grant: writeCfcGrant requires a trusted builtin implementation " +
+          "identity (the trusted policy-writer path; design §2.3 condition 1)",
+      );
+    }
+    const prepared = prepareCfcGrantWrite(
+      input,
+      this.#cfcState.trustSnapshot?.actingPrincipal,
+    );
+    // Deliberately NOT marked CFC-relevant: relevance forces boundary
+    // verification of activity the runtime has not yet verified, and this
+    // path is self-verifying — the validation above runs atomically before
+    // the privileged write, and a throw leaves nothing written. Relevance
+    // for grant docs belongs to the UNPRIVILEGED arm (noteSystemWrite),
+    // where a forged write must surface a fail-closed prepare reason. A
+    // transaction that is otherwise relevant still binds this write into
+    // its prepared digest through the ordinary write journal.
+    this.#runPrivilegedSystemWrite(() => {
+      this.writeOrThrow({
+        space: prepared.space,
+        id: prepared.id,
+        type: "application/json",
+        path: ["value"],
+      }, prepared.value as unknown as FabricValue);
+    });
+    return { space: prepared.space, id: prepared.id };
+  }
+
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
     const key = effect.idempotencyKey ?? effect.id;
     if (this.outboxIdempotencyKeys.has(key)) {
@@ -673,15 +897,46 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // identity-stable cache keys (e.g. for the `hashStringOf()` WeakMap
     // cache) and matches the chokepoint freeze applied to dereference
     // traces and write-policy inputs.
-    const consumedReads: ConsumedRead[] = [];
+    // Activity-clock ranks for the digest: the prefix-provenance gate
+    // consumes only the RELATIVE order of non-internal reads and write
+    // attempts, so the digest binds dense ranks over exactly that set. Raw
+    // clock values would additionally encode how many runtime-internal
+    // (verifier-marked) reads interleaved — noise that must not perturb the
+    // enforcement identity of otherwise-identical transactions (pinned by
+    // the boundary test "does not let helper source-cell reads affect the
+    // prepared digest"). Any reorder among the ranked items still flips
+    // ranks, so the §6 invalidation property is intact.
+    const pendingReads: Array<{ read: IReadActivity; raw?: number }> = [];
+    const rawRanks: number[] = [];
     for (const read of this.getReadActivities()) {
       if (isInternalVerifierRead(read.meta)) {
         continue;
       }
+      pendingReads.push({ read, raw: read.journalIndex });
+      if (read.journalIndex !== undefined) {
+        rawRanks.push(read.journalIndex);
+      }
+    }
+    const rawAttempts = [...this.getWriteAttemptLog()];
+    for (const attempt of rawAttempts) {
+      rawRanks.push(attempt.journalIndex);
+    }
+    const rankByRaw = new Map<number, number>();
+    rawRanks.sort((a, b) => a - b).forEach((raw, rank) => {
+      rankByRaw.set(raw, rank);
+    });
+
+    const consumedReads: ConsumedRead[] = [];
+    for (const { read, raw } of pendingReads) {
+      // Strip the raw stamp before the spread; re-attach its rank (or leave
+      // the field absent when the backend never stamped one — an explicit
+      // undefined would hash differently from absence).
+      const { journalIndex: _raw, ...bare } = read;
       consumedReads.push(deepFreeze({
-        ...read,
+        ...bare,
         scope: normalizeCellScope(read.scope),
         path: canonicalizeLogicalPath(read.path),
+        ...(raw !== undefined ? { journalIndex: rankByRaw.get(raw)! } : {}),
       }));
     }
 
@@ -709,15 +964,49 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
     }
 
+    // The §6 order binding: the temporal write sequence, rank-stamped on the
+    // same scale as the consumed reads above. Paths stay RAW — see
+    // OrderedWriteAttempt.
+    const writeAttemptLog: OrderedWriteAttempt[] = [];
+    for (const attempt of rawAttempts) {
+      writeAttemptLog.push(deepFreeze({
+        space: attempt.space,
+        id: attempt.id,
+        scope: normalizeCellScope(attempt.scope),
+        path: [...attempt.path],
+        journalIndex: rankByRaw.get(attempt.journalIndex)!,
+      }));
+    }
+
     return {
       consumedReads,
       attemptedWrites,
       writes,
+      writeAttemptLog,
       dereferenceTraces: [...this.#cfcState.dereferenceTraces],
       triggerReads: [...this.#cfcState.triggerReads],
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
       implementationIdentity: this.#cfcState.implementationIdentity,
       trustSnapshot: this.#cfcState.trustSnapshot,
+      // Digest-only projection: the decision-relevant identity of the policy
+      // set (Epic B5). The snapshot itself is frozen Runtime config; only its
+      // identity needs to invalidate.
+      policySnapshot: this.#cfcState.policySnapshot === undefined
+        ? undefined
+        : { digest: this.#cfcState.policySnapshot.digest },
+      // Consulted grants (§8.12.7 route 2a): the resolution-time content
+      // digests recorded by the grant resolver — a boundary decision's
+      // policy-state inputs, bound the same way policySnapshot.digest is
+      // (drift between prepare and the commit-time rebuild mismatches →
+      // cfc-prepared-digest-mismatch). EXTERNAL mutation between prepare
+      // and commit is additionally rejected for WRITING transactions by the
+      // storage layer's claim pass — the resolver's read validated the
+      // grant document snapshot; a zero-write transaction skips that pass,
+      // the same snapshot-consistency posture every labeled read has, and a
+      // revocation then takes effect on the next evaluation (design §2.2).
+      ...(this.#cfcState.consultedGrants.length > 0
+        ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+        : {}),
     };
   }
 
@@ -734,10 +1023,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     const reasons = this.#runPrivilegedSystemWrite(() =>
-      prepareBoundaryCommit(this)
+      prepareBoundaryCommit(
+        this,
+        // Stage-0 precision counters: threaded through only when the hook is
+        // installed, so the gate skips all measurement (and the summary
+        // allocation) otherwise. The non-null assertion restates the
+        // presence check above — the hooks object is fixed at construction.
+        this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
+          onPrefixProvenance: (summary) =>
+            this.cfcInstrumentation.onPrefixProvenance!(summary),
+        },
+      )
     );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
+      // A recorded reason makes the transaction CFC-relevant by definition.
+      // Without this mark, a reasoned transaction whose reads/writes never
+      // tripped an eager mark (e.g. a schema-less labeled flow feeding a
+      // writer-fit misfit) leaves `relevant` false; the commit-time probes
+      // skip non-`unprepared` prepare states, so the enforcement ladder's
+      // reject would silently fail open (same shape as the late-sink-request
+      // hole, Codex P2 on #4070).
+      this.markCfcRelevant("prepare-reasons");
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
@@ -844,7 +1151,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
-    this.tx.recordMergeableOp?.(toMemorySpaceAddress(link), delta);
+    const address = toMemorySpaceAddress(link);
+    // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
+    // write. The ["cfc"]-path arm is structurally unreachable here (a
+    // NormalizedFullLink always yields a value-rooted storage path), but the
+    // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
+    // path must not slip an unprivileged grant mutation past the gate.
+    this.noteSystemWrite(address);
+    this.tx.recordMergeableOp?.(address, delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
@@ -861,6 +1175,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getReadActivities(): Iterable<IReadActivity> {
     return getTransactionReadActivities(this.tx);
+  }
+
+  getWriteAttemptLog(): readonly IWriteAttempt[] {
+    // Absent source (a custom transaction with neither a native log nor a
+    // journal) degrades to an empty log; the CFC prefix gate then finds no
+    // overlapping attempt for any target and falls back to
+    // transaction-global gating (conservative), never to a too-early bound.
+    return getTransactionWriteAttempts(this.tx) ?? [];
   }
 
   getWriteDetails(
@@ -1078,6 +1400,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.outboxIdempotencyKeys.clear();
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
+    this.#cfcState.structureContainers = [];
     return this.tx.abort(reason);
   }
 
@@ -1333,6 +1656,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.setCfcTriggerReadGating(enabled);
   }
 
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
+    this.wrapped.setCfcPolicyEvaluationMode(mode);
+  }
+
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
   }
@@ -1365,6 +1692,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.recordCfcDereferenceTrace(trace);
   }
 
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.wrapped.recordCfcStructureContainer(address);
+  }
+
   prepareCfc(): string {
     return this.wrapped.prepareCfc();
   }
@@ -1381,6 +1712,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcWritePolicyInput(input: WritePolicyInput): void {
     this.wrapped.recordCfcWritePolicyInput(input);
+  }
+
+  recordCfcConsultedGrant(consulted: ConsultedGrant): void {
+    this.wrapped.recordCfcConsultedGrant(consulted);
+  }
+
+  writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
+    return this.wrapped.writeCfcGrant(input);
   }
 
   noteCfcSinkReleaseReject(
@@ -1472,6 +1811,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReadActivities(): Iterable<IReadActivity> {
     return this.wrapped.getReadActivities?.() ??
       getTransactionReadActivities(this.wrapped.tx);
+  }
+
+  getWriteAttemptLog(): readonly IWriteAttempt[] {
+    return this.wrapped.getWriteAttemptLog?.() ??
+      getTransactionWriteAttempts(this.wrapped.tx) ?? [];
   }
 
   getWriteDetails(

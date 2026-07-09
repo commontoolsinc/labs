@@ -1,11 +1,19 @@
 import {
+  buildsMatch,
   type Cell,
   entityIdFrom,
+  type EnvReader,
+  experimentalOptionsFromEnv,
+  getPatternIdentityRef,
+  getPatternSource,
   type JSONSchema,
+  type MemorySpace,
   type ModuleByteCache,
   Runtime,
+  runtimePresets,
   RuntimeProgram,
   type Schema,
+  setPatternSource,
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
@@ -14,6 +22,7 @@ import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ACLManager } from "./acl-manager.ts";
 import { homeSchema } from "@commonfabric/home-schemas";
@@ -21,19 +30,65 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+// System space-root patterns, served as raw TSX by the toolshed patterns route.
+export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
+export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+
+/**
+ * The system space-root pattern URL a space of this type is created with — the
+ * home DID gets home.tsx, every other space the default app. Used to back-fill
+ * `patternSource` for spaces created before provenance stamping.
+ *
+ * Known v1 limitation: an existing *custom-app* space (whose root was seeded
+ * from home's `defaultAppUrl`) that carries no stored `patternSource` derives to
+ * default-app.tsx here. The auto-update check must therefore only act when a
+ * stored `patternSource` is present (or the running identity matches a known
+ * system identity) — otherwise it would roll a custom app to the default. See
+ * docs/specs/pattern-imports/pattern-updates.md risk list.
+ */
+export function deriveSystemPatternUrl(
+  space: MemorySpace,
+  runtime: Runtime,
+): string {
+  return space === runtime.userIdentityDID
+    ? HOME_PATTERN_URL
+    : DEFAULT_APP_PATTERN_URL;
+}
+
+// Same logger as manager.ts's timePiecePhase: timing stats record even while
+// the logger is disabled, so controller phases show up in the load summaries
+// (browser worker included) as `piece/phase/<label>`.
+const pieceTimingLogger = getLogger("piece", { enabled: false });
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
+
+/** The result of a system-pattern update check. */
+export type UpdateOutcome =
+  | "updated"
+  | "current"
+  | "skipped-skew"
+  | "skipped-disabled";
+
+// This module can load outside Deno (browser-safe storage import above), so
+// env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
+const readEnv: EnvReader = (key) =>
+  typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
+
 async function timePiecesPhase<T>(
   label: string,
   run: () => T | Promise<T>,
 ): Promise<T> {
-  if (!PIECE_TRACE_TIMINGS) {
-    return await run();
-  }
   const start = performance.now();
   try {
     return await run();
   } finally {
-    const elapsed = Math.round(performance.now() - start);
-    console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+    pieceTimingLogger.time(start, "phase", label);
+    if (PIECE_TRACE_TIMINGS) {
+      const elapsed = Math.round(performance.now() - start);
+      console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+    }
   }
 }
 
@@ -156,20 +211,23 @@ export class PiecesController<T = unknown> {
     moduleByteCache?: ModuleByteCache;
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
-    const runtime = new Runtime({
+    // Shared first-party posture for client runtimes against a deployed API
+    // (CT-1814); the CFC pin this site previously restated lives in the
+    // preset core. Trust provenance stays a visible delta of this controller.
+    const runtime = new Runtime(runtimePresets.remoteClient({
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
         memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
-      cfcEnforcementMode: "enforce-explicit",
+      experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
       }),
-    });
+    }));
 
     const manager = new PieceManager(session, runtime);
     await manager.synced();
@@ -351,7 +409,7 @@ export class PiecesController<T = unknown> {
     if (isHomeSpace) {
       patternConfig = {
         name: "Home",
-        urlPath: "/api/patterns/system/home.tsx",
+        urlPath: HOME_PATTERN_URL,
         cause: "home-pattern",
       };
     } else {
@@ -361,7 +419,7 @@ export class PiecesController<T = unknown> {
       );
       patternConfig = {
         name: "DefaultPieceList",
-        urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+        urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
         cause: "space-root",
       };
     }
@@ -427,6 +485,10 @@ export class PiecesController<T = unknown> {
           // Run pattern setup within same transaction
           this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
+          // Stamp the provenance the piece tracks for updates (the source it
+          // was born from) — the same transaction, one extra meta write.
+          setPatternSource(pieceCell, tx, patternConfig.urlPath);
+
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));
         }),
@@ -457,5 +519,113 @@ export class PiecesController<T = unknown> {
     );
 
     return new PieceController<NameSchema>(this.#manager, finalPattern);
+  }
+
+  /**
+   * Roll the space's system root pattern forward in place if its toolshed
+   * serves a newer content identity than the running one. Best-effort: every
+   * failure logs and returns without throwing — a failed check must never break
+   * space open. The apply is a `patternIdentity` meta write; the existing
+   * pattern watcher (runner.ts) cancels the old nodes and re-instantiates the
+   * new pattern onto the SAME result cell (no new piece, state preserved by
+   * stable key). Never calls run()/stop()/recreateDefaultPattern.
+   *
+   * Call it AFTER {@link ensureDefaultPattern} has resolved (the root must be
+   * running for the watcher to be live).
+   */
+  async checkAndUpdateDefaultPattern(): Promise<UpdateOutcome> {
+    const runtime = this.#manager.runtime;
+    const space = this.#manager.getSpace();
+
+    // 1. Flag gate. Home is held behind a second flag until its durable state
+    //    is verified stable-key-addressed (spec § open question 4).
+    if (!runtime.experimental?.systemPatternAutoUpdate) {
+      return "skipped-disabled";
+    }
+    const isHomeSpace = space === runtime.userIdentityDID;
+    if (isHomeSpace && !runtime.experimental?.systemPatternAutoUpdateHome) {
+      return "skipped-disabled";
+    }
+
+    try {
+      // 2. The running root piece's result cell (no re-run).
+      const root = await this.#manager.getDefaultPattern(false);
+      if (!root) return "current";
+
+      // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
+      //    space must resolve against its own toolshed). A non-home root
+      //    created before provenance stamping has no patternSource; we must NOT
+      //    derive default-app.tsx for it — a custom-app space (seeded from
+      //    home's defaultAppUrl) would be silently rolled to the default app.
+      //    Deriving is only safe for the home root (definitionally home.tsx).
+      //    Legacy non-home roots stay pinned until re-created stamps them; a
+      //    known-system-identity match could relax this later (spec M2.3).
+      const storedSource = getPatternSource(root);
+      if (storedSource === undefined && !isHomeSpace) {
+        return "current";
+      }
+      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
+      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+
+      // The version gate (step 4) validates `host`'s build, and the light
+      // ?identity is only trustworthy from that same build — so only act on a
+      // source served BY `host`. A cross-origin patternSource (a published /
+      // custom-app source on another host) would be gated against the wrong
+      // build; defer it to the cross-host published-pattern flow (Phase 4).
+      const target = new URL(url, host);
+      if (target.origin !== new URL(host).origin) {
+        return "current";
+      }
+
+      // 4. Version gate: the light ?identity is only comparable within a build.
+      const toolshedVersion = await runtime.toolshedGitSha(host);
+      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
+        runtime.reportVersionSkew({
+          space,
+          clientVersion: runtime.clientVersion,
+          toolshedVersion,
+        });
+        return "skipped-skew";
+      }
+
+      // 5. Current identity from the toolshed (cached).
+      const currentId = await runtime.cachedPatternIdentity(host, url);
+      if (currentId === undefined) return "current"; // unresolved → skip
+
+      // 6. Compare to the running identity.
+      const running = getPatternIdentityRef(root)?.identity;
+      if (currentId === running) return "current";
+
+      // 7. Apply: compile the new source, then swap patternIdentity in place.
+      const program = await runtime.harness.resolve(
+        new HttpProgramResolver(target.href),
+      );
+      const pattern = await runtime.patternManager.compilePattern(program, {
+        space,
+      });
+      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
+        { identity: currentId, symbol: "default" };
+      const { error } = await runtime.editWithRetry((tx) => {
+        root.withTx(tx).setMetaRaw("patternIdentity", {
+          identity: entryRef.identity,
+          symbol: entryRef.symbol,
+        });
+        setPatternSource(root, tx, url); // back-fill provenance
+      });
+      if (error) {
+        pieceUpdateLogger.warn(
+          "swap-failed",
+          () => ["checkAndUpdateDefaultPattern: swap failed", space, error],
+        );
+        return "current";
+      }
+      return "updated";
+    } catch (error) {
+      pieceUpdateLogger.warn(
+        "check-failed",
+        () => ["checkAndUpdateDefaultPattern: check failed", space, error],
+      );
+      return "current";
+    }
   }
 }

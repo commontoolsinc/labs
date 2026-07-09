@@ -174,6 +174,18 @@ positives and a less faithful, more gameable gate.
   the same line set whether or not it has a record) would make the numbers
   easier to trust.
 
+- Event-handler bodies are never covered by the pattern-unit gate. A JSX handler
+  such as `onClick={() => stream.send({})}` compiles to a handler that the
+  runtime materializes as an opaque reference, not a callable function. A pattern
+  unit test can walk the rendered tree to pull reactive computeds, but it cannot
+  fire that handler, because firing needs the runtime's event dispatch and
+  `cf test` has no DOM. So the statements inside every event handler count as
+  uncovered. A change that adds UI buttons therefore raises the group's
+  uncovered-line count by an amount no unit test can bring back down. Accept that
+  rise with a `NEW_PERF_BASELINE` marker (see
+  [CI_PERFORMANCE.md](CI_PERFORMANCE.md)); do not restructure the handler to move
+  the counter, because that changes wiring no test exercises.
+
 ## Related documentation
 
 - [TESTING.md](TESTING.md) — how to run the test suites whose execution this

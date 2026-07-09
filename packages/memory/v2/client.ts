@@ -108,6 +108,7 @@ export class Client {
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
+  #serverFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #connected = false;
   #closed = false;
@@ -123,6 +124,13 @@ export class Client {
     const client = new Client(options.transport);
     await client.hello();
     return client;
+  }
+
+  /** The flags the SERVER advertised in its `hello.ok` (null before the first
+   *  handshake). Capability keys an old server never sent parse to `false`, so
+   *  optional-capability consumers fail closed by reading this. */
+  get serverFlags(): MemoryProtocolFlags | null {
+    return this.#serverFlags;
   }
 
   async close(): Promise<void> {
@@ -272,6 +280,11 @@ export class Client {
           this.#helloPending.reject(error);
           return;
         }
+        // The server's advertised flags (refreshed per hello, so a reconnect
+        // to a different server version updates them). Optional-capability
+        // consumers (e.g. the runner's sqlite write-gate relaxation) read
+        // these; absent-on-old-server keys parse to false — fail closed.
+        this.#serverFlags = helloOk.flags;
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,

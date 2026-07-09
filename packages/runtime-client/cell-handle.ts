@@ -367,7 +367,15 @@ export class CellHandle<T = unknown> {
 
   toJSON(): SigilLink {
     // Wrap in sigil link format so the runtime recognizes this as a link
-    // and dereferences it (e.g., when passed through event.detail.sourceCell)
+    // and dereferences it (e.g., when passed through event.detail.sourceCell).
+    //
+    // The ref-carried `cfcLabelView` is deliberately NOT serialized (inv-12
+    // Stage 0, like `toWireString`): toJSON output is exactly what
+    // JSON.stringify hands the VDOM event path when a handle lands in
+    // CustomEvent.detail, and that raw sigil link re-enters the worker
+    // without passing getCell/cellRefToSigilLink — a main-thread display
+    // copy must not ride back in as label state (codex/cubic review on the
+    // Stage 0 PR; the worker also strips inbound views defensively).
     return linkRefFrom<CfcCellLinkRefPayload>({
       id: this.#ref.id,
       space: this.#ref.space,
@@ -376,9 +384,6 @@ export class CellHandle<T = unknown> {
       ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
       ...(this.#ref.overwrite !== undefined &&
         { overwrite: this.#ref.overwrite }),
-      ...(this.#ref.cfcLabelView !== undefined && {
-        cfcLabelView: this.#ref.cfcLabelView,
-      }),
     });
   }
 

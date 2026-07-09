@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { defer } from "@commonfabric/utils/defer";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
 import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
@@ -26,6 +27,7 @@ class ReconnectableTransport implements Transport {
     localSeq: number;
   }> = [];
   #deliveredTransactLocalSeqs: number[] = [];
+  #firstPendingTransact = defer<void>();
 
   constructor(private readonly server: Server) {}
 
@@ -75,6 +77,10 @@ class ReconnectableTransport implements Transport {
     return this.#delayedTransactResponses.length;
   }
 
+  get firstPendingTransact(): Promise<void> {
+    return this.#firstPendingTransact.promise;
+  }
+
   get delayedTransactLocalSeqs(): number[] {
     return this.#delayedTransactResponses.map(({ localSeq }) => localSeq);
   }
@@ -118,6 +124,7 @@ class ReconnectableTransport implements Transport {
         ) {
           this.#transactRequestLocalSeqById.delete(requestId);
           this.#delayedTransactResponses.push({ payload, localSeq });
+          this.#firstPendingTransact.resolve();
           return;
         }
         if (typeof requestId === "string") {
@@ -191,7 +198,7 @@ Deno.test(
       });
 
       // Wait for the transact to reach the transport.
-      await waitFor(() => transport.pendingTransactCount >= 1);
+      await transport.firstPendingTransact;
       assertEquals(transport.delayedTransactLocalSeqs, [2]);
 
       // Disconnect while commit B's transact is held — commit B becomes
@@ -323,7 +330,7 @@ Deno.test(
         operations: [{ op: "set", id: "doc:b", value: { value: { v: 2 } } }],
       });
 
-      await waitFor(() => transport.pendingTransactCount >= 1);
+      await transport.firstPendingTransact;
       transport.disconnect();
 
       await waitFor(

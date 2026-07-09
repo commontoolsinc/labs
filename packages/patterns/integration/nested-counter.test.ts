@@ -1,5 +1,11 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  env,
+  Page,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { waitForText } from "./cfc-browser-helpers.ts";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
@@ -10,6 +16,7 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -21,6 +28,22 @@ describe("nested counter integration test", () => {
   let cc: PiecesController;
   let piece: PieceController;
   let pieceSinkCancel: (() => void) | undefined;
+  // The piece's committed result value, tracked by the result-cell sink below,
+  // and a one-shot waiter the sink resolves when the value reaches a target.
+  let latestResultValue: number | undefined;
+  let resultWaiter: { target: number; deferred: Deferred } | undefined;
+
+  // Resolve once the piece's committed result value equals `target`. The sink
+  // fires with the current value on registration and on every committed change,
+  // so a value already at the target resolves immediately; otherwise the sink
+  // resolves the waiter when the target lands. A fresh deferred per call keeps
+  // the sequential value checks independent.
+  const awaitResultValue = (target: number): Promise<void> => {
+    if (latestResultValue === target) return Promise.resolve();
+    const deferred = defer();
+    resultWaiter = { target, deferred };
+    return deferred.promise;
+  };
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -47,8 +70,16 @@ describe("nested counter integration test", () => {
     );
 
     // In pull mode, create a sink to keep the piece reactive when inputs change.
+    // The sink also drives awaitResultValue: it records the latest committed
+    // value and resolves a pending waiter when its target is reached.
     const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
+    pieceSinkCancel = resultCell.sink((value) => {
+      latestResultValue = (value as { value?: number } | undefined)?.value;
+      if (resultWaiter && latestResultValue === resultWaiter.target) {
+        resultWaiter.deferred.resolve();
+        resultWaiter = undefined;
+      }
+    });
   });
 
   afterAll(async () => {
@@ -67,19 +98,7 @@ describe("nested counter integration test", () => {
       identity,
     });
 
-    // Use try/catch because element may become stale between waitForSelector and innerText
-    // Use innerText() instead of evaluate() as it's more robust against stale handles
-    await waitFor(async () => {
-      try {
-        const counterResult = await page.waitForSelector("#counter-result", {
-          strategy: "pierce",
-        });
-        const initialText = await counterResult.innerText();
-        return initialText?.trim() === "Counter is the 0th number";
-      } catch (_) {
-        return false;
-      }
-    });
+    await waitForText(page, "#counter-result", "Counter is the 0th number");
 
     // Verify via direct operations that the nested structure works
     assertEquals(await piece.result.get(["value"]), 0);
@@ -89,13 +108,10 @@ describe("nested counter integration test", () => {
     const page = shell.page();
 
     // Click increment button (second button - first is decrement)
-    // Use retry logic to handle unstable box model during page settling
     await clickNthButton(page, "[data-cf-button]", 1);
 
-    // Wait for piece result update
-    await waitFor(async () => {
-      return await await piece.result.get(["value"]) === 1;
-    });
+    // Wait for the piece result to reflect the increment.
+    await awaitResultValue(1);
     await waitForCounter(page, "Counter is the 1st number");
   });
 
@@ -128,62 +144,74 @@ describe("nested counter integration test", () => {
   it("should verify nested counter has multiple counter displays", async () => {
     const page = shell.page();
 
-    // Use try/catch because elements may become stale between $$ and innerText
-    // Use innerText() instead of evaluate() as it's more robust against stale handles
-    await waitFor(async () => {
-      try {
-        // Find all counter result elements (should be 2 for nested counter)
-        const counterResults = await page.$$("#counter-result", {
-          strategy: "pierce",
-        });
-        if (counterResults.length !== 2) {
-          return false;
-        }
-        // Verify both show the same value
-        for (const counter of counterResults) {
-          const text = await counter.innerText();
-          if (text?.trim() !== "Counter is the 5th number") {
-            return false;
-          }
-        }
-        return true;
-      } catch (_) {
-        return false;
-      }
-    });
+    // Both nested counter displays (there are two) must show the same value.
+    await waitForCondition(page, (probe, expected) => {
+      const results = probe.collect("#counter-result");
+      return results.length === 2 &&
+        results.every((el) => probe.deepText(el).trim() === expected);
+    }, { args: ["Counter is the 5th number"] });
   });
 });
 
 async function waitForCounter(page: Page, text: string) {
-  // Use try/catch because element may become stale between waitForSelector and innerText
-  await waitFor(async () => {
-    try {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      return (await counterResult?.innerText())?.trim() === text;
-    } catch (_) {
-      return false;
-    }
-  });
+  await waitForText(page, "#counter-result", text);
 }
 
-// Clicks the nth button matching selector, retrying if the element lacks a stable box model.
-// This handles timing issues where the element is found but the page
-// is still settling (re-renders, layout shifts, hydration).
-function clickNthButton(
+// Clicks the nth button matching selector: wait until that button is present
+// and interactive (scrolled into view with a stable box model), then dispatch a
+// single trusted click on it. The wait re-checks on each DOM mutation while the
+// page settles (re-renders, layout shifts, hydration) rather than re-clicking.
+const NTH_BUTTON_CLICK_TARGET_ATTR = "data-cfc-nth-button-target";
+
+async function clickNthButton(
   page: Page,
   selector: string,
   index: number,
 ): Promise<void> {
-  return waitFor(async () => {
-    const buttons = await page.$$(selector, { strategy: "pierce" });
-    if (buttons.length <= index) return false;
-    try {
-      await buttons[index].click();
+  const token = `cfc-nth-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, async (
+      probe: ProbeApi,
+      sel: string,
+      idx: number,
+      tok: string,
+      attr: string,
+    ) => {
+      const target = probe.collect(sel)[idx];
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      if (!probe.isVisible(target)) return false;
+      target.setAttribute(attr, tok);
       return true;
-    } catch (_) {
-      return false;
-    }
-  });
+    }, { args: [selector, index, token, NTH_BUTTON_CLICK_TARGET_ATTR] });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find button #${index} matching "${selector}"`,
+      { cause },
+    );
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${NTH_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce" },
+    );
+    await clickTarget.click();
+  } finally {
+    await page.evaluate((targetToken, targetAttr) => {
+      function collect(root: Document | ShadowRoot, result: Element[]): void {
+        for (const element of root.querySelectorAll("*")) {
+          if (element.getAttribute(targetAttr) === targetToken) {
+            result.push(element);
+          }
+          if (element.shadowRoot) collect(element.shadowRoot, result);
+        }
+      }
+      const matches: Element[] = [];
+      collect(document, matches);
+      for (const element of matches) element.removeAttribute(targetAttr);
+    }, { args: [token, NTH_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
+  }
 }

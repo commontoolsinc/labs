@@ -16,7 +16,17 @@ function installBrowserGlobals(): () => void {
       value,
     });
   }
-  class TestHTMLElement extends EventTarget {}
+  class TestHTMLElement extends EventTarget {
+    // Minimal render root so Lit's connectedCallback (createRenderRoot ->
+    // attachShadow -> adoptStyles) runs without a real DOM.
+    attachShadow() {
+      return {
+        adoptedStyleSheets: [],
+        appendChild() {},
+        append() {},
+      };
+    }
+  }
   setGlobal("window", globalThis);
   setGlobal("HTMLElement", TestHTMLElement);
   setGlobal("customElements", {
@@ -80,6 +90,79 @@ describe("XRootView", () => {
       const markup = templateStrings(view.render());
       expect(markup).toContain("cf-theme");
       expect(markup).toContain("x-app-view");
+    } finally {
+      restore();
+    }
+  });
+
+  it("raises the reload banner on a versionSkew, and renders it", async () => {
+    const restore = installBrowserGlobals();
+    const warnings: unknown[][] = [];
+    const origWarn = console.warn;
+    console.warn = (...a: unknown[]) => warnings.push(a);
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const bannerSlot = () =>
+        (view.render() as { values: unknown[] }).values[0];
+
+      // No banner by default (the conditional renders null).
+      expect(bannerSlot()).toBe(null);
+
+      // The worker's versionSkew handler warns and flips the banner state on.
+      view._handleVersionSkew({ space: "did:key:x" });
+      expect(warnings.length).toBe(1);
+      expect(
+        (view as unknown as { _versionSkew: boolean })._versionSkew,
+      ).toBe(true);
+
+      // Now the banner template is constructed and rendered in the slot.
+      const banner = bannerSlot();
+      expect(banner).not.toBe(null);
+      expect(templateStrings(banner)).toContain("version-skew-banner");
+      expect(templateStrings(banner)).toContain("Reload");
+    } finally {
+      console.warn = origWarn;
+      restore();
+    }
+  });
+
+  it("guards a browser reload only while the runtime reports pending writes", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      // Stub Lit's render step: connectedCallback enables updating, which would
+      // otherwise schedule a real render (createComment etc.) this shim has no
+      // DOM for. We exercise the listener registration, not Lit rendering.
+      (view as unknown as { performUpdate: () => void }).performUpdate =
+        () => {};
+
+      // connect/disconnect register and remove the beforeunload listener.
+      view.connectedCallback();
+      view.disconnectedCallback();
+
+      const handler = (view as unknown as {
+        _onBeforeUnload: (event: { preventDefault: () => void }) => void;
+      })._onBeforeUnload;
+      let prevented = 0;
+      const event = () => ({ preventDefault: () => prevented++ });
+      const setRuntime = (runtime: unknown) =>
+        (view as unknown as { runtime: unknown }).runtime = runtime;
+
+      // No runtime yet: nothing to lose, so no prompt.
+      handler(event());
+      expect(prevented).toBe(0);
+
+      // A runtime with no unconfirmed writes: no prompt.
+      setRuntime({ hasPendingWrites: () => false });
+      handler(event());
+      expect(prevented).toBe(0);
+
+      // Unconfirmed writes in flight: prompt the user before unload.
+      setRuntime({ hasPendingWrites: () => true });
+      handler(event());
+      expect(prevented).toBe(1);
     } finally {
       restore();
     }

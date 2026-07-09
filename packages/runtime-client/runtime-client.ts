@@ -33,9 +33,11 @@ import {
   type LogLevel,
   NavigateRequestNotification,
   type PatternSourcesResponse,
+  PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
+  VersionSkewNotification,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -43,6 +45,8 @@ import { RuntimeTransport } from "./client/transport.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import {
   InitializedRuntimeConnection,
+  type PendingRequestDiagnostic,
+  type RequestTimelineEntry,
   RuntimeConnection,
   type SubscriptionDiagnostics,
 } from "./client/connection.ts";
@@ -60,6 +64,8 @@ export type RuntimeClientEvents = {
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
+  pendingwriteschange: [{ pending: boolean }];
+  versionskew: [VersionSkewNotification];
 };
 
 export const $conn = Symbol("$request");
@@ -69,6 +75,7 @@ export const $conn = Symbol("$request");
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
+  #pendingWrites = false;
 
   private constructor(
     conn: InitializedRuntimeConnection,
@@ -80,6 +87,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
+    this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
+    this.#conn.on("versionskew", this._onVersionSkew);
+  }
+
+  /**
+   * Whether the worker runtime has issued commits that the server has not yet
+   * confirmed. Mirrored from the worker's storage manager on every transition,
+   * so it is synchronously readable — e.g. from a beforeunload handler, where
+   * no async round-trip is possible. Tearing the page down while this is true
+   * loses those writes.
+   */
+  hasPendingWrites(): boolean {
+    return this.#pendingWrites;
   }
 
   /**
@@ -113,6 +133,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
+      clientVersion: options.clientVersion,
       identity: options.identity.serialize(),
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
@@ -172,16 +193,23 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle(this, response.cell);
   }
 
-  // TODO(unused)
+  /**
+   * Wait until the worker runtime is quiescent AND every issued commit has
+   * been confirmed by the server (or terminally failed). This is the client's
+   * "safe to navigate or reload" checkpoint: once it resolves, tearing the
+   * page down loses no writes. Waits for the joint fixpoint of reactive
+   * quiescence and commit durability (Scheduler.idleWithPendingCommits), not
+   * for pulls or subscription convergence — that is `allSynced()`.
+   */
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
   /**
-   * Await all in-flight compile-cache write-backs in the worker. Distinct from
-   * `idle()` (reactive/scheduler quiescence): this guarantees persistence
-   * durability, so a subsequent load of an already-compiled pattern reads the
-   * cached entry instead of recompiling in-client.
+   * Await all in-flight compile-cache write-backs in the worker. Narrower than
+   * `idle()`: it flushes only the compile cache, so a subsequent load of an
+   * already-compiled pattern reads the cached entry instead of recompiling
+   * in-client, without waiting for runtime quiescence.
    */
   async flushCompileCacheWrites(): Promise<void> {
     await this.#conn.request<RequestType.FlushCompileCacheWrites>({
@@ -347,6 +375,26 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   getSubscriptionDiagnostics(): SubscriptionDiagnostics {
     return this.#conn.getSubscriptionDiagnostics();
+  }
+
+  /**
+   * Snapshot of in-flight IPC requests (sent to the worker, not yet answered).
+   * Main-thread state only — needs no worker round-trip, so it works even when
+   * the worker is wedged. Exposed on `commonfabric.rt` so an integration-test
+   * probe on a stuck page can name the request a UI await is blocked on.
+   */
+  getPendingRequests(): PendingRequestDiagnostic[] {
+    return this.#conn.getPendingRequestDiagnostics();
+  }
+
+  /**
+   * Bounded send/settle timeline of the first IPC requests on this
+   * connection — the boot window. Main-thread state only, like
+   * getPendingRequests. Where the per-type histograms say a request was slow,
+   * this says when it was sent and what overlapped it.
+   */
+  getRequestTimeline(): RequestTimelineEntry[] {
+    return this.#conn.getRequestTimelineDiagnostics();
   }
 
   resetSubscriptionDiagnostics(): void {
@@ -602,5 +650,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onTelemetry = (data: TelemetryNotification): void => {
     this.emit("telemetry", data.marker);
+  };
+
+  private _onPendingWritesChange = (
+    data: PendingWritesNotification,
+  ): void => {
+    this.#pendingWrites = data.pending;
+    this.emit("pendingwriteschange", { pending: data.pending });
+  };
+
+  private _onVersionSkew = (data: VersionSkewNotification): void => {
+    this.emit("versionskew", data);
   };
 }

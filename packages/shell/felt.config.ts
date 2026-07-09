@@ -52,6 +52,15 @@ const config: Config = {
       "$EXPERIMENTAL_COMPUTED_CELL_IDS": Deno.env.get(
         "EXPERIMENTAL_COMPUTED_CELL_IDS",
       ),
+      "$EXPERIMENTAL_EAGER_SOURCE_ANNOTATION": Deno.env.get(
+        "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
+      ),
+      "$EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE": Deno.env.get(
+        "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
+      ),
+      "$EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME": Deno.env.get(
+        "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
+      ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

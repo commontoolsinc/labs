@@ -5,7 +5,11 @@ import { fromFileUrl } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
-import { Runtime } from "@commonfabric/runner";
+import {
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
 import { sleep } from "@commonfabric/utils/sleep";
 import { createCompileByteCache } from "@commonfabric/test-support/compile-byte-cache";
 
@@ -65,14 +69,17 @@ function resolveModulePath(moduleRef: string | URL): string {
 export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtimeErrors: Error[] = [];
-  const runtime = new Runtime({
+  // Same preset as the CLI pattern-test harness (CT-1814): shared CFC pin
+  // and env-honored experimental flags, so the two harnesses cannot drift.
+  const runtime = new Runtime(runtimePresets.patternTest({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
     moduleByteCache,
     errorHandlers: [(error) => {
       runtimeErrors.push(error);
     }],
-  });
+  }));
 
   const modulePath = resolveModulePath(scenario.module);
   const programResolver = new FileSystemProgramResolver(modulePath);

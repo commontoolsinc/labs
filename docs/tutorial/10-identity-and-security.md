@@ -27,7 +27,7 @@ registration step, no central registry: knowing the derivation inputs *is*
 knowing the space. Dev environments lean on this hard: named dev spaces
 derive from a well-known passphrase, which is why two local setups agree on
 what `did:key:...` a space name means. The same trick defines the **shared
-dev identity** `id derive "implicit trust"` — the DID the local toolshed
+dev identity** `cf id derive "implicit trust"` — the DID the local toolshed
 itself runs as in dev mode. Because it comes from a public string, *everyone*
 who derives it gets the identical keypair. That is a convenience on your own
 localhost (CLI, browser, and server can all act as one admin identity) and a
@@ -84,15 +84,18 @@ current (v2) protocol, authorization happens at **session open**
    partitions from Chapter 9. `PerUser` isolation is cryptographic
    identity, enforced in the storage engine.
 
-The package also contains a fuller capability system from the v1 design —
-UCAN-signed per-invocation proofs and per-space ACLs
-(`packages/memory/access.ts`, `acl.ts`, surfaced as `cf acl ...`). **An
-honest caveat for the current code:** in the v2 path as deployed, what's
-verified is the signature and principal binding; the v1-style space-level
-ACL check is not wired into the v2 server (the v2 session-open hook
-authenticates rather than authorizes against an ACL). Treat per-space
-access control as an evolving area and check the code before relying on a
-specific enforcement property.
+Beyond authentication, per-space **ACLs** are now wired into the v2 server
+itself. A space can carry an ACL document (its entity id is the space DID;
+types in `packages/memory/acl.ts`, managed by the runner's `ACLManager`
+and surfaced as `cf acl ...`) granting READ/WRITE/OWNER capabilities. The
+server evaluates them per message — session-open, queries, and watches
+need READ; `transact` needs WRITE; writing the ACL itself needs OWNER —
+and seeds the space's creator as owner on first open. Enforcement is a
+deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`,
+`packages/memory/v2/server.ts`); the default is still `off`, and `enforce`
+additionally revokes live sessions that lose access. So the machinery
+exists, but check your deployment's mode before relying on a specific
+enforcement property.
 
 ## Running untrusted code: three rings
 
@@ -104,10 +107,7 @@ unworkable constructs; emitted module-scope functions are frozen; every
 handler/lift carries a schema that *declares* what it reads and writes. The
 schema is a capability manifest: the runtime passes a handler exactly the
 cells its context schema names — with write handles only where the schema
-says `asCell` — rather than ambient access to the space. (The
-`cfc-*` patterns and the verified-source `implementationRef` machinery
-extend this into data-classification policies — flow tracking of which code
-touched which classified data — beyond this tutorial's scope.)
+says `asCell` — rather than ambient access to the space.
 
 **Ring 2 — SES.** Compiled pattern code executes inside SES (Secure
 ECMAScript) compartments: hardened intrinsics, no ambient authority. This
@@ -129,10 +129,31 @@ IPC protocol mediated by the host (`src/ipc.ts`), which applies policy per
 request. The package README is candid that exfiltration hardening (e.g.
 covert channels via permitted fetches) is ongoing work.
 
+**Beyond the rings — Contextual Flow Control (CFC).** The rings bound what
+untrusted code *can do*; CFC (`packages/runner/src/cfc/`) tracks what data
+it *touched*. Every value can carry a label: **integrity atoms** recording
+who or what vouches for it (`PolicyCertified`, `InjectionSafe`,
+`LlmDerived`, `ExternalIngest`, ...) and **confidentiality clauses**
+(conjunctive normal form, including author-written disjunctions) saying who
+may observe it. The runtime derives a conservative flow join per
+transaction — LLM output is stamped `LlmDerived` at the store boundary;
+data arriving over vouched channels (OAuth, Plaid, the ingest endpoint of
+Chapter 11) gets a runtime-minted, unforgeable `ExternalIngest` provenance
+mark — and can refuse operations that would launder a label or fall below a
+required-integrity floor (e.g. tool inputs that demand certified data).
+Deployments dial it along four independent axes — enforcement mode
+(`disabled`/`observe`/`enforce-explicit`/`enforce-strict`), flow-label
+persistence (`off`/`observe`/`persist`), the write floor, and trigger-read
+gating; the shell today runs `enforce-explicit` with flow labels at
+`persist`. The verified-source `$implRef` machinery (Chapter 7) is what
+ties labels to the exact code that produced a value. Specs live in
+`docs/specs/cfc-*.md`; demo patterns in `packages/patterns/cfc-*`.
+
 The rings compose with the data layer: even code that breaks ergonomics
 rules still acts *as* its session's principal, inside one space's replica,
 through schema-bounded handles, with every commit journaled in the
-append-only history of Chapter 9. Damage is scoped and auditable by
+append-only history of Chapter 9 — and, with CFC, with the provenance of
+what it read and wrote labeled. Damage is scoped and auditable by
 construction.
 
 ---

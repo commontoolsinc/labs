@@ -48,6 +48,9 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        // Read back from the ambient flag (a test seam that deliberately does
+        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -67,6 +70,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -84,6 +88,9 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        // Read back from the ambient flag (a test seam that deliberately does
+        // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
+        eagerSourceAnnotation: false,
       });
       await runtime.dispose();
       await sm.close();

@@ -37,6 +37,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { defer } from "@commonfabric/utils/defer";
 import { resolveLink } from "../src/link-resolution.ts";
 import {
   computeBackoffDelayMs,
@@ -94,20 +95,24 @@ function rejectServerTransacts(
 
 function collectEventCommitMarkers(runtime: Runtime): {
   markers: RuntimeTelemetryMarker[];
+  firstMarker: Promise<void>;
   dispose(): void;
 } {
   const markers: RuntimeTelemetryMarker[] = [];
+  const firstMarker = defer<void>();
   const listener = (event: Event) => {
     const marker = (event as CustomEvent<{
       marker: RuntimeTelemetryMarker;
     }>).detail.marker;
     if (marker.type === "scheduler.event.commit") {
       markers.push(marker);
+      firstMarker.resolve();
     }
   };
   runtime.telemetry.addEventListener("telemetry", listener);
   return {
     markers,
+    firstMarker: firstMarker.promise,
     dispose: () => runtime.telemetry.removeEventListener("telemetry", listener),
   };
 }
@@ -286,8 +291,8 @@ describe("committed-write backpressure", () => {
       const terminalErrors: ErrorWithContext[] = [];
       runtime.scheduler.onError((error) => terminalErrors.push(error));
 
-      // Eight conflicts: well past DEFAULT_RETRIES_FOR_EVENTS (5). The old
-      // fixed-budget path gives up after ~6 attempts and drops the write.
+      // Eight conflicts: well past the old fixed budget of five. That path gave
+      // up after ~6 attempts and dropped the write; the window keeps retrying.
       const injector = rejectServerTransacts(storageManager, 8, {
         name: "ConflictError",
         message: "forced transient conflict",
@@ -309,6 +314,57 @@ describe("committed-write backpressure", () => {
         // The handler re-ran for each failed attempt plus the success.
         expect(piece.invocations()).toBeGreaterThanOrEqual(9);
         // The write converged, so no terminal error.
+        expect(terminalErrors).toHaveLength(0);
+      } finally {
+        injector.restore();
+      }
+    },
+  );
+
+  it(
+    "drops a write on a non-stale-basis transient error rather than windowing it",
+    async () => {
+      // Only a stale basis (a ConflictError, or a StorageTransactionInconsistent)
+      // is windowed, because only a stale basis converges by re-running. A
+      // non-permanent rejection that is not a stale basis — the server normalizes
+      // an unrecognized rejection name to "TransactionError" — cannot be resolved
+      // by re-running, so it fails fast: the handler runs once, the write drops,
+      // and the retry window is never entered.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-nonstalebasis-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const terminalErrors: ErrorWithContext[] = [];
+      runtime.scheduler.onError((error) => terminalErrors.push(error));
+
+      // Reject every commit with a non-stale-basis error. Were it wrongly
+      // windowed, the handler would re-run and ride past these injections.
+      const injector = rejectServerTransacts(storageManager, 8, {
+        name: "TransientCommitError",
+        message: "forced non-stale-basis transient error",
+      });
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-nonstalebasis:0:backpressure-nonstalebasis-root",
+        );
+
+        // Give any erroneous retry a chance to run, then confirm none did.
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await runtime.idle();
+
+        // Failed fast: the handler ran exactly once (no windowed re-queue) and
+        // the write did not land.
+        expect(piece.invocations()).toBe(1);
+        expect(piece.total()).toBe(0);
+        // A fast-fail drop is not a terminal convergence error.
         expect(terminalErrors).toHaveLength(0);
       } finally {
         injector.restore();
@@ -366,11 +422,7 @@ describe("committed-write backpressure", () => {
           "evt:backpressure-permanent:0:backpressure-permanent-root",
         );
 
-        await waitFor(
-          runtime,
-          () => commitTelemetry.markers.length >= 1,
-          "permanent rejection never reported a commit marker",
-        );
+        await commitTelemetry.firstMarker;
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -385,6 +437,69 @@ describe("committed-write backpressure", () => {
           commitTelemetry.markers.some((marker) =>
             (marker as { permanentRejection?: string }).permanentRejection ===
               "receipt-exists"
+          ),
+        ).toBe(true);
+      } finally {
+        injector.restore();
+        commitTelemetry.dispose();
+      }
+    },
+  );
+
+  it(
+    "does not retry a terminal commit-rule rejection (RowLabelCommitError) and stops after one run",
+    async () => {
+      // A server-side commit-time row-label violation (E4 Phase 3.c,
+      // memory/v2/sqlite/commit-eval.ts `RowLabelCommitError`) rolls back the
+      // whole commit and can NEVER succeed on retry: re-running the identical
+      // handler recomputes the identical refused write. Unlike a stale-read
+      // ConflictError, it must not consume the retry budget — each doomed
+      // re-run's speculative rev bumps starve concurrent sibling commits that
+      // share reactive state (the E4 3.c integration test masked this with a
+      // between-sends drain). It must therefore run exactly once, like a
+      // permanent rejection.
+      const piece = buildCounterPiece(
+        runtime,
+        tx,
+        "backpressure-terminal-root",
+      );
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const terminalErrors: ErrorWithContext[] = [];
+      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const commitTelemetry = collectEventCommitMarkers(runtime);
+
+      const injector = rejectServerTransacts(storageManager, Infinity, {
+        name: "RowLabelCommitError",
+        message:
+          "sqlite commit refused: rowLabel rule rejected committed row " +
+          '(rowid 1) of table "emails"',
+      });
+
+      try {
+        piece.queueAdd(
+          4,
+          "evt:backpressure-terminal:0:backpressure-terminal-root",
+        );
+
+        await commitTelemetry.firstMarker;
+        // Give any erroneous retry a generous chance to run (a bounded-retry
+        // misclassification would re-run the handler up to
+        // DEFAULT_RETRIES_FOR_EVENTS more times), then confirm none did.
+        await runtime.idle();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await runtime.idle();
+
+        // The doomed handler ran exactly once — no retry budget consumed.
+        expect(piece.invocations()).toBe(1);
+        // The refused write did not land.
+        expect(piece.total()).toBe(0);
+        // A terminal deterministic refusal is reported, not silently dropped.
+        expect(
+          commitTelemetry.markers.some((marker) =>
+            (marker as { terminal?: string }).terminal === "rule"
           ),
         ).toBe(true);
       } finally {
@@ -422,7 +537,13 @@ describe("committed-write backpressure", () => {
       await runtime.idle();
 
       const terminalErrors: ErrorWithContext[] = [];
-      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const gotConvergenceError = defer<void>();
+      runtime.scheduler.onError((error) => {
+        terminalErrors.push(error);
+        if (error.name === "CommitConvergenceError") {
+          gotConvergenceError.resolve();
+        }
+      });
 
       // Reject every commit: the conflict never clears.
       const injector = rejectServerTransacts(storageManager, Infinity, {
@@ -433,15 +554,7 @@ describe("committed-write backpressure", () => {
       try {
         piece.queueAdd(7, "evt:backpressure-stuck:0:backpressure-stuck-root");
 
-        await waitFor(
-          runtime,
-          () =>
-            terminalErrors.some((error) =>
-              error.name === "CommitConvergenceError"
-            ),
-          `non-converging write did not surface a terminal error ` +
-            `(invocations=${piece.invocations()}, total=${piece.total()})`,
-        );
+        await gotConvergenceError.promise;
 
         const convergence = terminalErrors.find((error) =>
           error.name === "CommitConvergenceError"
@@ -479,7 +592,13 @@ describe("committed-write backpressure", () => {
       await runtime.idle();
 
       const terminalErrors: ErrorWithContext[] = [];
-      runtime.scheduler.onError((error) => terminalErrors.push(error));
+      const gotConvergenceError = defer<void>();
+      runtime.scheduler.onError((error) => {
+        terminalErrors.push(error);
+        if (error.name === "CommitConvergenceError") {
+          gotConvergenceError.resolve();
+        }
+      });
 
       const injector = rejectServerTransacts(storageManager, Infinity, {
         name: "ConflictError",
@@ -492,15 +611,7 @@ describe("committed-write backpressure", () => {
           "evt:backpressure-zerowin:0:backpressure-zerowin-root",
         );
 
-        await waitFor(
-          runtime,
-          () =>
-            terminalErrors.some((error) =>
-              error.name === "CommitConvergenceError"
-            ),
-          `zero-window conflict did not surface a terminal error ` +
-            `(invocations=${piece.invocations()}, total=${piece.total()})`,
-        );
+        await gotConvergenceError.promise;
 
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();

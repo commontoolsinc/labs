@@ -1,5 +1,6 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
+import { defer } from "@commonfabric/utils/defer";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
@@ -1124,14 +1125,29 @@ class ReconnectableLoopbackTransport implements Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
+  #reconnected = defer<void>();
+  #secondWatchSet = defer<void>();
 
   constructor(private readonly server: Server) {}
+
+  /** Resolves when a second connection is opened (reconnect). */
+  get reconnected(): Promise<void> {
+    return this.#reconnected.promise;
+  }
+
+  /** Resolves when a second watch set is installed. */
+  get secondWatchSet(): Promise<void> {
+    return this.#secondWatchSet.promise;
+  }
 
   async send(payload: string): Promise<void> {
     const message = decodeMemoryBoundary(payload) as { type?: string };
     await this.connection().receive(payload);
     if (message.type === "session.watch.set") {
       this.watchSetCount++;
+      if (this.watchSetCount >= 2) {
+        this.#secondWatchSet.resolve();
+      }
     }
   }
 
@@ -1157,6 +1173,9 @@ class ReconnectableLoopbackTransport implements Transport {
   private connection(): ReturnType<Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
+      if (this.connectionCount >= 2) {
+        this.#reconnected.resolve();
+      }
       this.#connection = this.server.connect((message: FabricValue) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
@@ -1269,6 +1288,12 @@ class DelayedTransactTransport implements Transport {
   transactLocalSeqs: number[] = [];
   #receiver: (payload: string) => void = () => {};
   #heldResponses: Array<() => void> = [];
+  #twoTransacts = defer<void>();
+
+  /** Resolves when two transacts have been received. */
+  get twoTransacts(): Promise<void> {
+    return this.#twoTransacts.promise;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -1311,6 +1336,9 @@ class DelayedTransactTransport implements Transport {
       case "transact": {
         const localSeq = message.commit?.localSeq ?? -1;
         this.transactLocalSeqs.push(localSeq);
+        if (this.transactLocalSeqs.length === 2) {
+          this.#twoTransacts.resolve();
+        }
         this.#heldResponses.push(() =>
           this.#respond({
             type: "response",
@@ -1871,19 +1899,6 @@ class CloseOnAppliedCommitTransport implements Transport {
   }
 }
 
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 500,
-): Promise<void> => {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeout) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-};
-
 const nextWithTimeout = async <Value>(
   iterator: AsyncIterator<Value>,
   timeout = 200,
@@ -1961,7 +1976,7 @@ Deno.test(
           },
         }],
       });
-      await waitFor(() => transport.connectionCount >= 2);
+      await transport.reconnected;
       const resumed = await syncs.next();
       const snapshot = await nextWithTimeout(snapshots);
 
@@ -2043,7 +2058,7 @@ Deno.test("memory v2 client emits empty caught-up syncs after resume", async () 
     const syncs = view.subscribeSync();
 
     transport.disconnect();
-    await waitFor(() => transport.openCount >= 2);
+    await transport.reopened;
 
     const caughtUp = await nextWithTimeout(syncs);
     assertEquals(caughtUp.done, false);
@@ -2087,7 +2102,7 @@ Deno.test("memory v2 client forwards a top-level-only caught-up seq on resume", 
     const syncs = view.subscribeSync();
 
     transport.disconnect();
-    await waitFor(() => transport.openCount >= 2);
+    await transport.reopened;
 
     const caughtUp = await nextWithTimeout(syncs);
     assertEquals(caughtUp.done, false);
@@ -2110,6 +2125,12 @@ class TopLevelCaughtUpResumeTransport implements Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #openedSession = false;
   #closed = false;
+  #reopened = defer<void>();
+
+  /** Resolves when the connection is reopened (openCount reaches 2). */
+  get reopened(): Promise<void> {
+    return this.#reopened.promise;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -2128,6 +2149,9 @@ class TopLevelCaughtUpResumeTransport implements Transport {
     switch (message.type) {
       case "hello":
         this.openCount += 1;
+        if (this.openCount >= 2) {
+          this.#reopened.resolve();
+        }
         this.#closed = false;
         this.#receiver(encodeMemoryBoundary(HELLO_OK));
         return Promise.resolve();
@@ -2199,6 +2223,12 @@ class EmptyCaughtUpResumeTransport implements Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #openedSession = false;
   #closed = false;
+  #reopened = defer<void>();
+
+  /** Resolves when the connection is reopened (openCount reaches 2). */
+  get reopened(): Promise<void> {
+    return this.#reopened.promise;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -2217,6 +2247,9 @@ class EmptyCaughtUpResumeTransport implements Transport {
     switch (message.type) {
       case "hello":
         this.openCount += 1;
+        if (this.openCount >= 2) {
+          this.#reopened.resolve();
+        }
         this.#closed = false;
         this.#receiver(encodeMemoryBoundary(HELLO_OK));
         return Promise.resolve();
@@ -2325,7 +2358,7 @@ Deno.test(
 
       await space.close();
       transport.disconnect();
-      await waitFor(() => transport.connectionCount >= 2);
+      await transport.reconnected;
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       assertEquals(transport.watchSetCount, 1);
@@ -2377,7 +2410,7 @@ Deno.test(
       const updates = view.subscribe();
 
       transport.disconnect();
-      await waitFor(() => transport.watchSetCount >= 2);
+      await transport.secondWatchSet;
 
       const reinstall = await nextWithTimeout(updates);
       assertEquals(reinstall.done, false);
@@ -2561,7 +2594,7 @@ Deno.test("memory v2 client sends later transacts before earlier responses settl
     });
 
     try {
-      await waitFor(() => transport.transactLocalSeqs.length === 2);
+      await transport.twoTransacts;
       assertEquals(transport.transactLocalSeqs, [1, 2]);
     } finally {
       transport.releaseNext();
@@ -2756,6 +2789,57 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
     Error,
     "memory flag mismatch",
   );
+});
+
+Deno.test("memory v2 client stores the server's advertised flags (capability handshake)", async () => {
+  // An OLD server's hello.ok omits sqliteCommitRowLabelEval: the parsed
+  // server flags must read false (the runner's write gate then keeps failing
+  // closed), while a current server's advertisement reads true.
+  const transportWithFlags = (flags: unknown): Transport => {
+    let receiver = (_payload: string) => {};
+    return {
+      send(payload): Promise<void> {
+        const message = decodeMemoryBoundary(payload) as { type?: string };
+        if (message.type === "hello") {
+          receiver(encodeMemoryBoundary({
+            type: "hello.ok",
+            protocol: MEMORY_PROTOCOL,
+            flags,
+            sessionOpen: {
+              audience: TEST_SESSION_OPEN_AUDIENCE,
+              challenge: sessionOpenChallenge,
+            },
+          } as FabricValue));
+        }
+        return Promise.resolve();
+      },
+      async close() {},
+      setReceiver(next) {
+        receiver = next;
+      },
+      setCloseReceiver() {},
+    };
+  };
+
+  const current = await connect({
+    transport: transportWithFlags(getMemoryProtocolFlags()),
+  });
+  try {
+    assertEquals(current.serverFlags?.sqliteCommitRowLabelEval, true);
+  } finally {
+    await current.close();
+  }
+
+  const legacy = await connect({
+    transport: transportWithFlags({
+      modernCellRep: getMemoryProtocolFlags().modernCellRep,
+    }),
+  });
+  try {
+    assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
+  } finally {
+    await legacy.close();
+  }
 });
 
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {

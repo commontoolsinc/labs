@@ -251,15 +251,11 @@ export const EnvSchema = z.object({
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
 
-  // ===========================================================================
-  // Experimental feature flags (see ExperimentalOptions in runner)
-  // These use flagValue() (tri-state: true/false/undefined) because the runner
-  // distinguishes "unset" from an explicit false. The plain on/off booleans
-  // above use boolFlag(); both avoid z.coerce.boolean()'s Boolean("false") trap.
-  // ===========================================================================
-  EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
-  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
-  EXPERIMENTAL_COMPUTED_CELL_IDS: flagValue(),
+  // EXPERIMENTAL_* feature flags are no longer declared here: the runtime
+  // construction site reads them through the canonical mapping
+  // (`experimentalOptionsFromEnv` / EXPERIMENTAL_ENV_VARS in
+  // @commonfabric/runner runtime-presets), shared with the CLI and the
+  // background-piece-service so the wirings cannot drift (CT-1814).
 
   // Git SHA of the deployed commit. Set at deploy time; takes priority over
   // the build-baked SHA (see lib/build-info.ts).

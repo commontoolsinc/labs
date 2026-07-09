@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "@hono/hono";
 import { verifyFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
+import { trace } from "@opentelemetry/api";
 import type { AppBindings } from "@/lib/types.ts";
 
 export function requireFirstPartyHttpAuth(): MiddlewareHandler<
@@ -11,6 +12,10 @@ export function requireFirstPartyHttpAuth(): MiddlewareHandler<
         request: c.req.raw,
       });
       c.set("verifiedUserDid", userDid);
+      // Enrich the active request span (started by the otel middleware, which
+      // runs earlier in the chain) with the verified user. Defensive: no-op if
+      // no span/provider is active.
+      trace.getActiveSpan()?.setAttribute("user.did", userDid);
       // TODO(auth): Check that the verified DID is authorized for this privileged route before continuing.
     } catch (error) {
       const logger = c.get("logger");

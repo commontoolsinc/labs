@@ -2,8 +2,18 @@ export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
+  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
+  stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
+export {
+  classifyAtomField,
+  classifyLabelField,
+  LABEL_FIELD_CLASSIFICATION,
+  type LabelAtomFamily,
+  type LabelFieldClassificationEntry,
+  type LabelFieldRepresentationClass,
+} from "./label-field-classification.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
@@ -22,6 +32,7 @@ export type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
   CfcMetadata,
+  CfcPolicyEvaluationMode,
   CfcPrepareState,
   CfcSandboxDiagnostic,
   CfcSandboxExitCodeObservation,
@@ -34,10 +45,12 @@ export type {
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
   ImplementationIdentity,
+  OrderedWriteAttempt,
   PostCommitSideEffect,
   PreparedDigestInput,
   TrustSnapshot,
@@ -49,6 +62,7 @@ export {
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
   isCfcEnforcementMode,
@@ -71,11 +85,98 @@ export {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+export type { AtomPattern, AtomPatternBindings } from "./atom-pattern.ts";
 export {
+  atomEntails,
+  instantiateAtomPattern,
+  isAtomVarPlaceholder,
+  matchAtomPattern,
+  matchAtomPatternAgainstAtoms,
+  matchAtomPatternConjunction,
+} from "./atom-pattern.ts";
+export type {
+  CfcPolicyRecordInput,
+  ExchangeRule,
+  PolicyRecord,
+  PolicySnapshot,
+} from "./policy.ts";
+export { buildCfcPolicySnapshot } from "./policy.ts";
+export {
+  MATERIAL_RISK_DISCHARGE_KINDS,
+  MATERIAL_RISK_DISCHARGE_POLICY,
+  MATERIAL_RISK_KINDS,
+  PROMPT_INJECTION_RISK_LEGACY,
+  STANDARD_PROMPT_CAVEAT_POLICY,
+} from "./standard-profile.ts";
+export type {
+  CfcConceptEdge,
+  CfcTrustConfig,
+  CfcTrustConfigInput,
+  CfcTrustStatement,
+  CfcVerifierDelegation,
+  TrustResolver,
+} from "./trust.ts";
+export {
+  buildCfcTrustConfig,
+  createTrustResolver,
+  MAX_TRUST_CLOSURE_DEPTH,
+} from "./trust.ts";
+export type {
+  CfcGrantResolver,
+  CfcGrantResolverQuery,
+  ExchangeEvalContext,
+  ExchangeEvalResult,
+  RuleFiring,
+} from "./exchange-eval.ts";
+export {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
+export type {
+  CfcGrant,
+  CfcGrantIdentity,
+  CfcGrantWriteInput,
+} from "./grants.ts";
+export {
+  CFC_GRANT_ABSENT_DIGEST,
+  CFC_GRANT_ID_PREFIX,
+  cfcGrantDocId,
+  cfcGrantIsLive,
+  createTxCfcGrantResolver,
+  disallowedGrantAudienceEntryReason,
+  expandCfcGrantFacts,
+  prepareCfcGrantWrite,
+  verifyCfcGrantDocument,
+} from "./grants.ts";
+export type {
+  RenderConfidentialityResolver,
+  RenderConfidentialityResolverConfig,
+  RenderLabelInput,
+} from "./render-ceiling.ts";
+export {
+  createRenderConfidentialityResolver,
+  RENDER_DISPLAY_SINK_CLASS,
+  RENDER_SINK_NAME,
+  spaceAtomIdsInConfidentiality,
+  STANDARD_RENDER_EXCHANGE_RULES,
+} from "./render-ceiling.ts";
+export type { SpaceMembershipProvider, SpaceRole } from "./space-membership.ts";
+export {
+  createRuntimeSpaceMembershipProvider,
+  spaceReaderRole,
+} from "./space-membership.ts";
+export {
+  CFC_PREFIX_PROVENANCE_MAX_WRITES,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
   prepareBoundaryCommit,
+} from "./prepare.ts";
+export type {
+  CfcPrefixBoundSource,
+  CfcPrefixProvenanceSummary,
+  CfcPrefixProvenanceWrite,
+  CfcPrepareInstrumentation,
 } from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,
@@ -111,8 +212,12 @@ export {
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
 export {
+  atomsOutsideCeiling,
   CFC_LABEL_READ_FAILED_ATOM,
   cfcConfidentialityForObservationNode,
+  type CfcFloorTrustContext,
+  cfcIntegritySatisfiesFloorCoherently,
+  cfcIntegrityWitnessKey,
   cfcJsonPointerForPath,
   cfcObservationFitsCeiling,
   type CfcObservationMaxConfidentiality,

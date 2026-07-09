@@ -242,6 +242,19 @@ derived-consuming list names the display ceiling and missing-policy rules,
 not writer-fit; (c) the rejection error contract and the audit/diagnostics
 contract for persist-and-flag.
 
+(b) and (c) are now **decided and landed (Epic H4 code step)**: the `canWrite`
+confidentiality misfit — the per-tx flow join measured against the declared
+store-policy component at each derived-stamp path — rejects at
+`enforce-strict` only, and persists-and-flags (a
+`writer-fit(persist-and-flag)` diagnostic carrying the identical reason
+string) under every lower mode, with the stable SC-18c reason
+`writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
+<offending clauses>`. Contract text in
+`docs/specs/cfc-enforcement-matrix.md` §4; implementation in
+`prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
+standard-profile default — stays open on the confidentiality side.
+
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)
 and is now decided (owner, 2026-06-12): the schema's `requiredIntegrity` is a
@@ -278,8 +291,9 @@ value consultation), and empty integrity on a floor-declaring path fails (a
 stamped-`LlmDerived`-only value fails any floor by construction — closing the
 write-side half of the vacuous pass). Wildcard (`*`) floor entries and
 pattern-setup/seed initialization stay exempt (v1 scope); (a) the standard-
-profile default, (b) `enforce-strict` making writer-fit itself reject, and (c)
-the §8.10 spec home remain open.
+profile default and (c) the §8.10 spec home remain open — (b),
+`enforce-strict` making writer-fit itself reject, landed with the H4 code
+step (see the confidentiality paragraph above).
 
 **SC-19 [clarify] Blanket "confidentiality always joins" dependency.**
 Verified open (the rule is stated as fact in §15.1 and §3.1.2, nowhere
@@ -322,6 +336,95 @@ change changes the hash and with it every identity within the artifact —
 rebinding is re-authorization, not inheritance; `writeAuthorizedBy`
 references resolve against this pair. Replace §8.15.6's "no separate naming
 scheme" claim with the pair definition and state the rebinding rule.
+
+**SC-23 [interpretation] Per-write read-prefix provenance classed as
+decomposition-grade precision — §8.9.1/§8.9.2 (Epic D4).** The runner's
+input-requirement gate (`requiredIntegrity`/`maxConfidentiality` in
+`verifyInputRequirements`) quantifies each protected write over the reads
+whose activity-clock position precedes the LAST write attempt overlapping the
+protected path (either prefix direction, matching floor applicability),
+trigger reads joining every prefix at −∞. Interpretation call (owner note in
+`cfc-write-prefix-provenance.md` §7.4): this is treated as a **structural
+fact of the journal order in §8.9.1's decomposition class** — a read past the
+last overlapping write provably did not feed the committed value — so it is
+applied WITHOUT the `flow-taint-precision` trust gate; it is not an untrusted
+`L_claim`. Two boundaries of the interpretation, both deliberate: (a) the
+confidentiality **egress ceiling** stays transaction-global (a sink request
+records no per-write provenance — §8.10); (b) the flow-label join `J(tx)` and
+the D3 floor's flow-meet credit stay transaction-global too (one per-tx label
+is load-bearing for stamp-collapse and persist-credit coherence); per-write
+narrowing there needs per-path derived components first. The audit-#14
+read-side vacuous pass resolves by DELEGATION: with an empty prefix the only
+possible endorsement is the one the written value carries, which is exactly
+the D3 write floor's check (§8.12.4.1) under its staged dial — an
+unconditional read-side rejection would duplicate it under `enforce` and
+break the pinned dial-off/observe byte-compat. If the spec wants the read
+gate itself to reject empty-input floored writes independent of the floor
+dial, that needs its own normative text + rollout dial.
+
+**SC-24 [normative] Journal-order precision blessed; span-attributed
+provenance profiled — §8.9.1.** SC-23's interpretation still has no spec home:
+§8.9.1 names decomposition and trusted claims only, and nothing in the spec
+mentions journal-order bounds. Proposed edit, two parts
+([`cfc-value-level-provenance.md`](./cfc-value-level-provenance.md)): (1) a
+normative paragraph sanctioning per-write gating over the last-overlapping-
+write read prefix as structural precision (both prefix directions, trigger
+reads at −∞, read|write interleaving digest-bound per §8.10.1) — the shipped
+D4 mechanism; (2) a MAY profile for span-attributed provenance: runtime-
+bracketed span tags on the activity record, per-write feeds-closure over
+observed span edges, sound only where the executor structurally enforces span
+non-interference — interpreter-class executors under §18.7-style obligations
+(specs#11); sandboxed executors under the **instance rule** (the span is the
+executor instance: executions sharing a live user-code instance share one
+span; per-run instantiation recovers per-run spans) plus SES-closed
+cross-instance channels and a commit-time observed-vs-attributed consistency
+check — **no trusted static analysis assumed anywhere**; violations surface
+as late errors (prefix fallback / commit rejection), never unsoundness. Bare
+opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
+remains only for semantic claims beyond runtime structure. States that the
+egress ceiling / flow join / floor credit MAY upgrade from transaction-global
+where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
+deliberate to staged). `open`.
+
+**SC-25 [normative] Cross-space label-metadata representation classes —
+§4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
+known-exposure paragraph is posture ("MUST treat persisted label metadata as
+visible … SHOULD prefer atom forms"); the enforcement design
+([`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md))
+needs it normative: cross-space persistence of source-bearing atom fields
+follows a classification-governed representation — `public` / `commitment`
+(canonical digest, equality-preserving, honestly probe-able) / `reference`
+(source-space back-reference; resolution rides the source's read authority;
+failure collapses to `notAvailable`) — applied identically to envelope
+entries and sigil-carried label views, with same-form matching semantics.
+Initial-assignment exception to record: `Space.id` in confidentiality clauses
+stays `public` because §4.9.3's ACL point query must dereference it. Also:
+§4.6.4.2 gains the interim population rule (source-identity confidentiality
+when known; else, for **derived-component** entries only, the entry's own
+effective confidentiality — sound because the §8.9.2 conservative join
+contains each influencing source's confidentiality; else fail closed —
+computable without new persisted metadata), and SC-6's "revisit when
+invariant 12 is implemented" note is discharged by the introspection-surface
+observation channel. `open`.
+
+**SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
+event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
+ShareGrant consulted at access time — a durable *input* to route-1 evaluation
+— while route 2's text describes an in-place store-label rewrite (durable
+*output*); the §13 summary table says "persistent policy state / label
+rewrite" as if one thing. Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)):
+split into 2a (grant records: reserved-path, trusted-writer,
+content-addressed, fail-closed point-query resolution per §4.9.3, consumed
+via a `policyState` exchange-rule guard kind, revocable, digest-bound into
+the evaluation) and 2b (the rewrite event proper: intent-gated per §6.5 +
+§3.8.4, authority-verified per §8.10.5.2, requires a declared-component
+monotonicity gate to exist first, event record = a create-only document
+causal to the consumed intent's id — the shipped `commitPreconditions`
+receipt discipline — with canonical clause-digest identity, outside the
+churn-free envelope). Guidance refines to:
+2a when revocable or policy-derived; 2b only when the widening must survive
+without evaluation (export/publish). Unconflate the §13 table row. `open`.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)

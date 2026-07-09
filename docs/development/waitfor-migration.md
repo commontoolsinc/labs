@@ -1,0 +1,291 @@
+# Migrating off the polling `waitFor` helper
+
+This note records an effort to move test waits away from `waitFor` — a poll
+loop with a sleep and a timeout — and onto primitives that resolve on a real
+event. It also records the `waitFor` usages that were deliberately left in
+place, because for those a bounded poll is the honest observation and replacing
+it would add coupling or complexity rather than remove flakiness.
+
+## Why move off `waitFor`
+
+`waitFor(predicate, { timeout, delay })` (defined in
+`packages/integration/utils.ts`) re-runs `predicate` every `delay` milliseconds
+(50 by default) and throws once `timeout` (60 seconds by default) elapses. In a
+browser test each tick is also a DevTools Protocol round-trip. Two problems
+follow. The timeout puts a ceiling on success: anything slower than the timeout
+can never be observed, even when it would have completed. The fixed delay puts
+a floor on latency and, in performance measurements, quantizes timings to the
+poll interval.
+
+Several non-browser test files also each define their own local copy of the same
+poll-loop shape, so the pattern had spread well beyond the shared helper.
+
+## The two families
+
+The usages split into two groups with very different replacements.
+
+**Browser integration tests** use the `waitFor` exported from
+`@commonfabric/integration`. The replacement toolkit already exists in the repo:
+
+- `waitForCondition(page, predicate, { timeout, args })` installs a single
+  waiter inside the page. A shared MutationObserver hub watches the document and
+  every shadow root — including shadow roots created after the wait began — and
+  re-evaluates the predicate the instant the DOM reflects new state, then signals
+  the test process over a protocol binding. It keeps a `timeout` argument, but
+  that is a genuine stuck-condition safety net, not a poll interval; a coarse
+  500-millisecond in-page backstop covers conditions that flip with no DOM
+  mutation (for example a runtime global being set).
+- `awaitViewSettled(page)` resolves once the worker has settled reactively, the
+  resulting vdom batch has crossed to the main thread and been applied, and Lit
+  has finished its update cycle. This is the "is the control interactive yet"
+  signal.
+- The higher-level wrappers in
+  `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
+  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
+  bundle "settle the view, act once, wait for the effect" on top of the two
+  primitives above.
+
+**Non-browser tests** (in `runner`, `memory`, `toolshed`, `piece`) each define a
+local `waitFor` poll loop. There is no page to attach an in-page waiter to. The
+sound replacement, where one applies, is to await a promise or resolve a
+`defer()` (from `packages/utils/src/defer.ts`) inside a callback the test already
+registers — a cell `sink`, a storage subscription's `next`, a scheduler
+`onError`, or a counter incremented inside a test-owned transport.
+
+## What was migrated
+
+Every change below was verified by running its suite (the browser suites
+against real toolshed and shell servers, the in-process suites directly).
+
+Browser tests, moved to `waitForCondition` / `waitForText` / `awaitViewSettled`:
+
+- `packages/shell/integration/header-menu.test.ts`,
+  `login.test.ts`, `blob-upload.test.ts` — menu open/close class, breadcrumb
+  text, aria-expanded, menu-item labels, piece-switcher dropdown presence and
+  absence, runtime-exposed and image-loaded checks. Several had abused a short
+  `waitForSelector` timeout inside a try/catch as their poll tick; those inverted
+  patterns are gone.
+- `packages/shell/integration/shadow-dom.ts` — the shared `clickPierce` helper
+  now finds its target through a `waitForCondition` predicate.
+- `packages/shell/integration/piece.test.ts` — the slug-marker text, the
+  app-view's resolved space-root and active pattern, and the runtime
+  exposed/torn-down checks.
+- `packages/patterns/integration/counter.test.ts`, `nested-counter.test.ts`,
+  `fetch-json.test.ts` — rendered-text waits moved to `waitForText`; the "two
+  nested displays agree" assertion to a `waitForCondition` predicate.
+- `packages/patterns/integration/chatbot.test.ts`, `cfc-spec-gallery.test.ts`,
+  `cfc-authorship-chat.test.ts`, `cfc-group-chat-demo.test.ts` — chat-message
+  counts and the label / authorship probes moved into `waitForCondition`
+  predicates that inline the probe's own in-page collection.
+- `packages/patterns/integration/default-app.test.ts` and
+  `reload/default-app-notebook.test.ts` — the redundant local runtime-idle
+  helpers were deleted in favour of the shared `waitForRuntimeIdle` /
+  `waitForRuntimeSynced`, the `waitFor(() => helper(page))` wrappers dropped to
+  bare awaits, the `app.serialize()` reads moved into `waitForCondition`, and the
+  standalone view-settle waits changed to gate-then-settle.
+- `packages/patterns/integration/default-app.test.ts`,
+  `reload/default-app-notebook.test.ts`, and `nested-counter.test.ts` — the
+  shared button-click helpers (`clickButtonWithText` / `clickButtonWithExactText`
+  / `clickButtonWithTitle`, and `nested-counter.test.ts`'s `clickNthButton`,
+  which clicked the nth `[data-cf-button]` in a retry loop) were reshaped to the
+  `clickCfButton` form: a `waitForCondition` predicate finds the first visible
+  matching (or nth) button and marks its click target, then the test dispatches
+  a single trusted click. This replaced both the `waitFor(() => helper(...))`
+  presence loops and the bare find-and-click, so the button-appearance wait is
+  event-driven and the click fires once.
+- `packages/patterns/integration/default-app.test.ts` and
+  `reload/default-app-notebook.test.ts` — the `collectNoteTitlesInList` /
+  `collectNotebookRenderState` / `collectNotebookSourceState` waits moved into
+  `waitForCondition` predicates that inline each probe's in-page collection (the
+  rendered-title scan, the piece-cell read for `isNotebook` / `noteCount` /
+  rendered chips, and the argument/internal read with manifest resolution). The
+  standalone probe functions were kept where a later line still reads them for a
+  one-shot assertion or diagnostics.
+
+In-process tests, moved to a `defer()` resolved inside a callback the test
+already registers (a cell `sink`/`subscribe`, a subscription's notification
+recorder, a scheduler `onError`, a telemetry listener, or a test-owned transport
+counter):
+
+- runner: `memory-v2-subscription.test.ts`, `memory-v2-reconnect-race.test.ts`,
+  `scheduler-commit-backpressure.test.ts`, `integration/reconnection.test.ts`,
+  `integration/memory-v2-reactivity.test.ts` (plus a shared `onNotification`
+  hook on the `NotificationRecorder` helper).
+- memory: `v2-client-test.ts`, `v2-restore-flush-test.ts`.
+- toolshed: `routes/storage/memory/memory.test.ts`.
+- piece: `pull-materialization.test.ts`.
+- runtime-client: `client.test.ts` — the cell-subscribe, console, and navigation
+  waits (the render-driven `MockDoc` waits stay; see below).
+- patterns / shell: `counter.test.ts`, `nested-counter.test.ts`, and
+  `shell/integration/piece.test.ts` — the polls that read a piece's committed
+  `result` value through the in-process controller now resolve a `defer()` from
+  the result-cell `sink()` the tests already register to keep the piece
+  reactive. The sink records the latest committed value and resolves a pending
+  waiter when its target lands, with a fast path for a value already at the
+  target (a re-set to the same value commits no change).
+
+A handful of now-dead poll loops that followed an already-awaited
+`provider.sync(...)` were dropped outright, since sync resolving already implies
+the record is present.
+
+Documentation:
+
+- `docs/development/UI_TESTING.md` — guidance and examples updated to teach the
+  event-driven primitives instead of `waitFor`, and a stale reference to a
+  non-existent `awaitRuntimeIdle` corrected to `waitForRuntimeIdle`.
+
+## Guard against new usage
+
+A check keeps new integration tests from importing the polling `waitFor` again.
+`tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
+directory beneath `packages/` (excluding the `@commonfabric/integration` package,
+which defines `waitFor`) and fails when one names `waitFor` in an import from
+`@commonfabric/integration` and is not on the check's allowlist. Run it with
+`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
+The error names the offending file and points at `waitForCondition`,
+`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+
+The allowlist inside `tasks/check-no-waitfor.ts` covers only the exceptions the
+check can see: the integration-test files that import the shared `waitFor` from
+`@commonfabric/integration`. That is a subset of the exceptions listed below.
+The others fall outside the scan and are not on the allowlist — the in-process
+`test/` files that each define their own local `waitFor` poll loop (the check
+never reads a named import there), the `MultiRuntimeHarness.waitFor` method and
+its callers (a different `waitFor`), `packages/runner/integration/sqlite-cfc-commit-eval.test.ts`
+(which waits through a local helper rather than the shared import), and
+`packages/integration/shell-utils.ts` (inside the excluded package that defines
+`waitFor`). Do not add those to the allowlist: the check never scans them, so the
+stale-entry test would reject the entry.
+
+For the in-scope entries, the check's own tests assert that the allowlist and the
+set of integration-test files still importing the shared `waitFor` stay in step:
+a new offender fails the check, and an allowlisted file that later drops `waitFor`
+fails the tests until its entry is removed. When a new in-scope usage is genuinely
+one of the exception shapes below, add the file to the allowlist with a one-line
+reason and record it here.
+
+## Intentional exceptions: `waitFor` usages left in place
+
+These are the usages where a bounded poll is the right tool. They are grouped by
+the reason migration was declined.
+
+### No page, and no callback to hang a promise on
+
+These observe in-process state that becomes true as a side effect, with no event
+boundary the test can await without adding one to production code.
+
+- `packages/runtime-client/integration/client.test.ts` — the remaining sixteen
+  waits observe the `MockDoc`'s rendered `innerHTML`, which the worker's render
+  pipeline applies with no completion callback the test can hook, or a fresh
+  `cell.sync()` round-trip with no registered subscription. There is no event
+  boundary to resolve a deferred from without adding a render hook to the mock
+  purely for the test. (The cell-subscribe, console, and navigation waits in this
+  file, which do have callbacks, were converted.)
+- `packages/generated-patterns/integration/pattern-harness.ts` pulls a runtime
+  `Cell` value and compares it, headless. No page; polling the pull until it
+  converges is the honest wait.
+- `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
+  reloaded piece (`cc.get(pieceId, true)`), which has no registered sink, stays a
+  bounded poll on its own sync round trip. The sink-backed result-cell reads in
+  this file (and every such read in `counter.test.ts` and
+  `nested-counter.test.ts`) were converted to a `defer()` resolved from the
+  existing `resultCell.sink(...)`.
+
+### Race, backpressure, and convergence tests
+
+Here the poll is measuring eventual convergence across timing the test does not
+control, and there is no single "it converged" promise to await.
+
+- `packages/runner/test/scheduler-commit-backpressure.test.ts` — the committed
+  total or list lands only after the runtime works through several
+  backoff-delayed retry attempts, each parked on a real timer. `runtime.idle()`
+  returns between retries, so it does not span the wait.
+- `packages/runner/test/memory-v2-pull-reactivity.test.ts` — waits on
+  `runtime.scheduler.isDirty(action)`, which reads membership in the scheduler's
+  internal dirty set. Nothing fires when one specific action flips to dirty;
+  de-polling would mean adding a scheduler hook purely for the test.
+- `packages/runner/test/effect-conflict-recovery.test.ts` — recovery after a
+  cross-replica conflict is driven autonomously by the runtime's catch-up
+  re-queue, and one case deliberately disables the reader-dirty fast path so only
+  the timing-sensitive re-queue can recover. The automatic re-run is the behavior
+  under test; there is by construction no event to await.
+- `packages/runner/test/memory-v2-reconnect-race.test.ts` and
+  `packages/memory/test/v2-restore-flush-test.ts` — the waits that watch for a
+  deliberate mid-flight sabotage or a restore replay to reach a specific in-flight
+  point. These are race checkpoints the surrounding interleaving depends on;
+  bounded polling expresses "wait until the sabotage/replay happened" without
+  coupling test control to the race window.
+- `packages/runner/integration/sqlite-cfc-commit-eval.test.ts` — the predicates
+  read derived pattern result cells that settle only after a full server round
+  trip (handler send, scheduler run, server commit, server-side re-derivation,
+  re-query). The helper already drains with `runtime.idle()` and
+  `storageManager.synced()` each iteration; the remaining poll observes eventual
+  convergence of that multi-stage evaluation.
+- The frontier-cardinality waits in `memory-v2-subscription.test.ts`,
+  `memory-v2-pull-reactivity.test.ts`, and `memory-v2-reconnect-race.test.ts`
+  ("all N reachable ids present") are soft: event-driven only via a counting
+  `defer()` over several integrate batches, which is a poll wearing a callback.
+  Left as bounded convergence checks.
+
+### A different `waitFor`
+
+`packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts` and
+`packages/patterns/integration/sqlite-read-clearance-multi-runtime.test.ts` call
+`MultiRuntimeHarness.waitFor` (defined in
+`packages/patterns/integration/multi-runtime-harness.ts`), a different method
+that settles several in-process Deno-worker runtimes and reads durable cells
+across them. It is not the `@commonfabric/integration` `waitFor`, has no page,
+and its cross-runtime convergence poll is the honest mechanism.
+
+### Cross-page joint condition
+
+`packages/patterns/integration/lunch-poll-vote.test.ts` waits on a condition
+joined across two different browser pages (both must show both voters).
+`waitForCondition` installs its waiter in one page and resolves on that page's
+binding, so it cannot express a two-page condition; the cross-browser
+propagation wait stays a poll.
+
+### Instrumentation and profiling one-shots
+
+In `packages/patterns/integration/default-app.test.ts` and
+`packages/patterns/integration/reload/default-app-notebook.test.ts`, a number of
+`waitFor` calls wrap one-shot instrumentation (arm a trace, reset a logger,
+install a telemetry handler) that returns false only until a runtime API is
+present. These observe API readiness, not a UI condition; the honest fix is to
+await a runtime-ready signal directly, not to install a DOM waiter. They are
+env-gated profiling scaffolding, not assertions.
+
+### A shared state primitive
+
+`packages/integration/shell-utils.ts`'s `waitForState` compares the shell's
+serialized `AppState` (view plus identity DID), read through
+`globalThis.app.serialize()`. That is application state, not the DOM, and this is
+the shared primitive many suites build on. `waitForCondition`'s probe cannot see
+app state, so migration would mean re-implementing view/identity comparison
+inside an in-page predicate for no reduction in flakiness.
+
+### Disabled tests
+
+`cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
+`cf-checkbox.test.disabled.ts` hold many `waitFor` calls but never run.
+Migrating them only churns dead code.
+
+## Also noticed, since cleaned up
+
+Three bare sleeps sat next to migrated waits, one in
+`packages/runner/integration/reconnection.test.ts` and two in
+`packages/toolshed/routes/storage/memory/memory.test.ts`. Each restarted the
+server on the same port and then slept a fixed 100 milliseconds before writing
+the value a subscriber was waiting for, racing server readiness rather than
+awaiting it.
+
+All three are gone. Each test already blocked on a `defer()` that its
+subscription sink resolves when the post-restart value arrives, so the sleep only
+added latency ahead of a wait that already covered the reconnection.
+`Deno.serve` binds and starts accepting connections synchronously before it
+returns, so the writer runtime created after the restart connects to an
+already-listening server, and on reconnect the subscriber re-issues its watch
+against the fresh server, which reads current committed state — so the update is
+delivered whether the write lands before or after the reconnect completes. The
+sleeps were removed with no replacement wait.

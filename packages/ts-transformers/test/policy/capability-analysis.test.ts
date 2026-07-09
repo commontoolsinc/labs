@@ -1474,6 +1474,433 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis expands a fixed tuple spread into imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, Writable<Auth>] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.writePaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis maps each fixed tuple spread element to its own parameter capability",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { ReadonlyCell, Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: ReadonlyCell<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { ReadonlyCell, Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, ReadonlyCell<Auth>] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 flows to a Writable parameter (read and write); element 1 flows
+    // to a ReadonlyCell parameter (read only, no write).
+    assert(state.writePaths.includes("pair.0"));
+    assertEquals(state.writePaths.includes("pair.1"), false);
+    assert(state.readPaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis does not expand a variable-length array spread into imported fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: Writable<Auth>[] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assertEquals(state.writePaths.includes("pair.0"), false);
+    assertEquals(state.writePaths.includes("pair.1"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps a tuple spread with a non-cell position conservatively read",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: number,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { pair }: { pair: [Writable<Auth>, number] },
+        ) => {
+          client(...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 maps to a Writable parameter, so its write is recorded. Element
+    // 1 is a plain value with no cell contract, so the spread source is not
+    // suppressed and its ordinary read is tracked conservatively.
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.readPaths.includes("pair"));
+  },
+);
+
+Deno.test(
+  "Capability analysis maps a leading fixed argument before a fixed tuple spread",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          first: Writable<Auth>,
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            first,
+            pair,
+          }: {
+            first: Writable<Auth>;
+            pair: [Writable<Auth>, Writable<Auth>];
+          },
+        ) => {
+          client(first, ...pair);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    assert(state.writePaths.includes("first"));
+    assert(state.writePaths.includes("pair.0"));
+    assert(state.writePaths.includes("pair.1"));
+  },
+);
+
+Deno.test(
+  "Capability analysis advances past a single-element tuple spread to a trailing argument",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            single,
+            tail,
+          }: {
+            single: [Writable<Auth>];
+            tail: Writable<Auth>;
+          },
+        ) => {
+          client(...single, tail);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // The single tuple element fills parameter 0, so the trailing argument must
+    // map to parameter 1 rather than colliding on parameter 0.
+    assert(state.writePaths.includes("single.0"));
+    assert(state.writePaths.includes("tail"));
+  },
+);
+
+Deno.test(
+  "Capability analysis stays conservative for a variadic tuple spread into fixed parameters",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { variadic }: { variadic: [Writable<Auth>, ...Writable<Auth>[]] },
+        ) => {
+          client(...variadic);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A tuple with a rest element has no statically fixed length, so signature
+    // mapping stops and the positions are not written.
+    assertEquals(state.writePaths.includes("variadic.0"), false);
+    assertEquals(state.writePaths.includes("variadic.1"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis wildcards a dynamically indexed fixed tuple spread",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: Writable<Auth>,
+          b: Writable<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            bag,
+            k,
+          }: {
+            bag: { [key: string]: [Writable<Auth>, Writable<Auth>] };
+            k: string;
+          },
+        ) => {
+          const local = bag;
+          client(...local[k]);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // The tuple is fixed-length, but the spread source is reached through a
+    // dynamic index, so the whole root is wildcarded rather than mapped to
+    // specific positions.
+    assert(state.wildcard);
+  },
+);
+
+Deno.test(
+  "Capability analysis maps writeonly, comparable, and opaque fixed tuple positions",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type {
+          ComparableCell,
+          OpaqueCell,
+          WriteonlyCell,
+        } from "commonfabric";
+
+        export type Auth = { token: string };
+        export function client(
+          a: WriteonlyCell<Auth>,
+          b: ComparableCell<Auth>,
+          c: OpaqueCell<Auth>,
+        ): void;
+      `,
+      "/test.ts": `
+        import { client, type Auth } from "client";
+        import type {
+          ComparableCell,
+          OpaqueCell,
+          WriteonlyCell,
+        } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          {
+            triple,
+          }: {
+            triple: [
+              WriteonlyCell<Auth>,
+              ComparableCell<Auth>,
+              OpaqueCell<Auth>,
+            ];
+          },
+        ) => {
+          client(...triple);
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // Element 0 is write-only (write, no passing read), element 1 is a
+    // comparable cell (identity-cell path), element 2 is opaque.
+    assert(state.writePaths.includes("triple.0"));
+    assertEquals(state.readPaths.includes("triple.0"), false);
+    assert(state.identityCellPaths.includes("triple.1"));
+    assert(state.opaquePaths.includes("triple.2"));
+  },
+);
+
+Deno.test(
+  "Capability analysis records nothing for a parenthesis-free imported construction",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/client.d.ts": `
+        import type { Writable } from "commonfabric";
+
+        export type Auth = { token: string };
+        export declare class Client {
+          constructor(auth: Writable<Auth>);
+        }
+      `,
+      "/test.ts": `
+        import { Client, type Auth } from "client";
+        import type { Writable } from "commonfabric";
+
+        const fn = (
+          _event: unknown,
+          { auth }: { auth: Writable<Auth> },
+        ) => {
+          new Client;
+          return auth;
+        };
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "__param1");
+
+    // A construction written without an argument list has no arguments to map,
+    // so the constructor's declared cell contract records no write for the
+    // separately-read cell.
+    assertEquals(state.writePaths.includes("auth"), false);
+    assert(state.readPaths.includes("auth"));
+  },
+);
+
+Deno.test(
   "Capability analysis shrinks a root cell to readonly for a ReadonlyCell parameter",
   () => {
     const { program, sourceFile } = createProgramWithFiles({
@@ -3256,5 +3683,205 @@ Deno.test(
     const input = summary.params.find((entry) => entry.name === "input");
     assert(input);
     assertEquals(input!.capability, "writable");
+  },
+);
+
+Deno.test("Capability analysis classifies send() as a write", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.events.send({ fired: true });
+      return null;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  // send() delegates to set() on every receiver: a raw cell takes a
+  // transactional write; a stream enqueues an event whose handler writes in
+  // its own transaction. Either way a sending callback must never summarize
+  // as write-free.
+  assert(input.writePaths.includes("events"));
+  assertEquals(input.capability, "writeonly");
+});
+
+Deno.test(
+  "Capability analysis fails closed on unknown methods without a checker",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => input.items.frobnicate();`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // Without a checker the receiver cannot be proven value-like, so the
+    // unknown method could be an unrecognized mutator: writePaths must not
+    // be treated as exhaustive.
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks unknown cell-method calls as unverified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<{ items: string[] }>) => {
+  // Not a method the analysis recognizes; the receiver is cell-like, so a
+  // mutation cannot be ruled out.
+  input.frobnicate();
+  return null;
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps value-level unknown methods verified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<string[]>) => {
+  const items = input.get();
+  return items.some((item) => item.length > 0);
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // Array methods on a .get() snapshot cannot write through the cell:
+    // only cell-like receivers poison write-exhaustiveness.
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks set() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    // The write itself is still recorded...
+    assert(input!.writePaths.map((path) => path.join(".")).includes("count"));
+    // ...but onCommit receives the committed transaction and can write
+    // arbitrary cells through it, so writePaths is not exhaustive.
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks send() with an onCommit callback as unverified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.events.send({ fired: true }, (tx) => tx.doSomething());
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assert(input!.writePaths.map((path) => path.join(".")).includes("events"));
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps plain set()/send() calls verified",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        input.count.set(1);
+        input.events.send({ fired: true });
+        return null;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks dynamic cell-method calls as unverified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<{ items: string[] }>, m: string) => {
+  // Unresolvable method name on a cell-like receiver: could be any mutator.
+  input[m]();
+  return null;
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps value-level dynamic method calls verified",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const fn = (input: Cell<Record<string, () => number>>, m: string) => {
+  const value = input.get();
+  // Dynamic method on a .get() snapshot: cannot write through the cell.
+  return value[m]();
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+    const summary = analyzeFunctionCapabilities(fn, { checker });
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis fails closed on dynamic methods without a checker",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, m) => input.items[m]();`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    assert(input);
+
+    assertEquals(input!.hasUnverifiedCellUse, true);
   },
 );

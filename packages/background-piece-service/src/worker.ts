@@ -8,9 +8,18 @@ import {
   type ErrorWithContext,
   isStream,
   Runtime,
+  runtimePresets,
   Stream,
 } from "@commonfabric/runner";
+import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { env } from "./env.ts";
+import {
+  getMeter,
+  getTracer,
+  initOpenTelemetry,
+  shutdownOpenTelemetry,
+} from "./otel.ts";
 
 import {
   createSession,
@@ -32,6 +41,10 @@ let latestError: Error | null = null;
 let currentSession: Session | null = null;
 let manager: PieceManager | null = null;
 let runtime: Runtime | null = null;
+// Detaches the OpenTelemetry bridge from the runtime's telemetry EventTarget.
+// Set when the runtime is created in initialize(), called on cleanup() so the
+// listener and any in-flight spans are torn down with the runtime.
+let detachOtelBridge: (() => void) | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 let streamValidator = isStream;
 
@@ -127,6 +140,7 @@ export function resetWorkerStateForTesting(): void {
   currentSession = null;
   manager = null;
   runtime = null;
+  detachOtelBridge = null;
   loadedPieces.clear();
   streamValidator = isStream;
 }
@@ -150,18 +164,50 @@ export async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and piece manager
-  runtime = new Runtime({
-    apiUrl: new URL(toolshedUrl),
+  // Initialize runtime and piece manager. Shared first-party posture
+  // (CT-1814); `experimental` arrives as data from the main process so the
+  // service has one flag decision point (see main.ts createRuntime). The
+  // preset pins patternEnvironment to `apiUrl`, matching the explicit pin
+  // this site previously carried.
+  runtime = new Runtime(runtimePresets.productionServer({
+    apiUrl,
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(toolshedUrl),
     }),
-    patternEnvironment: { apiUrl },
+    // The IPC type allows absence, but the service always forwards the main
+    // runtime's resolved flags; `{}` (constructor defaults) covers a bare
+    // caller.
+    experimental: experimental ?? {},
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
-    experimental,
+  }));
+  // Each worker is its own isolate: the provider main.ts registers doesn't
+  // exist here, so initialize OTel in-worker (idempotent, fail-open) or the
+  // bridge below would attach to no-op instruments.
+  await initOpenTelemetry();
+
+  // Bridge the runtime's existing telemetry stream to OpenTelemetry. This is a
+  // second, passive consumer of the same event bus the debug tooling uses; it
+  // emits no-op instruments unless a provider is registered (see otel.ts).
+  detachOtelBridge = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
+    tracer: getTracer(),
+    meter: getMeter(),
+    attributes: {
+      "ct.runtime": "bg-piece",
+      "space.did": spaceId,
+      "user.did": identity.did(),
+    },
+    // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
+    // the scoping labels explicitly (metrics only — on spans these live on the
+    // resource, and duplicating them as span attributes makes the bare key
+    // ambiguous in queries).
+    metricAttributes: {
+      "service.name": env.OTEL_SERVICE_NAME,
+      "deployment.environment": env.ENV,
+    },
   });
+
   manager = new PieceManager(currentSession, runtime);
   await manager.ready;
 
@@ -186,6 +232,22 @@ export async function cleanup(): Promise<void> {
     await runtime.storageManager.synced();
     await runtime.dispose();
     runtime = null;
+  }
+
+  // Detach the OTel bridge only after the runtime is fully torn down, so the
+  // final sync/dispose telemetry (storage completions, subscription removals)
+  // is still observed; detaching closes any spans left in flight.
+  if (detachOtelBridge) {
+    detachOtelBridge();
+    detachOtelBridge = null;
+  }
+
+  // Flush buffered spans/metrics before the controller terminates this worker;
+  // fail-open — telemetry teardown must never block cleanup.
+  try {
+    await shutdownOpenTelemetry();
+  } catch (error) {
+    console.error("Failed to shut down OpenTelemetry:", error);
   }
 
   initialized = false;

@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
@@ -18,11 +18,12 @@ function pierce(page: Page, selector: string, timeout?: number) {
 
 /** Wait until the menu container has (or lacks) the "open" class. */
 async function waitForMenuState(page: Page, open: boolean) {
-  await waitFor(async () => {
-    const el = await pierce(page, ".menu-container");
-    const cls = await el.evaluate((e: Element) => e.className);
-    return open ? cls.includes("open") : !cls.includes("open");
-  });
+  await waitForCondition(page, (probe, wantOpen) => {
+    const el = probe.collect(".menu-container")[0];
+    if (!el) return false;
+    const isOpen = el.className.includes("open");
+    return wantOpen ? isOpen : !isOpen;
+  }, { args: [open] });
 }
 
 /** Click the nav-picker trigger to open the menu. */
@@ -94,15 +95,14 @@ describe("header menu tests", () => {
     const page = shell.page();
     await loginAndGoto();
 
-    await waitFor(async () => {
-      try {
-        const el = await pierce(page, ".header-space", 500);
-        const text = await el.innerText();
-        return text?.trim() === SPACE_NAME;
-      } catch {
-        return false;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe, name) =>
+        probe.collect(".header-space").some((el) =>
+          probe.deepText(el).trim() === name
+        ),
+      { args: [SPACE_NAME] },
+    );
   });
 
   it("has correct ARIA attributes", async () => {
@@ -126,13 +126,12 @@ describe("header menu tests", () => {
 
     // Open menu — aria-expanded should become true
     await openMenu(page);
-    await waitFor(async () => {
-      const el = await pierce(page, ".nav-picker");
-      const val = await el.evaluate(
-        (e: Element) => e.getAttribute("aria-expanded"),
-      );
-      return val === "true";
-    });
+    await waitForCondition(
+      page,
+      (probe) =>
+        probe.collect(".nav-picker")[0]?.getAttribute("aria-expanded") ===
+          "true",
+    );
 
     // Panel should have role=menu
     const panel = await pierce(page, ".menu-panel");
@@ -166,19 +165,13 @@ describe("header menu tests", () => {
 
     await openMenu(page);
 
-    await waitFor(async () => {
-      try {
-        const el = await pierce(
-          page,
-          '[role="menuitem"] .menu-item-label',
-          500,
-        );
-        const text = await el.innerText();
-        return text?.trim() === "Go Home";
-      } catch {
-        return false;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe) =>
+        probe.collect('[role="menuitem"] .menu-item-label').some((el) =>
+          probe.deepText(el).trim() === "Go Home"
+        ),
+    );
   });
 
   it("opens and closes the desktop piece switcher", async () => {
@@ -186,28 +179,20 @@ describe("header menu tests", () => {
     await loginAndGoto();
 
     // Wait for the piece trigger to appear in the header breadcrumb
-    await waitFor(async () => {
-      try {
-        await pierce(page, ".header-piece-trigger", 500);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe) => probe.collect(".header-piece-trigger").length > 0,
+    );
 
     // Click the piece trigger to open the dropdown
     const trigger = await pierce(page, ".header-piece-trigger");
     await trigger.click();
 
     // Dropdown should appear
-    await waitFor(async () => {
-      try {
-        await pierce(page, ".header-piece-dropdown", 500);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe) => probe.collect(".header-piece-dropdown").length > 0,
+    );
 
     // Re-query trigger since Lit may have re-rendered
     const updatedTrigger = await pierce(page, ".header-piece-trigger");
@@ -222,13 +207,9 @@ describe("header menu tests", () => {
     await page.keyboard.press("Escape");
 
     // Dropdown should be gone
-    await waitFor(async () => {
-      try {
-        await pierce(page, ".header-piece-dropdown", 200);
-        return false;
-      } catch {
-        return true;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe) => probe.collect(".header-piece-dropdown").length === 0,
+    );
   });
 });

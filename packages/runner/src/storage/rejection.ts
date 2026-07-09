@@ -10,6 +10,41 @@ export function isPermanentRejection(
 }
 
 /**
+ * The wire names of terminal commit rejections: a server-side commit-time
+ * evaluation that DETERMINISTICALLY refused the committed data itself, so
+ * re-running the identical handler recomputes the identical refused write and
+ * can NEVER converge. Today: `RowLabelCommitError` — a CFC per-row label
+ * commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated inside
+ * `applyCommitTransaction`, rolls back the whole commit). The memory server
+ * MUST serialize the class name unchanged (memory/v2/server.ts transact catch);
+ * the runner keeps it through normalization (storage/v2.ts `toRejectedError`).
+ * Keep the two in sync — the sqlite-cfc-commit-eval integration test exercises
+ * the real server→runner path and fails if the name is dropped or renamed.
+ */
+const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
+  "RowLabelCommitError",
+]);
+
+/**
+ * A terminal rejection is a deterministic, data-caused commit refusal that
+ * retrying can never resolve (see {@link TERMINAL_REJECTION_NAMES}). It is
+ * terminal like a {@link isPermanentRejection}, but classified separately: a
+ * permanent rejection is an idempotency/lineage precondition
+ * (`origin-committed`/`receipt-exists`), whereas a terminal rejection is the
+ * server refusing the committed rows on their own merits. Both must stop the
+ * handler immediately: a doomed handler that keeps re-running through its retry
+ * budget produces speculative rev bumps on each attempt that starve concurrent
+ * sibling commits sharing reactive state. Unlike a stale-read
+ * {@link isConflictRejection} (retry against fresh state can converge), a
+ * terminal rejection is NOT retryable.
+ */
+export function isTerminalRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name !== undefined && TERMINAL_REJECTION_NAMES.has(error.name);
+}
+
+/**
  * A conflict rejection is a stale-read / pending-dependency commit failure
  * (normalized to `ConflictError`, see storage/v2.ts): the authoritative version
  * is ahead of this replica. A reactive compute or effect recovers from one by
@@ -24,8 +59,12 @@ export function isPermanentRejection(
  * The event-handler commit path treats the same rejection as the signal to
  * apply committed-write backpressure: re-running the handler against fresh
  * confirmed state and committing again can succeed, so a conflict is retried
- * with backoff rather than dropped. Handler-initiated aborts and system errors
- * are not conflicts and keep their bounded retry budget.
+ * with backoff rather than dropped. It windows the local stale-basis guard
+ * (`isStorageTransactionInconsistent`) the same way. Every other non-permanent
+ * rejection there — a handler-initiated abort, an authorization denial, a
+ * transport or malformed-store error — is not a stale basis and cannot converge
+ * by re-running, so it drops fast rather than entering the window (see
+ * `classifyCommitDisposition` in scheduler/events.ts).
  */
 export function isConflictRejection(
   error: { name?: string } | undefined | null,

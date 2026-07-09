@@ -24,10 +24,14 @@ import {
   apiHeaders,
   applyBaselineOverrides,
   type BaselineOverrides,
+  benchmarksRunsPath,
+  compileCacheFamilyForMetric,
+  type CompileCacheStates,
   computeBaseline,
   type DenoBenchResult,
   downloadAndParseJUnit,
-  downloadAndParsePerfMetrics,
+  downloadAndParsePerfMetricsDetailed,
+  dropColdSamples,
   escapeTableCell,
   extractBenchMetrics,
   extractMetrics,
@@ -458,6 +462,9 @@ async function main() {
   let artifactRunsProcessed = 0;
   let perfMetricRunsProcessed = 0;
   let logParseRunsProcessed = 0;
+  // Per-run compile cache states from tagged perf-metrics artifacts. Runs
+  // without a tag (pre-rollout, missing artifact) stay absent — unknown.
+  const cacheStatesByRunId = new Map<number, CompileCacheStates>();
   await mapConcurrent(
     [...jobsByRun],
     API_CONCURRENCY,
@@ -468,12 +475,15 @@ async function main() {
           (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
         );
         if (perfMetricsArtifact) {
-          const metrics = await downloadAndParsePerfMetrics(
+          const detailed = await downloadAndParsePerfMetricsDetailed(
             perfMetricsArtifact.id,
           );
-          if (metrics) {
+          if (detailed) {
+            if (detailed.compileCacheStates) {
+              cacheStatesByRunId.set(run.id, detailed.compileCacheStates);
+            }
             let hasTestMetrics = false;
-            for (const [name, sample] of metrics) {
+            for (const [name, sample] of detailed.metrics) {
               if (name.startsWith("test:") || name.startsWith("subtest:")) {
                 hasTestMetrics = true;
                 addSample(timelines, name, sample);
@@ -551,9 +561,7 @@ async function main() {
   let benchRunsProcessed = 0;
   try {
     const benchRuns = (
-      await githubGet<{ workflow_runs: WorkflowRun[] }>(
-        `/repos/${REPO}/actions/workflows/benchmarks.yml/runs?branch=main&status=success&event=push&per_page=${MAX_RUNS_TO_FETCH}`,
-      )
+      await githubGet<{ workflow_runs: WorkflowRun[] }>(benchmarksRunsPath())
     ).workflow_runs;
 
     if (benchRuns.length > 0) {
@@ -632,6 +640,33 @@ async function main() {
       `Applying ${overridesBySha.size} baseline override(s)...`,
     );
     applyBaselineOverrides(timelines, overridesBySha);
+  }
+
+  // Drop samples from known-cold runs for timing metrics inflated by a cold
+  // compile cache, so cold main runs skew neither the baseline nor the
+  // recent window. Runs without a recorded state are unknown and kept;
+  // metrics with no compile-cache family are untouched. This must run AFTER
+  // applyBaselineOverrides: truncation is anchored on the override commit's
+  // sample, which may itself be from a cold run (a fingerprint-changing PR
+  // carrying an override) — dropping it first would silently skip the
+  // truncation.
+  if (cacheStatesByRunId.size > 0) {
+    let coldSamplesDropped = 0;
+    for (const timeline of timelines.values()) {
+      const family = compileCacheFamilyForMetric(timeline.name);
+      if (!family) continue;
+      const kept = dropColdSamples(
+        timeline.samples,
+        (runId) => cacheStatesByRunId.get(runId)?.[family],
+      );
+      coldSamplesDropped += timeline.samples.length - kept.length;
+      timeline.samples = kept;
+    }
+    if (coldSamplesDropped > 0) {
+      console.log(
+        `Dropped ${coldSamplesDropped} sample(s) from cold-compile-cache runs.`,
+      );
+    }
   }
 
   // Print a summary of all metrics

@@ -7,7 +7,7 @@ import { expect } from "@std/expect";
 import {
   parseWriteParamColumns,
   parseWriteTable,
-} from "../src/builtins/sqlite/write-targets.ts";
+} from "../v2/sqlite/write-targets.ts";
 
 describe("parseWriteParamColumns — determinable shapes", () => {
   it("INSERT with explicit column list", () => {
@@ -138,5 +138,45 @@ describe("parseWriteTable", () => {
     expect(parseWriteTable("UPDATE main.emails SET a = ?")).toBeUndefined());
   it("quoted schema-qualified → undefined", () =>
     expect(parseWriteTable('INSERT INTO "main"."emails" (a) VALUES (?)'))
+      .toBeUndefined());
+
+  it("no attributable target (malformed INTO) → undefined", () =>
+    expect(parseWriteTable("INSERT INTO (bad) VALUES (?)")).toBeUndefined());
+});
+
+describe("blanking — comments and string escapes never fool the parsers", () => {
+  it("line and block comments are blanked (decoy INTO/? inside)", () => {
+    expect(
+      parseWriteTable(
+        "INSERT /* not INTO fake */ INTO emails -- INTO other\n" +
+          "(a) VALUES (?)",
+      ),
+    ).toBe("emails");
+    expect(
+      parseWriteParamColumns(
+        "INSERT INTO emails (a) -- a ? in a comment\nVALUES (?)",
+      ),
+    ).toEqual(["a"]);
+  });
+
+  it("a string literal with an '' escape hides its ? and -- from the scan", () => {
+    // One real placeholder; the quoted text's `?`, `--`, and `,` are data.
+    expect(
+      parseWriteParamColumns(
+        "UPDATE emails SET a = ? WHERE b = 'it''s a ?, not -- a param'",
+      ),
+    ).toEqual(["a"]);
+  });
+
+  it("columnless INSERT with placeholders stays unattributable", () =>
+    expect(parseWriteParamColumns("INSERT INTO emails VALUES (?, ?)"))
+      .toBeUndefined());
+
+  it("an empty name in the column list fails closed", () =>
+    expect(parseWriteParamColumns("INSERT INTO emails (a, ) VALUES (?, ?)"))
+      .toBeUndefined());
+
+  it("UPDATE without a SET clause fails closed", () =>
+    expect(parseWriteParamColumns("UPDATE emails WHERE a = ?"))
       .toBeUndefined());
 });

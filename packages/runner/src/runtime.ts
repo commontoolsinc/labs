@@ -33,6 +33,10 @@ import {
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
+import {
+  isEagerSourceAnnotationEnabled,
+  setEagerSourceAnnotation,
+} from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
   ChangeGroup,
@@ -42,6 +46,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  URI,
 } from "./storage/interface.ts";
 import {
   type Cell,
@@ -57,6 +62,7 @@ import {
   resolveCommitBackpressure,
 } from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
+import { fetchToolshedGitSha } from "./harness/version-gate.ts";
 import {
   CellLink,
   isCellLink,
@@ -68,16 +74,24 @@ import {
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  buildCfcPolicySnapshot,
+  buildCfcTrustConfig,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelView,
+  type CfcPolicyEvaluationMode,
+  type CfcPolicyRecordInput,
+  type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
+  type CfcTrustConfig,
+  type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
   flowLabelWorkExists,
   gatedSinkRequestExists,
   linkCfcLabelView,
+  type PolicySnapshot,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
@@ -163,12 +177,32 @@ export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
+ * TTL backstop for the system-pattern update caches (toolshed git sha and
+ * ?identity). Bounds how long a stale value survives a toolshed redeploy
+ * mid-session; the primary invalidation is clearPatternUpdateCaches().
+ */
+const PATTERN_UPDATE_CACHE_TTL_MS = 5 * 60_000;
+
+/** A build-version mismatch detected while checking a space for updates. */
+export interface VersionSkewInfo {
+  space: string;
+  clientVersion?: string;
+  toolshedVersion?: string;
+}
+export type VersionSkewHandler = (info: VersionSkewInfo) => void;
+
+/**
  * Feature flags for the space-model data-layer changes. Each flag gates an
  * independent piece of the new fabric-value pipeline so that the features
  * can be enabled incrementally. Passed via `RuntimeOptions.experimental` and
  * propagated to the memory layer as ambient config.
  *
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
+ *
+ * Every experimental flag in the repository — these options, the CFC
+ * enforcement dials below, and the storage, memory-protocol, and shell flags —
+ * is catalogued in `docs/development/EXPERIMENTAL_OPTIONS.md`. Update that
+ * registry when adding, changing, or removing a flag.
  */
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
@@ -184,6 +218,29 @@ export interface ExperimentalOptions {
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+  /**
+   * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
+   * module evaluation. Debug-only — identity never reads `.src` — and OFF by
+   * default: the resolution (a stack capture + source-map walk per primitive)
+   * is the boot floor's largest single cost (~80ms+ per cold piece boot).
+   * Shell development builds turn it on so `.src` debugging keeps working;
+   * see `setEagerSourceAnnotation` (builder/module.ts).
+   */
+  eagerSourceAnnotation?: boolean | undefined;
+  /**
+   * Roll a space's system root pattern (default-app / home) forward in place
+   * when its toolshed serves a newer content identity. Default off; enabled per
+   * deployment once CI golden-replay coverage exists. The home root has an
+   * additional gate ({@link systemPatternAutoUpdateHome}) pending the
+   * stable-addressing audit. See docs/specs/pattern-imports/pattern-updates.md.
+   */
+  systemPatternAutoUpdate?: boolean | undefined;
+  /**
+   * Also auto-update the HOME space root (favorites/journal/spaces). Requires
+   * {@link systemPatternAutoUpdate}. Held separately until home.tsx addresses
+   * its durable state by stable key/cause (spec § open question 4).
+   */
+  systemPatternAutoUpdateHome?: boolean | undefined;
 }
 
 /**
@@ -235,9 +292,24 @@ export interface RuntimeOptions {
    * one. Fixed for the runtime's lifetime.
    */
   spaceHostMap?: Record<string, string>;
+  /**
+   * This client build's git sha (the shell's `COMMIT_SHA`). Compared against a
+   * space's toolshed `/api/meta` `gitSha` to gate the system-pattern
+   * auto-update path — the light `?identity` is only trustworthy when client
+   * and toolshed are the same build. Absent (dev / unknown) ⇒ never
+   * auto-update. See `harness/version-gate.ts`.
+   */
+  clientVersion?: string;
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
+  /**
+   * Invoked when a system-pattern update check is skipped because the space's
+   * toolshed build differs from this client build. The worker backend forwards
+   * it to the shell as a `versionSkew` IPC notification (banner). Inert when
+   * omitted.
+   */
+  onVersionSkew?: VersionSkewHandler;
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
@@ -269,11 +341,49 @@ export interface RuntimeOptions {
    * metadata resolution per prepare).
    */
   cfcTriggerReadGating?: CfcTriggerReadGating;
+  /**
+   * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
+   * `off` (gates decide on raw labels, byte-identical to before the dial).
+   * `observe` evaluates gated labels to fixpoint and emits diagnostics while
+   * still deciding on the un-rewritten label; `enforce` decides on the
+   * rewritten label and fails closed on fuel exhaustion.
+   */
+  cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
+  /**
+   * Per-prepare D4 write-prefix precision counters (value-level provenance
+   * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
+   * to `false`: the prepare gate then skips all measurement, paying a single
+   * presence check. When `true`, each prepared transaction with at least one
+   * protected write aggregates prefix-vs-transaction-global gated-read
+   * counts, bound-source classifications and S7-exemption fires into
+   * `getCfcStats()`. Measurement only — enforcement decisions are
+   * byte-identical either way.
+   */
+  cfcPrefixProvenanceStats?: boolean;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
    *  none declared (`DEFAULT_SINK_MAX_CONFIDENTIALITY`). */
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
+  /**
+   * Deployment policy records for the exchange-rule evaluator (Epic B2a,
+   * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
+   * at construction — malformed records throw at boot (fail-closed config,
+   * mirroring the sink ceilings' freeze discipline). Defaults to none
+   * configured (evaluation is a no-op).
+   */
+  cfcPolicyRecords?: readonly CfcPolicyRecordInput[];
+  /**
+   * Deployment trust config for concept-guard satisfaction (Epic B3, spec
+   * §4.8): trust statements, verifier delegations, concept edges. Validated,
+   * digested, and deep-frozen at construction; malformed config throws at
+   * boot. The config digest folds into the DEFAULT trust-snapshot provider's
+   * `revision`, so a config change invalidates prepared digests; hosts
+   * supplying a custom `trustSnapshotProvider` must fold their own trust
+   * versioning into `revision`. Defaults to none configured (every concept
+   * guard fails closed).
+   */
+  cfcTrustConfig?: CfcTrustConfigInput;
   /** Deterministic provider for the trust snapshot attached to each new tx. */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Replace runner-owned frames with `<CF_INTERNAL>` in surfaced stacks. */
@@ -311,6 +421,28 @@ export interface CfcRuntimeStats {
   cfcOutboxFlushes: number;
   sinkDedupHits: number;
   sinkReleaseRejects: number;
+  // Stage-0 D4 write-prefix precision counters
+  // (docs/specs/cfc-value-level-provenance.md §6, SC-24). All zero unless
+  // `cfcPrefixProvenanceStats` is enabled. Aggregated over the per-prepare
+  // summaries; the per-write detail lists are not retained here.
+  /** Prepares that measured at least one protected write. */
+  prefixProvenanceSummaries: number;
+  /** Protected writes measured (requiredIntegrity / maxConfidentiality). */
+  prefixProtectedWrites: number;
+  /** Gated reads under the shipped D4 per-write prefix. */
+  prefixGatedReads: number;
+  /** What the pre-D4 transaction-global gate would have counted. */
+  prefixTxGlobalGatedReads: number;
+  /** Writes bounded by a logged overlapping attempt (prefix engaged). */
+  prefixBoundReal: number;
+  /** Writes on the +Infinity fallback (no logged overlapping attempt). */
+  prefixBoundInfinityFallback: number;
+  /** Writes with no ordered write-attempt evidence at all (clock-less). */
+  prefixBoundClockLess: number;
+  /** S7 provenance-only exemption fires within prefixes. */
+  prefixS7ExemptionFires: number;
+  /** Read activities without a clock position (treated at -Infinity). */
+  prefixClockLessReads: number;
 }
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
@@ -321,6 +453,15 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcOutboxFlushes: 0,
   sinkDedupHits: 0,
   sinkReleaseRejects: 0,
+  prefixProvenanceSummaries: 0,
+  prefixProtectedWrites: 0,
+  prefixGatedReads: 0,
+  prefixTxGlobalGatedReads: 0,
+  prefixBoundReal: 0,
+  prefixBoundInfinityFallback: 0,
+  prefixBoundClockLess: 0,
+  prefixS7ExemptionFires: 0,
+  prefixClockLessReads: 0,
 });
 
 /**
@@ -406,7 +547,13 @@ export class Runtime {
   readonly cfcFlowLabels: CfcFlowLabelsMode;
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
+  readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
+  readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
+  /** Frozen deployment policy snapshot; undefined = no policies configured. */
+  readonly cfcPolicySnapshot: PolicySnapshot | undefined;
+  /** Frozen deployment trust config; undefined = no trust configured. */
+  readonly cfcTrustConfig: CfcTrustConfig | undefined;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
@@ -419,6 +566,9 @@ export class Runtime {
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
+  /** This client build's git sha; see RuntimeOptions.clientVersion. */
+  readonly clientVersion?: string;
+  readonly #onVersionSkew?: VersionSkewHandler;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
@@ -441,6 +591,7 @@ export class Runtime {
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
       computedCellIds: undefined,
+      eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
 
@@ -470,12 +621,22 @@ export class Runtime {
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     setComputedCellIdsConfig(this.experimental.computedCellIds);
     this.experimental.computedCellIds = getComputedCellIdsConfig();
+    // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
+    // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
+    // directly around runtime construction), and an unconditional
+    // `undefined -> default` write would stomp it.
+    if (this.experimental.eagerSourceAnnotation !== undefined) {
+      setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
+    }
+    this.experimental.eagerSourceAnnotation = isEagerSourceAnnotationEnabled();
 
     this.commitBackpressure = resolveCommitBackpressure(
       options.commitBackpressure,
     );
 
     this.id = options.storageManager.id;
+    this.clientVersion = options.clientVersion;
+    this.#onVersionSkew = options.onVersionSkew;
     this.apiUrl = new URL(options.apiUrl);
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
@@ -516,11 +677,19 @@ export class Runtime {
 
     this.storageManager = options.storageManager;
     this.moduleByteCache = options.moduleByteCache;
+    // Validated + digested + frozen before the trust-snapshot provider
+    // default below, whose `revision` covers the config digest (a trust
+    // config change must invalidate prepared digests like any other
+    // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
+    this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
     const actingPrincipal = options.storageManager.as.did() as DID;
+    const trustRevision = this.cfcTrustConfig === undefined
+      ? this.id
+      : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
     this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
       id: `principal:${actingPrincipal}`,
       actingPrincipal,
-      revision: this.id,
+      revision: trustRevision,
     }));
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
@@ -532,6 +701,8 @@ export class Runtime {
     this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+    this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -542,6 +713,10 @@ export class Runtime {
         ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
       ),
     );
+    // Validates + digests + deep-freezes; throws on malformed records so a
+    // config error surfaces at boot, not as a silently inert rule (same
+    // eager-validation posture as the spaceHostMap URLs above).
+    this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -588,7 +763,10 @@ export class Runtime {
   }
 
   /**
-   * Wait for all pending operations to complete
+   * Wait for reactive quiescence: no scheduler pass running, no queued events,
+   * no background scheduler work. Does NOT wait for issued commits to be
+   * confirmed by the server (`scheduler.idleWithPendingCommits()`), for async
+   * builtin I/O (`settled()`), or for storage sync (`storageManager.synced()`).
    */
   idle(): Promise<void> {
     return this.scheduler.idle();
@@ -779,12 +957,35 @@ export class Runtime {
       onSinkReleaseReject: () => {
         this.cfcStats.sinkReleaseRejects += 1;
       },
+      // Stage-0 D4 precision counters: installed only when the deployment
+      // opted in, so the default prepare path skips all measurement.
+      ...(this.cfcPrefixProvenanceStats
+        ? {
+          onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
+            this.cfcStats.prefixProvenanceSummaries += 1;
+            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
+            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
+            this.cfcStats.prefixTxGlobalGatedReads +=
+              summary.txGlobalGatedReads;
+            this.cfcStats.prefixBoundReal += summary.boundSources.real;
+            this.cfcStats.prefixBoundInfinityFallback +=
+              summary.boundSources.infinityFallback;
+            this.cfcStats.prefixBoundClockLess +=
+              summary.boundSources.clockLess;
+            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+          },
+        }
+        : {}),
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
+    wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
+    wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
+    wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
@@ -908,9 +1109,52 @@ export class Runtime {
       });
     }
     this.prepareTxForCommit(tx);
-    return tx.commit().then(({ error }) => {
+    return tx.commit().then(async ({ error }) => {
       if (error) {
         if (maxRetries > 0) {
+          // A CONFLICT means this replica is behind the authoritative
+          // version: re-running immediately re-reads the same stale local
+          // state and fails identically, so without waiting the retries all
+          // burn on one deterministic conflict (CT-1824 — the compile-cache
+          // write-back looped this way and stale-version pieces recompiled
+          // on every cold boot). The conflict carries the catch-up gate;
+          // await it so the retry runs against fresh state — same protocol
+          // as the scheduler's conflict handling (scheduler/action-run.ts).
+          // A readiness gate that rejects (session closed/replaced while
+          // waiting) is control flow, not an error: retry anyway and let
+          // commit produce the definitive outcome.
+          const readyToRetry =
+            (error as { readyToRetry?: () => unknown }).readyToRetry;
+          if (typeof readyToRetry === "function") {
+            try {
+              await readyToRetry();
+            } catch {
+              // Readiness aborted — the retry's commit decides.
+            }
+          }
+          // The catch-up gate advances the session past the conflicting
+          // commit, but a doc this replica never READ does not arrive with
+          // it — and a conflicted blind WRITE means exactly that (the
+          // compile-cache write-back rewrites derived docs a cold replica
+          // has never seen). Pull the named doc so the retry's write
+          // carries its true version instead of re-asserting seq 0.
+          const conflict = (error as {
+            conflict?: { space?: MemorySpace; of?: string };
+          }).conflict;
+          if (
+            conflict?.space !== undefined &&
+            typeof conflict.of === "string" &&
+            conflict.of !== "of:unknown"
+          ) {
+            try {
+              await this.storageManager.open(conflict.space).sync(
+                conflict.of as unknown as URI,
+                { path: [], schema: false },
+              );
+            } catch {
+              // Pull failed — the retry's commit decides.
+            }
+          }
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };
@@ -1324,6 +1568,107 @@ export class Runtime {
    */
   hostForSpace(space: MemorySpace): URL {
     return new URL(this.mappedHostFor(space) ?? this.apiUrl);
+  }
+
+  /**
+   * Report a build-version mismatch found while checking a space for a
+   * system-pattern update. Forwarded (by the worker backend) to the shell as a
+   * `versionSkew` notification. Inert when no handler is configured.
+   */
+  reportVersionSkew(info: VersionSkewInfo): void {
+    this.#onVersionSkew?.(info);
+  }
+
+  // --- System-pattern update caches ---------------------------------------
+  // A toolshed's build sha and each pattern's content identity are fixed for
+  // its process lifetime, so both are cached. Keyed by host / (host,url), with
+  // single-flight in-flight sharing. A failed (undefined) lookup is evicted so
+  // it retries. Cleared explicitly by clearPatternUpdateCaches() and, as a
+  // backstop against a toolshed redeploy mid-session (we have no
+  // storage-socket-reset event to hang invalidation on yet), after a TTL.
+  #toolshedGitShaCache = new Map<
+    string,
+    { at: number; value: Promise<string | undefined> }
+  >();
+  #patternIdentityCache = new Map<
+    string,
+    { at: number; value: Promise<string | undefined> }
+  >();
+
+  /** A space's toolshed build git sha (cached). See version-gate.ts. */
+  toolshedGitSha(host: string | URL): Promise<string | undefined> {
+    const key = host.toString();
+    return this.#cachedLookup(
+      this.#toolshedGitShaCache,
+      key,
+      () => fetchToolshedGitSha(this.fetch, host),
+    );
+  }
+
+  /**
+   * A pattern file's content identity from its toolshed (cached), via
+   * `GET {host}{url}?identity`. Undefined on any failure. Equals the
+   * patternIdentity the worker would compile for the same source at the same
+   * build (see the toolshed parity test).
+   */
+  cachedPatternIdentity(
+    host: string | URL,
+    url: string,
+  ): Promise<string | undefined> {
+    const key = `${host.toString()} ${url}`;
+    return this.#cachedLookup(
+      this.#patternIdentityCache,
+      key,
+      () => this.#fetchPatternIdentity(host, url),
+    );
+  }
+
+  /** Drop the update caches (e.g. on a storage-socket reset). */
+  clearPatternUpdateCaches(): void {
+    this.#toolshedGitShaCache.clear();
+    this.#patternIdentityCache.clear();
+  }
+
+  async #fetchPatternIdentity(
+    host: string | URL,
+    url: string,
+  ): Promise<string | undefined> {
+    try {
+      const u = new URL(url, host.toString());
+      u.searchParams.set("identity", "");
+      const res = await this.fetch(u);
+      if (!res.ok) return undefined;
+      const body = (await res.text()).trim();
+      return body.length > 0 ? body : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  #cachedLookup(
+    cache: Map<string, { at: number; value: Promise<string | undefined> }>,
+    key: string,
+    lookup: () => Promise<string | undefined>,
+  ): Promise<string | undefined> {
+    const now = Date.now();
+    const entry = cache.get(key);
+    if (entry && now - entry.at < PATTERN_UPDATE_CACHE_TTL_MS) {
+      return entry.value;
+    }
+    const value = lookup();
+    const fresh = { at: now, value };
+    cache.set(key, fresh);
+    // Evict a failed lookup (or one that resolved to "unknown") so it retries —
+    // but only if it is still THIS entry (a later lookup may have replaced it).
+    const evictIfStale = () => {
+      if (cache.get(key) === fresh) cache.delete(key);
+    };
+    value
+      .then((v) => {
+        if (v === undefined) evictIfStale();
+      })
+      .catch(evictIfStale);
+    return value;
   }
 
   /**

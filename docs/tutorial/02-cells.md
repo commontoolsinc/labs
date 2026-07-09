@@ -42,15 +42,19 @@ deep:
   what a handler is allowed to touch. Declaring write intent in the type is
   declaring it to the runtime, not just to the compiler.
 
-The write-capable surface (`docs/common/concepts/writeable.md`):
+The write-capable surface (`docs/common/concepts/types-and-schemas/writable.md`):
 
 ```ts
 // Shown inside a pattern body.
 value.get()              // current value (inside computations: also subscribes)
-value.set(next)          // replace
+value.set(next)          // replace (last-write-wins)
 value.update({ k: v })   // shallow merge into an object
-items.push(item)         // append to an array
-items.remove(item)       // remove (by identity — see below)
+value.increment(1)       // add to a number — mergeable: concurrent increments sum
+items.push(item)         // append — mergeable: disjoint appends merge
+items.addUnique(item)    // append if not already present — mergeable
+items.remove(item)       // remove the first matching element
+items.removeByValue(item) // remove elements equal to a value — mergeable
+items.elementById("id")  // cell for one element, addressed by a stable key
 obj.key("field")         // navigate to a sub-cell: a Writable of one field
 ```
 
@@ -59,6 +63,14 @@ obj.key("field")         // navigate to a sub-cell: a Writable of one field
 `item.title` — which is exactly what you hand to a two-way-bound input
 (Chapter 4). Reactivity is path-granular: a computation that read only
 `item.title` does not re-run when `item.done` changes.
+
+The methods marked *mergeable* matter for collaboration: they commit the
+*intent* of the write (append this, add one) rather than the resulting
+value, so two users pushing to the same list — or incrementing the same
+counter — both land, merged by the server, instead of one clobbering the
+other. `writable.md` spells out the authoring contract, including when a
+write is *not* mergeable (a push whose value depends on reading the same
+list is a read-modify-write, and the compiler warns about it).
 
 ## Defaults: `Default<>`
 
@@ -187,12 +199,20 @@ mechanisms in Chapters 8 and 9:
   JSX expression, or a handler's reactive context re-runs that computation
   when the value changes — even if the change came from another machine.
 - **Writes are transactional.** All writes from one handler invocation go
-  into one transaction — which targets a single space — and commit
-  atomically, or not at all.
-- **Updates are optimistic but converge.** Your own writes apply locally and
-  instantly; if the server detects a conflict with someone else's commit,
-  your transaction is rolled back and retried against fresh state. You don't
-  write merge code; you may occasionally see your write "lose" and re-apply.
+  into one transaction — which by default targets a single space — and
+  commit atomically, or not at all. (A handler *can* end up writing a
+  second space, e.g. by instantiating a pattern there via a factory's
+  `.inSpace()`; such transactions commit per-space, sequentially, with no
+  cross-space atomicity.)
+- **Updates are optimistic and converge — by one of three routes.** Your
+  own writes always apply locally and instantly. What happens when two
+  users race depends on the kind of write: *mergeable* operations
+  (`push`, `addUnique`, `increment`, `removeByValue`) are merged by the
+  server, so concurrent writers all land; plain scalar `set`s — including
+  the writes two-way UI bindings make — are last-write-wins, the later
+  write simply sticks; and read-modify-write commits carry their read set,
+  so a genuine conflict rolls the loser back and retries it against fresh
+  state. In all three cases you don't write merge code.
 - **Durability is automatic.** There is no save button anywhere in this
   system. If it committed, it's in SQLite on the server.
 

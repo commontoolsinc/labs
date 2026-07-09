@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitForCondition } from "@commonfabric/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
@@ -86,14 +86,13 @@ describe("shell login tests", () => {
 
     await clickPierce(page, '[test-id="passphrase-continue"]');
 
-    await waitFor(async () => {
-      try {
-        const handle = await pierce(page, ".header-space", 500);
-        const title = await handle.evaluate((el: Element) => el.textContent);
-        return title?.trim() === spaceName;
-      } catch {
-        return false;
-      }
-    });
+    await waitForCondition(
+      page,
+      (probe, name) =>
+        probe.collect(".header-space").some((el) =>
+          probe.deepText(el).trim() === name
+        ),
+      { args: [spaceName] },
+    );
   });
 });

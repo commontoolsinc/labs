@@ -45,9 +45,14 @@ export interface CapabilityParamSummary {
   readonly passthrough: boolean;
   readonly wildcard: boolean;
   /**
-   * An unrecognized method was called on a cell-like receiver rooted in this
-   * parameter — `writePaths` may be incomplete. Consumers asserting write
-   * exhaustiveness (`captureWritesAnalyzed`) must treat this like `wildcard`.
+   * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
+   * may be incomplete. Set by unrecognized or dynamic method calls on
+   * cell-like receivers, and by `set`/`send` calls carrying an onCommit
+   * callback. Consumers asserting write exhaustiveness
+   * (`captureWritesAnalyzed`) must treat this like `wildcard` and fail
+   * closed. Detection is per
+   * method-call dispatch: extracted method references
+   * (`const f = cell.send; f(x)`) are outside the contract.
    */
   readonly hasUnverifiedCellUse?: boolean;
   readonly identityOnly?: boolean;

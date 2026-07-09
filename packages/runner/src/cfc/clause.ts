@@ -1,6 +1,8 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { atomEntails } from "./atom-pattern.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 
 /**
@@ -92,8 +94,14 @@ export const clausesEqual = (
  * non-empty ceiling clause is a subset of an empty alternative set, so a
  * label containing `{anyOf: []}` never fits any ceiling.)
  *
- * Atom comparison is structural equality for now; the per-family entailment
- * hook (`Expires` ordering etc.) arrives with the Epic B matcher.
+ * Atom comparison is per-family entailment (`atomEntails`, Epic B1):
+ * structural equality everywhere, plus the `Expires` timestamp order —
+ * ceiling alternative `Expires(t_c)` entails label alternative `Expires(t_l)`
+ * iff `t_c <= t_l` (every context the ceiling admits, `now <= t_c`, is one
+ * the label allows). The clause generalization is per-alternative: `c ⟹ l`
+ * for disjunctions iff EVERY alternative of `c` entails SOME alternative of
+ * `l` — so the subset check becomes an entailment-witness check, reducing to
+ * the previous deepEqual membership on order-free families.
  */
 export const clauseSubsumes = (
   ceilingClause: CfcConfClause,
@@ -103,6 +111,22 @@ export const clauseSubsumes = (
   if (ceilingAlternatives.length === 0) return false;
   const labelAlternatives = clauseAlternatives(labelClause);
   return ceilingAlternatives.every((ceilingAtom) =>
-    labelAlternatives.some((labelAtom) => deepEqual(ceilingAtom, labelAtom))
+    labelAlternatives.some((labelAtom) => atomEntails(ceilingAtom, labelAtom))
   );
 };
+
+// Atom types forbidden as alternatives of an AUTHORED OR-clause (spec §3.1.8):
+// alternatives must be principal-like. `Caveat` as an alternative would make a
+// risk obligation dischargeable by identity ("readable by Bob OR if screened"),
+// collapsing the caveat discipline; `Expires` semantics is most-restrictive-
+// wins, which inverts to least-restrictive-wins as an alternative
+// (`[[User(A) ∨ Expires(t)]]` world-readable until t). Both are conservative
+// fail-closed rejections, relaxable later by a profile that defines the wanted
+// semantics. Shared by the authored-clause gate in prepare.ts and the grant
+// audience validation in grants.ts (a grant audience entry IS a future clause
+// alternative — §8.12.7 route 2a) so the two cannot drift.
+export const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES: ReadonlySet<string> =
+  new Set([
+    CFC_ATOM_TYPE.Caveat,
+    CFC_ATOM_TYPE.Expires,
+  ]);

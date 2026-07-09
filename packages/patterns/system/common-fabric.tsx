@@ -5,6 +5,7 @@ import {
   fetchJson,
   fetchProgram,
   fetchText,
+  type FrameworkProvided,
   handler,
   ifElse,
   NAME,
@@ -285,7 +286,7 @@ type BashRequest = {
   /** Additional environment variables as key-value pairs. */
   environment?: Record<string, string>;
   /** Sandbox identifier. Automatically provided — do not set. */
-  sandboxId: string;
+  sandboxId: FrameworkProvided<string>;
 };
 
 type BashResult = {

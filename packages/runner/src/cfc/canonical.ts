@@ -5,7 +5,9 @@ import type {
   CfcAddress,
   CfcDereferenceTrace,
   CfcMetadata,
+  ConsultedGrant,
   ConsumedRead,
+  OrderedWriteAttempt,
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
@@ -68,6 +70,15 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
   const leftPointer = logicalPathToPointer(left.path);
   const rightPointer = logicalPathToPointer(right.path);
   return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
+};
+
+const compareConsultedGrant = (
+  left: ConsultedGrant,
+  right: ConsultedGrant,
+): number => {
+  if (left.space !== right.space) return left.space < right.space ? -1 : 1;
+  if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  return left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0;
 };
 
 const compareWritePolicyInput = (
@@ -263,6 +274,16 @@ export const canonicalizePreparedDigestInput = (
   writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
     compareAddress,
   ),
+  // ORDER-PRESERVING on purpose (sorted by journalIndex, which is unique
+  // per record, so this is a total order): the log exists to bind the
+  // temporal write sequence into the digest — an address-sort here would
+  // discard exactly the information the write-prefix gate's decision
+  // depends on (docs/specs/cfc-write-prefix-provenance.md §6). Paths stay
+  // raw/verbatim for the same reason (surface fidelity).
+  writeAttemptLog: [...(input.writeAttemptLog ?? [])].sort(
+    (left: OrderedWriteAttempt, right: OrderedWriteAttempt) =>
+      left.journalIndex - right.journalIndex,
+  ),
   triggerReads: [...(input.triggerReads ?? [])].map(canonicalizeAttemptedWrite)
     .sort(compareAddress),
   dereferenceTraces: [...input.dereferenceTraces].map(
@@ -281,6 +302,20 @@ export const canonicalizePreparedDigestInput = (
   ).sort(compareWritePolicyInput),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
+  // Already canonical: a digest-only projection of the frozen policy
+  // snapshot (Epic B5). Absent (no policies configured) stays absent so
+  // pre-B5 digests are unchanged.
+  policySnapshot: input.policySnapshot,
+  // Consulted grants (§8.12.7 route 2a): address-sorted so recording order
+  // cannot perturb the digest (order-insensitive by design — which guard
+  // consulted a grant first is not decision content). An EMPTY set collapses
+  // to ABSENT: "no grants consulted" has one spelling, and pre-grant digests
+  // are unchanged.
+  ...(input.consultedGrants !== undefined && input.consultedGrants.length > 0
+    ? {
+      consultedGrants: [...input.consultedGrants].sort(compareConsultedGrant),
+    }
+    : {}),
 });
 
 export const preparedDigestFor = (input: PreparedDigestInput): string =>

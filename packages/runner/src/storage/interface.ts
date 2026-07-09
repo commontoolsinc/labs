@@ -40,12 +40,16 @@ import {
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
+  CfcAddress,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcGrantWriteInput,
+  CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -160,6 +164,32 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * Register an in-flight commit so the durability barrier
+   * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
+   * transaction layer at `commit()` entry, synchronously with the commit
+   * being issued, so there is no window where a commit is in flight but
+   * invisible to the barrier. The registration must tolerate rejection and
+   * drop the promise once it settles.
+   */
+  trackPendingCommit(promise: Promise<unknown>): void;
+
+  /**
+   * Whether any registered commit is still unconfirmed. Every write flows
+   * through `edit()` transactions, so this is the authoritative "are there
+   * unconfirmed local writes" signal — narrower than `synced()`, which also
+   * waits for pulls and cross-space read work.
+   */
+  hasPendingCommits(): boolean;
+
+  /**
+   * Wait for the currently pending commits to settle (server confirmation or
+   * terminal failure). One round only: commits issued after the call starts
+   * are not awaited — callers that need a fixpoint re-check `hasPendingCommits`
+   * after each round, as the scheduler's client-facing idle does.
+   */
+  pendingCommitsSettled(): Promise<void>;
+
+  /**
    * Add a promise to the list of cross-space promises.
    */
   addCrossSpacePromise(promise: Promise<void>): void;
@@ -177,6 +207,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * observe held, not-yet-loaded state. This is the safe composition of
    * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
    * wiring the self-removing `finally` by hand at each call site.
+   *
+   * `work` must eventually settle (resolve or reject). A chain that never
+   * settles stays registered and keeps `Cell.pull()`/`idle()` from observing
+   * convergence until the scheduler's convergence bound trips, so a caller that
+   * wraps an external `sync()` should ensure it cannot hang unbounded.
    */
   trackUntilSettled(work: Promise<unknown>): void;
 
@@ -281,6 +316,16 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
 
   // No `sqliteExecute`: SQLite writes go through the commit fold
   // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
+
+  /**
+   * Whether the CONNECTED SERVER advertised commit-time row-label evaluation
+   * for folded sqlite writes (CFC Phase 3.c,
+   * `MemoryProtocolFlags.sqliteCommitRowLabelEval`). The runner's write gate
+   * relaxes its non-attributable-shape rejects only when this is true; a
+   * missing implementation, a not-yet-resolved session, or an old server all
+   * read as `false` — fail closed.
+   */
+  sqliteServerCommitRowLabelEval?(): boolean;
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
@@ -675,6 +720,17 @@ export interface IStorageTransaction {
   getReadActivities?(): Iterable<IReadActivity>;
 
   /**
+   * Optional ordered log of every applied write attempt, in transaction
+   * order, stamped on the same per-transaction activity clock as read
+   * activities. Unlike `getWriteDetails` (per-path, last-value upserts,
+   * path-sorted reconstruction) this preserves the temporal write sequence,
+   * one entry per write call. The CFC write-prefix provenance gate derives
+   * each protected path's last-overlapping-write bound from it
+   * (docs/specs/cfc-write-prefix-provenance.md §4/§6).
+   */
+  getWriteAttemptLog?(): readonly IWriteAttempt[];
+
+  /**
    * Optional write details for the given space.
    *
    * V2 transactions can provide the current and previous values directly
@@ -853,6 +909,11 @@ export interface IExtendedStorageTransaction
    */
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
   /**
+   * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
+   * Anti-downgrade pinned: once `enforce`, weakening throws.
+   */
+  setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
+  /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation
    * even when the run never re-reads them.
@@ -910,6 +971,15 @@ export interface IExtendedStorageTransaction
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
 
   /**
+   * Declares a list-coordinator result container (filter/flatMap) whose
+   * `structure` label must be re-derived from this transaction's flow-join J
+   * (its selection criteria) — independent of whether the container value is
+   * written this tx. See `CfcTxState.structureContainers`. The address is
+   * `deepFreeze()`d on entry.
+   */
+  recordCfcStructureContainer(address: CfcAddress): void;
+
+  /**
    * Runs CFC boundary verification for this transaction and records the
    * prepared digest. Takes no caller-supplied input: the commit-time digest
    * recheck only confirms the prepared input matches real activity, so an
@@ -940,6 +1010,33 @@ export interface IExtendedStorageTransaction
    * `compareWritePolicyInput`.
    */
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
+
+  /**
+   * Records a grant document consulted by policyState-guarded boundary
+   * evaluation (§8.12.7 route 2a) — address plus resolution-time content
+   * digest — for the prepared-digest binding (`PreparedDigestInput.
+   * consultedGrants`). Deduplicated by address; the argument is
+   * `deepFreeze()`d on entry. Called by the runner-side grant resolver
+   * (`createTxCfcGrantResolver`); recording is not itself an enforcement
+   * decision, so exposure is harmless (like `noteCfcDiagnostic`).
+   */
+  recordCfcConsultedGrant(consulted: ConsultedGrant): void;
+
+  /**
+   * The trusted policy-writer path for CFC grant documents (§8.12.7 route
+   * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT
+   * implementation identity to be a trusted builtin (the arm
+   * `writeAuthorizedBy` and the runtime-mint gate trust for runtime
+   * evidence — ordinary pattern/handler code is refused); validates the
+   * grant — audience entries principal-like per §3.1.8, `owner` equal to
+   * this transaction's acting principal (release authority), lifecycle
+   * shape — derives the content-addressed id under the reserved
+   * `grant:cfc:` namespace, and writes the document inside the privileged
+   * system-write scope. Throws on any violation. Any OTHER write to the
+   * reserved namespace is recorded as an unprivileged system write and
+   * fails closed at prepare (S18 class).
+   */
+  writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string };
 
   /**
    * Surfaces a post-commit sink-request release rejection (the effect is fail-
@@ -1489,6 +1586,32 @@ export type Activity = Variant<{
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
+  /**
+   * Position of this read on the transaction's activity clock — a single
+   * per-transaction monotonic counter shared with write attempts
+   * ({@link IWriteAttempt}), stamped at record time by the storage
+   * transaction. Gives the read|write interleaving order without a journal
+   * scan (V2 journals do not support `activity()`). Consumed by the CFC
+   * write-prefix provenance gate and bound into the prepared digest
+   * (docs/specs/cfc-write-prefix-provenance.md §6). Optional only for
+   * backends that predate the clock; absent means "order unknown" and CFC
+   * treats the read as preceding every write (conservative).
+   */
+  journalIndex?: number;
+}
+
+/**
+ * One applied write attempt, in transaction order. `path` is the RAW storage
+ * path as written (`["value", ...]` for user data, `["cfc"]`/`["source"]`
+ * for runtime surfaces, `[]` for whole-envelope writes) — deliberately not
+ * canonicalized, so surface distinctions survive. Value-equal writes that
+ * the storage layer elides entirely (no write details, no reactivity) do
+ * not appear here either: the log records exactly the write set the rest of
+ * the transaction inspection surface sees. `journalIndex` is the shared
+ * activity clock (see {@link IReadActivity.journalIndex}).
+ */
+export interface IWriteAttempt extends IMemorySpaceAddress {
+  journalIndex: number;
 }
 
 /**

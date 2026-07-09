@@ -1,6 +1,4 @@
 import { isAbsolute, join } from "@std/path";
-import type { ExperimentalOptions } from "@commonfabric/runner";
-import { cliName } from "./cli-name.ts";
 
 export function absPath(relpath: string, cwd = Deno.cwd()): string {
   // TODO(js): homedir check is not cross platform
@@ -9,40 +7,6 @@ export function absPath(relpath: string, cwd = Deno.cwd()): string {
     return relpath;
   }
   return join(cwd, relpath);
-}
-
-/**
- * Read EXPERIMENTAL_* env vars and return an ExperimentalOptions object.
- * Mirrors the same env var names used by toolshed (env.ts) and shell
- * (felt.config.ts) so all three share one source of truth.
- */
-export function experimentalOptionsFromEnv(): ExperimentalOptions {
-  /**
-   * Results in `true` (on), `false` (off), or `undefined` (default).
-   */
-  const read = (name: string): boolean | undefined => {
-    const v = Deno.env.get(name);
-    return v === undefined ? undefined : v === "true";
-  };
-  const opts: ExperimentalOptions = {
-    modernCellRep: read("EXPERIMENTAL_MODERN_CELL_REP"),
-    persistentSchedulerState: read(
-      "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-    ),
-    computedCellIds: read("EXPERIMENTAL_COMPUTED_CELL_IDS"),
-  };
-
-  // Log any overridden experimental flags.
-  const overrideFlags = Object.entries(opts)
-    .filter(([_, v]) => v !== undefined)
-    .map(([k, v]) => `${k}=${v}`);
-  if (overrideFlags.length > 0) {
-    console.error(
-      `[${cliName()}] Experimental flag overrides: ${overrideFlags.join(", ")}`,
-    );
-  }
-
-  return opts;
 }
 
 const SYNC_TIMEOUT_MS = 30_000;

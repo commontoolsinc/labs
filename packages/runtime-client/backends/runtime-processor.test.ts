@@ -6,19 +6,33 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
-  runtimeOptionsFromInitializationData,
+  browserWorkerParamsFromInitializationData,
+  checkUpdateInBackground,
+  maybeCheckHomeUpdate,
+  postVersionSkew,
+  renderConfidentialityResolverFor,
+  renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
+  versionSkewNotification,
 } from "./runtime-processor.ts";
+import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
+  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { cellRefToSigilLink } from "./utils.ts";
+import {
+  cellRefToSigilLink,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
@@ -91,6 +105,180 @@ function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
 // A valid `fid1:` page id from a readable seed (handlers parse pageId via
 // `entityIdFrom`, which requires a real tagged-hash string).
 const fid = (seed: string) => taggedHashStringOf(seed);
+
+describe("renderConfidentialityResolverFor (H3b)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(
+        renderConfidentialityResolverFor(runtime, cfcSigner, undefined),
+      ).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the acting user's own space against a ceiling", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(resolver).toBeDefined();
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The acting user's own space (space DID == principal DID) is a verified
+      // member, so a Space label naming it resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A different space the acting user has no verified role in stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkElse")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkElse")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves the session workspace when it differs from the principal DID", async () => {
+    // createSession({ spaceName }) derives a home-space DID distinct from the
+    // acting principal; the session-authorized workspace is a verified member,
+    // so its own Space(...) label resolves rather than over-blocking.
+    const { runtime, storageManager } = createRuntime();
+    const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
+    try {
+      const resolver = renderConfidentialityResolverFor(
+        runtime,
+        cfcSigner,
+        { atoms: [cfcAtom.user(cfcSigner.did())] },
+        sessionSpace,
+      );
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The session workspace resolves...
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(sessionSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // ...and the acting user's own identity space still resolves too.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // A third, unrelated space stays blocked.
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space("did:key:z6MkThird")] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
+    // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
+    // reads each space's ACL doc. A space whose declared ACL grants the acting
+    // user READ resolves; one that does not (no ACL / residency only) blocks.
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
+    const deniedSpace = "did:key:z6MkDeniedSpaceForRenderTest";
+    try {
+      // Seed the granted space's ACL doc (entity id == space DID) with a READ
+      // grant for the acting user. The denied space gets no ACL doc at all —
+      // its bytes may still be resident, but residency is not read authority.
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The ACL-granted space resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(grantedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // The space with no granting ACL stays blocked (fail-closed).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(deniedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space(deniedSpace)]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
+describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(renderMembershipProviderFor(runtime, cfcSigner, undefined))
+        .toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("builds a runtime-backed provider that reads a space's ACL doc", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
+    try {
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const provider = renderMembershipProviderFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(provider).toBeDefined();
+      // The acting user's own space is an implicit OWNER (no ACL read).
+      expect(provider!.readerRole(cfcSigner.did())).toBe("owner");
+      // A space whose ACL grants READ resolves to a reader role.
+      expect(provider!.readerRole(grantedSpace)).toBe("reader");
+      // A space with no ACL doc fails closed.
+      expect(provider!.readerRole("did:key:z6MkNoAclProviderTest")).toBeNull();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
 
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
@@ -874,9 +1062,191 @@ describe("RuntimeProcessor home pattern IPC", () => {
     expect(startedCell).toBe(defaultPatternCell);
     expect(idleCalled).toBe(true);
   });
+
+  it("maybeCheckHomeUpdate no-ops unless both flags are on", () => {
+    let built = false;
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: { systemPatternAutoUpdate: true }, // home flag off
+      getHomeSpaceCell: () => {
+        built = true;
+        return { sync: () => Promise.resolve() };
+      },
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    // No controller built (the home flag gates it before any construction).
+    expect(built).toBe(false);
+  });
+
+  it("maybeCheckHomeUpdate builds a home controller and kicks a check when enabled", async () => {
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+      // PieceManager reads userIdentityDID + getHomeSpaceCell().sync();
+      // the update check itself is best-effort and fails closed on this mock.
+      getHomeSpaceCell: () => ({
+        sync: () => Promise.resolve(),
+        key: () => ({ get: () => undefined }),
+      }),
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+
+    // Constructs the home controller and kicks the background check without
+    // throwing; let the fire-and-forget check settle.
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
+describe("system-pattern update wiring", () => {
+  it("versionSkewNotification builds the worker→shell payload", () => {
+    expect(
+      versionSkewNotification({
+        space: "did:key:z6Mk",
+        clientVersion: "c",
+        toolshedVersion: "t",
+      }),
+    ).toEqual({
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: "c",
+      toolshedVersion: "t",
+    });
+  });
+
+  it("postVersionSkew posts the notification to the shell", () => {
+    const posted: unknown[] = [];
+    const orig = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
+      posted.push(m);
+    try {
+      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
+    } finally {
+      (self as { postMessage: unknown }).postMessage = orig;
+    }
+    expect(posted).toEqual([{
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: undefined,
+      toolshedVersion: "t",
+    }]);
+  });
+
+  it("checkUpdateInBackground logs a non-current outcome and swallows a rejection", async () => {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => logs.push(a.join(" "));
+    console.warn = (...a: unknown[]) => warns.push(a.join(" "));
+    try {
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("updated") },
+        "did:key:a",
+      );
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("current") },
+        "did:key:b",
+      );
+      checkUpdateInBackground(
+        {
+          checkAndUpdateDefaultPattern: () => Promise.reject(new Error("boom")),
+        },
+        "did:key:c",
+      );
+      // Let the fire-and-forget promises settle.
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+    expect(logs.some((l) => l.includes("did:key:a") && l.includes("updated")))
+      .toBe(true);
+    expect(logs.some((l) => l.includes("did:key:b"))).toBe(false);
+    expect(warns.some((w) => w.includes("did:key:c"))).toBe(true);
+  });
+
+  it("handleGetSpaceRootPattern returns the page ref and kicks the background check", async () => {
+    const ref: CellRef = {
+      id: "of:root-result" as CellRef["id"],
+      space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
+    let checked = false;
+    const cc = {
+      ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
+      checkAndUpdateDefaultPattern: () => {
+        checked = true;
+        return Promise.resolve("current");
+      },
+    };
+    const processor = {
+      getSpaceCtx: () => ({ cc }),
+    } as unknown as RuntimeProcessor;
+
+    const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
+      .call(processor, {
+        type: RequestType.GetSpaceRootPattern,
+        space: "did:key:test-space",
+      });
+    expect(result.page.cell).toEqual(ref);
+    // The background check was kicked (fire-and-forget).
+    expect(checked).toBe(true);
+  });
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
+  it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
+    const ref: CellRef = {
+      id: "of:cfc-raw-meta-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    // The raw envelope this seam used to return verbatim — Caveat.source and
+    // friends, unredacted. If the handler ever reaches getMetaRaw for "cfc"
+    // again, this is what would leak.
+    const rawEnvelope = {
+      version: 1,
+      schemaHash: "test-schema",
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.Caveat,
+              kind: "derived-from",
+              source: "did:key:alice",
+            }],
+          },
+        }],
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "labelled data",
+          getMetaRaw: () => rawEnvelope,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
+    // that still sends it must get an error, never the raw metadata.
+    expect(() =>
+      RuntimeProcessor.prototype.handleCellGet.call(processor, {
+        type: RequestType.CellGet,
+        cell: ref,
+        meta: "cfc" as never,
+      })
+    ).toThrow(/cfc/);
+  });
+
   it("returns a label view for a cell ref", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
@@ -978,6 +1348,210 @@ describe("RuntimeProcessor CFC label IPC", () => {
     // The caveat survives with its kind/type, but the source identity is gone.
     expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
+  });
+
+  // Inv-12 Stage 0, step 3: the display redaction applied to the top-level
+  // cfcLabel at the three IPC response sites also covers the cfcLabelView
+  // copies riding sigil links INSIDE response values (attached by
+  // convertCellsToLinks includeCfcLabelView). Safe now that the worker
+  // neither persists nor re-imports inbound views (steps 1–2).
+  it("redacts Caveat.source in sigil label views inside handleCellGet values", () => {
+    const ref: CellRef = {
+      id: "of:cfc-value-view-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-value-view-linked",
+          space: "did:key:test",
+          path: [],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [{
+                  type: CFC_ATOM_TYPE.Caveat,
+                  kind: "derived-from",
+                  source: "did:key:alice",
+                }],
+              },
+            }],
+          },
+        },
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => ({ nested: linkWithView }),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+    const responseLink = (response.value as {
+      nested: {
+        "/": {
+          "link@1": {
+            cfcLabelView: {
+              entries: Array<
+                { label: { confidentiality: Array<Record<string, unknown>> } }
+              >;
+            };
+          };
+        };
+      };
+    }).nested["/"]["link@1"];
+    const atom = responseLink.cfcLabelView.entries[0].label.confidentiality[0];
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect(atom.kind).toBe("derived-from");
+    expect("source" in atom).toBe(false);
+  });
+
+  it("redacts Caveat.source in sigil label views inside subscription updates", async () => {
+    const ref: CellRef = {
+      id: "of:cfc-subscribe-view-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+      schema: { type: "object", additionalProperties: true },
+    };
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-subscribe-view-linked",
+          space: "did:key:test",
+          path: [],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: [{
+                  type: CFC_ATOM_TYPE.Caveat,
+                  kind: "derived-from",
+                  source: "did:key:alice",
+                }],
+              },
+            }],
+          },
+        },
+      },
+    };
+    const processor = {
+      subscriptions: new Map(),
+      runtime: {
+        getCellFromLink: () => ({
+          sink: (
+            callback: (value: unknown, cfcLabel: unknown) => void,
+          ) => {
+            callback({ nested: linkWithView }, undefined);
+            return () => {};
+          },
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const posted: Array<{ value?: unknown }> = [];
+    const orig = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (m: { value?: unknown }) =>
+      posted.push(m);
+    try {
+      RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+        type: RequestType.CellSubscribe,
+        cell: ref,
+      });
+      // The sink posts from a microtask.
+      await Promise.resolve();
+    } finally {
+      (self as { postMessage: unknown }).postMessage = orig;
+    }
+
+    expect(posted.length).toBe(1);
+    const notifiedLink = (posted[0].value as {
+      nested: {
+        "/": {
+          "link@1": {
+            cfcLabelView: {
+              entries: Array<
+                { label: { confidentiality: Array<Record<string, unknown>> } }
+              >;
+            };
+          };
+        };
+      };
+    }).nested["/"]["link@1"];
+    const atom = notifiedLink.cfcLabelView.entries[0].label.confidentiality[0];
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+    expect("source" in atom).toBe(false);
+  });
+
+  it("redacts Caveat.source in label views on response cell refs", () => {
+    const sourceRef: CellRef = {
+      id: "of:cfc-ref-view-source" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const resolvedRef: CellRef = {
+      id: "of:cfc-ref-view-resolved" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const resolvedCell = {
+      getAsLink: () => ({
+        "/": {
+          "link@1": resolvedRef,
+        },
+      }),
+      getAsNormalizedFullLink: () => resolvedRef,
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => ({
+            value: "resolved value",
+            cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: {
+                    confidentiality: [{
+                      type: CFC_ATOM_TYPE.Caveat,
+                      kind: "derived-from",
+                      source: "did:key:alice",
+                    }],
+                  },
+                }],
+              },
+            },
+          }),
+        }),
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
+      processor,
+      { type: RequestType.CellResolveAsCell, cell: sourceRef },
+    );
+    const atom = response.cell.cfcLabelView?.entries[0].label
+      .confidentiality?.[0] as Record<string, unknown>;
+    expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect("source" in atom).toBe(false);
   });
 
@@ -1553,7 +2127,14 @@ describe("RuntimeProcessor CFC commit preparation", () => {
 });
 
 describe("runtime-client CellRef conversion", () => {
-  it("preserves carried label views in transient sigil links", () => {
+  // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
+  // CellRef is a main-thread display artifact — round-tripped through
+  // CellHandle.deserialize and back — and must not re-enter the worker as
+  // label state. Forwarding it onto the written sigil link previously fed
+  // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
+  // persisted as link-origin labels; the worker now re-derives those from
+  // its own stored source metadata instead.
+  it("does not forward an inbound label view into worker sigil links", () => {
     const cfcLabelView: CfcLabelView = {
       version: 1,
       entries: [{
@@ -1576,36 +2157,153 @@ describe("runtime-client CellRef conversion", () => {
           space: ref.space,
           scope: "space",
           path: ref.path,
-          cfcLabelView,
         },
       },
     });
   });
+
+  it("does not seed worker cells from an inbound label view", () => {
+    const cfcLabelView: CfcLabelView = {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["main-thread-claim"] },
+      }],
+    };
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:z6MkrX123abc" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+      cfcLabelView,
+    };
+    const seen: unknown[] = [];
+    const runtime = {
+      getCellFromLink: (...args: unknown[]) => {
+        seen.push(args[3]);
+        return {};
+      },
+    } as unknown as Runtime;
+
+    getCell(runtime, ref);
+    expect(seen).toEqual([undefined]);
+  });
+
+  // Raw sigil links inside inbound values (hand-crafted JSON, or a
+  // CellHandle serialized into CustomEvent.detail via toJSON) bypass the
+  // CellRef path — the value walker must drop their label views too
+  // (codex/cubic review on the Stage 0 PR).
+  it("strips label views from raw sigil links in inbound values", () => {
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-raw-link",
+          space: "did:key:z6MkrX123abc",
+          path: ["value"],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: ["main-thread-claim"] },
+            }],
+          },
+        },
+      },
+    };
+    const mapped = mapCellRefsToSigilLinks({
+      nested: [linkWithView],
+    }) as { nested: Array<{ "/": { "link@1": Record<string, unknown> } }> };
+    const payload = mapped.nested[0]["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-raw-link");
+    expect("cfcLabelView" in payload).toBe(false);
+  });
 });
 
-describe("runtimeOptionsFromInitializationData", () => {
-  it("threads CFC initialization settings into runtime options", () => {
+describe("RuntimeProcessor VDom event label-view ingress", () => {
+  // CustomEvent.detail is JSON.stringify'd on the main thread (invoking
+  // CellHandle.toJSON) and re-enters the worker here, bypassing
+  // getCell/cellRefToSigilLink — a handler writing event.detail.sourceCell
+  // would persist the ref's view through the sigil-link write path. The
+  // worker strips inbound views at this ingress too (codex/cubic review).
+  it("strips label views from sigil links in inbound VDOM events", () => {
+    const dispatched: unknown[] = [];
+    const processor = {
+      vdomMounts: new Map([[
+        "mount-1",
+        {
+          reconciler: {
+            dispatchEvent: (_handlerId: string, event: unknown) => {
+              dispatched.push(event);
+              return true;
+            },
+          },
+        },
+      ]]),
+    } as unknown as RuntimeProcessor;
+
+    RuntimeProcessor.prototype.handleVDomEvent.call(processor, {
+      type: ClientNotificationType.VDomEvent,
+      mountId: "mount-1",
+      handlerId: "handler-1",
+      event: {
+        type: "drop",
+        detail: {
+          sourceCell: {
+            "/": {
+              "link@1": {
+                id: "of:cfc-event-link",
+                space: "did:key:z6MkrX123abc",
+                path: ["value"],
+                cfcLabelView: {
+                  version: 1,
+                  entries: [{
+                    path: [],
+                    label: { confidentiality: ["main-thread-claim"] },
+                  }],
+                },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(dispatched.length).toBe(1);
+    const payload = (dispatched[0] as {
+      detail: { sourceCell: { "/": { "link@1": Record<string, unknown> } } };
+    }).detail.sourceCell["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-event-link");
+    expect("cfcLabelView" in payload).toBe(false);
+  });
+});
+
+describe("browserWorkerParamsFromInitializationData", () => {
+  it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
-      typeof runtimeOptionsFromInitializationData
+      typeof browserWorkerParamsFromInitializationData
     >[2];
     const storageManager = {
       as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<typeof runtimeOptionsFromInitializationData>[1];
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
 
-    const options = runtimeOptionsFromInitializationData(
-      {
-        apiUrl: "http://worker.test/",
-        identity: {} as never,
-        spaceDid: "did:key:space",
-        cfcEnforcementMode: "enforce-explicit",
-        cfcFlowLabels: "observe",
-        trustSnapshot: {
-          id: "principal:did:key:worker",
-          actingPrincipal: "did:key:worker",
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          cfcEnforcementMode: "enforce-explicit",
+          cfcFlowLabels: "observe",
+          trustSnapshot: {
+            id: "principal:did:key:worker",
+            actingPrincipal: "did:key:worker",
+          },
         },
-      },
-      storageManager,
-      telemetry,
+        storageManager,
+        telemetry,
+      ),
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
@@ -1613,6 +2311,89 @@ describe("runtimeOptionsFromInitializationData", () => {
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",
+    });
+    // The preset pins patterns to the host's own API base.
+    expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
+  });
+
+  it("threads clientVersion through to the runtime options", () => {
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+
+    const withVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          clientVersion: "build-sha-xyz",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withVersion.clientVersion).toBe("build-sha-xyz");
+
+    // Absent → omitted (rides the constructor default of undefined).
+    const withoutVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withoutVersion.clientVersion).toBe(undefined);
+  });
+
+  it("falls back to the shared CFC pin when the host sends no dial", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcFlowLabels).toBeUndefined();
+  });
+
+  it("threads the host-decided space-host map through to the runtime options", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          spaceHostMap: { "did:key:federated": "http://other-host.test/" },
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.spaceHostMap).toEqual({
+      "did:key:federated": "http://other-host.test/",
     });
   });
 });
@@ -1723,6 +2504,28 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("handleIdle awaits commit-durability quiescence, not plain idle", async () => {
+    // The client reads "idle" as a safe point to navigate or reload, so the
+    // handler must await idleWithPendingCommits() — which includes in-flight
+    // commit durability — rather than runtime.idle() (reactive quiescence
+    // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
+    // regression to runtime.idle() throws here.
+    const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
+    let calls = 0;
+    const fake = {
+      runtime: {
+        scheduler: {
+          idleWithPendingCommits: () => {
+            calls++;
+            return Promise.resolve();
+          },
+        },
+      },
+    };
+    await handleIdle.call(fake);
+    expect(calls).toBe(1);
   });
 
   it("watchSiteTable registers table entries, isolating bad ones", async () => {

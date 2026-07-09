@@ -6,6 +6,10 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type {
+  RenderConfidentialityResolver,
+  SpaceMembershipProvider,
+} from "@commonfabric/runner/cfc";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
@@ -349,6 +353,26 @@ export interface WorkerReconcilerOptions {
    * {@link RenderConfidentialityCeiling}.
    */
   renderConfidentialityCeiling?: RenderConfidentialityCeiling;
+
+  /**
+   * Runner-side resolver (Epic H3b) that rewrites a cell's confidentiality
+   * label through the display-boundary exchange rules (spec §8.10.6) before
+   * the ceiling fit check — the seam that admits `Space(...)`-via-`HasRole`
+   * principal forms. When absent, the ceiling admits by exact structural
+   * equality only (H3a behavior). Evaluation happens here, RUNNER-side; the
+   * reconciler only fits the resolved label against the ceiling.
+   */
+  resolveRenderConfidentiality?: RenderConfidentialityResolver;
+
+  /**
+   * The §4.9.3 membership provider backing {@link resolveRenderConfidentiality}
+   * (Stage 2 reactive upgrade). When present, a rendered cell labeled
+   * `Space(X)` subscribes to X's ACL doc within its cancel group, so a
+   * fail-closed over-block (X's ACL not yet synced) re-renders to an admit once
+   * the ACL arrives — and a later revoke re-blocks. Absent → no reactive
+   * upgrade (Stage-1 sync snapshot only; still sound, just less precise).
+   */
+  membershipProvider?: SpaceMembershipProvider;
 }
 
 /**

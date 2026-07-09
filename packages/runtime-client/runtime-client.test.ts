@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "./runtime-client.ts";
-import { RequestType } from "./protocol/mod.ts";
+import { NotificationType, RequestType } from "./protocol/mod.ts";
 import type { RuntimeTransport } from "./client/transport.ts";
 
 describe("RuntimeClient.initialize option validation", () => {
@@ -82,5 +82,67 @@ describe("RuntimeClient.setForwardWorkerConsole", () => {
     expect(requests).toEqual([
       { type: RequestType.SetForwardWorkerConsole, enabled: false },
     ]);
+  });
+});
+
+describe("RuntimeClient.hasPendingWrites", () => {
+  // The constructor registers connection listeners; capture them so the
+  // pending-writes notification can be driven directly, no worker needed.
+  function clientWithConnHandlers(): {
+    client: RuntimeClient;
+    handlers: Map<string, (data: unknown) => void>;
+  } {
+    const handlers = new Map<string, (data: unknown) => void>();
+    const conn = {
+      on: (event: string, handler: (data: unknown) => void) => {
+        handlers.set(event, handler);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    return { client, handlers };
+  }
+
+  it("mirrors a pending-writes notification into a synchronous flag and event", () => {
+    const { client, handlers } = clientWithConnHandlers();
+    const onChange = handlers.get("pendingwriteschange");
+    expect(onChange).toBeDefined();
+
+    const emitted: boolean[] = [];
+    client.on("pendingwriteschange", ({ pending }) => emitted.push(pending));
+
+    // Defaults to false, and reflects each transition synchronously — the
+    // property a beforeunload handler relies on (no async round-trip possible).
+    expect(client.hasPendingWrites()).toBe(false);
+
+    onChange!({ type: NotificationType.PendingWritesChanged, pending: true });
+    expect(client.hasPendingWrites()).toBe(true);
+
+    onChange!({ type: NotificationType.PendingWritesChanged, pending: false });
+    expect(client.hasPendingWrites()).toBe(false);
+
+    expect(emitted).toEqual([true, false]);
+  });
+});
+
+describe("RuntimeClient boot-window diagnostics", () => {
+  // Both getters are main-thread snapshots forwarded straight from the
+  // connection (no worker round-trip), so a connection stub pins the wiring.
+  it("exposes pending-request and request-timeline snapshots", () => {
+    const pending = [{ msgId: 7, type: RequestType.Idle, ageMs: 12 }];
+    const timeline = [
+      { msgId: 7, type: RequestType.Idle, sentAtMs: 3, doneAtMs: 8 },
+    ];
+    const conn = {
+      on: () => {},
+      getPendingRequestDiagnostics: () => pending,
+      getRequestTimelineDiagnostics: () => timeline,
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    expect(client.getPendingRequests()).toEqual(pending);
+    expect(client.getRequestTimeline()).toEqual(timeline);
   });
 });

@@ -1,5 +1,10 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime } from "@commonfabric/runner";
+import {
+  type EnvReader,
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
@@ -41,19 +46,24 @@ export function parseWorkerTimeout(args: string[]): number {
   return DEFAULT_WORKER_TIMEOUT_MS;
 }
 
-export function createRuntime(env: EnvVars, identity: Identity): Runtime {
-  return new Runtime({
+export function createRuntime(
+  env: EnvVars,
+  identity: Identity,
+  // Injectable for tests, mirroring loadEnv's `source`. The EXPERIMENTAL_*
+  // flags are read through the canonical runner mapping rather than declared
+  // in EnvVars (CT-1814), so they are read here, not in loadEnv.
+  readEnv: EnvReader = (key) => Deno.env.get(key),
+): Runtime {
+  // Shared first-party posture (CT-1814). This runtime's experimental flags
+  // are the single source the service forwards to its workers (service.ts).
+  return new Runtime(runtimePresets.productionServer({
     apiUrl: new URL(env.API_URL),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(env.API_URL),
     }),
-    experimental: {
-      modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
-      persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
-      computedCellIds: env.EXPERIMENTAL_COMPUTED_CELL_IDS,
-    },
-  });
+    experimental: experimentalOptionsFromEnv(readEnv),
+  }));
 }
 
 export function shutdown(

@@ -15,9 +15,11 @@ import {
   IPCRemoteResponse,
   NavigateRequestNotification,
   NotificationType,
+  PendingWritesNotification,
   RequestType,
   TelemetryNotification,
   VDomBatchNotification,
+  VersionSkewNotification,
 } from "./types.ts";
 
 export function isCellRef(value: unknown): value is CellRef {
@@ -89,7 +91,8 @@ export function isIPCRemoteNotification(
   return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
-    isVDomBatchNotification(value);
+    isVDomBatchNotification(value) || isPendingWritesNotification(value) ||
+    isVersionSkewNotification(value);
 }
 
 export function isCellUpdateNotification(
@@ -144,6 +147,16 @@ export function isTelemetryNotification(
   );
 }
 
+export function isPendingWritesNotification(
+  value: unknown,
+): value is PendingWritesNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.PendingWritesChanged &&
+    typeof value.pending === "boolean"
+  );
+}
+
 export function isVDomBatchNotification(
   value: unknown,
 ): value is VDomBatchNotification {
@@ -152,5 +165,15 @@ export function isVDomBatchNotification(
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
     Array.isArray(value.ops)
+  );
+}
+
+export function isVersionSkewNotification(
+  value: unknown,
+): value is VersionSkewNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.VersionSkew &&
+    typeof value.space === "string"
   );
 }

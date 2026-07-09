@@ -1,12 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { defer } from "@commonfabric/utils/defer";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -17,11 +16,11 @@ import type {
 } from "../src/storage/interface.ts";
 import {
   NotificationRecorder,
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
@@ -29,12 +28,6 @@ import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -54,6 +47,7 @@ type TestProvider = IStorageProviderWithReplica & {
 
 class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   connectionCount = 0;
+  onConnectionCount?: (connectionCount: number) => void;
   droppedLocalSeqs: number[] = [];
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -116,6 +110,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
+      this.onConnectionCount?.(this.connectionCount);
       this.#connection = this.server.connect((message) => {
         if (!this.#dropResponses) {
           this.#receiver(encodeMemoryBoundary(message));
@@ -126,59 +121,21 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   }
 }
 
-class RejectThenSucceedTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+class RejectThenSucceedTransport extends ScriptedSessionTransport {
+  constructor() {
+    super({
+      name: "reject-then-succeed",
+      sessionId: "session:reject-then-succeed",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
-  }
-
-  async send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      commit?: { localSeq?: number };
-      invocation?: { aud?: unknown; challenge?: unknown };
-    };
-
+  protected override async handle(
+    message: ScriptedTransportMessage,
+  ): Promise<void> {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "reject-then-succeed-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return;
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `reject-then-succeed-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:reject-then-succeed",
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return;
       case "session.watch.set":
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -193,20 +150,12 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           },
         });
         return;
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 0,
-          },
-        });
-        return;
       case "transact": {
-        const localSeq = message.commit?.localSeq ?? -1;
+        const commit = message.commit as { localSeq?: number } | undefined;
+        const localSeq = commit?.localSeq ?? -1;
         if (localSeq === 1) {
           await new Promise((resolve) => setTimeout(resolve, 5));
-          this.#respond({
+          this.respond({
             type: "response",
             requestId: message.requestId!,
             error: {
@@ -216,7 +165,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           });
           return;
         }
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -237,15 +186,6 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -272,15 +212,22 @@ const notificationChanges = (
       "changes" in notification ? [...notification.changes] : []
     );
 
-const getObjectValue = (
-  provider: TestProvider,
+const notificationCarriesField = (
+  notification: StorageNotification,
   uri: URI,
-): Record<string, unknown> | undefined => {
-  const value = provider.get(uri)?.value;
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-};
+  key: string,
+  expected: unknown,
+): boolean =>
+  "changes" in notification &&
+  [...notification.changes].some((change) => {
+    if (change.address.id !== uri) {
+      return false;
+    }
+    const after = change.after as { value?: Record<string, unknown> } | null;
+    return after != null && typeof after === "object" &&
+      after.value != null && typeof after.value === "object" &&
+      after.value[key] === expected;
+  });
 
 const visibleIds = (
   provider: TestProvider,
@@ -326,6 +273,12 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
 
     await waitFor(() => transport.droppedLocalSeqs.includes(1));
 
+    const gotRemote7 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, remoteUri, "remote", 7)) {
+        gotRemote7.resolve();
+      }
+    };
     await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -339,7 +292,7 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
     });
 
     assertEquals(await localSend, { ok: {} });
-    await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 7);
+    await gotRemote7.promise;
 
     const commitChanges = notificationChanges(
       notifications.notifications,
@@ -416,6 +369,17 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
 
     await waitFor(() => transport.droppedLocalSeqs.includes(1));
 
+    const gotLocal2 = defer<void>();
+    const gotRemote9 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, localUri, "local", 2)) {
+        gotLocal2.resolve();
+      }
+      if (notificationCarriesField(notification, remoteUri, "remote", 9)) {
+        gotRemote9.resolve();
+      }
+    };
+
     const second = provider.send([{
       uri: localUri,
       value: { value: { local: 2 } },
@@ -435,8 +399,8 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
 
     assertEquals(await first, { ok: {} });
     assertEquals(await second, { ok: {} });
-    await waitFor(() => getObjectValue(provider, localUri)?.local === 2);
-    await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 9);
+    await gotLocal2.promise;
+    await gotRemote9.promise;
 
     const notificationTypes = notifications.notifications.map((notification) =>
       notification.type
@@ -522,8 +486,17 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
     );
 
     notifications.clear();
+    const reconnected = defer<void>();
+    transport.onConnectionCount = (connectionCount) => {
+      if (connectionCount >= 2) {
+        reconnected.resolve();
+      }
+    };
+    if (transport.connectionCount >= 2) {
+      reconnected.resolve();
+    }
     transport.disconnect();
-    await waitFor(() => transport.connectionCount >= 2, 1_000);
+    await reconnected.promise;
 
     await writer.transact({
       localSeq: 2,
@@ -658,6 +631,12 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     let remoteLocalSeq = 1;
 
     await provider.sync(uri);
+    const gotVersion1 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, uri, "version", 1)) {
+        gotVersion1.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -667,8 +646,14 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
         value: { value: { version: 1 } },
       }],
     });
-    await waitFor(() => getObjectValue(provider, uri)?.version === 1);
+    await gotVersion1.promise;
 
+    const gotVersion3 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, uri, "version", 3)) {
+        gotVersion3.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -678,7 +663,8 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
         value: { value: { version: 3 } },
       }],
     });
-    await waitFor(() => getObjectValue(provider, uri)?.version === 3);
+    await gotVersion3.promise;
+    notifications.onNotification = undefined;
     notifications.clear();
 
     const stale = await commitWithSeq(1, 2);

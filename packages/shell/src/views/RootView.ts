@@ -28,8 +28,9 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
-import { EXPERIMENTAL } from "../lib/env.ts";
-import { isWorkerConsoleForwardingEnabled } from "../lib/worker-console.ts";
+import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
+import { runtimeHostFlags } from "../lib/host-toggles.ts";
+import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -57,6 +58,31 @@ export class XRootView extends BaseView {
       height: 100%;
       width: 100%;
     }
+
+    #version-skew-banner {
+      position: fixed;
+      inset-block-start: 0;
+      inset-inline: 0;
+      z-index: 2000;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      font: 500 14px/1.4 system-ui, sans-serif;
+      color: #1a1a1a;
+      background: #ffe8a3;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    #version-skew-banner button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      padding: 2px 10px;
+      background: rgba(255, 255, 255, 0.6);
+    }
   `;
 
   @state()
@@ -64,6 +90,20 @@ export class XRootView extends BaseView {
 
   @state()
   private accessor _themePreference: ThemePreference = getThemePreference();
+
+  // Set when the worker reports a version-skew (a space's toolshed build differs
+  // from this client build). Surfaces a non-blocking "reload to update" banner.
+  @state()
+  private accessor _versionSkew = false;
+
+  // Handler for the worker's versionSkew IPC — raises the banner.
+  readonly _handleVersionSkew = (event: unknown): void => {
+    console.warn(
+      "[shell] version skew — a newer build is available",
+      event,
+    );
+    this._versionSkew = true;
+  };
 
   @property()
   accessor keyStore: KeyStore | undefined = undefined;
@@ -100,19 +140,42 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
+          this.#telemetry = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
         }
+
+        // Browser OpenTelemetry (Phase 3): self-gated + lazy — returns null
+        // (and imports no OTel SDK) unless telemetryEnabled is set. Attributes
+        // use the identity's DID and the currently resolved space; the runtime
+        // (and this sink) outlives navigations, so #resolveViewSpace keeps the
+        // sink's space.did current via setSpace.
+        const userDid = app.identity.did();
+        const telemetry = await initBrowserOtel({
+          apiUrl: app.apiUrl,
+          userDid,
+          spaceDid: this.space ?? userDid,
+          environment: ENVIRONMENT,
+        });
+        this.#telemetry = telemetry ?? undefined;
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
+          // This client build's git sha, for the system-pattern auto-update
+          // version-skew gate (compared to a space's toolshed /api/meta).
+          clientVersion: COMMIT_SHA,
+          onVersionSkew: this._handleVersionSkew,
+          // Per-profile dogfood toggles: worker-console forwarding and the
+          // Epic H3a render ceiling (see lib/host-toggles.ts).
+          ...runtimeHostFlags(),
           // lib-shell emits address-shaped targets ({spaceDid, pieceId});
           // mapNavigationView (shared/navigate.ts) maps a DID back to the
           // human-readable spaceName URL at the Navigation layer.
           navigate,
+          // Purely additive; null when telemetry is disabled.
+          telemetry: telemetry ?? undefined,
         });
 
         if (signal.aborted) {
@@ -148,6 +211,7 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
+    globalThis.addEventListener("beforeunload", this._onBeforeUnload);
   }
 
   override disconnectedCallback(): void {
@@ -156,8 +220,22 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
+    globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
     super.disconnectedCallback();
   }
+
+  // A page teardown (reload, tab close, external navigation) terminates the
+  // runtime worker, dropping any commit the server has not yet confirmed. The
+  // worker mirrors its pending-commit state to `RuntimeClient.hasPendingWrites`
+  // on every transition, so this synchronous check is current; while writes are
+  // unconfirmed, ask the browser to confirm leaving instead of silently losing
+  // them. Commits confirm quickly (typically well under a second), so the
+  // prompt only appears in the narrow window a reload would actually lose data.
+  private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
+    if (this.runtime?.hasPendingWrites()) {
+      event.preventDefault();
+    }
+  };
 
   protected override updated(changedProperties: PropertyValues<this>): void {
     if (!changedProperties.has("app")) {
@@ -184,6 +262,10 @@ export class XRootView extends BaseView {
     }
   }
 
+  // The active browser telemetry sink (undefined when telemetry is disabled
+  // or no runtime); kept only so space.did attribution can track navigation.
+  #telemetry: BrowserTelemetry | undefined;
+
   // Resolve the current view to a space DID — view state, independent of
   // the runtime's lifecycle.
   #resolveSpaceToken = 0;
@@ -208,6 +290,9 @@ export class XRootView extends BaseView {
     }
     if (token !== this.#resolveSpaceToken) return;
     this.space = space;
+    // Keep browser OTel span attribution in sync with the resolved space —
+    // the telemetry sink lives across navigations.
+    this.#telemetry?.setSpace(space);
   }
 
   private _onThemeChanged = (e: Event) => {
@@ -253,6 +338,19 @@ export class XRootView extends BaseView {
 
   override render() {
     return html`
+      ${this._versionSkew
+        ? html`
+          <div id="version-skew-banner" role="status">
+            <span>A newer version is available.</span>
+            <button @click="${() => globalThis.location.reload()}">
+              Reload
+            </button>
+            <button @click="${() => (this._versionSkew = false)}">
+              Dismiss
+            </button>
+          </div>
+        `
+        : null}
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
           .app="${this.app}"

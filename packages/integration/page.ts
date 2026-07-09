@@ -33,10 +33,21 @@ export function pipeConsole(e: ConsoleEvent) {
 // ```ts
 // page.addEventListener("dialog", dismissDialogs);
 // ```
+//
+// A beforeunload confirmation is accepted ("Leave") rather than dismissed:
+// dismissing it cancels the navigation the test just requested, which then
+// times out. The shell raises this dialog when a reload would drop writes the
+// server has not yet confirmed; a test that navigates at that point means to
+// navigate anyway, and durability assertions belong to the runtime-idle
+// checkpoint, not to this prompt.
 export async function dismissDialogs(e: DialogEvent) {
   const dialog = e.detail;
   console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
-  await dialog.dismiss();
+  if (dialog.type === "beforeunload") {
+    await dialog.accept();
+  } else {
+    await dialog.dismiss();
+  }
 }
 
 // Wrapper around `@astral/astral`'s `Page`.
@@ -88,6 +99,12 @@ export class Page extends EventTarget {
   // string of all console arguments, with objects represented as `"undefined"`.
   // Calling this method after navigating to a fresh document will properly
   // stringify objects in `ConsoleEvent#detail.text`.
+  //
+  // It also retains a bounded in-page tail of every formatted console message
+  // on `globalThis.__cfConsoleTail` ({ t, method, text } entries, oldest
+  // dropped). A failure probe evaluated in the page can include that tail, so
+  // a timeout error reports what the page logged around the stall without the
+  // test having to pipe the whole console stream.
   async applyConsoleFormatter() {
     this.checkIsOk();
 
@@ -100,6 +117,11 @@ export class Page extends EventTarget {
       if (globalThis[trueConsoleKey]) {
         return;
       }
+      const tail: Array<{ t: number; method: string; text: string }> =
+        ((globalThis as unknown as {
+          __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
+        }).__cfConsoleTail ??= []);
+      const TAIL_LIMIT = 300;
       const trueConsole = globalThis.console;
       const newConsole = Object.create(null);
       for (const method of methods) {
@@ -119,6 +141,18 @@ export class Page extends EventTarget {
             }
             return value;
           });
+          try {
+            tail.push({
+              t: Date.now(),
+              method,
+              text: formatted.map(String).join(" ").slice(0, 400),
+            });
+            if (tail.length > TAIL_LIMIT) {
+              tail.splice(0, tail.length - TAIL_LIMIT);
+            }
+          } catch (_e) {
+            // Retention must never break the logging call itself.
+          }
           // @ts-ignore: this code is stringified and sent to browser context
           return trueConsole[method].apply(trueConsole, formatted);
         };

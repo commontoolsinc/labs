@@ -64,20 +64,37 @@ job and step carries `started_at` and `completed_at`.
 
 ## Root Test Job Shape
 
-The `Test` job in `.github/workflows/deno.yml` runs the root `deno task test`
-with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded CI
-job, so the root job skips it. The root task still collects workspace coverage
-with `DENO_COVERAGE_DIR`.
+The `Test (n/6)` jobs in `.github/workflows/deno.yml` run the root
+`deno task test` on standard runners, sharded six ways with `TEST_SHARD` and
+with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded
+CI job, so the root jobs skip it. Each shard collects workspace coverage for
+its packages with `DENO_COVERAGE_DIR` and uploads it as
+`coverage-profile-workspace-<shard>`.
 
 The root task is `tasks/test.ts`. It reads the workspace list from
-`deno.jsonc`, starts `deno task test` in every enabled package at the same time,
-and waits for all packages to finish. Its wall time is set by the slowest
-package test task, plus the fixed setup and coverage report steps around it.
+`deno.jsonc`, selects this shard's packages by round-robin over the sorted
+package-name list (`selectShardMembers`), and runs `deno task test` in every
+selected package, at most `TEST_CONCURRENCY` (default: half the cores) at a
+time to keep contention-sensitive tests stable. Each shard's wall time is set
+by the slowest package test task in the shard, plus the fixed setup and
+coverage report steps around it.
 
-When this job becomes the long pole, start with the `Package timings:` block
-printed by `tasks/test.ts`. A slow package may simply be running many independent
-test modules serially. Deno's `--parallel` mode can reduce that package's wall
-time, but only after checking for tests that share process-wide state.
+When a shard becomes the long pole, start with the `Package timings:` block
+printed by `tasks/test.ts`. The round-robin split carries no per-package
+weighting, so first check whether one shard simply drew several slow packages;
+changing the shard count in the workflow matrix reshuffles the assignment.
+A shard-count change must also update the `coverage-profile-workspace-*`
+entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/perf-check.ts`, which
+the Performance Check gate uses to require every shard's coverage artifact.
+
+A package too heavy for any single shard can be split internally: the cli
+package runs as three units via `CLI_TEST_SHARD` (see
+`INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
+`packages/cli/test/run-tests.ts`), so its slices spread across workspace
+shards. A package that dominates a shard can be given the same treatment. A
+slow package may also be running many independent test modules serially.
+Deno's `--parallel` mode can reduce that package's wall time, but only after
+checking for tests that share process-wide state.
 
 Known serial CLI tests:
 
@@ -87,8 +104,10 @@ Known serial CLI tests:
   `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the
   missing-current-directory fallback.
-- `test/view-pager-pty.test.ts` drives a real pseudo-terminal and is sensitive
-  to heavy workspace contention.
+- `test/view-pager-pty.test.ts` drives a real pseudo-terminal, spawning a full
+  CLI child per test. Keystrokes are gated on observed child output rather than
+  on timing, so contention slows it but does not flake it; it stays serial to
+  avoid stacking those children on top of the parallel groups.
 
 The CLI package keeps those tests in a serial group and runs the rest of its
 test modules with `--parallel`.
@@ -122,3 +141,43 @@ baseline for later PRs. Performance Check still requires the full expected
 coverage artifact set during that reset cycle. Jobs with no reportable covered
 files upload an empty LCOV report so missing artifacts mean the report upload
 itself failed.
+
+## Compile Cache State and Cold Runs
+
+The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
+over the compiler packages. A PR that changes that fingerprint runs cold: every
+pattern compiles from scratch, pattern tests run roughly 1.7–2× slower, and the
+timing gate would trip against warm baselines. The other direction is just as
+bad: a cold main run covers compile branches that only execute on a cold cache,
+which lowers the coverage-debt baseline, so later warm PRs fail the coverage
+ratchet with phantom uncovered lines.
+
+To compare like with like, each pattern job uploads a small `cache-state-*`
+artifact recording its cache restore result. Performance Check aggregates those
+into `compileCacheStates` in `perf-metrics.json`. A job family is cold when any
+of its shards had a full cache miss, detected as the cache file being absent
+after the restore step (the combined `actions/cache` action does not expose the
+matched key). A partial hit through a restore key counts as warm: both key
+forms start with the fingerprint hash, so any restore means the compiled bytes
+are current.
+
+The comparison rules follow from the tagging:
+
+- When the current run is cold for a family, that family's cache-sensitive
+  timing metrics get the non-blocking `COLD` status instead of being gated.
+  The remedy is to re-run the pattern jobs: the cold attempt already saved the
+  new cache, so the re-run is warm and gates normally.
+- When the current run is warm, known-cold baseline samples are excluded from
+  the timing comparison.
+- The coverage-debt ratchet uses the latest non-cold main sample, so a cold
+  main run cannot lower the baseline that warm PRs are held to.
+
+Runs with unknown cache state — anything before this mechanism rolled out, and
+backfill-derived runs — behave exactly as before: their samples are kept and
+their metrics gate normally.
+
+Two gaps remain. Cold compile duration itself is not gated, so a regression
+that only shows up on a cold cache passes unnoticed; a dedicated cold-compile
+bench could cover that later. And cold main runs from before the rollout stay
+unknown, so they can still skew baselines until they age out of the 20-run
+baseline window.

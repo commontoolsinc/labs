@@ -23,7 +23,14 @@ import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+
+// D1b (cfc-llm-derived-stamp-builtins.test.ts): generateObject stamps LlmDerived
+// on EVERY node of the result schema so the mark rides split child-document
+// writes too. So instruction-inert result paths carry [InjectionSafe, LlmDerived]
+// and non-inert paths carry [LlmDerived].
+const LLM_DERIVED_ATOM = cfcAtom.llmDerived();
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -2030,27 +2037,28 @@ describe("generateObject with tools", () => {
             path: ["action"],
             label: {
               confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM],
+              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
             },
           },
           {
             path: ["approved"],
             label: {
               confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM],
+              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
             },
           },
           {
             path: ["confidence"],
             label: {
               confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM],
+              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
             },
           },
           {
             path: ["reasoning"],
             label: {
               confidentiality: [promptRisk, promptInfluence],
+              integrity: [LLM_DERIVED_ATOM],
             },
           },
         ]),

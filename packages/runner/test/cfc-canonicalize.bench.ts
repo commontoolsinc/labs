@@ -58,6 +58,9 @@ const warm = (input: PreparedDigestInput): PreparedDigestInput => {
     consumedReads: input.consumedReads.map(warmAddr),
     attemptedWrites: input.attemptedWrites.map(warmAddr),
     writes: input.writes.map(warmAddr),
+    // Attempt-log paths stay RAW by contract (no canonicalization), so
+    // warming is just the chokepoint freeze.
+    writeAttemptLog: input.writeAttemptLog.map((a) => deepFreeze({ ...a })),
     dereferenceTraces: input.dereferenceTraces.map((t) =>
       deepFreeze({
         ...t,
@@ -71,6 +74,17 @@ const warm = (input: PreparedDigestInput): PreparedDigestInput => {
     trustSnapshot: input.trustSnapshot,
   });
 };
+
+// Attempt-log mirror of a fixture's `writes`, with interleave-plausible
+// clock stamps (reads land between attempts in production; exact spacing is
+// irrelevant to the sort cost being measured).
+const attemptLogFor = (
+  writes: readonly { path: readonly string[] }[],
+): PreparedDigestInput["writeAttemptLog"] =>
+  writes.map((w, i) => ({
+    ...(w as PreparedDigestInput["writeAttemptLog"][number]),
+    journalIndex: i * 2 + 1,
+  }));
 
 // A small `PreparedDigestInput` that approximates a typical pattern-tick
 // boundary: a handful of reads and writes, one or two policy inputs, no
@@ -86,6 +100,7 @@ const SMALL_INPUT: PreparedDigestInput = {
   writes: [
     makeAddress("a", "items", 0),
   ],
+  writeAttemptLog: attemptLogFor([makeAddress("a", "items", 0)]),
   dereferenceTraces: [],
   triggerReads: [],
   writePolicyInputs: freezePolicies([
@@ -112,6 +127,9 @@ const LARGE_INPUT: PreparedDigestInput = {
     (_, i) => makeAddress(`w${i}`, "out", i),
   ),
   writes: Array.from({ length: 4 }, (_, i) => makeAddress(`w${i}`, "out", i)),
+  writeAttemptLog: attemptLogFor(
+    Array.from({ length: 4 }, (_, i) => makeAddress(`w${i}`, "out", i)),
+  ),
   dereferenceTraces: Array.from({ length: 6 }, (_, i) => ({
     source: makeAddress(`d${i}`, "src"),
     target: makeAddress(`d${i}`, "dst"),
@@ -165,6 +183,7 @@ const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: [],
   attemptedWrites: [],
   writes: [],
+  writeAttemptLog: [],
   dereferenceTraces: [],
   triggerReads: [],
   writePolicyInputs: freezePolicies(
@@ -206,6 +225,14 @@ const PATH_HEAVY_INPUT: PreparedDigestInput = {
     scope: "space" as const,
     path: ["value", "out", String(i)],
   })),
+  writeAttemptLog: attemptLogFor(
+    Array.from({ length: 4 }, (_, i) => ({
+      space: SPACE,
+      id: "of:doc-shared",
+      scope: "space" as const,
+      path: ["value", "out", String(i)],
+    })),
+  ),
   dereferenceTraces: Array.from({ length: 6 }, (_, i) => ({
     source: {
       space: SPACE,

@@ -13,13 +13,17 @@ signatures.
 This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
-1. Foundation: api, runner, identity, memory
+1. Foundation: api, data-model, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
-4. Operation: background-piece-service, cli
-5. Deployed Product: toolshed, shell
+4. Operation: background-piece-service, cli, fuse, state-inspector, cf-harness
+5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
+
+Support and test packages (utils, test-support, deno-web-test, integration,
+generated-patterns, content-hash, leb128, felt, static, vendor-astral,
+fs-sync-example) sit outside the layer stack.
 
 ## Pattern Development
 
@@ -92,6 +96,12 @@ If you are developing runtime code, read the following documentation:
   layers
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
+- `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every
+  experimental flag (runtime experimental options, CFC enforcement dials,
+  storage and memory-protocol capability flags, shell dogfood toggles): what
+  each gates, its default, its planned end state, and its removal path. Read it
+  before adding, changing, or removing any experimental flag, and update it in
+  the same change.
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
 

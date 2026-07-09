@@ -88,8 +88,8 @@ result of `computed()` is itself a reactive value you can pass to JSX, other
 computeds, or the return object.
 
 `lift()` is the lower-level primitive `computed()` is built on
-(`docs/common/concepts/lift.md`): it turns a pure function into a reusable
-reactive operator, and it must be declared at **module scope**:
+(`docs/common/concepts/computed/computed.md`): it turns a pure function into
+a reusable reactive operator, and it must be declared at **module scope**:
 
 ```ts
 // Shown inside a pattern body.
@@ -100,8 +100,8 @@ return { combined: addCells({ a, b }) };
 
 Rule of thumb from the docs: it's almost always better to use `computed()`.
 Reach for `lift()` only for a derivation you want to reuse across patterns
-or call several times. (You'll also see `derive()` in old code — deprecated,
-same meaning as `computed()`.)
+or call several times. (Old code and cautionary comments mention `derive()`;
+it has been removed from the API — use `computed()`.)
 
 One discipline: **`computed()` derives; it never writes.** Calling `.set()`
 on an upstream cell inside a computed creates a reactive cycle — the
@@ -132,7 +132,7 @@ at the call site:
 ```ts
 // Shown inside a pattern body.
 const increment = handler<void, { value: Writable<number> }>(
-  (_, { value }) => value.set(value.get() + 1),
+  (_, { value }) => value.increment(1),
 );
 
 // inside the pattern body:
@@ -187,7 +187,7 @@ interface CounterOutput {
 // Module-scope handler: reusable, bound to context at the call site.
 const increment = handler<void, { value: Writable<number> }>(
   (_, { value }) => {
-    value.set(value.get() + 1);
+    value.increment(1);
   },
 );
 
@@ -206,7 +206,7 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
 
   // Pattern-body action: preferred for single-use behavior.
   const decrement = action(() => {
-    value.set(value.get() - 1);
+    value.increment(-1);
   });
 
   // Derived values.
@@ -244,6 +244,10 @@ export default Counter;
 
 Things worth noticing:
 
+- `value.increment(1)`, not `value.set(value.get() + 1)`. `increment()` is a
+  *mergeable* write (Chapter 2): two users clicking at once both count,
+  because the server sums the increments instead of letting one
+  read-modify-write clobber the other.
 - `{value}` appears bare in JSX. No `.get()` — JSX expressions are reactive
   contexts, and the compiler wires the subscription (Chapter 7).
 - The pure helper `ordinal()` is called *inside* a `computed()`. The
