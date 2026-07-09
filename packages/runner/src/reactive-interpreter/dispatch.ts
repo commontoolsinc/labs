@@ -43,7 +43,13 @@ import { scopeRank } from "../scope.ts";
 import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { CellScope } from "../builder/types.ts";
-import { inputsOf, type Op, type OpId, type Rog } from "./rog.ts";
+import {
+  inputsOf,
+  type Op,
+  type OpId,
+  type Rog,
+  type ValueRef,
+} from "./rog.ts";
 import {
   elementArgumentUsage,
   makeInlineFilterImplementation,
@@ -81,6 +87,13 @@ export interface DispatchCensus {
   /** Collection ops evaluated SEGMENT-RESIDENT (transient, zero docs —
    * D-V2-TRANSIENT-COLLECTIONS) across interpreted patterns. */
   transientCollections: number;
+  /** Control ops FUSED into segments (native control emission, W8) across
+   * interpreted patterns — demand-driven predicate + taken side. */
+  controlsFused: number;
+  /** Ops whose alias write was ELIDED because they are consumed only
+   * through fused-control branch positions (transitively): they evaluate
+   * only when their side is taken, and their documents vanish. */
+  controlOpsGated: number;
 }
 
 const census: DispatchCensus = {
@@ -91,6 +104,8 @@ const census: DispatchCensus = {
   nodeOpsCollapsed: 0,
   boundariesByKind: {},
   transientCollections: 0,
+  controlsFused: 0,
+  controlOpsGated: 0,
 };
 
 export function getDispatchCensus(): DispatchCensus {
@@ -105,6 +120,8 @@ export function resetDispatchCensus(): void {
   census.nodeOpsCollapsed = 0;
   census.boundariesByKind = {};
   census.transientCollections = 0;
+  census.controlsFused = 0;
+  census.controlOpsGated = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,13 +259,24 @@ export function planInterpreterDispatch(
     pattern.nodes,
   );
 
+  // NATIVE CONTROL EMISSION (W8): admitted controls join segments as pure
+  // ops; the emission plan decides which ops' alias writes gate on a branch.
+  const fusableControls = findFusableControls(built, pattern.nodes);
+
   const part = partition({
     built,
     boundaryLeafOps,
     inlinablePatternOps,
     inlinableCollectionOps: new Set(inlineCollections.keys()),
+    inlinableControlOps: fusableControls,
   });
   if (!part.partitionable) return fallback(`unpartitionable:${part.reason}`);
+
+  const controlPlan = planControlEmission(
+    built,
+    part.segments,
+    fusableControls,
+  );
 
   // Build one synthetic node per segment that collapses ≥1 node-derived op.
   const nodes: SyntheticNode[] = [];
@@ -260,6 +288,7 @@ export function planInterpreterDispatch(
       segment,
       options,
       inlineCollections,
+      controlPlan,
     );
     if (seg === null) continue; // constructs-only segment: nothing to emit
     if (typeof seg === "string") return fallback(seg);
@@ -305,6 +334,14 @@ export function planInterpreterDispatch(
   census.nodeOpsSeen += pattern.nodes.length;
   census.nodeOpsCollapsed += collapsed.size;
   census.transientCollections += inlineCollections.size;
+  if (controlPlan) {
+    census.controlsFused += controlPlan.fused.size;
+    let gatedNodeOps = 0;
+    for (const id of controlPlan.gated) {
+      if (id < pattern.nodes.length) gatedNodeOps++;
+    }
+    census.controlOpsGated += gatedNodeOps;
+  }
   if (RI2_DEBUG) {
     console.log(
       `[ri2] interpret: nodes=${pattern.nodes.length} ` +
@@ -461,6 +498,154 @@ function findValueConsumedOps(
 }
 
 // ---------------------------------------------------------------------------
+// Native control emission (W8 / D-CONTROL-EMISSION).
+// ---------------------------------------------------------------------------
+
+/** Control ops admitted for fusion. Fail-closed: a control whose NODE
+ * declares static scope routing stays a verbatim boundary (the legacy
+ * builtin applies scope policy the in-memory path does not reproduce). */
+function findFusableControls(
+  built: BuiltRog,
+  nodes: Pattern["nodes"],
+): Set<OpId> {
+  const fusable = new Set<OpId>();
+  for (const op of built.rog.ops) {
+    if (op.detail.kind !== "control") continue;
+    const module = nodes[op.id]?.module as
+      | { implementation?: unknown }
+      | undefined;
+    if (
+      declaresScopeRouting(module) ||
+      declaresScopeRouting(module?.implementation)
+    ) {
+      continue;
+    }
+    fusable.add(op.id);
+  }
+  return fusable;
+}
+
+/** The per-pattern control-emission plan. */
+interface ControlPlan {
+  /** Control ops fused into segments (pure, demand-driven). */
+  fused: ReadonlySet<OpId>;
+  /** Ops (any kind) consumed ONLY through fused-control branch positions,
+   * transitively — R-CONTROL-READS: their alias writes are elided and they
+   * evaluate only when their side is taken. Node-derived members shrink the
+   * segment's outputs; the rest (constructs) simply stop being reachable
+   * except on demand. */
+  gated: ReadonlySet<OpId>;
+  /** Segment id per op (segment members only). */
+  segOf: ReadonlyMap<OpId, string>;
+}
+
+/**
+ * Compute which ops are FORCED (evaluate every run, keep their alias
+ * writes) versus GATED (reachable only through fused-control branch
+ * positions — evaluate on demand, alias elided).
+ *
+ * An op is forced iff some consumption edge into it forces:
+ *   - the consumer is outside the segments (result tree, effect, boundary
+ *     op — including writeTargets), or
+ *   - the consumer is in a DIFFERENT segment (its read goes through the
+ *     alias — the producing segment must keep writing it; the CONSUMING
+ *     side is where laziness applies), or
+ *   - the edge is a non-branch position of a FORCED same-segment consumer.
+ * A fused control's then/else edges never force (deferred to runtime
+ * demand); its pred edge forces exactly when the control itself is forced.
+ * Monotone fixpoint from the external seeds. Dangling ops (no consumers)
+ * stay forced — they run and write today, and this pass must not change
+ * that.
+ */
+function planControlEmission(
+  built: BuiltRog,
+  segments: readonly Segment[],
+  admitted: ReadonlySet<OpId>,
+  emptyOk = false,
+): ControlPlan | undefined {
+  const rog = built.rog;
+  const segOf = new Map<OpId, string>();
+  for (const seg of segments) {
+    for (const id of seg.opIds) segOf.set(id, seg.id);
+  }
+  const fused = new Set<OpId>(
+    [...admitted].filter((id) => segOf.has(id)),
+  );
+  if (fused.size === 0 && !emptyOk) return undefined;
+
+  const producerOf = (ref: ValueRef): OpId | undefined => {
+    if (ref.kind === "opOut") return ref.op;
+    if (ref.kind === "internal") return rog.internals[ref.cell]?.producedBy;
+    return undefined;
+  };
+
+  interface Edge {
+    consumer: OpId | "external";
+    branch: boolean;
+  }
+  const edges = new Map<OpId, Edge[]>();
+  const addEdge = (
+    ref: ValueRef | "pred",
+    consumer: OpId | "external",
+    branch: boolean,
+  ) => {
+    if (ref === "pred") return;
+    const p = producerOf(ref);
+    if (p === undefined) return;
+    let list = edges.get(p);
+    if (!list) edges.set(p, list = []);
+    list.push({ consumer, branch });
+  };
+
+  for (const op of rog.ops) {
+    const d = op.detail;
+    if (d.kind === "control") {
+      const branchDefers = fused.has(op.id);
+      addEdge(d.pred, op.id, false);
+      addEdge(d.then, op.id, branchDefers);
+      addEdge(d.else, op.id, branchDefers);
+      continue;
+    }
+    for (const ref of dependencyRefsOf(op)) addEdge(ref, op.id, false);
+    if (d.kind === "effect") {
+      for (const ref of d.writeTargets) addEdge(ref, op.id, false);
+    }
+  }
+  addEdge(rog.result, "external", false);
+
+  const forced = new Set<OpId>();
+  // Dangling segment ops (no consumers at all): preserve run-and-write.
+  for (const op of rog.ops) {
+    if (segOf.has(op.id) && !edges.has(op.id)) forced.add(op.id);
+  }
+  const forces = (e: Edge, producer: OpId): boolean => {
+    if (e.consumer === "external") return true;
+    const cSeg = segOf.get(e.consumer);
+    if (cSeg === undefined) return true; // boundary/effect consumer
+    if (cSeg !== segOf.get(producer)) return true; // cross-segment read
+    if (e.branch) return false; // fused-control branch: deferred
+    return forced.has(e.consumer);
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [p, list] of edges) {
+      if (forced.has(p) || !segOf.has(p)) continue;
+      if (list.some((e) => forces(e, p))) {
+        forced.add(p);
+        changed = true;
+      }
+    }
+  }
+
+  const gated = new Set<OpId>();
+  for (const op of rog.ops) {
+    if (segOf.has(op.id) && !forced.has(op.id)) gated.add(op.id);
+  }
+  return { fused, gated, segOf };
+}
+
+// ---------------------------------------------------------------------------
 // Inline-collection emission (W5).
 // ---------------------------------------------------------------------------
 
@@ -600,12 +785,31 @@ function dependencyRefsOf(op: Op) {
   return refs;
 }
 
+/** Per-segment control-emission payload for the implementation. */
+interface SegmentControlIo {
+  /** Fused control ops in this segment. */
+  fused: OpId[];
+  /** Fused controls whose alias IS written (retained): handle-preferred. */
+  refOutputs: OpId[];
+  /** Demand roots = the ops whose aliases this segment writes. */
+  demandRoots: OpId[];
+  /** Seed keys consumed only through gated ops / branch positions: read
+   * lazily at demand time instead of in the eager pass. */
+  lazyOpKeys: OpId[];
+  lazyInternalKeys: number[];
+  lazyExternalKeys: number[];
+  lazyLeafInputs: OpId[];
+  /** Sub-ROG membership (bare-ref handle routing needs it). */
+  subRogOps: OpId[];
+}
+
 function buildSegmentNode(
   pattern: Pattern,
   built: BuiltRog,
   segment: Segment,
   options: DispatchOptions,
   inlineCollections: ReadonlyMap<OpId, InlineTransientCollection>,
+  controlPlan: ControlPlan | undefined,
 ): SegmentEmission | null | string {
   const rog = built.rog;
   const nodeCount = pattern.nodes.length;
@@ -613,6 +817,11 @@ function buildSegmentNode(
 
   const segmentNodeOps = segment.opIds.filter((id) => id < nodeCount);
   if (segmentNodeOps.length === 0) return null;
+  const segFused = controlPlan
+    ? segment.opIds.filter((id) => controlPlan.fused.has(id))
+    : [];
+  const gatedHere = (id: OpId): boolean =>
+    controlPlan !== undefined && controlPlan.gated.has(id);
 
   // Assemble the sub-ROG: the segment's node ops plus every construct op
   // they (transitively) reference — constructs have no legacy alias, so they
@@ -754,16 +963,73 @@ function buildSegmentNode(
     inputs.leafInputs = leafInputs;
   }
 
-  // OUTPUTS binding: this segment's node ops write their ORIGINAL aliases.
+  // OUTPUTS binding: this segment's node ops write their ORIGINAL aliases —
+  // except GATED ops (consumed only through fused-control branch positions):
+  // their alias writes are ELIDED, which is precisely what lets them not
+  // evaluate (and not read) when their side is untaken (R-CONTROL-READS).
+  const writtenNodeOps = segmentNodeOps.filter((id) => !gatedHere(id));
   const outputs: Record<string, unknown> = {};
-  for (const opId of segmentNodeOps) {
+  for (const opId of writtenNodeOps) {
     outputs[String(opId)] = pattern.nodes[opId].outputs;
+  }
+
+  // CONTROL EMISSION input classification: a seed key consumed ONLY by
+  // gated ops or through fused-control branch positions is read LAZILY at
+  // demand time (an untaken side's inputs are never read). Override-fed
+  // (schema-bound) leaves consume through their leafInputs key, not their
+  // structural refs — their refs don't force eagerness.
+  let ctl: SegmentControlIo | undefined;
+  if (segFused.length > 0) {
+    const schemaBound = new Set(schemaBoundLeaves.map((l) => l.id));
+    const eagerKeys = new Set<string>();
+    const keyOf = (ref: ValueRef): string | null => {
+      if (ref.kind === "external") return `e${ref.cell}`;
+      if (ref.kind === "opOut") {
+        return include.has(ref.op) ? null : `o${ref.op}`;
+      }
+      if (ref.kind === "internal") {
+        const producer = rog.internals[ref.cell]?.producedBy;
+        if (producer === undefined) return `i${ref.cell}`;
+        return include.has(producer) ? null : `o${producer}`;
+      }
+      return null;
+    };
+    const markEager = (ref: ValueRef | "pred") => {
+      if (ref === "pred") return;
+      const k = keyOf(ref);
+      if (k) eagerKeys.add(k);
+    };
+    for (const id of include) {
+      const op = opById.get(id)!;
+      if (gatedHere(id)) continue; // demanded → its reads are lazy anyway
+      const d = op.detail;
+      if (d.kind === "control" && controlPlan!.fused.has(id)) {
+        markEager(d.pred); // the predicate is read unconditionally
+        continue; // then/else defer to runtime demand
+      }
+      if (d.kind === "leaf" && schemaBound.has(id)) continue;
+      for (const ref of dependencyRefsOf(op)) markEager(ref);
+    }
+    ctl = {
+      fused: segFused,
+      refOutputs: segFused.filter((id) => !gatedHere(id)),
+      demandRoots: writtenNodeOps,
+      lazyOpKeys: [...externalOps].filter((id) => !eagerKeys.has(`o${id}`)),
+      lazyInternalKeys: [...internalReads].filter((idx) =>
+        !eagerKeys.has(`i${idx}`)
+      ),
+      lazyExternalKeys: [...externalReads].filter((idx) =>
+        !eagerKeys.has(`e${idx}`)
+      ),
+      lazyLeafInputs: schemaBoundLeaves.map((l) => l.id).filter(gatedHere),
+      subRogOps: [...include],
+    };
   }
 
   const implementation = makeSegmentImplementation(
     built,
     subRog,
-    segmentNodeOps,
+    writtenNodeOps,
     [...externalOps],
     schemaBoundLeaves,
     segment.id,
@@ -774,6 +1040,7 @@ function buildSegmentNode(
       internalKeys: [...internalReads],
       externalKeys: [...externalReads],
     },
+    ctl,
   );
 
   return {
@@ -813,6 +1080,7 @@ function makeSegmentImplementation(
     internalKeys: number[];
     externalKeys: number[];
   },
+  ctl?: SegmentControlIo,
 ) {
   return function reactiveInterpreterSegment(
     inputsCell: Cell<{
@@ -870,21 +1138,66 @@ function makeSegmentImplementation(
           }
         };
         const inputs = inputsCell.withTx(tx);
-        const bound = inputsCell.withTx(tx).get() ?? {};
-        const argument = bound.argument;
+        // CONTROL-FUSED segments read their inputs PER KEY, skipping keys
+        // consumed only through gated ops / branch positions (those become
+        // lazy thunks — read at demand time, journaled only when the side
+        // is actually taken). Segments without fused controls keep the ONE
+        // bulk read, byte-identical to the pre-control emission.
+        const lazyOpKeySet = new Set(ctl?.lazyOpKeys ?? []);
+        const lazyInternalKeySet = new Set(ctl?.lazyInternalKeys ?? []);
+        const lazyExternalKeySet = new Set(ctl?.lazyExternalKeys ?? []);
+        const lazyLeafInputSet = new Set(ctl?.lazyLeafInputs ?? []);
+        const bound = ctl ? {} : (inputsCell.withTx(tx).get() ?? {}) as {
+          argument?: unknown;
+          internals?: Record<string, unknown>;
+          externals?: Record<string, unknown>;
+          ops?: Record<string, unknown>;
+        };
+        const readOpsKey = (id: OpId): unknown =>
+          inputs.key("ops").key(String(id)).get();
+        const readInternalsKey = (idx: number): unknown =>
+          inputs.key("internals").key(String(idx)).get();
+        const readExternalsKey = (idx: number): unknown =>
+          inputs.key("externals").key(String(idx)).get();
+        // Per-path argument reads (fused segments): dereference exactly the
+        // consumed path at demand time — an untaken branch's argument link
+        // is never followed. Non-fused segments keep the bulk value.
+        const argument = ctl ? undefined : bound.argument;
+        const argumentByPath = ctl && io.readsArgument
+          ? (path: readonly (string | number)[]): unknown => {
+            let at = inputs.key("argument");
+            for (const step of path) {
+              at = at.key(step as never);
+            }
+            return at.get();
+          }
+          : undefined;
         const argumentScope: CellScope = io.readsArgument
           ? scopeOfBinding(inputs.key("argument"))
           : "space";
         const seed = new Map<OpId, unknown>();
         const byOp = new Map<OpId, CellScope>();
+        const lazyByOp = new Map<OpId, () => unknown>();
         for (const id of externalOpIds) {
-          seed.set(id, bound.ops?.[String(id)]);
+          if (lazyOpKeySet.has(id)) {
+            lazyByOp.set(id, () => readOpsKey(id));
+            continue;
+          }
+          seed.set(id, ctl ? readOpsKey(id) : bound.ops?.[String(id)]);
           byOp.set(id, scopeOfBinding(inputs.key("ops").key(String(id))));
         }
         const seedByInternal = new Map<number, unknown>();
         const byInternal = new Map<number, CellScope>();
+        const lazyByInternal = new Map<number, () => unknown>();
         for (const idx of io.internalKeys) {
-          seedByInternal.set(idx, bound.internals?.[String(idx)]);
+          if (lazyInternalKeySet.has(idx)) {
+            lazyByInternal.set(idx, () => readInternalsKey(idx));
+            continue;
+          }
+          seedByInternal.set(
+            idx,
+            ctl ? readInternalsKey(idx) : bound.internals?.[String(idx)],
+          );
           byInternal.set(
             idx,
             scopeOfBinding(inputs.key("internals").key(String(idx))),
@@ -892,8 +1205,16 @@ function makeSegmentImplementation(
         }
         const seedByExternal = new Map<number, unknown>();
         const byExternal = new Map<number, CellScope>();
+        const lazyByExternal = new Map<number, () => unknown>();
         for (const idx of io.externalKeys) {
-          seedByExternal.set(idx, bound.externals?.[String(idx)]);
+          if (lazyExternalKeySet.has(idx)) {
+            lazyByExternal.set(idx, () => readExternalsKey(idx));
+            continue;
+          }
+          seedByExternal.set(
+            idx,
+            ctl ? readExternalsKey(idx) : bound.externals?.[String(idx)],
+          );
           byExternal.set(
             idx,
             scopeOfBinding(inputs.key("externals").key(String(idx))),
@@ -920,54 +1241,127 @@ function makeSegmentImplementation(
         };
         const leafInputOverrides = new Map<OpId, unknown>();
         const byLeafInput = new Map<OpId, CellScope>();
+        const lazyByLeafInput = new Map<OpId, () => unknown>();
         for (const { id, schema } of schemaBoundLeaves) {
           const at = inputsCell.key("leafInputs").key(String(id));
-          const [value, sc] = captureScope(() =>
+          const readLeafInput = () =>
             schema !== undefined
               ? (at as unknown as {
                 asSchema: (s: unknown) => Cell<unknown>;
               }).asSchema(schema).withTx(tx).get()
-              : at.withTx(tx).get()
-          );
+              : at.withTx(tx).get();
+          if (lazyLeafInputSet.has(id)) {
+            // Gated leaf: read at demand time, inside the op's own scope
+            // bracket (the bracket attributes the observed scope).
+            lazyByLeafInput.set(id, readLeafInput);
+            continue;
+          }
+          const [value, sc] = captureScope(readLeafInput);
           leafInputOverrides.set(id, value);
           byLeafInput.set(id, sc);
         }
-        const { opValues, errors, opScopes } = evalRog(subRog, {
-          argument,
-          leafImpls: built.leafImpls,
-          children: built.children,
-          collections: inlineCollections as EvalContext["collections"],
-          seed,
-          seedByInternal,
-          seedByExternal,
-          leafInputOverrides,
-          scopes: {
-            argument: argumentScope,
-            byOp,
-            byInternal,
-            byExternal,
-            byLeafInput,
-          },
-          // Lazy leaf-input derefs read through the tx DURING op bodies —
-          // bracket each op run so those reads attribute to the right op.
-          runScoped: (fn, onScope) => {
-            const prev = tx.getNarrowestReadScope();
-            tx.resetNarrowestReadScope();
-            try {
-              return fn();
-            } finally {
-              const observed = tx.getNarrowestReadScope();
-              onScope(observed);
-              tx.resetNarrowestReadScope(
-                scopeRank(observed) > scopeRank(prev) ? observed : prev,
-              );
+        // REFERENCE-PASSTHROUGH handles for retained fused controls: the
+        // taken side's live cell, resolved through the SAME binding keys the
+        // values read — link resolution only (identity), never content.
+        const subRogIds = new Set(ctl?.subRogOps ?? []);
+        const rtFull = _runtime as {
+          getCellFromLink: (
+            link: NormalizedFullLink,
+            // deno-lint-ignore no-explicit-any
+          ) => any;
+        };
+        const handleFor = (ref: ValueRef): unknown => {
+          try {
+            let at: Cell<unknown> | undefined;
+            if (ref.kind === "external") {
+              at = inputs.key("externals").key(String(ref.cell));
+            } else if (ref.kind === "argument") {
+              at = inputs.key("argument");
+            } else if (ref.kind === "opOut" && !subRogIds.has(ref.op)) {
+              at = inputs.key("ops").key(String(ref.op));
+            } else if (ref.kind === "internal") {
+              const producer = subRog.internals[ref.cell]?.producedBy;
+              if (producer === undefined) {
+                at = inputs.key("internals").key(String(ref.cell));
+              } else if (!subRogIds.has(producer)) {
+                at = inputs.key("ops").key(String(producer));
+              } else {
+                return undefined;
+              }
+            } else {
+              return undefined;
             }
+            for (const step of ref.path) {
+              at = at!.key(step as never);
+            }
+            const resolved = resolveLink(
+              // deno-lint-ignore no-explicit-any
+              rtFull as any,
+              tx,
+              at!.getAsNormalizedFullLink(),
+            );
+            return rtFull.getCellFromLink(resolved).withTx(tx);
+          } catch {
+            return undefined; // fall back to value materialization
+          }
+        };
+        const { opValues, errors, opScopes, controlHandles } = evalRog(
+          subRog,
+          {
+            argument,
+            leafImpls: built.leafImpls,
+            children: built.children,
+            collections: inlineCollections as EvalContext["collections"],
+            seed,
+            seedByInternal,
+            seedByExternal,
+            leafInputOverrides,
+            ...(ctl
+              ? {
+                demandRoots: ctl.demandRoots,
+                lazy: {
+                  ...(argumentByPath ? { argumentByPath } : {}),
+                  byOp: lazyByOp,
+                  byInternal: lazyByInternal,
+                  byExternal: lazyByExternal,
+                  byLeafInput: lazyByLeafInput,
+                },
+                controlRefOutputs: {
+                  ids: new Set(ctl.refOutputs),
+                  handleFor,
+                },
+              }
+              : {}),
+            scopes: {
+              argument: argumentScope,
+              byOp,
+              byInternal,
+              byExternal,
+              byLeafInput,
+            },
+            // Lazy leaf-input derefs read through the tx DURING op bodies —
+            // bracket each op run so those reads attribute to the right op.
+            runScoped: (fn, onScope) => {
+              const prev = tx.getNarrowestReadScope();
+              tx.resetNarrowestReadScope();
+              try {
+                return fn();
+              } finally {
+                const observed = tx.getNarrowestReadScope();
+                onScope(observed);
+                tx.resetNarrowestReadScope(
+                  scopeRank(observed) > scopeRank(prev) ? observed : prev,
+                );
+              }
+            },
           },
-        });
+        );
         const out: Record<string, unknown> = {};
         const outScopes: Record<string, string> = {};
         for (const opId of outputOpIds) {
-          out[String(opId)] = opValues.get(opId);
+          out[String(opId)] = controlHandles.has(opId)
+            ? controlHandles.get(opId)
+            : opValues.get(opId);
           outScopes[String(opId)] = opScopes.get(opId) ?? "space";
         }
         ri2SetOutputScopes(out, outScopes);

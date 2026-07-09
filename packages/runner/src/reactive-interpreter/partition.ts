@@ -145,6 +145,7 @@ function boundaryKindOf(
   controlAsBoundary: boolean,
   inlinablePatternOps: ReadonlySet<OpId> | undefined,
   inlinableCollectionOps: ReadonlySet<OpId> | undefined,
+  inlinableControlOps: ReadonlySet<OpId> | undefined,
 ): Boundary["kind"] | null {
   if (op.kind === "effect") return "effect";
   if (op.kind === "collection") {
@@ -159,7 +160,13 @@ function boundaryKindOf(
       ? null
       : "pattern";
   }
-  if (op.kind === "control" && controlAsBoundary) return "control";
+  if (op.kind === "control") {
+    // NATIVE CONTROL EMISSION (W8): admitted controls are PURE — the
+    // segment evaluates them demand-driven (predicate + taken side only)
+    // and the write seam forwards bare-ref sides as links.
+    if (inlinableControlOps?.has(op.id)) return null;
+    if (controlAsBoundary) return "control";
+  }
   if (op.kind === "leaf") {
     if (!built.leafImpls.has(op.id)) return "unresolved-leaf";
     if (boundaryLeafOps?.has(op.id)) return "gated-leaf";
@@ -213,6 +220,11 @@ export interface PartitionInput {
    * output + fully-inlinable element): segment-resident in-memory
    * evaluation, zero docs (D-V2-TRANSIENT-COLLECTIONS). */
   inlinableCollectionOps?: ReadonlySet<OpId>;
+  /** SPECIFIC control ops the dispatch admits for NATIVE EMISSION (W8):
+   * fused into segments as pure ops, evaluated demand-driven (predicate +
+   * taken side — R-CONTROL-READS), bare-ref sides forwarded as links.
+   * Supersedes `controlAsBoundary` per op. */
+  inlinableControlOps?: ReadonlySet<OpId>;
 }
 
 /**
@@ -262,6 +274,7 @@ export function partition(input: PartitionInput): PartitionResult {
       controlAsBoundary,
       input.inlinablePatternOps,
       input.inlinableCollectionOps,
+      input.inlinableControlOps,
     );
     if (k !== null) {
       isBoundary[i] = true;

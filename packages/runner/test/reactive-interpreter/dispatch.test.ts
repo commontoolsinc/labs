@@ -134,11 +134,14 @@ describe("interpreter dispatch differential (W3c)", () => {
     );
   });
 
-  it("multi-segment: segments coalesce around a preserved ifElse boundary", async () => {
-    // seg0 (two lifts + str feeding the control inputs) → ifElse boundary
-    // (the ORIGINAL node, verbatim — legacy branch-LINK semantics) → seg1
-    // (a lift consuming the control output). Byte-equal both flags, and the
-    // census proves real multi-segment engagement.
+  it("control FUSES into the segment; branch lifts gate; flips still propagate", async () => {
+    // Before native control emission (W8) this pattern split into two
+    // segments around a preserved ifElse boundary. Now the control fuses:
+    // ONE segment, demand-driven — the branch lifts (consumed only through
+    // then/else) are GATED (alias writes elided; evaluated only when their
+    // side is taken), while `picked` (retained in the result) materializes.
+    // Values stay byte-equal to legacy, including through a predicate flip
+    // that must read the now-taken branch fresh.
     const buildPattern = () =>
       pattern<{ flag: boolean; a: number; b: number }>((input) => {
         const doubled = lift((v: { a: number }) => v.a * 2)({ a: input.a });
@@ -171,15 +174,28 @@ describe("interpreter dispatch differential (W3c)", () => {
     });
     assert(
       census.interpreted >= 1,
-      `expected multi-segment interpretation, census=${JSON.stringify(census)}`,
+      `expected interpretation, census=${JSON.stringify(census)}`,
     );
     assert(
-      (census.boundariesByKind["control"] ?? 0) >= 1,
-      `expected a preserved control boundary, census=${JSON.stringify(census)}`,
+      census.controlsFused >= 1,
+      `expected the control to FUSE (W8), census=${JSON.stringify(census)}`,
+    );
+    assertEquals(
+      census.boundariesByKind["control"] ?? 0,
+      0,
+      `no preserved control boundary expected, census=${
+        JSON.stringify(census)
+      }`,
     );
     assert(
-      census.nodeOpsCollapsed >= 4,
-      `expected >=4 collapsed node ops, census=${JSON.stringify(census)}`,
+      census.controlOpsGated >= 2,
+      `expected the two branch lifts gated, census=${JSON.stringify(census)}`,
+    );
+    assert(
+      census.nodeOpsCollapsed >= 5,
+      `expected >=5 collapsed node ops (control included), census=${
+        JSON.stringify(census)
+      }`,
     );
   });
 

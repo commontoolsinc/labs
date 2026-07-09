@@ -123,6 +123,46 @@ export interface EvalContext {
    * when fn throws); the fn's throw propagates unchanged.
    */
   runScoped?: <T>(fn: () => T, onScope: (scope: CellScope) => void) => T;
+  /**
+   * DEMAND-DRIVEN evaluation (native control emission, W8): when present,
+   * ops evaluate on demand from these roots (memoized recursion) instead of
+   * the full forward pass, and a `control` op demands its predicate plus the
+   * TAKEN side only — R-CONTROL-READS: the run's read-set never exceeds
+   * predicate-inputs ∪ active-branch-inputs. Ops reachable only through an
+   * untaken side never run: no reads, no errors, no scope. Absent ⇒ the
+   * eager forward pass (byte-identical legacy-parity semantics, both
+   * branches evaluated — elements and probe callers stay on this).
+   */
+  demandRoots?: readonly OpId[];
+  /**
+   * LAZY input readers (fused segments): branch-gated seed keys are carved
+   * OUT of the segment's eager input read and land here as thunks that read
+   * through the tx at demand time — inside the demanding op's scope bracket,
+   * journaled only when actually consumed. Memoized per key (one read per
+   * run, matching the eager path's read-once). `argumentByPath` replaces the
+   * whole-argument value with per-path reads (an untaken branch's argument
+   * link is never dereferenced).
+   */
+  lazy?: {
+    argumentByPath?: (path: readonly PathStep[]) => unknown;
+    byOp?: Map<OpId, () => unknown>;
+    byInternal?: Map<number, () => unknown>;
+    byExternal?: Map<number, () => unknown>;
+    byLeafInput?: Map<OpId, () => unknown>;
+  };
+  /**
+   * Fused control ops whose RETAINED output prefers a REFERENCE write: when
+   * the taken side is a bare ref (external cell / argument path / upstream
+   * alias / externally-written internal), `handleFor` builds the live cell
+   * handle (identity reads only — never content) and the evaluator records
+   * it in `controlHandles`; the write seam forwards it as a link, exactly
+   * legacy's reference-passthrough. A computed/const side has no handle and
+   * materializes by value instead.
+   */
+  controlRefOutputs?: {
+    ids: ReadonlySet<OpId>;
+    handleFor: (ref: ValueRef) => unknown;
+  };
 }
 
 /** Structural "this op cannot be interpreted here" — always propagates to
@@ -283,9 +323,38 @@ export function evalRog(
   errors: Array<{ opId: OpId; error: unknown }>;
   /** Per-op derived scope (present iff `ctx.scopes` was supplied). */
   opScopes: Map<OpId, CellScope>;
+  /** Reference handles for fused control outputs (`ctx.controlRefOutputs`):
+   * op id → the live cell of the TAKEN side, to be written as a link. */
+  controlHandles: Map<OpId, unknown>;
 } {
   const opValues = new Map<OpId, unknown>(ctx.seed ?? []);
   const errors: Array<{ opId: OpId; error: unknown }> = [];
+  const controlHandles = new Map<OpId, unknown>();
+  const byId = new Map<OpId, Op>(rog.ops.map((o) => [o.id, o]));
+  const demandMode = ctx.demandRoots !== undefined;
+  /** Which side a demand-mode control actually took (for scope folding —
+   * the static fold would join the UNTAKEN side's scope). */
+  const controlTaken = new Map<OpId, ValueRef | "pred">();
+  // Lazy-read memos (one read per run, like the eager bulk read).
+  const lazyMemo = {
+    byOp: new Map<OpId, unknown>(),
+    byInternal: new Map<number, unknown>(),
+    byExternal: new Map<number, unknown>(),
+    byLeafInput: new Map<OpId, unknown>(),
+    argumentByPath: new Map<string, unknown>(),
+  };
+  const lazyRead = <K>(
+    memo: Map<K, unknown>,
+    thunks: Map<K, () => unknown> | undefined,
+    key: K,
+  ): { present: boolean; value?: unknown } => {
+    if (memo.has(key)) return { present: true, value: memo.get(key) };
+    const thunk = thunks?.get(key);
+    if (!thunk) return { present: false };
+    const value = thunk();
+    memo.set(key, value);
+    return { present: true, value };
+  };
 
   // --- scope flow-tracking (see EvalContext.scopes) -------------------------
   const trackScopes = ctx.scopes !== undefined;
@@ -333,8 +402,16 @@ export function evalRog(
     if (d.kind === "pattern") fold(d.argument);
     if (d.kind === "control") {
       fold(d.pred);
-      fold(d.then);
-      fold(d.else);
+      // Demand mode: fold the TAKEN side only — the static both-sides fold
+      // would join the untaken side's scope into the write (legacy scopes a
+      // control result by what the action actually read).
+      const taken = controlTaken.get(op.id);
+      if (demandMode) {
+        if (taken !== undefined && taken !== "pred") fold(taken);
+      } else {
+        fold(d.then);
+        fold(d.else);
+      }
     }
     if (d.kind === "construct") {
       const t = d.template;
@@ -348,22 +425,63 @@ export function evalRog(
     switch (ref.kind) {
       case "const":
         return ref.value;
-      case "argument":
+      case "argument": {
+        // Per-path lazy argument (fused segments): dereference exactly the
+        // consumed path, at demand time — an untaken branch's argument link
+        // is never followed.
+        if (ctx.lazy?.argumentByPath) {
+          const key = JSON.stringify(ref.path);
+          if (!lazyMemo.argumentByPath.has(key)) {
+            lazyMemo.argumentByPath.set(
+              key,
+              ctx.lazy.argumentByPath(ref.path),
+            );
+          }
+          return lazyMemo.argumentByPath.get(key);
+        }
         return navigate(ctx.argument, ref.path);
-      case "opOut":
-        return navigate(opValues.get(ref.op), ref.path);
+      }
+      case "opOut": {
+        if (byId.has(ref.op)) {
+          demand(ref.op);
+          return navigate(opValues.get(ref.op), ref.path);
+        }
+        if (opValues.has(ref.op)) {
+          return navigate(opValues.get(ref.op), ref.path);
+        }
+        const lazy = lazyRead(lazyMemo.byOp, ctx.lazy?.byOp, ref.op);
+        return lazy.present ? navigate(lazy.value, ref.path) : undefined;
+      }
       case "internal": {
         const producer = internalProducer(rog.internals, ref.cell);
+        if (producer !== undefined && byId.has(producer)) {
+          demand(producer);
+          return navigate(opValues.get(producer), ref.path);
+        }
         if (producer !== undefined && opValues.has(producer)) {
           return navigate(opValues.get(producer), ref.path);
         }
         if (ctx.seedByInternal?.has(ref.cell)) {
           return navigate(ctx.seedByInternal.get(ref.cell), ref.path);
         }
-        return undefined;
+        const lazy = lazyRead(
+          lazyMemo.byInternal,
+          ctx.lazy?.byInternal,
+          ref.cell,
+        );
+        return lazy.present ? navigate(lazy.value, ref.path) : undefined;
       }
-      case "external":
-        return navigate(ctx.seedByExternal?.get(ref.cell), ref.path);
+      case "external": {
+        if (ctx.seedByExternal?.has(ref.cell)) {
+          return navigate(ctx.seedByExternal.get(ref.cell), ref.path);
+        }
+        const lazy = lazyRead(
+          lazyMemo.byExternal,
+          ctx.lazy?.byExternal,
+          ref.cell,
+        );
+        return lazy.present ? navigate(lazy.value, ref.path) : undefined;
+      }
       case "result":
         // Result-self-reference: needs the dispatch's materialized result
         // cell (the value is only complete after this evaluation). Not
@@ -393,9 +511,16 @@ export function evalRog(
         // A leaf takes its SINGLE structured input; none ⇒ called with
         // undefined (legacy's no-argument lift runs and may produce a
         // constant).
-        const hasOverride = ctx.leafInputOverrides?.has(op.id) ?? false;
+        const lazyOverride = !ctx.leafInputOverrides?.has(op.id) &&
+            ctx.lazy?.byLeafInput?.has(op.id)
+          ? lazyRead(lazyMemo.byLeafInput, ctx.lazy.byLeafInput, op.id)
+          : undefined;
+        const hasOverride = (ctx.leafInputOverrides?.has(op.id) ?? false) ||
+          (lazyOverride?.present ?? false);
         if (!hasOverride && op.inputs.length === 0) return impl(undefined);
-        let input = hasOverride
+        let input = lazyOverride?.present
+          ? lazyOverride.value
+          : hasOverride
           ? ctx.leafInputOverrides!.get(op.id)
           : resolve(op.inputs[0]);
         const fieldsToWrap = ctx.inputCellViews?.get(op.id);
@@ -456,11 +581,27 @@ export function evalRog(
         // unwrapped from a live Cell handle when the hook is supplied — and
         // a "pred" side returns that UNWRAPPED value (legacy returns the
         // condition VALUE, not a handle).
+        //
+        // Demand mode resolves the TAKEN side only (R-CONTROL-READS): the
+        // untaken side's producer never runs, its lazy inputs are never
+        // read. Eager mode is unchanged — both producers already ran in the
+        // forward pass; `resolve` is a memo lookup.
         const unwrap = ctx.unwrapCellForValue ?? ((v: unknown) => v);
         const cond = unwrap(resolve(d.pred));
-        const side = (s: ValueRef | "pred"): unknown =>
-          s === "pred" ? cond : resolve(s);
-        return cond ? side(d.then) : side(d.else);
+        const taken = cond ? d.then : d.else;
+        controlTaken.set(op.id, taken);
+        // Retained fused control: forward the taken side as a REFERENCE
+        // when it is a bare ref (identity-only handle; the write seam links
+        // it — legacy passthrough). The VALUE below is still the in-memory
+        // semantics for any consumer op.
+        if (ctx.controlRefOutputs?.ids.has(op.id)) {
+          const ref = taken === "pred" ? d.pred : taken;
+          if (isBareRef(ref)) {
+            const handle = ctx.controlRefOutputs.handleFor(ref);
+            if (handle !== undefined) controlHandles.set(op.id, handle);
+          }
+        }
+        return taken === "pred" ? cond : resolve(taken);
       }
       case "collection": {
         // TRANSIENT (segment-resident) collections only — the dispatch
@@ -559,20 +700,48 @@ export function evalRog(
     }
   };
 
+  /** Bare ref = names an addressable cell outside this evaluation (never a
+   * value computed in-memory here): eligible for reference-passthrough. */
+  const isBareRef = (ref: ValueRef): boolean => {
+    if (ref.kind === "external" || ref.kind === "argument") return true;
+    if (ref.kind === "opOut") return !byId.has(ref.op);
+    if (ref.kind === "internal") {
+      const producer = internalProducer(rog.internals, ref.cell);
+      return producer === undefined || !byId.has(producer);
+    }
+    return false;
+  };
+
   const bracket = trackScopes ? ctx.runScoped : undefined;
-  for (const op of topoOrder(rog.ops, rog.internals)) {
-    // PER-OP ERROR ISOLATION (legacy parity — see module doc).
+  const evaluated = new Set<OpId>();
+  const evaluating = new Set<OpId>();
+
+  /** Evaluate op `id` once (memoized), with PER-OP ERROR ISOLATION (legacy
+   * parity — see module doc). In the eager pass this runs in topo order so
+   * `resolve` never recurses (producers are memo hits); in demand mode it
+   * recurses producers-first, brackets nesting (inner scopes propagate out
+   * through the bracket's finally). */
+  function demand(id: OpId): unknown {
+    if (evaluated.has(id)) return opValues.get(id);
+    const op = byId.get(id);
+    if (!op || evaluating.has(id)) return opValues.get(id); // seeded / cycle
+    evaluating.add(id);
     let value: unknown;
     let runScope: CellScope = "space";
     try {
-      value = bracket
-        ? bracket(() => evalOp(op), (s) => runScope = s)
-        : evalOp(op);
-    } catch (e) {
-      if (e instanceof NotInterpretedHere) throw e;
-      errors.push({ opId: op.id, error: e });
-      value = undefined;
+      try {
+        value = bracket
+          ? bracket(() => evalOp(op), (s) => runScope = s)
+          : evalOp(op);
+      } catch (e) {
+        if (e instanceof NotInterpretedHere) throw e;
+        errors.push({ opId: op.id, error: e });
+        value = undefined;
+      }
+    } finally {
+      evaluating.delete(id);
     }
+    evaluated.add(id);
     opValues.set(op.id, value);
     // Scope derives from CONSUMED refs + the reads the op's own execution
     // performed (lazy leaf-input derefs) — independent of the op's outcome
@@ -585,7 +754,73 @@ export function evalRog(
         scopeRank(runScope) > scopeRank(derived) ? runScope : derived,
       );
     }
+    return value;
   }
 
-  return { result: resolve(rog.result), opValues, errors, opScopes };
+  /** Root-drive a handle-preferred fused control WITHOUT forcing its value:
+   * evaluate the predicate, pick the side, build the bare-ref handle. Only
+   * when the side is computed (no handle possible) does the value
+   * materialize via a full demand. */
+  function demandControlHandle(id: OpId): void {
+    const op = byId.get(id);
+    if (!op || op.detail.kind !== "control") {
+      demand(id);
+      return;
+    }
+    const d = op.detail;
+    let runScope: CellScope = "space";
+    let handled = false;
+    try {
+      const run = () => {
+        const unwrap = ctx.unwrapCellForValue ?? ((v: unknown) => v);
+        const cond = unwrap(resolve(d.pred));
+        const taken = cond ? d.then : d.else;
+        controlTaken.set(op.id, taken);
+        const ref = taken === "pred" ? d.pred : taken;
+        if (isBareRef(ref)) {
+          const handle = ctx.controlRefOutputs!.handleFor(ref);
+          if (handle !== undefined) {
+            controlHandles.set(op.id, handle);
+            return true;
+          }
+        }
+        return false;
+      };
+      handled = bracket ? bracket(run, (s) => runScope = s) : run();
+    } catch (e) {
+      if (e instanceof NotInterpretedHere) throw e;
+      errors.push({ opId: op.id, error: e });
+      // A throwing predicate isolates exactly like the eager path: the op's
+      // slot materializes as `undefined` below.
+      handled = false;
+    }
+    if (handled) {
+      if (trackScopes) {
+        const derived = opScopeOf(op);
+        opScopes.set(
+          op.id,
+          scopeRank(runScope) > scopeRank(derived) ? runScope : derived,
+        );
+      }
+      return;
+    }
+    demand(id); // computed side (or isolated error): materialize by value.
+  }
+
+  if (demandMode) {
+    for (const id of ctx.demandRoots!) {
+      if (ctx.controlRefOutputs?.ids.has(id)) demandControlHandle(id);
+      else demand(id);
+    }
+  } else {
+    for (const op of topoOrder(rog.ops, rog.internals)) demand(op.id);
+  }
+
+  return {
+    result: resolve(rog.result),
+    opValues,
+    errors,
+    opScopes,
+    controlHandles,
+  };
 }
