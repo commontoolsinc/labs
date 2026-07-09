@@ -104,8 +104,10 @@ Known serial CLI tests:
   `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the
   missing-current-directory fallback.
-- `test/view-pager-pty.test.ts` drives a real pseudo-terminal and is sensitive
-  to heavy workspace contention.
+- `test/view-pager-pty.test.ts` drives a real pseudo-terminal, spawning a full
+  CLI child per test. Keystrokes are gated on observed child output rather than
+  on timing, so contention slows it but does not flake it; it stays serial to
+  avoid stacking those children on top of the parallel groups.
 
 The CLI package keeps those tests in a serial group and runs the rest of its
 test modules with `--parallel`.

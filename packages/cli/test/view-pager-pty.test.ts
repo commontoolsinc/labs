@@ -3,15 +3,30 @@
  * terminal, so they are driven here through a pseudo-terminal: the CLI is run
  * under `script`, which gives the child a TTY, and keystrokes are fed to it.
  * Every case quits in-band with `q` (no signals — those do not forward through
- * `script`) and is bounded by a hard timeout so a stuck child never hangs the
- * suite. Skipped where `script` is unavailable.
+ * `script`).
+ *
+ * The driver is event-driven: each keystroke is sent only after the child's
+ * output shows the state it depends on (the drawn document, the search input
+ * line, the help overlay, the save prompt). Where a redraw carries no
+ * distinctive text, the escape prefix every frame draw emits is counted
+ * instead. The only clock is a watchdog for a child that stops producing
+ * output entirely; it resets on every output chunk, so a slow child that is
+ * still making progress never trips it, and a silent child fails the test
+ * with the captured output. Skipped where `script` is unavailable.
  */
 import { assert } from "@std/assert";
 import { join } from "@std/path";
 
 const CLI_MOD = join(import.meta.dirname!, "..", "mod.ts");
 const ENC = new TextEncoder();
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** How long the child may go without writing any output before the test gives
+ * up on it. Resets on every chunk, so it bounds silence, not total runtime. */
+const STALL_MS = 60_000;
+
+/** Every frame draw starts by disabling autowrap (see pager.ts `draw`), so
+ * occurrences of this prefix count redraws. */
+const FRAME = "\x1b[?7l";
 
 async function hasScript(): Promise<boolean> {
   if (Deno.build.os !== "linux" && Deno.build.os !== "darwin") return false;
@@ -28,9 +43,6 @@ async function hasScript(): Promise<boolean> {
   }
 }
 const SCRIPT = await hasScript();
-
-/** A step of bytes to send, then how long to wait before the next step. */
-type Step = { send: string; waitMs?: number };
 
 function spawnUnderPty(args: string[]): Deno.ChildProcess {
   const inner = [Deno.execPath(), "run", "-A", CLI_MOD, ...args];
@@ -52,36 +64,206 @@ function spawnUnderPty(args: string[]): Deno.ChildProcess {
   return cmd.spawn();
 }
 
-async function runInteractive(
-  args: string[],
-  steps: Step[],
-  { startMs = 1800, timeoutMs = 20000 } = {},
-): Promise<{ code: number; out: string; timedOut: boolean }> {
-  const child = spawnUnderPty(args);
-  const writer = child.stdin.getWriter();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try {
-      child.kill("SIGKILL");
-    } catch { /* already gone */ }
-  }, timeoutMs);
+/**
+ * A pager child under a pseudo-terminal, with its output accumulated as it
+ * arrives. `send` records where the output stood, and `expect` waits for text
+ * that appears after that point, so an expectation always refers to the
+ * response to the most recent keystroke.
+ */
+class PtyPager {
+  #child: Deno.ChildProcess;
+  #writer: WritableStreamDefaultWriter<Uint8Array>;
+  #out = "";
+  #err = "";
+  #outDone: Promise<void>;
+  #errDone: Promise<void>;
+  #outEof = false;
+  #exited = false;
+  #mark = 0;
+  #waiters = new Set<{ wake: () => void }>();
 
-  const feed = (async () => {
-    await sleep(startMs); // let deno boot, draw the first frame, enter the read loop
-    for (const step of steps) {
-      await writer.write(ENC.encode(step.send));
-      if (step.waitMs) await sleep(step.waitMs);
+  constructor(args: string[]) {
+    this.#child = spawnUnderPty(args);
+    this.#writer = this.#child.stdin.getWriter();
+    this.#outDone = this.#drain(
+      this.#child.stdout,
+      (text) => this.#out += text,
+      () => this.#outEof = true,
+    );
+    this.#errDone = this.#drain(this.#child.stderr, (text) => {
+      this.#err += text;
+    });
+    this.#child.status.then(() => {
+      this.#exited = true;
+      this.#wakeAll();
+    });
+  }
+
+  async #drain(
+    stream: ReadableStream<Uint8Array>,
+    sink: (text: string) => void,
+    onEnd?: () => void,
+  ): Promise<void> {
+    const decoder = new TextDecoder();
+    try {
+      for await (const chunk of stream) {
+        sink(decoder.decode(chunk, { stream: true }));
+        this.#wakeAll();
+      }
+      sink(decoder.decode());
+    } catch { /* a pipe broken by a kill reads as end of stream */ }
+    onEnd?.();
+    this.#wakeAll();
+  }
+
+  #wakeAll(): void {
+    const waiters = [...this.#waiters];
+    this.#waiters.clear();
+    for (const w of waiters) w.wake();
+  }
+
+  /** Resolves when more output arrives, the child exits, or the output stream
+   * ends. After {@link STALL_MS} with none of those, kills the child and
+   * rejects with the captured output. */
+  #nextActivity(waitingFor: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
+        wake: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      };
+      const timer = setTimeout(() => {
+        this.#waiters.delete(waiter);
+        try {
+          this.#child.kill("SIGKILL");
+        } catch { /* already gone */ }
+        reject(
+          new Error(this.#report(
+            `the pager wrote no output for ${
+              STALL_MS / 1000
+            }s while waiting for ${waitingFor}`,
+          )),
+        );
+      }, STALL_MS);
+      this.#waiters.add(waiter);
+    });
+  }
+
+  #report(problem: string): string {
+    const tail = (label: string, s: string) =>
+      `--- ${label} (${s.length} chars, tail shown) ---\n${
+        JSON.stringify(s.slice(-2000))
+      }`;
+    return `${problem}\n${tail("stdout", this.#out)}\n${
+      tail("stderr", this.#err)
+    }`;
+  }
+
+  output(): string {
+    return this.#out;
+  }
+
+  /** The number of frames drawn so far, over the whole output. */
+  frameCount(): number {
+    let n = 0;
+    for (
+      let i = this.#out.indexOf(FRAME);
+      i !== -1;
+      i = this.#out.indexOf(FRAME, i + FRAME.length)
+    ) {
+      n++;
+    }
+    return n;
+  }
+
+  async send(text: string): Promise<void> {
+    this.#mark = this.#out.length;
+    try {
+      await this.#writer.write(ENC.encode(text));
+    } catch (error) {
+      throw new Error(this.#report(
+        `writing ${JSON.stringify(text)} to the child failed (${
+          error instanceof Error ? error.message : error
+        })`,
+      ));
+    }
+  }
+
+  /** Waits until `needle` appears in the output written after the last
+   * {@link send}. */
+  async expect(needle: string, what: string): Promise<void> {
+    const label = `${what} (${JSON.stringify(needle)})`;
+    while (!this.#out.includes(needle, this.#mark)) {
+      if (this.#outEof) {
+        throw new Error(this.#report(`output ended before ${label} appeared`));
+      }
+      await this.#nextActivity(label);
+    }
+  }
+
+  /** Waits until at least `target` frames have been drawn in total. */
+  async expectFrameCount(target: number, what: string): Promise<void> {
+    while (this.frameCount() < target) {
+      if (this.#outEof) {
+        throw new Error(this.#report(`output ended before ${what}`));
+      }
+      await this.#nextActivity(what);
+    }
+  }
+
+  /** Sends a keystroke whose redraw has no distinctive text and waits for the
+   * frame it causes. */
+  async sendExpectingRedraw(text: string): Promise<void> {
+    const target = this.frameCount() + 1;
+    await this.send(text);
+    await this.expectFrameCount(
+      target,
+      `a redraw after sending ${JSON.stringify(text)}`,
+    );
+  }
+
+  /** Closes stdin and waits for the child to exit and its streams to end. */
+  async waitExit(): Promise<void> {
+    try {
+      await this.#writer.close();
+    } catch { /* the child may have already exited */ }
+    while (!this.#exited) {
+      await this.#nextActivity("the child to exit");
+    }
+    await this.#outDone;
+    await this.#errDone;
+    await this.#child.status;
+  }
+
+  /** Reaps the child and releases its pipes; safe after any failure. */
+  async dispose(): Promise<void> {
+    if (!this.#exited) {
+      try {
+        this.#child.kill("SIGKILL");
+      } catch { /* already gone */ }
     }
     try {
-      await writer.close();
-    } catch { /* the child may have already exited */ }
-  })();
+      await this.#writer.close();
+    } catch { /* may already be closed */ }
+    await this.#outDone;
+    await this.#errDone;
+    await this.#child.status;
+  }
+}
 
-  const { code, stdout } = await child.output();
-  clearTimeout(timer);
-  await feed.catch(() => {});
-  return { code, out: new TextDecoder().decode(stdout), timedOut };
+async function driveInteractive(
+  args: string[],
+  drive: (p: PtyPager) => Promise<void>,
+): Promise<{ out: string }> {
+  const p = new PtyPager(args);
+  try {
+    await drive(p);
+    await p.waitExit();
+  } finally {
+    await p.dispose();
+  }
+  return { out: p.output() };
 }
 
 const SRC =
@@ -116,10 +298,10 @@ Deno.test({
   name: "pager: opens a TTY, draws the document, quits on q",
   ignore: !SCRIPT,
   fn: withDoc(SRC, async (file) => {
-    const { out, timedOut } = await runInteractive(["view", file], [
-      { send: "q" },
-    ]);
-    assert(!timedOut, "the pager quit before the timeout");
+    const { out } = await driveInteractive(["view", file], async (p) => {
+      await p.expect("greet", "the first frame of the document");
+      await p.send("q");
+    });
     assert(out.includes("greet"), `drew the document: ${out.slice(0, 120)}`);
   }),
 });
@@ -130,18 +312,24 @@ Deno.test({
   fn: withDoc(
     SRC + "x\n".repeat(60),
     async (file) => {
-      const { timedOut } = await runInteractive(["view", file], [
-        { send: "j", waitMs: 40 },
-        { send: "k", waitMs: 40 },
-        { send: "G", waitMs: 40 },
-        { send: "g", waitMs: 40 },
-        { send: "/greet\r", waitMs: 60 },
-        { send: "n", waitMs: 40 },
-        { send: "?", waitMs: 40 }, // help overlay
-        { send: "\x1b", waitMs: 40 }, // escape
-        { send: "q" },
-      ]);
-      assert(!timedOut, "handled the keystrokes and quit");
+      await driveInteractive(["view", file], async (p) => {
+        await p.expect("greet", "the first frame of the document");
+        await p.sendExpectingRedraw("j");
+        await p.sendExpectingRedraw("k");
+        await p.send("G");
+        await p.expect("END", "the end-of-document position indicator");
+        await p.sendExpectingRedraw("g");
+        await p.send("/greet");
+        await p.expect("/greet", "the search input line");
+        await p.send("\r");
+        await p.expect("match 1/2", "the match counter after the search");
+        await p.send("n");
+        await p.expect("match 2/2", "the counter on the next match");
+        await p.send("?");
+        await p.expect("cf view — keys", "the help overlay");
+        await p.sendExpectingRedraw("\x1b"); // escape closes the overlay
+        await p.send("q");
+      });
     },
   ),
 });
@@ -150,14 +338,23 @@ Deno.test({
   name: "pager: an edit triggers the deferred reparse, then quits",
   ignore: !SCRIPT,
   fn: withDoc(SRC, async (file) => {
-    const { timedOut } = await runInteractive(["view", file], [
-      { send: "\x1b[B", waitMs: 120 }, // down arrow reveals the text cursor
-      { send: "Z", waitMs: 400 }, // type, then pause past the reparse debounce
-      { send: "\x1b", waitMs: 120 }, // escape back to navigation
-      { send: "q", waitMs: 150 }, // quit — the dirty buffer raises the save prompt
-      { send: "d" }, // discard the edit and exit
-    ], { timeoutMs: 25000 });
-    assert(!timedOut, "reparsed after the pause and quit");
+    await driveInteractive(["view", file], async (p) => {
+      await p.expect("greet", "the first frame of the document");
+      await p.send("\x1b[B"); // down arrow reveals the text cursor
+      await p.expect("editing —", "the edit-mode status hint");
+      // Typing redraws once immediately; the deferred re-parse redraws a
+      // second time once the debounce elapses.
+      const frames = p.frameCount();
+      await p.send("Z");
+      await p.expectFrameCount(
+        frames + 2,
+        "the keystroke redraw and the deferred re-parse redraw",
+      );
+      await p.sendExpectingRedraw("\x1b"); // escape back to navigation
+      await p.send("q"); // the dirty buffer raises the save prompt
+      await p.expect("(d) discard", "the save prompt");
+      await p.send("d"); // discard the edit and exit
+    });
   }),
 });
 
@@ -165,10 +362,10 @@ Deno.test({
   name: "pager: a diff is viewed interactively",
   ignore: !SCRIPT,
   fn: withDoc(DIFF, async (file) => {
-    const { out, timedOut } = await runInteractive(["view", file], [{
-      send: "q",
-    }]);
-    assert(!timedOut, "the diff pager quit");
+    const { out } = await driveInteractive(["view", file], async (p) => {
+      await p.expect("next", "the first frame of the diff");
+      await p.send("q");
+    });
     assert(out.includes("next"), `drew the diff: ${out.slice(0, 120)}`);
   }),
 });
@@ -180,11 +377,9 @@ Deno.test({
   // than blocking on the keyboard, so the viewer reports there is nothing to
   // show and exits.
   fn: async () => {
-    const { out, timedOut } = await runInteractive(["view"], [], {
-      startMs: 400,
-      timeoutMs: 15000,
+    const { out } = await driveInteractive(["view"], async (p) => {
+      await p.expect("no input", "the no-input report");
     });
-    assert(!timedOut, "exited without input");
     assert(
       out.toLowerCase().includes("no input"),
       `reported no input: ${out.slice(0, 160)}`,
