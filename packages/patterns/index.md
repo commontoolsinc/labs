@@ -195,7 +195,7 @@ addPiece.send({ piece: ann });
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
 assignees. Demonstrates: reading-list-style piece-in-list composition, `PerUser`
-display-name on a shared piece, mergeable comment appends, session- scoped
+display-name on a shared piece, mergeable comment appends, session-scoped
 drafts, `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,

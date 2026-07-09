@@ -2,6 +2,7 @@ import {
   action,
   computed,
   Default,
+  handler,
   NAME,
   navigateTo,
   pattern,
@@ -52,9 +53,22 @@ export interface TopicsOutput {
   topicCount: number;
   /** The viewer's display name (normalized to "" until set). */
   myName: string;
+  /** Session-local draft for the footer composer (exposed for embedding and
+   * headless driving, like the chat exemplar's drafts). */
+  newTitle: Writable<string>;
   addTopic: Stream<{ title: string }>;
   setMyName: Stream<{ name: string }>;
+  /** Submit the footer composer: reads newTitle, delegates to addTopic. */
+  submitTopic: Stream<void>;
 }
+
+/** Row navigation, bound per topic card. Module-scope handler (not an inline
+ * closure) so embedders and tests can bind and drive it directly. */
+export const openTopic = handler<void, { topic: TopicPiece }>(
+  (_, { topic }) => {
+    navigateTo(topic);
+  },
+);
 
 export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
@@ -65,7 +79,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     const piece = Topic({
       title: trimmed,
       createdAt: safeDateNow(),
-      createdByName: myName.get().trim() || "someone",
+      createdByName: (myName.get() ?? "").trim() || "someone",
       myName,
     });
     // Mergeable append: concurrent creates from different users all land.
@@ -75,6 +89,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
 
   const setMyName = action(({ name }: { name: string }) => {
     myName.set((name ?? "").trim());
+  });
+
+  const submitTopic = action(() => {
+    addTopic.send({ title: newTitle.get() });
   });
 
   // Normalized snapshot: a never-written PerUser cell reads as undefined in
@@ -134,7 +152,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                     </cf-vstack>
                     <cf-button
                       variant="secondary"
-                      onClick={() => navigateTo(topic)}
+                      onClick={openTopic({ topic })}
                     >
                       Open
                     </cf-button>
@@ -158,10 +176,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                   placeholder="What deserves shared attention?"
                 />
               </cf-field>
-              <cf-button
-                variant="primary"
-                onClick={() => addTopic.send({ title: newTitle.get() })}
-              >
+              <cf-button variant="primary" onClick={submitTopic}>
                 Start
               </cf-button>
             </cf-hstack>
@@ -173,7 +188,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     mentionable: topics,
     topicCount,
     myName: myNameView,
+    newTitle,
     addTopic,
     setMyName,
+    submitTopic,
   };
 });

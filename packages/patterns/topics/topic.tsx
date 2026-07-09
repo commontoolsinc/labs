@@ -69,6 +69,20 @@ export interface TopicOutput {
   addComment: Stream<{ body: string }>;
   addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
   setBody: Stream<{ body: string }>;
+  /** Session-local composer/edit state, exposed like the chat exemplar's
+   * drafts so embedders and tests can drive the same flows the UI does. */
+  commentDraft: Writable<string>;
+  bodyDraft: Writable<string>;
+  editingBody: boolean;
+  linkUrlDraft: Writable<string>;
+  linkLabelDraft: Writable<string>;
+  linkKindDraft: Writable<TopicLinkKind>;
+  /** UI affordances as streams: composer submit, body edit lifecycle. */
+  submitComment: Stream<void>;
+  startEditBody: Stream<void>;
+  saveBody: Stream<void>;
+  cancelEditBody: Stream<void>;
+  submitLink: Stream<void>;
 }
 
 /** The shape stored in the tracker's list. */
@@ -131,6 +145,13 @@ export const snippet = (text: string, max: number): string => {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 };
 
+/** Only http(s) URLs may become live anchors — a user-supplied `javascript:`
+ * href on a shared surface is script execution in every viewer's session.
+ * Enforced at write (addLink rejects) AND at render (non-http renders as
+ * text), since stored data may predate the write guard. */
+export const isSafeLinkUrl = (url: string): boolean =>
+  /^https?:\/\//i.test((url ?? "").trim());
+
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
   { label: "PR", value: "pr" },
@@ -157,7 +178,9 @@ export default pattern<TopicInput, TopicOutput>(
       if (!trimmed) return;
       // Mergeable append: concurrent comments from different users all land.
       comments.push({
-        authorName: myName.get().trim() || "someone",
+        // `?? ""`: a never-written PerUser cell can read as undefined (e.g. a
+        // headless caller that never set a name) — same guard as myNameView.
+        authorName: (myName.get() ?? "").trim() || "someone",
         body: trimmed,
         sentAt: safeDateNow(),
       });
@@ -170,7 +193,7 @@ export default pattern<TopicInput, TopicOutput>(
         label: string;
       }) => {
         const trimmedUrl = (url ?? "").trim();
-        if (!trimmedUrl) return;
+        if (!trimmedUrl || !isSafeLinkUrl(trimmedUrl)) return;
         links.push({
           kind: kind ?? "web",
           url: trimmedUrl,
@@ -324,14 +347,22 @@ export default pattern<TopicInput, TopicOutput>(
                               <cf-badge size="xs" color="neutral">
                                 {link.kind}
                               </cf-badge>
-                              <a
-                                href={link.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style="color: inherit;"
-                              >
-                                {link.label || link.url}
-                              </a>
+                              {isSafeLinkUrl(link.url)
+                                ? (
+                                  <a
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style="color: inherit;"
+                                  >
+                                    {link.label || link.url}
+                                  </a>
+                                )
+                                : (
+                                  <cf-text tone="muted">
+                                    {link.label || link.url}
+                                  </cf-text>
+                                )}
                             </cf-hstack>
                           ))
                         )}
@@ -438,6 +469,17 @@ export default pattern<TopicInput, TopicOutput>(
       addComment,
       addLink,
       setBody,
+      commentDraft,
+      bodyDraft,
+      editingBody,
+      linkUrlDraft,
+      linkLabelDraft,
+      linkKindDraft,
+      submitComment,
+      startEditBody,
+      saveBody,
+      cancelEditBody,
+      submitLink,
     };
   },
 );
