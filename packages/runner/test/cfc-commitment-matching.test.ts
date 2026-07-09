@@ -10,6 +10,7 @@ import { atomsOutsideCeiling } from "../src/cfc/observation.ts";
 import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import {
   dischargeMaterialRiskAtoms,
+  schemaWithInjectionSafeAnnotations,
 } from "../src/cfc/schema-sanitization.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
@@ -103,6 +104,18 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
           {
             type: CFC_ATOM_TYPE.Caveat,
             source: { space: { var: "$sp" }, id: "of:doc" },
+          },
+          committedCaveat,
+        ),
+      ).toBeNull();
+      // An absence requirement (explicit-undefined field) is a shape
+      // constraint, not a value — the pattern is not concrete and cannot
+      // digest-match the marker either (fail closed).
+      expect(
+        matchAtomPattern(
+          {
+            type: CFC_ATOM_TYPE.Caveat,
+            source: { space: "did:key:a", id: "of:doc", extra: undefined },
           },
           committedCaveat,
         ),
@@ -243,6 +256,23 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
         source: commitCfcFieldValue(source),
       };
       expect(dischargeMaterialRiskAtoms([committed])).toEqual([]);
+    });
+
+    it("sanitizer annotation preserves committed atoms intact (B6 composition)", () => {
+      // The B6 sanitizer merges observed confidentiality into schema ifc on
+      // NEW values. A sanitized copy whose ORIGIN labels were cross-space
+      // (already committed at rest) must stay committed end-to-end: the
+      // merge neither unwraps nor drops the marker, so the declared entry
+      // minted from this schema re-persists the committed form verbatim.
+      const committedUserAtom = {
+        type: CFC_ATOM_TYPE.User,
+        subject: commitCfcFieldValue(reader),
+      };
+      const annotated = schemaWithInjectionSafeAnnotations(
+        { type: "string" },
+        [committedUserAtom],
+      ) as { ifc?: { confidentiality?: unknown[] } };
+      expect(annotated.ifc?.confidentiality).toContainEqual(committedUserAtom);
     });
   });
 
