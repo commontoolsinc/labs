@@ -73,6 +73,7 @@ import {
   buildCfcTrustConfig,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
+  type CfcLabelMetadataProtectionMode,
   type CfcLabelView,
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
@@ -333,6 +334,17 @@ export interface RuntimeOptions {
    */
   cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
   /**
+   * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
+   * spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality.md §2/§5).
+   * Defaults to `off` (persisted label bytes identical to before the dial).
+   * `observe` computes the classification-governed transformed form for
+   * cross-space entries and emits a structured divergence diagnostic while
+   * persisting verbatim; `enforce` persists the transformed form (commitment
+   * fields as `{digestOf: <hash>}` markers). Representation only — never
+   * rejects a commit by itself.
+   */
+  cfcLabelMetadataProtection?: CfcLabelMetadataProtectionMode;
+  /**
    * Per-prepare D4 write-prefix precision counters (value-level provenance
    * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
    * to `false`: the prepare gate then skips all measurement, paying a single
@@ -531,6 +543,7 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
+  readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
@@ -682,6 +695,8 @@ export class Runtime {
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
     this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+    this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
+      "off";
     this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
@@ -962,6 +977,7 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
+    wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);

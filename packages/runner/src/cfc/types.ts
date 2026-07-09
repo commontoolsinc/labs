@@ -474,6 +474,23 @@ export type CfcPolicyEvaluationMode = "off" | "observe" | "enforce";
 export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
   "off";
 
+/**
+ * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
+ * docs/specs/cfc-label-metadata-confidentiality.md §2/§5; spec §4.6.4.1),
+ * orthogonal to the enforcement ladder: `off` = persisted label bytes are
+ * identical to before this dial existed; `observe` = compute the
+ * classification-governed transformed form for cross-space entries and emit a
+ * structured diagnostic when it differs from the verbatim form (the
+ * divergence count is the rollout metric), but persist VERBATIM; `enforce` =
+ * persist the transformed form (commitment-class atom fields replaced by
+ * their canonical digest markers `{digestOf: <hash>}`). The transform never
+ * rejects — representation only.
+ */
+export type CfcLabelMetadataProtectionMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
+  CfcLabelMetadataProtectionMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
@@ -481,6 +498,7 @@ export type CfcTxState = {
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
   policyEvaluationMode: CfcPolicyEvaluationMode;
+  labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Result containers a list coordinator (filter/flatMap) declares each
