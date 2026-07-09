@@ -1196,6 +1196,53 @@ describe("system-pattern update wiring", () => {
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
+  it("fails closed on the raw meta:\"cfc\" seam (inv-12 Stage 0 / SC-25)", () => {
+    const ref: CellRef = {
+      id: "of:cfc-raw-meta-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    // The raw envelope this seam used to return verbatim — Caveat.source and
+    // friends, unredacted. If the handler ever reaches getMetaRaw for "cfc"
+    // again, this is what would leak.
+    const rawEnvelope = {
+      version: 1,
+      schemaHash: "test-schema",
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.Caveat,
+              kind: "derived-from",
+              source: "did:key:alice",
+            }],
+          },
+        }],
+      },
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "labelled data",
+          getMetaRaw: () => rawEnvelope,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
+    // that still sends it must get an error, never the raw metadata.
+    expect(() =>
+      RuntimeProcessor.prototype.handleCellGet.call(processor, {
+        type: RequestType.CellGet,
+        cell: ref,
+        meta: "cfc" as never,
+      })
+    ).toThrow(/cfc/);
+  });
+
   it("returns a label view for a cell ref", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],

@@ -845,6 +845,18 @@ export class RuntimeProcessor {
   handleCellGet(
     request: CellGetRequest,
   ): CellGetResponse {
+    // Fail closed on the retired raw label-metadata seam (inv-12 Stage 0 /
+    // SC-14 / SC-25): `meta: "cfc"` used to return the raw `["cfc"]` envelope
+    // (unredacted Caveat.source and other principal identities) via
+    // getMetaRaw. "cfc" is no longer a MetaField, but the wire is untyped
+    // JSON — reject the request rather than serve raw metadata. Display
+    // label views are served redacted via `includeCfcLabel` / CellGetCfcLabel.
+    if ((request.meta as string | undefined) === "cfc") {
+      throw new Error(
+        'cell/get meta "cfc" is not served over IPC (inv-12); ' +
+          "use getCfcLabel for the redacted display view",
+      );
+    }
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
