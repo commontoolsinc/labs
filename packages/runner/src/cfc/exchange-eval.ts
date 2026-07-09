@@ -318,16 +318,26 @@ const matchRule = (
       // through the context's grant resolver. Evaluated LAST so the query
       // benefits from every binding the other guards established (the
       // point-query fields). Fail closed throughout — see
-      // `extendThroughGrantGuard`.
-      for (const pattern of rule.preCondition?.policyState ?? []) {
-        environments = extendThroughGrantGuard(
-          environments,
-          pattern,
-          ctx.grantResolver,
-        );
-        if (environments.length === 0) break;
+      // `extendThroughGrantGuard`. A PRESENT guard that is not a non-empty
+      // array is unsatisfiable: boot validation rejects that shape, so it
+      // can only arrive through a hand-built snapshot, and degrading it to
+      // "no guard" would fire a rule its author believed grant-gated (cubic
+      // P1 on #4627). Only a genuinely-absent policyState means "no guard".
+      const policyState = rule.preCondition?.policyState;
+      if (policyState !== undefined) {
+        if (!Array.isArray(policyState) || policyState.length === 0) {
+          continue;
+        }
+        for (const pattern of policyState) {
+          environments = extendThroughGrantGuard(
+            environments,
+            pattern,
+            ctx.grantResolver,
+          );
+          if (environments.length === 0) break;
+        }
+        if (environments.length === 0) continue;
       }
-      if (environments.length === 0) continue;
 
       for (const bindings of environments) {
         matches.push({ clauseIndex, alternative, bindings });

@@ -194,7 +194,13 @@ const validatePolicyStateGuards = (value: unknown, where: string): void => {
         `cfcPolicyRecords: ${where} entries must be grant-pattern records`,
       );
     }
-    const kind = (pattern as { kind?: unknown }).kind;
+    // Own property required: the digest projection and atom-pattern matching
+    // consider own fields only, so an inherited `kind` must not satisfy boot
+    // validation (cubic P2 on #4627; isPlainRecord already confines this to
+    // Object.prototype, where a `kind` would be global pollution — belt).
+    const kind = Object.hasOwn(pattern, "kind")
+      ? (pattern as { kind: unknown }).kind
+      : undefined;
     if (typeof kind !== "string" || kind.length === 0) {
       throw new Error(
         `cfcPolicyRecords: ${where} entries need a concrete non-empty ` +

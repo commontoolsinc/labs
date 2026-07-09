@@ -796,13 +796,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     // Dedup by address: the resolver memoizes per query, but two different
     // guards can compute the same candidate — one digest entry per document.
-    // Within one transaction the snapshot is stable, so a duplicate always
-    // carries the identical digest and recording the first is exact.
-    if (
-      this.#cfcState.consultedGrants.some((existing) =>
-        existing.space === consulted.space && existing.id === consulted.id
-      )
-    ) {
+    // The journal snapshot keeps re-reads stable WITHIN one evaluation, but a
+    // consulted grant can legitimately change ACROSS evaluations of the same
+    // transaction (a privileged writeCfcGrant between prepares lands in the
+    // journal), so a re-consultation carrying a DIFFERENT digest replaces the
+    // stale record — the prepared digest must bind the grant state the
+    // LATEST boundary evaluation consumed, never a superseded one (cubic P1
+    // on #4627).
+    const index = this.#cfcState.consultedGrants.findIndex((existing) =>
+      existing.space === consulted.space && existing.id === consulted.id
+    );
+    if (index !== -1) {
+      if (this.#cfcState.consultedGrants[index].digest === consulted.digest) {
+        return;
+      }
+      this.#cfcState.consultedGrants[index] = deepFreeze(consulted);
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("consulted-grant-changed");
+      }
       return;
     }
     this.#cfcState.consultedGrants.push(deepFreeze(consulted));
@@ -817,14 +828,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
-    // soundness condition 1): validation — audience principal-like
-    // (§3.1.8), owner === the transaction's acting principal (release
-    // authority; the fuller §13.4.3 intent-evidence chain arrives with
-    // intents), lifecycle shape — happens INSIDE this method, atomically
-    // with the privileged write, so no caller can reach the reserved
-    // namespace with unvalidated content. Analogous to the builtin
-    // implementation-identity write arms: the runtime surface, not pattern
-    // code, is what authorizes the write.
+    // soundness condition 1): validation — trusted-writer identity (below),
+    // audience principal-like (§3.1.8), owner === the transaction's acting
+    // principal (release authority; the fuller §13.4.3 intent-evidence
+    // chain arrives with intents), lifecycle shape — happens INSIDE this
+    // method, atomically with the privileged write, so no caller can reach
+    // the reserved namespace with unvalidated content.
+    //
+    // Trusted-writer gate (codex P1 on #4627): a grant is DURABLE release
+    // state — far stronger than a single gated egress — so authoring it
+    // requires the transaction's current implementation identity to be a
+    // trusted BUILTIN, exactly the arm `writeAuthorizedBy` and the
+    // runtime-mint gate (`gateRuntimeMintedIntegrity`) trust for
+    // runtime-evidence writes today. Ordinary pattern/handler code runs
+    // under a `verified` (or no) identity and is refused; the share
+    // surface's trusted builtin writer sets its identity the way the llm /
+    // compile-cache builtins do. The §13.4.3 intent-evidence verification
+    // (rendered-state match, trusted surface concept) strengthens this gate
+    // when the §6 intent substrate lands.
+    const identity = this.#cfcState.implementationIdentity;
+    if (identity?.kind !== "builtin") {
+      throw new Error(
+        "cfc-grant: writeCfcGrant requires a trusted builtin implementation " +
+          "identity (the trusted policy-writer path; design §2.3 condition 1)",
+      );
+    }
     const prepared = prepareCfcGrantWrite(
       input,
       this.#cfcState.trustSnapshot?.actingPrincipal,

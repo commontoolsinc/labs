@@ -433,12 +433,16 @@ export const createTxCfcGrantResolver = (
     // bound `space` field must agree; anything else fails closed.
     const space = query.fields.space ?? owner;
     if (space !== owner) return [];
-    const id = cfcGrantDocId({ space, kind: query.kind, owner, resource });
-    const memoKey = `${space}\0${id}`;
-    const memoized = memo.get(memoKey);
-    if (memoized !== undefined) return memoized;
     let facts: readonly unknown[] = [];
     try {
+      // Inside the catch so a bound field the hasher cannot digest fails the
+      // GUARD closed rather than throwing out of the resolver (the
+      // evaluator's own catch is the backstop, but the resolver stays
+      // self-contained — cubic P2 on #4627).
+      const id = cfcGrantDocId({ space, kind: query.kind, owner, resource });
+      const memoKey = `${space}\0${id}`;
+      const memoized = memo.get(memoKey);
+      if (memoized !== undefined) return memoized;
       const value = tx.readOrThrow({
         space: space as MemorySpace,
         id,
@@ -462,14 +466,15 @@ export const createTxCfcGrantResolver = (
           facts = expandCfcGrantFacts(grant);
         }
       }
+      memo.set(memoKey, facts);
     } catch {
-      // Fail closed on read errors (unsynced replica, storage failure): the
-      // grant does not resolve; the §4.9.3 posture. The candidate was
-      // recorded above only if the read succeeded — a read that THREW never
-      // produced a value this decision could have consumed.
-      facts = [];
+      // Fail closed on derivation/read errors (undigestable bound field,
+      // unsynced replica, storage failure): the grant does not resolve; the
+      // §4.9.3 posture. Nothing is memoized or recorded on this path — a
+      // candidate that could not be read never produced a value this
+      // decision could have consumed.
+      return [];
     }
-    memo.set(memoKey, facts);
     return facts;
   };
 };

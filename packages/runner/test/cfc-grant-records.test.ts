@@ -13,11 +13,18 @@ import {
   type ExchangeRule,
 } from "../src/cfc/policy.ts";
 import {
+  CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
   cfcGrantDocId,
+  type CfcGrantWriteInput,
+  createTxCfcGrantResolver,
+  disallowedGrantAudienceEntryReason,
   expandCfcGrantFacts,
+  prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { preparedDigestFor } from "../src/cfc/canonical.ts";
@@ -476,6 +483,13 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     overrides: Record<string, unknown> = {},
   ): Promise<{ space: string; id: string }> => {
     const tx = runtime.edit();
+    // The trusted policy-writer authors under a builtin identity — the same
+    // way the llm/compile-cache builtins author their runtime-evidence
+    // writes (codex P1 on #4627).
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "cfc-grant-writer",
+    });
     const written = tx.writeCfcGrant({
       kind: "ShareGrant",
       owner: signer.did(),
@@ -541,12 +555,41 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
+    it("refuses a caller without a trusted builtin identity", async () => {
+      // A grant is durable release state: only the trusted policy-writer
+      // path may author one. Ordinary pattern/handler code runs under a
+      // `verified` (or no) implementation identity and is refused — the
+      // same arm writeAuthorizedBy trusts for builtin-authored writes.
+      await withRuntime({}, (runtime) => {
+        const grant = {
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+          audience: [userBob],
+        };
+        const bare = runtime.edit();
+        expect(() => bare.writeCfcGrant(grant)).toThrow(/builtin/);
+        bare.abort();
+        const verified = runtime.edit();
+        verified.setCfcImplementationIdentity({
+          kind: "verified",
+          moduleIdentity: "mod:example",
+        });
+        expect(() => verified.writeCfcGrant(grant)).toThrow(/builtin/);
+        verified.abort();
+      });
+    });
+
     it("refuses a grant whose owner is not the acting principal", async () => {
       // For this PR the writer's release-authority check is owner === the
       // transaction's acting principal (trust snapshot); the fuller §13.4.3
       // intent-evidence chain arrives with intents.
       await withRuntime({}, (runtime) => {
         const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-grant-writer",
+        });
         expect(() =>
           tx.writeCfcGrant({
             kind: "ShareGrant",
@@ -562,6 +605,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     it("refuses audience entries that are not principal-like (§3.1.8)", async () => {
       await withRuntime({}, (runtime) => {
         const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-grant-writer",
+        });
         const attempt = (audience: unknown[]) => () =>
           tx.writeCfcGrant({
             kind: "ShareGrant",
@@ -589,6 +636,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     it("refuses a revocation not attributed to the acting principal", async () => {
       await withRuntime({}, (runtime) => {
         const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-grant-writer",
+        });
         expect(() =>
           tx.writeCfcGrant({
             kind: "ShareGrant",
@@ -733,53 +784,54 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
 
     it("a malformed grant document does not fire (fail closed)", async () => {
-      // Seed a forged/corrupt doc at the derived address through a runtime
-      // with CFC disabled — the analog of a client that does not run the
-      // write gate. Verification-on-read must refuse it: the stored identity
-      // fields do not hash to the address they sit at.
-      const storageManager = StorageManager.emulate({ as: signer });
-      const seeder = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
-      const id = cfcGrantDocId({
-        space: signer.did(),
-        kind: "ShareGrant",
-        owner: signer.did(),
-        resource: PHOTO_REF,
-      });
-      const seed = seeder.edit();
-      seed.writeOrThrow({
-        space: signer.did(),
-        id: id as URI,
-        type: "application/json",
-        path: ["value"],
-      }, {
-        version: 1,
-        space: signer.did(),
-        kind: "ShareGrant",
-        owner: signer.did(),
-        // resource swapped: content no longer hashes to the address.
-        resource: "of:everything",
-        audience: [userBob],
-        grantedAt: 1000,
-      });
-      expect((await seed.commit()).ok).toBeDefined();
-      await seeder.dispose();
+      // Seed a forged/corrupt doc at the derived address through an
+      // OBSERVE-mode write — the analog of a client that does not enforce
+      // the write gate (the forgery is diagnosed, not blocked). Same
+      // runtime, so the resolver's read genuinely sees the document and the
+      // verify-on-read path refuses it: the stored identity fields do not
+      // hash to the address they sit at.
+      await withRuntime({ enforcement: "observe" }, async (runtime) => {
+        const id = cfcGrantDocId({
+          space: signer.did(),
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+        });
+        const seed = runtime.edit();
+        seed.writeOrThrow({
+          space: signer.did(),
+          id: id as URI,
+          type: "application/json",
+          path: ["value"],
+        }, {
+          version: 1,
+          space: signer.did(),
+          kind: "ShareGrant",
+          owner: signer.did(),
+          // resource swapped: content no longer hashes to the address.
+          resource: "of:everything",
+          audience: [userBob],
+          grantedAt: 1000,
+        });
+        expect((await seed.commit()).ok).toBeDefined();
 
-      await withRuntime({ storageManager }, async (runtime) => {
         await seedLabeledCell(runtime, "grant-malformed", {
           confidentiality: [cfcAtom.user(signer.did())],
         });
-        const { reasons } = readThenSink(runtime, "grant-malformed");
+        const { reasons, diagnostics } = readThenSink(
+          runtime,
+          "grant-malformed",
+        );
         expect(
           reasons.some((reason) =>
             reason.includes("sink-request confidentiality exceeds ceiling")
           ),
         ).toBe(true);
+        // The verify-on-read path ran (not the absent path).
+        expect(
+          diagnostics.some((note) => note.includes("malformed grant document")),
+        ).toBe(true);
       });
-      await storageManager.close();
     });
 
     it("releases only the owner clause, never a sibling clause (inv-11)", async () => {
@@ -869,6 +921,473 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Arm-level coverage: every reachable validation / fail-closed branch is
+  // pinned directly (the repo standard — defensive arms reachable from the
+  // runner side get tests, not just the happy path).
+  // -------------------------------------------------------------------------
+  describe("writer validation arms (prepareCfcGrantWrite)", () => {
+    const base: CfcGrantWriteInput = {
+      kind: "ShareGrant",
+      owner: ALICE,
+      resource: PHOTO_REF,
+      audience: [userBob],
+      grantedAt: 1000,
+    };
+    const attempt =
+      (input: unknown, acting: string | undefined = ALICE) => () =>
+        prepareCfcGrantWrite(input as CfcGrantWriteInput, acting);
+
+    it("rejects non-record input", () => {
+      expect(attempt("grant")).toThrow(/must be an object/);
+      expect(attempt([base])).toThrow(/must be an object/);
+    });
+
+    it("rejects a malformed kind", () => {
+      expect(attempt({ ...base, kind: 5 })).toThrow(/kind/);
+      expect(attempt({ ...base, kind: "" })).toThrow(/kind/);
+    });
+
+    it("rejects a non-DID owner and a missing acting principal", () => {
+      expect(attempt({ ...base, owner: "alice" })).toThrow(/owner/);
+      // Direct call: an explicit `undefined` second argument would select the
+      // helper's default acting principal.
+      expect(() => prepareCfcGrantWrite(base, undefined)).toThrow(
+        /acting principal/,
+      );
+      expect(attempt(base, BOB)).toThrow(/acting principal/);
+    });
+
+    it("rejects a space other than the owner (v1 governing-space posture)", () => {
+      expect(attempt({ ...base, space: BOB })).toThrow(
+        /space must equal owner/,
+      );
+    });
+
+    it("rejects a missing/empty resource", () => {
+      expect(attempt({ ...base, resource: undefined })).toThrow(/resource/);
+      expect(attempt({ ...base, resource: null })).toThrow(/resource/);
+      expect(attempt({ ...base, resource: "" })).toThrow(/resource/);
+    });
+
+    it("rejects malformed timestamps and intent ids", () => {
+      expect(attempt({ ...base, grantedAt: Number.NaN })).toThrow(/grantedAt/);
+      expect(attempt({ ...base, grantedAt: "soon" })).toThrow(/grantedAt/);
+      expect(attempt({ ...base, expiresAt: "later" })).toThrow(/expiresAt/);
+      expect(attempt({ ...base, expiresAt: Number.POSITIVE_INFINITY }))
+        .toThrow(/expiresAt/);
+      expect(attempt({ ...base, sourceIntentId: 42 })).toThrow(
+        /sourceIntentId/,
+      );
+    });
+
+    it("rejects malformed revocations", () => {
+      expect(attempt({ ...base, revoked: "yes" })).toThrow(/revoked/);
+      expect(attempt({ ...base, revoked: { at: "now", by: ALICE } })).toThrow(
+        /revoked/,
+      );
+      expect(attempt({ ...base, revoked: { at: 1, by: "alice" } })).toThrow(
+        /revoked/,
+      );
+    });
+
+    it("defaults grantedAt to the injected clock and carries sourceIntentId", () => {
+      const prepared = prepareCfcGrantWrite(
+        {
+          kind: "ShareGrant",
+          owner: ALICE,
+          resource: PHOTO_REF,
+          audience: [userBob],
+          sourceIntentId: "intent:1",
+        },
+        ALICE,
+        4242,
+      );
+      expect(prepared.value.grantedAt).toBe(4242);
+      expect(prepared.value.sourceIntentId).toBe("intent:1");
+      expect(prepared.space).toBe(ALICE);
+    });
+  });
+
+  describe("audience-entry validation arms (§3.1.8)", () => {
+    it("rejects non-record and typeless entries", () => {
+      expect(disallowedGrantAudienceEntryReason("bob")).toMatch(
+        /principal-like/,
+      );
+      expect(disallowedGrantAudienceEntryReason([userBob])).toMatch(
+        /principal-like/,
+      );
+      expect(disallowedGrantAudienceEntryReason({ subject: BOB })).toMatch(
+        /string type/,
+      );
+      expect(disallowedGrantAudienceEntryReason({ type: "", subject: BOB }))
+        .toMatch(/string type/);
+    });
+
+    it("rejects placeholders nested inside array values", () => {
+      expect(
+        disallowedGrantAudienceEntryReason({
+          type: CFC_ATOM_TYPE.User,
+          subjects: [{ var: "$x" }],
+        }),
+      ).toMatch(/placeholders/);
+    });
+
+    it("admits a principal-like atom", () => {
+      expect(disallowedGrantAudienceEntryReason(userBob)).toBeUndefined();
+    });
+  });
+
+  describe("verify-on-read arms", () => {
+    const identity = {
+      space: ALICE,
+      kind: "ShareGrant",
+      owner: ALICE,
+      resource: PHOTO_REF,
+    };
+    const id = cfcGrantDocId(identity);
+    const value = {
+      version: 1,
+      ...identity,
+      audience: [userBob],
+      grantedAt: 1000,
+    };
+
+    it("rejects a version mismatch", () => {
+      expect(verifyCfcGrantDocument(ALICE, id, { ...value, version: 2 }))
+        .toBeUndefined();
+    });
+
+    it("rejects a disallowed audience entry (defense in depth)", () => {
+      expect(
+        verifyCfcGrantDocument(ALICE, id, {
+          ...value,
+          audience: [cfcAtom.caveat("screened", userAlice)],
+        }),
+      ).toBeUndefined();
+      expect(verifyCfcGrantDocument(ALICE, id, { ...value, audience: [] }))
+        .toBeUndefined();
+    });
+
+    it("rejects malformed lifecycle fields", () => {
+      expect(
+        verifyCfcGrantDocument(ALICE, id, { ...value, grantedAt: "early" }),
+      ).toBeUndefined();
+      expect(
+        verifyCfcGrantDocument(ALICE, id, { ...value, expiresAt: "late" }),
+      ).toBeUndefined();
+      expect(
+        verifyCfcGrantDocument(ALICE, id, { ...value, revoked: "yes" }),
+      ).toBeUndefined();
+      expect(
+        verifyCfcGrantDocument(ALICE, id, {
+          ...value,
+          revoked: { at: 1, by: "mallory" },
+        }),
+      ).toBeUndefined();
+    });
+
+    it("rejects a resource swap (address re-derivation mismatch)", () => {
+      expect(
+        verifyCfcGrantDocument(ALICE, id, {
+          ...value,
+          resource: "of:everything",
+        }),
+      ).toBeUndefined();
+    });
+
+    it("carries sourceIntentId through fact expansion", () => {
+      const grant = verifyCfcGrantDocument(
+        ALICE,
+        cfcGrantDocId(identity),
+        { ...value, sourceIntentId: "intent:9" },
+      )!;
+      const facts = expandCfcGrantFacts(grant);
+      expect(facts[0]).toMatchObject({ sourceIntentId: "intent:9" });
+    });
+  });
+
+  describe("resolver guard arms (createTxCfcGrantResolver)", () => {
+    it("fails closed on unresolved or malformed query fields", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        // No owner bound.
+        expect(
+          resolver({ kind: "ShareGrant", fields: { resource: PHOTO_REF } }),
+        )
+          .toEqual([]);
+        // Owner not a DID.
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: "alice", resource: PHOTO_REF },
+          }),
+        ).toEqual([]);
+        // No resource bound (label-carried discovery arrives with share-UI).
+        expect(
+          resolver({ kind: "ShareGrant", fields: { owner: signer.did() } }),
+        ).toEqual([]);
+        // Bound space disagreeing with the owner's identity space.
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF, space: BOB },
+          }),
+        ).toEqual([]);
+        // Explicitly-bound agreeing space resolves.
+        const facts = resolver({
+          kind: "ShareGrant",
+          fields: {
+            owner: signer.did(),
+            resource: PHOTO_REF,
+            space: signer.did(),
+          },
+        });
+        expect(facts.length).toBe(1);
+        // Memoized: the repeat query returns identical facts and records the
+        // consulted candidate once.
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: {
+              owner: signer.did(),
+              resource: PHOTO_REF,
+              space: signer.did(),
+            },
+          }),
+        ).toEqual(facts);
+        expect(tx.getCfcState().consultedGrants.length).toBe(1);
+        tx.abort();
+      });
+    });
+
+    it("fails the guard closed when the address cannot be derived", async () => {
+      await withRuntime({}, (runtime) => {
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        const cyclic: Record<string, unknown> = {};
+        cyclic.self = cyclic;
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: cyclic },
+          }),
+        ).toEqual([]);
+        tx.abort();
+      });
+    });
+
+    it("fails closed (and records nothing) when the read throws", () => {
+      const consulted: unknown[] = [];
+      const throwingTx = {
+        readOrThrow: () => {
+          throw new Error("replica unavailable");
+        },
+        recordCfcConsultedGrant: (entry: unknown) => consulted.push(entry),
+        noteCfcDiagnostic: () => {},
+      } as unknown as IExtendedStorageTransaction;
+      const resolver = createTxCfcGrantResolver(throwingTx);
+      expect(
+        resolver({
+          kind: "ShareGrant",
+          fields: { owner: ALICE, resource: PHOTO_REF },
+        }),
+      ).toEqual([]);
+      expect(consulted).toEqual([]);
+    });
+
+    it("notes a diagnostic for a malformed stored document", async () => {
+      await withRuntime({ enforcement: "observe" }, async (runtime) => {
+        const id = cfcGrantDocId({
+          space: signer.did(),
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+        });
+        const seed = runtime.edit();
+        seed.writeOrThrow({
+          space: signer.did(),
+          id: id as URI,
+          type: "application/json",
+          path: ["value"],
+        }, { forged: true });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+          }),
+        ).toEqual([]);
+        expect(
+          tx.getCfcState().diagnostics.some((note) =>
+            note.includes("malformed grant document")
+          ),
+        ).toBe(true);
+        // The malformed candidate still joined the consulted set with its
+        // content digest — the decision looked at it.
+        expect(
+          tx.getCfcState().consultedGrants.some((entry) =>
+            entry.id === id && entry.digest !== CFC_GRANT_ABSENT_DIGEST
+          ),
+        ).toBe(true);
+        tx.abort();
+      });
+    });
+  });
+
+  describe("evaluator fail-closed arms (hand-built snapshots)", () => {
+    const handmade = (rule: ExchangeRule) => ({
+      records: [{ id: "handmade", digest: "d", rules: [rule] }],
+      digest: "d",
+    });
+
+    it("a present-but-empty policyState never fires (not 'no guard')", () => {
+      // Boot validation rejects an empty guard; a hand-built snapshot must
+      // not degrade it to an unguarded rule (cubic P1 on #4627).
+      const result = evaluateExchangeRules(
+        { confidentiality: [userAlice] },
+        handmade(shareRule({ preCondition: { policyState: [] } })),
+        { grantResolver: () => [aliceShareFact()] },
+      );
+      expect(result.firings).toEqual([]);
+      expect(result.label.confidentiality).toEqual([userAlice]);
+    });
+
+    it("a non-array policyState never fires", () => {
+      const rule = shareRule({
+        preCondition: {
+          policyState: "ShareGrant",
+        } as unknown as ExchangeRule["preCondition"],
+      });
+      const result = evaluateExchangeRules(
+        { confidentiality: [userAlice] },
+        handmade(rule),
+        { grantResolver: () => [aliceShareFact()] },
+      );
+      expect(result.firings).toEqual([]);
+    });
+
+    it("non-record guard patterns never fire and never query", () => {
+      const invoked: CfcGrantResolverQuery[] = [];
+      const resolver = (query: CfcGrantResolverQuery) => {
+        invoked.push(query);
+        return [aliceShareFact()];
+      };
+      // A bare string pattern.
+      const scalar = evaluateExchangeRules(
+        { confidentiality: [userAlice] },
+        handmade(shareRule({
+          preCondition: { policyState: ["ShareGrant"] },
+        })),
+        { grantResolver: resolver },
+      );
+      expect(scalar.firings).toEqual([]);
+      // A bare variable placeholder pattern.
+      const placeholder = evaluateExchangeRules(
+        { confidentiality: [userAlice] },
+        handmade(shareRule({
+          preCondition: { policyState: [{ var: "$g" }] },
+        })),
+        { grantResolver: resolver },
+      );
+      expect(placeholder.firings).toEqual([]);
+      expect(invoked).toEqual([]);
+    });
+
+    it("a resolver returning a non-array fails the guard closed", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [userAlice] },
+        snapshot([shareRule()]),
+        { grantResolver: () => "junk" as unknown as readonly unknown[] },
+      );
+      expect(result.firings).toEqual([]);
+    });
+  });
+
+  describe("consulted-grant recording arms", () => {
+    const entry = (digest: string) => ({
+      space: signer.did(),
+      id: `${CFC_GRANT_ID_PREFIX}probe`,
+      digest,
+    });
+
+    it("dedups identical records and replaces a changed digest", async () => {
+      await withRuntime({}, (runtime) => {
+        const tx = runtime.edit();
+        tx.recordCfcConsultedGrant(entry("d1"));
+        tx.recordCfcConsultedGrant(entry("d1"));
+        expect(tx.getCfcState().consultedGrants.length).toBe(1);
+        // A re-consultation with a DIFFERENT digest (the grant changed in
+        // the journal between evaluations) replaces the stale record — the
+        // prepared digest must bind the state the latest evaluation used.
+        tx.recordCfcConsultedGrant(entry("d2"));
+        const state = tx.getCfcState();
+        expect(state.consultedGrants.length).toBe(1);
+        expect(state.consultedGrants[0].digest).toBe("d2");
+        tx.abort();
+      });
+    });
+
+    it("invalidates a prepared transaction on new or changed records", async () => {
+      await withRuntime({}, (runtime) => {
+        const tx = runtime.edit();
+        tx.recordCfcConsultedGrant(entry("d1"));
+        tx.markCfcRelevant("test");
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        // Same record: no invalidation.
+        tx.recordCfcConsultedGrant(entry("d1"));
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        // Changed digest: invalidates.
+        tx.recordCfcConsultedGrant(entry("d2"));
+        const changed = tx.getCfcState().prepare;
+        expect(changed.status).toBe("invalidated");
+        if (changed.status === "invalidated") {
+          expect(changed.reasons).toContain("consulted-grant-changed");
+        }
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        // New address: invalidates.
+        tx.recordCfcConsultedGrant({ ...entry("d3"), id: "grant:cfc:other" });
+        const added = tx.getCfcState().prepare;
+        expect(added.status).toBe("invalidated");
+        if (added.status === "invalidated") {
+          expect(added.reasons).toContain("consulted-grant-added");
+        }
+        tx.abort();
+      });
+    });
+
+    it("delegates through the TransactionWrapper", async () => {
+      await withRuntime({}, (runtime) => {
+        const tx = runtime.edit();
+        const wrapper = new TransactionWrapper(
+          tx as ConstructorParameters<typeof TransactionWrapper>[0],
+          {},
+        );
+        wrapper.recordCfcConsultedGrant(entry("d1"));
+        expect(tx.getCfcState().consultedGrants.length).toBe(1);
+        wrapper.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-grant-writer",
+        });
+        const written = wrapper.writeCfcGrant({
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+          audience: [userBob],
+        });
+        expect(written.id.startsWith(CFC_GRANT_ID_PREFIX)).toBe(true);
+        tx.abort();
+      });
+    });
+  });
+
   describe("digest binding of consulted grants", () => {
     const base: PreparedDigestInput = {
       consumedReads: [],
@@ -912,6 +1431,18 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         preparedDigestFor({ ...base, consultedGrants: [grantA, grantB] }),
       ).toBe(
         preparedDigestFor({ ...base, consultedGrants: [grantB, grantA] }),
+      );
+    });
+
+    it("orders same-address entries by digest deterministically", () => {
+      // Post-dedup this shape cannot occur in a live transaction, but
+      // canonicalization must stay a total order on whatever it is handed —
+      // the digest tiebreaker keeps recording order out of the digest.
+      const twin = { ...grantA, digest: "digest-z" };
+      expect(
+        preparedDigestFor({ ...base, consultedGrants: [grantA, twin] }),
+      ).toBe(
+        preparedDigestFor({ ...base, consultedGrants: [twin, grantA] }),
       );
     });
 

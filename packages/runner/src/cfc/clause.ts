@@ -125,7 +125,8 @@ export const clauseSubsumes = (
 // semantics. Shared by the authored-clause gate in prepare.ts and the grant
 // audience validation in grants.ts (a grant audience entry IS a future clause
 // alternative — §8.12.7 route 2a) so the two cannot drift.
-export const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES = new Set<string>([
-  CFC_ATOM_TYPE.Caveat,
-  CFC_ATOM_TYPE.Expires,
-]);
+export const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES: ReadonlySet<string> =
+  new Set([
+    CFC_ATOM_TYPE.Caveat,
+    CFC_ATOM_TYPE.Expires,
+  ]);

@@ -1024,13 +1024,17 @@ export interface IExtendedStorageTransaction
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
-   * 2a; cfc/grants.ts module doc). Validates the grant — audience entries
-   * principal-like per §3.1.8, `owner` equal to this transaction's acting
-   * principal (release authority), lifecycle shape — derives the
-   * content-addressed id under the reserved `grant:cfc:` namespace, and
-   * writes the document inside the privileged system-write scope. Throws on
-   * any violation. Any OTHER write to the reserved namespace is recorded as
-   * an unprivileged system write and fails closed at prepare (S18 class).
+   * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT
+   * implementation identity to be a trusted builtin (the arm
+   * `writeAuthorizedBy` and the runtime-mint gate trust for runtime
+   * evidence — ordinary pattern/handler code is refused); validates the
+   * grant — audience entries principal-like per §3.1.8, `owner` equal to
+   * this transaction's acting principal (release authority), lifecycle
+   * shape — derives the content-addressed id under the reserved
+   * `grant:cfc:` namespace, and writes the document inside the privileged
+   * system-write scope. Throws on any violation. Any OTHER write to the
+   * reserved namespace is recorded as an unprivileged system write and
+   * fails closed at prepare (S18 class).
    */
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string };
 
