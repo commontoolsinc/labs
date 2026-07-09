@@ -20,11 +20,12 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-08.
+**Last reviewed:** 2026-07-09. Each flag's section carries the date its status
+was last checked against the code.
 
 ## Summary table
 
-| Flag | Toggle via | Default today | Originally added by | Planned end state | Status (2026-07-08) |
+| Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
@@ -35,6 +36,7 @@ in the same change.
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating) | `RuntimeOptions.cfcTriggerReadGating` | `false` | Bernhard Seefeld (#4488) | move toward `true` | implemented, staged rollout |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation) | `RuntimeOptions.cfcPolicyEvaluation` | `off` | Bernhard Seefeld (#4566) | move toward `enforce` | implemented, staged rollout |
+| [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
@@ -323,6 +325,35 @@ the per-epic implementation notes).
 - **Status on 2026-07-08.** Implemented and in staged rollout.
 - **Path to removal.** Once policy evaluation is the norm, the dial could settle
   on `enforce` and be retired.
+
+### `cfcPrefixProvenanceStats`
+
+- **Toggle via.** `RuntimeOptions.cfcPrefixProvenanceStats` (a plain boolean).
+  Pinned off in the shared `coreOptions`; it is a per-deployment measurement
+  opt-in, not env-wired.
+- **Added by.** Bernhard Seefeld, in "D4 write-prefix precision counters
+  (value-level provenance stage 0, SC-24)" (#4623, 2026-07-09).
+- **Purpose.** Measurement only, and the one dial here that does not affect
+  enforcement. When on, each prepared transaction that has at least one
+  protected write records per-prepare precision counters into `getCfcStats()`:
+  gated-read counts per protected write (prefix versus transaction-global),
+  bound-source classifications, and S7-exemption fires. Enforcement decisions
+  are byte-identical whether it is on or off. It exists to gather the "measure
+  before building" data described in
+  [`docs/specs/cfc-value-level-provenance.md`](../specs/cfc-value-level-provenance.md)
+  §6, which the project needs before deciding whether to build the larger
+  value-level provenance narrowing (its "T1").
+- **Current default and planned end state.** `false` by default; off skips all
+  measurement for a single presence check. There is no plan to graduate it to
+  on across the fleet — it is a diagnostic that a deployment turns on to collect
+  precision data.
+- **Status on 2026-07-09.** Implemented, off by default. Covered by
+  `packages/runner/test/cfc-prefix-provenance-stats.test.ts`.
+- **Path to removal.** Once the Stage 0 measurement has informed the
+  value-level-provenance decision (build the narrowing, or not — the entry
+  criteria are deliberately unscheduled in the spec's §8), the counters either
+  fold into that feature or are removed. Because enforcement is unaffected,
+  retiring it is low-risk.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
 > `cfcPolicyRecords`, and `cfcTrustConfig` are CFC *configuration inputs* (the
