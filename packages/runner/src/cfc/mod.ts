@@ -2,8 +2,18 @@ export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
+  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
+  stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
+export {
+  classifyAtomField,
+  classifyLabelField,
+  LABEL_FIELD_CLASSIFICATION,
+  type LabelAtomFamily,
+  type LabelFieldClassificationEntry,
+  type LabelFieldRepresentationClass,
+} from "./label-field-classification.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
