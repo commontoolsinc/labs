@@ -61,6 +61,7 @@ import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
   CFC_ENFORCING_STRICTNESS,
+  type CfcAddress,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
@@ -251,6 +252,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
+    structureContainers: [],
     triggerReads: [],
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
@@ -723,6 +725,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.dereferenceTraces.push(deepFreeze(trace));
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("dereference-trace-added");
+    }
+  }
+
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.#cfcState.structureContainers.push(deepFreeze(address));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("structure-container-added");
     }
   }
 
@@ -1255,6 +1264,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.outboxIdempotencyKeys.clear();
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
+    this.#cfcState.structureContainers = [];
     return this.tx.abort(reason);
   }
 
@@ -1544,6 +1554,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
     this.wrapped.recordCfcDereferenceTrace(trace);
+  }
+
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.wrapped.recordCfcStructureContainer(address);
   }
 
   prepareCfc(): string {

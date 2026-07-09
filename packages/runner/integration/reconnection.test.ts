@@ -5,19 +5,7 @@ import app from "../../toolshed/app.ts";
 import { Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 5000,
-): Promise<void> => {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeout) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-};
+import { defer } from "@commonfabric/utils/defer";
 
 const createRuntime = (identity: Identity, base: URL) =>
   new Runtime({
@@ -71,16 +59,15 @@ Deno.test(
       await subscriberRuntime.storageManager.synced();
       assertEquals(subscriberCell.get(), { count: 1 });
 
-      let sawReconnectUpdate = false;
+      const gotReconnectUpdate = defer<void>();
       subscriberCell.sink((value) => {
         if (value?.count === 2) {
-          sawReconnectUpdate = true;
+          gotReconnectUpdate.resolve();
         }
       });
 
       await server.shutdown();
       server = Deno.serve({ port }, app.fetch);
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const writerRuntime = createRuntime(identity, base);
       const writerCell = writerRuntime.getCell(
@@ -94,7 +81,7 @@ Deno.test(
       await tx.commit();
       await writerRuntime.storageManager.synced();
 
-      await waitFor(() => sawReconnectUpdate);
+      await gotReconnectUpdate.promise;
       assertEquals(subscriberCell.get(), { count: 2 });
 
       await writerRuntime.dispose();

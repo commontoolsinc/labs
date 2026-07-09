@@ -5,6 +5,8 @@ declare global {
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
+  var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
+  var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -25,6 +27,14 @@ const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
 const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
   typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
     ? $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION
+    : undefined;
+const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
+  typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
+    ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
+    : undefined;
+const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE =
+  typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME === "string"
+    ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -56,4 +66,12 @@ export const EXPERIMENTAL = {
   eagerSourceAnnotation:
     flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
       (ENVIRONMENT === "development"),
+  // Auto-update the space-root system pattern in place. Default off until CI
+  // golden-replay coverage exists; the home root needs the second flag too.
+  systemPatternAutoUpdate: flagValue(
+    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE,
+  ),
+  systemPatternAutoUpdateHome: flagValue(
+    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE,
+  ),
 };

@@ -72,9 +72,11 @@ export function testPrincipalSessionOpenAuthFactory(
 
 export class NotificationRecorder implements IStorageNotification {
   notifications: StorageNotification[] = [];
+  onNotification?: (notification: StorageNotification) => void;
 
   next(notification: StorageNotification) {
     this.notifications.push(notification);
+    this.onNotification?.(notification);
     return { done: false };
   }
 

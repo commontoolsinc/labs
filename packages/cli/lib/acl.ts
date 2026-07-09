@@ -1,6 +1,11 @@
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { loadIdentity } from "./identity.ts";
-import { ACLManager, Runtime } from "@commonfabric/runner";
+import {
+  ACLManager,
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   ACL,
@@ -8,7 +13,7 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
-import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
+import { awaitSyncWithTimeout } from "./utils.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -35,15 +40,17 @@ export async function createRuntime(
   config: SpaceConfig,
   session: Session,
 ): Promise<Runtime> {
-  const runtime = new Runtime({
+  // Shared first-party posture for client runtimes against a deployed API
+  // (CT-1814).
+  const runtime = new Runtime(runtimePresets.remoteClient({
     apiUrl: config.apiUrl,
-    experimental: experimentalOptionsFromEnv(),
     storageManager: StorageManager.open({
       as: session.as,
       memoryHost: new URL(config.apiUrl),
       spaceIdentity: session.spaceIdentity,
     }),
-  });
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
+  }));
 
   if (!(await runtime.healthCheck())) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);

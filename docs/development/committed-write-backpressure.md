@@ -14,10 +14,9 @@ the time this commit read its basis and the time it reached the server. On
 rejection the optimistic write is rolled back (a "revert") and the originating
 event is re-run.
 
-The re-run used to have a fixed budget. An event handler retried five times
-(`DEFAULT_RETRIES_FOR_EVENTS`) and then gave up: it logged "Event handler
-transaction failed after exhausting all retries" and dropped the write. Nothing
-surfaced to the user.
+The re-run used to have a fixed budget. An event handler retried five times and
+then gave up: it logged "Event handler transaction failed after exhausting all
+retries" and dropped the write. Nothing surfaced to the user.
 
 Under sustained contention that budget is exhausted before the contention
 clears. The concrete case that motivated this work: profile appends issued while
@@ -33,22 +32,38 @@ correctness cliff, not graceful degradation.
 A committed write that represents real user intent must converge or fail loudly.
 It must never vanish. Under contention the system should get slower, not lossy.
 
-That requires separating two kinds of rejection that the old fixed budget
-treated the same:
+The split is by whether a re-run against fresher confirmed state could make the
+commit succeed — that is, whether the rejection is a **stale basis**:
 
-- A **transient stale-basis conflict** (`ConflictError`). Re-running the handler
-  against fresh confirmed state and committing again can succeed. These are
-  exactly the rejections that a contention burst produces, and the ones that
-  must keep being retried until they land.
-- A **permanent precondition failure** (`PreconditionFailedError` —
-  `receipt-exists`, `origin-committed`). Re-running can never succeed and must
-  not happen. `receipt-exists` means the event was already durably handled by a
-  prior delivery (idempotent dedup); `origin-committed` means the event's origin
-  lineage did not commit, so the descendant must not apply.
+- **Retry through the window — a stale basis.** Two rejections mean the confirmed
+  timeline moved under the commit, so re-reading it fresh can resolve it: a
+  server-side `ConflictError` (another writer advanced the entity's sequence) and
+  the local `StorageTransactionInconsistent` guard (a value the transaction read
+  changed on this replica between the read and the commit). These are exactly what
+  a contention burst — a space rehydrating while a handler writes to it — produces.
+  Re-running the handler against fresh confirmed state and committing again can
+  succeed, so the write backs off and retries until it lands.
+- **Fail fast — everything else.** A **permanent precondition failure**
+  (`PreconditionFailedError` — `receipt-exists`, `origin-committed`) can never
+  succeed and must not re-run: `receipt-exists` means the event was already
+  durably handled by a prior delivery (idempotent dedup); `origin-committed` means
+  the event's origin lineage did not commit, so the descendant must not apply.
+  Every **other non-permanent rejection** — an authorization denial, a malformed
+  store operation, a transport error, a handler `tx.abort()` — is not a stale
+  basis: re-running hits the same rule and gets the same refusal. Retrying it
+  would burn the whole window arriving at the same answer, and for an
+  authorization denial that means retrying a security denial. So it drops on the
+  first attempt.
 
-A third group — handler-initiated aborts and system errors — are transient in
-the sense that they are not permanent precondition failures, but they are not
-contention either, so retrying harder does not help them.
+The old code had two problems this fixes. It retried a fixed five times and then
+dropped, so a stale-basis rejection that was not typed as `ConflictError` — a
+`StorageTransactionInconsistent` from the rehydration storm — ran out of its five
+attempts in a few milliseconds and vanished (a silent-loss cliff). And it gave
+*only* `ConflictError` the window. Now both stale-basis rejections are windowed
+(the `StorageTransactionInconsistent` one unconditionally — generalizing an
+interim version that windowed it only on a commit carrying a mergeable op), and
+there is no fixed count anywhere: a stale basis is bounded by the retry window, a
+non-stale-basis rejection drops immediately.
 
 ## The model
 
@@ -56,35 +71,58 @@ The event-handler commit path classifies each commit result and acts on it
 (`packages/runner/src/scheduler/events.ts`, `classifyCommitDisposition`):
 
 - **Success** — done.
-- **Stale-basis `ConflictError`** — the backpressure path. The event is re-queued
-  parked via the existing `notBefore` mechanism with a single capped exponential
-  backoff plus jitter (`scheduler/backpressure.ts`, `computeBackoffDelayMs`). The
-  curve is deliberately near-immediate at the start: the default `baseDelayMs` is
-  25/32 ms, so the first few delays are 0.78, 1.56, 3.125 ms — effectively
-  immediate. A stale-basis conflict usually clears the instant the fresh confirmed
-  state arrives, and these sub-5ms delays let it converge within a settle (the
-  harness and the UI settle by waiting for the event queue to drain, so a retry
-  that would have cleared immediately must not be spaced out). The delay only
-  grows into real spacing once a conflict persists: it reaches 25ms before the
-  seventh attempt and doubles to a 1-second cap. Backoff makes the scheduler slow
-  down under sustained contention instead of busy-looping; jitter keeps concurrent
-  writers contending for the same entity from retrying in lockstep. The event
-  keeps retrying for a bounded window (default 30 seconds), measured from the
-  first conflict, which is long enough to outlast a rehydration burst. `idle()`
-  and `settled()` already wait for a parked head event, so a write that converges
+- **A stale-basis rejection** (`ConflictError` or `StorageTransactionInconsistent`)
+  — the backpressure path. The event is re-queued parked via the
+  existing `notBefore` mechanism with a single capped exponential backoff plus
+  jitter (`scheduler/backpressure.ts`, `computeBackoffDelayMs`). The curve is
+  deliberately near-immediate at the start: the default `baseDelayMs` is 25/32 ms,
+  so the first few delays are 0.78, 1.56, 3.125 ms — effectively immediate. A
+  stale-basis conflict usually clears the instant the fresh confirmed state
+  arrives, and these sub-5ms delays let it converge within a settle (the harness
+  and the UI settle by waiting for the event queue to drain, so a retry that would
+  have cleared immediately must not be spaced out). The delay only grows into real
+  spacing once the failure persists: it reaches 25ms before the seventh attempt
+  and doubles to a 1-second cap. Backoff makes the scheduler slow down under
+  sustained contention instead of busy-looping; jitter keeps concurrent writers
+  contending for the same entity from retrying in lockstep. The event keeps
+  retrying for a bounded window (default 30 seconds), measured from the first
+  failure, which is long enough to outlast a rehydration burst. `idle()` and
+  `settled()` already wait for a parked head event, so a write that converges
   still completes within a settle.
 - **Window elapsed without converging** — a terminal `CommitConvergenceError` is
   surfaced through the scheduler error channel (`scheduler.onError`). The write
   fails loudly rather than disappearing. This is the bounded-resource backstop:
-  if a conflict genuinely never clears, the system does not retry forever, it
-  reports.
+  if a transient failure genuinely never clears, the system does not retry
+  forever, it reports, carrying the original error as the error's `cause`.
 - **Permanent rejection** — never retried, exactly as before, and still
   observable through the `scheduler.event.commit` telemetry marker
   (`permanentRejection`).
-- **Any other transient error** (abort, system error) — keeps the fixed
-  `retriesLeft` budget and the previous retry-then-stop behavior. Backpressure
-  would not help a handler that aborts itself, and retrying it within the window
-  would loop pointlessly.
+- **Any other non-permanent rejection** — dropped without retry. An authorization
+  denial, a malformed store operation, a transport error, or a handler
+  `tx.abort()` is not a stale basis, so re-running cannot resolve it; the write is
+  dropped and logged rather than entering the window.
+- **`retries: false` opt-out** — dropped without retry as well; see below.
+
+### Why only a stale basis is windowed
+
+The dividing line is whether a re-run against fresher confirmed state could change
+the outcome. A `ConflictError` and a `StorageTransactionInconsistent` are races
+with the confirmed timeline — the server, or the local basis guard, saw a read go
+stale — and re-reading fresh confirmed state can win the race, so they take the
+window. Every other non-permanent rejection is deterministic with respect to
+confirmed state: an authorization policy, a malformed operation, a handler abort,
+or a transport failure the server keeps rejecting refuses the identical
+transaction identically no matter how fresh the state is. Windowing one would burn
+up to the full window (30 seconds by default) of backoff to arrive at the same
+refusal, and for a forged or unauthorized event that means retrying a security
+denial. So they fail fast, alongside the permanent precondition failures.
+
+An interim version windowed only `ConflictError`, plus `StorageTransactionInconsistent`
+when the commit carried a mergeable op (add-wins, commutative — always safe to
+retry). Windowing every `StorageTransactionInconsistent` generalizes that: a
+stale basis converges by re-running whether or not the op is mergeable, and the
+receipt machinery (below) keeps the re-run from double-applying, so the
+mergeable-op gate is no longer needed.
 
 ### Resource bounds
 
@@ -118,15 +156,24 @@ re-run reads fresh confirmed state (including profiles that landed in the
 meantime) and reconciles — which is why three concurrent appends converge to a
 list of three rather than clobbering each other.
 
-### The `retries: 0` opt-out
+### The `retries` opt-out
 
-`queueEvent`'s `retries` argument now gates whether conflicts are retried at all,
-rather than bounding how many times. The default (`DEFAULT_RETRIES_FOR_EVENTS`,
-used by every real user event through `cell.send`) is positive, so user events
-get backpressure. A caller that sends with `retries: 0` — a speculative lineage
-origin, an internal one-shot — opts out: a conflict gives up immediately, so a
-descendant of a failed origin still drops deterministically. The exact positive
-count no longer bounds conflict retries; the window does.
+`queueEvent`'s `retries` argument is a boolean: it gates whether a transient
+failure is retried at all, with no count anywhere. It defaults to `true` (used by
+every real user event through `cell.send`), so user events get backpressure. A
+caller that sends with `retries: false` — a speculative lineage origin, an
+internal one-shot — opts out: any failure gives up immediately, so a descendant of
+a failed origin still drops deterministically. When `retries` is `true`, a
+stale-basis failure is bounded by the retry window rather than a count (a
+non-stale-basis failure still drops on the first attempt).
+
+The same `retries` boolean also gates the inSpace-name resolution path
+(`RetryImmediately`), which re-runs the handler to resolve a
+`PatternFactory.inSpace("name")` target. That loop needs no count either: name
+resolution is monotonic — each re-run resolves at least one previously-unresolved
+name into a cache, and a resolved name never becomes pending again — so a handler
+that references finitely many distinct names terminates on its own. A
+`retries: false` event does not take this path; it drops instead of re-running.
 
 ## Configuration
 
@@ -137,9 +184,9 @@ count no longer bounds conflict retries; the window does.
 (non-negative delays, a cap no lower than the base delay, jitter within [0, 1], a
 non-negative window). The clamps only keep the arithmetic sane; the
 never-silently-dropped guarantee does not depend on them. A zero window is
-allowed and does not reintroduce silent drops — it makes the first conflict fail
-terminally instead of being retried. Tests use this to shrink the window and
-backoff.
+allowed and does not reintroduce silent drops — it makes the first stale-basis
+failure fail terminally instead of being retried. Tests use this to shrink the
+window and backoff.
 
 ## Observability
 
@@ -151,10 +198,13 @@ registered `scheduler.onError` handlers as a `CommitConvergenceError`.
 
 ## The reactive-action path
 
-The reactive path (`scheduler/action-run.ts`) does not need this backpressure
-and shares only the `isConflictRejection` classifier. A reactive action is a
-re-derivation: its output is a function of its inputs. On a conflict it does not
-enter the bounded retry budget — instead it re-arms its subscription, waits for
+The reactive path (`scheduler/action-run.ts`) does not need this backpressure.
+Both paths window a stale basis, but they recover from a `ConflictError`
+differently: the event path re-queues it with backoff, while the reactive path
+re-arms its subscription and waits for the catch-up. A reactive action is a
+re-derivation: its
+output is a function of its inputs. On a conflict it does not enter the bounded
+retry budget — instead it re-arms its subscription, waits for
 the conflict's `readyToRetry` catch-up, and re-queues itself to re-run against
 the caught-up state. (Reader-dirty propagation re-runs it too when the catch-up
 write lands as a fresh notification, a redundant fast path that does not cover a
@@ -171,15 +221,28 @@ must be actively retried rather than recovered by re-derivation.
 - `packages/runner/test/scheduler-commit-backpressure.test.ts` — the validation
   of record. It drives the event-handler commit path against an emulated server
   that rejects commits on demand: a burst of transient conflicts longer than the
-  old budget still lands; a permanent rejection is not retried and stays
-  observable; a never-converging conflict surfaces a terminal error within the
-  window with bounded attempts; and three whole-array appends
-  (`list = [...list, value]`, the profile-append shape) survive a conflict storm
-  so the durable count reaches three. This deterministically reproduces the
-  silent-loss bug and proves the fix.
-- `packages/runner/test/scheduler-event-lineage.test.ts` — adapted so a
-  permanently failed origin is modeled without relying on budget exhaustion; it
-  exercises the give-up (`retries: 0`) and terminal-convergence paths.
+  old budget still lands; a non-stale-basis rejection (which the server normalizes
+  to `TransactionError`) drops on the first attempt without entering the window; a
+  permanent rejection is not retried and stays observable; a never-converging
+  conflict surfaces a terminal error within the window with bounded attempts; and
+  three whole-array appends (`list = [...list, value]`, the profile-append shape)
+  survive a conflict storm so the durable count reaches three. This
+  deterministically reproduces the silent-loss bug and proves the fix.
+- `packages/runner/test/mergeable-append-multispace-conflict.test.ts` — a
+  mergeable append survives a `StorageTransactionInconsistent` storm (windowed),
+  and an `AuthorizationError` on the same commit fails fast without entering the
+  window (non-stale-basis).
+- `packages/runner/test/scheduler-event-lineage.test.ts` — a permanently failing
+  origin (a handler that aborts its own tx) fast-fails on its first attempt (an
+  abort is not a stale basis, so it is not windowed), and the test asserts the
+  lineage invariant: the origin's payload-only same-space follow-up never commits.
+  Also exercises the give-up (`retries: false`) and terminal-convergence paths,
+  and the "stops handler-result pieces when the handler commit never converges"
+  case drives an unending conflict to a terminal `CommitConvergenceError`.
+- `packages/runner/test/cfc-ui-contract.test.ts` — the `writeAuthorizedBy`
+  enforcement cases confirm the fast-fail path: an unauthorized push is rejected
+  with `StorageTransactionAborted` and dropped immediately rather than retried for
+  the full window.
 - `packages/patterns/integration/home-profile.test.ts` — unchanged browser-level
   profile-creation regression coverage; still passes (the fix does not regress
   the normal cross-space append).

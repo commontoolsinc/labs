@@ -174,18 +174,29 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
-  retriesLeft: number;
+  /**
+   * Whether a transient failure for this event should be retried. `true` routes
+   * a transient commit failure through the exponential-backoff window and lets
+   * the inSpace-name resolution path (RetryImmediately) re-run the handler;
+   * `false` makes both drop on the first failure (a speculative lineage origin or
+   * an internal one-shot opts out this way). There is no retry count: a windowed
+   * commit failure is bounded by the retry window, and RetryImmediately is
+   * bounded by the monotonic space-name cache (each re-run resolves at least one
+   * previously-unresolved name, and a resolved name never becomes pending again).
+   */
+  retry: boolean;
   onCommit?: (tx: IExtendedStorageTransaction) => void;
   notBefore?: number;
   /**
-   * Number of transient commit conflicts this intent has hit. Drives the
-   * exponential backoff exponent; carried across backoff retries.
+   * Number of transient commit failures this intent has hit. Drives the
+   * exponential backoff exponent; carried across backoff retries. Covers every
+   * transient commit failure, not only conflicts.
    */
-  conflictAttempts?: number;
+  retryAttempts?: number;
   /**
-   * Wall-clock deadline (performance.now()) after which a still-conflicting
-   * intent surfaces a terminal error instead of retrying. Set from the first
-   * conflict and carried across backoff retries.
+   * Wall-clock deadline (performance.now()) after which a still-failing intent
+   * surfaces a terminal error instead of retrying. Set from the first transient
+   * failure and carried across backoff retries.
    */
-  conflictDeadline?: number;
+  retryDeadline?: number;
 };

@@ -566,7 +566,9 @@ Topological sort over the work set with:
 ### 7.5 Events
 
 Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
-per-event retry budget. There is exactly **one lane today** (lane =
+per-event retry policy (no retry count: a stale-basis commit failure retries
+within a bounded backoff window, everything else drops fast — see the
+rejection taxonomy in §7.6). There is exactly **one lane today** (lane =
 everything), so observable behavior is v1's global FIFO unchanged — but the
 spec states ordering, consistency gating, parking, and (future)
 confirmed-commit dispatch *per lane*, so that relaxing ordering later is a
@@ -616,9 +618,10 @@ Per pass, for each lane's head event:
 3. **Dispatch** once the closure is clean: presync handler inputs
    (`presyncInputs`, unchanged), run the handler in an immediate transaction
    stamped with the handler's id, commit optimistically (changes propagate
-   through the one channel), retry by re-queueing at the lane head on
-   rejection, then run the internal `onCommit` callback (success or
-   exhausted failure; no external side effects — unchanged contract).
+   through the one channel), retry a stale-basis rejection by re-queueing at
+   the lane head (backoff-parked via `notBefore`), then run the internal
+   `onCommit` callback (success or final failure; no external side effects —
+   unchanged contract).
 
 ### 7.6 Event-initiated work and commit failure
 
@@ -652,8 +655,9 @@ Current state, for the record (verified in code, June 2026):
   push-mode branch (`runner.ts:2724-2729`); the pull path ties teardown only
   to the handler node's lifetime (`runner.ts:2735`). Convergence after a
   failed commit relies on retry + cause-derived deterministic ids
-  (`{ resultFor: cause }` + `startCore`'s already-running check); exhausted
-  retries leave a registered piece running against rolled-back data. The
+  (`{ resultFor: cause }` + `startCore`'s already-running check); a commit
+  that never lands (retry window elapsed, or a fast-dropped rejection)
+  leaves a registered piece running against rolled-back data. The
   commit-gated mechanism already exists (`startAfterSuccessfulCommit`) but
   is used only for `navigateTo` results.
 - *Exactly-once handling* does not exist at all: a re-delivered event
@@ -661,7 +665,13 @@ Current state, for the record (verified in code, June 2026):
 
 The design rests on two shared pieces of infrastructure — durable event
 identity (§7.5) and a **rejection taxonomy**: commit rejections split into
-*retryable* (ordinary optimistic conflicts — retry as today) and
+*stale-basis* (a server-side conflict or the local
+StorageTransactionInconsistent guard — re-running against fresher confirmed
+state can succeed, so it retries with capped exponential backoff within a
+bounded window, then surfaces a terminal CommitConvergenceError),
+*terminal* (a deterministic commit-rule refusal — never retried, surfaced),
+*non-retryable* (every other non-permanent rejection — deterministic with
+respect to confirmed state, drops on the first attempt), and
 *permanent* (a commit-time precondition failed — drop, never retry).
 
 **Speculation lineage.** Follow-up work dispatches immediately and

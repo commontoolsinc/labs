@@ -17,12 +17,12 @@ import {
   toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
 import type {
-  Entity,
   EventHandler,
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -1017,35 +1017,27 @@ describe("event handling", () => {
   });
 
   it(
-    "should retry event handler when the handler transaction aborts, up to retries count",
+    "does not retry an event handler whose transaction aborts locally",
     async () => {
-      const entityId = `test:retry-conflict-${Date.now()}` as Entity;
-
-      // Set up an event cell and commit initial state
+      // A handler that aborts its own transaction produces a local
+      // StorageTransactionAborted. That is a deterministic rejection, not
+      // contention: re-running the identical handler cannot make it converge, so
+      // the scheduler drops it on the first attempt regardless of the retries
+      // budget. (A ConflictError, by contrast, is retried within the
+      // backpressure window — see scheduler-commit-backpressure.test.ts.)
       const eventCell = runtime.getCell<number>(
         space,
-        "should retry event handler on conflict",
+        "should not retry event handler on local abort",
         undefined,
         tx,
       );
       eventCell.set(0);
       await tx.commit();
 
-      // Event handler that writes a conflicting value to the same entity
       let attempts = 0;
-      const handler: EventHandler = (tx, _event) => {
+      const handler: EventHandler = (handlerTx, _event) => {
         attempts++;
-        // Force commit failure for the first 5 attempts to exercise retries.
-        if (attempts <= 5) {
-          tx.abort("force-abort-for-retry");
-          return;
-        }
-        // On the final attempt, perform a regular write.
-        tx.write({
-          space,
-          id: entityId,
-          path: [],
-        }, { version: 2 });
+        handlerTx.abort("force-abort-no-retry");
       };
 
       runtime.scheduler.addEventHandler(
@@ -1053,18 +1045,71 @@ describe("event handling", () => {
         eventCell.getAsNormalizedFullLink(),
       );
 
-      // Queue event (uses default retries configured in scheduler)
+      // Default retries budget; the local abort is dropped regardless of it.
       runtime.scheduler.queueEvent(
         eventCell.getAsNormalizedFullLink(),
         1,
       );
 
-      await waitForSchedulerCondition(runtime, () => attempts >= 6);
+      await runtime.idle();
+      // Give any erroneous retry a chance to run, then confirm none did.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
 
-      // Should attempt initial + default retries times (DEFAULT_RETRIES=5)
-      expect(attempts).toBe(6);
+      expect(attempts).toBe(1);
+    },
+  );
 
-      // No further assertions needed; this verifies retry behavior only.
+  it(
+    "drops an event that needs inSpace-name resolution when the caller opted out (retries: false)",
+    async () => {
+      // RetryImmediately is the inSpace("name") resolution signal: the handler
+      // referenced a named pattern space that has just been resolved, and the
+      // scheduler re-runs the handler so it resolves synchronously from the
+      // cache. A retries: false event is a one-shot (a speculative lineage
+      // origin, an internal one-shot) and opts out of that re-run: it drops the
+      // write instead of re-running to resolve names.
+      const eventCell = runtime.getCell<number>(
+        space,
+        "retries-false-inspace-resolution",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      let onCommitStatus: string | undefined;
+      const handler: EventHandler = (_handlerTx, _event) => {
+        attempts++;
+        throw new RetryImmediately();
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      // retries: false opts out of both the commit-retry window and the
+      // inSpace-name resolution re-run. The final-outcome callback still fires
+      // once for the dropped one-shot.
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        false,
+        (committedTx) => {
+          onCommitStatus = committedTx.status().status;
+        },
+      );
+
+      await runtime.idle();
+      // Give any erroneous re-run a chance to run, then confirm none did.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
+
+      // The one-shot ran once and dropped without re-running to resolve names.
+      expect(attempts).toBe(1);
+      expect(onCommitStatus).toBeDefined();
     },
   );
 });

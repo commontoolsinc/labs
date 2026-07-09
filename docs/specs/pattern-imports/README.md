@@ -12,11 +12,11 @@ A reference names a **starting cell** — by slug or by cell URI, optionally
 qualified by space and toolshed host — and resolution **follows the pointer
 chain until it reaches a content-addressed pattern source**. A slug may point
 at a deployed piece (then we mean "the pattern that piece currently runs" —
-one more hop through `meta("pattern")`) or directly at a pattern (a named,
-updatable publication). Either way the chain terminates at an entry-module
-identity in the same namespace as the compile cache and `cf:module/<hash>`
-(`packages/runner/src/harness/module-identity.ts`), and that terminal hash is
-what deployed importers pin.
+one more hop, reading the piece's `patternIdentity`) or directly at a pattern
+(a named, updatable publication). Either way the chain terminates at an
+entry-module identity in the same namespace as the compile cache and
+`cf:module/<hash>` (`packages/runner/src/harness/module-identity.ts`), and that
+terminal hash is what deployed importers pin.
 
 There is deliberately **no type tag in the specifier** (`cf:piece/…` vs
 `cf:pattern/…` was considered and dropped, § Alternatives): slug cells are
@@ -26,11 +26,18 @@ distinction evaporates at pin time — both freeze to the same kind of hash.
 
 ## Status
 
-Design.
+**Implemented** (`#4081`; grammar/resolver/pinning/mounting as described). This
+remains the design of record; for the as-built pointer model note that the
+patternId + pattern **meta cell** this document originally leaned on were
+**retired** in `#4156` (`docs/specs/pattern-id-retirement.md`) — a piece now
+carries only `patternIdentity = { identity, symbol }`, and a pattern's source
+lives in the `pattern:<identity>` source-doc closure. References below are
+updated to match. Update propagation (rolling a running piece to a new version)
+is a companion: `pattern-updates.md`.
 
 ## Last Updated
 
-2026-06-11
+2026-07-08
 
 ## Motivation
 
@@ -42,10 +49,10 @@ Design.
   (`packages/runner/src/builtins/fetch-program.ts`) fetches and compiles remote
   programs at *runtime*, untyped at the call site. An import is compile-time:
   TypeScript checks the binding names and types against the real source.
-- **A publishing story that is just naming.** Pointing a slug at a pattern
-  meta cell in a readable space *is* publication: a human-readable, updatable
-  name (a dist-tag) for a content-addressed artifact. No registry product
-  required.
+- **A publishing story that is just naming.** Pointing a slug at a cell that
+  carries a `patternIdentity` (a piece, or a lightweight published-pointer
+  cell) in a readable space *is* publication: a human-readable, updatable name
+  (a dist-tag) for a content-addressed artifact. No registry product required.
 - **Foundation for external packages.** The same resolution seam, pinning
   model, and collision rules are designed so that `npm:`/esm.sh support can be
   added later without revisiting this design (§ External packages).
@@ -57,9 +64,10 @@ Design.
   follows a live pointer is a different feature (e.g. `getPattern`, wish);
   imports are static.
 - **Version ranges / semver resolution.** References are exact: a mutable
-  pointer (resolved once, at pin time) or a content hash. Pattern lineage
-  (`parents`, `spec` in the pattern meta cell) is metadata, not a resolution
-  input.
+  pointer (resolved once, at pin time) or a content hash. Any version label or
+  lineage is non-hashed metadata (the entry source doc's `annotations` field is
+  the seam), never a resolution input. (`parents`/`spec` were removed with the
+  meta cell; lineage is not currently stored.)
 - **A package registry product.** There is no registry service at all: every
   resolution hop — including cross-host — is an ordinary authenticated cell
   read, and content is hash-verified by the client regardless of which host
@@ -72,23 +80,24 @@ Design.
 | `ProgramResolver` seam (`main()` / `resolveSource(specifier)`, async) | `packages/js-compiler/program.ts`, `typescript/resolver.ts` | The hook where fabric imports plug in; compilation already runs inside a runtime with storage + network access |
 | Authored-import policy | `packages/runner/src/sandbox/runtime-module-policy.ts:25` | Single dispatch point to extend for `cf:` specifiers |
 | Per-module Merkle identity (source + deps; external deps fold the full specifier string into the leaf: `runtime:${specifier}@${fingerprint}`) | `packages/runner/src/harness/module-identity.ts:145-149` | Makes pinned specifiers content-derived with **no hashing changes** (§ Snapshot semantics) |
-| Piece → pattern pointers: `meta("pattern")` = patternId URI (`of:<hash>`); `meta("patternIdentity")` = `{ identity, symbol }` (entry-module identity) | `packages/runner/src/runner.ts:4137-4159` | One hop in the resolution chain |
-| Pattern meta cell: `program {main, files}`, `entryIdentity`, `parents`, `spec`; cell id = patternId (`of:<hash>`, a causal ref) | `packages/runner/src/pattern-manager.ts:55-90` | Source-of-truth envelope for a pattern's source set |
-| Compile cache: source docs at cell key **`pattern:<identity>`**, compiled docs at `compileCache:<rtVersion>/<identity>` | `packages/runner/src/compilation-cache/cell-cache.ts:71-81` | **The URI a pattern is saved under by hash.** Content-addressed per-module source + compiled storage; imports resolve from and dedupe into it |
+| Piece → pattern pointer: `meta("patternIdentity")` = `{ identity, symbol }` (entry-module identity), the sole pointer post-`#4156` (a separate `meta("pattern")` survives only as a builtin parent-backlink) | write `runner.ts:1012`, read `getPatternIdentityRef` `runner.ts:4441` | The terminal hop of the resolution chain |
+| Pattern source-of-truth: the `pattern:<identity>` source-doc closure (there is no longer a meta cell; the retired one's `program` was pure duplication of these docs) | `packages/runner/src/compilation-cache/cell-cache.ts` | Recovered via `getPatternSourceProgramByIdentity` / `loadVerifiedSourceClosure` |
+| Compile cache: source docs at cell key **`pattern:<identity>`**, compiled docs at `compileCache:<rtVersion>/<identity>` | `packages/runner/src/compilation-cache/cell-cache.ts` (`sourceDocKey`/`compiledDocKey`) | **The URI a pattern is saved under by hash.** Content-addressed per-module source + compiled storage; imports resolve from and dedupe into it |
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts:34-80` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
-| `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts:985` | Existing by-identity load path the resolver builds on |
+| `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts:839` | Existing by-identity load path the resolver builds on |
 | Per-space host routing: `spaceHostMap` resolves each space to its memory host; foreign-host sessions are ordinary authenticated memory sessions (#3947) | `packages/runner/src/storage/v2-remote-session.ts:47` | Cross-toolshed refs are just cell reads in a space routed to another host — no HTTP endpoints needed |
 
 ### The two "pattern by hash" handles, explicitly
 
 Because both come up, and only one is the pin:
 
-- **`of:fid1:<patternId>`** — the pattern **meta cell**'s entity URI
-  (`toURI(createRef(...))`, `packages/runner/src/uri-utils.ts:12`). A *causal*
-  ref: resolvable (it's a cell address) but not re-hash-verifiable from fetched
-  content alone, and its derivation is not purely source-content in all paths.
-  Usable as a reference *starting point*; never the pin.
+- **`of:fid1:<hash>`** — the entity URI of a **cell that carries a pattern
+  pointer** (a piece result cell), `toURI(createRef(...))`
+  (`packages/runner/src/uri-utils.ts:12`). A *causal* ref: resolvable (it's a
+  cell address) but not re-hash-verifiable from fetched content alone. Usable as
+  a reference *starting point* (the chase reads its `patternIdentity`); never
+  the pin.
 - **`pattern:<identity>`** — the per-module **source-set document key**
   (`cell-cache.ts:sourceDocKey`), where `<identity>` is the prefix-free
   entry-module Merkle hash (authored source + authored path + dep hashes;
@@ -111,7 +120,7 @@ cf:/<space>/<ref>[/<subpath>][@<pin>]              ; explicit space
 cf://<host>/<space>/<ref>[/<subpath>][@<pin>]      ; explicit toolshed
 
 ref     = slug                ; no ":" — isSlugAddress convention
-        | "of:fid1:" hash     ; cell URI (pattern meta cell, or a piece's entity id)
+        | "of:fid1:" hash     ; cell URI (a piece / a cell carrying patternIdentity)
         | "pattern:" hash     ; entry-module identity (content-addressed source)
 space   = space-name | space-did
 host    = domain[":"port]     ; a toolshed
@@ -137,7 +146,7 @@ import { TodoItem } from "cf:/kitchen/todo-list";                   // space by 
 import { TodoItem } from "cf:/did:key:z6Mk…/todo-list";             // space by DID
 import { TodoItem } from "cf://toolshed.common.tools/kitchen/todo-list";  // explicit toolshed
 import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";                    // content-addressed, space-free
-import { TodoItem } from "cf:/kitchen/of:fid1:ZwjMI…A2Os";          // pattern meta cell by URI
+import { TodoItem } from "cf:/kitchen/of:fid1:ZwjMI…A2Os";          // a piece (patternIdentity-bearing cell) by URI
 
 // What a deployed importer actually stores (§ Snapshot semantics):
 import { TodoItem } from "cf:/kitchen/todo-list@AvcnyZ…rC1c";
@@ -167,16 +176,15 @@ Starting from the named cell, follow pointers until a pattern source is
 reached:
 
 1. slug → slug cell's redirect target (`resolveSlugTargetCell`);
-2. a cell with `meta("pattern")` (a **piece**) → prefer
-   `meta("patternIdentity").identity`; else follow `meta("pattern")` to the
-   meta cell;
-3. a **pattern meta cell** → `entryIdentity` (computing it from `program` via
-   `computeModuleHashes` if absent — legacy metas);
-4. a `pattern:<identity>` ref → already terminal.
+2. a cell carrying a `patternIdentity` meta (a **piece**) → its `.identity` is
+   the terminal identity (`getPatternIdentityRef`, `runner.ts:4441`);
+3. a `pattern:<identity>` ref → already terminal.
 
 Anything that doesn't chase to a pattern is a compile error ("does not resolve
-to a pattern", naming the chain followed). The chain is short (≤3 hops) and
-each hop is an ordinary cell read under ordinary space authz.
+to a pattern", naming the chain followed). The chain is short (≤2 hops) and
+each hop is an ordinary cell read under ordinary space authz. (This matches the
+as-built chase in `packages/runner/src/fabric-ref-resolution.ts`; the retired
+meta cell added no hop.)
 
 Why this shape:
 
@@ -192,10 +200,10 @@ Why this shape:
   (`packages/js-compiler/typescript/compiler.ts:176-207`).
 - **It is the shell's URL shape with a scheme on it** —
   `/{spaceNameOrDid}/{pieceIdOrSlug}` — so users learn one addressing model.
-- **Publication = naming.** `slug → pattern meta cell` in a readable space is
-  the whole publish story; updating the slug is publishing a new version
-  (dist-tag semantics). Pieces and published patterns are then *the same kind
-  of reference target*, differing only by one hop.
+- **Publication = naming.** `slug → a cell carrying patternIdentity` (a piece,
+  or a published-pointer cell) in a readable space is the whole publish story;
+  updating the slug is publishing a new version (dist-tag semantics). Pieces and
+  published patterns are then *the same kind of reference target*.
 
 ### Alternatives considered
 
@@ -254,8 +262,8 @@ Mechanics:
 
 4. **Updating is an explicit authoring action.** `cf deps update
    [<specifier>]` (and an equivalent affordance in the shell's iterate flow)
-   re-runs resolution and rewrites the pin — an ordinary source edit, visible
-   in lineage (`parents`) like any other edit. The unpinned form never reaches
+   re-runs resolution and rewrites the pin — an ordinary source edit. The
+   unpinned form never reaches
    deployed storage: deploying with an unpinned mutable reference pins it; a
    stored program containing one is a compile error. `cf dev`/`cf check`
    resolve unpinned references live against the connected toolshed and print
@@ -268,8 +276,8 @@ every downstream content address) change without any edit to the importer —
 exactly the build-order/reload-churn class of instability the content-addressed
 identity work eliminated. Live composition stays a runtime feature.
 
-In-source pinning vs a lockfile side-table: a side-table (`resolvedImports` on
-the pattern meta cell) would preserve authored bytes exactly, but then program
+In-source pinning vs a lockfile side-table: a side-table (a `resolvedImports`
+map stored alongside the source) would preserve authored bytes exactly, but then program
 identity becomes a function of *(source, lockmap)* and every consumer of
 `computeId`/`computeModuleHashes`/`cf check` must thread the lockmap. The
 in-source pin keeps "identity = hash of source" true, keeps the pin visible and
@@ -283,10 +291,11 @@ into the import statement."
 The pin records what `meta("patternIdentity")` already carries. The
 alternatives fail:
 
-- *patternId* (`of:<hash>`): a causal ref whose derivation is not purely
-  source-content, so a fetched program can't be verified against it by
+- *a piece's `of:` entity URI* (a causal/cell ref): its derivation is not
+  purely source-content, so a fetched program can't be verified against it by
   re-hashing alone — fine as a reference starting point, unusable as an
-  integrity anchor.
+  integrity anchor. (This is why the retired `patternId`, an `of:`-style causal
+  ref, could not have been the pin.)
 - *whole-program id* (`computeId`): entry-point and sibling-file sensitive,
   and not the namespace existing load machinery keys on.
 
@@ -371,7 +380,7 @@ Engine wraps the authored resolver; on a `cf:` specifier:
 1. **Reference → identity**: pinned (or `pattern:` ref) → use the hash, never
    touch the mutable pointer. Unpinned (authoring/dev only) → run the uniform
    chase **as ordinary cell reads through the compiling runtime's storage**
-   (slug cell redirect, piece `meta(…)` hop, meta-cell `entryIdentity`) —
+   (slug cell redirect → the piece's `patternIdentity`) —
    `cf check`/`cf dev` already construct a runtime (`packages/cli/lib/dev.ts`),
    and every production compile happens inside one, so space authz is exactly
    memory-read authz. Host-qualified refs are the same reads with the space
@@ -443,10 +452,11 @@ depended on the transport).
 
 Consequences:
 
-- **Publication is purely a data/authz act**: make the slug cell, the pattern
-  meta cell, and the `pattern:<identity>` source docs readable in a space
-  (`cf publish` is sugar for writing them to such a space and assigning the
-  slug). Whoever can read the space can import; nobody else can.
+- **Publication is purely a data/authz act**: make the slug cell, the
+  patternIdentity-bearing cell it points at, and the `pattern:<identity>` source
+  docs readable in a space (`cf publish` is sugar for writing them to such a
+  space and assigning the slug). Whoever can read the space can import; nobody
+  else can.
 - **The host segment maps to a `spaceHostMap` entry.** One mechanical work
   item: the map is fixed at storage construction today
   (`v2.ts` options), while a host-qualified ref is discovered mid-compile —
@@ -462,10 +472,11 @@ unchanged.
 
 ### 5. CLI / shell
 
-- `cf deploy`: pins unpinned mutable refs (writes the rewritten source into
-  the pattern meta `program`).
-- `cf publish <pattern> [--slug name] [--space …]`: ensure source docs exist
-  in the target space + assign the slug to the meta cell.
+- `cf deploy`: pins unpinned mutable refs (rewrites the stored source, which
+  re-derives the pinned identity and its `pattern:<identity>` source docs).
+- `cf publish <pattern> [--slug name] [--space …]` *(not yet built)*: ensure the
+  source docs exist in the target space + assign the slug to a
+  patternIdentity-bearing cell.
 - `cf deps update [specifier]`: re-resolve + rewrite pins.
 - `cf dev` / `cf check`: live-resolve unpinned refs against the connected
   toolshed; `--frozen` to forbid (CI). `--show-transformed` shows mounted
@@ -564,10 +575,10 @@ unchanged.
    name→DID mapping per host; the shell resolves names client-side today and
    there is no service surface here to hang it on. Name squatting/renaming
    semantics need a decision before phase 2 (DID-form refs sidestep it).
-3. **Slug-cell typing.** The uniform chase duck-types its hops
-   (`meta("pattern")` present ⇒ piece; matches `patternMetaSchema` ⇒ pattern
-   meta). Good enough, or should slug assignment stamp an explicit kind on
-   the slug cell for better errors and tooling?
+3. **Slug-cell typing.** The uniform chase duck-types its hops (a
+   `patternIdentity` meta present ⇒ a pattern-bearing cell). Good enough, or
+   should slug assignment stamp an explicit kind on the slug cell for better
+   errors and tooling?
 4. **Type-only imports.** Should `import type { … }` from a fabric ref skip
    the pin requirement (types don't affect runtime identity)? Tempting, but
    the transformer lowers types into schemas — so types DO affect emitted

@@ -28,7 +28,6 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import {
-  DEFAULT_RETRIES_FOR_EVENTS,
   EVENT_LOAD_PARK_TIMEOUT_MS,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
   MAX_SETTLE_STATS_HISTORY,
@@ -866,9 +865,13 @@ export class Scheduler {
   queueEvent(
     eventLink: NormalizedFullLink,
     event: any,
-    retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Whether a transient commit failure converges via the backoff window (and
+    // the inSpace-name resolution path re-runs the handler). `false` opts out:
+    // the event drops on the first failure without retrying. Defaults to `true`
+    // so every real user event through `cell.send` gets backpressure.
+    retries: boolean = true,
     // Internal-only commit callback. This runs after the final commit result,
-    // including exhausted failure, so it must not perform external side
+    // including a dropped failure, so it must not perform external side
     // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,

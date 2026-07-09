@@ -18,7 +18,6 @@ import {
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
-import { getDirectTransactionMergeableOpAddresses } from "../storage/transaction-inspection.ts";
 import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
@@ -85,7 +84,7 @@ export interface SchedulerEventQueueState {
   readonly queueEvent: (
     eventLink: NormalizedFullLink,
     event: unknown,
-    retries: number,
+    retries: boolean,
     onCommit: QueuedEvent["onCommit"] | undefined,
     doNotLoadPieceIfNotRunning: boolean,
     opts?: { eventId?: string; originTx?: IExtendedStorageTransaction },
@@ -131,7 +130,7 @@ function notifyEventDropped(
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
-  readonly retries: number;
+  readonly retries: boolean;
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly doNotLoadPieceIfNotRunning: boolean;
   readonly eventId?: string;
@@ -151,7 +150,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         action: (tx) => handler(tx, args.event),
         handler,
         event: args.event,
-        retriesLeft: args.retries,
+        retry: args.retries,
         onCommit: args.onCommit,
       };
       state.eventQueue.push(queuedEvent);
@@ -652,8 +651,7 @@ export async function dispatchQueuedEvent(state: {
     space: MemorySpace,
   ) => number | undefined;
 }, queuedEvent: QueuedEvent): Promise<void> {
-  const { action, handler, event: eventValue, retriesLeft, onCommit } =
-    queuedEvent;
+  const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
   const handlerId = state.getActionId(handler);
 
   state.runtime.telemetry.submit({
@@ -701,57 +699,62 @@ export async function dispatchQueuedEvent(state: {
   }
   const actionId = state.getActionId(action);
 
-  // Requeue a retry of this event. Dispatch released the lineage
-  // registration above, so the fresh QueuedEvent object must be re-recorded:
-  // otherwise an origin that fails while the retry is queued cannot remove
-  // it, and the post-settlement originStatus() fallback ("confirmed") would
-  // let a descendant of a failed origin run.
-  const requeueForRetry = () => {
-    const retry: QueuedEvent = {
+  // Re-queue this event for an immediate re-run. This is the inSpace-name
+  // resolution path (RetryImmediately): the run referenced a pattern space by
+  // name that has now been resolved, so re-running resolves it synchronously from
+  // the cache. No count guards this loop — name resolution is monotonic (each
+  // re-run resolves at least one previously-unresolved name, and a resolved name
+  // never becomes pending again), so a handler with finitely many distinct
+  // inSpace names terminates. Dispatch released the lineage registration above,
+  // so the fresh QueuedEvent must be re-recorded: otherwise an origin that fails
+  // while the retry is queued cannot remove it, and the post-settlement
+  // originStatus() fallback ("confirmed") would let a descendant of a failed
+  // origin run.
+  const requeueForNameResolution = () => {
+    const requeued: QueuedEvent = {
       id: queuedEvent.id,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
       handler,
       event: eventValue,
-      retriesLeft: retriesLeft - 1,
+      retry,
       onCommit,
     };
-    state.eventQueue.unshift(retry);
-    if (retry.originTx !== undefined) {
-      state.recordLineageEvent(retry.originTx, retry);
+    state.eventQueue.unshift(requeued);
+    if (requeued.originTx !== undefined) {
+      state.recordLineageEvent(requeued.originTx, requeued);
     }
     state.queueExecution();
   };
 
-  // Re-queue a transient commit conflict for a later retry. The retry is parked
+  // Re-queue a transient commit failure for a later retry. The retry is parked
   // via notBefore so the scheduler backs off (capped exponential delay) instead
   // of busy-looping; idle()/settled() wait for the parked head, so a converging
-  // write still completes within a settle. The conflict attempt count and
-  // deadline are carried forward; retriesLeft is preserved untouched because it
-  // is the separate budget for inSpace-name resolution (RetryImmediately), not
-  // for conflicts.
+  // write still completes within a settle. The retry attempt count and deadline
+  // are carried forward; `retry` is preserved untouched (it gates whether this
+  // event retries at all, which a windowed re-queue does not change).
   const requeueForBackoff = (
     attempts: number,
     deadline: number,
     runAt: number,
   ) => {
-    const retry: QueuedEvent = {
+    const requeued: QueuedEvent = {
       id: queuedEvent.id,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
       handler,
       event: eventValue,
-      retriesLeft,
+      retry,
       onCommit,
-      conflictAttempts: attempts,
-      conflictDeadline: deadline,
+      retryAttempts: attempts,
+      retryDeadline: deadline,
       notBefore: runAt,
     };
-    state.eventQueue.unshift(retry);
-    if (retry.originTx !== undefined) {
-      state.recordLineageEvent(retry.originTx, retry);
+    state.eventQueue.unshift(requeued);
+    if (requeued.originTx !== undefined) {
+      state.recordLineageEvent(requeued.originTx, requeued);
     }
     state.queueExecution();
   };
@@ -780,12 +783,14 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
-      if (retriesLeft > 0) {
-        requeueForRetry();
+      if (retry) {
+        requeueForNameResolution();
       } else {
-        logger.error(
+        // retries: false is a one-shot; it does not re-run to resolve names.
+        logger.warn(
           "scheduler",
-          "Event handler exhausted retries resolving inSpace names",
+          "Event handler needed inSpace-name resolution but opted out of " +
+            "retry (retries: false); dropping",
           { handlerId },
         );
         runFinalCommitCallback();
@@ -810,13 +815,6 @@ export async function dispatchQueuedEvent(state: {
 
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
-    // A commit that carries a mergeable op (append/add-unique/increment/
-    // remove-by-value) represents durable, commutative user intent that cannot
-    // truly conflict. A stale-basis inconsistency — the same-replica race the
-    // space-rehydration storm produces — must not exhaust the fixed retry budget
-    // and drop that intent; it is retried within the retry window like a
-    // conflict instead (see classifyCommitDisposition).
-    const hasMergeableOps = transactionHasMergeableOps(tx);
     const telemetryWrites = log.writes
       .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
       .map(formatEventCommitAddress);
@@ -836,15 +834,14 @@ export async function dispatchQueuedEvent(state: {
           ? (result.error as IPreconditionFailedError).precondition
           : undefined;
       // Classify the commit outcome. A committed write that represents user
-      // intent must converge or fail loudly: a transient conflict backs off and
-      // retries within a bounded window rather than being dropped after a fixed
-      // budget; a permanent rejection is never retried; an unconverged write
-      // surfaces a terminal error.
+      // intent must converge or fail loudly: a stale-basis rejection backs off
+      // and retries within a bounded window rather than being dropped; a
+      // permanent or non-stale-basis rejection is not retried; an unconverged
+      // write surfaces a terminal error.
       const disposition = classifyCommitDisposition(
         result.error,
         queuedEvent,
         state.backpressure,
-        hasMergeableOps,
       );
 
       state.runtime.telemetry.submit({
@@ -877,27 +874,22 @@ export async function dispatchQueuedEvent(state: {
         case "success":
           runFinalCommitCallback();
           return;
-        case "bounded-retry":
-          logger.warn(
-            "scheduler",
-            `Event handler transaction failed, retrying ` +
-              `(${retriesLeft} retries left)`,
-            { error: result.error, handlerId },
-          );
-          requeueForRetry();
-          return;
         case "give-up":
           runFinalCommitCallback();
-          logger.error(
-            "schedule-error",
-            "Event handler transaction failed after exhausting all retries",
-            { error: result.error, handlerId, permanent: false },
+          logger.warn(
+            "scheduler",
+            disposition.reason === "non-retryable"
+              ? "Event handler commit failed with a non-stale-basis rejection " +
+                "that re-running cannot resolve; dropping the write without retry"
+              : "Event handler commit failed and the caller opted out of " +
+                "retry (retries: false); dropping the write",
+            { error: result.error, handlerId },
           );
           return;
         case "backoff":
           logger.warn(
             "scheduler",
-            `Event handler commit conflicted; backing off ` +
+            `Event handler commit failed transiently; backing off ` +
               `${Math.round(disposition.delayMs)}ms ` +
               `(attempt ${disposition.attempts})`,
             { handlerId },
@@ -1027,13 +1019,6 @@ function formatEventCommitAddress(address: {
   return `${address.space}/${address.id}/${address.path.join("/")}`;
 }
 
-function transactionHasMergeableOps(tx: IExtendedStorageTransaction): boolean {
-  for (const _ of getDirectTransactionMergeableOpAddresses(tx) ?? []) {
-    return true;
-  }
-  return false;
-}
-
 type CommitDisposition =
   | { kind: "success" }
   | { kind: "permanent" }
@@ -1046,41 +1031,55 @@ type CommitDisposition =
     runAt: number;
   }
   | { kind: "convergence-failed"; attempts: number; elapsedMs: number }
-  | { kind: "bounded-retry" }
-  | { kind: "give-up" };
+  | { kind: "give-up"; reason: "non-retryable" | "opt-out" };
 
 /**
  * Decides what to do with an event-handler commit result.
  *
  *  - success: nothing more to do.
- *  - permanent: a precondition failure; never retried.
- *  - terminal: a deterministic server-side refusal of the committed data
- *    (a CFC row-label commit-rule violation, `isTerminalRejection`); never
- *    retried — re-running recomputes the identical refused write, and the
- *    doomed re-runs' speculative rev bumps would starve concurrent siblings.
- *  - backoff / convergence-failed: a stale-basis ConflictError under
- *    contention, or a stale-basis StorageTransactionInconsistent on a commit
- *    that carries a mergeable op. It backs off and retries until it lands or the
- *    retry window elapses, after which it fails terminally rather than being
+ *  - permanent: a commit-time precondition failure (receipt-exists,
+ *    origin-committed). Re-running can never succeed and would double-handle the
+ *    event, so it is never retried.
+ *  - terminal: a deterministic server-side refusal of the committed data (a CFC
+ *    row-label commit-rule violation, `isTerminalRejection`); never retried —
+ *    re-running recomputes the identical refused write, and the doomed re-runs'
+ *    speculative rev bumps would starve concurrent siblings. Surfaced as a
+ *    terminal outcome (telemetry `terminal: "rule"`) rather than a silent drop.
+ *  - give-up (reason "non-retryable"): a non-permanent rejection that is neither
+ *    a stale basis nor a terminal commit-rule refusal — an authorization denial,
+ *    a malformed store operation, a transport error, a handler `tx.abort()`.
+ *    Re-running against fresher confirmed state cannot resolve it, so the write
+ *    drops fast rather than burning the retry window on a rejection that will
+ *    recur identically.
+ *  - give-up (reason "opt-out"): the caller sent with `retries: false` (a
+ *    speculative lineage origin, an internal one-shot) and opted out of retrying.
+ *    The failed write drops deterministically so a descendant of a failed origin
+ *    does not run.
+ *  - backoff / convergence-failed: a stale-basis rejection — a server-side
+ *    ConflictError under contention, or the local StorageTransactionInconsistent
+ *    guard (the same-replica race the rehydration storm produces). Re-running the
+ *    handler against fresh confirmed state and committing again can succeed, so a
+ *    committed write that represents user intent backs off with capped
+ *    exponential delay and retries until it lands or the retry window elapses,
+ *    after which it surfaces a terminal CommitConvergenceError rather than being
  *    silently dropped. This is the backpressure path.
- *  - bounded-retry / give-up: any other transient error (a handler-initiated
- *    abort, a system error). These are not a stale basis, so re-running against
- *    fresh state would not help; they keep the fixed retriesLeft budget and stop
- *    after it.
  *
- * The extra windowing for a mergeable-op commit is scoped to the stale-basis
- * StorageTransactionInconsistent — the same-replica race the rehydration storm
- * produces, which re-running resolves. A mergeable op is add-wins and
- * commutative, so retrying it against fresh state is always safe and its durable
- * intent must not be dropped when the fixed budget runs out. A non-stale-basis
- * rejection (authorization, malformed store op, transport) still keeps the fixed
- * budget even with a mergeable op present, since retrying cannot resolve it.
+ * Only a stale basis is windowed, because only a stale basis converges by
+ * re-running: the confirmed timeline moved on, and reading it fresh resolves the
+ * commit. StorageTransactionInconsistent is windowed unconditionally — the
+ * generalization of an earlier version that windowed it only when the commit
+ * carried a mergeable op, which made the mergeable-op gate unnecessary. Every
+ * other non-permanent rejection is deterministic with respect to confirmed
+ * state: retrying it would waste the whole window arriving at the same refusal
+ * (and, for an authorization denial, retry a security denial), so it fails fast
+ * with the permanent precondition failures. There is no fixed retry count either
+ * way — a stale basis is bounded by the retry window, and a non-stale-basis
+ * rejection drops on the first attempt.
  */
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,
   policy: CommitBackpressurePolicy,
-  hasMergeableOps: boolean,
 ): CommitDisposition {
   if (!error) {
     return { kind: "success" };
@@ -1088,41 +1087,45 @@ function classifyCommitDisposition(
   if (isPermanentRejection(error)) {
     return { kind: "permanent" };
   }
-  // A deterministic commit-rule refusal is terminal BEFORE the retry-budget /
-  // windowing logic: it is neither a stale-read conflict (retry cannot converge)
-  // nor a transient error (re-running recomputes the identical refused write),
-  // so it must not consume the retry budget or back off — it stops now.
+  // A deterministic commit-rule refusal is terminal, and distinct from the
+  // fast-drop below: re-running recomputes the identical refused write (and the
+  // doomed re-runs' speculative rev bumps would starve concurrent siblings), so
+  // it must not back off, and it is surfaced as a terminal outcome (telemetry
+  // `terminal: "rule"`) rather than a silent drop. Checked before the stale-basis
+  // split because it is not a stale basis.
   if (isTerminalRejection(error)) {
     return { kind: "terminal" };
   }
-  const windowed = isConflictRejection(error) ||
-    (hasMergeableOps && isStorageTransactionInconsistent(error));
-  if (!windowed) {
-    return queuedEvent.retriesLeft > 0
-      ? { kind: "bounded-retry" }
-      : { kind: "give-up" };
+  // Only a stale-basis rejection — a server-side ConflictError, or the local
+  // StorageTransactionInconsistent guard — converges by re-running against
+  // fresher confirmed state. Any other non-permanent rejection (authorization,
+  // malformed store op, transport, handler abort) will recur identically, so it
+  // drops fast rather than burning the retry window.
+  const staleBasis = isConflictRejection(error) ||
+    isStorageTransactionInconsistent(error);
+  if (!staleBasis) {
+    return { kind: "give-up", reason: "non-retryable" };
   }
-  // A caller that sent with retries:0 (a speculative lineage origin, an internal
-  // one-shot) opted out of retrying; honor that so a descendant of a failed
-  // origin drops deterministically. Any positive budget opts into retry-on-
-  // conflict, which the retry window then governs — the exact count no longer
-  // bounds conflict retries, the window does.
-  if (queuedEvent.retriesLeft <= 0) {
-    return { kind: "give-up" };
+  // A caller that sent with retries: false (a speculative lineage origin, an
+  // internal one-shot) opted out of retrying; honor that so a descendant of a
+  // failed origin drops deterministically. retries: true opts into the retry
+  // window, which bounds the retries by time rather than by a count.
+  if (!queuedEvent.retry) {
+    return { kind: "give-up", reason: "opt-out" };
   }
-  const attempts = (queuedEvent.conflictAttempts ?? 0) + 1;
+  const attempts = (queuedEvent.retryAttempts ?? 0) + 1;
   const now = performance.now();
-  const deadline = queuedEvent.conflictDeadline ?? (now + policy.retryWindowMs);
+  const deadline = queuedEvent.retryDeadline ?? (now + policy.retryWindowMs);
   if (now >= deadline) {
-    // The window is measured from the first conflict (deadline minus window);
+    // The window is measured from the first failure (deadline minus window);
     // elapsed time is at least the full window.
     const elapsedMs = policy.retryWindowMs + (now - deadline);
     return { kind: "convergence-failed", attempts, elapsedMs };
   }
-  // Exponential backoff from the first conflict. The early steps are sub-5ms
-  // (near-immediate), so a transient conflict that clears once fresh state
-  // arrives converges fast; the delay only grows into real spacing once a
-  // conflict persists.
+  // Exponential backoff from the first failure. The early steps are sub-5ms
+  // (near-immediate), so a transient failure that clears once fresh state
+  // arrives converges fast; the delay only grows into real spacing once the
+  // failure persists.
   const delayMs = computeBackoffDelayMs(attempts, policy);
   return { kind: "backoff", attempts, deadline, delayMs, runAt: now + delayMs };
 }
