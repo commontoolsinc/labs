@@ -328,9 +328,11 @@ the per-epic implementation notes).
 
 ### `cfcPrefixProvenanceStats`
 
-- **Toggle via.** `RuntimeOptions.cfcPrefixProvenanceStats` (a plain boolean).
-  Pinned off in the shared `coreOptions`; it is a per-deployment measurement
-  opt-in, not env-wired.
+- **Toggle via.** `RuntimeOptions.cfcPrefixProvenanceStats` (a plain boolean),
+  not env-wired. The presets do not pin it: like every CFC dial except the
+  enforcement mode, it is left out of the shared `coreOptions` and rides the
+  `Runtime` constructor default of `false` until a deployment sets it. The
+  preset classification table marks it `core-default (off)`.
 - **Added by.** Bernhard Seefeld, in "D4 write-prefix precision counters
   (value-level provenance stage 0, SC-24)" (#4623, 2026-07-09).
 - **Purpose.** Measurement only, and the one dial here that does not affect
