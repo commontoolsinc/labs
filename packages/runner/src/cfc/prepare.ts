@@ -4448,44 +4448,43 @@ export const prepareBoundaryCommit = (
       // evidence-mint gate as the carried entries (audit S4): a link write
       // may not re-mint runtime evidence at the target without builtin
       // authorship.
+      // The emptiness check runs on the GATED label (cubic review on this
+      // PR): the mint gate can strip an integrity-only entry down to
+      // nothing, and pushing an empty origin:"link" entry at a more-specific
+      // path would SHADOW an ancestor link entry's confidentiality under the
+      // per-component longest-prefix read resolution — an under-labeling.
+      const pushGatedLinkEntry = (entry: {
+        path: readonly string[];
+        label: IFCLabel;
+      }) => {
+        const gated = gateRuntimeMintedIntegrity(
+          cloneLabel(entry.label),
+          linkIdentity,
+        );
+        if (!hasLabelValues(gated)) {
+          return;
+        }
+        persistedLabelEntries.push({
+          path: [
+            ...targetPath,
+            ...canonicalizeLogicalPath(entry.path),
+          ],
+          label: gated,
+          origin: "link",
+        });
+      };
       const rederivedView = cfcLabelViewFromMetadata(
         result.sourceMetadata,
         input.source.path,
       );
       for (const entry of rederivedView?.entries ?? []) {
-        if (!hasLabelValues(entry.label)) {
-          continue;
-        }
-        persistedLabelEntries.push({
-          path: [
-            ...targetPath,
-            ...canonicalizeLogicalPath(entry.path),
-          ],
-          label: gateRuntimeMintedIntegrity(
-            cloneLabel(entry.label),
-            linkIdentity,
-          ),
-          origin: "link",
-        });
+        pushGatedLinkEntry(entry);
       }
+      // The carried label view is author-influenceable; gate runtime-minted
+      // evidence atoms unless a builtin authored the link write (audit S4
+      // review).
       for (const entry of input.cfcLabelView?.entries ?? []) {
-        if (!hasLabelValues(entry.label)) {
-          continue;
-        }
-        // The carried label view is author-influenceable; gate runtime-minted
-        // evidence atoms unless a builtin authored the link write (audit S4
-        // review).
-        persistedLabelEntries.push({
-          path: [
-            ...targetPath,
-            ...canonicalizeLogicalPath(entry.path),
-          ],
-          label: gateRuntimeMintedIntegrity(
-            cloneLabel(entry.label),
-            linkIdentity,
-          ),
-          origin: "link",
-        });
+        pushGatedLinkEntry(entry);
       }
     }
 

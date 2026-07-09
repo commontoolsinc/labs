@@ -196,6 +196,12 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     // The re-derived entries take the same gate as carried ones (audit S4):
     // a non-builtin link write must not re-mint runtime evidence atoms at
     // the target, even when they come from the source's stored metadata.
+    // And when the gate EMPTIES an integrity-only entry, no entry may be
+    // pushed at all: an empty origin:"link" entry at a more-specific path
+    // would SHADOW an ancestor link-origin confidentiality entry under the
+    // per-component longest-prefix read resolution (cubic review on this
+    // PR) — an under-labeling introduced by the very loop meant to prevent
+    // weakening.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -221,6 +227,12 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           labelMap: {
             version: 1,
             entries: [{
+              // The root confidentiality an empty deeper entry would shadow.
+              path: [],
+              label: { confidentiality: ["source-root"] },
+            }, {
+              // Integrity-only: the mint gate empties it for this
+              // non-builtin write.
               path: ["attested"],
               label: {
                 integrity: [{ type: CFC_ATOM_TYPE.InjectionSafe }],
@@ -271,7 +283,10 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
             labelMap?: {
               entries: Array<{
                 path: string[];
-                label: { integrity?: Array<{ type?: string }> };
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: Array<{ type?: string }>;
+                };
               }>;
             };
           };
@@ -283,6 +298,14 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       expect(
         allIntegrity.some((a) => a?.type?.endsWith("/InjectionSafe")),
       ).toBe(false);
+      // The gate emptied the ["attested"] entry — nothing may persist there:
+      // every persisted entry still carries label values.
+      for (const entry of entries) {
+        expect(
+          (entry.label.confidentiality?.length ?? 0) > 0 ||
+            (entry.label.integrity?.length ?? 0) > 0,
+        ).toBe(true);
+      }
     } finally {
       await runtime.dispose();
       await storageManager.close();
