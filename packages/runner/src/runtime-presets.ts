@@ -172,6 +172,11 @@ export const EXPERIMENTAL_ENV_VARS = {
   commitPreconditions: null,
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
+  // Reactive interpreter (#4514): keeps its own default-off env wiring
+  // (`CF_EXPERIMENTAL_INTERPRETER=1`, read in runtime.ts — accepts "1", and
+  // materializes only when enabled so ambient env doesn't spam subprocess
+  // stderr). Not double-wired here.
+  experimentalInterpreter: null,
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
