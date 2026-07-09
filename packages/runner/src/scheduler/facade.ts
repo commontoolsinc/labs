@@ -2091,6 +2091,8 @@ export class Scheduler {
     if (this.headEventLoadPark) {
       clearTimeout(this.headEventLoadPark.timeout);
     }
+    // TODO(scheduler-v2): release on the transport's connection-failure signal
+    // instead of this wall-clock backstop — see EVENT_LOAD_PARK_TIMEOUT_MS.
     const timeout = setTimeout(() => {
       logger.warn("scheduler-load-park", () => [
         "Event load park timed out; dispatching fail-open",

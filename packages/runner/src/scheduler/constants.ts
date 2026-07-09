@@ -38,6 +38,17 @@ export const AUTO_DEBOUNCE_DELAY_MS = 100;
 // releases the park immediately; the timeout only bounds a wedged transport,
 // after which the event dispatches fail-open (today's behavior) with a
 // warning.
+//
+// TODO(scheduler-v2): a wall-clock timer is the wrong shape for "the socket is
+// dead." The correct fix is to release the park on the TRANSPORT's own
+// connection-failure signal (the network layer's built-in TCP timeouts), so a
+// wedged sync hard-fails deterministically and a live-but-slow one never trips
+// it. This 10s value is only a stopgap and is far too short for a real network
+// partition — e.g. a phone driving through a tunnel is alive but silent for far
+// longer, and would spuriously fail-open the at-most-once handler against a
+// stale/absent replica. Replace with transport-driven release; do not lengthen
+// this constant as a "fix" (that just trades a false fail-open for a longer
+// idle stall). Discussed w/ Hixie 2026-07-08.
 export const EVENT_LOAD_PARK_TIMEOUT_MS = 10_000;
 
 // How long a resumed action's initial run may be held while waiting for its
