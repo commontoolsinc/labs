@@ -105,7 +105,16 @@ function makeRuntime(options: FakeEditOptions = {}): {
           },
         });
       }
-      const ok = fn({});
+      // The republisher wraps its container write in
+      // tx.runWithAmbientReadMeta(linkResolutionProbe, ...) (S16: structure-only
+      // container reads must not journal prior element content). Hand the action
+      // a tx whose ambient-read-meta scope is a pass-through, so the wrapped
+      // write actually runs.
+      const tx = {
+        runWithAmbientReadMeta: <T>(_meta: unknown, action: () => T): T =>
+          action(),
+      };
+      const ok = fn(tx);
       return Promise.resolve({ ok });
     },
     storageManager: {
