@@ -106,25 +106,6 @@ You'll want to install the
 [Deno extension](https://docs.deno.com/runtime/reference/vscode/), and the
 [Prettier extension](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode).
 
-## CI/CD
-
-Our CI/CD pipeline is basically: run a linter, run the tests, deploy to fly.
-
-It's built on GitHub Actions, the configuration
-[lives here](https://github.com/commontoolsinc/labs/blob/main/.github/workflows/toolshed.yml).
-
-## Deploying to Production
-
-Toolshed is deployed to fly.io.
-
-To deploy you simply run the following command:
-
-```shell
-fly deploy
-```
-
-If you need access to deploy to fly, ping Jake for access and instructions.
-
 ## Contributing
 
 1. Fork the repository
