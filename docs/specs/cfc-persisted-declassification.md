@@ -1,0 +1,251 @@
+# CFC persisted declassification — grants, and the rewrite event
+
+_Design for the thing Epic B scoped out (decision 1: "rewritten labels are
+never persisted; store-label rewrite as a declassification event is out of
+scope for this epic"). Spec ground: `08-12-store-label-monotonicity.md`
+§8.12.7's three sanctioned widening routes, worked example §13.4.3, merged
+§4.9.3 (ACL point query), `06-events-and-intents.md` §6.5. Grounded in the
+shipped Epic B evaluator (`cfc/exchange-eval.ts`, `cfc/policy.ts`).
+Written 2026-07-09 at owner request._
+
+## 1. The spec names one route; its example is a different one
+
+§8.12.7 sanctions three routes to post-hoc widening of a stored label:
+access-time exchange rules (1), "an explicit store-label rewrite as a
+declassification event: an intent-gated, policy-guarded operation (the shape
+of §13.4.3's persistent share-policy update), never an ordinary write" (2),
+and a new value carrying the wider label (3).
+
+But §13.4.3 — route 2's own cited shape — does **not** rewrite a label. It
+persists a `ShareGrant` record (`{owner, resourceRef, recipient, scope,
+grantedAt, sourceIntentId}`) to policy state; "the grant is then consulted on
+later reads." §13.4.4 then shows the consuming exchange rule (`guard:
+{policyState: [{kind:"ShareGrant", …}]}` adding `User($recipient)`). The
+worked-examples summary table blurs the two ("persistent policy state / label
+rewrite"). These are different artifacts:
+
+- A **grant record** is a durable *input to evaluation*: the stored label
+  keeps its clauses; a route-1 rule consults the grant at access time. The
+  label stays honest, monotonicity is never touched, and revocation is the
+  grant's lifecycle.
+- A **rewrite event** is a durable *output of evaluation*: the declared
+  component itself widens, once, attributably. Reads thereafter need no
+  policy evaluation — the widening survives export beyond the
+  policy-evaluation domain.
+
+This design: build **grants** as the standard persisted-declassification
+mechanism (§2–3); specify the **rewrite event** precisely but keep it
+unscheduled behind hard entry criteria (§4–5), because every piece of
+substrate it needs is unbuilt and grants cover all but one use class.
+
+## 2. Grant records (build this)
+
+### 2.1 Shape and precedents
+
+Two artifacts of exactly this kind already exist or are specced:
+
+- The **space ACL document** (merged §4.9.3; `acl-manager.ts`,
+  `memory/v2/server.ts`): one doc per space at a reserved address (entity id
+  = the space DID), owner-gated writes, consulted at access time by a
+  fail-closed point query, feeding runtime-minted `HasRole` facts into
+  exchange evaluation. It *is* a durable audience grant.
+- The **ShareGrant** (§13.4.3): per-resource, minted by a trusted policy
+  writer after verifying intent evidence (rendered-state match, trusted
+  surface concept, share authority).
+
+A grant generalizes both: a content-addressed record at a reserved space-root
+path (the B2b storage discipline: "content-addressed records verified on
+read, read under `internalVerifierRead` so policy lookups never taint"),
+written only by a trusted policy writer, shaped
+
+```ts
+type CfcGrant = {
+  kind: string;                    // "ShareGrant", …  — matched by policyState guards
+  owner: DID;                      // whose release authority this spends
+  resource: Reference | AtomPattern; // what it releases (doc ref or label-pattern scope)
+  audience: unknown[];             // principal-like atoms, §3.1.8-validated
+  grantedAt: number;
+  expiresAt?: number;
+  sourceIntentId?: Reference;      // §6 attribution when the intent substrate exists
+  revoked?: { at: number; by: DID };
+};
+```
+
+### 2.2 Consumption: the `policyState` guard kind
+
+Shipped `ExchangeRule.preCondition` admits `confidentiality | integrity |
+boundary` guards only — §13.4.4's `policyState` guard kind is unimplementable
+in B2a. The extension: a `policyState` guard names a grant `kind` plus field
+patterns; at evaluation the runtime resolves matching, unexpired, unrevoked
+grants from the governing space's grant path (point query per candidate, the
+§4.9.3 discipline: fail-closed on absent/malformed/unsynced; discovered from
+atoms in the label under evaluation, never enumerated) and binds guard
+variables from the grant's fields. Everything downstream is the shipped
+evaluator: the fired rule adds the grant's audience as alternatives to the
+matched clause, clause-locally (invariant 11), evaluation-time only.
+
+Properties inherited for free:
+
+- **Monotonicity**: untouched — the stored label never changes.
+- **Revocation**: delete/expire/mark the grant; rules stop firing on next
+  evaluation. "Disjunctions arise at access time" stays true.
+- **Attribution**: the grant doc is written under the policy writer's
+  verified identity with `writeAuthorizedBy`, carries `owner` +
+  `sourceIntentId`; the policy-snapshot digest already binds *which rules*
+  could consume it (B5's `PreparedDigestInput.policySnapshot`).
+- **Audit**: grants are ordinary docs — enumerable per space at the reserved
+  path, with history.
+- **Single-use releases**: a grant consumed at a commit point claims a §6.5
+  consumed cell (`refer({grantConsumed: {grantId}})`) — the attempt-cell
+  contract verbatim, when that substrate ships; standing grants simply never
+  consume.
+
+### 2.3 Soundness conditions (each red-first-testable)
+
+1. **Write gate**: grant docs are writable only by the trusted policy-writer
+   identity (reserved-path guard, same class as the S18 `["cfc"]` write
+   guard); `audience` entries pass the §3.1.8 principal-like validation
+   (`disallowedAuthoredClauseReason` — no Caveat/Expires alternatives); the
+   writer verifies the granting principal's release authority over
+   `resource` (inv-7: an audience is mintable only over content within the
+   granter's own authority).
+2. **Read non-taint**: grant lookups ride `internalVerifierRead` — they must
+   not enter the consumed set or PC (the §4.9.3 point-query discipline;
+   otherwise every gated read of a shared doc taints with the grant doc).
+3. **Digest binding**: the resolved grant set joins the evaluation's
+   identity. Cheapest sound form: fold each consulted grant's content address
+   into the prepared digest input alongside `policySnapshot.digest` (same
+   invalidation discipline — a grant changed between prepare and commit
+   invalidates).
+4. **Clause locality**: a grant releases only the clause(s) its consuming
+   rule matched — inherited from the evaluator, but the B2b home-clause
+   constraint (CT-1874) applies identically when grants are discovered from
+   label-carried atoms: a grant referenced from clause k must not widen
+   clause j ≠ k.
+5. **Cross-space representation**: a grant names DIDs; when its *existence*
+   crosses spaces it is label-adjacent metadata and the inv-12 classification
+   applies ([`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md)).
+   Same-space grants (the normal case) persist verbatim.
+
+### 2.4 What grants cannot do
+
+A grant is live state: it works only where the evaluator runs *and* the grant
+doc is reachable. Three consequences — the exact residual that motivates the
+rewrite event:
+
+- **Export/publish**: a value released "to everyone, forever" (publishing)
+  should not depend on a grant lookup succeeding for eternity.
+- **Cross-deployment portability**: a doc synced into a deployment without
+  the source's policy writer/grant path re-closes.
+- **Read-path cost**: every gated read pays evaluation + point queries.
+
+## 3. Build order for grants
+
+1. `policyState` guard kind + grant resolution in `exchange-eval.ts`
+   (evaluator change is additive; guards default-absent).
+2. Reserved grant path + trusted-writer gate + §3.1.8 validation (storage
+   discipline shared with B2b's policy docs — build once).
+3. Digest binding of consulted grants.
+4. ShareGrant end-to-end: share UI → (until §6 intents ship) a
+   trusted-builtin writer verifying authority directly → grant → release on
+   read; the §13.4.3 verification list minus the intent-evidence rows, which
+   strengthen when intents land.
+5. Single-use grants (blocked on §6.5 consumed-cell substrate).
+
+Dependency note: (1)+(2) are B2b-adjacent — the same reserved-path,
+content-addressed, verify-on-read machinery. If B2b is built first, grants
+are a second record kind on the same substrate; if grants go first, B2b
+inherits the substrate. Either order, with CT-1874's home-clause gate in the
+shared selection layer.
+
+## 4. The rewrite event (specify now, build later)
+
+When a widening must survive without evaluation (§2.4), route 2 proper: an
+in-place widening of the **declared** component, executed as a
+declassification event. Contract, if and when built:
+
+1. **Intent-gated**: requires a consumed `IntentOnce` (§6.5) whose parameters
+   (target doc, clause, added audience) carry integrity per §3.8.4 robust
+   declassification — release scope/destination/audience are
+   integrity-sensitive parameters. **Hard dependency: the intent substrate,
+   which does not exist in the runner today.**
+2. **Policy-guarded**: the acting principal's authority over the target
+   clause verified exactly as a grant writer would (inv-7), plus §8.10.5.2 —
+   a broader audience is a new release judgment with its own evidence.
+3. **A new monotonicity gate**: today no runtime `canUpdateStoreLabel` check
+   exists (declared entries evolve only via the schema-walk re-mint). The
+   event is the *sanctioned exception* to a gate that must first exist —
+   build the gate (reject non-monotone declared-component changes outside an
+   event) before the exception, or the "never an ordinary write" clause is
+   unenforced prose.
+4. **The event record**, adjacent to but not inside the `["cfc"]` envelope
+   (SC-11 keeps envelopes churn-free and version-neutral; an event wants an
+   ordered, revision-bumping ledger): a content-addressed record at the
+   reserved path, `{doc, path, clauseDigest, priorLabelDigest,
+   newLabelDigest, actingPrincipal, intentId, at}` — clause identity by
+   canonical clause digest (clause *indices* are evaluation-ephemeral; the
+   shipped `RuleFiring.clauseIndex` is explicitly firing-time-only and
+   under-records for this purpose).
+5. **Tighten-back is legal, un-widening is not retroactive**: a later
+   monotone tightening (§8.12.5) may re-narrow the label, but reads served
+   between event and tightening were released — the event is a real
+   declassification, stated plainly.
+
+**Considered and rejected — mechanized route 3** (rewrite = copy-forward with
+a wider authored label + alias swap): sidesteps monotonicity entirely and
+reuses the shipped authoring path (the B6 sanitizer already persists loosened
+labels onto new values), but changes document identity — every inbound link,
+sync client, and history consumer sees a different doc. Identity-preserving
+widening is the whole point of route 2; if identity may change, route 3
+already works today with no new machinery.
+
+## 5. Entry criteria
+
+Build **grants** when a product surface needs durable sharing (the share UI,
+group-membership beyond space ACLs) — B2b-adjacent, no blockers beyond the
+evaluator extension. Build the **rewrite event** only when all hold: (a) a
+real export/publish/portability requirement that grants demonstrably cannot
+serve; (b) the §6.5 intent substrate exists (IntentOnce + consumed cells);
+(c) the declared-component monotonicity gate (§4.3) has shipped and soaked.
+Until then, "publish" is served by route 3 (copy-forward), which is honest
+about being a new value.
+
+## 6. Spec-change queue
+
+- **§8.12.7 route 2 splits** into 2a (durable grant records consumed by
+  access-time rules — the §13.4.3/§13.4.4 shape, generalizing the §4.9.3 ACL
+  document) and 2b (the in-place rewrite event proper, with the §4 contract:
+  intent-gated, authority-verified, gate-first, event record with
+  clause-digest identity, ledger outside the envelope). "Right when the
+  widening is a durable owner decision" refines to: 2a when revocable or
+  policy-derived; 2b only when the widening must survive without evaluation.
+- **§13 worked-examples summary table**: "persistent policy state / label
+  rewrite" unconflates into the two rows.
+- **§6.8 cell-ID table** gains `grantConsumed` (single-use grants) when the
+  §6.5 substrate is specced for the runner.
+- **`policyState` guard kind** documented next to the exchange-rule grammar
+  (§4.3.3 vicinity), with the §4.9.3-style fail-closed resolution rules and
+  the CT-1874 home-clause constraint for label-carried discovery.
+
+## Provenance
+
+Runner seams: `exchange-eval.ts` (`RuleFiring` under-recording, guard kinds,
+fuel/fail-closed), `policy.ts` (`PolicyRecord`/`PolicySnapshot` digests,
+B2a scope note), `prepare.ts` (S18 privileged `["cfc"]` write guard, SC-11
+idempotence skip, `derivePersistedLabel` authoring path,
+`disallowedAuthoredClauseReason`, runtime-mint forgery gate),
+`acl-manager.ts` + `memory/v2/server.ts` (reserved ACL doc, capability
+resolution, owner-gated writes), `cfc/space-membership.ts` (fail-closed point
+query, `HasRole` mint), B6 sanitizer discharge-onto-new-value
+(`schema-sanitization.ts`). Spec: `08-12-store-label-monotonicity.md` §8.12.1
+(`canUpdateStoreLabel`, spec/Lean only), §8.12.5, §8.12.7 (the three routes),
+§8.12.8 (components, replacement-soundness); `03-core-concepts.md` §3.1.8
+(conjunctive join, principal-like alternatives, no-silent-widening) and
+§3.8.4 (robust declassification); `06-events-and-intents.md` §6.2/§6.4/§6.5
+(processed/consumed/attempt cells — spec-only in the runner today);
+`08-10-validation-at-boundaries.md` §8.10.5.2/§8.10.6 (audience expansion is
+a new release judgment); `13-worked-examples.md` §13.4.3–.4 (ShareGrant +
+consuming rule); merged §4.9.3 (HasRole fact generation). Labs-side: Epic B
+decision 1 (`docs/plans/cfc-future-work-implementation.md`), CT-1874
+(home-clause constraint), [`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md)
+(grant records as label-adjacent metadata).
