@@ -574,10 +574,21 @@ export function makeInlineFilterImplementation(
       }
       const resultCell = result;
       const resultPresence = resultCell.asSchema(RESULT_PRESENCE_SCHEMA);
+      // (S16, legacy filter.ts parity) Declare the result container so
+      // prepare re-derives its `structure` label (membership/order,
+      // §8.5.6.1) from this tx's J — the selection criteria the coordinator
+      // actually read (inline first-pass predicate reads + per-element
+      // predicate results) — EVERY reconcile, decoupled from value writes.
+      // Growth and no-write re-stamps land through this declaration.
+      tx.recordCfcStructureContainer(resultCell.getAsNormalizedFullLink());
 
-      const rawList = probeScoped(() =>
-        listCell.withTx(tx).getRaw() as unknown
-      );
+      // UNMARKED read (legacy filter.ts / inline-map parity): membership and
+      // order ARE the list's content — a value-class read that does NOT
+      // consume the per-slot link-origin labels. Probe-marking this root
+      // read would make it a followRef observation post-C1, joining every
+      // element's source label into the coordinator's J — exactly the S16
+      // structure over-taint (caught by the index-only pointwise oracle).
+      const rawList = listCell.withTx(tx).getRaw() as unknown;
       if (rawList === undefined) {
         probeScoped(() => resultPresence.withTx(tx).set([]));
         for (const run of elementRuns.values()) run.cancel?.();
@@ -631,13 +642,18 @@ export function makeInlineFilterImplementation(
         const evalPredicateIn = (
           evalTx: IExtendedStorageTransaction,
         ): { out: unknown; errors: { error: unknown }[] } => {
-          const elemValue = runtime.getCellFromLink(
-            link,
-            undefined,
-            evalTx,
-          )!.withTx(evalTx).get() as unknown;
           const argument: Record<string, unknown> = {};
-          if (usage.usesElement) argument.element = elemValue;
+          // Element CONTENT is read only when the predicate consumes it
+          // (S16 §8.5.6.1): an index-only predicate must leave no member
+          // content in the coordinator's per-tx join — the structure label
+          // re-derives from exactly what the selection criteria read.
+          if (usage.usesElement) {
+            argument.element = runtime.getCellFromLink(
+              link,
+              undefined,
+              evalTx,
+            )!.withTx(evalTx).get() as unknown;
+          }
           if (usage.usesIndex) argument.index = index;
           if (usage.usesParams) {
             argument.params = inputsCell.key("params").withTx(evalTx).get();
@@ -671,15 +687,16 @@ export function makeInlineFilterImplementation(
           setResultCell(predicateCell, parentCell);
           run = { predicateCell, lastIndex: -1 };
           elementRuns.set(elementKey, run);
-          // Legacy batch-first-instantiation parity (CFC §8.5.6.1): an
-          // element's FIRST predicate evaluation runs inline in the
-          // coordinator's own tx, so the container write that decides its
-          // membership joins the element's content label — the membership
-          // structure stamp must be as confidential as the values that
-          // decided it, even when the container value is `[]` or later
-          // diffs never touch the root again. Subsequent element changes
-          // go through the per-element effect (pointwise labels).
-          // Deliberately NOT probe-scoped: the content read IS the taint.
+          // An element's FIRST predicate evaluation runs inline in the
+          // coordinator's own tx: its GENUINE reads (element content only
+          // when the predicate uses it, index/params otherwise) land in
+          // this tx's J, and the S16 structure declaration above re-derives
+          // the container's membership stamp from exactly that — as
+          // confidential as the values that decided membership, even when
+          // the container value is `[]`. Subsequent element changes go
+          // through the per-element effect (pointwise labels), whose
+          // predicate-result reads below keep feeding J on reconciles.
+          // Deliberately NOT probe-scoped: these reads ARE the criteria.
           const { out, errors } = evalPredicateIn(tx);
           predicateCell.withTx(tx).setRawUntyped(
             fabricFromNativeValue(convertCellsToLinks(out)),
