@@ -53,6 +53,7 @@ import {
   uniqueCfcAtoms,
 } from "./observation.ts";
 import { evaluateExchangeRules } from "./exchange-eval.ts";
+import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   type ReadClassSelection,
@@ -3235,12 +3236,15 @@ const setupResultSchemaFor = (
     : schema as JSONSchema;
 };
 
+// `sourceMetadata` is returned alongside the derived label so the persist
+// loop can re-derive the source's sub-path entries from the same stored
+// state without a second store read (inv-12 Stage 0, see the loop).
 const derivePersistedLinkLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
   candidateSchemas: ReadonlyMap<string, JSONSchema>,
   authoringIdentity: ImplementationIdentity | undefined,
-): { label?: IFCLabel; reason?: string } => {
+): { label?: IFCLabel; reason?: string; sourceMetadata?: CfcMetadata } => {
   const sourceMetadata = storedMetadataFor(
     tx,
     input.source.space,
@@ -3306,6 +3310,7 @@ const derivePersistedLinkLabel = (
   ) {
     return {};
   }
+  const withMetadata = sourceMetadata === undefined ? {} : { sourceMetadata };
   const sourceLabel = mergeLabels(
     sourceMetadata === undefined ? undefined : labelAtPath(
       sourceMetadata,
@@ -3337,7 +3342,7 @@ const derivePersistedLinkLabel = (
       [linkReferenceIntegrity(input)],
     ),
   };
-  return { label };
+  return { label, ...withMetadata };
 };
 
 const cloneLabel = (label: IFCLabel): IFCLabel => ({
@@ -4430,6 +4435,39 @@ export const prepareBoundaryCommit = (
         });
       }
       const targetPath = canonicalizeLogicalPath(input.target.path);
+      // Inv-12 Stage 0 (SC-25 prerequisite): persist link-origin labels from
+      // the worker-authoritative source — the source doc's STORED label map,
+      // re-derived under the link source path — independent of the carried
+      // view. The carried `cfcLabelView` round-trips through the main thread
+      // (CellHandle refs) and is author-influenceable, so a tampered /
+      // redacted / incomplete view must not be able to WEAKEN what the
+      // stored metadata provides: entries re-derived here persist outright;
+      // the view loop below can only add. (`derivePersistedLinkLabel` above
+      // covers the label AT the source path; this covers the source's
+      // sub-path entries, which previously rode only the view.) Same
+      // evidence-mint gate as the carried entries (audit S4): a link write
+      // may not re-mint runtime evidence at the target without builtin
+      // authorship.
+      const rederivedView = cfcLabelViewFromMetadata(
+        result.sourceMetadata,
+        input.source.path,
+      );
+      for (const entry of rederivedView?.entries ?? []) {
+        if (!hasLabelValues(entry.label)) {
+          continue;
+        }
+        persistedLabelEntries.push({
+          path: [
+            ...targetPath,
+            ...canonicalizeLogicalPath(entry.path),
+          ],
+          label: gateRuntimeMintedIntegrity(
+            cloneLabel(entry.label),
+            linkIdentity,
+          ),
+          origin: "link",
+        });
+      }
       for (const entry of input.cfcLabelView?.entries ?? []) {
         if (!hasLabelValues(entry.label)) {
           continue;
