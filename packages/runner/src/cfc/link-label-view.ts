@@ -53,6 +53,35 @@ export function setLinkCfcLabelView(
  * Input trees are link-converted response values, so they are acyclic.
  */
 export function redactSigilCfcLabelViewsForDisplay(value: unknown): unknown {
+  return transformSigilCfcLabelViews(value, (payload) => ({
+    ...payload,
+    cfcLabelView: redactCaveatSourcesForDisplay(payload.cfcLabelView!),
+  }));
+}
+
+/**
+ * Remove every `cfcLabelView` riding a sigil link inside an INBOUND value
+ * (inv-12 Stage 0): views arriving from the main thread are untrusted display
+ * artifacts and must not become worker label state or link-write policy
+ * inputs. `cellRefToSigilLink` already refuses to forward ref-carried views,
+ * but raw sigil links bypass the CellRef path — hand-crafted JSON in write
+ * values, and CellHandles serialized into `CustomEvent.detail` via `toJSON`
+ * re-entering through the VDOM event ingress (codex/cubic review on the
+ * Stage 0 PR). Same copy-on-write discipline as the display redactor above.
+ */
+export function stripSigilCfcLabelViews(value: unknown): unknown {
+  return transformSigilCfcLabelViews(value, (payload) => {
+    const { cfcLabelView: _cfcLabelView, ...clean } = payload;
+    return clean;
+  });
+}
+
+function transformSigilCfcLabelViews(
+  value: unknown,
+  transformPayload: (
+    payload: CfcCellLinkRefPayload,
+  ) => CfcCellLinkRefPayload,
+): unknown {
   if (isLinkRef(value)) {
     const payload = linkRefPayload(
       value as SigilLink,
@@ -60,15 +89,12 @@ export function redactSigilCfcLabelViewsForDisplay(value: unknown): unknown {
     if (payload.cfcLabelView === undefined) {
       return value;
     }
-    return linkRefFrom<CfcCellLinkRefPayload>({
-      ...payload,
-      cfcLabelView: redactCaveatSourcesForDisplay(payload.cfcLabelView),
-    });
+    return linkRefFrom<CfcCellLinkRefPayload>(transformPayload(payload));
   }
   if (Array.isArray(value)) {
     let changed = false;
     const out = value.map((item) => {
-      const next = redactSigilCfcLabelViewsForDisplay(item);
+      const next = transformSigilCfcLabelViews(item, transformPayload);
       if (next !== item) changed = true;
       return next;
     });
@@ -78,7 +104,7 @@ export function redactSigilCfcLabelViewsForDisplay(value: unknown): unknown {
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      const next = redactSigilCfcLabelViewsForDisplay(item);
+      const next = transformSigilCfcLabelViews(item, transformPayload);
       if (next !== item) changed = true;
       out[key] = next;
     }

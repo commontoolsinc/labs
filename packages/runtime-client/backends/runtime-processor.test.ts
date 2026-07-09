@@ -28,7 +28,11 @@ import {
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { cellRefToSigilLink, getCell } from "./utils.ts";
+import {
+  cellRefToSigilLink,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
@@ -2183,6 +2187,93 @@ describe("runtime-client CellRef conversion", () => {
 
     getCell(runtime, ref);
     expect(seen).toEqual([undefined]);
+  });
+
+  // Raw sigil links inside inbound values (hand-crafted JSON, or a
+  // CellHandle serialized into CustomEvent.detail via toJSON) bypass the
+  // CellRef path — the value walker must drop their label views too
+  // (codex/cubic review on the Stage 0 PR).
+  it("strips label views from raw sigil links in inbound values", () => {
+    const linkWithView = {
+      "/": {
+        "link@1": {
+          id: "of:cfc-raw-link",
+          space: "did:key:z6MkrX123abc",
+          path: ["value"],
+          cfcLabelView: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: ["main-thread-claim"] },
+            }],
+          },
+        },
+      },
+    };
+    const mapped = mapCellRefsToSigilLinks({
+      nested: [linkWithView],
+    }) as { nested: Array<{ "/": { "link@1": Record<string, unknown> } }> };
+    const payload = mapped.nested[0]["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-raw-link");
+    expect("cfcLabelView" in payload).toBe(false);
+  });
+});
+
+describe("RuntimeProcessor VDom event label-view ingress", () => {
+  // CustomEvent.detail is JSON.stringify'd on the main thread (invoking
+  // CellHandle.toJSON) and re-enters the worker here, bypassing
+  // getCell/cellRefToSigilLink — a handler writing event.detail.sourceCell
+  // would persist the ref's view through the sigil-link write path. The
+  // worker strips inbound views at this ingress too (codex/cubic review).
+  it("strips label views from sigil links in inbound VDOM events", () => {
+    const dispatched: unknown[] = [];
+    const processor = {
+      vdomMounts: new Map([[
+        "mount-1",
+        {
+          reconciler: {
+            dispatchEvent: (_handlerId: string, event: unknown) => {
+              dispatched.push(event);
+              return true;
+            },
+          },
+        },
+      ]]),
+    } as unknown as RuntimeProcessor;
+
+    RuntimeProcessor.prototype.handleVDomEvent.call(processor, {
+      type: ClientNotificationType.VDomEvent,
+      mountId: "mount-1",
+      handlerId: "handler-1",
+      event: {
+        type: "drop",
+        detail: {
+          sourceCell: {
+            "/": {
+              "link@1": {
+                id: "of:cfc-event-link",
+                space: "did:key:z6MkrX123abc",
+                path: ["value"],
+                cfcLabelView: {
+                  version: 1,
+                  entries: [{
+                    path: [],
+                    label: { confidentiality: ["main-thread-claim"] },
+                  }],
+                },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(dispatched.length).toBe(1);
+    const payload = (dispatched[0] as {
+      detail: { sourceCell: { "/": { "link@1": Record<string, unknown> } } };
+    }).detail.sourceCell["/"]["link@1"];
+    expect(payload.id).toBe("of:cfc-event-link");
+    expect("cfcLabelView" in payload).toBe(false);
   });
 });
 

@@ -43,6 +43,7 @@ import {
   redactSigilCfcLabelViewsForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
+  stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -1700,9 +1701,13 @@ export class RuntimeProcessor {
       return;
     }
 
+    // CustomEvent.detail was JSON.stringify'd on the main thread (invoking
+    // CellHandle.toJSON), so sigil links in it bypass getCell /
+    // cellRefToSigilLink — strip any main-thread cfcLabelView copies before
+    // a handler can write them (inv-12 Stage 0; codex/cubic review).
     const dispatched = mount.reconciler.dispatchEvent(
       request.handlerId,
-      request.event,
+      stripSigilCfcLabelViews(request.event) as typeof request.event,
     );
     if (!dispatched) {
       console.warn(

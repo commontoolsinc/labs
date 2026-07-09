@@ -4,6 +4,7 @@ export {
   linkCfcLabelView,
   redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
+  stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
 export {
   classifyAtomField,

@@ -8,10 +8,11 @@ import {
 import {
   cfcLabelViewForCell,
   redactCaveatSourcesForDisplay,
+  stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { CellRef, PageRef } from "../protocol/types.ts";
 import { Runtime } from "@commonfabric/runner";
-import { linkRefFrom } from "@commonfabric/runner/shared";
+import { isSigilLink, linkRefFrom } from "@commonfabric/runner/shared";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import { isCellRef } from "../protocol/mod.ts";
 
@@ -26,6 +27,13 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     return value.map((v) => mapCellRefsToSigilLinks(v));
   } else if (isCellRef(value)) {
     return cellRefToSigilLink(value);
+  } else if (isSigilLink(value)) {
+    // A RAW sigil link in an inbound value bypasses the CellRef branch above
+    // (hand-crafted JSON, or a CellHandle serialized into CustomEvent.detail
+    // via toJSON). Its label view is a main-thread display artifact like a
+    // ref's (inv-12 Stage 0) — drop it so it never becomes a link-write
+    // policy input.
+    return stripSigilCfcLabelViews(value);
   } else if (typeof value === "object" && value) {
     return Object.entries(value).reduce((acc: Record<string, any>, [k, v]) => {
       acc[k] = mapCellRefsToSigilLinks(v);
