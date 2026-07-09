@@ -1,13 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { URI } from "@commonfabric/memory/interface";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryProtocolFlags,
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
@@ -17,21 +12,15 @@ import type {
 } from "../src/storage/interface.ts";
 import {
   NotificationRecorder,
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-sync-under-pending");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -81,29 +70,26 @@ type HeldTransact = {
 /**
  * Scripted transport that serves an initial doc snapshot on watch, HOLDS every
  * transact response until the test releases it, and can push server syncs
- * (session/effect) at any point in between. This is what lets a test interleave
- * "a foreign writer's sync arrives" with "our own commit is still in flight".
+ * (session/effect, via the base emitSync) at any point in between. This is
+ * what lets a test interleave "a foreign writer's sync arrives" with "our own
+ * commit is still in flight".
  */
-class HeldTransactTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  readonly #sessionId = "session:sync-under-pending";
-  readonly #space = space;
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
+class HeldTransactTransport extends ScriptedSessionTransport {
   #held: HeldTransact | null = null;
   #transactSent = Promise.withResolvers<void>();
 
   constructor(
     private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
-  ) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+  ) {
+    super({
+      name: "sync-under-pending",
+      sessionId: "session:sync-under-pending",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override ackServerSeq(): number {
+    return 10;
   }
 
   /** Resolves when a transact request has arrived (and is being held). */
@@ -111,62 +97,15 @@ class HeldTransactTransport implements MemoryV2Client.Transport {
     return this.#transactSent.promise;
   }
 
-  send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      invocation?: { aud?: unknown; challenge?: unknown };
-      commit?: { operations?: Array<{ op: string; id: string }> };
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "sync-under-pending-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return Promise.resolve();
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `sync-under-pending-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: this.#sessionId,
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return Promise.resolve();
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 10,
-          },
-        });
-        return Promise.resolve();
       case "session.watch.set":
       case "session.watch.add": {
         const roots =
           message.watches?.flatMap((watch) =>
             watch.query?.roots?.map((root) => root.id as URI) ?? []
           ) ?? [];
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -177,18 +116,21 @@ class HeldTransactTransport implements MemoryV2Client.Transport {
             ),
           },
         });
-        return Promise.resolve();
+        return;
       }
       case "transact": {
         if (this.#held !== null) {
           throw new Error("Test transport holds only one transact at a time");
         }
+        const commit = message.commit as
+          | { operations?: Array<{ op: string; id: string }> }
+          | undefined;
         this.#held = {
           requestId: message.requestId!,
-          operations: message.commit?.operations ?? [],
+          operations: commit?.operations ?? [],
         };
         this.#transactSent.resolve();
-        return Promise.resolve();
+        return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
@@ -203,7 +145,7 @@ class HeldTransactTransport implements MemoryV2Client.Transport {
     }
     this.#held = null;
     this.#transactSent = Promise.withResolvers<void>();
-    this.#respond({
+    this.respond({
       type: "response",
       requestId: held.requestId,
       ok: {
@@ -219,24 +161,6 @@ class HeldTransactTransport implements MemoryV2Client.Transport {
         })),
       },
     });
-  }
-
-  emitSync(sync: SessionSync): void {
-    this.#respond({
-      type: "session/effect",
-      space: this.#space,
-      sessionId: this.#sessionId,
-      effect: sync,
-    });
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 

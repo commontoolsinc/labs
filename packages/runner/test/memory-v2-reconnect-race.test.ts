@@ -1,13 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { defer } from "@commonfabric/utils/defer";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -18,11 +16,11 @@ import type {
 } from "../src/storage/interface.ts";
 import {
   NotificationRecorder,
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
@@ -30,12 +28,6 @@ import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -129,59 +121,21 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   }
 }
 
-class RejectThenSucceedTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+class RejectThenSucceedTransport extends ScriptedSessionTransport {
+  constructor() {
+    super({
+      name: "reject-then-succeed",
+      sessionId: "session:reject-then-succeed",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
-  }
-
-  async send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      commit?: { localSeq?: number };
-      invocation?: { aud?: unknown; challenge?: unknown };
-    };
-
+  protected override async handle(
+    message: ScriptedTransportMessage,
+  ): Promise<void> {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "reject-then-succeed-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return;
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `reject-then-succeed-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:reject-then-succeed",
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return;
       case "session.watch.set":
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -196,20 +150,12 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           },
         });
         return;
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 0,
-          },
-        });
-        return;
       case "transact": {
-        const localSeq = message.commit?.localSeq ?? -1;
+        const commit = message.commit as { localSeq?: number } | undefined;
+        const localSeq = commit?.localSeq ?? -1;
         if (localSeq === 1) {
           await new Promise((resolve) => setTimeout(resolve, 5));
-          this.#respond({
+          this.respond({
             type: "response",
             requestId: message.requestId!,
             error: {
@@ -219,7 +165,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
           });
           return;
         }
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -240,15 +186,6 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
