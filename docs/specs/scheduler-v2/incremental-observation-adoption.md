@@ -156,6 +156,15 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   cascade's computation runs; the associated transactions, IPC, and
   conflict-retry churn go with it. Acceptance: flag-ON multi-user beats
   main on the group-chat A/B.
+
+  Measured (group-chat-adoption-bench, 10 messages, alice→{bob, tab2},
+  scheduler run-start deltas): main(v1) sender 401 / receivers 400 /
+  total 801; branch flag-OFF 201 / 400 / 601 (v2 already halves the
+  sender cascade); branch flag-ON 201 / **332** / **533** with 68
+  adoptions — receivers −17%, total −33% vs main. The residual receiver
+  runs are effects plus §4's window-lag laggards; aligning the
+  observation-batch flush with its cascade's push window is the next
+  lever.
 - **External-I/O builtins:** a receiver adopting the writer's fetch/LLM
   computation state never re-issues the request (today this is guarded
   case-by-case, e.g. the fetch mutex).
