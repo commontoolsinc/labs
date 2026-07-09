@@ -229,9 +229,11 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   - post-resume element-field write re-derives exactly that row (liveness —
     guards against the stranded-rows mode (c));
   - structural append reconciles and runs only the new row.
-- `scheduler-observations.test.ts`: unit branches — hold-when-not-rehydrated
-  (register no longer else-ifs), `resumeMode: "always-run"` skip,
-  identity-less actions not persisted.
+- `scheduler-observations.test.ts`: unit branches — `resumeMode:
+  "always-run"` runs despite a matching snapshot (with a rehydrating
+  control), identity-less actions persist no observation. The
+  hold-when-not-rehydrated decoupling is asserted end-to-end by the
+  map-children test rather than a timing-sensitive unit gate.
 - `reload-rehydration.test.ts`: the asserted listing query shape becomes the
   space-scoped one.
 - Reload churn: the ≤ 1 residual gate lives in the flag-OFF integration run,
