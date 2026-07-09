@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitFor, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { dirname, join, resolve } from "@std/path";
@@ -7,6 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { clickPierce } from "./shadow-dom.ts";
 import { expect } from "@std/expect";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
@@ -65,23 +66,14 @@ async function waitForSlugPieceMarker(
   shell: ShellIntegration,
   expectedText: string,
 ): Promise<void> {
-  await waitFor(async () => {
-    return await shell.page().evaluate((expected) => {
-      function findText(root: Document | ShadowRoot): string | undefined {
-        const marker = root.querySelector("#slug-piece-marker");
-        if (marker?.textContent?.trim()) {
-          return marker.textContent.trim();
-        }
-        for (const element of root.querySelectorAll("*")) {
-          if (element.shadowRoot) {
-            const found = findText(element.shadowRoot);
-            if (found) return found;
-          }
-        }
-      }
-      return findText(document) === expected;
-    }, { args: [expectedText] });
-  });
+  await waitForCondition(
+    shell.page(),
+    (probe, expected) =>
+      probe.collect("#slug-piece-marker").some((el) =>
+        probe.deepText(el).trim() === expected
+      ),
+    { args: [expectedText] },
+  );
 }
 
 async function getClientEngineCompileCount(
@@ -100,22 +92,20 @@ async function getClientEngineCompileCount(
 async function waitForSpaceRootPattern(
   page: ReturnType<ShellIntegration["page"]>,
 ): Promise<void> {
-  await waitFor(async () => {
-    return await page.evaluate(() => {
-      const rootView = document.querySelector("x-root-view");
-      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-        | {
-          _patterns?: {
-            value?: {
-              spaceRootPattern?: {
-                id(): string;
-              };
+  await waitForCondition(page, () => {
+    const rootView = document.querySelector("x-root-view");
+    const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+      | {
+        _patterns?: {
+          value?: {
+            spaceRootPattern?: {
+              id(): string;
             };
           };
-        }
-        | null;
-      return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
-    });
+        };
+      }
+      | null;
+    return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
   });
 }
 
@@ -134,6 +124,18 @@ describe("shell piece tests", () => {
     let piece: PieceController | undefined;
     let pieceSinkCancel: (() => void) | undefined;
     let identityPath: string | undefined;
+    // The piece's committed result value, tracked by the result-cell sink set
+    // up below, and a one-shot waiter the sink resolves when the value reaches
+    // a target. A fresh deferred per call keeps the sequential checks (0, then
+    // -1, then -2) independent.
+    let latestResultValue: number | undefined;
+    let resultWaiter: { target: number; deferred: Deferred } | undefined;
+    const awaitResultValue = (target: number): Promise<void> => {
+      if (latestResultValue === target) return Promise.resolve();
+      const deferred = defer();
+      resultWaiter = { target, deferred };
+      return deferred.promise;
+    };
     const logDebugSnapshot = async (label: string) => {
       console.log(label, {
         shellState: await shell.state(),
@@ -225,11 +227,17 @@ describe("shell piece tests", () => {
       piece = currentPiece;
 
       const resultCell = cc.manager().getResult(currentPiece.getCell());
-      pieceSinkCancel = resultCell.sink(() => {});
+      pieceSinkCancel = resultCell.sink((value) => {
+        latestResultValue = (value as { value?: number } | undefined)?.value;
+        if (resultWaiter && latestResultValue === resultWaiter.target) {
+          resultWaiter.deferred.resolve();
+          resultWaiter = undefined;
+        }
+      });
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === 0
-      );
+      await awaitResultValue(0);
+      // A fresh reload of the piece has no sink; poll until its own sync round
+      // trip reads the committed value back.
       await waitFor(async () => {
         const reloadedPiece = await cc.get(pieceId, true);
         return (await reloadedPiece.result.get(["value"])) === 0;
@@ -242,9 +250,7 @@ describe("shell piece tests", () => {
         identity,
       });
 
-      await waitFor(async () => {
-        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
-      });
+      await waitForCondition(page, () => !!globalThis.commonfabric?.rt);
       await waitForSpaceRootPattern(page);
       // First in-browser load of the piece: pieces are no longer eagerly
       // started when the space loads (CT-1623 — the header used to start every
@@ -263,41 +269,33 @@ describe("shell piece tests", () => {
       });
 
       const waitForActivePattern = async () => {
-        await waitFor(async () => {
-          return await page.evaluate((expectedPieceId) => {
-            const rootView = document.querySelector("x-root-view");
-            const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-              | {
-                _patterns?: {
-                  value?: {
-                    activePattern?: {
-                      id(): string;
-                    };
+        await waitForCondition(page, (_probe, expectedPieceId) => {
+          const rootView = document.querySelector("x-root-view");
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                value?: {
+                  activePattern?: {
+                    id(): string;
                   };
                 };
-              }
-              | null;
-            const activePattern = appView?._patterns?.value?.activePattern;
-            return activePattern?.id() === expectedPieceId;
-          }, { args: [pieceId] });
-        });
+              };
+            }
+            | null;
+          const activePattern = appView?._patterns?.value?.activePattern;
+          return activePattern?.id() === expectedPieceId;
+        }, { args: [pieceId] });
       };
 
       await waitForActivePattern();
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === 0
-      );
+      await awaitResultValue(0);
 
       await clickPierce(page, "#counter-decrement");
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -1
-      );
+      await awaitResultValue(-1);
 
       await clickPierce(page, "#counter-decrement");
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -2
-      );
+      await awaitResultValue(-2);
 
       // Compilation-cache contract: the piece's cold compile above was written
       // back to the IDB-backed CachedCompiler. A FRESH worker must then load
@@ -322,9 +320,7 @@ describe("shell piece tests", () => {
         },
         identity,
       });
-      await waitFor(async () => {
-        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
-      });
+      await waitForCondition(page, () => !!globalThis.commonfabric?.rt);
       await waitForSpaceRootPattern(page);
       // Settle the space-root chain's own loads before baselining (a trailing
       // root compile landing inside the measurement window would show up as a
@@ -360,9 +356,7 @@ describe("shell piece tests", () => {
         );
       }
 
-      await waitFor(async () =>
-        (await currentPiece.result.get(["value"])) === -2
-      );
+      await awaitResultValue(-2);
     } catch (error) {
       if (piece) {
         await logDebugSnapshot("shell piece test debug");
@@ -469,8 +463,9 @@ describe("shell piece tests", () => {
           identity: undefined,
         });
       });
-      await waitFor(async () =>
-        await shell.page().evaluate(() => !globalThis.commonfabric?.rt)
+      await waitForCondition(
+        shell.page(),
+        () => !globalThis.commonfabric?.rt,
       );
       // Let any disposal-raced async work settle before afterEach inspects the
       // recorded console errors.

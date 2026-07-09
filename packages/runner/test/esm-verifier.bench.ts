@@ -199,11 +199,11 @@ const parkingRecords = parkingGraph.graph.records;
 const parkingMainSpec = parkingGraph.mainSpecifier;
 
 // Log program sizes for reference
-console.log(
+console.error(
   `small: ${smallBodies.length} authored bodies, ` +
     `total body bytes: ${smallBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );
-console.log(
+console.error(
   `parking-coordinator: ${parkingBodies.length} authored bodies, ` +
     `total body bytes: ${parkingBodies.reduce((s, [, b]) => s + b.length, 0)}`,
 );

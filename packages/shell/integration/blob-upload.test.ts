@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 
 const { FRONTEND_URL } = env;
@@ -18,15 +18,12 @@ describe("shell blob upload", () => {
       view: { spaceName },
       identity,
     });
-    await waitFor(async () =>
-      await shell.page().evaluate(() =>
-        Boolean(
-          (globalThis as unknown as {
-            commonfabric?: { rt?: unknown };
-          }).commonfabric?.rt,
-        )
-      )
-    );
+    await waitForCondition(shell.page(), () =>
+      Boolean(
+        (globalThis as unknown as {
+          commonfabric?: { rt?: unknown };
+        }).commonfabric?.rt,
+      ));
 
     const result = await shell.page().evaluate(async () => {
       const g = globalThis as unknown as {
@@ -133,20 +130,18 @@ describe("shell blob upload", () => {
       "[data-blob-upload-test='true']",
     );
 
-    await waitFor(async () =>
-      await shell.page().evaluate(() => {
-        const image = document.querySelector<HTMLImageElement>(
-          "[data-blob-upload-test='true']",
-        );
-        if (!image) return false;
-        const rect = image.getBoundingClientRect();
-        return image.complete &&
-          image.naturalWidth === 1 &&
-          image.naturalHeight === 1 &&
-          rect.width === 16 &&
-          rect.height === 16;
-      })
-    );
+    await waitForCondition(shell.page(), () => {
+      const image = document.querySelector<HTMLImageElement>(
+        "[data-blob-upload-test='true']",
+      );
+      if (!image) return false;
+      const rect = image.getBoundingClientRect();
+      return image.complete &&
+        image.naturalWidth === 1 &&
+        image.naturalHeight === 1 &&
+        rect.width === 16 &&
+        rect.height === 16;
+    });
     const box = await image.boundingBox();
 
     const rendered = await shell.page().evaluate(() => {

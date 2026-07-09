@@ -28,28 +28,30 @@
 import { Identity } from "@commonfabric/identity";
 import {
   ConsoleMethod,
-  type ModuleByteCache,
+  experimentalOptionsFromEnv,
   PatternCoverageCollector,
   patternCoverageOutputPath,
   Runtime,
+  runtimePresets,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import type {
   Cell,
   ConsoleHandler,
   ErrorWithContext,
+  ModuleByteCache,
   Pattern,
   SettleStats,
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import type { Reactive } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
-import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
   appendLoggerDeltaMessages,
   snapshotLoggerErrorWarnCounts,
@@ -62,7 +64,6 @@ import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   type FetchMockEntry,
   makeMockFetch,
@@ -267,14 +268,14 @@ export interface TestRunnerOptions {
   statsActionLimit?: number;
   /** Override CFC enforcement mode for the test runtime. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /** Shared compiled-module-byte cache for direct harness compiles. */
+  moduleByteCache?: ModuleByteCache;
   /** Print storage-related logger timings and counts after each test file. */
   storageStats?: boolean;
   /** Limit for storage timing/count tables when storageStats is enabled. */
   storageStatsLimit?: number;
   /** Directory for pattern runtime coverage LCOV artifacts. */
   patternCoverageDir?: string;
-  /** Shared compiled-module-byte cache for direct harness compiles. */
-  moduleByteCache?: ModuleByteCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -887,8 +888,6 @@ export async function runTestPattern(
     ? new PatternCoverageCollector()
     : undefined;
   let writeLocalPatternCoverage = patternCoverage !== undefined;
-  const moduleByteCache = options.moduleByteCache ??
-    getDefaultModuleByteCache();
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
   // console event) and logger-level error/warn activity (channel 2: logger count
@@ -937,19 +936,24 @@ export async function runTestPattern(
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
     () =>
-      new Runtime({
+      // `runtimePresets.patternTest` carries the shared first-party posture
+      // (CT-1814): the enforce-explicit CFC pin lives in the preset core, so
+      // pattern tests act as a regression net for CFC without this site
+      // restating the production default. Params below are this harness's
+      // declared deltas.
+      new Runtime(runtimePresets.patternTest({
+        apiUrl: new URL(import.meta.url),
         storageManager,
+        experimental: experimentalOptionsFromEnv(Deno.env.get),
+        moduleByteCache: options.moduleByteCache ??
+          getDefaultModuleByteCache(),
         // Inject a fetch that honors test-declared `fetchMocks` (scoped to this
         // runtime; no process-global mutation).
         fetch: mockFetch,
-        // Match the production runtime default: enforce explicitly declared
-        // `ifc` policies so pattern tests act as a regression net for CFC.
-        // Patterns without CFC annotations are unaffected; tests that need a
-        // laxer mode can pass `cfcEnforcementMode` explicitly.
-        cfcEnforcementMode: options.cfcEnforcementMode ?? "enforce-explicit",
-        experimental: experimentalOptionsFromEnv(),
-        apiUrl: new URL(import.meta.url),
-        moduleByteCache,
+        // Tests that need a laxer mode than the shared pin opt out per test.
+        ...(options.cfcEnforcementMode !== undefined
+          ? { cfcEnforcementMode: options.cfcEnforcementMode }
+          : {}),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
         navigateCallback: (target) => {
           const name = (target.key("$NAME") as Cell<string | undefined>).get();
@@ -962,7 +966,7 @@ export async function runTestPattern(
             console.log(`    → navigateTo: ${label}`);
           }
         },
-      }),
+      })),
   );
   runtime.enableIdempotencyCheck();
   // Channel 1: capture pattern-code console.error / console.warn calls that

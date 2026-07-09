@@ -6,7 +6,22 @@ export type {
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
   RuntimeOptions,
   SpaceCellContents,
+  VersionSkewHandler,
+  VersionSkewInfo,
 } from "./runtime.ts";
+export {
+  type BrowserWorkerPresetParams,
+  type EnvReader,
+  EXPERIMENTAL_ENV_VARS,
+  experimentalOptionsFromEnv,
+  type PatternTestPresetParams,
+  type ProductionServerPresetParams,
+  type RemoteClientPresetParams,
+  RUNTIME_OPTION_KEYS,
+  type RuntimeOptionKey,
+  runtimePresets,
+  type UnitTestPresetParams,
+} from "./runtime-presets.ts";
 export type {
   UnsafeHostTrust,
   UnsafeHostTrustOptions,
@@ -51,10 +66,14 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
+  buildsMatch,
+  computeEntryIdentity,
   Console,
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  fetchToolshedGitSha,
+  resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
@@ -91,7 +110,9 @@ export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
   getPatternIdentityRef,
+  getPatternSource,
   patternIdentityKey,
+  setPatternSource,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)

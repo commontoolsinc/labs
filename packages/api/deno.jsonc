@@ -1,7 +1,8 @@
 {
   "name": "@commonfabric/api",
   "tasks": {
-    "test": "deno test --allow-read test/**/*.test.ts"
+    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
+    "test": "deno test --no-check --allow-read test/**/*.test.ts"
   },
   "exports": {
     ".": "./index.ts",

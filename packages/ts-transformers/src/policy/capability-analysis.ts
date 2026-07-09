@@ -488,6 +488,25 @@ function isRestParameter(parameter: ts.Symbol | undefined): boolean {
     !!declaration.dotDotDotToken;
 }
 
+// A spread of a fixed-length tuple fills a statically known set of parameter
+// positions, so it can be expanded and matched positionally. Return the element
+// count for such a tuple, or undefined for anything whose length is not fixed at
+// compile time (a plain array, or a tuple with an optional, rest, or variadic
+// element such as `[A, ...B[]]`). Every element flag must be exactly
+// `Required`; any other flag admits a variable runtime length.
+function getFixedTupleElementCount(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): number | undefined {
+  if (!checker.isTupleType(type)) return undefined;
+  const target = (type as ts.TypeReference).target as ts.TupleType;
+  const elementFlags = target.elementFlags;
+  for (const flag of elementFlags) {
+    if (flag !== ts.ElementFlags.Required) return undefined;
+  }
+  return elementFlags.length;
+}
+
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -2316,17 +2335,94 @@ export function analyzeFunctionCapabilities(
       const args = call.arguments;
       if (!args) return handled;
 
-      for (let index = 0; index < args.length; index++) {
+      // `index` walks the argument list; `paramIndex` walks parameter
+      // positions. The two diverge only when a fixed-length tuple spread expands
+      // into several positions, so the loop update advances `paramIndex` by one
+      // per argument and the tuple branch adds the remaining positions.
+      for (
+        let index = 0, paramIndex = 0;
+        index < args.length;
+        index++, paramIndex++
+      ) {
         const argument = args[index];
         if (!argument) continue;
 
-        const parameter = getParameterAtArgument(signature, index);
+        const parameter = getParameterAtArgument(signature, paramIndex);
         const isSpreadArgument = ts.isSpreadElement(argument);
-        // An array spread has unknown runtime length, so it cannot be matched to
-        // later fixed parameters; stop signature mapping there. A spread into a
-        // rest parameter is a collection of rest elements, recorded below at the
-        // representative array-item path.
-        if (isSpreadArgument && !isRestParameter(parameter)) break;
+        // An array spread into a fixed parameter has unknown runtime length, so
+        // it cannot be matched to later fixed parameters. A spread of a
+        // fixed-length tuple is the exception: its positions are statically
+        // known, so expand each tuple element to its corresponding parameter. A
+        // spread into a rest parameter is a collection of rest elements,
+        // recorded below at the representative array-item path.
+        if (isSpreadArgument && !isRestParameter(parameter)) {
+          const tupleLength = getFixedTupleElementCount(
+            checker.getTypeAtLocation(argument.expression),
+            checker,
+          );
+          if (tupleLength === undefined) break;
+
+          const spreadSource = resolveSourceRef(argument.expression);
+          // Suppress the ordinary read of the spread source only when the
+          // contract accounts for every tuple position: a dynamic source is
+          // wholly wildcarded, and a static source qualifies only if every
+          // element maps to a recognized cell wrapper. A tuple with a non-cell
+          // position leaves that position to conservative read tracking.
+          const suppressOrdinaryRead = () => {
+            handled.add(index);
+            signatureCapabilityArgumentUses.add(
+              unwrapExpressionUsageSite(argument.expression),
+            );
+          };
+          if (spreadSource) {
+            if (spreadSource.dynamic) {
+              markWildcard(spreadSource.root);
+              suppressOrdinaryRead();
+            } else {
+              let mappedCount = 0;
+              for (let element = 0; element < tupleLength; element++) {
+                const elementParameter = getParameterAtArgument(
+                  signature,
+                  paramIndex + element,
+                );
+                const elementCellKind = getParameterDeclaredCellKind(
+                  elementParameter,
+                  checker,
+                );
+                if (!elementCellKind) continue;
+                mappedCount++;
+                const elementPath = [...spreadSource.path, String(element)];
+                switch (elementCellKind) {
+                  case "cell":
+                    trackRead(spreadSource.root, elementPath);
+                    trackWrite(spreadSource.root, elementPath);
+                    break;
+                  case "readonly":
+                    trackRead(spreadSource.root, elementPath);
+                    break;
+                  case "writeonly":
+                    trackWrite(spreadSource.root, elementPath);
+                    break;
+                  case "comparable":
+                    recordComparablePath(spreadSource.root, elementPath, {
+                      cellLike: true,
+                    });
+                    break;
+                  case "opaque":
+                  case "stream":
+                  case "sqlite":
+                    recordOpaquePath(spreadSource.root, elementPath);
+                    break;
+                }
+              }
+              if (mappedCount === tupleLength) suppressOrdinaryRead();
+            }
+          }
+          // The loop update advances `paramIndex` by one; the tuple fills
+          // `tupleLength` positions, so add the rest here.
+          paramIndex += tupleLength - 1;
+          continue;
+        }
 
         const capabilityArgument = isSpreadArgument
           ? argument.expression

@@ -705,6 +705,13 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // In-flight commits, registered synchronously by the transaction layer at
+  // commit() entry (see IStorageManager.trackPendingCommit). This is the
+  // write-durability barrier: distinct from #crossSpacePromises, which also
+  // carries cross-space READ work (link-target loads) and so must not gate
+  // "are there unconfirmed writes" questions.
+  #pendingCommits = new Set<Promise<unknown>>();
+  #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #spaceIdentity?: Signer;
   /** Seed map from Options — fixed for the manager's lifetime. */
@@ -829,6 +836,51 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.synced()),
     ).finally(() => this.resolveCrossSpace(resolve));
     return promise;
+  }
+
+  trackPendingCommit(promise: Promise<unknown>): void {
+    // Normalize so a rejected commit settles the barrier instead of leaking an
+    // unhandled rejection; the caller keeps the original promise for results.
+    const tracked = promise.then(() => {}, () => {});
+    this.#pendingCommits.add(tracked);
+    if (this.#pendingCommits.size === 1) {
+      this.#notifyPendingCommits(true);
+    }
+    tracked.finally(() => {
+      this.#pendingCommits.delete(tracked);
+      if (this.#pendingCommits.size === 0) {
+        this.#notifyPendingCommits(false);
+      }
+    });
+  }
+
+  hasPendingCommits(): boolean {
+    return this.#pendingCommits.size > 0;
+  }
+
+  async pendingCommitsSettled(): Promise<void> {
+    await Promise.allSettled([...this.#pendingCommits]);
+  }
+
+  /**
+   * Observe transitions of the pending-commit state: `true` when the set of
+   * unconfirmed commits becomes non-empty, `false` when it drains. Drives the
+   * client-side "unconfirmed writes" flag (e.g. the shell's before-unload
+   * guard). Returns an unsubscribe function.
+   */
+  subscribePendingCommits(callback: (pending: boolean) => void): () => void {
+    this.#pendingCommitsSubscribers.add(callback);
+    return () => this.#pendingCommitsSubscribers.delete(callback);
+  }
+
+  #notifyPendingCommits(pending: boolean): void {
+    for (const callback of this.#pendingCommitsSubscribers) {
+      try {
+        callback(pending);
+      } catch (error) {
+        console.error("pending-commits subscriber threw:", error);
+      }
+    }
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1322,25 +1374,6 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
-  /**
-   * The durable half of `synced()`: flush scheduler observations and in-flight
-   * commits, but do NOT block on in-flight reads/watch refreshes.
-   *
-   * `close()` uses this instead of `synced()` because a watch's transport
-   * response can be withheld past dispose (e.g. a gate holding a doc), so a read
-   * pull promise may never settle on its own. Awaiting it before teardown would
-   * deadlock close(); teardown rejects the request instead, settling the read.
-   */
-  private async flushCommits(): Promise<void> {
-    if (
-      this.#schedulerObservationBatch.length > 0 ||
-      this.#schedulerObservationFlushPromise
-    ) {
-      await this.flushSchedulerObservationBatch();
-    }
-    await Promise.allSettled([...this.#commitPromises]);
-  }
-
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -1392,13 +1425,18 @@ class SpaceReplica implements ISpaceReplica {
     // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
     // for any refresh already in flight.
     this.cancelQueuedWatchRefresh();
-    // Flush durable work (scheduler observations + in-flight commits). Unlike
-    // `synced()`, this does NOT wait on in-flight reads/watch refreshes: a
-    // watch's transport response can be withheld past dispose (e.g. a gate
-    // holding a doc), so awaiting it here would deadlock close(). The client
-    // teardown below rejects every in-flight request, which settles those read
-    // promises without waiting on a response that may never arrive.
-    await this.flushCommits();
+    // Send any batched scheduler observations so they reach the server, but do
+    // not await commit confirmation here. A commit whose response is withheld
+    // past dispose — the server holding it for a gated read that never arrives —
+    // never settles on its own, so awaiting it before the client teardown below
+    // would deadlock close(), just as awaiting an in-flight read would. Kicking
+    // the flush issues the observation commit into `#commitPromises`; the client
+    // teardown rejects every in-flight request, reads and commits alike, and the
+    // post-teardown drain settles them.
+    const observationFlush = (this.#schedulerObservationBatch.length > 0 ||
+        this.#schedulerObservationFlushPromise)
+      ? this.flushSchedulerObservationBatch()
+      : undefined;
     this.#watchView?.close();
     this.#watchView = null;
     // Also close the view the update consumer is bound to, in case it diverged
@@ -1428,9 +1466,14 @@ class SpaceReplica implements ISpaceReplica {
         await resolved.client.close();
       }
     }
-    // With the client closed, every in-flight read/watch pull has been rejected
-    // and now settles promptly. Awaiting them here can no longer hang and
-    // guarantees no transport promise is left pending when close() resolves.
+    // With the client closed, every in-flight commit and read/watch pull has
+    // been rejected and now settles promptly. Awaiting them here can no longer
+    // hang and guarantees no transport promise is left pending when close()
+    // resolves.
+    await Promise.allSettled([
+      ...(observationFlush ? [observationFlush] : []),
+      ...this.#commitPromises,
+    ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
