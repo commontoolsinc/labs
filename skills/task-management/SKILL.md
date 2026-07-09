@@ -13,6 +13,10 @@ multiple research tasks and tasks in parallel. For managing todos and progress
 WITHIN a session you are encouraged to use `bd` (beads) to manage the work -
 falling back to a NOTES.md text based flow otherwise.
 
+`bd` is an external tool, not part of this repo, and is not installed on every
+machine. Check for it first (`which bd`); when it is absent, use the NOTES.md
+flow without asking about it.
+
 If available, use `bd` to manage subtasks and local todo lists (`bd quickstart`
 and `bd --help`)
 

@@ -109,7 +109,7 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 | [06-cfc.md](./06-cfc.md) | Future per-column and per-row CFC labels. |
 | [07-examples.md](./07-examples.md) | End-to-end usage examples. |
 | [08-open-questions.md](./08-open-questions.md) | Unresolved design questions for review. |
-| [implementation-plan.md](./implementation-plan.md) | Ordered workstreams, milestones, and dependency/gating map for building the feature. |
+| [implementation-plan.md](../../history/specs/sqlite-builtin/implementation-plan.md) | Archived as-built workstream record: milestones and dependency/gating map from building the feature. |
 
 ## At a glance
 

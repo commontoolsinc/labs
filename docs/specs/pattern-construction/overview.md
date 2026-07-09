@@ -203,7 +203,9 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
    - Remove `.setDefault`; rely on schema-level defaults
    - Deprecate JSON pattern representation in favor of graph snapshots
 2. **Testing & documentation**
-   - Integration test harness (see `pattern-integration-tests.md`) - **DONE**
+   - Integration test harness (see
+     `docs/history/specs/pattern-construction/pattern-integration-tests.md`) -
+     **DONE**
    - Update builder/runner tests for new helper behavior and metadata
    - Document unified cell types and `.for()` usage for pattern authors
 
@@ -235,7 +237,8 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 ## Next Steps
 
 - Prototype capability wrappers and convert a sample pattern to validate
-  ergonomics (see `capability-wrappers.md`).
+  ergonomics (see the superseded exploration in
+  `docs/history/specs/pattern-construction/capability-wrappers.md`).
 - Draft and iterate on the graph snapshot schema, then review with
   runtime/storage stakeholders (`graph-snapshot.md`).
 - Implement rehydration against the stored graph snapshot and exercise it with

@@ -127,6 +127,14 @@ module-graph cleanliness, "make invalid states unrepresentable") is a loud,
 Blocking finding even if the code "works." Fix what the diff touches; propose
 wider sweeps as follow-ups — don't boil the ocean.
 
+`docs/history/` is exempt from the coherence sweep: those are frozen
+point-in-time records and are supposed to describe old behavior. The reverse
+check applies instead — a diff that edits the content of a `docs/history/`
+document (anything beyond its metadata header or a mechanical link fix) is a
+finding; see `docs/history/README.md`. Also flag a diff that completes a plan or
+supersedes a design without archiving the now-historical document
+(`docs/README.md`, "Moving a document from live to historical").
+
 ### 3. Anti-duplication
 
 We move fast; under that pressure core machinery gets silently re-forked, and in

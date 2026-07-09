@@ -2,7 +2,7 @@
  * SelectorTracker.getSupersetSelector benchmarks.
  *
  * CPU profiles of the default-app integration flow
- * (docs/development/performance/default-app-note-create.md) show schema
+ * (docs/history/development/performance/default-app-note-create.md) show schema
  * standardization under getSupersetSelector as the single largest hashing
  * seam (~210ms of 574ms attributable hash/freeze time per 3 note creates):
  * getStandardSchema re-walks (isDeepFrozen + rebuild + intern-hash) every

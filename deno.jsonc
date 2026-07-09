@@ -77,7 +77,7 @@
     "**/build/",
     "**/.cache/",
     "**/coverage/",
-    "./tutorials/",
+    "./docs/history/",
     "**/.doccheck*"
   ],
   "lint": {
@@ -127,7 +127,7 @@
       "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
       "packages/ui/src/v2/components/cf-select/cf-select.ts",
       "packages/vendor-astral",
-      "tutorials/"
+      "docs/history/"
     ]
   },
   "imports": {
