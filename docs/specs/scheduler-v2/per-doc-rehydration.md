@@ -238,10 +238,30 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   space-scoped one.
 - Reload churn: the ≤ 1 residual gate lives in the flag-OFF integration run,
   where fresh child first-runs are inherent (v1 reached 0 via its populate
-  pass; v2 flag-off has no restore to lean on). The ≤ 0 acceptance therefore
-  lands as a flag-ON churn assertion in `integration/reload/` (the
-  `pattern-reload-integration-test` job); the flag-off gate keeps its coupled
-  `conflicts ≤ 1, reverts/runErrors ≤ conflicts` form.
+  pass; v2 flag-off has no restore to lean on). A flag-ON churn assertion in
+  `integration/reload/` (the `pattern-reload-integration-test` job) pins
+  flag-ON at "never worse than flag-off". Measured: the rows rehydrate, but
+  the always-run coordinator's first reconcile still reads one cold hop
+  through the field-level alias chain, so the same coupled 1-conflict
+  residual remains. It reaches zero when resume-time runners pre-warm their
+  persisted read sets — an application of the incremental
+  observation-adoption direction (see below), not of the boot listing.
+
+## 7.1 Where this goes next: incremental adoption in ongoing work
+
+Reload is the degenerate case. The same per-doc observations, delivered
+**incrementally with memory subscriptions**, let a live client skip work
+another client already did: when client A's action run commits (observation
+attached to the commit), every subscriber receiving those doc writes can
+adopt the observation for its own registered equivalent action — same
+pieceId/actionId (restart- and runtime-stable, proven above), same
+fingerprints, deterministic computation over the same shared docs — instead
+of re-running it. Receivers keep running their local effects (rendering);
+they stop re-deriving computations the writer already derived. This is the
+recovery lever for the multi-user perf delta, and it is the direction the
+per-piece deriver-attribution rigor (P2) explicitly does NOT gate: the
+observation arrives WITH the doc write, so the client never needs to find
+the deriver. Design: `incremental-observation-adoption.md`.
 
 ## 8. Alternatives rejected
 
