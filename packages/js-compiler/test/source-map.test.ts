@@ -936,4 +936,27 @@ describe("deferred composition inputs and lazy registration (CT-1819)", () => {
     expect(parser.mapPosition("empty.js", 1, 0)).toBeNull();
     expect(calls).toBe(1);
   });
+
+  it("pendingProviders is LRU-bounded: never-looked-up providers don't accumulate (CT-1819 leak guard)", () => {
+    const parser = new SourceMapParser();
+    // The leak scenario: evaluations that never error, so their source maps are
+    // never looked up / materialized. Each registers a unique `${evalId}.js`
+    // provider; a plain Map would retain one per eval until dispose.
+    const register = (from: number, count: number) => {
+      for (let i = from; i < from + count; i++) {
+        parser.loadLazy(
+          `eval-${i}.js`,
+          () => identitySourceMap("a", "/id/x.tsx"),
+        );
+      }
+    };
+    register(0, 4096);
+    const afterFirst = parser.pendingProviderCountForTesting();
+    register(4096, 4096); // 4096 more, all unique, still never looked up
+    const afterSecond = parser.pendingProviderCountForTesting();
+    // Bounded far below the 8192 registered, and it plateaus (the second batch
+    // evicts rather than grows). A plain Map would give 4096 then 8192.
+    expect(afterFirst).toBeLessThan(4096);
+    expect(afterSecond).toBe(afterFirst);
+  });
 });

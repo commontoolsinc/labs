@@ -412,8 +412,16 @@ export class SourceMapParser {
   // Deferred registrations (CT-1819): the boot path registers a PROVIDER
   // instead of composing eagerly; the first lookup that needs the filename
   // materializes it. One-shot — the provider is dropped as soon as it runs,
-  // so its captured inputs are released after first use.
-  private pendingProviders = new Map<string, () => SourceMap | undefined>();
+  // so its captured inputs are released after first use. LRU-bounded like
+  // `sourceMaps`: a provider whose filename is NEVER looked up (its eval never
+  // errored) would otherwise be retained until dispose — one per eval, an
+  // unbounded leak on long-lived runners — so cap it and evict the oldest.
+  // Evicting an unused provider only means a later error in that (old) eval
+  // goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
+  private pendingProviders = new LRUCache<
+    string,
+    () => SourceMap | undefined
+  >({ capacity: MAX_SOURCE_MAP_CACHE_SIZE });
 
   load(filename: string, sourceMap: SourceMap) {
     // An explicit map supersedes any pending provider for the same name.
@@ -427,7 +435,12 @@ export class SourceMapParser {
    * compose) simply leaves the name unmapped, matching eager behavior.
    */
   loadLazy(filename: string, provider: () => SourceMap | undefined) {
-    this.pendingProviders.set(filename, provider);
+    this.pendingProviders.put(filename, provider);
+  }
+
+  /** Tests-only: count of still-deferred (not-yet-materialized) providers. */
+  pendingProviderCountForTesting(): number {
+    return this.pendingProviders.size;
   }
 
   private materialize(filename: string): void {
