@@ -110,6 +110,11 @@ describe("CFC label-field classification (inv-12 / SC-25)", () => {
     expect(classifyAtomField("cf-compiled-by:cf-compiler", ["source"]))
       .toBeUndefined();
     expect(classifyAtomField(null, ["source"])).toBeUndefined();
+    // A record with neither a string `type` nor a string `kind` selects no
+    // family at all.
+    expect(classifyAtomField({ foo: 1 }, ["source"])).toBeUndefined();
+    expect(classifyAtomField({ type: 42, kind: 42 }, ["source"]))
+      .toBeUndefined();
   });
 
   it("exposes the table as frozen data", () => {
