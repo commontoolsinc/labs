@@ -45,6 +45,7 @@ import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
   CfcGrantWriteInput,
+  CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
@@ -913,6 +914,14 @@ export interface IExtendedStorageTransaction
    * Anti-downgrade pinned: once `enforce`, weakening throws.
    */
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
+  /**
+   * Set the cross-space label-metadata representation dial (inv-12 Stage 1 /
+   * SC-25, spec §4.6.4.1). Anti-downgrade pinned: once `enforce`, weakening
+   * throws.
+   */
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation

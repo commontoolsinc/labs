@@ -7,6 +7,7 @@ export {
   stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
 export {
+  CLASSIFIED_KIND_FAMILIES,
   classifyAtomField,
   classifyLabelField,
   LABEL_FIELD_CLASSIFICATION,
@@ -14,6 +15,14 @@ export {
   type LabelFieldClassificationEntry,
   type LabelFieldRepresentationClass,
 } from "./label-field-classification.ts";
+export {
+  type CfcFieldCommitment,
+  commitCfcFieldValue,
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  isCfcFieldCommitment,
+  transformCfcLabelForCrossSpacePersist,
+} from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
@@ -31,6 +40,7 @@ export type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
   CfcPrepareState,
@@ -62,6 +72,7 @@ export {
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,

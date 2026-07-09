@@ -53,6 +53,8 @@
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
+ * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
+ * |                            | rollout: observe first, then enforce)            |
  * | cfcPolicyRecords           | core-default (none declared) — same              |
  * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
  * |                            | deployment (value-level provenance Stage 0)      |
@@ -129,6 +131,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcWriteFloor",
   "cfcTriggerReadGating",
   "cfcPolicyEvaluation",
+  "cfcLabelMetadataProtection",
   "cfcPolicyRecords",
   "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
@@ -246,9 +249,10 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // lives once. Same value as the constructor default today.
     cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
-    // cfcPolicyEvaluation / cfcPolicyRecords / cfcTrustConfig /
-    // cfcSinkMaxConfidentiality ride the constructor defaults (off / none) —
-    // deliberately absent here until a first-party rollout begins.
+    // cfcPolicyEvaluation / cfcLabelMetadataProtection / cfcPolicyRecords /
+    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
+    // defaults (off / none) — deliberately absent here until a first-party
+    // rollout begins.
   };
 }
 

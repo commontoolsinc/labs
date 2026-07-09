@@ -68,6 +68,7 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcGrantWriteInput,
+  type CfcLabelMetadataProtectionMode,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
@@ -78,6 +79,7 @@ import {
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
@@ -259,6 +261,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
+    labelMetadataProtectionMode: DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     structureContainers: [],
@@ -285,6 +288,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
   #cfcPolicyEvaluationPinned = false;
+  #cfcLabelMetadataProtectionPinned = false;
   // Write-once pin for the deployment policy snapshot. Distinct from the
   // slot's value being defined: the Runtime configures MANY tx with NO
   // policies (`undefined`), and that "no policies" state must be just as
@@ -468,6 +472,37 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.policyEvaluationMode = mode;
     if (mode === "enforce") {
       this.#cfcPolicyEvaluationPinned = true;
+    }
+  }
+
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — pattern/handler code that reaches the
+    // tx cannot weaken it to `observe`/`off` so cross-space label metadata
+    // persists verbatim again (inv-12 Stage 1 / SC-25). Strengthening to
+    // `enforce` is always allowed.
+    if (this.#cfcLabelMetadataProtectionPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC label-metadata protection mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    // The mode drives which representation prepareBoundaryCommit persists but
+    // is not part of PreparedDigestInput, so — like the flow-labels /
+    // write-floor / policy-evaluation setters — a real change after prepare
+    // must invalidate the prepared decision; the Runtime's idempotent set at
+    // tx creation (before prepare) does not.
+    if (
+      this.#cfcState.labelMetadataProtectionMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("label-metadata-protection-mode-changed");
+    }
+    this.#cfcState.labelMetadataProtectionMode = mode;
+    if (mode === "enforce") {
+      this.#cfcLabelMetadataProtectionPinned = true;
     }
   }
 
@@ -1658,6 +1693,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
     this.wrapped.setCfcPolicyEvaluationMode(mode);
+  }
+
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void {
+    this.wrapped.setCfcLabelMetadataProtectionMode(mode);
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
