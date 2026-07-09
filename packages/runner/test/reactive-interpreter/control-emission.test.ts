@@ -420,6 +420,95 @@ async function runNested(interpreter: boolean) {
   return { first, second, third };
 }
 
+/** Conditionals inside map ELEMENTS: `x.done ? "done:"+label : label` per
+ * element. Control ops made elements non-inlinable before W8 — every such
+ * map ran the full legacy child-pattern path. Unlocked, the inline
+ * coordinator evaluates the element ROG (control eagerly — value/error
+ * parity with the legacy child, whose branch lifts also both run). */
+async function runMapWithTernary(interpreter: boolean) {
+  const h = makeHarness(interpreter);
+  const { runtime, cf } = h;
+  const tx = runtime.edit();
+  const { pattern, lift, ifElse } = cf;
+
+  const itemSchema = {
+    type: "object",
+    properties: { done: { type: "boolean" }, label: { type: "string" } },
+    required: ["done", "label"],
+  };
+  const Row = pattern(
+    // deno-lint-ignore no-explicit-any
+    (input: any) => {
+      const decorated = lift(
+        (v: { label: string }) => `done:${v.label}`,
+        {
+          type: "object",
+          properties: { label: { type: "string" } },
+          required: ["label"],
+        },
+        { type: "string" },
+      )({ label: input.element.label });
+      return {
+        view: ifElse(input.element.done, decorated, input.element.label),
+      };
+    },
+    {
+      type: "object",
+      properties: { element: itemSchema },
+      required: ["element"],
+    },
+  );
+  // deno-lint-ignore no-explicit-any
+  const Root = pattern((input: any) => ({
+    rows: input.items.mapWithPattern(Row, {}),
+  }));
+
+  const items = [
+    { done: true, label: "a" },
+    { done: false, label: "b" },
+    { done: true, label: "c" },
+  ];
+  const argCell = runtime.getCell<{ items: typeof items }>(
+    space,
+    `ctl-map-arg-${interpreter}`,
+    undefined,
+    tx,
+  );
+  argCell.set({ items });
+  const resultCell = runtime.getCell(
+    space,
+    `ctl-map-result-${interpreter}`,
+    undefined,
+    tx,
+  );
+  const result = runtime.run(tx, Root, argCell, resultCell);
+  await tx.commit();
+  await runtime.idle();
+  await runtime.storageManager.synced();
+  await result.pull();
+  const cancelSink = result.key("rows").sink(() => {});
+  await runtime.idle();
+
+  const views = () =>
+    ((result.key("rows").get() ?? []) as Array<{ view?: unknown }>)
+      .map((r) => r?.view);
+  const initial = views();
+
+  // Flip element 1 to done → its view re-derives through the conditional.
+  const tx2 = runtime.edit();
+  argCell.withTx(tx2).key("items").key(1).key("done").set(true);
+  await tx2.commit();
+  await runtime.idle();
+  await runtime.storageManager.synced();
+  const afterFlip = views();
+
+  const inlined =
+    (getDispatchCensus().boundariesByKind["collection-inlined"] ?? 0) >= 1;
+  cancelSink();
+  await h.dispose();
+  return { initial, afterFlip, inlined };
+}
+
 describe("native control emission (W8)", () => {
   it("conditional expr: values match legacy at every step; fused node never re-runs on untaken-branch writes; conditional docs collapse", async () => {
     const off = await runConditionalExpr(false);
@@ -535,5 +624,26 @@ describe("native control emission (W8)", () => {
     const on = await runNested(true);
     assertEquals(off, { first: 21, second: 11, third: 31 });
     assertEquals(on, off);
+  });
+
+  it("map elements with ternaries inline (controls no longer block element inlining)", async () => {
+    const off = await runMapWithTernary(false);
+    resetDispatchCensus();
+    const on = await runMapWithTernary(true);
+
+    console.log(
+      `[ctl-map] OFF=${JSON.stringify(off)} ON=${JSON.stringify(on)}`,
+    );
+
+    assertEquals(off.initial, ["done:a", "b", "done:c"]);
+    assertEquals(off.afterFlip, ["done:a", "done:b", "done:c"]);
+    assertEquals(on.initial, off.initial);
+    assertEquals(on.afterFlip, off.afterFlip);
+    // ENGAGEMENT: the inline coordinator must have taken the map (RED while
+    // rogFullyInlinable refuses control ops in elements).
+    assert(
+      on.inlined,
+      "expected the ternary-element map to run the INLINE coordinator",
+    );
   });
 });

@@ -501,15 +501,83 @@ function findValueConsumedOps(
 // Native control emission (W8 / D-CONTROL-EMISSION).
 // ---------------------------------------------------------------------------
 
-/** Control ops admitted for fusion. Fail-closed: a control whose NODE
- * declares static scope routing stays a verbatim boundary (the legacy
- * builtin applies scope policy the in-memory path does not reproduce). */
+/** Control ops admitted for fusion. Fail-closed refusals:
+ *
+ * - a control whose NODE declares static scope routing (the legacy builtin
+ *   applies scope policy the in-memory path does not reproduce);
+ * - a POSSIBLY-RETAINED control (its output reachable by the result tree,
+ *   an effect, a boundary-ish op, or a construct — anything that exposes
+ *   the written DOC) whose branch VALUE closure contains structured
+ *   producers (construct / collection / pattern): legacy writes a LINK into
+ *   a link-bearing tree there (per-position scope annotations, live
+ *   sub-links); a value write would flatten that structure. Bare-ref sides
+ *   (link forward) and scalar chains (leaf/expr/interpolate/access —
+ *   exactly one value doc in legacy too) are safe. Value-consumed controls
+ *   are exempt: their branch values live in memory only.
+ */
 function findFusableControls(
   built: BuiltRog,
   nodes: Pattern["nodes"],
 ): Set<OpId> {
+  const rog = built.rog;
+  const opById = new Map<OpId, Op>(rog.ops.map((o) => [o.id, o]));
+  const producerOf = (ref: ValueRef): OpId | undefined => {
+    if (ref.kind === "opOut") return ref.op;
+    if (ref.kind === "internal") return rog.internals[ref.cell]?.producedBy;
+    return undefined;
+  };
+
+  // Ops whose output may end up in a written/observable DOC: referenced by
+  // the result, an effect (inputs or writeTargets), a collection/pattern op,
+  // or a construct (constructs can be the result tree / boundary inputs).
+  const possiblyRetained = new Set<OpId>();
+  const retain = (ref: ValueRef | "pred") => {
+    if (ref === "pred") return;
+    const p = producerOf(ref);
+    if (p !== undefined) possiblyRetained.add(p);
+  };
+  retain(rog.result);
+  for (const op of rog.ops) {
+    const d = op.detail;
+    if (d.kind === "effect") {
+      for (const ref of inputsOf(op)) retain(ref);
+      for (const ref of d.writeTargets) retain(ref);
+    } else if (
+      d.kind === "collection" || d.kind === "pattern" ||
+      d.kind === "construct" || d.kind === "call"
+    ) {
+      for (const ref of dependencyRefsOf(op)) retain(ref);
+    }
+  }
+
+  /** Is this side's VALUE safe to materialize into the control's alias?
+   * Bare refs forward as links; scalar-chain producers yield exactly the
+   * one value doc legacy had. Structured producers refuse. */
+  const sideSafe = (ref: ValueRef | "pred", seen: Set<OpId>): boolean => {
+    if (ref === "pred") return true;
+    const p = producerOf(ref);
+    if (p === undefined) return true; // bare ref → link forward
+    if (seen.has(p)) return true;
+    seen.add(p);
+    const op = opById.get(p);
+    if (!op) return false;
+    const d = op.detail;
+    switch (d.kind) {
+      case "leaf":
+      case "expr":
+      case "interpolate":
+        return true; // one opaque value, exactly like the legacy node doc
+      case "access":
+        return op.inputs.length > 0 ? sideSafe(op.inputs[0], seen) : true;
+      case "control":
+        return sideSafe(d.then, seen) && sideSafe(d.else, seen);
+      default:
+        return false; // construct / collection / pattern / effect / call
+    }
+  };
+
   const fusable = new Set<OpId>();
-  for (const op of built.rog.ops) {
+  for (const op of rog.ops) {
     if (op.detail.kind !== "control") continue;
     const module = nodes[op.id]?.module as
       | { implementation?: unknown }
@@ -519,6 +587,13 @@ function findFusableControls(
       declaresScopeRouting(module?.implementation)
     ) {
       continue;
+    }
+    const d = op.detail;
+    if (
+      possiblyRetained.has(op.id) &&
+      !(sideSafe(d.then, new Set()) && sideSafe(d.else, new Set()))
+    ) {
+      continue; // retained + structured branch → verbatim boundary
     }
     fusable.add(op.id);
   }
@@ -650,10 +725,21 @@ function planControlEmission(
 // ---------------------------------------------------------------------------
 
 /** Every op in this ROG is pure, resolvable, trusted, caps-clean — safe for
- * whole-child in-memory evaluation. */
+ * whole-child in-memory evaluation.
+ *
+ * `control` is PURE here (W8): whole-child in-memory evaluation runs it
+ * eagerly (both producers evaluate, selection is lazy) — value AND error
+ * parity with the legacy child pattern, whose branch lifts also both run.
+ * EXCEPTION (`allowControl: false`): the materialized inline FILTER refuses
+ * control-bearing predicates — its membership-taint machinery
+ * (batch-first-pass structure stamps, growth re-stamps) is calibrated
+ * against straight-line predicates, and the pointwise CFC oracle shows the
+ * contracts do not yet hold for branched ones. Those filters keep the
+ * legacy coordinator (fail-safe). */
 function rogFullyInlinable(
   built: BuiltRog,
   leafTrust: DispatchOptions["leafTrust"],
+  allowControl = true,
 ): boolean {
   if (built.rog.incomplete?.length) return false;
   // Whole-child in-memory evaluation has no external-cell seeding yet.
@@ -667,7 +753,9 @@ function rogFullyInlinable(
     }
     if (d.kind === "pattern") {
       const child = built.children.get(op.id);
-      if (!child || !rogFullyInlinable(child, leafTrust)) return false;
+      if (!child || !rogFullyInlinable(child, leafTrust, allowControl)) {
+        return false;
+      }
       continue;
     }
     if (
@@ -675,7 +763,7 @@ function rogFullyInlinable(
     ) {
       return false;
     }
-    if (d.kind === "control") return false; // link semantics (boundary-only)
+    if (d.kind === "control" && !allowControl) return false;
   }
   return true;
 }
@@ -712,7 +800,15 @@ function tryBuildInlineCollectionNode(
   if (declaresScopeRouting(elementFactory)) return refuse("element_scoped");
   const elementBuilt = getBuiltRogResolved(elementFactory);
   if (!elementBuilt) return refuse("element_no_rog");
-  if (!rogFullyInlinable(elementBuilt, options.leafTrust)) {
+  if (
+    !rogFullyInlinable(
+      elementBuilt,
+      options.leafTrust,
+      /* allowControl (W8): filter's membership-taint machinery is not yet
+       * calibrated for branched predicates — see rogFullyInlinable. */
+      collectionOp !== "filter",
+    )
+  ) {
     return refuse("element_not_inlinable");
   }
   const usage = elementArgumentUsage(elementBuilt);

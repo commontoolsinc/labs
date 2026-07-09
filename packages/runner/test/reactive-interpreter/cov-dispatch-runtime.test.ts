@@ -19,7 +19,6 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { pattern, popFrame, pushFrame } from "../../src/builder/pattern.ts";
 import { lift } from "../../src/builder/module.ts";
-import { ifElse } from "../../src/builder/built-in.ts";
 import type { Pattern } from "../../src/builder/types.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
@@ -359,22 +358,45 @@ describe("inline-collection refusals stay legacy boundaries", () => {
   });
 
   it("map whose element is not fully inlinable refuses inline (element_not_inlinable), stays a collection boundary", async () => {
-    // The element contains a CONTROL op (ifElse) → rogFullyInlinable returns
-    // false → tryBuildInlineCollectionNode refuses `element_not_inlinable`.
-    // (An effect/handler or an I/O builtin like fetchJson hits the SAME
-    // rogFullyInlinable=false path; ifElse is used here so the pattern runs
-    // deterministically without network I/O.)
+    // The element contains a nested COLLECTION op (an inner map) →
+    // rogFullyInlinable returns false → tryBuildInlineCollectionNode
+    // refuses `element_not_inlinable`. (Control ops no longer disqualify an
+    // element — W8 native control emission — so the fixture nests a map,
+    // which stays deterministic without network I/O.)
+    const PARTS_SCHEMA = {
+      type: "object",
+      properties: {
+        element: {
+          type: "object",
+          properties: {
+            parts: { type: "array", items: { type: "number" } },
+          },
+          required: ["parts"],
+        },
+      },
+      required: ["element"],
+    } as const;
     const buildPattern = () =>
-      pattern<{ items: { n: number }[]; k: number }>((input) => {
-        const Classify = pattern<{ element: { n: number } }>(
-          (i) => ({
-            label: ifElse(
-              lift((v: { n: number }) => v.n > 10)({ n: i.element.n }),
-              "big",
-              "small",
-            ),
-          }),
-          ELEMENT_SCHEMA,
+      pattern<{ items: { parts: number[] }[]; k: number }>((input) => {
+        const Double = pattern<{ element: number }>(
+          (j) => ({ d: lift((v: { n: number }) => v.n * 2)({ n: j.element }) }),
+          {
+            type: "object",
+            properties: { element: { type: "number" } },
+            required: ["element"],
+          } as const,
+        );
+        const Classify = pattern<{ element: { parts: number[] } }>(
+          (i) => {
+            const doubled = (i.element.parts as unknown as {
+              mapWithPattern: (op: unknown, params: unknown) => unknown;
+            }).mapWithPattern(Double as unknown, {});
+            const total = lift((v: { list: { d: number }[] }) =>
+              (v.list ?? []).reduce((a, x) => a + (x?.d ?? 0), 0)
+            )({ list: doubled } as never);
+            return { total };
+          },
+          PARTS_SCHEMA,
         );
         const labelled = (input.items as unknown as {
           mapWithPattern: (op: unknown, params: unknown) => unknown;
@@ -384,8 +406,8 @@ describe("inline-collection refusals stay legacy boundaries", () => {
         return { labelled, kPlus, kTimes };
       }) as unknown as Pattern;
 
-    const argument = { items: [{ n: 5 }, { n: 20 }], k: 7 };
-    const edit = { path: ["items"], value: [{ n: 50 }, { n: 2 }] };
+    const argument = { items: [{ parts: [1, 2] }, { parts: [10] }], k: 7 };
+    const edit = { path: ["items"], value: [{ parts: [5] }] };
 
     const legacy = await runOnce(false, buildPattern, argument, edit);
     resetDispatchCensus();
@@ -395,12 +417,12 @@ describe("inline-collection refusals stay legacy boundaries", () => {
     assertEquals(interpreted.initial, legacy.initial);
     assertEquals(interpreted.afterEdit, legacy.afterEdit);
     assertEquals(legacy.initial, {
-      labelled: [{ label: "small" }, { label: "big" }],
+      labelled: [{ total: 6 }, { total: 20 }],
       kPlus: 8,
       kTimes: 14,
     });
     assertEquals(legacy.afterEdit, {
-      labelled: [{ label: "big" }, { label: "small" }],
+      labelled: [{ total: 10 }],
       kPlus: 8,
       kTimes: 14,
     });
