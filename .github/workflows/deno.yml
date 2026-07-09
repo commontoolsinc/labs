@@ -254,12 +254,21 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: ♻️ Restore/save generated pattern compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: generated-patterns
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -570,12 +579,21 @@ jobs:
       # rolls the key while `restore-keys` still seeds from the most recent prior
       # cache.
       - name: ♻️ Restore/save compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: pattern-integration
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -721,12 +739,21 @@ jobs:
         run: deno task initialize-db
 
       - name: ♻️ Restore/save pattern unit compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
+
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: pattern-unit
+          shard: ${{ matrix.chunk }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8

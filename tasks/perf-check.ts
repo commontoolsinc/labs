@@ -17,11 +17,18 @@
 
 import {
   addSample,
+  aggregateCacheStates,
   API_CONCURRENCY,
   applyBaselineOverrides,
   type Artifact,
   type BaselineOverrides,
   buildCoverageDebtSuggestionComment,
+  CACHE_STATE_ARTIFACT_PREFIX,
+  COMPILE_CACHE_FAMILIES,
+  type CompileCacheFamily,
+  compileCacheFamilyForMetric,
+  type CompileCacheState,
+  type CompileCacheStates,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
@@ -35,8 +42,9 @@ import {
   type CoverageSuggestionGroup,
   downloadAndExtractArtifact,
   downloadAndParseJUnit,
-  downloadAndParsePerfMetrics,
   downloadAndParsePerfMetricsBackfill,
+  downloadAndParsePerfMetricsDetailed,
+  dropColdSamples,
   extractMetrics,
   extractTestFileMetrics,
   fetchArtifactsForRun,
@@ -47,6 +55,7 @@ import {
   formatOverrideSuggestion,
   githubGet,
   isCoverageDebtMetric,
+  latestNonColdSample,
   mapConcurrent,
   type MetricTimeline,
   MIN_ABSOLUTE_DELTA,
@@ -55,10 +64,12 @@ import {
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
+  parseCacheStateFiles,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_FILE,
   PERF_METRICS_FILE,
+  type PerfMetricsDetailed,
   type PRFile,
   type PRInfo,
   readAndParseEvent,
@@ -570,8 +581,9 @@ export async function parsePerfMetricsFromArtifacts(
   artifacts: Artifact[],
   parseMetrics: (
     artifactId: number,
-  ) => Promise<Map<string, TimingSample> | null> = downloadAndParsePerfMetrics,
-): Promise<Map<string, TimingSample> | null> {
+  ) => Promise<PerfMetricsDetailed | null> =
+    downloadAndParsePerfMetricsDetailed,
+): Promise<PerfMetricsDetailed | null> {
   const artifact = newestArtifactNamed(
     artifacts,
     PERF_METRICS_ARTIFACT_NAME,
@@ -581,21 +593,102 @@ export async function parsePerfMetricsFromArtifacts(
   return await parseMetrics(artifact.id);
 }
 
+export interface AddPerfMetricsResult {
+  added: boolean;
+  /** Null when the run has no perf-metrics artifact or an untagged one. */
+  compileCacheStates: CompileCacheStates | null;
+}
+
 export async function addPerfMetricsFromArtifacts(
   timelines: Map<string, MetricTimeline>,
   artifacts: Artifact[],
   parseMetrics: (
     artifacts: Artifact[],
-  ) => Promise<Map<string, TimingSample> | null> =
-    parsePerfMetricsFromArtifacts,
-): Promise<boolean> {
-  const artifactMetrics = await parseMetrics(artifacts);
-  if (!artifactMetrics) return false;
+  ) => Promise<PerfMetricsDetailed | null> = parsePerfMetricsFromArtifacts,
+): Promise<AddPerfMetricsResult> {
+  const detailed = await parseMetrics(artifacts);
+  if (!detailed) return { added: false, compileCacheStates: null };
 
-  for (const [name, sample] of artifactMetrics) {
+  for (const [name, sample] of detailed.metrics) {
     addSample(timelines, name, sample);
   }
-  return true;
+  return { added: true, compileCacheStates: detailed.compileCacheStates };
+}
+
+/**
+ * Download the JSON file(s) inside one cache-state artifact. Returns null
+ * when the download or extraction fails.
+ */
+async function downloadCacheStateFiles(
+  artifactId: number,
+): Promise<string[] | null> {
+  const tmpDir = await downloadAndExtractArtifact(artifactId, "cache-state-");
+  if (!tmpDir) return null;
+  try {
+    const contents: string[] = [];
+    for await (const file of walkFiles(tmpDir)) {
+      if (file.endsWith(".json")) {
+        contents.push(await Deno.readTextFile(file));
+      }
+    }
+    return contents;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+}
+
+/** `family=state` pairs for every cache family, absent shown as unknown. */
+export function formatCompileCacheStates(states: CompileCacheStates): string {
+  return COMPILE_CACHE_FAMILIES
+    .map((family) => `${family}=${states[family] ?? "unknown"}`)
+    .join(", ");
+}
+
+/**
+ * Aggregate the current run's per-shard cache-state artifacts into per-family
+ * compile cache states. Re-run duplicates are deduped newest-first — a re-run
+ * restores the cache the first (cold) attempt saved, so it is genuinely warm.
+ * Best-effort: any failure degrades to `{}` (all unknown) with a warning, so
+ * a broken tag behaves like a pre-rollout run instead of failing the gate.
+ */
+export async function collectCurrentCacheStates(
+  artifacts: Artifact[],
+  download: (artifactId: number) => Promise<string[] | null> =
+    downloadCacheStateFiles,
+): Promise<CompileCacheStates> {
+  try {
+    const cacheStateArtifacts = newestArtifactsByName(artifacts.filter(
+      (artifact) =>
+        artifact.name.startsWith(CACHE_STATE_ARTIFACT_PREFIX) &&
+        !artifact.expired,
+    ));
+
+    const contents: string[] = [];
+    for (const artifact of cacheStateArtifacts) {
+      const files = await download(artifact.id);
+      if (!files) {
+        throw new Error(
+          `could not download cache-state artifact ${artifact.name} (${artifact.id})`,
+        );
+      }
+      contents.push(...files);
+    }
+    const records = parseCacheStateFiles(contents);
+    if (!records) {
+      throw new Error(
+        "one or more cache-state records failed to parse; a missing shard " +
+          "could mislabel its family warm",
+      );
+    }
+    return aggregateCacheStates(records);
+  } catch (error) {
+    console.warn(
+      `  Warning: could not collect compile cache states; treating them as unknown: ${error}`,
+    );
+    return {};
+  }
 }
 
 /**
@@ -691,7 +784,14 @@ async function readCombinedLcov(lcovDir: string): Promise<string> {
 }
 
 type TableAlign = "left" | "right";
-export type Status = "OVER" | "CLOSE" | "OK" | "ovrd" | "excl" | "n/a";
+export type Status =
+  | "OVER"
+  | "CLOSE"
+  | "OK"
+  | "ovrd"
+  | "COLD"
+  | "excl"
+  | "n/a";
 
 function printTextTable(
   headers: string[],
@@ -821,6 +921,116 @@ export function printMetricTable(rows: Row[], includeStatus = false): void {
     ? ["left", "right", "right", "right", "left", "left"] as TableAlign[]
     : ["right", "right", "right", "left", "left"] as TableAlign[];
   printTextTable(headers, metricTableRows(rows, includeStatus), align);
+}
+
+export interface EvaluateTimingMetricOptions {
+  metric: string;
+  current: number;
+  timeline: MetricTimeline | undefined;
+  prOverrides: BaselineOverrides;
+  /** The current run's per-family compile cache states. */
+  currentCacheStates: CompileCacheStates;
+  /** Baseline-run cache state lookup, per family. */
+  stateOfRunForFamily: (
+    family: CompileCacheFamily,
+  ) => (runId: number) => CompileCacheState | undefined;
+}
+
+export interface TimingMetricEvaluation {
+  row: Row;
+  failure: boolean;
+}
+
+/**
+ * Evaluate one timing (non-coverage) metric against its baseline timeline.
+ *
+ * Compile-cache handling: when the metric maps to a cache family whose cache
+ * is cold this run, the metric gets a non-blocking `COLD` status — a full
+ * recompile inflates it, and cold baselines essentially never reach
+ * MIN_SAMPLES, so there is no cold-vs-cold gating. When the current run is
+ * warm or unknown, known-cold baseline samples are dropped before computing
+ * the baseline; too few remaining samples fall back to the `n/a` path.
+ * Metrics excluded via EXCLUDED_METRIC_PATTERNS stay `excl` even when cold.
+ */
+export function evaluateTimingMetric(
+  options: EvaluateTimingMetricOptions,
+): TimingMetricEvaluation {
+  const { metric, current, timeline, prOverrides } = options;
+
+  const family = compileCacheFamilyForMetric(metric);
+  const currentIsCold = family !== null &&
+    options.currentCacheStates[family] === "cold";
+  const samples = family !== null && !currentIsCold
+    ? dropColdSamples(
+      timeline?.samples ?? [],
+      options.stateOfRunForFamily(family),
+    )
+    : timeline?.samples ?? [];
+  const n = samples.length;
+
+  const baseline = computeBaseline(
+    samples.map((s) => s.durationSeconds),
+    metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
+  );
+
+  const stats = baseline && {
+    median: baseline.median,
+    variance: baseline.variance,
+    stddev: baseline.stddev,
+    threshold: baseline.threshold,
+    pctIncrease: ((current - baseline.median) / baseline.median) * 100,
+    headroomPct: baseline.threshold > baseline.median
+      ? ((current - baseline.median) /
+        (baseline.threshold - baseline.median)) * 100
+      : 0,
+  };
+
+  // Metrics whose aggregate values grow as tests are added — never fail,
+  // but still shown so the log has full context. Takes precedence over COLD.
+  if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
+    return {
+      row: { metric, status: "excl", current, n, ...(stats ?? {}) },
+      failure: false,
+    };
+  }
+
+  // Cold compile cache for this metric's job family — report without gating.
+  if (currentIsCold) {
+    return { row: { metric, status: "COLD", current, n }, failure: false };
+  }
+
+  // Not enough baseline data — show anyway.
+  if (!baseline) {
+    return { row: { metric, status: "n/a", current, n }, failure: false };
+  }
+
+  // PR has an override saving this metric.
+  if (prOverrides.metrics.has(metric)) {
+    const override = prOverrides.metrics.get(metric)!;
+    if (current <= override) {
+      return {
+        row: { metric, status: "ovrd", current, n, ...stats! },
+        failure: false,
+      };
+    }
+  }
+
+  if (current > baseline.threshold) {
+    return {
+      row: { metric, status: "OVER", current, n, ...stats! },
+      failure: true,
+    };
+  }
+  if ((stats!.headroomPct ?? 0) >= 50) {
+    return {
+      row: { metric, status: "CLOSE", current, n, ...stats! },
+      failure: false,
+    };
+  }
+  return {
+    row: { metric, status: "OK", current, n, ...stats! },
+    failure: false,
+  };
 }
 
 async function extractCoverageDebtSamples(
@@ -1204,6 +1414,14 @@ export async function main() {
     console.warn(`  Warning: could not fetch artifacts for current run: ${e}`);
   }
 
+  // Aggregate the current run's compile cache states so this run's
+  // perf-metrics artifact is tagged (main-push runs included — future
+  // baselines must know whether this run was cold).
+  const currentCacheStates = await collectCurrentCacheStates(currentArtifacts);
+  console.log(
+    `Compile cache states: ${formatCompileCacheStates(currentCacheStates)}`,
+  );
+
   // Extract per-test metrics from JUnit artifacts
   try {
     // Newest per name: a re-run of a flagged test job must refresh its metric.
@@ -1251,7 +1469,11 @@ export async function main() {
     );
   }
 
-  await writePerfMetricsFile(PERF_METRICS_FILE, currentMetrics);
+  await writePerfMetricsFile(
+    PERF_METRICS_FILE,
+    currentMetrics,
+    currentCacheStates,
+  );
   console.log(
     `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
   );
@@ -1284,6 +1506,9 @@ export async function main() {
   const overridesBySha = new Map<string, BaselineOverrides>();
   const prInfoBySha = new Map<string, PRInfo>();
   const newBackfills = new Map<number, Map<string, TimingSample>>();
+  // Compile cache states per baseline run, from tagged perf-metrics
+  // artifacts. Backfill and jobs-API fallback runs stay absent (unknown).
+  const cacheStatesByRunId = new Map<number, CompileCacheStates>();
 
   const baselineContexts = await githubApiOrSkip(
     "fetching baseline run context",
@@ -1362,7 +1587,14 @@ export async function main() {
           }
         }
 
-        if (await addPerfMetricsFromArtifacts(timelines, artifacts)) {
+        const artifactResult = await addPerfMetricsFromArtifacts(
+          timelines,
+          artifacts,
+        );
+        if (artifactResult.added) {
+          if (artifactResult.compileCacheStates) {
+            cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
+          }
           return;
         }
 
@@ -1429,6 +1661,15 @@ export async function main() {
     timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  const stateOfRunForFamily =
+    (family: CompileCacheFamily) =>
+    (runId: number): CompileCacheState | undefined =>
+      cacheStatesByRunId.get(runId)?.[family];
+  const isRunCold = (runId: number): boolean => {
+    const states = cacheStatesByRunId.get(runId);
+    return states !== undefined && Object.values(states).includes("cold");
+  };
+
   const coverageBaselineAvailable = [...timelines.keys()].some(
     isCoverageDebtMetric,
   );
@@ -1448,11 +1689,16 @@ export async function main() {
   for (const [metric, currentSample] of currentMetrics) {
     const current = currentSample.durationSeconds;
     const timeline = timelines.get(metric);
-    const n = timeline?.samples.length ?? 0;
     const isCoverageMetric = isCoverageDebtMetric(metric);
 
     if (isCoverageMetric) {
-      const latestBaseline = timeline?.samples.at(-1)?.durationSeconds;
+      const n = timeline?.samples.length ?? 0;
+      // Ratchet against the latest run that was not known-cold: a cold main
+      // run covers rare cold-compile-only branches, and ratcheting against
+      // its lower debt would fail later warm PRs with phantom regressions.
+      const latestBaseline = timeline
+        ? latestNonColdSample(timeline.samples, isRunCold)?.durationSeconds
+        : undefined;
       const override = prOverrides.metrics.get(metric);
       const coverageReset = prOverrides.coverageBaselineReset;
       const shouldGateCoverage = shouldGateCoverageDebtMetric(
@@ -1523,56 +1769,16 @@ export async function main() {
       continue;
     }
 
-    const baseline = timeline && n >= MIN_SAMPLES
-      ? computeBaseline(
-        timeline.samples.map((s) => s.durationSeconds),
-        metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
-      )
-      : null;
-
-    const stats = baseline && {
-      median: baseline.median,
-      variance: baseline.variance,
-      stddev: baseline.stddev,
-      threshold: baseline.threshold,
-      pctIncrease: ((current - baseline.median) / baseline.median) * 100,
-      headroomPct: baseline.threshold > baseline.median
-        ? ((current - baseline.median) /
-          (baseline.threshold - baseline.median)) * 100
-        : 0,
-    };
-
-    // Metrics whose aggregate values grow as tests are added — never fail,
-    // but still shown so the log has full context.
-    if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
-      rows.push({ metric, status: "excl", current, n, ...(stats ?? {}) });
-      continue;
-    }
-
-    // Not enough baseline data — show anyway.
-    if (!baseline) {
-      rows.push({ metric, status: "n/a", current, n });
-      continue;
-    }
-
-    // PR has an override saving this metric.
-    if (prOverrides.metrics.has(metric)) {
-      const override = prOverrides.metrics.get(metric)!;
-      if (current <= override) {
-        rows.push({ metric, status: "ovrd", current, n, ...stats! });
-        continue;
-      }
-    }
-
-    if (current > baseline.threshold) {
-      const row: Row = { metric, status: "OVER", current, n, ...stats! };
-      rows.push(row);
-      failures.push(row);
-    } else if ((stats!.headroomPct ?? 0) >= 50) {
-      rows.push({ metric, status: "CLOSE", current, n, ...stats! });
-    } else {
-      rows.push({ metric, status: "OK", current, n, ...stats! });
-    }
+    const { row, failure } = evaluateTimingMetric({
+      metric,
+      current,
+      timeline,
+      prOverrides,
+      currentCacheStates,
+      stateOfRunForFamily,
+    });
+    rows.push(row);
+    if (failure) failures.push(row);
   }
 
   // 6. Report results
@@ -1599,7 +1805,31 @@ export async function main() {
     );
   }
 
-  // 6c. Full metric table — always emitted, grouped by metric kind.
+  // 6c. Cold compile cache callout — the affected timing metrics are shown
+  // as COLD and not gated this run.
+  const coldFamilies = COMPILE_CACHE_FAMILIES.filter(
+    (family) => currentCacheStates[family] === "cold",
+  );
+  if (coldFamilies.length > 0) {
+    console.log("\n## Cold compile cache");
+    console.log(
+      `The pattern compile byte cache missed for: ${coldFamilies.join(", ")}.`,
+    );
+    console.log(
+      "Timing metrics for these job families run a full recompile (~1.7-2x slower per test),",
+    );
+    console.log(
+      "so they are reported as COLD and not gated — comparing them against warm baselines",
+    );
+    console.log(
+      "would flag phantom regressions, and cold baselines are too rare to gate against.",
+    );
+    console.log(
+      "To get a warm, fully gated run, re-run the pattern jobs: this cold run already saved the new compile cache.",
+    );
+  }
+
+  // 6d. Full metric table — always emitted, grouped by metric kind.
   console.log(
     "\n::group::All collected metrics:" +
       `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
@@ -1613,7 +1843,13 @@ export async function main() {
     "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
   );
   console.log(
-    "  OK = <50% consumed; ovrd = saved by a PR override/reset; excl = metric excluded from the check;",
+    "  OK = <50% consumed; ovrd = saved by a PR override/reset;",
+  );
+  console.log(
+    "  COLD = compile cache cold for this metric's job family; not gated (rerun to go warm);",
+  );
+  console.log(
+    "  excl = metric excluded from the check;",
   );
   console.log(
     `  n/a = fewer than ${MIN_SAMPLES} baseline samples.`,
@@ -1654,12 +1890,14 @@ export async function main() {
   // Sort order within each kind: most at-risk of failing the check first.
   // `ovrd` sits below `OK` because an override-protected metric is at strictly
   // lower risk of tripping the check than an unguarded OK metric — the author
-  // has already authorized its current level.
+  // has already authorized its current level. `COLD` sits below `ovrd`: a
+  // cold metric is not gated this run at all.
   const STATUS_ORDER: Record<Status, number> = {
-    OVER: 5,
-    CLOSE: 4,
-    OK: 3,
-    ovrd: 2,
+    OVER: 6,
+    CLOSE: 5,
+    OK: 4,
+    ovrd: 3,
+    COLD: 2,
     excl: 1,
     "n/a": 0,
   };
@@ -1680,13 +1918,14 @@ export async function main() {
     CLOSE: 0,
     OK: 0,
     ovrd: 0,
+    COLD: 0,
     excl: 0,
     "n/a": 0,
   } as Record<Status, number>;
   for (const r of rows) counts[r.status]++;
 
   console.log(
-    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
+    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, COLD: ${counts.COLD}, excl: ${counts.excl}, n/a: ${
       counts["n/a"]
     })`,
   );
@@ -1704,7 +1943,7 @@ export async function main() {
 
   console.log("::endgroup::");
 
-  // 6d. Failure metric details.
+  // 6e. Failure metric details.
   if (failures.length > 0) {
     failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
 
@@ -1716,19 +1955,29 @@ export async function main() {
       const timeline = timelines.get(f.metric);
       if (!timeline) continue;
 
+      // Show the samples the gate actually used: for cache-family metrics
+      // that is the timeline minus known-cold runs (a failing metric was
+      // gated warm — cold current runs never fail). Runs cold in any family
+      // keep a [cold] suffix so the warm-run stats stay auditable.
+      const family = compileCacheFamilyForMetric(f.metric);
+      const samples = family !== null
+        ? dropColdSamples(timeline.samples, stateOfRunForFamily(family))
+        : timeline.samples;
+
       const fmt = (v: number) => formatMetricValue(f.metric, v);
       console.log(
-        `  ${f.metric} (n=${timeline.samples.length}, median=${
+        `  ${f.metric} (n=${samples.length}, median=${
           fmt(f.median!)
         }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
       );
-      for (const s of timeline.samples) {
+      for (const s of samples) {
         const pr = prInfoBySha.get(s.sha);
         const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+        const coldSuffix = isRunCold(s.runId) ? " [cold]" : "";
         console.log(
           `    ${fmt(s.durationSeconds)} — ${prStr} (${
             s.createdAt.slice(0, 10)
-          })`,
+          })${coldSuffix}`,
         );
       }
     }
@@ -1736,7 +1985,7 @@ export async function main() {
     console.log("::endgroup::");
   }
 
-  // 6e. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  // 6f. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (informationalOnly) {
     console.log("\nInformational Only:");
   }
