@@ -449,6 +449,39 @@ export const SOURCE_DOC_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
+ * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
+ * source/compiled doc's `imports` array holds LIVE links to per-edge element
+ * docs (the cell layer hoists each `{specifier, link}` element into its own
+ * derived doc); the element doc's own `link` field is a *quoted* link — data,
+ * not a traversal edge — so this schema pulls exactly the doc plus its edge
+ * element docs and stops. A schema-less `sync()` normalizes to the rejecting
+ * selector and delivers only the root, leaving the element docs unknown to
+ * the replica — then the re-write touches them blind and the engine reveals
+ * the conflicts one per commit attempt (the CT-1824 loop; the write-back's
+ * retry budget converges it, one round per edge doc). With the element docs
+ * client-known up front, the re-write diffs against true state and commits
+ * on the first attempt. Recursion is deliberately omitted: the write-target
+ * pre-sync enumerates every module doc itself, so each doc only needs its
+ * own edges — nothing beyond the write set loads (the lazy-by-default
+ * posture for code docs is untouched).
+ */
+export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
+  type: "object",
+  properties: {
+    imports: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          specifier: { type: "string" },
+          link: true,
+        },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+/**
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
