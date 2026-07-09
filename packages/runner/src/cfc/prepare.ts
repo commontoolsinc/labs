@@ -43,7 +43,12 @@ import {
   canonicalizeCfcMetadata,
   canonicalizeLogicalPath,
 } from "./canonical.ts";
-import { clauseAlternatives, isOrClause, normalizeClause } from "./clause.ts";
+import {
+  clauseAlternatives,
+  FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES,
+  isOrClause,
+  normalizeClause,
+} from "./clause.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
   atomsOutsideCeiling,
@@ -53,6 +58,7 @@ import {
   uniqueCfcAtoms,
 } from "./observation.ts";
 import { evaluateExchangeRules } from "./exchange-eval.ts";
+import { createTxCfcGrantResolver } from "./grants.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   type ReadClassSelection,
@@ -1782,20 +1788,10 @@ const unsupportedTrustSensitiveReason = (
   return undefined;
 };
 
-// Atom types forbidden as alternatives of an AUTHORED OR-clause (spec §3.1.8):
-// alternatives must be principal-like. `Caveat` as an alternative would make a
-// risk obligation dischargeable by identity ("readable by Bob OR if screened"),
-// collapsing the caveat discipline; `Expires` semantics is most-restrictive-
-// wins, which inverts to least-restrictive-wins as an alternative
-// (`[[User(A) ∨ Expires(t)]]` world-readable until t). Both are conservative
-// fail-closed rejections, relaxable later by a profile that defines the wanted
-// semantics. (`Expires` is not yet a registered `CFC_ATOM_TYPE` — it arrives
-// with the exchange-rule atoms in Epic B1 — so match its spec type URI too.)
-const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES = new Set<string>([
-  CFC_ATOM_TYPE.Caveat,
-  "https://commonfabric.org/cfc/atom/Expires",
-]);
-
+// FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES (the §3.1.8 principal-like
+// discipline) moved to clause.ts — it is now shared with the grant-audience
+// validation in grants.ts (§8.12.7 route 2a), which enforces the same
+// rejection on grant audience entries at write time.
 const disallowedAuthoredClauseReason = (
   schema: JSONSchema,
   path: readonly string[],
@@ -3553,6 +3549,13 @@ const evaluateGatedConfidentiality = (
       boundary,
       trustResolver: createTrustResolver(state.trustConfig),
       actingPrincipal: state.trustSnapshot?.actingPrincipal,
+      // Grant resolution for policyState guards (§8.12.7 route 2a): the
+      // closure captures the transaction, point-reads grant documents under
+      // internalVerifierRead (lookups never taint), and records each
+      // consulted address+digest into the prepare state for the B5-style
+      // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
+      // of this evaluation — this function only runs when the dial is on.
+      grantResolver: createTxCfcGrantResolver(tx),
     },
   );
   return {

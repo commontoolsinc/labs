@@ -1,3 +1,4 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -113,3 +114,18 @@ export const clauseSubsumes = (
     labelAlternatives.some((labelAtom) => atomEntails(ceilingAtom, labelAtom))
   );
 };
+
+// Atom types forbidden as alternatives of an AUTHORED OR-clause (spec §3.1.8):
+// alternatives must be principal-like. `Caveat` as an alternative would make a
+// risk obligation dischargeable by identity ("readable by Bob OR if screened"),
+// collapsing the caveat discipline; `Expires` semantics is most-restrictive-
+// wins, which inverts to least-restrictive-wins as an alternative
+// (`[[User(A) ∨ Expires(t)]]` world-readable until t). Both are conservative
+// fail-closed rejections, relaxable later by a profile that defines the wanted
+// semantics. Shared by the authored-clause gate in prepare.ts and the grant
+// audience validation in grants.ts (a grant audience entry IS a future clause
+// alternative — §8.12.7 route 2a) so the two cannot drift.
+export const FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.Caveat,
+  CFC_ATOM_TYPE.Expires,
+]);

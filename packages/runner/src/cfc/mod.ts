@@ -35,6 +35,7 @@ export type {
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
@@ -111,6 +112,8 @@ export {
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
 export type {
+  CfcGrantResolver,
+  CfcGrantResolverQuery,
   ExchangeEvalContext,
   ExchangeEvalResult,
   RuleFiring,
@@ -119,6 +122,22 @@ export {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+export type {
+  CfcGrant,
+  CfcGrantIdentity,
+  CfcGrantWriteInput,
+} from "./grants.ts";
+export {
+  CFC_GRANT_ABSENT_DIGEST,
+  CFC_GRANT_ID_PREFIX,
+  cfcGrantDocId,
+  cfcGrantIsLive,
+  createTxCfcGrantResolver,
+  disallowedGrantAudienceEntryReason,
+  expandCfcGrantFacts,
+  prepareCfcGrantWrite,
+  verifyCfcGrantDocument,
+} from "./grants.ts";
 export type {
   RenderConfidentialityResolver,
   RenderConfidentialityResolverConfig,
