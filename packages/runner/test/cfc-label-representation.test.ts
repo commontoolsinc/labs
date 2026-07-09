@@ -277,6 +277,16 @@ describe("CFC label representation transform (inv-12 Stage 1)", () => {
       expect(transformCfcLabelForCrossSpacePersist(label)).toBe(label);
     });
 
+    it("passes a marker in atom position through the walk untouched", () => {
+      // A commitment marker encountered as a VALUE during the walk (not at
+      // a classified field) — e.g. a committed clause element inside a
+      // stored list being re-derived — returns by reference: the top-level
+      // passthrough arm of the transform.
+      const marker = commitCfcFieldValue("did:key:alice");
+      const label = { confidentiality: [marker] };
+      expect(transformCfcLabelForCrossSpacePersist(label)).toBe(label);
+    });
+
     it("leaves an already-committed field untouched (marker passthrough)", () => {
       const label = {
         confidentiality: [{

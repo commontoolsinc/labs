@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
 
@@ -70,6 +71,20 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
     tx.setCfcLabelMetadataProtectionMode("off");
     tx.setCfcLabelMetadataProtectionMode("enforce");
     expect(() => tx.setCfcLabelMetadataProtectionMode("observe")).toThrow(
+      /cannot be weakened/,
+    );
+    tx.abort();
+  });
+
+  it("delegates through TransactionWrapper to the wrapped transaction", () => {
+    // The wrapper forwards every dial setter; the new one must reach the
+    // wrapped tx (and its pin) identically.
+    const runtime = makeRuntime();
+    const tx = runtime.edit();
+    const wrapper = new TransactionWrapper(tx);
+    wrapper.setCfcLabelMetadataProtectionMode("enforce");
+    expect(tx.getCfcState().labelMetadataProtectionMode).toBe("enforce");
+    expect(() => wrapper.setCfcLabelMetadataProtectionMode("off")).toThrow(
       /cannot be weakened/,
     );
     tx.abort();
