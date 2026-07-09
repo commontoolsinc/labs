@@ -25,6 +25,28 @@ Support and test packages (utils, test-support, deno-web-test, integration,
 generated-patterns, content-hash, leb128, felt, static, vendor-astral,
 fs-sync-example) sit outside the layer stack.
 
+## Documentation Lifecycle
+
+Documentation is split into two categories with different obligations. The full
+rules are in `docs/README.md`; the short version:
+
+- **Live** documentation (everything outside `docs/history/`) describes the
+  current system or pending plans. If your change alters behavior that a live
+  document describes, update that document in the same change.
+- **Historical** documentation (`docs/history/`) holds point-in-time records:
+  audits, reports, investigation findings, executed plans, superseded designs.
+  Never edit their content, and never treat them as descriptions of the current
+  system.
+- The test for which is which: if the system changed, would someone edit this
+  document, or write a new one and leave this one alone? Edit it — live. Write a
+  new one — historical.
+- When you produce a point-in-time artifact (a report on completed work, an
+  audit, a post-mortem), create it in `docs/history/` with the metadata header
+  defined in `docs/history/README.md`.
+- When a live plan or design reaches "done" or is abandoned — for example, your
+  change lands its last phase — archive it to `docs/history/` following the
+  procedure in `docs/README.md`.
+
 ## Pattern Development
 
 If you are developing patterns, use the repo-local `pattern-dev` skill at

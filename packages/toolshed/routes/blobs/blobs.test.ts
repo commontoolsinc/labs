@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterAll, afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import createApp from "@/lib/create-app.ts";
 import router from "./blobs.index.ts";
@@ -30,6 +30,14 @@ const blobUploadEncoding = new JsonEncodingContext();
 describe("Blob Routes", () => {
   afterEach(async () => {
     await memoryServer.flushSessions();
+  });
+
+  afterAll(async () => {
+    // The toolshed `memoryServer` is a module-level singleton constructed when
+    // memory.ts is imported. Deno isolates each test file's module graph, so
+    // this instance is owned by this file alone. Closing it releases its SQLite
+    // handles, engine map, and refresh timer.
+    await memoryServer.close();
   });
 
   it("stores and serves a FabricBytes blob by content id", async () => {

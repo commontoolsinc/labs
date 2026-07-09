@@ -494,7 +494,7 @@ entries per written path — bench before/after (canonicalize + label-sync).
 
 **Goal.** Close the three composing holes that let an injected `sendMail`
 recipient send under `enforce` (scoping doc:
-[docs/specs/cfc-trusted-agent-tool-integrity.md](../specs/cfc-trusted-agent-tool-integrity.md)),
+[docs/history/specs/cfc-trusted-agent-tool-integrity.md](../history/specs/cfc-trusted-agent-tool-integrity.md)),
 and build the write-side `requiredIntegrity` floor (§8.12.4.1 / SC-18). Track
 runs independently of A/B (D5 excepted) — **start immediately; this is the
 security-urgent track.**
@@ -701,7 +701,7 @@ Runtime constructor **already defaults `enforce-explicit`**
 ([lib-shell/src/runtime.ts:113-149](../../packages/lib-shell/src/runtime.ts));
 `InitializationData` already carries `renderDeclassificationPolicy` and
 `renderConfidentialityCeiling` across the worker IPC
-([runtime-client/protocol/types.ts:130-187](../../packages/runtime-client/src/protocol/types.ts)).
+([runtime-client/protocol/types.ts:130-187](../../packages/runtime-client/protocol/types.ts)).
 The dormant pieces are: the flow dial (`off` everywhere), the render ceiling
 (plumbed, never populated), `enforce-strict` (rankable, no distinct behavior),
 and trigger-read labels on the enforcement side.
@@ -831,5 +831,7 @@ persist regions, `runtime.ts` options, `lib-shell/src/runtime.ts`,
 `memory/v2/sqlite/row-label.ts` and the runner sqlite builtins,
 `memory/v2/engine.ts` (`applySqliteOperation`), `acl-manager.ts`,
 `schema-refs.ts`, `ui-contract.ts`, and the scoping docs
-(`cfc-trusted-agent-tool-integrity.md`, `runner_cfc_implementation.md`,
-`cfc-s16-default-transition-design.md`, `docs/specs/sqlite-builtin/06-cfc.md`).
+(`docs/history/specs/cfc-trusted-agent-tool-integrity.md`,
+`runner_cfc_implementation.md`,
+`docs/history/specs/cfc-s16-default-transition-design.md`,
+`docs/specs/sqlite-builtin/06-cfc.md`).

@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { setEagerSourceAnnotation } from "../src/builder/module.ts";
+import { getComposeBundleSourceMapCallsForTesting } from "@commonfabric/js-compiler/source-map";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
@@ -109,5 +110,21 @@ describe("ESM loader: verified-source location resolution", () => {
     // normalization — they both gain the same leading slash).
     expect(r.src).toMatch(/^cf:module\//);
     expect(r.kind).toBe("verified");
+  });
+
+  // CT-1819: with source annotation OFF (the production default) nothing at
+  // boot consumes the maps, so nothing should COMPOSE them either — the eval
+  // registers lazy providers only. The debug-path test above is the other
+  // half of the pin: with annotation ON, the same providers materialize
+  // during eval and `.src` still resolves to the authored source, so the
+  // CT-1754 fail-closed behavior is unchanged for every consumer that
+  // actually looks.
+  it("evaluation composes no source maps when annotation is off", async () => {
+    setEagerSourceAnnotation(false);
+    makeRuntime();
+    const before = getComposeBundleSourceMapCallsForTesting();
+    const compiled = await runtime.patternManager.compilePattern(program);
+    expect(compiled).toBeDefined();
+    expect(getComposeBundleSourceMapCallsForTesting()).toBe(before);
   });
 });

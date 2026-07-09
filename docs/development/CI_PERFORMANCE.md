@@ -62,6 +62,88 @@ Jobs and steps for a run:
 `GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
 
+## Step Phase Markers
+
+`scripts/ci-gantt.ts` draws each job as a bar and splits that bar into three
+segments — setup, work, and shutdown — so the shared scaffolding around a job is
+visually separated from the job's own work. For a matrix job this shows, per
+shard, how much wall time is setup that every shard repeats versus the unique
+work that one shard does.
+
+The chart decides a step's phase from the emoji its name starts with. The emoji
+is the marker: the script never reads step wording, only the leading emoji. Every
+step we control — in `.github/workflows/*` and in the composite actions under
+`.github/actions/*` — must begin with a marker emoji from the table below, and
+each emoji belongs to exactly one phase. When you add a step, pick an emoji whose
+phase matches what the step does. When you add a genuinely new kind of step,
+choose a new emoji, then add it to both this table and the `PHASE_MARKERS` array
+in `scripts/ci-gantt.ts`, keeping the one-emoji-one-phase rule.
+
+**setup** — fetch code, install tools and dependencies, restore caches,
+authenticate, and bring test servers and devices up before the real work:
+
+| Emoji | Used for |
+| --- | --- |
+| 📥 | checkout, download inputs |
+| 🦕 | set up Deno |
+| 🔍 | verify the lock file and install, resolve refs |
+| 📦 | install packages, cache dependencies |
+| ♻️ | restore or save a build cache |
+| 🛡️ | relax the sandbox for browser tests |
+| 🔧 | enable a device |
+| ⚙️ | set up an external SDK |
+| 🔑 | authenticate to a cloud |
+| 🔌 | start a local server for tests |
+| ⏳ | wait for a service to be ready |
+| 💾 | restore or save a cache |
+| 🧮 | compute a cache identity |
+
+**work** — the job's actual purpose:
+
+| Emoji | Used for |
+| --- | --- |
+| 🔎 | checks (format, type, patterns, attestations) |
+| 🚧 | guard that fails the build on a banned pattern |
+| 🧪 | run tests |
+| 🧩 | run integration tests |
+| 🧹 | lint |
+| 🧭 | check skill facts |
+| 📄 | type-check docs |
+| 🏗️ | build binaries or assets |
+| 🏋️ | run benchmarks |
+| 📊 | produce performance metrics or status reports |
+| 🧬 | combine coverage |
+| 📝 | generate attestations |
+| 🔐 | sign binaries |
+| 🚀 | deploy |
+| 💬 | post a pull-request comment |
+
+**shutdown** — post-work reports, artifact uploads, log capture, teardown:
+
+| Emoji | Used for |
+| --- | --- |
+| 🧾 | write a coverage report |
+| 📤 | upload artifacts |
+| 📋 | capture logs on failure |
+
+A few markers were chosen so the phase stays unambiguous, which is worth knowing
+before you "correct" a step name back to a more obvious emoji:
+
+- 🚀 means deploy, which is work. A step that starts a local server for tests is
+  setup, so it uses 🔌 instead of 🚀. A step that uploads artifacts to cloud
+  storage is shutdown, so it uses 📤.
+- 🔍 means verify-then-install, which is setup. Verifying binary attestations is
+  work, so that step uses 🔎.
+- Downloading logs after a failure is shutdown, so those steps use 📋 rather than
+  the 📥 or 📦 download markers.
+
+The steps GitHub injects into every job — `Set up job`, `Post …`, and
+`Complete job` — carry no marker, so the script classifies them by name (setup
+for `Set up job`, shutdown for the other two). Any other step that reaches the
+chart without a recognized marker is counted as "other", drawn in gray, and
+listed on standard error when the script runs, so a missing marker is easy to
+find and fix.
+
 ## Root Test Job Shape
 
 The `Test (n/6)` jobs in `.github/workflows/deno.yml` run the root
@@ -104,8 +186,10 @@ Known serial CLI tests:
   `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the
   missing-current-directory fallback.
-- `test/view-pager-pty.test.ts` drives a real pseudo-terminal and is sensitive
-  to heavy workspace contention.
+- `test/view-pager-pty.test.ts` drives a real pseudo-terminal, spawning a full
+  CLI child per test. Keystrokes are gated on observed child output rather than
+  on timing, so contention slows it but does not flake it; it stays serial to
+  avoid stacking those children on top of the parallel groups.
 
 The CLI package keeps those tests in a serial group and runs the rest of its
 test modules with `--parallel`.
@@ -139,3 +223,43 @@ baseline for later PRs. Performance Check still requires the full expected
 coverage artifact set during that reset cycle. Jobs with no reportable covered
 files upload an empty LCOV report so missing artifacts mean the report upload
 itself failed.
+
+## Compile Cache State and Cold Runs
+
+The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
+over the compiler packages. A PR that changes that fingerprint runs cold: every
+pattern compiles from scratch, pattern tests run roughly 1.7–2× slower, and the
+timing gate would trip against warm baselines. The other direction is just as
+bad: a cold main run covers compile branches that only execute on a cold cache,
+which lowers the coverage-debt baseline, so later warm PRs fail the coverage
+ratchet with phantom uncovered lines.
+
+To compare like with like, each pattern job uploads a small `cache-state-*`
+artifact recording its cache restore result. Performance Check aggregates those
+into `compileCacheStates` in `perf-metrics.json`. A job family is cold when any
+of its shards had a full cache miss, detected as the cache file being absent
+after the restore step (the combined `actions/cache` action does not expose the
+matched key). A partial hit through a restore key counts as warm: both key
+forms start with the fingerprint hash, so any restore means the compiled bytes
+are current.
+
+The comparison rules follow from the tagging:
+
+- When the current run is cold for a family, that family's cache-sensitive
+  timing metrics get the non-blocking `COLD` status instead of being gated.
+  The remedy is to re-run the pattern jobs: the cold attempt already saved the
+  new cache, so the re-run is warm and gates normally.
+- When the current run is warm, known-cold baseline samples are excluded from
+  the timing comparison.
+- The coverage-debt ratchet uses the latest non-cold main sample, so a cold
+  main run cannot lower the baseline that warm PRs are held to.
+
+Runs with unknown cache state — anything before this mechanism rolled out, and
+backfill-derived runs — behave exactly as before: their samples are kept and
+their metrics gate normally.
+
+Two gaps remain. Cold compile duration itself is not gated, so a regression
+that only shows up on a cold cache passes unnoticed; a dedicated cold-compile
+bench could cover that later. And cold main runs from before the rollout stay
+unknown, so they can still skew baselines until they age out of the 20-run
+baseline window.

@@ -5,8 +5,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 
 /**
- * PR D regression guard (docs/specs/content-addressed-action-identity-
- * implementation-plan.md): the pattern-scoped function registries
+ * PR D regression guard (docs/history/specs/content-addressed-action-
+ * identity-implementation-plan.md): the pattern-scoped function registries
  * (`verifiedPatternFunctions` / `verifiedPatternLoadIds` / `associatePattern`)
  * were deleted. They existed to disambiguate equal `implementationRef`s across
  * separate loads of the same module; under content addressing that

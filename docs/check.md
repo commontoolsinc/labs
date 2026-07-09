@@ -1,11 +1,13 @@
 # Type-checking doc code blocks
 
 `docs/check.sh` (which runs `docs/check.ts`) type-checks the TypeScript and TSX
-code blocks embedded in the Markdown under `docs/`. It runs in CI as the
-"Type-check docs code blocks" step of the `check` job. Run it locally with:
+code blocks embedded in the Markdown under `docs/`, except `docs/history/` —
+archived documents keep the API of their era and are not kept compiling. It
+runs in CI as the "Type-check docs code blocks" step of the `check` job. Run
+it locally with:
 
 ```text
-deno task check-docs            # all of docs/
+deno task check-docs            # all of docs/ (minus history/)
 deno task check-docs tutorial   # just docs/tutorial/
 ```
 

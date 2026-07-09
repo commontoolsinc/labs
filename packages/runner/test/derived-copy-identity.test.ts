@@ -13,7 +13,7 @@ import {
 
 /**
  * Derived-copy identity carry (PR B of
- * docs/specs/content-addressed-action-identity-implementation-plan.md).
+ * docs/history/specs/content-addressed-action-identity-implementation-plan.md).
  *
  * Copies of builder artifacts (build-time graph serialization, traversal,
  * binding) register `copy → original` in a module-level WeakMap via

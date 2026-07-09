@@ -1186,11 +1186,25 @@ const valueWriteTargets = (
       ) {
         continue;
       }
+      // A document-root write carries the RAW envelope ({value, source, …}):
+      // writeOrThrow's missing-doc retry materializes the whole document in
+      // one write at storage path []. `writePath` is already logical, so the
+      // recorded value must be too — the envelope's `value` member. Keeping
+      // the raw envelope would let `pureLinkContainerPaths` walk through the
+      // `value` wrapper and emit it as a stamp path, persisting membership
+      // anchored at ["value"] where no canonical-path read consumes it; the
+      // envelope's other members (`source`, `cfc`) are the runtime surfaces
+      // the raw-path exclusions above keep out of flow labeling.
+      const writtenValue = rawPath.length === 0
+        ? (isRecord(write.value)
+          ? (write.value as { value?: unknown }).value
+          : undefined)
+        : write.value;
       const key = targetKey(write.address);
       const existing = result.get(key);
       if (existing !== undefined) {
         existing.paths.push(writePath);
-        existing.valuesByPath.set(pathKey(writePath), write.value);
+        existing.valuesByPath.set(pathKey(writePath), writtenValue);
       } else {
         result.set(key, {
           space: write.address.space,
@@ -1198,7 +1212,7 @@ const valueWriteTargets = (
           id: write.address.id as URI,
           type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
-          valuesByPath: new Map([[pathKey(writePath), write.value]]),
+          valuesByPath: new Map([[pathKey(writePath), writtenValue]]),
         });
       }
     }

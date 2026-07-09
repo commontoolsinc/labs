@@ -16,7 +16,7 @@ const signer = await Identity.fromPassphrase("cfc agent tool-input integrity");
 const space = signer.did();
 enableMockMode();
 
-// Epic D2 (docs/specs/cfc-trusted-agent-tool-integrity.md piece A/C): the CFC
+// Epic D2 (docs/history/specs/cfc-trusted-agent-tool-integrity.md piece A/C): the CFC
 // agent prompt-injection demo's central claim is structural. A routing field
 // (`sendMail.recipient`) declares `ifc.requiredIntegrity: [agent-kernel]`, so a
 // recipient the model lifted out of a hostile briefing — a plain model-output

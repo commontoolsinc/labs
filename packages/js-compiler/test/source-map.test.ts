@@ -818,3 +818,145 @@ export const tag = "util";
     }
   });
 });
+
+// CT-1819: the boot path defers composition, capturing per-module LINE COUNTS
+// instead of bodies — pin that the count-shaped inputs are byte-equivalent to
+// the body-shaped ones, and that the parser's lazy slot has one-shot,
+// lookup-driven semantics.
+describe("deferred composition inputs and lazy registration (CT-1819)", () => {
+  const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
+    ({
+      version: 3,
+      file: "m.js",
+      sources,
+      names: [],
+      mappings,
+    }) as unknown as SourceMap;
+
+  it("bodyLineCount is byte-equivalent to body for composition", () => {
+    const bodies = ["a\nbb\nccc", "one", "x\n", ""];
+    const withBodies = composeBundleSourceMap(
+      bodies.map((body, i) => ({
+        body,
+        map: raw("AAAA;AACA", [`s${i}.ts`]),
+        source: `/id/s${i}.ts`,
+      })),
+      "bundle.js",
+    );
+    const withCounts = composeBundleSourceMap(
+      bodies.map((body, i) => ({
+        bodyLineCount: (body.match(/\n/g)?.length ?? 0) + 1,
+        map: raw("AAAA;AACA", [`s${i}.ts`]),
+        source: `/id/s${i}.ts`,
+      })),
+      "bundle.js",
+    );
+    expect(withCounts).toEqual(withBodies);
+  });
+
+  it("identitySourceMap accepts a line count in place of the body", () => {
+    for (const body of ["one line", "a\nb\nc", "trailing\n", ""]) {
+      const lineCount = (body.match(/\n/g)?.length ?? 0) + 1;
+      expect(identitySourceMap(lineCount, "/id/m.tsx")).toEqual(
+        identitySourceMap(body, "/id/m.tsx"),
+      );
+    }
+  });
+
+  it("an entry with neither body nor bodyLineCount throws", () => {
+    expect(() =>
+      composeBundleSourceMap(
+        [{ map: raw("AAAA") }],
+        "bundle.js",
+      )
+    ).toThrow(/body or bodyLineCount/);
+  });
+
+  it("loadLazy defers the provider until a lookup needs the filename", () => {
+    const parser = new SourceMapParser();
+    let calls = 0;
+    parser.loadLazy("lazy.js", () => {
+      calls++;
+      return identitySourceMap("a\nb", "/id/lazy.tsx");
+    });
+    expect(calls).toBe(0);
+    // A lookup for a DIFFERENT filename does not materialize it.
+    expect(parser.mapPosition("other.js", 1, 0)).toBeNull();
+    expect(calls).toBe(0);
+    // First matching lookup materializes (once) and resolves.
+    const pos = parser.mapPosition("lazy.js", 2, 0);
+    expect(calls).toBe(1);
+    expect(pos?.source).toBe("/id/lazy.tsx");
+    expect(pos?.line).toBe(2);
+    parser.mapPosition("lazy.js", 1, 0);
+    expect(calls).toBe(1); // one-shot: provider dropped after first use
+  });
+
+  it("parse() materializes pending providers for frames it maps", () => {
+    const parser = new SourceMapParser();
+    let calls = 0;
+    parser.loadLazy("lazy.js", () => {
+      calls++;
+      return identitySourceMap("a\nb\nc", "/id/lazy.tsx");
+    });
+    const mapped = parser.parse("    at fn (lazy.js:3:0)");
+    expect(calls).toBe(1);
+    expect(mapped).toContain("/id/lazy.tsx:3:0");
+  });
+
+  it("an explicit load supersedes a pending provider; clear drops both", () => {
+    const parser = new SourceMapParser();
+    let calls = 0;
+    parser.loadLazy("lazy.js", () => {
+      calls++;
+      return identitySourceMap("a", "/id/stale.tsx");
+    });
+    parser.load("lazy.js", identitySourceMap("a", "/id/fresh.tsx"));
+    expect(parser.mapPosition("lazy.js", 1, 0)?.source).toBe("/id/fresh.tsx");
+    expect(calls).toBe(0);
+
+    parser.loadLazy("dropped.js", () => {
+      calls++;
+      return identitySourceMap("a", "/id/dropped.tsx");
+    });
+    parser.clear();
+    expect(parser.mapPosition("dropped.js", 1, 0)).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it("a provider returning undefined leaves the name unmapped", () => {
+    const parser = new SourceMapParser();
+    let calls = 0;
+    parser.loadLazy("empty.js", () => {
+      calls++;
+      return undefined;
+    });
+    expect(parser.mapPosition("empty.js", 1, 0)).toBeNull();
+    expect(calls).toBe(1);
+    expect(parser.mapPosition("empty.js", 1, 0)).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it("pendingProviders is LRU-bounded: never-looked-up providers don't accumulate (CT-1819 leak guard)", () => {
+    const parser = new SourceMapParser();
+    // The leak scenario: evaluations that never error, so their source maps are
+    // never looked up / materialized. Each registers a unique `${evalId}.js`
+    // provider; a plain Map would retain one per eval until dispose.
+    const register = (from: number, count: number) => {
+      for (let i = from; i < from + count; i++) {
+        parser.loadLazy(
+          `eval-${i}.js`,
+          () => identitySourceMap("a", "/id/x.tsx"),
+        );
+      }
+    };
+    register(0, 4096);
+    const afterFirst = parser.pendingProviderCountForTesting();
+    register(4096, 4096); // 4096 more, all unique, still never looked up
+    const afterSecond = parser.pendingProviderCountForTesting();
+    // Bounded far below the 8192 registered, and it plateaus (the second batch
+    // evicts rather than grows). A plain Map would give 4096 then 8192.
+    expect(afterFirst).toBeLessThan(4096);
+    expect(afterSecond).toBe(afterFirst);
+  });
+});
