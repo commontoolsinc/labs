@@ -913,10 +913,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this,
         // Stage-0 precision counters: threaded through only when the hook is
         // installed, so the gate skips all measurement (and the summary
-        // allocation) otherwise.
+        // allocation) otherwise. The non-null assertion restates the
+        // presence check above — the hooks object is fixed at construction.
         this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
           onPrefixProvenance: (summary) =>
-            this.cfcInstrumentation.onPrefixProvenance?.(summary),
+            this.cfcInstrumentation.onPrefixProvenance!(summary),
         },
       )
     );
