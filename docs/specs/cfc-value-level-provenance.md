@@ -78,6 +78,7 @@ Extend the shipped activity clock (`v2-transaction.ts` — the shared
 optional **span tag**:
 
 ```ts
+// Shown for illustration only.
 // storage/interface.ts additions (sketch)
 interface IReadActivity  { /* … */ journalIndex?: number; span?: SpanId }
 interface IWriteAttempt  { /* … */ journalIndex:  number; span?: SpanId }

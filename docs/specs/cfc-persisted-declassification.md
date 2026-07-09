@@ -59,6 +59,7 @@ read, read under `internalVerifierRead` so policy lookups never taint"),
 written only by a trusted policy writer, shaped
 
 ```ts
+// Shown for illustration only.
 type CfcGrant = {
   kind: string;                    // "ShareGrant", …  — matched by policyState guards
   owner: DID;                      // whose release authority this spends
