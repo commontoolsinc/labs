@@ -444,15 +444,22 @@ pattern source; you may need a fake `?identity`/source responder):
 - A **CI golden replay** must exist before flipping the flag on by default:
   instantiate a space from version N of a `default-app`-shaped root, seed
   representative state, roll to version N+1 in place, assert no crash and state
-  survives. **Done** —
-  `packages/piece/test/default-app-golden-replay.test.ts` runs the real
-  `checkAndUpdateDefaultPattern` swap against a root that OWNS its state via
-  `new Writable([])` (as `default-app` owns `allPieces`) and derives a reactive
-  value from it. It seeds three "pieces", rolls the identity N→N+1 in place, and
-  asserts (a) the seeded state survives intact, and (b) the NEW code's own
-  reactive computation runs over that survived state (`v2:` not `v1:`, reporting
-  the seeded count) — so the swap is real, not just a meta write. This is the
-  gate the flag-flip PR waits on.
+  survives. **Done** — two golden replays run the real
+  `checkAndUpdateDefaultPattern` swap and assert (a) the seeded state survives
+  intact, and (b) the NEW code's own reactive computation runs over that
+  survived state (`v2:` not `v1:`) — so each swap is real, not just a meta write:
+  - `packages/piece/test/default-app-golden-replay.test.ts` — the **non-home**
+    default-app root; owns a `pieces` list via `new Writable([])` (as
+    `default-app` owns `allPieces`), seeds three pieces. This is the gate the
+    non-home flag-flip PR waits on.
+  - `packages/piece/test/home-golden-replay.test.ts` — the **home** root (the
+    higher-stakes case: favorites/journal/spaces are unrecoverable if lost). It
+    runs under a home session with BOTH flags on, owns three lists via the
+    stable-key `new Writable([]).for("<label>")` idiom that real `home.tsx` uses
+    (`home.tsx:167-170`), seeds representative favorites/journal/spaces, and
+    asserts every list survives the in-place roll-forward. This is the evidence
+    the separate `systemPatternAutoUpdateHome` flag would need before its own
+    flip (still gated on the broader `home.tsx` stable-addressing audit).
 
 **Acceptance M4**: flag off → zero behavior change (assert the existing
 space-open tests are untouched); flag on → default-app rolls forward in place,
