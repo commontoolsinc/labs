@@ -28,7 +28,7 @@ import {
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { cellRefToSigilLink } from "./utils.ts";
+import { cellRefToSigilLink, getCell } from "./utils.ts";
 import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
@@ -1919,7 +1919,14 @@ describe("RuntimeProcessor CFC commit preparation", () => {
 });
 
 describe("runtime-client CellRef conversion", () => {
-  it("preserves carried label views in transient sigil links", () => {
+  // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
+  // CellRef is a main-thread display artifact — round-tripped through
+  // CellHandle.deserialize and back — and must not re-enter the worker as
+  // label state. Forwarding it onto the written sigil link previously fed
+  // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
+  // persisted as link-origin labels; the worker now re-derives those from
+  // its own stored source metadata instead.
+  it("does not forward an inbound label view into worker sigil links", () => {
     const cfcLabelView: CfcLabelView = {
       version: 1,
       entries: [{
@@ -1942,10 +1949,36 @@ describe("runtime-client CellRef conversion", () => {
           space: ref.space,
           scope: "space",
           path: ref.path,
-          cfcLabelView,
         },
       },
     });
+  });
+
+  it("does not seed worker cells from an inbound label view", () => {
+    const cfcLabelView: CfcLabelView = {
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["main-thread-claim"] },
+      }],
+    };
+    const ref: CellRef = {
+      id: "of:cfc-label-cell" as CellRef["id"],
+      space: "did:key:z6MkrX123abc" as CellRef["space"],
+      scope: "space",
+      path: ["value"],
+      cfcLabelView,
+    };
+    const seen: unknown[] = [];
+    const runtime = {
+      getCellFromLink: (...args: unknown[]) => {
+        seen.push(args[3]);
+        return {};
+      },
+    } as unknown as Runtime;
+
+    getCell(runtime, ref);
+    expect(seen).toEqual([undefined]);
   });
 });
 

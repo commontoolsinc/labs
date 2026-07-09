@@ -33,6 +33,13 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {
+  // A `cfcLabelView` on an inbound CellRef is deliberately NOT forwarded
+  // (inv-12 Stage 0 / SC-25): it round-tripped through the main thread
+  // (CellHandle.deserialize keeps the view on the ref) and is
+  // main-thread-influenceable — an untrusted display artifact. Forwarding it
+  // onto the written sigil link previously made it a link-write policy input
+  // that prepareBoundaryCommit persisted as link-origin labels; the worker
+  // re-derives those from its own stored source metadata instead.
   return linkRefFrom<CfcCellLinkRefPayload>({
     id: cell.id,
     space: cell.space,
@@ -40,9 +47,6 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
     path: cell.path,
     ...(cell.schema !== undefined && { schema: cell.schema }),
     ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
-    ...(cell.cfcLabelView !== undefined && {
-      cfcLabelView: cell.cfcLabelView,
-    }),
   });
 }
 
@@ -87,5 +91,17 @@ export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // We explicitly do not pass in `schema`, as this function applies
   // the schema to `schema`, and cell refs already contain all this
   // information. Maybe the upstream function should change.
-  return runtime.getCellFromLink(ref, undefined, undefined, ref.cfcLabelView);
+  //
+  // `ref.cfcLabelView` is deliberately NOT seeded into the worker cell
+  // (inv-12 Stage 0 / SC-25): an inbound view is a main-thread display
+  // artifact, not worker label state. The worker derives label views from
+  // its own stored metadata (`cfcLabelViewForCell`); outbound refs still
+  // carry a view for the client's display. Stripped from the ref object
+  // itself because getCellFromLink also reads the property off
+  // normalized-link-shaped inputs.
+  if (ref.cfcLabelView === undefined) {
+    return runtime.getCellFromLink(ref);
+  }
+  const { cfcLabelView: _cfcLabelView, ...cleanRef } = ref;
+  return runtime.getCellFromLink(cleanRef);
 }
