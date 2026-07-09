@@ -13,7 +13,6 @@ import {
   clickTrustedAction,
   fillCfInput,
   waitForRuntimeIdle,
-  waitForRuntimeSynced,
   waitForText,
   waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
@@ -154,7 +153,11 @@ describe("profile-embed integration test", () => {
       { timeout: PROFILE_EMBED_TIMEOUT },
     );
     await clickSaveByLabel(page, "Save name");
-    await waitForRuntimeSynced(page);
+    // The save dispatches into the resolved profile's owner-protected setName
+    // stream — a cross-space write into the profile space this session created
+    // and still holds open. `waitForRuntimeIdle` awaits the pending-commit
+    // barrier, so the write is server-confirmed before the next edit.
+    await waitForRuntimeIdle(page);
 
     // Amend the bio too (bio is clearable; the embed sends the trimmed draft).
     // cf-textarea wraps a native <textarea> (not an <input>), so fillCfInput —
@@ -165,7 +168,10 @@ describe("profile-embed integration test", () => {
       "Countess of computing.",
     );
     await clickSaveByLabel(page, "Save bio");
-    await waitForRuntimeSynced(page);
+    // As with the name save, the bio dispatches into the resolved profile's
+    // owner-protected setBio stream; `waitForRuntimeIdle` confirms the write
+    // through the pending-commit barrier before edit mode is left.
+    await waitForRuntimeIdle(page);
 
     // Leave edit mode and assert the RESOLVED presentation reflects the amends:
     // the hero badge shows the new name and the bio paragraph renders.
@@ -201,12 +207,18 @@ async function waitForSelector(page: Page, selector: string) {
 // shared-profile.test.ts: fill the create input like a user, then fire the
 // trusted CreateProfile click carrying the typed name.
 async function createProfileFromFallback(page: Page, name: string) {
-  await waitForRuntimeSynced(page);
   await fillCfInput(page, CREATE_INPUT, name, {
     timeout: PROFILE_EMBED_TIMEOUT,
   });
   await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
-  await waitForRuntimeSynced(page);
+  // Creating a profile satisfies `#profile` by committing into a new cross-space
+  // child space, issued fire-and-forget by the trusted action's handler.
+  // `waitForRuntimeIdle` awaits the storage manager's pending-commit barrier
+  // alongside scheduler quiescence, so the create is server-confirmed before the
+  // caller reads the resolved profile back. The read renders in this same
+  // session, so the child space stays open and subscribed and the reactive read
+  // resolves from already-open state without a separate cross-space sync.
+  await waitForRuntimeIdle(page);
 }
 
 // Fill a cf-textarea's inner native <textarea> and durably commit the edit.
