@@ -850,6 +850,7 @@ describe("mounted callable resolution and execution", () => {
     const pieceDir = join(mountpoint, "home/pieces/notes-2");
     const filePath = join(pieceDir, "result", "search.tool");
     await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(filePath, "");
     await Deno.writeTextFile(
       join(pieceDir, "meta.json"),
       JSON.stringify({
@@ -880,16 +881,25 @@ describe("mounted callable resolution and execution", () => {
     });
     await writeLiveMountState(stateDir, mountpoint);
 
-    setTimeout(() => {
-      void Deno.writeTextFile(filePath, "");
-    }, 50);
-
+    // The file exists, but stat reports NotFound the way a stale FUSE-T
+    // kernel cache does while the bridge rebuilds the prop subtree. The
+    // resolver falls back to the parent directory listing, which names
+    // the file.
+    const statCalls: string[] = [];
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
       loadManager: () => Promise.resolve(harness.manager),
       loadPiece: () => Promise.resolve(harness.piece),
+      stat: (path) => {
+        statCalls.push(path);
+        return Promise.reject(
+          new Deno.errors.NotFound(`stat '${path}': invalidated`),
+        );
+      },
     });
 
+    expect(statCalls.length).toBe(1);
+    expect(statCalls[0].endsWith(join("result", "search.tool"))).toBe(true);
     expect(resolved.absPath).toBe(filePath);
     expect(resolved.pieceId).toBe("of:piece-123");
   });
