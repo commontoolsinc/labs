@@ -147,10 +147,21 @@ revisited when invariant 12 is implemented." This is that revisit:
    (2)'s labeling.
 
 The shipped display redaction (`redactCaveatSourcesForDisplay` at the three
-IPC response sites) remains as defense-in-depth for same-space views, and
-extends to the sigil `cfcLabelView` copies in `handleCellGet`/`subscribe`
-value payloads — main-thread application code has no enforcement need for
-them (worker-side enforcement consumes the unredacted view).
+IPC response sites) remains as defense-in-depth for same-space views.
+Extending it to the sigil `cfcLabelView` copies in `handleCellGet`/
+`subscribe` value payloads is **not safe by itself**: those views round-trip
+— `CellHandle.deserialize` preserves the view on the `CellRef`,
+`mapCellRefsToSigilLinks` sends it back to the worker, and
+`prepareBoundaryCommit` persists `input.cfcLabelView` entries as link-origin
+labels — so response-side redaction would persist redacted, under-labeled
+views on copy-forward/link writes. The prerequisite (independently
+motivated: a round-tripped view is main-thread-influenceable, and today it
+is gated only for runtime-minted-integrity forgery) is **re-derivation at
+the persist seam**: the worker treats an inbound `cfcLabelView` as an
+untrusted display artifact and persists link-origin labels only from its own
+authoritative sources (stored source metadata / the worker-side label-view
+state), never from the round-tripped copy. Once persistence no longer
+consumes inbound views, redacting the outbound copies is safe.
 
 ## 4. What this deliberately does not do
 
@@ -174,9 +185,12 @@ them (worker-side enforcement consumes the unredacted view).
 ## 5. Staging
 
 - **Stage 0 (now, no representation change):** remove/redact the `meta:"cfc"`
-  IPC seam; extend display redaction to sigil `cfcLabelView` in IPC value
-  payloads; add the classification table as data (no transform yet). Each is
-  small and independently shippable.
+  IPC seam; make the persist seam re-derive link-origin labels from
+  worker-authoritative sources instead of the round-tripped `cfcLabelView`
+  (the §3 prerequisite — a hardening on its own); then extend display
+  redaction to sigil `cfcLabelView` in IPC value payloads; add the
+  classification table as data (no transform yet). Each is small and
+  independently shippable, in that order.
 - **Stage 1 (representation):** the cross-space persist transform
   (commitment/public per §2's table) behind a dial
   (`cfcLabelMetadataProtection: off | observe | enforce` — observe computes
