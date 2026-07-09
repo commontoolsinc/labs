@@ -1,6 +1,6 @@
 ---
 status: historical
-created: 2026-01-07
+created: 2026-01-06
 archived: 2026-07-08
 reason: "Completed improvement list."
 ---

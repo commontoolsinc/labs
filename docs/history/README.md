@@ -64,7 +64,10 @@ reason: "<one line on why this document is historical>"
 - `status: historical` — always exactly this.
 - `created` — required; the date the document was originally written. Use
   the date stated in the document if it has one, otherwise the date of the
-  git commit that first added it.
+  git commit that first added it. A stated date that the git history
+  contradicts (for example, a date months before the file first existed) is
+  a typo in the document; use the git date and leave the frozen body as it
+  is.
 - `archived` — the date the document was moved here. For documents created
   here directly, the same as `created`.
 - `reason` — required; one line saying why the document is a record rather
