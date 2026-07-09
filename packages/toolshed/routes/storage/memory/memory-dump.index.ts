@@ -24,7 +24,7 @@ import {
 import { createRouter } from "@/lib/create-app.ts";
 import type { AppBindings } from "@/lib/types.ts";
 import env from "@/env.ts";
-import { memoryEngineStoreUrl } from "@/routes/storage/memory.ts";
+import { memoryEngineStoreUrl } from "@/routes/storage/memory-store-url.ts";
 import { dumpAllowSet, isDumpEnabled } from "./memory-dump-policy.ts";
 
 const DUMP_BASE = "/api/storage/memory/dump";
