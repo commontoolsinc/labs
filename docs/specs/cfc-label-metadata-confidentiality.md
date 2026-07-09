@@ -190,7 +190,12 @@ consumes inbound views, redacting the outbound copies is safe.
   (the §3 prerequisite — a hardening on its own); then extend display
   redaction to sigil `cfcLabelView` in IPC value payloads; add the
   classification table as data (no transform yet). Each is small and
-  independently shippable, in that order.
+  independently shippable, in that order. _Implementation note (2026-07-09):
+  shipped — `MetaField` drops `"cfc"` (fail-closed at `handleCellGet`), the
+  persist loop re-derives the source's stored label map per link write while
+  the IPC ingress stops consuming inbound views, all main-thread-facing view
+  copies redact `Caveat.source`, and the §2 table lives at
+  `runner/src/cfc/label-field-classification.ts`._
 - **Stage 1 (representation):** the cross-space persist transform
   (commitment/public per §2's table) behind a dial
   (`cfcLabelMetadataProtection: off | observe | enforce` — observe computes
