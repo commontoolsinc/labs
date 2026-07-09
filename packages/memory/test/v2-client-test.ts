@@ -2741,20 +2741,12 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
     await time.runMicrotasks();
     assertEquals(transport.helloCount, 3);
 
-    let closed = false;
-    const closePromise = client.close().then(() => {
-      closed = true;
-    });
-    await time.runMicrotasks();
-
-    await time.tickAsync(24);
-    assertEquals(closed, false);
-
-    await time.tickAsync(1);
-    await time.runMicrotasks();
-    assertEquals(closed, true);
-
-    await closePromise;
+    // The client is now parked in a 50ms reconnect backoff. Closing cancels
+    // that wait at once, so the close settles through microtasks with the
+    // clock held still. Were the backoff required to elapse, awaiting the
+    // close under fake time would hang, since nothing ticks its timer.
+    await client.close();
+    assertEquals(transport.helloCount, 3);
   } finally {
     Math.random = originalRandom;
     time.restore();
