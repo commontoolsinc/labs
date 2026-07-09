@@ -11,6 +11,11 @@ import type {
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "../src/storage/reactivity-log.ts";
+import {
   NotificationRecorder,
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -62,9 +67,17 @@ const getObjectValue = (
     : undefined;
 };
 
+type HeldCommitRead = {
+  id: string;
+  path: string[];
+  seq?: number;
+  nonRecursive?: boolean;
+};
+
 type HeldTransact = {
   requestId: string;
   operations: Array<{ op: string; id: string }>;
+  reads: { confirmed: HeldCommitRead[]; pending: HeldCommitRead[] };
 };
 
 /**
@@ -97,6 +110,11 @@ class HeldTransactTransport extends ScriptedSessionTransport {
     return this.#transactSent.promise;
   }
 
+  /** The commit currently held (for wire-shape assertions). */
+  get heldCommit(): HeldTransact | null {
+    return this.#held;
+  }
+
   protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
       case "session.watch.set":
@@ -123,11 +141,15 @@ class HeldTransactTransport extends ScriptedSessionTransport {
           throw new Error("Test transport holds only one transact at a time");
         }
         const commit = message.commit as
-          | { operations?: Array<{ op: string; id: string }> }
+          | {
+            operations?: Array<{ op: string; id: string }>;
+            reads?: HeldTransact["reads"];
+          }
           | undefined;
         this.#held = {
           requestId: message.requestId!,
           operations: commit?.operations ?? [],
+          reads: commit?.reads ?? { confirmed: [], pending: [] },
         };
         this.#transactSent.resolve();
         return;
@@ -181,19 +203,30 @@ const notificationCarriesField = (
       after.value[key] === expected;
   });
 
-// The red/green/blue race: a local leaf write ("green") is committed and in
-// flight (unconfirmed) when a foreign writer's server sync ("blue", which also
-// changes a sibling field) arrives. applySessionSync must only advance the
-// CONFIRMED base — the pending write replays on top, so the visible value keeps
-// the local leaf while integrating the sibling change, exactly matching what
-// the server computes when it later applies the patch on top of blue. The
-// other guards then hold the line: confirming the commit promotes the merged
-// value forward, and a late stale replay of blue can never regress it.
+// LAYER: this pins the worker-side SpaceReplica against the client↔server
+// WIRE protocol (the scripted transport plays the server). It does NOT touch
+// the main-thread↔worker IPC hop — the CellSet/CellUpdate echo ordering on
+// that hop is pinned separately by
+// packages/runtime-client/backends/cell-set-echo-race.test.ts.
+//
+// The red/green/blue race: a local blind leaf write ("green") is committed and
+// in flight (unconfirmed) when a foreign writer's server sync ("blue", which
+// also changes a sibling field) arrives. The write uses the real blind-UI-input
+// marks (markUiInputBlindWriteTx + setBlindStructuralTarget), so the commit on
+// the wire is shaped exactly like handleCellSet's: no value-equality read at
+// the written leaf, one nonRecursive structural read at the cell's parent —
+// which is why a real server accepts it on top of blue instead of rejecting a
+// stale CAS read. applySessionSync must only advance the CONFIRMED base — the
+// pending write replays on top, so the visible value keeps the local leaf
+// while integrating the sibling change, exactly matching what the server
+// computes when it later applies the patch on top of blue. The other guards
+// then hold the line: confirming the commit promotes the merged value forward,
+// and a late stale replay of blue can never regress it.
 // (The individual guards are pinned elsewhere — the watch-refresh-race test
 // covers monotonicity, the stacked-commit suite covers pending visibility —
 // but this is the only test that delivers a foreign sync WHILE a commit is
 // pending.)
-Deno.test("memory v2 runner rebases a pending write over a sync arriving before its confirmation", async () => {
+Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sync arriving before its confirmation", async () => {
   const docA = `of:sync-under-pending-a-${crypto.randomUUID()}` as URI;
   const docB = `of:sync-under-pending-b-${crypto.randomUUID()}` as URI;
   const transport = new HeldTransactTransport(
@@ -233,9 +266,12 @@ Deno.test("memory v2 runner rebases a pending write over a sync arriving before 
 
     // Local leaf write: color -> "green". The transact is held by the
     // transport, so the write sits in the pending overlay, unconfirmed.
-    // Transaction paths address the document envelope, so the cell payload
-    // lives under ["value", ...].
+    // Local blind leaf write: color -> "green", using the real blind-UI-input
+    // marks the way handleCellSet does (mark → read/write → structural target
+    // at the leaf's PARENT → unmark → commit). Transaction paths address the
+    // document envelope, so the cell payload lives under ["value", ...].
     const tx = storageManager.edit();
+    markUiInputBlindWriteTx(tx);
     const read = tx.read({ space, id: docA, type: DOCUMENT_MIME, path: [] });
     assert(read.ok, "seeded doc should be readable in the tx");
     const write = tx.write(
@@ -243,12 +279,35 @@ Deno.test("memory v2 runner rebases a pending write over a sync arriving before 
       "green",
     );
     assert(write.ok, "leaf write should apply in the tx");
+    setBlindStructuralTarget(tx, {
+      id: docA,
+      space,
+      scope: "space",
+      path: ["value"],
+    });
+    unmarkUiInputBlindWriteTx(tx);
     const commitPromise = tx.commit();
     await transport.transactSent;
     assertEquals(getObjectValue(provider, docA), {
       color: "green",
       note: "seed",
     });
+
+    // The wire shape must match a blind CellSet's: the tx's own reads carry no
+    // value-equality precondition (they were tagged ignoreReadForCommit and
+    // dropped by buildReads); the ONLY read is the nonRecursive structural
+    // precondition at the leaf's parent. This is what lets a real server accept
+    // the commit on top of a concurrent leaf write instead of rejecting a
+    // stale CAS read.
+    const held = transport.heldCommit;
+    assert(held !== null, "the transact should be held");
+    assertEquals(held.reads.pending, []);
+    assertEquals(held.reads.confirmed.length, 1);
+    const structuralRead = held.reads.confirmed[0]!;
+    assertEquals(structuralRead.id, docA);
+    assertEquals(structuralRead.path, ["value"]);
+    assertEquals(structuralRead.nonRecursive, true);
+    assertEquals(structuralRead.seq, 1);
 
     // Foreign writer's sync lands while green is still pending: blue at a
     // newer confirmed seq, also rewriting the sibling `note` field. The
