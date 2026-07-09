@@ -212,20 +212,26 @@ longer exist.
 
 ## Experimental flags
 
-See [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) for
-the full table, propagation paths (server / shell / bg-piece / CLI), and
-verification steps. Briefly:
+[`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) is the
+central registry of every experimental flag: what each gates, who added it, its
+default, its planned end state, and its removal path, plus the propagation paths
+(server / shell / bg-piece / CLI) and verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
 - Shell-side toggles are baked at build time — toggling requires a rebuild.
 - The same env var must be set everywhere the flag is read.
 
-Currently defined:
+The environment-backed flags (the only ones settable without editing code) are:
 
 | Flag | Env var |
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
-| `schedulerHistoricalMightWrite` | _(runtime-only; pass via `new Runtime({ experimental: { ... } })`)_ |
+| `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
+| `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
+
+The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
+storage, memory-protocol, and shell flags are documented in the registry. See it
+for the complete list.
 
 ---
 
@@ -241,6 +247,8 @@ Most shell config is **build-time**: esbuild injects defines in
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---
@@ -297,6 +305,8 @@ Passed before the CLI args; rarely needed:
 | `IDENTITY` | _(unset)_ | Path to keyfile; takes precedence over `OPERATOR_PASS`. |
 | `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | _(unset)_ | See experimental flags. |
 
 ---
 

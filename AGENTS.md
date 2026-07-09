@@ -96,6 +96,12 @@ If you are developing runtime code, read the following documentation:
   layers
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
+- `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every
+  experimental flag (runtime experimental options, CFC enforcement dials,
+  storage and memory-protocol capability flags, shell dogfood toggles): what
+  each gates, its default, its planned end state, and its removal path. Read it
+  before adding, changing, or removing any experimental flag, and update it in
+  the same change.
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
 

@@ -165,6 +165,10 @@ export type EnvReader = (name: string) => string | undefined;
  * `flagValue()` read anything but "false" as true, the CLI read anything but
  * "true" as false — so `EXPERIMENTAL_MODERN_CELL_REP=1` enabled the flag on
  * toolshed and disabled it under `cf test`.)
+ *
+ * Every experimental flag is catalogued in
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`; update that registry when adding
+ * or removing an entry here.
  */
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
