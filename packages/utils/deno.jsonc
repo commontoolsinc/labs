@@ -1,7 +1,8 @@
 {
   "name": "@commonfabric/utils",
   "tasks": {
-    "test": "deno test",
+    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
+    "test": "deno test --no-check",
     "bench": {
       "description": "Run benchmarks",
       "command": "deno bench"

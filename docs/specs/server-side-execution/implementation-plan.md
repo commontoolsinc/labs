@@ -71,7 +71,11 @@ dual handler execution.
 
 ### 0.3 Naming reserved by this plan
 
-- Runtime option: `persistSchedulerState: boolean` (default false).
+- Runtime option (SHIPPED, already in the tree): `persistentSchedulerState:
+  boolean` (default false), env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`.
+  (An earlier draft reserved `persistSchedulerState`; that name never
+  shipped — the built option is `persistentSchedulerState`. Use the real
+  name everywhere.)
 - Runtime/provider option: `storageConnection: "remote" | "in-process"`.
 - Env flags: `CF_INTEREST_FEED` (client), `EXECUTOR_MODE=reactive` (bps).
 - Protocol messages: `session.interest.set`.
@@ -104,136 +108,215 @@ Parallelizable start set: W0.1, W0.3, W0.4, W0.5, W0.7.
 
 ## 2. Phase 0 — foundations
 
-### W0.1 — Persist scheduler observations transactionally
+### W0.1 — Adopt & verify existing observation persistence (already built)
 
-**Depends on:** nothing. **Unblocks:** W0.2, W1.3.
-**Deliverable:** one PR: observation rows written in the same SQLite
-transaction as the commit they describe; readable back through the
-existing provider seam. Gated by runtime option `persistSchedulerState`
-(default false).
+**Already built (do not re-implement).** Observation persistence is
+present and functional on `main` (verified against the current tree) AND
+on #4288 today, behind the default-off flag. A fresh runtime on the same
+store already skips re-running unchanged actions when the flag is on. Do
+not rebuild any of this; these anchors are the seams you verify/extend:
+
+- **Flag + default (OFF):** `let persistentSchedulerStateEnabled = false;`
+  (`packages/memory/v2.ts:640`; getter `:653`, setter `:649` coerces
+  `undefined`→false); `setPersistentSchedulerStateConfig(this.experimental
+  .persistentSchedulerState)` at runtime construction
+  (`packages/runner/src/runtime.ts:505`). Env
+  `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` plumbed through
+  `packages/toolshed/env.ts`, `packages/shell/src/lib/env.ts`,
+  `packages/background-piece-service/src/{env.ts,main.ts}`.
+- **Durable transactional write:** the runner attaches the observation to
+  the live commit tx — gate
+  `packages/runner/src/scheduler/action-run.ts:646`, build `:666`
+  (`buildSchedulerActionObservation`), attach `:708`
+  (`setSchedulerObservation`). Server strips it when the flag is off
+  (`packages/memory/v2/server.ts:1620`). Persisted INSIDE the single
+  commit transaction:
+  `engine.database.transaction(applyCommitTransaction).immediate`
+  (`packages/memory/v2/engine.ts:1554`) →
+  `upsertSchedulerObservationTransaction` (`:3285`). Five durable tables
+  (DDL `engine.ts:206` `scheduler_observation` history, `:232`
+  `scheduler_action_snapshot` LWW-per-action, `:268`
+  `scheduler_read_index`, `:293` `scheduler_write_index`, `:316`
+  `scheduler_action_state`). No-op elision via `payloadChanged`;
+  observation-only + batched (`schedulerObservationBatch`) commits exist.
+- **Durable read + cold-start skip:** indexed SELECT
+  `listSchedulerActionSnapshots` (`packages/memory/v2/engine.ts:1717`);
+  provider method `packages/runner/src/storage/v2.ts:1108`, optional on
+  `interface.ts:272`. Cold start: flag-gated `schedulerRehydrationOptions`
+  in `packages/runner/src/runner.ts` → subscription `rehydrateFromStorage`
+  → `Scheduler.rehydrateActionFromStorage`
+  (`packages/runner/src/scheduler.ts:666`) → fingerprint check
+  `observationMatchesCurrentAction` (`:716`) →
+  `rehydrateActionFromObservation` (`:593`), which restores reads/writes
+  WITHOUT running (fail-open on miss).
+- **`graph-snapshot.ts` is NOT this.**
+  `packages/runner/src/scheduler/graph-snapshot.ts` is in-memory
+  diagnostics/telemetry only (no storage I/O). The durable snapshot is the
+  `scheduler_action_snapshot` SQLite table — do not conflate them.
+- **`main` vs #4288 (structural only, NO capability delta):** #4288
+  replaces `scheduler.ts` with `export * from ./scheduler/facade.ts` and
+  DROPS `rehydrateActionFromStorage`, moving cold-start orchestration into
+  the runner (`loadSchedulerRehydrationSnapshots` +
+  `schedulerRehydrationOptions` passing `snapshotsByActionId` into the
+  subscription); the skip fires in `facade.ts`
+  (`rehydrateActionFromObservation` → `setStatus(action, "clean")` +
+  `pending.delete`). Flag, tables, provider method, and test names are
+  identical on both refs.
+
+**Depends on:** nothing (substrate already in the tree).
+**Unblocks:** W0.2, W1.3.
+**Deliverable:** one PR that ADOPTS the shipped persistence rather than
+building it: (1) reconcile this plan + README to the real flag name
+`persistentSchedulerState`; (2) close the one composed-durability test gap
+with a single end-to-end kill→reopen→skip test; (3) record the accepted
+deviations from this plan's original sketch. No new tables, commit-payload
+field, or provider method — they exist.
 
 **Read first:**
 
-- `docs/specs/persistent-scheduler-state.md` (the chosen storage design:
-  hybrid "Option B", transaction-coupled) and
-  `docs/specs/persistent-scheduler-state/implementation_notes.md`.
-- `packages/runner/src/scheduler/persistent-observation.ts` — the shapes
-  already exist: `SchedulerActionObservation` (line ~22),
-  `PersistedSchedulerObservationSnapshot` (~47),
-  `buildSchedulerActionObservation()` (~76).
-- `packages/runner/src/scheduler.ts` — `rehydrateActionFromStorage`
-  (~666) and `rehydrateActionFromObservation` (~593); subscription options
-  `rehydrateFromStorage` / `awaitSyncBeforeInitialRun` (~528).
-- `packages/runner/src/storage/interface.ts` — the optional provider
-  methods `listSchedulerActionSnapshots?` (~271) and `sqliteQuery?`
-  (~276).
-- `docs/specs/memory-v2/02-storage.md` (tables/migrations) and
-  `docs/development/patch-operations.md` (the one-place registry for
-  anything commit-carried).
+- The "Already built" anchors above.
+- `docs/specs/persistent-scheduler-state.md` +
+  `docs/specs/persistent-scheduler-state/implementation_notes.md` — the
+  as-shipped design (normalized multi-table, transaction-coupled); it
+  deviates from this plan's original single-`(space,branch,action_id)`
+  sketch.
+- `packages/runner/src/scheduler/persistent-observation.ts` — observation
+  shapes + `buildSchedulerActionObservation`.
+- `packages/runner/test/reload-rehydration.test.ts` and
+  `packages/memory/test/v2-scheduler-state-test.ts` — the two halves of
+  the durability proof you compose into one test.
+- **If #4288 has landed:** cold-start is `runner.ts`
+  `loadSchedulerRehydrationSnapshots` + `scheduler/facade.ts`, NOT
+  `scheduler.ts:666` (that symbol is gone on #4288). Flag, tables,
+  provider method, and test names are unchanged.
 
 **Steps:**
 
-1. In `packages/memory` add a `scheduler_observation` table (migration per
-   02-storage.md conventions): columns `(space, branch, piece_id,
-   action_id, observed_at_seq, kind, payload_json, updated_at_seq)`,
-   primary key `(space, branch, action_id)` — last-write-wins per
-   `actionId`, no history.
-2. Extend the commit payload with an optional
-   `schedulerObservations: SchedulerActionObservation[]` field. Follow the
-   patch-operations registry pattern (commit `02938e3f8` is the model for
-   "define once, used by memory/runner/api"): one definition, wire codec,
-   server apply. The server writes rows inside the SAME sqlite
-   transaction as the commit/revision rows in `Engine.applyCommit`
-   (`packages/memory/v2/server.ts` ~1628 call site).
-3. No-op elision: before attaching an observation to a commit, compare
-   against the last-persisted snapshot for that `actionId` (cache it on
-   the provider); skip identical payloads. Name the helper
-   `schedulerObservationBatch` (the spec reserves the name).
-4. In `packages/runner`, at the point where `buildSchedulerActionObservation`
-   output is available after an action run (find the caller in
-   `packages/runner/src/scheduler/` — it exists for the in-memory
-   rehydration path), attach observations to the transaction when
-   `persistSchedulerState` is on.
-5. Implement `listSchedulerActionSnapshots` on the v2 provider
-   (`packages/runner/src/storage/v2.ts`, class `Provider` ~1074) reading
-   the table (via the read path, not a raw side-channel).
-6. Wire the runtime option: `persistSchedulerState` plumbed from Runtime
-   construction (see how `ExperimentalOptions` flow — commit `48172859a`
-   is a recent example of plumbing one option through shell / toolshed /
-   bps / CLI).
+1. **Naming reconciliation (docs only).** Replace every bare
+   `persistSchedulerState` in this file and in `README.md` with
+   `persistentSchedulerState`; note env
+   `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. No code rename — the shipped
+   name is authoritative.
+2. **Close the durability-composition gap (the only real build).** Add ONE
+   test proving the full stack in a single assertion: commit observations
+   to a FILE-backed store (`Deno.makeTempFile`), fully `close()` server +
+   client, reopen a brand-new runtime whose StorageManager points at the
+   same on-disk path, run the fixture, and assert via a lift-invocation
+   counter that unchanged actions do NOT re-run and that writing one input
+   re-runs exactly the dependent action. The tree lacks this single test
+   (the runtime skip test uses a live `emulate()` server;
+   `v2-scheduler-state-test.ts` reopens the file but stops at the memory
+   layer, not the runner's skip decision).
+3. **Record accepted deviations in the PR description (do not "fix"):**
+   (a) the commit payload carries observations via the bespoke
+   `schedulerObservation`/`schedulerObservationBatch` fields, NOT the
+   patch-operations registry this plan's checklist assumed — accepted
+   as-shipped; a registry migration is a separate follow-up, not this WO.
+   (b) storage is a normalized multi-table shape (history + LWW snapshot +
+   read/write/action-state indexes), not the single LWW-no-history table
+   originally sketched.
+4. **Name the known limitation for W1.1 to inherit:** `processGeneration`
+   is hardcoded `0` on read and write, so cross-generation invalidation is
+   not exercised; per-restart generation bumping is a hibernate/resume
+   identity concern deferred to W1.1.
 
-**Success criteria (each = a named test):**
+**Success criteria (most already pass — this WO proves the DELTA, not the
+substrate):**
 
-- [ ] `packages/memory`: applying a commit carrying observations writes
-      commit rows AND observation rows atomically; a commit that
-      **conflicts** writes NEITHER (assert row absence after rejected
-      commit).
-- [ ] `packages/memory`: two observations for the same `actionId` →
-      single row, latest payload (LWW).
-- [ ] `packages/runner`: with `persistSchedulerState: true`, run a fixture
-      pattern; dispose the runtime; construct a NEW runtime on the same
-      store with `rehydrateFromStorage`; assert (via an invocation counter
-      inside the fixture's lift) that unchanged actions do NOT re-run,
-      and that after writing one input, exactly the dependent action
-      re-runs.
-- [ ] Fail-open: delete all observation rows between the two runtimes →
-      second runtime re-runs everything and produces identical results
-      (byte-compare result docs), no errors.
-- [ ] Parity: with the option off (default), no observation rows are ever
-      written, and an existing scheduler test file of your choice passes
+- [ ] **Headline delta — single-test cold durability:** the new
+      file-backed kill→reopen→fresh-runtime test (step 2) shows the
+      lift-invocation counter unchanged for stale-free actions (skip) and
+      incremented by exactly one for the dependent action after one input
+      write. Link the red run — it is a genuinely new assertion (no
+      existing test closes the whole stack in one shot), not a re-run of
+      green code.
+- [ ] **Flag-on skip regression guard:** `reload-rehydration.test.ts`
+      ("reload: resumed pattern rehydrates persisted observations") stays
+      green — `reload.ok > 0`, `reload.missNoSnapshot === 0`. On #4288
+      this is the same test name; verify green post-refactor.
+- [ ] **Disk durability guard:** `v2-scheduler-state-test.ts`
+      (close → reopen on-disk `openEngine`) stays green — reader index +
+      `scheduler_action_state` survive reopen.
+- [ ] **Fail-open:** delete all observation rows between the two runtimes
+      → second runtime re-runs everything, byte-identical result docs, no
+      errors (extend the step-2 fixture).
+- [ ] **Parity (flag off, default):** with `persistentSchedulerState`
+      unset, no observation rows are ever written (server strips at
+      `server.ts:1620`); an existing scheduler test file passes
       unmodified.
-- [ ] No-op elision: run the same fixture twice without input changes →
-      zero new observation writes on the second settle (assert write
-      count via test hook).
+- [ ] **No-op elision guard:** run the fixture twice with no input change
+      → zero new observation writes on the second settle (`payloadChanged`
+      elision; assert via a write-count test hook).
+- [ ] **Naming:** no `persistSchedulerState` used as an option/flag name
+      remains under `docs/specs/server-side-execution/` — only the
+      historical rename note (§0.3, this WO's step 1) may mention the old
+      name.
 
 **Review checklist:**
 
-- Observation write is inside `Engine.applyCommit`'s transaction, not a
-  second transaction (grep the diff for a second `BEGIN`/`transaction`
-  call — reject if found).
-- The commit-payload extension went through the patch-operations single
-  registry, not an ad-hoc parallel field.
-- Rehydration degradation is fail-open (spec invariant: never incorrect
-  cleanliness). Look for any code path that trusts a snapshot without
-  checking `implementationFingerprint`/`runtimeFingerprint` match.
-- The invocation-counter fixture actually counts lift executions, not
+- This is an ADOPT/VERIFY WO: reject any diff that re-adds a
+  `scheduler_observation` table, a second `listSchedulerActionSnapshots`,
+  or a parallel commit-payload field. The seams exist — the diff should be
+  ~one test + docs, not new machinery.
+- The new durability test must actually close the file: assert against a
+  reopened on-disk DB (`Deno.makeTempFile` + `close()` + reopen), not a
+  still-live `emulate()` server — otherwise it does not test the gap.
+- Rehydration must stay fail-open: the fingerprint check
+  (`observationMatchesCurrentAction`, `scheduler.ts:716`; the `facade.ts`
+  equivalent on #4288) gates every clean-restore path — never trust a
+  snapshot without `implementationFingerprint`/`runtimeFingerprint` match.
+- The invocation-counter fixture counts lift executions, not
   subscriptions.
+- If reviewing on #4288: confirm the skip fires via `facade.ts`
+  `setStatus(action, "clean")` + `pending.delete`, and that `runner.ts`
+  `loadSchedulerRehydrationSnapshots` early-returns when the flag is off.
 
 ---
 
-### W0.2 — doc→readers index + wake query
+### W0.2 — doc→readers wake query (index already built)
 
 **Depends on:** W0.1. **Unblocks:** W1.3.
-**Deliverable:** one PR: an indexed reverse mapping (space, docId) →
-(pieceId, actionId, observedAtSeq) maintained from observation read sets,
-plus an engine-side query `staleReadersFor(space, changedIds, seq)`.
+**Deliverable:** one PR that EXTENDS the existing reverse index (it is
+already built and populated) with the one missing piece: a named
+engine-side batched query `staleReadersFor(space, changedIds, seq)`
+returning the distinct stale reader list for wake. The index tables,
+population, and inline per-write reader-dirtying already exist — do not
+rebuild them.
 
-**Read first:** W0.1's code; `docs/specs/persistent-scheduler-state.md`
-§9 (server-side read/write indexes); `packages/memory/v2/server.ts`
-`markSpaceDirty` (~1051, ~2320) — the post-commit point where changed ids
-are already in hand.
+**Already built (do not re-implement):** `scheduler_read_index` DDL
+`packages/memory/v2/engine.ts:268` (indexed lookup on the read target),
+populated in the SAME observation transaction from `observation.reads` +
+`shallowReads`; `scheduler_write_index` `:293`;
+`findSchedulerReadersForWrite` `:1849` and
+`markSchedulerReadersDirtyForWrites` `:1912`, consumed INLINE in
+`applyCommit` (`:3276` region) to mark same-space + owner-space readers
+direct-dirty; cross-space MIRROR rows exist as the v1 stand-in (README
+§6.8/G9 flag them as not-yet-deployment-global). Tests already cover it:
+`v2-scheduler-state-test.ts` "marks persisted readers dirty during
+semantic commits". What is GENUINELY MISSING is only the named batched
+wake query — the tree dirties readers inline during commit but exposes no
+distinct wake-list query (`staleReadersFor` does not exist).
+
+**Read first:** W0.1's "Already built" anchors;
+`docs/specs/persistent-scheduler-state.md` §9 (read/write indexes as
+shipped); `packages/memory/v2/engine.ts` `findSchedulerReadersForWrite`
+(~1849) and its `applyCommit` call site (~3276) — you add a *batched
+distinct wake query* beside this per-write finder, not a replacement.
 
 **Steps:**
 
-1. Add `scheduler_read_index` as deployment-level engine infrastructure
-   (not per-space data — README §6.8): keyed by TARGET
-   `(space, branch, doc_id)` → `(reader_space, piece_id, action_id,
-   observed_at_seq)`, indexed on the target key. Same-space rows
-   populate/replace in the same transaction as the observation write
-   (delete-then-insert per actionId; read sets come from
-   `observation.reads` + `shallowReads`). Rows for reads targeting
-   ANOTHER space: fold into the same transaction via the engine's
-   existing ATTACH mechanism if straightforward (it already attaches
-   cell-dbs during `applyCommit` — `packages/memory/v2/server.ts` ~1617),
-   otherwise write them async with fail-open semantics (a missed
-   cross-space wake = stale-until-demanded, never wrong data — state in
-   the PR which you shipped).
-2. Implement `Engine.staleReadersFor(space, changedIds, commitSeq)`:
-   one indexed SELECT returning distinct
-   `(reader_space, piece_id, action_id)` where
-   `doc_id IN changedIds AND observed_at_seq < commitSeq`.
-3. Expose it as an engine/server method (no wire protocol yet — Phase 1
-   consumes it in-process).
+1. Implement `Engine.staleReadersFor(space, changedIds, commitSeq)`: one
+   indexed SELECT over `scheduler_read_index` returning DISTINCT
+   `(reader_space, piece_id, action_id)` where the read target is in
+   `changedIds` AND `observed_at_seq < commitSeq`. Reuse the existing
+   index; add no new table. (This is the symbol W1.3 calls; only the
+   inline `findSchedulerReadersForWrite` exists today.)
+2. Cross-space: the mirror-row mechanism already lands cross-space reader
+   rows; `staleReadersFor` must read them so a changed doc in space B
+   returns the A-space reader. A missing mirror row is fail-open
+   (stale-until-demanded, never wrong) — state which case ships.
+3. Expose as an engine/server method (no wire protocol yet — Phase 1
+   consumes it in-process via the pool host).
 
 **Success criteria:**
 
@@ -631,7 +714,7 @@ README §6.1–§6.5.
    spaces with `executorConfig.enabled` (W0.4). Per space, the interested
    piece set = registry entries for that space (client-driven interest
    arrives in W1.3+/Phase 3).
-3. Space worker: construct runtime with `persistSchedulerState: true`,
+3. Space worker: construct runtime with `persistentSchedulerState: true`,
    `storageConnection: "in-process"` (worker-bridge from W0.6), the
    executor signer, and `rehydrateFromStorage` subscriptions.
    Registration order is load-bearing (README §6.5 spawn sequence): the

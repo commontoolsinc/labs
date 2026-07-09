@@ -1696,3 +1696,66 @@ export default pattern<Input>(({ departments }) => {
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: send-only computed keeps stream paths in write metadata but never brands them collectible",
+  async () => {
+    const source =
+      `import { computed, pattern, type Stream } from "commonfabric";
+
+interface Input {
+  items: string[];
+  notify: Stream<{ id: string }>;
+}
+
+export default pattern<Input>(({ items, notify }) => {
+  const banner = computed(() => {
+    if (items.get().length > 0) notify.send({ id: "first" });
+    return items.get().length;
+  });
+  return { banner };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    const liftCall = liftCallFor(root, "banner");
+
+    // The send path STAYS in the emitted write metadata: the downstream
+    // write-exhaustiveness consumer relies on a non-empty record to keep
+    // event-firing computeds out of the pure-derivation class (replaying a
+    // dropped commit would re-fire the event).
+    const optionsArg = liftCall.arguments.at(-1)!;
+    assert(
+      ts.isObjectLiteralExpression(optionsArg),
+      "expected a trailing materializer options object",
+    );
+    const options = literalToValue(optionsArg) as Record<string, unknown>;
+    assertEquals(options.materializerWriteInputPaths, [["notify"]]);
+
+    // ...but the capture keeps its stream brand, so the runner's envelope
+    // collector (cell/writeonly only) never materializes an envelope at the
+    // stream address: a stream send writes no address — the dispatched
+    // handler's writes belong to the handler's own action.
+    const argSchema = literalToValue(
+      liftCall.arguments[1]!,
+    ) as {
+      properties?: Record<string, { asCell?: unknown[] }>;
+    };
+    const notifyBrand = argSchema.properties?.notify?.asCell ?? [];
+    assert(
+      notifyBrand.includes("stream"),
+      `expected stream brand on the sent capture, got ${
+        JSON.stringify(notifyBrand)
+      }`,
+    );
+    assert(
+      !notifyBrand.includes("cell") && !notifyBrand.includes("writeonly"),
+      `stream send must not brand collectible, got ${
+        JSON.stringify(notifyBrand)
+      }`,
+    );
+  },
+);

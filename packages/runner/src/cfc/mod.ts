@@ -128,13 +128,26 @@ export {
   createRenderConfidentialityResolver,
   RENDER_DISPLAY_SINK_CLASS,
   RENDER_SINK_NAME,
+  spaceAtomIdsInConfidentiality,
   STANDARD_RENDER_EXCHANGE_RULES,
 } from "./render-ceiling.ts";
+export type { SpaceMembershipProvider, SpaceRole } from "./space-membership.ts";
 export {
+  createRuntimeSpaceMembershipProvider,
+  spaceReaderRole,
+} from "./space-membership.ts";
+export {
+  CFC_PREFIX_PROVENANCE_MAX_WRITES,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
   prepareBoundaryCommit,
+} from "./prepare.ts";
+export type {
+  CfcPrefixBoundSource,
+  CfcPrefixProvenanceSummary,
+  CfcPrefixProvenanceWrite,
+  CfcPrepareInstrumentation,
 } from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,

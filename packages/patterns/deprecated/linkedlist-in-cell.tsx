@@ -1,6 +1,6 @@
 import {
+  computed,
   Default,
-  derive,
   handler,
   NAME,
   pattern,
@@ -58,10 +58,7 @@ export default pattern<InputSchema>(({ title }) => {
 
   // Create a derived value for the linked list string representation
   // FIXME(@ellyxir): use inputschema instead of just creating it here
-  const linkedListString = derive(
-    items_list,
-    (list) => listToString(list.get(), "\n"),
-  );
+  const linkedListString = computed(() => listToString(items_list.get(), "\n"));
 
   return {
     [NAME]: title,

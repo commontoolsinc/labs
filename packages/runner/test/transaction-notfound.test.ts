@@ -68,6 +68,16 @@ class MockStorageManager implements IStorageManager {
 
   trackUntilSettled() {}
 
+  trackPendingCommit() {}
+
+  hasPendingCommits() {
+    return false;
+  }
+
+  pendingCommitsSettled() {
+    return Promise.resolve();
+  }
+
   syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
     return Promise.resolve(cell);
   }

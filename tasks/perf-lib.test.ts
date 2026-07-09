@@ -10,6 +10,7 @@ import {
   aggregateCacheStates,
   applyBaselineOverrides,
   type Artifact,
+  benchmarksRunsPath,
   buildCoverageDebtSuggestionComment,
   buildCoverageResolvedComment,
   compileCacheFamilyForMetric,
@@ -409,6 +410,52 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
   );
   assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
   assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
+});
+
+Deno.test("benchmarksRunsPath matches successful main runs of any trigger", () => {
+  const path = benchmarksRunsPath();
+  assertStringIncludes(path, "/actions/workflows/benchmarks.yml/runs");
+  assertStringIncludes(path, "branch=main");
+  assertStringIncludes(path, "status=success");
+  // The Benchmarks workflow runs on a schedule and via manual dispatch, so
+  // the query must not restrict runs to a trigger event.
+  assertFalse(path.includes("event="));
+});
+
+Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Test (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:03:20Z",
+      [
+        makeStep(
+          "🧪 Run parallel workspace tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:03:10Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Test (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:02:30Z",
+      [
+        makeStep(
+          "🧪 Run parallel workspace tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:02:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(metrics.get("job: Test (1/4)")?.durationSeconds, 200);
+  assertEquals(metrics.get("job: Test (2/4)")?.durationSeconds, 150);
+  assertEquals(metrics.get("job: Test")?.durationSeconds, 200);
+  assertEquals(metrics.get("step: workspace tests")?.durationSeconds, 180);
 });
 
 Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {

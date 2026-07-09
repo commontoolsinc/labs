@@ -90,7 +90,7 @@ const HOUR_HEIGHT = 60;
 const DAY_START = 6;
 const DAY_END = 22;
 const RESIZE_HANDLE_HEIGHT = 14;
-const SLOT_HEIGHT = HOUR_HEIGHT / 2;
+const SLOT_HEIGHT = 30;
 
 // ============ STYLES ============
 
@@ -214,8 +214,7 @@ const buildHours = (): Array<
   return hours;
 };
 
-const HOURS = buildHours();
-const GRID_HEIGHT = (DAY_END - DAY_START) * HOUR_HEIGHT;
+const GRID_HEIGHT = 960;
 const COLUMN_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
 
 // ============ MODULE-SCOPE HANDLERS (for LLM-callable streams) ============
@@ -406,6 +405,7 @@ const WeeklyCalendar = pattern<Input, Output>(
         .map((e) => `${e.date || ""} ${e.title || ""}`.trim())
         .join(", ");
     });
+    const hours = buildHours();
     const weekDates = computed(() => getWeekDates(startDate.get(), 7));
     const todayDate = getTodayDate();
 
@@ -861,7 +861,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                       paddingTop: "50px",
                     }}
                   >
-                    {HOURS.map((hour) => (
+                    {hours.map((hour) => (
                       <div
                         style={{
                           height: `${HOUR_HEIGHT}px`,
@@ -972,7 +972,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     });
 
                     // Click handlers for creating events at specific hours (using action)
-                    const hourClickActions = HOURS.map((hour) =>
+                    const hourClickActions = hours.map((hour) =>
                       action(() => {
                         if (safeDateNow() - lastDropTime.get() < 300) return;
                         newEventTitle.set("");
@@ -1032,7 +1032,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                           oncf-drop={handleDayDrop}
                           style={{ position: "relative", flex: "1" }}
                         >
-                          {HOURS.map((hour, hourIdx) => (
+                          {hours.map((hour, hourIdx) => (
                             <div
                               style={{
                                 position: "absolute",

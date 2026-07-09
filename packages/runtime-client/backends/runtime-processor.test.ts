@@ -6,17 +6,24 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  browserWorkerParamsFromInitializationData,
+  checkUpdateInBackground,
+  maybeCheckHomeUpdate,
+  postVersionSkew,
   renderConfidentialityResolverFor,
-  runtimeOptionsFromInitializationData,
+  renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
+  versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
+  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -172,6 +179,96 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
           ceiling,
         ),
       ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
+    // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
+    // reads each space's ACL doc. A space whose declared ACL grants the acting
+    // user READ resolves; one that does not (no ACL / residency only) blocks.
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
+    const deniedSpace = "did:key:z6MkDeniedSpaceForRenderTest";
+    try {
+      // Seed the granted space's ACL doc (entity id == space DID) with a READ
+      // grant for the acting user. The denied space gets no ACL doc at all —
+      // its bytes may still be resident, but residency is not read authority.
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const resolver = renderConfidentialityResolverFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      const ceiling = [cfcAtom.user(cfcSigner.did())];
+      // The ACL-granted space resolves to User(actingUser).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(grantedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([]);
+      // The space with no granting ACL stays blocked (fail-closed).
+      expect(
+        atomsOutsideCeiling(
+          resolver!({ confidentiality: [cfcAtom.space(deniedSpace)] }),
+          ceiling,
+        ),
+      ).toEqual([cfcAtom.space(deniedSpace)]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+});
+
+describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  it("returns undefined when no ceiling is configured", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      expect(renderMembershipProviderFor(runtime, cfcSigner, undefined))
+        .toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("builds a runtime-backed provider that reads a space's ACL doc", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
+    try {
+      const aclCell = runtime.getCellFromLink({
+        id: grantedSpace,
+        path: [],
+        space: grantedSpace as MemorySpace,
+      });
+      const tx = runtime.edit();
+      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const provider = renderMembershipProviderFor(runtime, cfcSigner, {
+        atoms: [cfcAtom.user(cfcSigner.did())],
+      });
+      expect(provider).toBeDefined();
+      // The acting user's own space is an implicit OWNER (no ACL read).
+      expect(provider!.readerRole(cfcSigner.did())).toBe("owner");
+      // A space whose ACL grants READ resolves to a reader role.
+      expect(provider!.readerRole(grantedSpace)).toBe("reader");
+      // A space with no ACL doc fails closed.
+      expect(provider!.readerRole("did:key:z6MkNoAclProviderTest")).toBeNull();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -961,6 +1058,141 @@ describe("RuntimeProcessor home pattern IPC", () => {
     expect(startedCell).toBe(defaultPatternCell);
     expect(idleCalled).toBe(true);
   });
+
+  it("maybeCheckHomeUpdate no-ops unless both flags are on", () => {
+    let built = false;
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: { systemPatternAutoUpdate: true }, // home flag off
+      getHomeSpaceCell: () => {
+        built = true;
+        return { sync: () => Promise.resolve() };
+      },
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    // No controller built (the home flag gates it before any construction).
+    expect(built).toBe(false);
+  });
+
+  it("maybeCheckHomeUpdate builds a home controller and kicks a check when enabled", async () => {
+    const runtime = {
+      userIdentityDID: "did:key:test-home",
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+      // PieceManager reads userIdentityDID + getHomeSpaceCell().sync();
+      // the update check itself is best-effort and fails closed on this mock.
+      getHomeSpaceCell: () => ({
+        sync: () => Promise.resolve(),
+        key: () => ({ get: () => undefined }),
+      }),
+    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+
+    // Constructs the home controller and kicks the background check without
+    // throwing; let the fire-and-forget check settle.
+    maybeCheckHomeUpdate(cfcSigner, runtime);
+    await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
+describe("system-pattern update wiring", () => {
+  it("versionSkewNotification builds the worker→shell payload", () => {
+    expect(
+      versionSkewNotification({
+        space: "did:key:z6Mk",
+        clientVersion: "c",
+        toolshedVersion: "t",
+      }),
+    ).toEqual({
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: "c",
+      toolshedVersion: "t",
+    });
+  });
+
+  it("postVersionSkew posts the notification to the shell", () => {
+    const posted: unknown[] = [];
+    const orig = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
+      posted.push(m);
+    try {
+      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
+    } finally {
+      (self as { postMessage: unknown }).postMessage = orig;
+    }
+    expect(posted).toEqual([{
+      type: NotificationType.VersionSkew,
+      space: "did:key:z6Mk",
+      clientVersion: undefined,
+      toolshedVersion: "t",
+    }]);
+  });
+
+  it("checkUpdateInBackground logs a non-current outcome and swallows a rejection", async () => {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => logs.push(a.join(" "));
+    console.warn = (...a: unknown[]) => warns.push(a.join(" "));
+    try {
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("updated") },
+        "did:key:a",
+      );
+      checkUpdateInBackground(
+        { checkAndUpdateDefaultPattern: () => Promise.resolve("current") },
+        "did:key:b",
+      );
+      checkUpdateInBackground(
+        {
+          checkAndUpdateDefaultPattern: () => Promise.reject(new Error("boom")),
+        },
+        "did:key:c",
+      );
+      // Let the fire-and-forget promises settle.
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+    expect(logs.some((l) => l.includes("did:key:a") && l.includes("updated")))
+      .toBe(true);
+    expect(logs.some((l) => l.includes("did:key:b"))).toBe(false);
+    expect(warns.some((w) => w.includes("did:key:c"))).toBe(true);
+  });
+
+  it("handleGetSpaceRootPattern returns the page ref and kicks the background check", async () => {
+    const ref: CellRef = {
+      id: "of:root-result" as CellRef["id"],
+      space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
+    let checked = false;
+    const cc = {
+      ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
+      checkAndUpdateDefaultPattern: () => {
+        checked = true;
+        return Promise.resolve("current");
+      },
+    };
+    const processor = {
+      getSpaceCtx: () => ({ cc }),
+    } as unknown as RuntimeProcessor;
+
+    const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
+      .call(processor, {
+        type: RequestType.GetSpaceRootPattern,
+        space: "did:key:test-space",
+      });
+    expect(result.page.cell).toEqual(ref);
+    // The background check was kicked (fire-and-forget).
+    expect(checked).toBe(true);
+  });
 });
 
 describe("RuntimeProcessor CFC label IPC", () => {
@@ -1670,29 +1902,33 @@ describe("runtime-client CellRef conversion", () => {
   });
 });
 
-describe("runtimeOptionsFromInitializationData", () => {
-  it("threads CFC initialization settings into runtime options", () => {
+describe("browserWorkerParamsFromInitializationData", () => {
+  it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
-      typeof runtimeOptionsFromInitializationData
+      typeof browserWorkerParamsFromInitializationData
     >[2];
     const storageManager = {
       as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<typeof runtimeOptionsFromInitializationData>[1];
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
 
-    const options = runtimeOptionsFromInitializationData(
-      {
-        apiUrl: "http://worker.test/",
-        identity: {} as never,
-        spaceDid: "did:key:space",
-        cfcEnforcementMode: "enforce-explicit",
-        cfcFlowLabels: "observe",
-        trustSnapshot: {
-          id: "principal:did:key:worker",
-          actingPrincipal: "did:key:worker",
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          cfcEnforcementMode: "enforce-explicit",
+          cfcFlowLabels: "observe",
+          trustSnapshot: {
+            id: "principal:did:key:worker",
+            actingPrincipal: "did:key:worker",
+          },
         },
-      },
-      storageManager,
-      telemetry,
+        storageManager,
+        telemetry,
+      ),
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
@@ -1700,6 +1936,89 @@ describe("runtimeOptionsFromInitializationData", () => {
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",
+    });
+    // The preset pins patterns to the host's own API base.
+    expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
+  });
+
+  it("threads clientVersion through to the runtime options", () => {
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+
+    const withVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          clientVersion: "build-sha-xyz",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withVersion.clientVersion).toBe("build-sha-xyz");
+
+    // Absent → omitted (rides the constructor default of undefined).
+    const withoutVersion = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        storageManager,
+        telemetry,
+      ),
+    );
+    expect(withoutVersion.clientVersion).toBe(undefined);
+  });
+
+  it("falls back to the shared CFC pin when the host sends no dial", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcFlowLabels).toBeUndefined();
+  });
+
+  it("threads the host-decided space-host map through to the runtime options", () => {
+    const options = runtimePresets.browserWorker(
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          spaceHostMap: { "did:key:federated": "http://other-host.test/" },
+        },
+        { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[1],
+        { marker() {} } as unknown as Parameters<
+          typeof browserWorkerParamsFromInitializationData
+        >[2],
+      ),
+    );
+    expect(options.spaceHostMap).toEqual({
+      "did:key:federated": "http://other-host.test/",
     });
   });
 });
@@ -1810,6 +2129,28 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  it("handleIdle awaits commit-durability quiescence, not plain idle", async () => {
+    // The client reads "idle" as a safe point to navigate or reload, so the
+    // handler must await idleWithPendingCommits() — which includes in-flight
+    // commit durability — rather than runtime.idle() (reactive quiescence
+    // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
+    // regression to runtime.idle() throws here.
+    const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
+    let calls = 0;
+    const fake = {
+      runtime: {
+        scheduler: {
+          idleWithPendingCommits: () => {
+            calls++;
+            return Promise.resolve();
+          },
+        },
+      },
+    };
+    await handleIdle.call(fake);
+    expect(calls).toBe(1);
   });
 
   it("watchSiteTable registers table entries, isolating bad ones", async () => {

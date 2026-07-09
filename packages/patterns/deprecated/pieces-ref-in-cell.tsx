@@ -7,7 +7,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  toSchema,
   UI,
   Writable,
 } from "commonfabric";
@@ -24,7 +23,6 @@ interface AddPieceState {
   cellRef: Writable<Piece[]>;
   isInitialized: Writable<boolean>;
 }
-const AddPieceSchema = toSchema<AddPieceState>();
 
 // Simple piece that will be instantiated multiple times
 const SimplePiece = pattern<{ id: string }>(({ id }) => ({
@@ -36,9 +34,7 @@ const SimplePiece = pattern<{ id: string }>(({ id }) => ({
 // The isInitialized flag prevents duplicate additions:
 // - Without it: lift runs → adds to array → array changes → lift runs again → duplicate
 // - With it: lift runs once → sets isInitialized → subsequent runs skip
-const addPieceAndNavigate = lift(
-  AddPieceSchema,
-  undefined,
+const addPieceAndNavigate = lift<AddPieceState, any>(
   ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {

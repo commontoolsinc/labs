@@ -702,7 +702,7 @@ const EXCLUDED_METRIC_PATTERNS = [
 ];
 
 const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
-  "coverage-profile-workspace",
+  ...[1, 2, 3, 4, 5, 6].map((shard) => `coverage-profile-workspace-${shard}`),
   ...[1, 2, 3, 4, 5].map((shard) => `coverage-profile-runner-${shard}`),
   ...[1, 2, 3, 4].map((shard) =>
     `coverage-profile-generated-patterns-${shard}`

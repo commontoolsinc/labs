@@ -1805,7 +1805,17 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  async commit(): Promise<Result<Unit, CommitError>> {
+  commit(): Promise<Result<Unit, CommitError>> {
+    const promise = this.#commitImpl();
+    // Synchronous registration with the manager's durability barrier: by the
+    // time commit() returns, the in-flight commit is visible to
+    // hasPendingCommits(), so a quiescence check started in the same turn
+    // cannot miss it.
+    this.storage.trackPendingCommit(promise);
+    return promise;
+  }
+
+  async #commitImpl(): Promise<Result<Unit, CommitError>> {
     this.assertWritable("commit()");
     const ready = this.editable();
     if (ready.error) {

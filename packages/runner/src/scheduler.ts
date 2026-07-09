@@ -28,10 +28,7 @@ import type {
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
-import {
-  DEFAULT_RETRIES_FOR_EVENTS,
-  MAX_SETTLE_STATS_HISTORY,
-} from "./scheduler/constants.ts";
+import { MAX_SETTLE_STATS_HISTORY } from "./scheduler/constants.ts";
 import {
   getPieceMetadataFromFrame,
   getSchedulerActionId,
@@ -961,16 +958,59 @@ export class Scheduler {
   }
 
   idle(): Promise<void> {
+    return this.#waitForQuiescence(false);
+  }
+
+  // Client-facing quiescence: reactive quiescence AND durability of in-flight
+  // commits. Commits are issued fire-and-forget (event handlers, direct cell
+  // writes over IPC, reactive recomputation write-backs), so plain idle()
+  // reports quiescence while a commit is still travelling to the server; a
+  // client that reads idle as a safe point to navigate or reload would then
+  // drop that write when the page and its worker are torn down. The pending
+  // set is sourced from the storage manager — the single chokepoint every
+  // commit flows through — so no write path can be forgotten. A landed commit
+  // also dirties readers of the committed write (onEventCommitWrites), which
+  // can re-trigger scheduler work that produces further commits, so durability
+  // and reactive quiescence are one joint fixpoint. This reuses the same
+  // recursive convergence idle() uses — a pending commit is just one more
+  // class of work to wait for — so there is no separate retry loop and no
+  // round cap. It resolves exactly when the scheduler is quiescent and no
+  // commit is in flight, and (like idle()) never resolves for a system that
+  // genuinely never settles.
+  idleWithPendingCommits(): Promise<void> {
+    return this.#waitForQuiescence(true);
+  }
+
+  #waitForQuiescence(awaitPendingCommits: boolean): Promise<void> {
     return new Promise<void>((resolve) => {
+      // Re-evaluate every condition from scratch once the thing we are waiting
+      // on settles.
+      const recheck = () =>
+        this.#waitForQuiescence(awaitPendingCommits).then(resolve);
+      // A parked waiter (idlePromises) resolves when the scheduler drains, but a
+      // commit can still be in flight then, so the commit-aware variant re-checks
+      // instead of resolving. That re-check is deferred to a microtask: it must
+      // not re-enter #waitForQuiescence synchronously while resolveIdlePromises
+      // is iterating idlePromises (draining runs before the scheduler marks
+      // itself not-scheduled, so a synchronous re-check would push back into the
+      // array mid-drain). The plain variant keeps the direct resolver.
+      const park = awaitPendingCommits
+        ? () => queueMicrotask(recheck)
+        : resolve;
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
-        this.runningPromise.then(() => this.idle().then(resolve));
+        this.runningPromise.then(recheck);
       } else if (this.backgroundTasks.size > 0) {
         // Async scheduler work, such as event-triggered auto-start, is still in
         // flight. Wait for it to settle and then re-check the scheduler state.
-        Promise.allSettled([...this.backgroundTasks]).then(() =>
-          this.idle().then(resolve)
-        );
+        Promise.allSettled([...this.backgroundTasks]).then(recheck);
+      } else if (
+        awaitPendingCommits && this.runtime.storageManager.hasPendingCommits()
+      ) {
+        // In-flight commits. Wait for them to settle (server confirmation or
+        // terminal failure) and then re-check: a landed commit can dirty
+        // readers and re-trigger scheduler work.
+        this.runtime.storageManager.pendingCommitsSettled().then(recheck);
       } else if (
         hasEventQueueWakeTimer(this.eventQueueWakeState) &&
         ((this.eventQueue.length > 0 &&
@@ -979,15 +1019,15 @@ export class Scheduler {
       ) {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       } else if (this.hasPendingLineageHeadEvent()) {
         // A cross-space lineage head has no timer; its origin commit callback
         // is the wake source, so idle must stay open until that callback runs.
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
           this.queueExecution();
-          this.idlePromises.push(resolve);
+          this.idlePromises.push(park);
           return;
         }
         // Nothing is scheduled to run - we're idle.
@@ -996,7 +1036,7 @@ export class Scheduler {
         resolve();
       } else {
         // Execution is scheduled - wait for it to complete
-        this.idlePromises.push(resolve);
+        this.idlePromises.push(park);
       }
     });
   }
@@ -1019,9 +1059,13 @@ export class Scheduler {
   queueEvent(
     eventLink: NormalizedFullLink,
     event: any,
-    retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Whether a transient commit failure converges via the backoff window (and
+    // the inSpace-name resolution path re-runs the handler). `false` opts out:
+    // the event drops on the first failure without retrying. Defaults to `true`
+    // so every real user event through `cell.send` gets backpressure.
+    retries: boolean = true,
     // Internal-only commit callback. This runs after the final commit result,
-    // including exhausted failure, so it must not perform external side
+    // including a dropped failure, so it must not perform external side
     // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,

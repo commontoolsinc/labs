@@ -12,6 +12,13 @@ export default pattern(() => {
     adminName,
   });
 
+  // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
+  // button. With no profile resolved and no typed name, that must be a safe
+  // no-op — never enrolling a blank participant.
+  const action_join_empty = action(() => {
+    participantIdentity.joinAs.send({});
+  });
+
   const action_join_as_alex = action(() => {
     participantIdentity.joinAs.send({ name: "Alex" });
   });
@@ -39,6 +46,12 @@ export default pattern(() => {
     participantIdentity.me === "" &&
     participantIdentity.isJoined === false &&
     participantIdentity.isAdmin === false
+  );
+
+  const assert_empty_send_noop = computed(() =>
+    users.get().length === 0 &&
+    participantIdentity.me === "" &&
+    participantIdentity.isJoined === false
   );
 
   const assert_joined_as_alex = computed(() => {
@@ -76,6 +89,8 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initial },
+      { action: action_join_empty },
+      { assertion: assert_empty_send_noop },
       { action: action_join_as_alex },
       { assertion: assert_joined_as_alex },
       { action: action_try_rejoin_as_alex_two },

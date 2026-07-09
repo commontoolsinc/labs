@@ -14,6 +14,7 @@ import {
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
 import {
+  type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
   convertCellsToLinks,
@@ -24,19 +25,23 @@ import {
   isCellResult,
   markUiInputBlindWriteTx,
   Runtime,
+  runtimePresets,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
   unmarkUiInputBlindWriteTx,
+  type VersionSkewInfo,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
+  createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
   type RenderConfidentialityResolver,
+  type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -115,6 +120,7 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type VersionSkewNotification,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -158,24 +164,102 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
-export function runtimeOptionsFromInitializationData(
+/** The worker→shell versionSkew IPC payload for a build-mismatch skip. */
+export function versionSkewNotification(
+  info: VersionSkewInfo,
+): VersionSkewNotification {
+  return {
+    type: NotificationType.VersionSkew,
+    space: info.space,
+    clientVersion: info.clientVersion,
+    toolshedVersion: info.toolshedVersion,
+  };
+}
+
+/** Post the versionSkew notification to the shell. Exported for testing. */
+export function postVersionSkew(info: VersionSkewInfo): void {
+  self.postMessage(versionSkewNotification(info));
+}
+
+/**
+ * Best-effort, non-blocking system-pattern update check for a space open. The
+ * check itself never throws (it is internally best-effort); this only logs a
+ * non-current outcome and defends against an unexpected rejection. Exported for
+ * testing.
+ */
+export function checkUpdateInBackground(
+  cc: Pick<PiecesController, "checkAndUpdateDefaultPattern">,
+  space: string,
+): void {
+  cc.checkAndUpdateDefaultPattern()
+    .then((outcome) => {
+      if (outcome === "updated" || outcome === "skipped-skew") {
+        console.log(`[space-root] update check for ${space}: ${outcome}`);
+      }
+    })
+    .catch((error) => {
+      console.warn(`[space-root] update check for ${space} threw`, error);
+    });
+}
+
+/**
+ * Best-effort update check for the HOME root, gated behind its own flag
+ * (pending the stable-addressing audit). No-ops unless both auto-update flags
+ * are on — so the hot home fast path pays nothing when disabled — otherwise
+ * builds a home PiecesController and kicks a non-blocking check. Exported for
+ * testing.
+ */
+export function maybeCheckHomeUpdate(
+  identity: Identity,
+  runtime: Runtime,
+): void {
+  if (
+    !runtime.experimental?.systemPatternAutoUpdate ||
+    !runtime.experimental?.systemPatternAutoUpdateHome
+  ) {
+    return;
+  }
+  const homeSession: Session = {
+    as: identity,
+    space: runtime.userIdentityDID,
+  };
+  const homeCC = new PiecesController(new PieceManager(homeSession, runtime));
+  void checkUpdateInBackground(homeCC, runtime.userIdentityDID);
+}
+
+/**
+ * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
+ * params (CT-1814): the shared first-party posture (CFC pins,
+ * patternEnvironment from apiUrl) lives in the preset; this function only
+ * carries what the host actually decided. Exported for testing.
+ */
+export function browserWorkerParamsFromInitializationData(
   data: InitializationData,
   storageManager: RuntimeOptions["storageManager"],
   telemetry: RuntimeTelemetry,
-): RuntimeOptions {
-  const apiUrlObj = new URL(data.apiUrl);
+): BrowserWorkerPresetParams {
   return {
-    apiUrl: apiUrlObj,
-    spaceHostMap: data.spaceHostMap,
+    apiUrl: new URL(data.apiUrl),
+    ...(data.clientVersion !== undefined
+      ? { clientVersion: data.clientVersion }
+      : {}),
     storageManager,
-    patternEnvironment: { apiUrl: apiUrlObj },
+    // The host decides the flags (shell build-time defines); absent ⇒ runtime
+    // defaults.
+    experimental: data.experimental ?? {},
     telemetry,
-    experimental: data.experimental,
-    cfcEnforcementMode: data.cfcEnforcementMode,
-    cfcFlowLabels: data.cfcFlowLabels,
-    trustSnapshotProvider: data.trustSnapshot
-      ? () => data.trustSnapshot
-      : undefined,
+    ...(data.spaceHostMap !== undefined
+      ? { spaceHostMap: data.spaceHostMap }
+      : {}),
+    ...(data.cfcEnforcementMode !== undefined
+      ? { cfcEnforcementMode: data.cfcEnforcementMode }
+      : {}),
+    ...(data.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: data.cfcFlowLabels }
+      : {}),
+    ...(data.trustSnapshot
+      ? { trustSnapshotProvider: () => data.trustSnapshot }
+      : {}),
   };
 }
 
@@ -193,15 +277,22 @@ export function runtimeOptionsFromInitializationData(
  *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
  *    is the space `session.open` gated on, so an own-workspace `Space(...)`
  *    label resolves rather than over-blocking.
- * Broader cross-space membership awaits the §4.9.3 membership lookup; until
- * then other-space `Space(...)` labels fail closed. Returns undefined when no
- * ceiling is configured (no render gating — today's behavior).
+ *
+ * Broader cross-space membership comes from the §4.9.3 membership lookup: a
+ * runtime-backed `SpaceMembershipProvider` reads each other space's declared
+ * ACL doc and mints a reader fact only when it grants the acting user READ+
+ * (never from residency). Its cross-space guarantee is exactly as strong as
+ * the deployment `MEMORY_ACL_MODE`. Service DIDs are NOT threaded to the
+ * worker today (design §9), so `serviceDids` is `[]` and service principals —
+ * which rarely render — fail closed. Returns undefined when no ceiling is
+ * configured (no render gating — today's behavior).
  */
 export function renderConfidentialityResolverFor(
   runtime: Runtime,
   identity: Identity,
   ceiling: RenderConfidentialityCeiling | undefined,
   sessionSpace?: string,
+  membershipProvider?: SpaceMembershipProvider,
 ): RenderConfidentialityResolver | undefined {
   if (ceiling === undefined) {
     return undefined;
@@ -216,7 +307,34 @@ export function renderConfidentialityResolverFor(
     actingPrincipal,
     trustConfig: runtime.cfcTrustConfig,
     memberSpaces,
+    // Share the reconciler's provider instance when supplied (so Stage-2 ACL
+    // subscriptions and the resolver's reads observe the same cells); else
+    // build a private one — both read the same underlying runtime documents.
+    membershipProvider: membershipProvider ??
+      createRuntimeSpaceMembershipProvider(runtime, actingPrincipal),
   });
+}
+
+/**
+ * The §4.9.3 membership provider for a worker's renders — the reactive half of
+ * the render lookup. Built once per worker (same lifetime as the resolver) and
+ * threaded to BOTH `renderConfidentialityResolverFor` (as the resolver's
+ * lookup) and the reconciler (for Stage-2 ACL-change subscriptions), so the two
+ * share one instance. Undefined when no ceiling is configured — no render
+ * gating, so no membership lookup. Service DIDs are not threaded to the worker
+ * (design §9), so service principals fail closed.
+ */
+export function renderMembershipProviderFor(
+  runtime: Runtime,
+  identity: Identity,
+  ceiling: RenderConfidentialityCeiling | undefined,
+): SpaceMembershipProvider | undefined {
+  if (ceiling === undefined) {
+    return undefined;
+  }
+  const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
+    identity.did();
+  return createRuntimeSpaceMembershipProvider(runtime, actingPrincipal);
 }
 
 /**
@@ -377,6 +495,11 @@ export class RuntimeProcessor {
   // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
   // `HasRole` principal forms resolve before the reconciler's ceiling fit.
   private renderConfidentialityResolver?: RenderConfidentialityResolver;
+  // §4.9.3 Stage 2: the membership provider shared with the resolver above and
+  // handed to every mount's reconciler, so a `Space(X)`-labeled cell blocked
+  // before X's ACL synced re-renders once the ACL grants READ. Undefined when
+  // no ceiling is in force.
+  private renderMembershipProvider?: SpaceMembershipProvider;
 
   private constructor(
     runtime: Runtime,
@@ -421,10 +544,24 @@ export class RuntimeProcessor {
       spaceHostMap: data.spaceHostMap,
     });
 
+    // Mirror the durability barrier to the page: `pending` is true while any
+    // issued commit is still unconfirmed. The shell keeps the latest value and
+    // consults it from its beforeunload handler, so a reload with unconfirmed
+    // writes prompts the user instead of silently dropping them.
+    storageManager.subscribePendingCommits((pending) => {
+      self.postMessage({
+        type: NotificationType.PendingWritesChanged,
+        pending,
+      });
+    });
+
     let pieceManager: PieceManager | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
-    const runtime = new Runtime({
-      ...runtimeOptionsFromInitializationData(
+    // Everything below goes through the browserWorker preset (CT-1814):
+    // host-decided data via the params mapper, plus this worker's declared
+    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    const runtime = new Runtime(runtimePresets.browserWorker({
+      ...browserWorkerParamsFromInitializationData(
         data,
         storageManager,
         telemetry,
@@ -487,7 +624,8 @@ export class RuntimeProcessor {
           });
         },
       ],
-    });
+      onVersionSkew: postVersionSkew,
+    }));
 
     if (!await runtime.healthCheck()) {
       throw new Error(`Could not connect to "${data.apiUrl}"`);
@@ -513,11 +651,17 @@ export class RuntimeProcessor {
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
     processor.renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    processor.renderMembershipProvider = renderMembershipProviderFor(
+      runtime,
+      identity,
+      processor.renderConfidentialityCeiling,
+    );
     processor.renderConfidentialityResolver = renderConfidentialityResolverFor(
       runtime,
       identity,
       processor.renderConfidentialityCeiling,
       space,
+      processor.renderMembershipProvider,
     );
     // Site-table v0: the home space carries did → host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
@@ -950,6 +1094,9 @@ export class RuntimeProcessor {
     if (getMetaLink(defaultPatternCell, "pattern")) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
+      // The home root is held behind its own flag (pending the stable-addressing
+      // audit); the helper no-ops on this hot fast path unless enabled.
+      maybeCheckHomeUpdate(this.identity, this.runtime);
       return {
         cell: createCellRef(defaultPatternCell),
       };
@@ -972,7 +1119,14 @@ export class RuntimeProcessor {
   }
 
   async handleIdle(): Promise<void> {
-    await this.runtime.idle();
+    // The client reads "idle" as a safe point to navigate or reload, so it
+    // must include durability of just-issued writes: idleWithPendingCommits()
+    // waits for reactive quiescence and for every in-flight commit together
+    // (see Scheduler.idleWithPendingCommits; the pending set is sourced from
+    // the storage manager, covering event handlers, direct cell IPC writes,
+    // and reactive write-backs alike). Internal callers that only need
+    // reactive quiescence use runtime.idle() and are unaffected.
+    await this.runtime.scheduler.idleWithPendingCommits();
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:
@@ -1011,6 +1165,10 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
+    // Best-effort, non-blocking: roll the root forward if its toolshed serves a
+    // newer identity. The watcher re-instantiates in place; a failed check
+    // never breaks space open, and we never block the response on it.
+    void checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };
@@ -1551,6 +1709,7 @@ export class RuntimeProcessor {
       renderDeclassificationPolicy: this.renderDeclassificationPolicy,
       renderConfidentialityCeiling: this.renderConfidentialityCeiling,
       resolveRenderConfidentiality: this.renderConfidentialityResolver,
+      membershipProvider: this.renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
         const batchId = this.vdomBatchIdCounter++;
         self.postMessage({

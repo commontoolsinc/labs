@@ -41,17 +41,25 @@ jobs:
       - name: 🧹 Lint codebase
         run: deno lint
 
+      # This is the only type check for the paths listed in tasks/check.sh:
+      # the test jobs in this workflow and the package test tasks run with
+      # --no-check and rely on it. Removing a path from check.sh removes its
+      # type checking entirely.
       - name: 🔎 Type check codebase
         run: deno task check
 
+      # --no-check: the type-check step above covers tasks/ (tasks/check.sh).
       - name: 🧪 Run tasks/ unit tests
-        run: deno test --allow-read --allow-write --allow-env --allow-run tasks/
+        run: deno test --no-check --allow-read --allow-write --allow-env --allow-run tasks/
 
       - name: 🧭 Check cf-review skill facts
         run: deno task check-skill-facts
 
       - name: 📄 Type-check docs code blocks
         run: deno task check-docs
+
+      - name: 🚧 Guard against new polling waitFor in integration tests
+        run: deno task check-no-waitfor
 
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
@@ -82,10 +90,14 @@ jobs:
         run: deno task cfcheck
 
   test:
-    name: "Test"
-    runs-on:
-      group: labs
+    name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+        total: [6]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -113,19 +125,25 @@ jobs:
       - name: 🧪 Run parallel workspace tests
         run: deno task test
         env:
-          DENO_COVERAGE_DIR: coverage/raw/workspace
+          DENO_COVERAGE_DIR: coverage/raw/workspace-${{ matrix.shard }}
           TEST_DISABLED_PACKAGES: runner
+          TEST_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
+          # One package at a time: a package's own test task already
+          # parallelizes across all of this runner's cores, and cross-package
+          # concurrency destabilizes the timing-sensitive CLI pseudo-terminal
+          # tests (see docs/development/CI_PERFORMANCE.md).
+          TEST_CONCURRENCY: "1"
 
       - name: 🧾 Write coverage report
         if: always()
-        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/workspace coverage/lcov/workspace.lcov
+        run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/workspace-${{ matrix.shard }} coverage/lcov/workspace-${{ matrix.shard }}.lcov
 
       - name: 📤 Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-profile-workspace
-          path: coverage/lcov/workspace.lcov
+          name: coverage-profile-workspace-${{ matrix.shard }}
+          path: coverage/lcov/workspace-${{ matrix.shard }}.lcov
           retention-days: 90
           if-no-files-found: error
 
@@ -163,7 +181,10 @@ jobs:
           fi
           printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' $TEST_FILES
+          # --no-check: the Check job type-checks packages/runner
+          # (tasks/check.sh).
           ENV=test deno test \
+            --no-check \
             --allow-ffi \
             --allow-env \
             --allow-read \
@@ -186,8 +207,7 @@ jobs:
 
   build-binaries:
     name: "Build Binaries"
-    runs-on:
-      group: labs
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -643,12 +663,14 @@ jobs:
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
+          # --no-check: the Check job type-checks packages/patterns/integration
+          # (tasks/check.sh).
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
-          deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+          deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
 
@@ -896,8 +918,7 @@ jobs:
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on:
-      group: labs
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       [
@@ -1222,79 +1243,3 @@ jobs:
 
           echo "📦 Staging Shell deployed"
           echo "https://staging.commontools.dev/"
-
-  # Post-deployment patterns test (runs after deployment, so this will NOT block deployments.)
-  # DISABLED: This test is currently disabled
-  post-deploy-patterns-test:
-    name: "Toolshed Post-Deploy Patterns Test"
-    if: false # Disabled - was: github.ref == 'refs/heads/main'
-    needs: ["deploy-toolshed"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: toolshed
-    continue-on-error: true # Don't fail the workflow if tests fail
-    steps:
-      - name: 🧩 Run post-deploy Patterns integration tests against Toolshed (Staging)
-        id: run_tests
-        continue-on-error: true
-        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
-        with:
-          host: ${{ secrets.BASTION_HOST }}
-          username: bastion
-          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          command_timeout: 20m
-          script: |
-            /opt/cf/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
-              https://toolshed.saga-castor.ts.net \
-              https://toolshed.saga-castor.ts.net
-
-      - name: 📥 Retrieve test logs on failure
-        if: steps.run_tests.outcome == 'failure'
-        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
-        with:
-          host: ${{ secrets.BASTION_HOST }}
-          username: bastion
-          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: |
-            LOG_FILE="/tmp/patterns-test-${{ github.sha }}.log"
-            if [ -f "$LOG_FILE" ]; then
-              echo "📋 Test failed - showing last 500 lines..."
-              echo "========================================="
-              tail -n 500 "$LOG_FILE"
-              echo "========================================="
-              echo "Full logs will be available as artifact"
-            else
-              echo "⚠️ Log file not found at $LOG_FILE"
-            fi
-
-      - name: 📦 Download logs from bastion
-        if: always()
-        uses: nicklasfrahm/scp-action@main
-        with:
-          direction: download
-          host: ${{ secrets.BASTION_HOST }}
-          username: bastion
-          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          insecure_ignore_fingerprint: true
-          source: /tmp/patterns-test-${{ github.sha }}.log
-          target: patterns-test-${{ github.sha }}.log
-
-      - name: 📤 Upload test logs as artifact
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: patterns-test-logs-${{ github.sha }}
-          path: patterns-test-${{ github.sha }}.log
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: 📊 Report test status
-        if: always()
-        run: |
-          if [ "${{ steps.run_tests.outcome }}" == "success" ]; then
-            echo "✅ Pattern integration tests PASSED"
-          else
-            echo "❌ Pattern integration tests FAILED"
-            echo "📥 Check the artifacts tab for full logs"
-          fi
-          exit ${{ steps.run_tests.outcome == 'success' && '0' || '1' }}

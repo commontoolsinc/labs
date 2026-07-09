@@ -509,6 +509,11 @@ export class CFInput extends BaseElement {
    * completed before continuing. Does not surface a remote-commit rejection (the
    * underlying set() logs and swallows that). When the field is not bound to a
    * Cell, it falls back to the cell controller's setValue.
+   *
+   * This is for standalone inputs. Inside a cf-form the form owns durable writes
+   * and flushes every field atomically on submit, so commit() resolves without
+   * writing: the edit stays buffered for the form's submit rather than
+   * persisting on its own.
    */
   commit(): Promise<void> {
     return this._formField.commit();

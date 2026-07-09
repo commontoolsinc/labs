@@ -64,20 +64,37 @@ job and step carries `started_at` and `completed_at`.
 
 ## Root Test Job Shape
 
-The `Test` job in `.github/workflows/deno.yml` runs the root `deno task test`
-with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded CI
-job, so the root job skips it. The root task still collects workspace coverage
-with `DENO_COVERAGE_DIR`.
+The `Test (n/6)` jobs in `.github/workflows/deno.yml` run the root
+`deno task test` on standard runners, sharded six ways with `TEST_SHARD` and
+with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded
+CI job, so the root jobs skip it. Each shard collects workspace coverage for
+its packages with `DENO_COVERAGE_DIR` and uploads it as
+`coverage-profile-workspace-<shard>`.
 
 The root task is `tasks/test.ts`. It reads the workspace list from
-`deno.jsonc`, starts `deno task test` in every enabled package at the same time,
-and waits for all packages to finish. Its wall time is set by the slowest
-package test task, plus the fixed setup and coverage report steps around it.
+`deno.jsonc`, selects this shard's packages by round-robin over the sorted
+package-name list (`selectShardMembers`), and runs `deno task test` in every
+selected package, at most `TEST_CONCURRENCY` (default: half the cores) at a
+time to keep contention-sensitive tests stable. Each shard's wall time is set
+by the slowest package test task in the shard, plus the fixed setup and
+coverage report steps around it.
 
-When this job becomes the long pole, start with the `Package timings:` block
-printed by `tasks/test.ts`. A slow package may simply be running many independent
-test modules serially. Deno's `--parallel` mode can reduce that package's wall
-time, but only after checking for tests that share process-wide state.
+When a shard becomes the long pole, start with the `Package timings:` block
+printed by `tasks/test.ts`. The round-robin split carries no per-package
+weighting, so first check whether one shard simply drew several slow packages;
+changing the shard count in the workflow matrix reshuffles the assignment.
+A shard-count change must also update the `coverage-profile-workspace-*`
+entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/perf-check.ts`, which
+the Performance Check gate uses to require every shard's coverage artifact.
+
+A package too heavy for any single shard can be split internally: the cli
+package runs as three units via `CLI_TEST_SHARD` (see
+`INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
+`packages/cli/test/run-tests.ts`), so its slices spread across workspace
+shards. A package that dominates a shard can be given the same treatment. A
+slow package may also be running many independent test modules serially.
+Deno's `--parallel` mode can reduce that package's wall time, but only after
+checking for tests that share process-wide state.
 
 Known serial CLI tests:
 

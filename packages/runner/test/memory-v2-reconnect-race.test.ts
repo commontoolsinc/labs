@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import { defer } from "@commonfabric/utils/defer";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
@@ -54,6 +55,7 @@ type TestProvider = IStorageProviderWithReplica & {
 
 class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   connectionCount = 0;
+  onConnectionCount?: (connectionCount: number) => void;
   droppedLocalSeqs: number[] = [];
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -116,6 +118,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
+      this.onConnectionCount?.(this.connectionCount);
       this.#connection = this.server.connect((message) => {
         if (!this.#dropResponses) {
           this.#receiver(encodeMemoryBoundary(message));
@@ -272,15 +275,22 @@ const notificationChanges = (
       "changes" in notification ? [...notification.changes] : []
     );
 
-const getObjectValue = (
-  provider: TestProvider,
+const notificationCarriesField = (
+  notification: StorageNotification,
   uri: URI,
-): Record<string, unknown> | undefined => {
-  const value = provider.get(uri)?.value;
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-};
+  key: string,
+  expected: unknown,
+): boolean =>
+  "changes" in notification &&
+  [...notification.changes].some((change) => {
+    if (change.address.id !== uri) {
+      return false;
+    }
+    const after = change.after as { value?: Record<string, unknown> } | null;
+    return after != null && typeof after === "object" &&
+      after.value != null && typeof after.value === "object" &&
+      after.value[key] === expected;
+  });
 
 const visibleIds = (
   provider: TestProvider,
@@ -326,6 +336,12 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
 
     await waitFor(() => transport.droppedLocalSeqs.includes(1));
 
+    const gotRemote7 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, remoteUri, "remote", 7)) {
+        gotRemote7.resolve();
+      }
+    };
     await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -339,7 +355,7 @@ Deno.test("memory v2 runner does not integrate its own replayed commit after rec
     });
 
     assertEquals(await localSend, { ok: {} });
-    await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 7);
+    await gotRemote7.promise;
 
     const commitChanges = notificationChanges(
       notifications.notifications,
@@ -416,6 +432,17 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
 
     await waitFor(() => transport.droppedLocalSeqs.includes(1));
 
+    const gotLocal2 = defer<void>();
+    const gotRemote9 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, localUri, "local", 2)) {
+        gotLocal2.resolve();
+      }
+      if (notificationCarriesField(notification, remoteUri, "remote", 9)) {
+        gotRemote9.resolve();
+      }
+    };
+
     const second = provider.send([{
       uri: localUri,
       value: { value: { local: 2 } },
@@ -435,8 +462,8 @@ Deno.test("memory v2 runner deduplicates replayed stacked commits while integrat
 
     assertEquals(await first, { ok: {} });
     assertEquals(await second, { ok: {} });
-    await waitFor(() => getObjectValue(provider, localUri)?.local === 2);
-    await waitFor(() => getObjectValue(provider, remoteUri)?.remote === 9);
+    await gotLocal2.promise;
+    await gotRemote9.promise;
 
     const notificationTypes = notifications.notifications.map((notification) =>
       notification.type
@@ -522,8 +549,17 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
     );
 
     notifications.clear();
+    const reconnected = defer<void>();
+    transport.onConnectionCount = (connectionCount) => {
+      if (connectionCount >= 2) {
+        reconnected.resolve();
+      }
+    };
+    if (transport.connectionCount >= 2) {
+      reconnected.resolve();
+    }
     transport.disconnect();
-    await waitFor(() => transport.connectionCount >= 2, 1_000);
+    await reconnected.promise;
 
     await writer.transact({
       localSeq: 2,
@@ -658,6 +694,12 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     let remoteLocalSeq = 1;
 
     await provider.sync(uri);
+    const gotVersion1 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, uri, "version", 1)) {
+        gotVersion1.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -667,8 +709,14 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
         value: { value: { version: 1 } },
       }],
     });
-    await waitFor(() => getObjectValue(provider, uri)?.version === 1);
+    await gotVersion1.promise;
 
+    const gotVersion3 = defer<void>();
+    notifications.onNotification = (notification) => {
+      if (notificationCarriesField(notification, uri, "version", 3)) {
+        gotVersion3.resolve();
+      }
+    };
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
@@ -678,7 +726,8 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
         value: { value: { version: 3 } },
       }],
     });
-    await waitFor(() => getObjectValue(provider, uri)?.version === 3);
+    await gotVersion3.promise;
+    notifications.onNotification = undefined;
     notifications.clear();
 
     const stale = await commitWithSeq(1, 2);

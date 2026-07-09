@@ -90,7 +90,7 @@ Deno.test("a pulled DB is discoverable and resolvable by full DID", async () => 
 
       // …so normal local discovery reports the real DID and resolves it by the
       // full DID a `pull` would have printed (the workflow Codex flagged).
-      const found = discoverSpaceDbs({ dirs: [cacheDir] });
+      const found = discoverSpaceDbs({ dirs: [cacheDir], defaultRoots: false });
       assertEquals(found.some((s) => s.did === SPACE), true);
       assertEquals(resolveSpacePath(SPACE, found), path);
     } finally {

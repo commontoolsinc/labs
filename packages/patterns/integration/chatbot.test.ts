@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, waitForCondition } from "@commonfabric/integration";
 import { sleep } from "@commonfabric/utils/sleep";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -157,12 +157,11 @@ describe("Chat pattern test", () => {
       assert(chatHistory, "Should find chat history container");
 
       // Wait for assistant response (second cf-chat-message)
-      await waitFor(async () => {
-        const messages = await page.$$("cf-chat-message", {
-          strategy: "pierce",
-        });
-        return messages.length >= 2;
-      }, { timeout: 30000 });
+      await waitForCondition(
+        page,
+        (probe) => probe.collect("cf-chat-message").length >= 2,
+        { timeout: 30000 },
+      );
 
       // Get all chat messages using pierce strategy
       const allMessages = await page.$$("cf-chat-message", {
@@ -226,12 +225,11 @@ describe("Chat pattern test", () => {
       await sleep(200);
 
       // Wait for new assistant response - at least 4 messages total
-      await waitFor(async () => {
-        const messages = await page.$$("cf-chat-message", {
-          strategy: "pierce",
-        });
-        return messages.length >= 4;
-      }, { timeout: 60000 });
+      await waitForCondition(
+        page,
+        (probe) => probe.collect("cf-chat-message").length >= 4,
+        { timeout: 60000 },
+      );
 
       // Get all chat messages to verify sequence
       const chatMessages = await page.$$("cf-chat-message", {
@@ -282,12 +280,10 @@ describe("Chat pattern test", () => {
       await clearButton.click();
 
       // Wait for chat to clear
-      await waitFor(async () => {
-        const messages = await page.$$("cf-chat-message", {
-          strategy: "pierce",
-        });
-        return messages.length === 0;
-      });
+      await waitForCondition(
+        page,
+        (probe) => probe.collect("cf-chat-message").length === 0,
+      );
 
       // Verify chat history is now empty
       const messagesAfter = await page.$$("cf-chat-message", {

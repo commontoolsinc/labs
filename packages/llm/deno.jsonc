@@ -1,7 +1,8 @@
 {
   "name": "@commonfabric/llm",
   "tasks": {
-    "test": "ENV=test deno test --allow-env"
+    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
+    "test": "ENV=test deno test --no-check --allow-env"
   },
   "exports": {
     ".": "./src/index.ts",

@@ -110,6 +110,16 @@ export const MIN_BASELINE_DAYS = 7;
 /** Maximum workflow runs to fetch from API. */
 export const MAX_RUNS_TO_FETCH = 100;
 
+/**
+ * Runs-list API path for successful main-branch Benchmarks runs. Carries no
+ * event filter: the Benchmarks workflow runs on a schedule and via manual
+ * dispatch, and older push-triggered runs also carry usable samples.
+ */
+export function benchmarksRunsPath(): string {
+  return `/repos/${REPO}/actions/workflows/benchmarks.yml/runs` +
+    `?branch=main&status=success&per_page=${MAX_RUNS_TO_FETCH}`;
+}
+
 /** Concurrency limit for API calls. */
 export const API_CONCURRENCY = 5;
 
@@ -1159,6 +1169,8 @@ export const GENERATED_PATTERNS_RE =
   /Generated Patterns Integration Tests\s*\((\d+)\/(\d+)\)/;
 export const RUNNER_TEST_RE = /Runner Tests\s*\((\d+)\/(\d+)\)/;
 export const CLI_CORE_SPLIT_RE = /CLI Integration Tests\s*\((core-[^)]+)\)/;
+// Anchored so it does not match the other sharded "... Tests (n/m)" jobs.
+export const WORKSPACE_TEST_RE = /^Test\s*\((\d+)\/(\d+)\)$/;
 
 interface StepMetricMatcher {
   jobName: string;
@@ -1288,6 +1300,7 @@ export function extractMetrics(
     );
     const runnerTestMatch = RUNNER_TEST_RE.exec(normalizedJobName);
     const cliCoreSplitMatch = CLI_CORE_SPLIT_RE.exec(normalizedJobName);
+    const workspaceTestMatch = WORKSPACE_TEST_RE.exec(normalizedJobName);
 
     const matcherJobName = packageIntegrationMatch
       ? "Package Integration Tests"
@@ -1301,6 +1314,8 @@ export function extractMetrics(
       ? "Runner Tests"
       : cliCoreSplitMatch
       ? "CLI Integration Tests (core)"
+      : workspaceTestMatch
+      ? "Test"
       : normalizedJobName;
 
     if (packageIntegrationMatch) {
@@ -1350,6 +1365,17 @@ export function extractMetrics(
       setMaxMetric("job: Runner Tests", sample);
     }
 
+    if (workspaceTestMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: Test (${workspaceTestMatch[1]}/${workspaceTestMatch[2]})`,
+        sample,
+      );
+      // Rolls up to the pre-shard "job: Test" metric so the sharded jobs
+      // compare against the existing single-job baselines.
+      setMaxMetric("job: Test", sample);
+    }
+
     if (cliCoreSplitMatch) {
       const sample = makeSample(jobDuration);
       metrics.set(
@@ -1376,7 +1402,8 @@ export function extractMetrics(
           const sample = makeSample(stepDuration);
           if (
             packageIntegrationMatch || patternIntegrationMatch ||
-            generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch
+            generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch ||
+            workspaceTestMatch
           ) {
             setMaxMetric(matcher.metricName, sample);
           } else {

@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime.ts";
 import type { Logger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
 import { cellIdentityKey } from "./scope-policy.ts";
+import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 
 type ElementRuns = Map<
   string,
@@ -115,7 +116,14 @@ export function createResumeRepublisher(
         }
       }
       if (stillPending.length > 0) return stillPending;
-      result.asSchema(resultSchema).withTx(tx).set(out);
+      // The element reads above are real content reads (the aggregate genuinely
+      // depends on them, so they taint J). The container write only diffs prior
+      // slots for identity, so it runs under the link-resolution probe (S16) to
+      // avoid re-journaling prior element content — matching map/filter/flatMap.
+      tx.runWithAmbientReadMeta(
+        linkResolutionProbe,
+        () => result.asSchema(resultSchema).withTx(tx).set(out),
+      );
       return [];
     }).then(({ ok, error }) => {
       if (error) {

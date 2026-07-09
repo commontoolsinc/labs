@@ -3,10 +3,16 @@ import {
   CdpWorkerProfiler,
   env,
   Page,
+  type ProbeApi,
   renderProfileReport,
   waitFor,
+  waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import {
+  waitForRuntimeIdle,
+  waitForRuntimeSynced,
+} from "./cfc-browser-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
@@ -381,32 +387,24 @@ describe("default-app flow test", () => {
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "Notes"));
-      });
+      await clickButtonWithText(page, "Notes");
 
       const noteCreateStartedAt = performance.now();
       console.log(`Click 'New Note' (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "New Note"));
-      });
+      await clickButtonWithText(page, "New Note");
 
       console.log(`Wait for note view (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return await page.evaluate(() => {
-          const state = globalThis.app?.serialize?.();
-          return !!state &&
-            !!state.view &&
-            typeof state.view === "object" &&
-            "pieceId" in state.view &&
-            typeof state.view.pieceId === "string" &&
-            state.view.pieceId.length > 0;
-        });
+      await waitForCondition(page, () => {
+        const state = globalThis.app?.serialize?.();
+        return !!state &&
+          !!state.view &&
+          typeof state.view === "object" &&
+          "pieceId" in state.view &&
+          typeof state.view.pieceId === "string" &&
+          state.view.pieceId.length > 0;
       });
 
-      await waitFor(async () => {
-        return await waitForRuntimeIdle(page);
-      });
+      await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
 
       if (CAPTURE_ACTION_RUN_SERIES > 0) {
@@ -486,14 +484,11 @@ describe("default-app flow test", () => {
         return await clickPieceLinkWithText(page, spaceName);
       });
       await shell.waitForState({ view: { spaceName }, identity });
-      await waitFor(async () => {
-        return await waitForRuntimeIdle(page);
-      });
+      await waitForRuntimeIdle(page);
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
-      await waitFor(async () => {
-        const noteTitles = await collectNoteTitlesInList(page);
-        return noteTitles.length > noteCountBefore;
+      await waitForCondition(page, noteTitlesExceed, {
+        args: [noteCountBefore],
       });
 
       const noteTitlesAfter = await collectNoteTitlesInList(page);
@@ -673,21 +668,32 @@ describe("default-app flow test", () => {
     });
 
     console.log("Await runtime idle for notebook regression...");
-    await waitFor(async () => {
-      return await awaitRuntimeIdle(page);
-    });
+    await waitForRuntimeIdle(page);
 
     try {
-      await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "Notes"));
-      });
-      await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "New Notebook"));
-      });
+      await clickButtonWithText(page, "Notes");
+      await clickButtonWithText(page, "New Notebook");
       try {
-        await waitFor(async () => {
-          const state = await collectNotebookRenderState(page);
-          return state.isNotebook;
+        await waitForCondition(page, async () => {
+          const commonfabric = globalThis.commonfabric as
+            | { readCell?: (options: { id: string }) => Promise<unknown> }
+            | undefined;
+          const view = globalThis.app?.serialize?.()?.view;
+          const pieceId = view && typeof view === "object" &&
+              "pieceId" in view && typeof view.pieceId === "string"
+            ? view.pieceId
+            : undefined;
+          if (!pieceId || !commonfabric?.readCell) return false;
+          let current: unknown;
+          const originalLog = console.log;
+          try {
+            console.log = () => {};
+            current = await commonfabric.readCell({ id: pieceId });
+          } finally {
+            console.log = originalLog;
+          }
+          return (current as { isNotebook?: unknown } | undefined)
+            ?.isNotebook === true;
         });
       } catch (error) {
         console.log(
@@ -701,7 +707,11 @@ describe("default-app flow test", () => {
       // clicking. viewSettled resolves once the worker is idle and the
       // rendered view has caught up (vdom applied, Lit updates drained), so the
       // New Note button's handler is bound and a single click is not dropped.
-      await waitFor(async () => await awaitViewSettled(page));
+      await waitForCondition(
+        page,
+        () => typeof globalThis.commonfabric?.viewSettled === "function",
+      );
+      await awaitViewSettled(page);
       assert(
         await clickButtonWithTitle(page, "New Note"),
         "Expected New Note click to succeed",
@@ -727,14 +737,10 @@ describe("default-app flow test", () => {
       );
 
       try {
-        await waitFor(async () => {
-          const state = await collectNotebookSourceState(page);
-          return state.argumentNotesLength === noteCreates &&
-            state.noteCount === noteCreates &&
-            state.showNewNotePrompt === false &&
-            state.usedCreateAnotherNote === false;
+        await waitForCondition(page, notebookSourceStateMatches, {
+          args: [noteCreates],
         });
-        await waitFor(async () => await waitForRuntimeSynced(page));
+        await waitForRuntimeSynced(page);
       } catch (_) {
         // Keep the final assertions below so failures include diagnostics.
       }
@@ -765,7 +771,7 @@ describe("default-app flow test", () => {
       assertEquals(summary.argumentNotesLength, noteCreates);
       assertEquals(summary.noteCount, noteCreates);
     } finally {
-      await waitFor(async () => await awaitRuntimeIdle(page)).catch(
+      await waitForRuntimeIdle(page).catch(
         (error) =>
           console.warn(
             "Failed to await runtime idle after notebook regression",
@@ -782,15 +788,6 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
     if (!rt) return false;
     await rt.setTriggerTraceEnabled(false);
     await rt.setTriggerTraceEnabled(true);
-    return true;
-  });
-}
-
-async function awaitRuntimeIdle(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.idle) return false;
-    await rt.idle();
     return true;
   });
 }
@@ -1540,24 +1537,6 @@ async function armActionRunTrace(page: Page): Promise<boolean> {
   });
 }
 
-async function waitForRuntimeIdle(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.idle) return false;
-    await rt.idle();
-    return true;
-  });
-}
-
-async function waitForRuntimeSynced(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.allSynced) return false;
-    await rt.allSynced();
-    return true;
-  });
-}
-
 async function disposeBrowserRuntime(page: Page): Promise<void> {
   await page.evaluate(async () => {
     try {
@@ -1579,30 +1558,26 @@ async function waitForHomePageReady(
   page: Page,
   options: { spaceName: string; expectNoteInList: boolean },
 ): Promise<void> {
-  await waitFor(async () => {
-    return await page.evaluate((spaceName: string) => {
-      const app = globalThis.app;
-      const rt = globalThis.commonfabric?.rt;
-      const state = app?.serialize?.();
-      const view = state?.view;
-      return !!(
-        rt &&
-        state &&
-        view &&
-        typeof view === "object" &&
-        "spaceName" in view &&
-        view.spaceName === spaceName
-      );
-    }, { args: [options.spaceName] });
-  });
+  await waitForCondition(page, (_probe, spaceName) => {
+    const app = globalThis.app;
+    const rt = globalThis.commonfabric?.rt;
+    const state = app?.serialize?.();
+    const view = state?.view;
+    return !!(
+      rt &&
+      state &&
+      view &&
+      typeof view === "object" &&
+      "spaceName" in view &&
+      view.spaceName === spaceName
+    );
+  }, { args: [options.spaceName] });
 
   if (options.expectNoteInList) {
-    await waitFor(() => findNoteInList(page));
+    await waitForCondition(page, noteTitlesExceed, { args: [0] });
   }
 
-  await waitFor(async () => {
-    return await waitForRuntimeIdle(page);
-  });
+  await waitForRuntimeIdle(page);
 }
 
 async function collectNotebookSourceState(page: Page): Promise<{
@@ -1701,6 +1676,88 @@ async function collectNotebookSourceState(page: Page): Promise<{
     };
   });
 }
+
+// Serialized into the page by waitForCondition: read the notebook's argument
+// and internal cells and report whether the rapidly created notes have all
+// landed — `expectedCount` notes present, the new-note prompt closed, and the
+// "create another" flag cleared. Inlines the collection that
+// collectNotebookSourceState performs so the wait resolves the instant the
+// source state converges rather than on a polling tick.
+const notebookSourceStateMatches = async (
+  _probe: ProbeApi,
+  expectedCount: number,
+): Promise<boolean> => {
+  const api = globalThis.commonfabric as {
+    readCell?: (options: {
+      id: string;
+      path?: string[];
+      meta?: "argument" | "internal";
+    }) => Promise<unknown>;
+  } | undefined;
+
+  const view = globalThis.app?.serialize?.()?.view;
+  const notebookEntityId = view && typeof view === "object" &&
+      "pieceId" in view && typeof view.pieceId === "string"
+    ? view.pieceId
+    : undefined;
+  if (!notebookEntityId || !api?.readCell) return false;
+
+  const resolveInternalManifest = async (
+    manifest: unknown,
+  ): Promise<Record<string, unknown>> => {
+    const resolved: Record<string, unknown> = {};
+    if (!Array.isArray(manifest)) return resolved;
+    for (const entry of manifest) {
+      if (entry === null || typeof entry !== "object") continue;
+      const { partialCause, link } = entry as {
+        partialCause?: unknown;
+        link?: { sync?: () => Promise<unknown> };
+      };
+      const key = typeof partialCause === "string"
+        ? partialCause
+        : JSON.stringify(partialCause) ?? String(partialCause);
+      if (link && typeof link.sync === "function") {
+        resolved[key] = await link.sync();
+      }
+    }
+    return resolved;
+  };
+
+  let notebookArgument: unknown;
+  let notebookInternalManifest: unknown;
+  const originalLog = console.log;
+  try {
+    console.log = () => {};
+    notebookArgument = await api.readCell({
+      id: notebookEntityId,
+      meta: "argument",
+    });
+    notebookInternalManifest = await api.readCell({
+      id: notebookEntityId,
+      meta: "internal",
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  const notebookInternal = await resolveInternalManifest(
+    notebookInternalManifest,
+  );
+
+  const argumentNotes = (notebookArgument as { notes?: unknown[] } | undefined)
+    ?.notes;
+  const argumentNotesLength = Array.isArray(argumentNotes)
+    ? argumentNotes.length
+    : undefined;
+  const internal = notebookInternal as {
+    noteCount?: unknown;
+    showNewNotePrompt?: unknown;
+    usedCreateAnotherNote?: unknown;
+  };
+  return argumentNotesLength === expectedCount &&
+    internal.noteCount === expectedCount &&
+    internal.showNewNotePrompt === false &&
+    internal.usedCreateAnotherNote === false;
+};
 
 async function collectHomeLoadSummaryFromFreshPage(
   shell: ShellIntegration,
@@ -3178,26 +3235,138 @@ async function ensureCapturedConsole(page: Page): Promise<boolean> {
 }
 
 // Helper to find and click a button by text using piercing selectors
+// Marker attribute a click predicate stamps on the button it resolved, so the
+// test can then resolve that exact element and dispatch a single trusted click
+// on it. Mirrors the CLICK_TARGET_ATTR flow of clickCfButton in
+// cfc-browser-helpers.ts.
+const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
+
+// Serialized into the page by waitForCondition: find the first rendered
+// button/link whose text or title matches, scroll it into view, and stamp its
+// inner click target with `token`. "Rendered" means laid out and not
+// display:none/visibility:hidden — the same elements the innerText scan the
+// poll used could see — and is viewport-independent, so a match below the fold
+// is scrolled in rather than skipped. Returns false until a match exists, so
+// the wait re-checks on the next DOM mutation instead of the caller retrying a
+// bare find-and-click loop.
+const markNoteButton = async (
+  probe: ProbeApi,
+  selector: string,
+  match: "includes" | "exact" | "title",
+  needle: string,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const isRendered = (element: Element): boolean => {
+    const style = globalThis.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const target = probe.collect(selector).find((element) => {
+    if (!isRendered(element)) return false;
+    if (match === "title") return element.getAttribute("title") === needle;
+    const text = (element.textContent ?? "").trim();
+    return match === "exact" ? text === needle : text.includes(needle);
+  }) as HTMLElement | undefined;
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
+    | HTMLElement
+    | null) ?? target;
+  clickTarget.setAttribute(attr, token);
+  return true;
+};
+
+// Remove every element carrying `attr=token`, descending through shadow roots.
+async function clearNoteButtonMark(
+  page: Page,
+  token: string,
+): Promise<void> {
+  await page.evaluate((targetToken, targetAttr) => {
+    function collect(root: Document | ShadowRoot, result: Element[]): void {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.getAttribute(targetAttr) === targetToken) {
+          result.push(element);
+        }
+        if (element.shadowRoot) collect(element.shadowRoot, result);
+      }
+    }
+    const matches: Element[] = [];
+    collect(document, matches);
+    for (const element of matches) element.removeAttribute(targetAttr);
+  }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
+}
+
+// Wait for a matching button to be present and interactive, then dispatch a
+// single trusted click on it. Throws if no matching button becomes clickable.
+async function settleAndClickNoteButton(
+  page: Page,
+  selector: string,
+  match: "includes" | "exact" | "title",
+  needle: string,
+): Promise<void> {
+  const token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, markNoteButton, {
+      args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
+    });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find a ${
+        match === "title" ? "button titled" : "button matching"
+      } "${needle}" to click`,
+      { cause },
+    );
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce" },
+    );
+    await clickTarget.click();
+  } finally {
+    await clearNoteButtonMark(page, token);
+  }
+}
+
+// The click helpers resolve `true` once the single click has landed (they throw
+// otherwise), so the call sites that assert the click succeeded keep reading.
 async function clickButtonWithText(
   page: Page,
   searchText: string,
 ): Promise<boolean> {
-  const button = await findButtonWithText(page, searchText);
-  if (!button) return false;
-  try {
-    await button.click();
-    return true;
-  } catch (_) {
-    return await page.evaluate((searchText: string) => {
-      for (const el of document.querySelectorAll("cf-button, button, a")) {
-        if (el.textContent?.trim().includes(searchText)) {
-          (el as HTMLElement).click();
-          return true;
-        }
-      }
-      return false;
-    }, { args: [searchText] });
-  }
+  await settleAndClickNoteButton(
+    page,
+    "cf-button, button, a",
+    "includes",
+    searchText,
+  );
+  return true;
+}
+
+async function clickButtonWithExactText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  await settleAndClickNoteButton(
+    page,
+    "cf-button, button, a",
+    "exact",
+    searchText,
+  );
+  return true;
+}
+
+async function clickButtonWithTitle(
+  page: Page,
+  title: string,
+): Promise<boolean> {
+  await settleAndClickNoteButton(page, "cf-button, button", "title", title);
+  return true;
 }
 
 async function findButtonWithText(
@@ -3218,75 +3387,6 @@ async function findButtonWithText(
     return null;
   } catch (_) {
     return null;
-  }
-}
-
-async function clickButtonWithExactText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  try {
-    const buttons = await page.$$("cf-button, button, a", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const text = await button.innerText();
-      if (text?.trim() === searchText) {
-        try {
-          await button.click();
-          return true;
-        } catch (_) {
-          return await page.evaluate((searchText: string) => {
-            for (
-              const el of document.querySelectorAll(
-                "cf-button, button, a",
-              )
-            ) {
-              if (el.textContent?.trim() === searchText) {
-                (el as HTMLElement).click();
-                return true;
-              }
-            }
-            return false;
-          }, { args: [searchText] });
-        }
-      }
-    }
-    return false;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function clickButtonWithTitle(
-  page: Page,
-  title: string,
-): Promise<boolean> {
-  try {
-    const buttons = await page.$$("cf-button, button", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const actualTitle = await button.getAttribute("title");
-      if (actualTitle === title) {
-        try {
-          await button.click();
-          return true;
-        } catch (_) {
-          return await page.evaluate((title: string) => {
-            const el = document.querySelector(
-              `cf-button[title="${title}"], button[title="${title}"]`,
-            );
-            if (!el) return false;
-            (el as HTMLElement).click();
-            return true;
-          }, { args: [title] });
-        }
-      }
-    }
-    return false;
-  } catch (_) {
-    return false;
   }
 }
 
@@ -3467,6 +3567,23 @@ async function clickPieceLinkWithText(
 async function findNoteInList(page: Page): Promise<boolean> {
   return (await collectNoteTitlesInList(page)).length > 0;
 }
+
+// Serialized into the page by waitForCondition: count the unique rendered
+// "📝 New Note #<hash>" titles across the document and every shadow root and
+// report whether more than `minCount` are present. Inlines the collection that
+// collectNoteTitlesInList performs so the wait resolves the instant the list
+// grows rather than on a polling tick.
+const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
+  const titles = new Set<string>();
+  for (const element of probe.collect("*")) {
+    const text = element.textContent;
+    if (!text) continue;
+    for (const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)) {
+      titles.add(match[0]);
+    }
+  }
+  return titles.size > minCount;
+};
 
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {

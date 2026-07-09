@@ -61,11 +61,13 @@ import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
   CFC_ENFORCING_STRICTNESS,
+  type CfcAddress,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcPolicyEvaluationMode,
+  type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -111,6 +113,10 @@ type CfcInstrumentationHooks = {
   onSinkReleaseReject?(
     info: { sink: string; effectId: string; detail: string },
   ): void;
+  // Stage-0 D4 precision counters (cfc-value-level-provenance.md §6, SC-24):
+  // one summary per prepared transaction that measured a protected write.
+  // When absent — the default — the prepare gate skips all measurement.
+  onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -251,6 +257,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
+    structureContainers: [],
     triggerReads: [],
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
@@ -726,6 +733,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.#cfcState.structureContainers.push(deepFreeze(address));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("structure-container-added");
+    }
+  }
+
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
     this.#cfcState.trustSnapshot = snapshot;
     if (this.#cfcState.prepare.status === "prepared") {
@@ -895,7 +909,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     const reasons = this.#runPrivilegedSystemWrite(() =>
-      prepareBoundaryCommit(this)
+      prepareBoundaryCommit(
+        this,
+        // Stage-0 precision counters: threaded through only when the hook is
+        // installed, so the gate skips all measurement (and the summary
+        // allocation) otherwise. The non-null assertion restates the
+        // presence check above — the hooks object is fixed at construction.
+        this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
+          onPrefixProvenance: (summary) =>
+            this.cfcInstrumentation.onPrefixProvenance!(summary),
+        },
+      )
     );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
@@ -1255,6 +1279,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.outboxIdempotencyKeys.clear();
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
+    this.#cfcState.structureContainers = [];
     return this.tx.abort(reason);
   }
 
@@ -1544,6 +1569,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
     this.wrapped.recordCfcDereferenceTrace(trace);
+  }
+
+  recordCfcStructureContainer(address: CfcAddress): void {
+    this.wrapped.recordCfcStructureContainer(address);
   }
 
   prepareCfc(): string {

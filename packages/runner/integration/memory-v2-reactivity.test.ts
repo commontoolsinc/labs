@@ -5,19 +5,7 @@ import app from "../../toolshed/app.ts";
 import { Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 5000,
-): Promise<void> => {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeout) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-};
+import { defer } from "@commonfabric/utils/defer";
 
 const createRuntime = (identity: Identity, base: URL) =>
   new Runtime({
@@ -88,10 +76,10 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     await runtime2.storageManager.synced();
     assertEquals(personCell2.get()?.address, undefined);
 
-    let receivedAddress = false;
+    const gotAddress = defer<void>();
     personCell2.sink((value) => {
       if (value?.address?.city === "San Francisco") {
-        receivedAddress = true;
+        gotAddress.resolve();
       }
     });
 
@@ -110,7 +98,7 @@ Deno.test("memory v2 runner discovers newly linked documents", async () => {
     await tx.commit();
     await runtime3.storageManager.synced();
 
-    await waitFor(() => receivedAddress);
+    await gotAddress.promise;
     assertEquals(personCell2.get(), {
       name: "Alice",
       address: { city: "San Francisco" },
@@ -191,10 +179,10 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
       address: { city: "New York" },
     });
 
-    let receivedNewCity = false;
+    const gotNewCity = defer<void>();
     personCell2.sink((value) => {
       if (value?.address?.city === "Los Angeles") {
-        receivedNewCity = true;
+        gotNewCity.resolve();
       }
     });
 
@@ -210,7 +198,7 @@ Deno.test("memory v2 runner propagates linked document changes", async () => {
     await tx.commit();
     await runtime3.storageManager.synced();
 
-    await waitFor(() => receivedNewCity);
+    await gotNewCity.promise;
     assertEquals(personCell2.get(), {
       name: "Bob",
       address: { city: "Los Angeles" },
@@ -320,10 +308,10 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
       },
     });
 
-    let receivedPopulation = false;
+    const gotPopulation = defer<void>();
     personCell2.sink((value) => {
       if (value?.address?.city?.population === 800000) {
-        receivedPopulation = true;
+        gotPopulation.resolve();
       }
     });
 
@@ -339,7 +327,7 @@ Deno.test("memory v2 runner keeps deep linked chains live", async () => {
     await tx.commit();
     await runtime3.storageManager.synced();
 
-    await waitFor(() => receivedPopulation);
+    await gotPopulation.promise;
     assertEquals(personCell2.get(), {
       name: "Charlie",
       address: {
