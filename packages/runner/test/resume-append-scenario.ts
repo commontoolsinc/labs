@@ -152,9 +152,21 @@ export interface AppendScenario {
 async function build(scenario: AppendScenario): Promise<void> {
   const { signer, space, server, program, cellId, items } = scenario;
   const sm = GatedStorageManager.make(signer, server);
+  // Build the durable aggregate through the LEGACY coordinator, even under the
+  // interpreter flag. The gate window this harness forces (below) holds each
+  // element's per-element RESULT document as it streams in on resume — but only
+  // the legacy coordinator persists those documents. The flag-on inline filter
+  // evaluates its predicates in-segment and keeps the ORIGINAL element
+  // references, so it never writes a streamable per-element result doc; a
+  // flag-on inline build would leave the gate with nothing to hold and
+  // `firstHeld` would never resolve (the same reason map is not gated here).
+  // The RESUME runtime keeps the ambient flag: the interpreter refuses resumed
+  // collections and falls back to the legacy coordinator, so the resume path —
+  // the actual subject of these tests — is still exercised flag-on.
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sm,
+    experimental: { experimentalInterpreter: false },
   });
   const compiled = await rt.patternManager.compilePattern(program, { space });
   const tx0 = rt.edit();
@@ -176,9 +188,9 @@ async function build(scenario: AppendScenario): Promise<void> {
   expect(scenario.read(rc)).toEqual(scenario.buildExpected);
   rt.scheduler.dispose();
   await rt.dispose();
-  // Close the session too (sibling harnesses close their storage managers in
-  // afterEach): an inline-value element resolves to an argument-doc path
-  // whose watch keeps a transport promise pending past process end.
+  // Close the build session's storage manager (sibling harnesses close theirs in
+  // afterEach): a per-element result watch can otherwise keep a transport promise
+  // pending past process end, which the op sanitizer reports as a leak.
   await sm.close();
 }
 
@@ -217,14 +229,6 @@ export async function runResumeAppendScenario(
 
     const started = await rt2.start(rc2);
     expect(started).toBe(true);
-    // TEMP-DEBUG (ri2 leak isolation): stage bisect. 1=after start,
-    // 2=after firstHeld, 3=after release+settle.
-    const stopAt = Number(Deno.env.get("RI2_STOP_AT") ?? "0");
-    const fake = {
-      output: ["a", "b", "c", "d", "e"] as unknown[],
-      heldCount: 1,
-    };
-    if (stopAt === 1) return fake;
 
     // Standing effect so `idle()` drives the coordinator without `pull()`. While
     // the gate holds the per-element documents, `pull()` would block on the
@@ -243,13 +247,6 @@ export async function runResumeAppendScenario(
       // it into the resume batch instead, with no recovery.
       await gate.firstHeld;
       expect(gate.heldCount).toBeGreaterThan(0);
-      if (stopAt === 2) return fake;
-      if (stopAt === 3) {
-        gate.release();
-        await rc2.pull();
-        await rt2.settled();
-        return fake;
-      }
 
       // Append while the per-element results are held. The coordinator's
       // reconcile reads the still-stale sibling result cells, so its commit is
