@@ -635,17 +635,25 @@ function attachSchedulerActionObservation(
   }
 
   const annotated = args.action as Partial<TelemetryAnnotations>;
+  const observationIdentity = annotated.schedulerObservationIdentity;
+  if (!observationIdentity) {
+    // Only doc-keyed observations persist. An action registered without
+    // rehydration identity (session-scoped effects: cell sinks, pull, the
+    // wish resolver) can never be rehydrated — its registration carries no
+    // identity to match on — and a fallback pieceId would violate the
+    // doc→deriver keying the per-doc restore lists by
+    // (docs/specs/scheduler-v2/per-doc-rehydration.md §2).
+    return;
+  }
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
-  const observationIdentity = annotated.schedulerObservationIdentity;
   const observation = buildSchedulerActionObservation({
-    ...(observationIdentity?.ownerSpace !== undefined
+    ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
       : {}),
-    branch: observationIdentity?.branch ?? "",
-    pieceId: observationIdentity?.pieceId ??
-      schedulerObservationPieceId(args.actionId, telemetry),
-    processGeneration: observationIdentity?.processGeneration ?? 0,
+    branch: observationIdentity.branch ?? "",
+    pieceId: observationIdentity.pieceId,
+    processGeneration: observationIdentity.processGeneration ?? 0,
     actionId: args.actionId,
     actionKind: state.nodes.isKnownEffect(args.action)
       ? "effect"

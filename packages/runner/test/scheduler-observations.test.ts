@@ -363,10 +363,18 @@ describe("persistent scheduler observations", () => {
         },
       ) as Action;
 
+      // Observations persist only for doc-keyed registrations (per-doc
+      // rehydration §2), so carry the identity a real piece registration has.
       runtime.scheduler.subscribe(changingWriter, {
         reads: [toMemorySpaceAddress(selector.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:test:changing-writer",
+          processGeneration: 0,
+        },
       });
 
       await runtime.scheduler.run(changingWriter);
@@ -458,10 +466,18 @@ describe("persistent scheduler observations", () => {
         { implementationHash: "cf:module/test-lsw:logSurfaceWriter" },
       ) as Action;
 
+      // Observations persist only for doc-keyed registrations (per-doc
+      // rehydration §2), so carry the identity a real piece registration has.
       runtime.scheduler.subscribe(logSurfaceWriter, {
         reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: surface,
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:test:log-surface-writer",
+          processGeneration: 0,
+        },
       });
 
       await runtime.scheduler.run(logSurfaceWriter);
@@ -638,6 +654,134 @@ describe("persistent scheduler observations", () => {
         testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
       )
         .toEqual([writeAddress]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("runs an always-run action on resume despite a matching snapshot", async () => {
+    // Child-starting coordinators (map/filter/flatMap) declare resumeMode
+    // "always-run": rehydrating them clean would skip the reconcile that
+    // re-attaches their per-element children (per-doc-rehydration.md §3.3).
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const makeEffect = (name: string) => {
+        let runs = 0;
+        // Named-function trick: the property name becomes fn.name, which is
+        // the action id for hash-less actions.
+        const action = Object.assign(
+          {
+            [name]: function () {
+              runs++;
+            },
+          }[name] as Action,
+          { writes: [writeLink] },
+        );
+        const observation = buildSchedulerActionObservation({
+          actionId: name,
+          actionKind: "effect",
+          branch: "",
+          pieceId: "space:always-run-process",
+          processGeneration: 1,
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            name,
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [],
+          },
+        });
+        return { action, observation, runs: () => runs };
+      };
+
+      const control = makeEffect("rehydratedEffect");
+      const coordinator = makeEffect("alwaysRunCoordinator");
+
+      const subscribeOptions = (
+        entry: ReturnType<typeof makeEffect>,
+        name: string,
+        resumeMode?: "always-run",
+      ) => ({
+        isEffect: true,
+        ...(resumeMode ? { resumeMode } : {}),
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:always-run-process",
+          processGeneration: 1,
+          snapshotsByActionId: new Map([[
+            name,
+            { observation: entry.observation },
+          ]]),
+        },
+      });
+
+      testRuntime.runtime.scheduler.subscribe(control.action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, subscribeOptions(control, "rehydratedEffect"));
+      testRuntime.runtime.scheduler.subscribe(coordinator.action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, subscribeOptions(coordinator, "alwaysRunCoordinator", "always-run"));
+
+      await testRuntime.runtime.idle();
+
+      // Identical setups; the only difference is resumeMode. The control
+      // rehydrates clean and must not run; always-run must run anyway.
+      expect(control.runs()).toBe(0);
+      expect(coordinator.runs()).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("persists no observation for identity-less registrations", async () => {
+    // Only doc-keyed observations persist: an action registered without
+    // rehydration identity (session-scoped effects like sinks/pull) can never
+    // be rehydrated, and a fallback pieceId would violate the doc→deriver
+    // keying the per-doc restore lists by (per-doc-rehydration.md §2).
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const { runtime } = testRuntime;
+      const observations: SchedulerActionObservation[] = [];
+      const originalEdit = runtime.edit.bind(runtime);
+      runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+        const actionTx = originalEdit(...args);
+        const originalSetSchedulerObservation = actionTx
+          .setSchedulerObservation?.bind(actionTx);
+        actionTx.setSchedulerObservation = (observation: unknown) => {
+          if (isSchedulerActionObservation(observation)) {
+            observations.push(observation);
+          }
+          originalSetSchedulerObservation?.(observation);
+        };
+        return actionTx;
+      }) as typeof runtime.edit;
+
+      let runs = 0;
+      const identityLessEffect = Object.assign(
+        function identityLessEffect() {
+          runs++;
+        },
+        { writes: [writeLink] },
+      );
+      runtime.scheduler.subscribe(identityLessEffect, {
+        reads: [readAddress],
+        shallowReads: [],
+        writes: [],
+      });
+
+      await runtime.scheduler.run(identityLessEffect);
+      expect(runs).toBe(1);
+      expect(observations).toEqual([]);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

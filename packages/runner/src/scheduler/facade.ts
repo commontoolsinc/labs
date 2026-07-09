@@ -186,8 +186,14 @@ type SchedulerRegisterOptions = {
   rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
   // Hold the action's initial run until its space finishes syncing (bounded by
   // timeoutMs), so a resumed re-derivation reads confirmed-loaded inputs
-  // instead of racing the data. The flag-off resume path; see runner.ts.
+  // instead of racing the data. Applies whenever the action did NOT rehydrate
+  // from a snapshot: the flag-off resume path, and the flag-on degrade path
+  // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
+  // "always-run": never rehydrate this action clean on resume — its run has
+  // instantiation side effects (starting child runs) that a clean skip would
+  // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  resumeMode?: "always-run";
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -516,12 +522,22 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    if (rehydrateFromStorage?.snapshotsByActionId) {
-      this.applyPreloadedInitialActionRehydration(
+    // Rehydration and the synced-hold are independent: apply the snapshot when
+    // one is preloaded for this action (unless the action declares it must
+    // always run on resume), and hold the initial run of any action that did
+    // NOT rehydrate. A snapshot miss thus degrades to the same synced-hold
+    // fresh run the flag-off path gets, instead of racing the data.
+    let rehydrated = false;
+    if (
+      rehydrateFromStorage?.snapshotsByActionId &&
+      options.resumeMode !== "always-run"
+    ) {
+      rehydrated = this.applyPreloadedInitialActionRehydration(
         action,
         rehydrateFromStorage.snapshotsByActionId,
       );
-    } else if (options.awaitSyncBeforeInitialRun) {
+    }
+    if (!rehydrated && options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
     return cancel;
@@ -691,13 +707,16 @@ export class Scheduler {
     return true;
   }
 
+  // Returns whether the action actually rehydrated from its snapshot; a miss
+  // (no snapshot for this actionId, fingerprint mismatch, malformed payload)
+  // leaves the action on the normal initial-run path.
   private applyPreloadedInitialActionRehydration(
     action: Action,
     snapshotsByActionId: ReadonlyMap<
       string,
       PersistedSchedulerObservationSnapshot
     >,
-  ): void {
+  ): boolean {
     // Engage the rehydration barrier for the duration of the apply: if
     // rehydrateActionFromObservation triggers a synchronous settle, no pull
     // seed may promote this resuming action before its status is restored.
@@ -711,10 +730,11 @@ export class Scheduler {
         this.rehydrateActionFromObservation(action, snapshot)
       ) {
         logger.debug("rehydrate/ok", () => []);
-        return;
+        return true;
       }
 
       logger.debug("rehydrate/fallback-run/no-match", () => []);
+      return false;
     } finally {
       this.initialRehydrationInFlight--;
     }

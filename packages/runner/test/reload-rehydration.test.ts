@@ -143,10 +143,11 @@ Deno.test("reload: resumed pattern rehydrates persisted observations", async () 
     await runtimeB.idle();
 
     expect(resultCellB.key("count").getAsQueryResult()).toBe(COUNT);
-    const { scope, id } = resultCellB.getAsNormalizedFullLink();
+    // Per-doc rehydration: ONE space-wide listing per resumed boot (no
+    // pieceId filter — descendants consume their own buckets from the same
+    // listing). See docs/specs/scheduler-v2/per-doc-rehydration.md §3.1.
     expect(snapshotQueries).toEqual([{
       ownerSpace: space,
-      pieceId: `${scope}:${id}`,
       processGeneration: 0,
     }]);
   } finally {

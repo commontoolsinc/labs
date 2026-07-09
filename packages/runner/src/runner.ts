@@ -600,6 +600,29 @@ export class Runner {
   // each child must never be durable before that child's target). Each call
   // re-supplies the full order rather than replacing it with just the latest
   // child + parent. Keyed weakly by transaction so it is reclaimed with the tx.
+  // Per-doc rehydration (docs/specs/scheduler-v2/per-doc-rehydration.md):
+  // one space-wide snapshot listing per resumed boot, bucketed per piece doc
+  // (`${scope}:${id}` of each piece's result cell). Descendants started with
+  // resume intent consume their own bucket synchronously at registration.
+  // Replaced by the next top-level resume load for the space; the in-flight
+  // map single-flights concurrent resumes onto one listing.
+  private resumeSnapshotsBySpace = new Map<
+    MemorySpace,
+    ReadonlyMap<
+      string,
+      ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    >
+  >();
+  private resumeSnapshotLoads = new Map<
+    MemorySpace,
+    Promise<
+      | ReadonlyMap<
+        string,
+        ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+      >
+      | undefined
+    >
+  >();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -1869,14 +1892,28 @@ export class Runner {
       // is synced so re-derivations read confirmed-loaded inputs.
       return awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {};
     }
+    // Per-doc restore: a piece started with resume intent (awaitSync) but no
+    // explicitly threaded snapshots — a sub-pattern node or a per-element
+    // child run — looks up its own bucket from the boot's space-wide listing,
+    // keyed by the doc it derives. See per-doc-rehydration.md §3.2.
+    const pieceId = `${scope}:${id}`;
+    const snapshots = snapshotsByActionId ??
+      (awaitSync
+        ? this.resumeSnapshotsBySpace.get(space)?.get(pieceId)
+        : undefined);
     return {
       rehydrateFromStorage: {
         space,
-        pieceId: `${scope}:${id}`,
+        pieceId,
         processGeneration: 0,
         ...(awaitSync ? { awaitSync: true } : {}),
-        ...(snapshotsByActionId !== undefined ? { snapshotsByActionId } : {}),
+        ...(snapshots !== undefined ? { snapshotsByActionId: snapshots } : {}),
       },
+      // Resume intent also arms the synced-hold: any action that does not
+      // rehydrate from a snapshot (miss, fingerprint mismatch, or an
+      // always-run coordinator) holds its initial run until the space syncs
+      // instead of racing the data — restoring flag-off parity for children.
+      ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
     };
   }
 
@@ -1889,56 +1926,94 @@ export class Runner {
     if (!getPersistentSchedulerStateConfig()) {
       return undefined;
     }
-
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const byPiece = await this.loadResumeSnapshotsForSpace(space);
+    return byPiece?.get(`${scope}:${id}`);
+  }
+
+  // One space-wide snapshot listing per resumed boot, bucketed per piece doc.
+  // Concurrent resumes of the same space share one in-flight listing; a later
+  // resume refreshes (replaces) the cached buckets. Descendant registrations
+  // read the cache synchronously via schedulerRehydrationOptions, so the
+  // resume phase stays "load once, then register" (spec §9.2) for the whole
+  // piece tree — no per-child async lookups.
+  private loadResumeSnapshotsForSpace(
+    space: MemorySpace,
+  ): Promise<
+    | ReadonlyMap<
+      string,
+      ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    >
+    | undefined
+  > {
+    const inFlight = this.resumeSnapshotLoads.get(space);
+    if (inFlight) return inFlight;
+
     const provider = this.runtime.storageManager.open(space);
     const listSnapshots = provider.listSchedulerActionSnapshots;
     if (!listSnapshots) {
-      return undefined;
+      return Promise.resolve(undefined);
     }
 
-    const snapshotsByActionId = new Map<
-      string,
-      PersistedSchedulerObservationSnapshot
-    >();
-    // A transient listing failure must degrade to "resume fresh" rather than
-    // hard-failing start(): returning undefined runs the piece without
-    // rehydrating persisted observations.
-    try {
-      let cursor: SchedulerActionSnapshotCursor | undefined;
-      do {
-        const page = await listSnapshots.call(provider, {
-          ownerSpace: space,
-          pieceId: `${scope}:${id}`,
-          processGeneration: 0,
-          ...(cursor ? { cursor } : {}),
-        });
-        for (const snapshot of page.snapshots) {
-          if (!isSchedulerActionObservation(snapshot.observation)) continue;
-          snapshotsByActionId.set(snapshot.observation.actionId, {
-            observation: snapshot.observation,
-            ...(snapshot.directDirtySeq !== undefined
-              ? { directDirtySeq: snapshot.directDirtySeq }
-              : {}),
-            ...(snapshot.staleSeq !== undefined
-              ? { staleSeq: snapshot.staleSeq }
-              : {}),
-            ...(snapshot.unknownReason !== undefined
-              ? { unknownReason: snapshot.unknownReason }
-              : {}),
+    const load = (async () => {
+      const byPiece = new Map<
+        string,
+        Map<string, PersistedSchedulerObservationSnapshot>
+      >();
+      // A transient listing failure must degrade to "resume fresh" rather
+      // than hard-failing start(): returning undefined runs the boot without
+      // rehydrating persisted observations.
+      try {
+        let cursor: SchedulerActionSnapshotCursor | undefined;
+        do {
+          const page = await listSnapshots.call(provider, {
+            ownerSpace: space,
+            processGeneration: 0,
+            ...(cursor ? { cursor } : {}),
           });
-        }
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
-    } catch (error) {
-      logger.warn(
-        "Failed to list scheduler rehydration snapshots; resuming fresh",
-        error,
-      );
-      return undefined;
-    }
+          for (const snapshot of page.snapshots) {
+            if (!isSchedulerActionObservation(snapshot.observation)) continue;
+            const { pieceId, actionId } = snapshot.observation;
+            let byAction = byPiece.get(pieceId);
+            if (!byAction) {
+              byAction = new Map();
+              byPiece.set(pieceId, byAction);
+            }
+            byAction.set(actionId, {
+              observation: snapshot.observation,
+              ...(snapshot.directDirtySeq !== undefined
+                ? { directDirtySeq: snapshot.directDirtySeq }
+                : {}),
+              ...(snapshot.staleSeq !== undefined
+                ? { staleSeq: snapshot.staleSeq }
+                : {}),
+              ...(snapshot.unknownReason !== undefined
+                ? { unknownReason: snapshot.unknownReason }
+                : {}),
+            });
+          }
+          cursor = page.nextCursor;
+        } while (cursor !== undefined);
+      } catch (error) {
+        logger.warn(
+          "Failed to list scheduler rehydration snapshots; resuming fresh",
+          error,
+        );
+        return undefined;
+      }
+      return byPiece;
+    })();
 
-    return snapshotsByActionId;
+    this.resumeSnapshotLoads.set(space, load);
+    load.then((byPiece) => {
+      // Failure degrades the WHOLE boot to resume-fresh: drop any stale cache
+      // so descendants do not rehydrate from a previous boot's listing.
+      if (byPiece) this.resumeSnapshotsBySpace.set(space, byPiece);
+      else this.resumeSnapshotsBySpace.delete(space);
+    }).finally(() => {
+      this.resumeSnapshotLoads.delete(space);
+    });
+    return load;
   }
 
   private async syncCellsForRunningPattern(
@@ -4211,6 +4286,9 @@ export class Runner {
     const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.useDeclaredReadsAsDependencies
       : false;
+    const builtinResumeMode = isRawBuiltinResult(builtinResult)
+      ? builtinResult.resumeMode
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -4291,6 +4369,9 @@ export class Runner {
       debounce,
       noDebounce,
       throttle,
+      ...(builtinResumeMode !== undefined
+        ? { resumeMode: builtinResumeMode }
+        : {}),
       ...schedulerRehydration,
     };
 
