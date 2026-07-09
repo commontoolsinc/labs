@@ -1,6 +1,11 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
+import {
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  isCfcFieldCommitment,
+} from "./label-representation.ts";
 
 /**
  * Atom pattern matching for the exchange-rule calculus (spec §4.3.3/§4.4.5,
@@ -64,6 +69,26 @@ const isMalformedVarBearingRecord = (value: unknown): boolean =>
   !isAtomVarPlaceholder(value);
 
 /**
+ * A pattern is CONCRETE when it contains no variable placeholders (and no
+ * malformed var-bearing records) anywhere. Only a concrete pattern may
+ * digest-match a committed field (inv-12 Stage 1 same-form matching): the
+ * digest of a pattern with holes is meaningless, and a variable cannot see
+ * inside a commitment.
+ */
+const patternIsConcrete = (pattern: unknown): boolean => {
+  if (Array.isArray(pattern)) return pattern.every(patternIsConcrete);
+  if (isRecord(pattern)) {
+    if (Object.hasOwn(pattern, "var")) return false;
+    // An explicit-`undefined` field is the absence-requirement form — a
+    // shape constraint, not a value — so the pattern is not concrete.
+    return Object.values(pattern).every((field) =>
+      field !== undefined && patternIsConcrete(field)
+    );
+  }
+  return true;
+};
+
+/**
  * Matches `value` against `pattern` under `bindings`, returning the extended
  * bindings or `null`. Placeholders bind; a placeholder whose variable is
  * already bound unifies (structural equality with the prior binding) — the
@@ -89,12 +114,40 @@ const matchPatternValue = (
   }
   if (isAtomVarPlaceholder(pattern)) {
     if (Object.hasOwn(bindings, pattern.var)) {
-      return deepEqual(bindings[pattern.var], value) ? bindings : null;
+      // Unification of an already-bound variable is commitment-aware
+      // (inv-12 Stage 1 same-form matching): a variable bound to plaintext
+      // from one atom digest-compares against another atom's committed
+      // field — the binding comparison evidence correlation relies on,
+      // extended across representation forms. Plain values reduce to the
+      // previous deepEqual.
+      return commitmentAwareEquals(bindings[pattern.var], value)
+        ? bindings
+        : null;
+    }
+    // A variable does NOT take a fresh binding from a committed field
+    // (inv-12 Stage 1): the plaintext is not recoverable from the digest,
+    // so a rule needing a variable over the field simply does not fire —
+    // the fail-closed direction (spec §4.6.4.1: an unevaluable release
+    // does not happen).
+    if (isCfcFieldCommitment(value)) {
+      return null;
     }
     return { ...bindings, [pattern.var]: value };
   }
   if (isMalformedVarBearingRecord(pattern)) {
     return null;
+  }
+  // A committed VALUE field (inv-12 Stage 1): a fully CONCRETE pattern
+  // matches iff the pattern value's canonical digest equals the commitment
+  // (same-form matching — the pattern side is digested and compared, the
+  // committed side never opens). A pattern still carrying variables cannot
+  // see inside the digest and matches nothing (fail closed). Checked before
+  // the array/record arms so a marker is never subset-matched as an
+  // ordinary record.
+  if (isCfcFieldCommitment(value)) {
+    return patternIsConcrete(pattern) && commitmentAwareEquals(pattern, value)
+      ? bindings
+      : null;
   }
   if (Array.isArray(pattern)) {
     if (!Array.isArray(value) || value.length !== pattern.length) {
@@ -352,11 +405,25 @@ const isOrderedExpiresAtom = (value: unknown): value is ExpiresAtom =>
  * CLOSED — no structural-similarity heuristics, no cross-family order. A
  * malformed `Expires` (missing/non-finite timestamp) has no order and only
  * entails its structural equal.
+ *
+ * Commitment forms (inv-12 Stage 1, spec §4.6.4.1 same-form matching): an
+ * atom whose classified fields were persisted as `{digestOf}` markers
+ * denotes the same principal as its plaintext form, so equality extends
+ * across the marker — the plaintext side is digested and compared. This is
+ * what lets read gating satisfy a committed `User.subject` clause by
+ * digesting the acting reader. Guarded by a containment pre-check so the
+ * dominant all-plaintext mismatch path stays a single deepEqual.
  */
 export const atomEntails = (a: unknown, b: unknown): boolean => {
   if (deepEqual(a, b)) return true;
   if (isOrderedExpiresAtom(a) && isOrderedExpiresAtom(b)) {
     return a.timestamp <= b.timestamp;
+  }
+  if (
+    (containsCfcFieldCommitment(a) || containsCfcFieldCommitment(b)) &&
+    commitmentAwareEquals(a, b)
+  ) {
+    return true;
   }
   return false;
 };
