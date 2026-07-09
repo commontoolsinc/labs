@@ -57,14 +57,14 @@ export class CFMarkdown extends BaseElement {
         display: block;
         box-sizing: border-box;
         /* Keep the host within its container so a wide table scrolls inside
-         * the .table-scroll wrapper instead of blowing the host out. Two
-         * cases: as a normal block, max-width:100% is a no-op; as a
-         * non-stretched flex child (e.g. inside a cf-vstack with
-         * align-items:flex-start), max-width caps the host at the column width
-         * — otherwise the host grows to the table's content width and gets
-         * clipped by an ancestor (cf-screen sets overflow-x:hidden) with no
-         * scroll. min-width:0 lets it shrink below content in the flex main
-         * axis for the same reason. */
+        * the .table-scroll wrapper instead of blowing the host out. Two
+        * cases: as a normal block, max-width:100% is a no-op; as a
+        * non-stretched flex child (e.g. inside a cf-vstack with
+        * align-items:flex-start), max-width caps the host at the column width
+        * — otherwise the host grows to the table's content width and gets
+        * clipped by an ancestor (cf-screen sets overflow-x:hidden) with no
+        * scroll. min-width:0 lets it shrink below content in the flex main
+        * axis for the same reason. */
         min-width: 0;
         max-width: 100%;
         font-family: var(
@@ -331,8 +331,8 @@ export class CFMarkdown extends BaseElement {
 
       /* Tables */
       /* Scroll container so a wide table scrolls horizontally instead of
-       * cramming its columns on narrow (mobile) screens. Injected around every
-       * <table> by _wrapTablesForScroll. */
+      * cramming its columns on narrow (mobile) screens. Injected around every
+      * <table> by _wrapTablesForScroll. */
       .markdown-content .table-scroll {
         overflow-x: auto;
         max-width: 100%;
@@ -343,8 +343,8 @@ export class CFMarkdown extends BaseElement {
       .markdown-content table {
         border-collapse: collapse;
         /* Fill the available width, but grow past it when the per-column
-         * minimum widths demand more room — at which point .table-scroll
-         * scrolls rather than the columns collapsing. */
+        * minimum widths demand more room — at which point .table-scroll
+        * scrolls rather than the columns collapsing. */
         width: auto;
         min-width: 100%;
         margin: 0;
@@ -356,8 +356,8 @@ export class CFMarkdown extends BaseElement {
         padding: 0.5em 1em;
         text-align: left;
         /* Keep columns readable; below this they'd collapse into the cramped
-         * grid this fix exists to prevent. Content still wraps within a
-         * column. Tunable per context via --cf-markdown-table-col-min-width. */
+        * grid this fix exists to prevent. Content still wraps within a
+        * column. Tunable per context via --cf-markdown-table-col-min-width. */
         min-width: var(--cf-markdown-table-col-min-width, 10rem);
       }
 

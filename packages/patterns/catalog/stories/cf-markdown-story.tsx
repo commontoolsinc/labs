@@ -42,11 +42,13 @@ console.log(greeting);
         <cf-markdown content={content} />
         <cf-markdown content={wideTable} />
 
-        {/* Reproduce the Mobile Loom ancestry: a fixed-width column that lays
+        {
+          /* Reproduce the Mobile Loom ancestry: a fixed-width column that lays
             its children out with flex-start (so the host is not stretched) and
             clips horizontal overflow the way cf-screen does. This is the case
             where the host's `min-width: 0` matters — without it the wide table
-            would push this column wide and get clipped instead of scrolling. */}
+            would push this column wide and get clipped instead of scrolling. */
+        }
         <div
           style={{
             marginTop: "1.5rem",
@@ -58,7 +60,9 @@ console.log(greeting);
             overflowX: "hidden",
           }}
         >
-          <div style={{ fontSize: "12px", color: "#6b7280", padding: "4px 8px" }}>
+          <div
+            style={{ fontSize: "12px", color: "#6b7280", padding: "4px 8px" }}
+          >
             360px clipped flex column (Mobile Loom ancestry)
           </div>
           <cf-markdown content={wideTable} />

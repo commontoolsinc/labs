@@ -78,7 +78,9 @@ describe("cf-markdown", () => {
     // instead of cramming its columns.
     expect(rendered).toContain('<div class="table-scroll">');
     // The wrapper opens before the table and closes after it.
-    expect(rendered).toMatch(/<div class="table-scroll"><table[\s\S]*<\/table><\/div>/);
+    expect(rendered).toMatch(
+      /<div class="table-scroll"><table[\s\S]*<\/table><\/div>/,
+    );
   });
 
   it("should get content value from string", () => {
