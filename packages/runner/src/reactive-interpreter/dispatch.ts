@@ -347,7 +347,9 @@ export function planInterpreterDispatch(
       `[ri2] interpret: nodes=${pattern.nodes.length} ` +
         `collapsed=${collapsed.size} segments=${
           nodes.length - part.boundaries.length
-        } boundaries=${part.boundaries.length}`,
+        } boundaries=${part.boundaries.length} controlsFused=${
+          controlPlan?.fused.size ?? 0
+        } gated=${controlPlan?.gated.size ?? 0}`,
     );
   }
   return { kind: "interpret", nodes };
