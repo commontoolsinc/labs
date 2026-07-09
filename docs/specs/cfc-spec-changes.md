@@ -374,10 +374,17 @@ D4 mechanism; (2) a MAY profile for span-attributed provenance: runtime-
 bracketed span tags on the activity record, per-write feeds-closure over
 observed span edges, sound only where the executor structurally enforces span
 non-interference — interpreter-class executors under §18.7-style obligations
-(specs#11), other executors only behind the §8.9.1 `flow-taint-precision`
-gate. States that the egress ceiling / flow join / floor credit MAY upgrade
-from transaction-global where the profile is enforced (upgrades SC-23's
-boundaries (a)/(b) from deliberate to staged). `open`.
+(specs#11); sandboxed executors under the **instance rule** (the span is the
+executor instance: executions sharing a live user-code instance share one
+span; per-run instantiation recovers per-run spans) plus SES-closed
+cross-instance channels and a commit-time observed-vs-attributed consistency
+check — **no trusted static analysis assumed anywhere**; violations surface
+as late errors (prefix fallback / commit rejection), never unsoundness. Bare
+opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
+remains only for semantic claims beyond runtime structure. States that the
+egress ceiling / flow join / floor credit MAY upgrade from transaction-global
+where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
+deliberate to staged). `open`.
 
 **SC-25 [normative] Cross-space label-metadata representation classes —
 §4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
@@ -412,8 +419,10 @@ content-addressed, fail-closed point-query resolution per §4.9.3, consumed
 via a `policyState` exchange-rule guard kind, revocable, digest-bound into
 the evaluation) and 2b (the rewrite event proper: intent-gated per §6.5 +
 §3.8.4, authority-verified per §8.10.5.2, requires a declared-component
-monotonicity gate to exist first, event record with canonical clause-digest
-identity in a ledger outside the churn-free envelope). Guidance refines to:
+monotonicity gate to exist first, event record = a create-only document
+causal to the consumed intent's id — the shipped `commitPreconditions`
+receipt discipline — with canonical clause-digest identity, outside the
+churn-free envelope). Guidance refines to:
 2a when revocable or policy-derived; 2b only when the widening must survive
 without evaluation (export/publish). Unconflate the §13 table row. `open`.
 

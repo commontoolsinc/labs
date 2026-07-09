@@ -146,27 +146,52 @@ record:
   auditable. This doc adopts that framing verbatim rather than re-arguing the
   prefix doc's "no trust gate" conclusion for spans: the prefix needs no gate
   because journal order alone carries it; spans need the §18.7-class gate
-  because non-interference does not come from the journal.
-- Where the executor is **opaque user JS** (handlers via `events.ts`, legacy
-  per-node actions, RI `leaf` ops beyond their declared structured input),
-  non-interference is unattested. Span tags from such code MUST NOT narrow
-  labels; the gate ignores them (falls back to prefix). If a deployment wants
-  precision there anyway, §8.9.1 already prices it: trust the specific
-  implementation identity for `flow-taint-precision` — per identity, per
-  user, never ambient.
-- A **trusted compiler/transformer** (§14.4.4) that verifies element-locality
-  of code it compiled may stamp spans on that code's behalf; the claim rides
-  the *compiler's* identity. This is the ts-transformers seam, future work.
+  because non-interference does not come from the journal. (The interpreter
+  is exempt from the instance rule below — by instance-is-the-span logic
+  every interpreted op shares the interpreter and would merge into one span;
+  the exemption is exactly what trusting the runtime's own executor means,
+  and §18.7's obligations are what make that self-trust auditable.)
+- For **sandboxed user code** (RI `leaf` ops, compiled pattern nodes) no
+  analysis is needed — and none is available: we have no trusted static
+  analysis, so the design must not require one. The workaround is a pure
+  bookkeeping rule: **the span is the executor instance.** State can flow
+  freely inside a live module instance (a closure or module-interior object
+  survives across calls), so all executions sharing an instance share one
+  span — the record says what the heap permits. Per-run spans are recovered
+  by per-run instantiation where the dispatcher chooses to pay for it. The
+  runtime already knows which instance ran; no code property is assumed.
+  Around that rule, the sandbox's existing structure closes the remaining
+  channels: SES lockdown freezes intrinsics and shared globals (no ambient
+  cross-instance heap), and outputs are serializable data through the
+  transaction (function-bearing values are rejected), so cross-**instance**
+  flow is tx-visible — producer edges the closure already follows. A
+  commit-time consistency check completes it: an execution observed touching
+  activity outside its bracket attribution voids its span, and the write
+  falls back to the prefix. The trade is exactly **late errors for static
+  assurance**: without an analyzer, an author learns about a precision
+  violation as a commit-time prefix fallback or gate rejection instead of a
+  compile-time diagnostic — never as unsoundness.
+- **Opaque handlers** (`events.ts`) have no bracket at all: no spans, prefix
+  throughout. Unchanged from shipped behavior.
+- The §8.9.1 `flow-taint-precision` grant remains the spec's mechanism for
+  claims that *exceed* runtime structure (semantic dependency claims of the
+  §8.5.4.1 kind). This design requires none: every narrowing above is either
+  TCB-observed or instance-structural. Static analysis (§14.4.4), if it ever
+  becomes trusted, adds authoring-time diagnostics and per-run-instance
+  elision — an optimization, not a prerequisite.
 
 ### 3.4 Tier table
 
-| Tier | Executor | Mechanism | Trust surface |
+| Tier | Executor | Mechanism | Trust surface / failure mode |
 |---|---|---|---|
 | T0 (shipped) | any | last-overlapping-write prefix | none — journal order |
-| T1 | reactive interpreter | span closure §3.2 | interpreter identity trusted for `flow-taint-precision`, under §18.7 structural obligations |
-| T2 | opaque JS granted precision | span closure, unverified isolation | per-implementation `flow-taint-precision` grant (§8.9.1), explicit and rare |
-| T2′ | compiled patterns | compiler-asserted spans | compiler identity (§14.4.4) |
+| T1 | reactive interpreter | span closure §3.2, per-op brackets | interpreter identity under §18.7 structural obligations (runtime self-trust, auditable) |
+| T2 | sandboxed user code | span = executor instance (merge-on-sharing) + SES-closed channels + commit-time consistency check | none upfront — violations surface as **late errors** (prefix fallback / commit rejection), never unsoundness |
 | — | any, when affordable | true per-element transactions | none — §8.5.4.3 decomposition (preferred where the tx tax is acceptable) |
+
+(A per-implementation `flow-taint-precision` grant, §8.9.1, remains the
+spec's escape for semantic claims beyond runtime structure; no tier here
+needs it, and no trusted static analysis is assumed anywhere.)
 
 T1 is the payoff tier: the interpreter is where execution is consolidating,
 `runScoped` exists, and the IR's explicit `inputs`/`writeTargets` edges make

@@ -95,9 +95,14 @@ Properties inherited for free:
   could consume it (B5's `PreparedDigestInput.policySnapshot`).
 - **Audit**: grants are ordinary docs — enumerable per space at the reserved
   path, with history.
-- **Single-use releases**: a grant consumed at a commit point claims a §6.5
-  consumed cell (`refer({grantConsumed: {grantId}})`) — the attempt-cell
-  contract verbatim, when that substrate ships; standing grants simply never
+- **Single-use releases**: a grant consumed at a commit point claims a
+  create-only receipt document causal to the grant id — the shipped
+  exactly-once discipline (`experimental.commitPreconditions`: the event
+  path already mints the handler result cell from the durable event id via
+  `{resultFor: cause}` + `markCreateOnly`, and a duplicate handling dies as
+  a `receipt-exists` permanent rejection, `runner.ts` /
+  `scheduler/events.ts`). A consuming release claims
+  `{grantConsumed: {grantId}}` the same way; standing grants simply never
   consume.
 
 ### 2.3 Soundness conditions (each red-first-testable)
@@ -150,7 +155,9 @@ rewrite event:
    trusted-builtin writer verifying authority directly → grant → release on
    read; the §13.4.3 verification list minus the intent-evidence rows, which
    strengthen when intents land.
-5. Single-use grants (blocked on §6.5 consumed-cell substrate).
+5. Single-use grants — the receipt discipline exists behind
+   `experimental.commitPreconditions`; blocked only on that flag's
+   maturation, not on new machinery.
 
 Dependency note: (1)+(2) are B2b-adjacent — the same reserved-path,
 content-addressed, verify-on-read machinery. If B2b is built first, grants
@@ -164,11 +171,18 @@ When a widening must survive without evaluation (§2.4), route 2 proper: an
 in-place widening of the **declared** component, executed as a
 declassification event. Contract, if and when built:
 
-1. **Intent-gated**: requires a consumed `IntentOnce` (§6.5) whose parameters
+1. **Intent-gated**: requires a consumed single-use intent whose parameters
    (target doc, clause, added audience) carry integrity per §3.8.4 robust
    declassification — release scope/destination/audience are
-   integrity-sensitive parameters. **Hard dependency: the intent substrate,
-   which does not exist in the runner today.**
+   integrity-sensitive parameters. The **consumption half of this substrate
+   is shipped** (scheduler-v2 §7.6 / decision 13, flag
+   `experimental.commitPreconditions`): a durable event id rides the handler
+   transaction (`tx.dispatchedEventId`), every id minted in the handler
+   frame derives causally from it, and a create-only receipt cell is the
+   exactly-once witness — duplicate handlings collide as `receipt-exists`
+   permanent rejections. What is still missing is the **refinement/evidence
+   half** of §6: the `IntentEvent → IntentOnce` chain, gesture-provenance
+   binding to rendered state, and the bounded-retry attempt-cell ledger.
 2. **Policy-guarded**: the acting principal's authority over the target
    clause verified exactly as a grant writer would (inv-7), plus §8.10.5.2 —
    a broader audience is a new release judgment with its own evidence.
@@ -179,13 +193,16 @@ declassification event. Contract, if and when built:
    event) before the exception, or the "never an ordinary write" clause is
    unenforced prose.
 4. **The event record**, adjacent to but not inside the `["cfc"]` envelope
-   (SC-11 keeps envelopes churn-free and version-neutral; an event wants an
-   ordered, revision-bumping ledger): a content-addressed record at the
-   reserved path, `{doc, path, clauseDigest, priorLabelDigest,
-   newLabelDigest, actingPrincipal, intentId, at}` — clause identity by
-   canonical clause digest (clause *indices* are evaluation-ephemeral; the
-   shipped `RuleFiring.clauseIndex` is explicitly firing-time-only and
-   under-records for this purpose).
+   (SC-11 keeps envelopes churn-free and version-neutral): a **create-only
+   document causal to the consumed intent's id** — the shipped receipt
+   discipline reused, which gives the record ordinary journaling, atomic
+   exactly-once creation (a re-run of the declassification collides as
+   `receipt-exists`), and attribution through the normal write path, with
+   the envelope untouched. Contents: `{doc, path, clauseDigest,
+   priorLabelDigest, newLabelDigest, actingPrincipal, intentId, at}` —
+   clause identity by canonical clause digest (clause *indices* are
+   evaluation-ephemeral; the shipped `RuleFiring.clauseIndex` is explicitly
+   firing-time-only and under-records for this purpose).
 5. **Tighten-back is legal, un-widening is not retroactive**: a later
    monotone tightening (§8.12.5) may re-narrow the label, but reads served
    between event and tightening were released — the event is a real
@@ -205,8 +222,11 @@ Build **grants** when a product surface needs durable sharing (the share UI,
 group-membership beyond space ACLs) — B2b-adjacent, no blockers beyond the
 evaluator extension. Build the **rewrite event** only when all hold: (a) a
 real export/publish/portability requirement that grants demonstrably cannot
-serve; (b) the §6.5 intent substrate exists (IntentOnce + consumed cells);
-(c) the declared-component monotonicity gate (§4.3) has shipped and soaked.
+serve; (b) the §6 refinement/evidence half exists on top of the shipped
+receipt discipline (the `IntentEvent → IntentOnce` chain and
+gesture-provenance binding — the consumption half is already behind
+`experimental.commitPreconditions`); (c) the declared-component monotonicity
+gate (§4.3) has shipped and soaked.
 Until then, "publish" is served by route 3 (copy-forward), which is honest
 about being a new value.
 
@@ -245,7 +265,14 @@ query, `HasRole` mint), B6 sanitizer discharge-onto-new-value
 (processed/consumed/attempt cells — spec-only in the runner today);
 `08-10-validation-at-boundaries.md` §8.10.5.2/§8.10.6 (audience expansion is
 a new release judgment); `13-worked-examples.md` §13.4.3–.4 (ShareGrant +
-consuming rule); merged §4.9.3 (HasRole fact generation). Labs-side: Epic B
-decision 1 (`docs/plans/cfc-future-work-implementation.md`), CT-1874
+consuming rule); merged §4.9.3 (HasRole fact generation). Exactly-once
+substrate (scheduler-v2 §7.6 / decision 13, flag
+`experimental.commitPreconditions`): durable event id on the handler tx
+(`scheduler/events.ts` `tx.dispatchedEventId = queuedEvent.id`), handler
+frame cause derived from it (`runner.ts` — "every id minted in this frame
+derives from the durable event id"), create-only receipt cell
+`{resultFor: cause}` + `markCreateOnly` as the exactly-once witness,
+`receipt-exists` permanent rejection (`scheduler/events.ts`). Labs-side:
+Epic B decision 1 (`docs/plans/cfc-future-work-implementation.md`), CT-1874
 (home-clause constraint), [`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md)
 (grant records as label-adjacent metadata).
