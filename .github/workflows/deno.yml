@@ -262,30 +262,13 @@ jobs:
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      # The cache file exists on disk iff the restore found something (primary
-      # key or restore key); any restore implies the fingerprint hash is
-      # unchanged, so cold := file absent. The combined actions/cache action
-      # only exposes cache-hit (exact match), not the matched key, so file
-      # presence is the restore signal. perf-check reads these artifacts to
-      # tag the run's compile cache state.
-      - name: 🧾 Record compile cache state
-        env:
-          CACHE_FILE: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
-          EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
-        run: |
-          mkdir -p cache-state
-          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
-          printf '{"family":"generated-patterns","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
-            '${{ matrix.shard }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
-            > cache-state/generated-patterns-${{ matrix.shard }}.json
-
-      - name: 📤 Upload compile cache state
-        uses: actions/upload-artifact@v7
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
         with:
-          name: cache-state-generated-patterns-${{ matrix.shard }}
-          path: cache-state/
-          retention-days: 90
-          if-no-files-found: error
+          family: generated-patterns
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -604,30 +587,13 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      # The cache file exists on disk iff the restore found something (primary
-      # key or restore key); any restore implies the fingerprint hash is
-      # unchanged, so cold := file absent. The combined actions/cache action
-      # only exposes cache-hit (exact match), not the matched key, so file
-      # presence is the restore signal. perf-check reads these artifacts to
-      # tag the run's compile cache state.
-      - name: 🧾 Record compile cache state
-        env:
-          CACHE_FILE: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
-        run: |
-          mkdir -p cache-state
-          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
-          printf '{"family":"pattern-integration","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
-            '${{ matrix.shard }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
-            > cache-state/pattern-integration-${{ matrix.shard }}.json
-
-      - name: 📤 Upload compile cache state
-        uses: actions/upload-artifact@v7
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
         with:
-          name: cache-state-pattern-integration-${{ matrix.shard }}
-          path: cache-state/
-          retention-days: 90
-          if-no-files-found: error
+          family: pattern-integration
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -781,30 +747,13 @@ jobs:
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 
-      # The cache file exists on disk iff the restore found something (primary
-      # key or restore key); any restore implies the fingerprint hash is
-      # unchanged, so cold := file absent. The combined actions/cache action
-      # only exposes cache-hit (exact match), not the matched key, so file
-      # presence is the restore signal. perf-check reads these artifacts to
-      # tag the run's compile cache state.
-      - name: 🧾 Record compile cache state
-        env:
-          CACHE_FILE: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
-          EXACT_HIT: ${{ steps.compile-cache.outputs.cache-hit }}
-        run: |
-          mkdir -p cache-state
-          if [ -f "$CACHE_FILE" ]; then MATCHED_KEY=restored; else MATCHED_KEY=; fi
-          printf '{"family":"pattern-unit","shard":"%s","matchedKey":"%s","exactHit":%s}\n' \
-            '${{ matrix.chunk }}' "$MATCHED_KEY" "${EXACT_HIT:-false}" \
-            > cache-state/pattern-unit-${{ matrix.chunk }}.json
-
-      - name: 📤 Upload compile cache state
-        uses: actions/upload-artifact@v7
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
         with:
-          name: cache-state-pattern-unit-${{ matrix.chunk }}
-          path: cache-state/
-          retention-days: 90
-          if-no-files-found: error
+          family: pattern-unit
+          shard: ${{ matrix.chunk }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
