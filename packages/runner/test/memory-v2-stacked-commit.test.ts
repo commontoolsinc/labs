@@ -14,9 +14,9 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   type EntityDocument,
-  getMemoryProtocolFlags,
   type PatchOp,
   resetPersistentSchedulerStateConfig,
+  type SessionSync,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
@@ -41,22 +41,16 @@ import type {
 } from "../src/storage/interface.ts";
 import {
   NotificationRecorder,
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
   testSessionOpenAuthFactory,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const helloOk = () => ({
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const);
 const testReconstructionContext = new EmptyReconstructionContext(
   true,
   "no cell reconstruction in stacked commit transport",
@@ -359,64 +353,37 @@ class ScriptedServerModel {
   }
 }
 
-class ScriptedModelTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
-
-  constructor(readonly model: ScriptedServerModel) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+class ScriptedModelTransport extends ScriptedSessionTransport {
+  constructor(readonly model: ScriptedServerModel) {
+    super({ name: "stacked", sessionId: model.sessionId, space });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override openServerSeq(): number {
+    return this.model.serverSeq;
   }
 
-  send(payload: string): Promise<void> {
-    const message = valueFromJson(
+  protected override onHello(): void {
+    this.model.connectionCount += 1;
+  }
+
+  // The commit payloads carry full FabricValues; decode with a context that
+  // FAILS on cell reconstruction rather than the default memory context.
+  protected override decode(payload: string): ScriptedTransportMessage {
+    return valueFromJson(
       payload,
       testReconstructionContext,
-    ) as {
-      type: string;
-      requestId?: string;
-      session?: { sessionId?: string };
-      invocation?: { aud?: unknown; challenge?: unknown };
-      commit?: ClientCommit;
-    };
+    ) as ScriptedTransportMessage;
+  }
+  protected override encode(message: unknown): string {
+    return jsonFromValue(message as FabricValue);
+  }
 
+  // The harness owns teardown; closing the session must not signal a
+  // disconnect (which would trigger client reconnect churn mid-assertion).
+  protected override onClose(): void {}
+
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.model.connectionCount += 1;
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `stacked-hello-${this.model.connectionCount}`,
-        );
-        this.respond({
-          ...helloOk(),
-          sessionOpen: this.#sessionOpen,
-        });
-        break;
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `stacked-open-${++this.#sessionOpenCount}`,
-        );
-        this.respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: message.session?.sessionId ?? this.model.sessionId,
-            serverSeq: this.model.serverSeq,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        break;
       case "session.watch.set":
       case "session.watch.add":
         // Registers the watch but returns an empty sync: the harness NEVER
@@ -438,31 +405,22 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
           },
         });
         break;
-      case "session.ack":
-        this.respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: this.model.serverSeq,
-          },
-        });
-        break;
       case "transact": {
+        const commit = message.commit as ClientCommit;
         // Receipt-time bookkeeping: `transactLocalSeqs` records that a commit
         // reached the server even while its verdict is still gated. The
         // cascade tests (and the stress bookkeeping) use it to distinguish
         // "sent, verdict in flight" from "never sent".
-        this.model.transactLocalSeqs.push(message.commit!.localSeq);
-        const responseGate = message.commit
-          ? this.model.scripted.get(message.commit.localSeq)?.responseGate
-          : undefined;
+        this.model.transactLocalSeqs.push(commit.localSeq);
+        const responseGate = this.model.scripted.get(
+          commit.localSeq,
+        )?.responseGate;
         setTimeout(() => {
           void (async () => {
             await responseGate;
-            const commit = message.commit!;
             const response = this.model.transact(commit);
             if (response.type === "drop") {
-              this.#closeReceiver(new Error("disconnect"));
+              this.disconnect(new Error("disconnect"));
               return;
             }
             this.respond({
@@ -479,11 +437,6 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
-    return Promise.resolve();
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
   }
 
   /**
@@ -493,32 +446,23 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
    * when subscription catch-up arrives relative to commit verdicts.
    */
   pushSync(options: PushSyncOptions): void {
-    this.respond({
-      type: "session/effect",
-      space,
-      sessionId: this.model.sessionId,
-      effect: {
-        type: "sync",
-        fromSeq: this.model.serverSeq,
-        toSeq: this.model.serverSeq,
-        ...(options.caughtUpLocalSeq !== undefined
-          ? { caughtUpLocalSeq: options.caughtUpLocalSeq }
-          : {}),
-        upserts: (options.upserts ?? []).map((upsert) => ({
-          branch: "",
-          id: upsert.id,
-          seq: upsert.seq,
-          ...(upsert.deleted === true
-            ? { deleted: true as const }
-            : { doc: { value: upsert.value } }),
-        })),
-        removes: [],
-      },
-    });
-  }
-
-  private respond(message: unknown): void {
-    this.#receiver(jsonFromValue(message as FabricValue));
+    this.emitSync({
+      type: "sync",
+      fromSeq: this.model.serverSeq,
+      toSeq: this.model.serverSeq,
+      ...(options.caughtUpLocalSeq !== undefined
+        ? { caughtUpLocalSeq: options.caughtUpLocalSeq }
+        : {}),
+      upserts: (options.upserts ?? []).map((upsert) => ({
+        branch: "",
+        id: upsert.id,
+        seq: upsert.seq,
+        ...(upsert.deleted === true
+          ? { deleted: true as const }
+          : { doc: { value: upsert.value } }),
+      })),
+      removes: [],
+    } as SessionSync);
   }
 }
 
