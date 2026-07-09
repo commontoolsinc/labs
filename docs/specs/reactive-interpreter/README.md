@@ -689,13 +689,16 @@ and `measure-map.test.ts`):
 | (fused control, §7.1) | actions per predicate flip | 15 | 2 | −87% |
 | | actions per untaken-branch write | 0 | 0 | parity |
 
-Engagement on the authored corpus: ~71% of patterns interpret, ~59% of
-node-ops collapse. Integration suites are flat-to-slightly-faster (fixed compile/
-sync costs dominate their wall time); the multi-user chat simulation is
-~3% faster and, critically, free of the cross-space pull-amplification pathology
-that an earlier meta-node design hit (~226–270× timeouts). The metric that
-matters most at scale is the document count — storage, sync traffic, and
-conflict surface — which the −56% on lists directly reduces.
+Engagement on the authored corpus (the 87-file pattern-test run, flag-on):
+224 interpret decisions with **60% of node-ops collapsed**, and control
+emission engages broadly — **764 controls fused across 128 instantiations,
+with 1,254 branch-gated ops** whose alias writes (documents) are elided.
+Integration suites are flat-to-slightly-faster (fixed compile/sync costs
+dominate their wall time); the multi-user chat simulation is flat and,
+critically, free of the cross-space pull-amplification pathology that an
+earlier meta-node design hit (~226–270× timeouts). The metric that matters
+most at scale is the document count — storage, sync traffic, and conflict
+surface — which the −56% on lists and the gated-op elision directly reduce.
 
 Outputs are asserted byte-equal to legacy across the differential, scope,
 transient-collection, and coverage suites; the root test suite is green under

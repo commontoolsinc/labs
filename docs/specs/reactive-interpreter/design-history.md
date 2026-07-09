@@ -426,6 +426,21 @@ subscription/trigger-count differential, not a result differential.
   machinery is calibrated for straight-line predicates; the pointwise
   oracle disagreed. Map coordinators, transient collections, and inlined
   children take the unlock.
+- **D-CONTROL-HANDLE-WRITES-UNROUTED — a forwarded link is written at the
+  alias's own scope, never scope-routed.** The pattern corpus flag-on run
+  tripped the `expectNonIdempotent` checker on 7 tests: per-op scope routing
+  wrote retained handles at their derived (session) scope, so the FIRST
+  write minted a write-redirect at the alias and an identical re-run wrote
+  the link through the now-existing redirect — a state-dependent write
+  encoding for one logical value. Legacy never routes its result-link write
+  (raw builtins don't thread narrowestReadScope); the link's TARGET carries
+  the narrow scope and readers narrow at deref. Handle writes now pin
+  `outScopes` to "space"; value-materialized outputs keep per-op routing
+  (their doc carries the scoped data). Two lessons folded in: the
+  idempotency checker is an ORACLE for write-encoding determinism, not just
+  for accumulator bugs; and the pattern corpus exercises real shapes (a
+  parent minting sub-patterns whose fused controls forward argument-path
+  links) that no runner unit fixture had.
 - **L-MERGE-BREAKS-YOUR-ORACLES — a catch-up merge can invalidate flag-on
   assumptions the same day they're formed.** Mid-build, the three pointwise
   filter failures bisected NOT to the control work but to that morning's
