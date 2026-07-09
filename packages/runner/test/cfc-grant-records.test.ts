@@ -628,6 +628,13 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
+    // The mergeable-op path (push/increment/…) cannot bypass the gate: the
+    // storage layer refuses a mergeable op on a document this transaction has
+    // not already written ("target is not writable"), and that prior write
+    // goes through the gated write chokepoint above. recordMergeableOp still
+    // calls noteSystemWrite as defense-in-depth should that structural
+    // precondition ever loosen.
+
     it("records a diagnostic and allows the write in observe mode", async () => {
       await withRuntime({ enforcement: "observe" }, async (runtime) => {
         const tx = runtime.edit();

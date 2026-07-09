@@ -1108,7 +1108,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
-    this.tx.recordMergeableOp?.(toMemorySpaceAddress(link), delta);
+    const address = toMemorySpaceAddress(link);
+    // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
+    // write. The ["cfc"]-path arm is structurally unreachable here (a
+    // NormalizedFullLink always yields a value-rooted storage path), but the
+    // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
+    // path must not slip an unprivileged grant mutation past the gate.
+    this.noteSystemWrite(address);
+    this.tx.recordMergeableOp?.(address, delta);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
