@@ -923,6 +923,32 @@ export function normalizeAndDiff(
     // Get current array for precomputing child values (if it was an array)
     const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
 
+    // On GROWTH the length change must precede the element writes: applying
+    // a slot write beyond the current end auto-extends the array, turning a
+    // later length write into a no-op the write layer elides from the
+    // journal — write-detail consumers (flow-label clear/re-stamp of the
+    // ["length"] entries) would never see the length change, fossilizing
+    // its labels at whatever join first stamped them. The shrink direction
+    // is the opposite (deletes first, length last) — see below.
+    if (
+      Array.isArray(currentValue) && newValue.length > currentValue.length
+    ) {
+      const lub = (link.schema !== undefined)
+        ? runtime.cfc.lubSchema(link.schema)
+        : undefined;
+      const lengthSchema = (lub !== undefined)
+        ? { type: "number", ifc: { confidentiality: lub } } as JSONSchema
+        : { type: "number" } as JSONSchema;
+      changes.push({
+        location: {
+          ...link,
+          path: [...link.path, "length"],
+          schema: lengthSchema,
+        },
+        value: newValue.length,
+      });
+    }
+
     for (let i = 0; i < newValue.length; i++) {
       const inNew = i in newValue;
       const inCur = currentArray ? i in currentArray : false;
@@ -981,8 +1007,9 @@ export function normalizeAndDiff(
       changes.push(...nestedChanges);
     }
 
-    // Handle array length changes
-    if (Array.isArray(currentValue) && currentValue.length != newValue.length) {
+    // Handle array SHRINK (growth emitted its length change above, before
+    // the element writes)
+    if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
         ? runtime.cfc.lubSchema(link.schema)
@@ -991,6 +1018,26 @@ export function normalizeAndDiff(
       const childSchema = (lub !== undefined)
         ? { type: "number", ifc: { confidentiality: lub } } as JSONSchema
         : { type: "number" } as JSONSchema;
+      // Slots truncated by a shrink are removed, not merely out of range:
+      // emit explicit deletes (the direct `length`-write path's idiom) so
+      // write-detail consumers — notably the flow-label carry-forward that
+      // must drop the removed slots' stale per-slot link entries — see the
+      // removal. Ordered BEFORE the length change: once the length write
+      // has truncated the array, a delete at a now-absent slot is a no-op
+      // the write layer elides from the journal. Growth needs nothing
+      // here — the element loop above already visited every new slot.
+      for (let i = newValue.length; i < currentValue.length; i++) {
+        if (!(i in currentValue)) continue; // hole: nothing to remove
+        changes.push({
+          location: {
+            ...link,
+            path: [...link.path, i.toString()],
+            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+          },
+          value: undefined,
+          delete: true,
+        });
+      }
       changes.push({
         location: {
           ...link,
