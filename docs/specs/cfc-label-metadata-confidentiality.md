@@ -203,7 +203,21 @@ consumes inbound views, redacting the outbound copies is safe.
   established rollout idiom). Migration: transformed and verbatim envelopes
   coexist (entries are self-describing; a commitment field carries a marker
   wrapper `{digestOf: <hash>}` so consumers dispatch on shape, and SC-11
-  equality is computed post-transform).
+  equality is computed post-transform). _Implementation note (2026-07-09):
+  shipped — the transform lives in `runner/src/cfc/label-representation.ts`
+  and runs in `prepareBoundaryCommit`'s persist loop for cross-space-eligible
+  entries (link-origin entries when the link source's space differs from the
+  target's — covering the re-derived view AND the carried in-value sigil
+  `cfcLabelView`; flow-derived stamps when `deriveFlowJoin` consumed a
+  labeled foreign observation; ambiguity fails toward protection). Same-form
+  matching landed in `atomEntails` (read gating digests the candidate) and
+  `matchAtomPattern` (concrete patterns digest-match; variables refuse fresh
+  bindings from committed fields — variable-needing rules fail closed at the
+  destination; bound-variable unification digest-compares across forms).
+  Declared entries persist verbatim (the schema doc replicates to the
+  destination regardless — the §4 boundary), as do carried-forward existing
+  entries (no envelope rewrite on migration) and the local external-ingest
+  mark._
 - **Stage 2 (observation):** `inspectConfLabel` + interim population rule +
   the label-metadata observation channel (SC-6 revisit).
 - **Stage 3 (strong form):** `reference`-form carried labels + per-reader
