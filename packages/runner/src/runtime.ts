@@ -76,6 +76,7 @@ import {
   type CfcLabelView,
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
+  type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTrustConfigInput,
@@ -331,6 +332,17 @@ export interface RuntimeOptions {
    * rewritten label and fails closed on fuel exhaustion.
    */
   cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
+  /**
+   * Per-prepare D4 write-prefix precision counters (value-level provenance
+   * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
+   * to `false`: the prepare gate then skips all measurement, paying a single
+   * presence check. When `true`, each prepared transaction with at least one
+   * protected write aggregates prefix-vs-transaction-global gated-read
+   * counts, bound-source classifications and S7-exemption fires into
+   * `getCfcStats()`. Measurement only — enforcement decisions are
+   * byte-identical either way.
+   */
+  cfcPrefixProvenanceStats?: boolean;
   /** Per-sink confidentiality ceilings for the sink-request egress gate. A sink
    *  absent from the map is ungated; a declared ceiling rejects (or, in observe
    *  mode, flags) a request carrying confidentiality outside it. Defaults to
@@ -392,6 +404,28 @@ export interface CfcRuntimeStats {
   cfcOutboxFlushes: number;
   sinkDedupHits: number;
   sinkReleaseRejects: number;
+  // Stage-0 D4 write-prefix precision counters
+  // (docs/specs/cfc-value-level-provenance.md §6, SC-24). All zero unless
+  // `cfcPrefixProvenanceStats` is enabled. Aggregated over the per-prepare
+  // summaries; the per-write detail lists are not retained here.
+  /** Prepares that measured at least one protected write. */
+  prefixProvenanceSummaries: number;
+  /** Protected writes measured (requiredIntegrity / maxConfidentiality). */
+  prefixProtectedWrites: number;
+  /** Gated reads under the shipped D4 per-write prefix. */
+  prefixGatedReads: number;
+  /** What the pre-D4 transaction-global gate would have counted. */
+  prefixTxGlobalGatedReads: number;
+  /** Writes bounded by a logged overlapping attempt (prefix engaged). */
+  prefixBoundReal: number;
+  /** Writes on the +Infinity fallback (no logged overlapping attempt). */
+  prefixBoundInfinityFallback: number;
+  /** Writes with no ordered write-attempt evidence at all (clock-less). */
+  prefixBoundClockLess: number;
+  /** S7 provenance-only exemption fires within prefixes. */
+  prefixS7ExemptionFires: number;
+  /** Read activities without a clock position (treated at -Infinity). */
+  prefixClockLessReads: number;
 }
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
@@ -402,6 +436,15 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcOutboxFlushes: 0,
   sinkDedupHits: 0,
   sinkReleaseRejects: 0,
+  prefixProvenanceSummaries: 0,
+  prefixProtectedWrites: 0,
+  prefixGatedReads: 0,
+  prefixTxGlobalGatedReads: 0,
+  prefixBoundReal: 0,
+  prefixBoundInfinityFallback: 0,
+  prefixBoundClockLess: 0,
+  prefixS7ExemptionFires: 0,
+  prefixClockLessReads: 0,
 });
 
 /**
@@ -488,6 +531,7 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
+  readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
@@ -638,6 +682,7 @@ export class Runtime {
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
     this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+    this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
     // change what egresses are allowed (review on #3993).
@@ -891,6 +936,26 @@ export class Runtime {
       onSinkReleaseReject: () => {
         this.cfcStats.sinkReleaseRejects += 1;
       },
+      // Stage-0 D4 precision counters: installed only when the deployment
+      // opted in, so the default prepare path skips all measurement.
+      ...(this.cfcPrefixProvenanceStats
+        ? {
+          onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
+            this.cfcStats.prefixProvenanceSummaries += 1;
+            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
+            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
+            this.cfcStats.prefixTxGlobalGatedReads +=
+              summary.txGlobalGatedReads;
+            this.cfcStats.prefixBoundReal += summary.boundSources.real;
+            this.cfcStats.prefixBoundInfinityFallback +=
+              summary.boundSources.infinityFallback;
+            this.cfcStats.prefixBoundClockLess +=
+              summary.boundSources.clockLess;
+            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+          },
+        }
+        : {}),
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);

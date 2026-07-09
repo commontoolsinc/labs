@@ -69,6 +69,7 @@ import {
   type CfcFlowLabelsMode,
   type CfcGrantWriteInput,
   type CfcPolicyEvaluationMode,
+  type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -116,6 +117,10 @@ type CfcInstrumentationHooks = {
   onSinkReleaseReject?(
     info: { sink: string; effectId: string; detail: string },
   ): void;
+  // Stage-0 D4 precision counters (cfc-value-level-provenance.md §6, SC-24):
+  // one summary per prepared transaction that measured a protected write.
+  // When absent — the default — the prepare gate skips all measurement.
+  onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -990,7 +995,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     const reasons = this.#runPrivilegedSystemWrite(() =>
-      prepareBoundaryCommit(this)
+      prepareBoundaryCommit(
+        this,
+        // Stage-0 precision counters: threaded through only when the hook is
+        // installed, so the gate skips all measurement (and the summary
+        // allocation) otherwise. The non-null assertion restates the
+        // presence check above — the hooks object is fixed at construction.
+        this.cfcInstrumentation.onPrefixProvenance === undefined ? undefined : {
+          onPrefixProvenance: (summary) =>
+            this.cfcInstrumentation.onPrefixProvenance!(summary),
+        },
+      )
     );
     if (reasons.length > 0) {
       this.cfcInstrumentation.onPrepareReject?.(reasons);
