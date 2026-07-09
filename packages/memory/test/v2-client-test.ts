@@ -2753,6 +2753,60 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
   }
 });
 
+// Answers the first `hello` and leaves every later one hanging: no reply and no
+// close event. A reconnect triggered by `disconnect()` then parks the loop
+// inside the handshake rather than in a backoff wait.
+class HandshakeHangReconnectTransport implements Transport {
+  helloCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  disconnect(): void {
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as { type: string };
+    if (message.type === "hello") {
+      this.helloCount += 1;
+      if (this.helloCount === 1) {
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
+      }
+      return Promise.resolve();
+    }
+    throw new Error(`Unhandled handshake-hang message: ${message.type}`);
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("memory v2 client close ends a reconnect parked in the handshake", async () => {
+  const transport = new HandshakeHangReconnectTransport();
+  const client = await connect({ transport });
+
+  // Drop the connection. The reconnect loop sends a fresh `hello` that gets no
+  // reply, so it is parked awaiting the handshake, with no backoff timer armed.
+  transport.disconnect();
+  await Promise.resolve();
+  assertEquals(transport.helloCount, 2);
+
+  // Closing rejects the in-flight handshake. The loop then reaches the backoff
+  // step with the client already closed, which returns without arming a timer,
+  // so the close settles through microtasks.
+  await client.close();
+  assertEquals(client.isConnected(), false);
+});
+
 Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   let receiver = (_payload: string) => {};
   const transport: Transport = {
