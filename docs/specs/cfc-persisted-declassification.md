@@ -233,8 +233,8 @@ declassification event. Contract, if and when built:
    declared entries via the A2/A3 clause kernel, with
    `setCfcDeclaredWideningExemption` (trusted-builtin only, one
    `(doc, path, clauseDigest)` triple per tx, `cfcCanonicalClauseDigest`
-   clause identity) as the event writer's exemption seam. The gate still
-   has to soak at `enforce` before the event ships._
+   clause identity) as the event writer's exemption seam. No consumer of
+   the seam is built — the event itself is superseded per §5._
 4. **The event record**, adjacent to but not inside the `["cfc"]` envelope
    (SC-11 keeps envelopes churn-free and version-neutral): a **create-only
    document causal to the consumed intent's id** — the shipped receipt
@@ -287,14 +287,74 @@ mechanism level (2026-07-09):
   upgrade a v1, they do not gate it.
 
 So the only *hard* remaining gate is (a): a real export/publish/portability
-requirement that grants demonstrably cannot serve — a product decision, not
-a substrate one. When (a) holds, build order is: soak the shipped
-monotonicity gate → reduced-evidence v1 (§4.1) → §6 evidence upgrades as
-they land.
-Until then, "publish" is served by route 3 (copy-forward), which is honest
-about being a new value.
+requirement that grants demonstrably cannot serve. **Resolved 2026-07-10
+(owner decision): no such requirement is identified, and the two candidate
+sources dissolve on inspection.** *In-fabric federation* runs on remote
+attestation — every federated instance is a trusted runtime enforcing the
+same rules, so the rewrite event's one technical differentiator ("trust-free
+release": a rewritten label needs no policy/trust config at the destination,
+grants need both) buys nothing where trust is ambient; grants replicate as
+ordinary docs with the owner's space and evaluate locally. *Out-of-fabric
+egress* (an HTTP POST, an email) is irrevocable by nature — and the honest
+artifact for it is the **egress record** (§6), not a label rewrite: folding
+a past external disclosure into the label would loosen *future* fabric
+enforcement as a consequence of a leak, which is the wrong direction. The
+rewrite event therefore stands **superseded on both flanks**; §4's contract
+is retained in case a genuinely new requirement appears, and its
+prerequisite (the monotonicity gate) shipped anyway on its own merits as a
+declared-label integrity guarantee (#4647). "Publish" inside the fabric is
+grants (revocable) or route 3 copy-forward (a new value, honestly);
+"publish" outside the fabric is a sink release plus an egress record.
 
-## 6. Spec-change queue
+## 6. Egress records — irrevocability made honest
+
+Revoking the fabric-side record of an external send must never read as
+un-sending. That confusion is structural if external egress is modeled with
+the same revocable artifact as internal sharing: a user who "revokes" sees
+the grant disappear and reasonably believes the disclosure is undone, when
+only the *record that we sent it* changed. The fix is a second artifact
+class with the opposite lifecycle:
+
+- The record is minted in two phases, because the transaction commits
+  **before** the outbox flush and the release can still be refused during
+  the flush (`verifySinkRequestRelease` runs post-commit): the committing
+  transaction MAY stage an **attempt** marker, but the permanent **sent**
+  record is created only by the **successful post-commit send path** — a
+  create-only document causal to the outbox idempotency key (itself bound
+  to the consumed intent), shaped `{valueDigest, destination,
+  boundaryContext, releasedAudienceEvidence, at, intentId}`, the
+  destination captured per §8.10.5.2's destination/audience binding (the
+  spec's open destination-binding follow-up is exactly this evidence).
+  Write ordering: **record, then clear the outbox entry** — a crash between
+  send and record leaves a live outbox entry to reconcile from, so the
+  record can understate but never overstate. An attempt marker with no sent
+  record after the retry window means known-not-sent and MUST NOT display
+  as "sent". (This is the same seam as the audit's open "post-commit outbox
+  + sink-release re-verification contract" item — the two should be specced
+  together.)
+- **Permanent by construction**: the sent record is create-only (the
+  receipt discipline), never deleted, no revocation surface. Reserved-path
+  hosted like grants; readable as provenance.
+- **No enforcement role.** The record never feeds a future release
+  decision — the label keeps governing what the fabric itself serves (an
+  external copy existing is not a reason for our runtime to serve the
+  original more widely). It exists for honesty, audit, and UI derivation.
+- **UI vocabulary**: *shared* (a grant — revocable; revoking stops future
+  fabric reads) vs *sent* (an egress record — irrevocable; the only
+  affordance is "left the fabric on T to D"). "Who can see this?" derives
+  from current grants ∪ past egress records.
+- **Composition with single-use grants**: a single-use grant consumed by an
+  external send yields both artifacts atomically — the `grantConsumed`
+  receipt (spends the grant) and the egress record (remembers the send) —
+  in the same commit.
+
+Substrate: create-only receipts (`experimental.commitPreconditions`,
+shipped), the outbox's idempotency keys and sink-release instrumentation
+(`onSinkReleaseReject`/`onSinkDedupHit` seams), and the §8.10.5.2
+destination-binding follow-up for the evidence shape. This is a small
+build, not a design program.
+
+## 7. Spec-change queue
 
 - **§8.12.7 route 2 splits** into 2a (durable grant records consumed by
   access-time rules — the §13.4.3/§13.4.4 shape, generalizing the §4.9.3 ACL
@@ -310,6 +370,11 @@ about being a new value.
 - **`policyState` guard kind** documented next to the exchange-rule grammar
   (§4.3.3 vicinity), with the §4.9.3-style fail-closed resolution rules and
   the CT-1874 home-clause constraint for label-carried discovery.
+- **Egress records** (§6): normative text for the irrevocable release
+  receipt at send sinks, riding the §8.10.5.2 destination/audience-binding
+  follow-up — the record's shape, its create-only permanence, its
+  no-enforcement-role rule, and the shared-vs-sent distinction. Tracked as
+  SC-27 in [`cfc-spec-changes.md`](./cfc-spec-changes.md).
 
 ## Provenance
 
