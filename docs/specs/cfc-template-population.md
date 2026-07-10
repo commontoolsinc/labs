@@ -273,6 +273,45 @@ minted into the same entries, not the mechanism.
   `/cfc/labels/...` template mints per §5 + `inspectConfLabel` consuming
   them (upgrading WP7's computed-in-hand labels to persisted templates),
   per-field tests from the §4.6.4.2 example, SC-25 tail updated.
+
+  **Implementation note (Stage B landed, 2026-07-10, #4660).** Shipped in
+  `packages/runner/src/cfc/label-metadata-population.ts` (mint derivation +
+  wildcard resolver) wired into the `prepare.ts` persist seam and the
+  `label-introspection.ts` consumption, tests in
+  `packages/runner/test/cfc-template-metadata-population.test.ts`. Entry
+  form: `origin:"label-metadata"` with `observes:"labelMetadata"`, plain
+  `IFCLabel` under `label` per §3.3. The dedicated ORIGIN because the origin
+  axis is the update-discipline axis and these entries' discipline — a pure
+  function of the payload entries in the SAME envelope, re-derived from the
+  final entry set at every persist (never carried forward) — is none of the
+  existing ones; it buys replace-on-overwrite / cleared-with-the-described-
+  entry / SC-11-no-op by construction and keeps every derived/structure-
+  keyed persist rule (freeze-carry, SC-4 pooling, writer-fit selection,
+  restamp drops) ignoring them without carve-outs. The Stage-2 observation
+  CLASS on the `observes` axis because `readConsumesEntry` then already
+  yields the needed consumption table: no payload read class consumes them —
+  the introspection surface is the only consumer (the deliberately
+  over-inclusive `"all"` write-gate selection may, harmlessly: template
+  content duplicates the payload entries it derives from). Per labeled
+  target path: the whole-atom template plus one per-field template per
+  DISTINCT protected top-level field name (deeper protected content —
+  nested atoms behind public wrapper fields, array elements, bare
+  commitment markers — rides the whole-atom template only); templates
+  derive AFTER the Stage-1 representation transform, so committed forms
+  carry through identically. Two measured semantics notes: (1) the §4.6.4.1
+  metadata addressing concatenates clause indices across the entries stored
+  at one path, so coalescing JOINS same-path payload entries' population
+  labels (the C2 value/shape split) into one per-path template —
+  fail-toward-taint vs the per-entry in-hand rule, exact on the
+  single-source-bearing-entry common case (agreement pinned by test); (2)
+  consumption keeps the containment gate FIRST — a persisted template never
+  re-opens a declared/authored sibling's fields — and falls back to the
+  computed-in-hand rule on template-less (pre-Stage-B) envelopes, which
+  also heals the mixed-version residual (an older runtime rewriting payload
+  entries carries stale templates forward; the next Stage-B-runtime persist
+  re-derives them). Recorded `labelMetadata` observations now reference the
+  CONCRETE consulted clause/alternative metadata paths rather than the
+  subtree root.
 - **No new dial.** Template mints ride the existing dials of the stamps
   they accompany (`cfcFlowLabels` for flow-derived structure stamps); the
   new entries are additive taint (fail-safe direction). If review finds a

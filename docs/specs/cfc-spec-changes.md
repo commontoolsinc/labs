@@ -449,12 +449,18 @@ and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
 stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
 redaction, classification table), stage 1 as labs#4638
 (`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
-commitment-aware matching), stage 2 in reduced form as labs#4657
+commitment-aware matching), stage 2 as labs#4657
 (`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
-`labelMetadata` observation channel — the SC-6 revisit discharged; the full
-per-field `PathLabelTemplate` population profile co-builds with SC-4/SC-8,
-[`cfc-template-population.md`](./cfc-template-population.md) Stage B);
-stage 3 remains per the design doc.
+`labelMetadata` observation channel — the SC-6 revisit discharged)
+completed by template-population Stage B (labs#4660): the full per-field
+§4.6.4.2 profile persists as multi-`*` templates under `/cfc/labels/...`
+(`origin:"label-metadata"`, `observes:"labelMetadata"` — no payload read
+class consumes them), minted at the persist seam from each source-bearing
+derived-containment payload entry, resolved by `inspectConfLabel` at
+concrete clause/alternative metadata paths with the interim rule staying
+the label source and the in-hand computation the fallback on template-less
+envelopes ([`cfc-template-population.md`](./cfc-template-population.md)
+§5/§6 Stage B note); stage 3 remains per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
 event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a

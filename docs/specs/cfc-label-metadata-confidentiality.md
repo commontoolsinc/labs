@@ -145,7 +145,15 @@ revisited when invariant 12 is implemented." This is that revisit:
    confidentiality; declared/authored entries carry no such containment
    guarantee and stay fail-closed), else fail closed. Computable from the
    entry in hand, no cross-space resolution. `type`/`kind`/presence stay
-   public per the default profile.
+   public per the default profile. _Note (2026-07-10): the full profile now
+   ships — template-population Stage B persists it as multi-`*` templates
+   under `/cfc/labels/...` at the same seam that writes the payload entries
+   (`cfc-template-population.md` §5/§6). The interim rule remains the label
+   SOURCE; the templates are its CARRIER (the labels minted into them), the
+   introspection surface resolves them at concrete metadata paths and falls
+   back to computing the rule in hand on template-less envelopes, and the
+   fail-closed arm is unchanged — declared/authored fields mint nothing and
+   a sibling template never re-opens them._
 4. **Runtime enforcement reads stay outside the consumed set** (verifier
    reads are not observations — §8.10.1), unchanged. What changes is that
    *application-visible* projections of label metadata always pass through
@@ -225,10 +233,12 @@ consumes inbound views, redacting the outbound copies is safe.
   mark._
 - **Stage 2 (observation):** `inspectConfLabel` + interim population rule +
   the label-metadata observation channel (SC-6 revisit). _Implementation note
-  (2026-07-09): shipped (reduced form — §3 items 2–4; the full per-field
-  `PathLabelTemplate` profile stays with the SC-4/SC-8 co-build, designed in
+  (2026-07-09): shipped (initially in reduced form — §3 items 2–4; the full
+  per-field `PathLabelTemplate` profile co-built with SC-4/SC-8, designed in
   [`cfc-template-population.md`](./cfc-template-population.md) — its Stage B
-  upgrades this stage's computed-in-hand labels to persisted templates). The
+  landed 2026-07-10, upgrading this stage's computed-in-hand labels to
+  persisted `/cfc/labels/...` templates resolved at concrete metadata paths,
+  with the in-hand rule as fallback on template-less envelopes). The
   §4.6.4.1 evaluator + §4.6.4.2 interim population rule live in
   `runner/src/cfc/label-introspection.ts`: equality predicates over the six
   query fields; first-layer only (a `/cfc/...` target path refuses — payload
