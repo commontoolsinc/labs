@@ -104,8 +104,12 @@ export function inspectConfLabel(
         inputs?.query ?? {},
       );
     }
-    // Plain JSON copy: the outcome is runtime state (frozen constants,
-    // stored-form atoms); the result doc owns its bytes.
-    result.withTx(tx).set(JSON.parse(JSON.stringify(outcome)));
+    // Set the outcome directly: the write boundary owns normalization and
+    // copies by value (deep-frozen FabricValue trees — the stored-form atoms
+    // and the frozen notAvailable constant — are accepted as-is, IWritable
+    // contract). A JSON round-trip here would corrupt or throw on any
+    // non-JSON-safe Fabric value a stored atom might carry, breaking the
+    // stored-form-verbatim promise (codex/cubic P2 on the Stage 2 PR).
+    result.withTx(tx).set(outcome);
   };
 }

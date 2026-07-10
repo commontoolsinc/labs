@@ -138,11 +138,18 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
     });
 
     it("treats an absent field as no-match without protected consumption", () => {
-      // The bare string atom carries no `source` field: testing the predicate
-      // observes only atom shape (public), so the miss is public.
+      // Neither the bare string atom nor the (record) User atom carries a
+      // `source` field: testing the predicate observes only atom shape
+      // (public), so the miss is public — for records the family-generic
+      // predicate reaches the field-presence check and stops there.
       const metadata = metadataWith([{
         path: ["body"],
-        label: { confidentiality: ["secret"] },
+        label: {
+          confidentiality: [
+            "secret",
+            { type: CFC_ATOM_TYPE.User, subject: "did:key:alice" },
+          ],
+        },
         origin: "derived" as const,
       }]);
       const { result, consumedConfidentiality } = evaluateConfLabelQuery(
@@ -371,6 +378,75 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       expect(consumedConfidentiality).toContainEqual("secret");
     });
 
+    it("walks array-shaped alternatives element-wise", () => {
+      // A crafted alternative that IS an array: the projection walk visits
+      // every element. String elements are type-only tags (public) on a
+      // derived entry...
+      const derived = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: { confidentiality: [{ anyOf: [["tag-a", "tag-b"]] }] },
+          origin: "derived" as const,
+        }]),
+        ["body"],
+        {},
+      );
+      expect(derived.result.status).toBe("ok");
+      if (derived.result.status !== "ok") throw new Error("unreachable");
+      expect(derived.result.atoms).toHaveLength(1);
+      expect(derived.consumedConfidentiality).toEqual([]);
+
+      // ...while an array smuggling a source-bearing atom on a DECLARED
+      // entry fails closed through the element walk.
+      const declared = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: {
+            confidentiality: [{ anyOf: [["tag-a", caveatAtom(SOURCE_A)]] }],
+          },
+          origin: "declared" as const,
+        }]),
+        ["body"],
+        {},
+      );
+      expect(declared.result).toEqual({ status: "notAvailable" });
+    });
+
+    it("stops a public wrapper field from smuggling a protected nested atom", () => {
+      // `authored-by.subject` is table-public, so the walk recurses into its
+      // value — where a crafted nested Caveat atom resets the classification
+      // context. Its `source` is protected: fail-closed on a declared entry,
+      // the derived fallback on a derived one.
+      const smuggling = {
+        kind: "authored-by",
+        subject: caveatAtom(SOURCE_A),
+      };
+      const declared = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: { confidentiality: [smuggling] },
+          origin: "declared" as const,
+        }]),
+        ["body"],
+        { caveatKind: "authored-by" },
+      );
+      expect(declared.result).toEqual({ status: "notAvailable" });
+
+      const derived = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: { confidentiality: ["secret", smuggling] },
+          origin: "derived" as const,
+        }]),
+        ["body"],
+        { caveatKind: "authored-by" },
+      );
+      expect(derived.result.status).toBe("ok");
+      if (derived.result.status !== "ok") throw new Error("unreachable");
+      expect(derived.result.atoms).toHaveLength(1);
+      expect(derived.consumedConfidentiality).toContainEqual("secret");
+    });
+
     it("labels a whole-atom commitment marker by the protected chain", () => {
       // A clause alternative that IS a bare marker (crafted data; Stage 1
       // commits fields, not atoms): projecting it is a protected
@@ -455,6 +531,91 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       );
       expect(result.status).toBe("ok");
       expect(consumedConfidentiality).toContainEqual("secret");
+    });
+
+    it("gates family-specific predicates on the atom family", () => {
+      // policyName/resourceClass/originUri are family-qualified fields
+      // (spec: "resource/policy/origin fields"): a Builtin atom that merely
+      // HAS a `name` field must not satisfy a policyName query, and a
+      // crafted `kind` on an unrelated typed family is not a caveat kind
+      // (codex/cubic P2 on the Stage 2 PR). The family test rides the
+      // public `type` observation, so gating consumes nothing protected.
+      const metadata = metadataWith([{
+        path: ["body"],
+        label: {
+          confidentiality: [
+            { type: CFC_ATOM_TYPE.Builtin, name: "workspace" },
+            {
+              type: CFC_ATOM_TYPE.User,
+              kind: "prompt-influence",
+              subject: "did:key:u",
+            },
+            {
+              type: CFC_ATOM_TYPE.User,
+              class: "confidential",
+              subject: "did:key:u",
+            },
+            {
+              type: CFC_ATOM_TYPE.User,
+              uri: "https://example.com",
+              subject: "did:key:u",
+            },
+          ],
+        },
+        origin: "derived" as const,
+      }]);
+      expect(
+        evaluateConfLabelQuery(metadata, ["body"], { policyName: "workspace" })
+          .result,
+      ).toEqual({ status: "ok", atoms: [] });
+      expect(
+        evaluateConfLabelQuery(metadata, ["body"], {
+          caveatKind: "prompt-influence",
+        }).result,
+      ).toEqual({ status: "ok", atoms: [] });
+      expect(
+        evaluateConfLabelQuery(metadata, ["body"], {
+          resourceClass: "confidential",
+        }).result,
+      ).toEqual({ status: "ok", atoms: [] });
+      expect(
+        evaluateConfLabelQuery(metadata, ["body"], {
+          originUri: "https://example.com",
+        }).result,
+      ).toEqual({ status: "ok", atoms: [] });
+
+      // The genuine families still match: Caveat kinds, kind-shaped claim
+      // atoms (type-less — the kind discriminator IS their family), Origin
+      // URIs.
+      const genuine = metadataWith([{
+        path: ["body"],
+        label: {
+          confidentiality: [
+            caveatAtom(SOURCE_A),
+            { kind: "authored-by", subject: "did:key:alice" },
+            { type: CFC_ATOM_TYPE.Origin, uri: "https://mail.example.com" },
+          ],
+        },
+        origin: "derived" as const,
+      }]);
+      const byKind = evaluateConfLabelQuery(genuine, ["body"], {
+        caveatKind: "prompt-influence",
+      });
+      expect(byKind.result.status).toBe("ok");
+      if (byKind.result.status !== "ok") throw new Error("unreachable");
+      expect(byKind.result.atoms).toHaveLength(1);
+      const byClaim = evaluateConfLabelQuery(genuine, ["body"], {
+        caveatKind: "authored-by",
+      });
+      expect(byClaim.result.status).toBe("ok");
+      if (byClaim.result.status !== "ok") throw new Error("unreachable");
+      expect(byClaim.result.atoms).toHaveLength(1);
+      const byOrigin = evaluateConfLabelQuery(genuine, ["body"], {
+        originUri: "https://mail.example.com",
+      });
+      expect(byOrigin.result.status).toBe("ok");
+      if (byOrigin.result.status !== "ok") throw new Error("unreachable");
+      expect(byOrigin.result.atoms).toHaveLength(1);
     });
 
     it("supports resourceClass/policyName/originUri equality", () => {

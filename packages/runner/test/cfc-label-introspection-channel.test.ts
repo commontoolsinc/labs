@@ -5,6 +5,11 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import {
+  canonicalizePreparedDigestInput,
+  preparedDigestFor,
+} from "../src/cfc/canonical.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
@@ -271,6 +276,140 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       expect(
         stored?.labelMap.entries.some((entry) => entry.origin === "derived"),
       ).not.toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("canonicalizes observations order-insensitively (address sort + hash tiebreak)", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      // The digest must not depend on recording order: address-sorted for
+      // distinct targets, canonical-hash tiebreak for same-address records.
+      const a = observationFor("of:introspected-a", ["secret-a"]);
+      const b = observationFor("of:introspected-b", ["secret-b"]);
+      const sameAddr1 = observationFor("of:introspected-a", ["secret-c"]);
+
+      const base = {
+        consumedReads: [],
+        attemptedWrites: [],
+        writes: [],
+        writeAttemptLog: [],
+        dereferenceTraces: [],
+        triggerReads: [],
+        writePolicyInputs: [],
+      } as const;
+      const forward = canonicalizePreparedDigestInput({
+        ...base,
+        labelMetadataObservations: [a, b, sameAddr1],
+      });
+      const reversed = canonicalizePreparedDigestInput({
+        ...base,
+        labelMetadataObservations: [sameAddr1, b, a],
+      });
+      expect(JSON.stringify(forward)).toBe(JSON.stringify(reversed));
+      expect(
+        preparedDigestFor({
+          ...base,
+          labelMetadataObservations: [a, b, sameAddr1],
+        }),
+      ).toBe(
+        preparedDigestFor({
+          ...base,
+          labelMetadataObservations: [sameAddr1, b, a],
+        }),
+      );
+      // Distinct-space targets exercise the address arm too.
+      const foreign = observationFor(
+        "of:introspected-a",
+        ["secret-d"],
+        "did:key:zforeign",
+      );
+      const withForeign = canonicalizePreparedDigestInput({
+        ...base,
+        labelMetadataObservations: [foreign, a],
+      });
+      expect(
+        (withForeign.labelMetadataObservations ?? []).map((o) =>
+          o.target.space
+        ),
+      ).toEqual([space, "did:key:zforeign"]);
+      // And end-to-end: two txs with identical activity, recording in
+      // opposite orders, prepare to the SAME digest. Both prepare before
+      // either commits so their journals are byte-identical.
+      const tx1 = runtime.edit();
+      runtime.getCell(space, "channel-canon", undefined, tx1).set({ v: 1 });
+      tx1.recordCfcLabelMetadataObservation(a);
+      tx1.recordCfcLabelMetadataObservation(b);
+      const digest1 = tx1.prepareCfc();
+      const tx2 = runtime.edit();
+      runtime.getCell(space, "channel-canon", undefined, tx2).set({ v: 1 });
+      tx2.recordCfcLabelMetadataObservation(b);
+      tx2.recordCfcLabelMetadataObservation(a);
+      const digest2 = tx2.prepareCfc();
+      expect(digest1).not.toBe("");
+      expect(digest1).toBe(digest2);
+      await tx1.commit();
+      tx2.abort(new Error("digest comparison only"));
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps smuggled empty observations out of the flow derivation", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      // recordCfcLabelMetadataObservation drops empty (public) observations,
+      // so the deriveFlowJoin guard is defense in depth for INTERNAL
+      // construction paths that might bypass it — exercise it directly with
+      // a delegating wrapper tx (the cid-trigger-smuggle idiom): methods
+      // bound to the real tx, state carrying one empty and one labeled
+      // record.
+      const tx = runtime.edit();
+      const state = tx.getCfcState();
+      const smuggledState = {
+        ...state,
+        labelMetadataObservations: [
+          observationFor("of:introspected-empty", []),
+          observationFor("of:introspected-full", ["secret"]),
+        ],
+      };
+      const smuggledTx = new Proxy(tx, {
+        get(target, prop, receiver) {
+          if (prop === "getCfcState") {
+            return () => smuggledState;
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const join = deriveFlowJoin(smuggledTx, { collectLabeledSpaces: true });
+      expect(join.confidentiality).toEqual(["secret"]);
+      // The empty record contributes nothing — not even its space.
+      expect([...(join.labeledSpaces ?? [])]).toEqual([space]);
+      await tx.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("forwards recording through TransactionWrapper", async () => {
+    const { storageManager, runtime } = makeRuntime();
+    try {
+      // Cell.sample()/sink() hand out wrapped transactions; an introspection
+      // running under one must land its observation on the SHARED underlying
+      // state.
+      const tx = runtime.edit();
+      const wrapper = new TransactionWrapper(tx);
+      wrapper.recordCfcLabelMetadataObservation(
+        observationFor("of:introspected", ["secret"]),
+      );
+      expect(tx.getCfcState().labelMetadataObservations).toHaveLength(1);
+      expect(tx.getCfcState().relevant).toBe(true);
+      await tx.commit();
     } finally {
       await runtime.dispose();
       await storageManager.close();

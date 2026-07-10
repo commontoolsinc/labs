@@ -2601,9 +2601,14 @@ export interface WishFunction {
 /**
  * The bounded label-introspection query (CFC spec §4.6.4.1, inv-12 Stage 2):
  * equality tests only, over atom `type`, caveat `kind`, `source`, and the
- * resource/policy/origin fields. An absent field on a candidate atom is no
- * match. All six fields are supported even where the runtime currently mints
- * no atoms carrying them.
+ * resource/policy/origin fields. The family-qualified predicates test their
+ * own atom family only — `resourceClass` reads `Resource.class`,
+ * `policyName` reads the `Policy`/`Context` ref `name`, `originUri` reads
+ * `Origin.uri`, and `caveatKind` reads the `kind` discriminator of `Caveat`
+ * atoms and the type-less kind-shaped claim atoms — so an unrelated atom
+ * that merely has a same-named field is not a match. An absent field (or a
+ * family miss) on a candidate atom is no match. All six fields are supported
+ * even where the runtime currently mints no atoms carrying them.
  */
 export type ConfLabelQuery = {
   atomType?: string;

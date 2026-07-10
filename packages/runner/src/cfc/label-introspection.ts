@@ -1,3 +1,4 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
@@ -40,10 +41,12 @@ import type { CfcMetadata, LabelMapEntry } from "./types.ts";
 //   this module stays pure over stored metadata.
 
 /**
- * The §4.6.4.1 query: equality tests only. All six fields are supported even
+ * The §4.6.4.1 query: equality tests only, family-qualified where the spec
+ * names a family (see QUERY_PREDICATES). All six fields are supported even
  * where the runner has no mint site today (`policyName` matches the B2b
- * label-carried Policy/Context ref atoms; `originUri` currently matches
- * nothing) — an absent field on the candidate atom is simply no match.
+ * label-carried Policy/Context ref atoms; `originUri` matches Origin atoms,
+ * which nothing mints yet) — an absent field or a family miss on the
+ * candidate atom is simply no match.
  */
 export type ConfLabelQuery = {
   atomType?: string;
@@ -251,9 +254,11 @@ const atomProjectionLabel = (
         continue;
       }
       // Public field: recurse so a nested atom inside it (a `Caveat.by`
-      // User atom) is still classified on its own terms. Scalar public
+      // User atom) is still classified on its own terms — a public wrapper
+      // field must not smuggle a protected nested field out. Scalar public
       // fields end the walk trivially.
-      if (!walk(field, context)) {
+      const nestedObservable = walk(field, context);
+      if (!nestedObservable) {
         return false;
       }
     }
@@ -265,15 +270,39 @@ const atomProjectionLabel = (
 // ---------------------------------------------------------------------------
 // Query evaluation.
 
-/** The atom field each §4.6.4.1 query predicate tests, by query key. */
-const QUERY_FIELDS = {
-  atomType: "type",
-  caveatKind: "kind",
-  source: "source",
-  resourceClass: "class",
-  policyName: "name",
-  originUri: "uri",
-} as const satisfies Record<keyof ConfLabelQuery, string>;
+/**
+ * The atom field each §4.6.4.1 query predicate tests, plus the atom FAMILY
+ * the predicate is qualified to (codex/cubic P2 on the Stage 2 PR): the spec
+ * names "resource/policy/origin fields", so `resourceClass` reads
+ * `Resource.class`, `policyName` reads the B2b `Policy`/`Context` ref
+ * `name`, and `originUri` reads `Origin.uri` — an unrelated atom that merely
+ * HAS a `name`/`class`/`uri` field (a `Builtin` atom's `name`, say) is not a
+ * match. `caveatKind` reads the `kind` discriminator of the kind-carrying
+ * families: `Caveat` atoms and the type-less kind-shaped claim atoms
+ * (authored-by / represents-principal), whose `kind` IS their family; a
+ * crafted `kind` riding an unrelated typed family is not a caveat kind.
+ * `atomType` and `source` are family-generic by design. A family miss is
+ * treated exactly like an absent field: no match, and only the public atom
+ * `type` observation was consulted to decide it.
+ */
+const QUERY_PREDICATES: Record<
+  keyof ConfLabelQuery,
+  {
+    readonly field: string;
+    /** Absent = family-generic. Input is the record atom's `type` field. */
+    readonly familyTypes?: readonly (string | undefined)[];
+  }
+> = {
+  atomType: { field: "type" },
+  caveatKind: { field: "kind", familyTypes: [CFC_ATOM_TYPE.Caveat, undefined] },
+  source: { field: "source" },
+  resourceClass: { field: "class", familyTypes: [CFC_ATOM_TYPE.Resource] },
+  policyName: {
+    field: "name",
+    familyTypes: [CFC_ATOM_TYPE.Policy, CFC_ATOM_TYPE.Context],
+  },
+  originUri: { field: "uri", familyTypes: [CFC_ATOM_TYPE.Origin] },
+};
 
 const entryPathMatchesTarget = (
   entry: LabelMapEntry,
@@ -308,9 +337,9 @@ export const evaluateConfLabelQuery = (
       consumedConfidentiality: [],
     };
   }
-  const predicates = (Object.keys(QUERY_FIELDS) as (keyof ConfLabelQuery)[])
+  const predicates = (Object.keys(QUERY_PREDICATES) as (keyof ConfLabelQuery)[])
     .filter((key) => query[key] !== undefined)
-    .map((key) => ({ field: QUERY_FIELDS[key], expected: query[key] }));
+    .map((key) => ({ ...QUERY_PREDICATES[key], expected: query[key] }));
   const pointer = encodePointer(targetPath);
   const consumed: unknown[] = [];
   const atoms: LabelAtomProjection[] = [];
@@ -328,7 +357,7 @@ export const evaluateConfLabelQuery = (
       ) {
         const atom = alternatives[alternativeIndex];
         let matched = true;
-        for (const { field, expected } of predicates) {
+        for (const { field, familyTypes, expected } of predicates) {
           if (!isRecord(atom)) {
             // A bare string atom is a type-only atom: its entire content is
             // its (public) type tag, so `atomType` equality applies to the
@@ -339,6 +368,19 @@ export const evaluateConfLabelQuery = (
               : false;
             if (!matched) break;
             continue;
+          }
+          if (
+            familyTypes !== undefined &&
+            !familyTypes.includes(
+              typeof (atom as { type?: unknown }).type === "string"
+                ? (atom as { type: string }).type
+                : undefined,
+            )
+          ) {
+            // Family-qualified predicate against a different family: no
+            // match. Decided from the public `type` observation alone.
+            matched = false;
+            break;
           }
           if (!Object.hasOwn(atom, field)) {
             // Absent field = no match. Establishing absence is an atom-shape

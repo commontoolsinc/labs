@@ -313,6 +313,27 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       expect(value).toEqual({ status: "notAvailable" });
     });
 
+    it("treats a missing target as unobservable", async () => {
+      // No target bound at all: the input slot resolves to no cell, and the
+      // outcome is the SAME notAvailable as every hidden arm.
+      const testPattern = builder.pattern(() =>
+        builder.inspectConfLabel(undefined, "/body", {})
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "inspect-result-notarget",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+
+      const value = await waitForStatus(result);
+      await runtime.idle();
+      expect(value).toEqual({ status: "notAvailable" });
+    });
+
     it("refuses labels-of-labels addressing", async () => {
       await seedLabeledDoc(runtime, "inspect-src-lol");
       const source = runtime.getCell(space, "inspect-src-lol", undefined, tx);
