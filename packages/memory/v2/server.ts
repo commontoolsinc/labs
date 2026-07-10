@@ -1885,7 +1885,19 @@ export class Server {
         engine,
         message.query,
       );
-      const snapshots = page.snapshots.map((snapshot) => ({
+      // Reader-isolation gate (C6), reload flavor: the snapshot store keeps
+      // ONE row per actionId, so a shared derivation over user-scope docs
+      // holds whichever principal ran last — and that run also cleared the
+      // shared dirty markers. Handing such a row to another principal would
+      // rehydrate it clean over that reader's own (possibly stale) rows.
+      // Drop it; the reloading runtime runs the action fresh instead.
+      const snapshots = page.snapshots.filter((snapshot) =>
+        this.#observationScopeAdoptable(
+          snapshot.observation,
+          snapshot.writerSessionId,
+          session.principal,
+        )
+      ).map((snapshot) => ({
         observationId: snapshot.observationId,
         commitSeq: snapshot.commitSeq,
         observedAtSeq: snapshot.observedAtSeq,
@@ -2436,6 +2448,44 @@ export class Server {
     );
   }
 
+  // C6, incremental-observation-adoption.md §2: reader-isolated scopes name
+  // DIFFERENT data per reader — a scope:"user" address resolves per
+  // principal, scope:"session" per session — so the determinism premise of
+  // adoption (same action over the same committed reads => same result)
+  // only holds within the same reader. Session-scope rows never leave their
+  // session (a reloaded runtime is a NEW session, so they never rehydrate
+  // either), and user-scope rows reach only sessions of the writer's
+  // principal — fail closed when the writer is unknown. Gates both the
+  // live attach fan-out and the boot listing: a dropped row degrades to
+  // the receiver running the action itself.
+  #observationScopeAdoptable(
+    observation: Engine.SchedulerActionObservation,
+    writerSessionKey: string | undefined,
+    receiverPrincipal: string | undefined,
+  ): boolean {
+    let touchesUserScope = false;
+    for (
+      const address of [
+        ...(observation.reads ?? []),
+        ...(observation.shallowReads ?? []),
+        ...(observation.actualChangedWrites ?? []),
+        ...(observation.currentKnownWrites ?? []),
+        ...(observation.declaredWrites ?? []),
+        ...(observation.materializerWriteEnvelopes ?? []),
+        ...(observation.ignoredSchedulingWrites ?? []),
+      ]
+    ) {
+      const scope = declaredScope(address.scope);
+      if (scope === "session") return false;
+      if (scope === "user") touchesUserScope = true;
+    }
+    if (!touchesUserScope) return true;
+    if (writerSessionKey === undefined) return false;
+    const writerPrincipal = Engine.principalOfSessionKey(writerSessionKey);
+    return writerPrincipal !== undefined &&
+      writerPrincipal === receiverPrincipal;
+  }
+
   // Attach the sync window's scheduler observation rows so the receiving
   // client can ADOPT other clients' committed action runs instead of
   // re-running them (incremental-observation-adoption.md §4). Only for
@@ -2480,39 +2530,6 @@ export class Server {
           read.space === space &&
           trackedIds.has(toDirtyKey(read.id, declaredScope(read.scope)))
         );
-      // Reader-isolated scopes name DIFFERENT data per reader: a scope:"user"
-      // address resolves per principal, scope:"session" per session, so the
-      // determinism premise of adoption (same action over the same committed
-      // reads => same result) only holds within the same reader. Session-scope
-      // rows never cross sessions (the writer's own session is already
-      // echo-suppressed), and user-scope rows ship only to sessions of the
-      // writer's principal — fail closed when the writer is unknown.
-      const scopeAdoptable = (
-        observation: Engine.SchedulerActionObservation,
-        writerSessionKey: string | undefined,
-      ): boolean => {
-        let touchesUserScope = false;
-        for (
-          const address of [
-            ...(observation.reads ?? []),
-            ...(observation.shallowReads ?? []),
-            ...(observation.actualChangedWrites ?? []),
-            ...(observation.currentKnownWrites ?? []),
-            ...(observation.declaredWrites ?? []),
-            ...(observation.materializerWriteEnvelopes ?? []),
-            ...(observation.ignoredSchedulingWrites ?? []),
-          ]
-        ) {
-          const scope = declaredScope(address.scope);
-          if (scope === "session") return false;
-          if (scope === "user") touchesUserScope = true;
-        }
-        if (!touchesUserScope) return true;
-        if (writerSessionKey === undefined) return false;
-        const writerPrincipal = Engine.principalOfSessionKey(writerSessionKey);
-        return writerPrincipal !== undefined &&
-          writerPrincipal === session.principal;
-      };
       const engine = await this.openEngine(space);
       const page = Engine.listSchedulerActionSnapshots(engine, {
         sinceCommitSeq: sync.fromSeq,
@@ -2531,7 +2548,11 @@ export class Server {
           (snapshot.commitSeq === null ||
             !ownCommitSeqs?.has(snapshot.commitSeq)) &&
           readsTracked(snapshot.observation) &&
-          scopeAdoptable(snapshot.observation, snapshot.writerSessionId)
+          this.#observationScopeAdoptable(
+            snapshot.observation,
+            snapshot.writerSessionId,
+            session.principal,
+          )
         )
         .map((snapshot) => ({
           observationId: snapshot.observationId,

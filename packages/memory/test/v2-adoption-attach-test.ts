@@ -261,6 +261,37 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
 
     assertEquals(aliceAttached.includes("session-scope-write"), false);
     assertEquals(bobAttached.includes("session-scope-write"), false);
+
+    // Boot-listing flavor of the reader gate: the snapshot store keeps one
+    // row per actionId, so a user-scope row lists only for the writer's
+    // principal (another principal reloading must run fresh over its OWN
+    // rows), and session-scope rows list for no one — a reloaded runtime is
+    // a new session. The listing is NOT watch-scoped: rehydration itself
+    // re-subscribes the observation's reads.
+    const listedActionIds = async (session: typeof alice) => {
+      const listed = await session.listSchedulerActionSnapshots({
+        pieceId: "of:adoption-attach-piece",
+      });
+      return listed.snapshots.map((row) =>
+        (row.observation as SchedulerActionObservation).actionId
+      );
+    };
+    const aliceListed = await listedActionIds(alice);
+    const bobListed = await listedActionIds(bob);
+
+    assert(aliceListed.includes("space-scope"));
+    assert(aliceListed.includes("untracked-read"));
+    assert(
+      aliceListed.includes("user-scope-write"),
+      `same-principal listing must keep user-scope rows: ${
+        JSON.stringify(aliceListed)
+      }`,
+    );
+    assertEquals(aliceListed.includes("session-scope-write"), false);
+
+    assert(bobListed.includes("space-scope"));
+    assertEquals(bobListed.includes("user-scope-write"), false);
+    assertEquals(bobListed.includes("session-scope-write"), false);
   } finally {
     await writerClient.close().catch(() => {});
     await aliceClient.close().catch(() => {});

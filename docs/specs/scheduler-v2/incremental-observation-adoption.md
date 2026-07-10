@@ -41,16 +41,20 @@ read set does the rest. Adoption is allowed only when ALL hold:
   runtimeFingerprint (the same `observationMatchesCurrentAction` checks the
   reload path uses). Action ids fold the piece-scoped doc links, so ids are
   stable across runtimes for shared derivations — proven empirically by the
-  reload work (byte-identical instance keys across two managers). Crucially
-  this also makes adoption *self-limiting*: derivations over
-  reader-isolated or per-user docs have per-user doc ids in their instance
-  keys, so different users' actions never match — no false adoption of
-  state that is not actually shared.
+  reload work (byte-identical instance keys across two managers). Id
+  folding self-limits adoption only for derivations whose isolation is in
+  the doc *id* (per-user result docs of per-user pieces). It does NOT
+  self-limit scope-addressed isolation — see C6.
 - **C2 — seq currency.** For every doc in `O.reads ∪ O.shallowReads`, the
-  local replica's newest committed seq for that doc is ≤ `O.observedAtSeq`.
-  A newer local write means X is genuinely stale relative to state the
-  writer did not observe → run normally. (Conservative per-doc check; the
-  safe failure direction is refusing adoption.)
+  local replica holds a confirmed record for that doc and its newest
+  committed seq is ≤ `O.observedAtSeq`. A newer local write means X is
+  genuinely stale relative to state the writer did not observe → run
+  normally. A doc with NO local record (or no confirmed base) is worse
+  than unverifiable: adoption would skip the very run that loads and
+  subscribes it, so no later push would ever invalidate X — a permanently
+  stale receiver. Refuse; the local run establishes the subscription.
+  (Conservative per-doc check; the safe failure direction is refusing
+  adoption.)
 - **C3 — no local divergence.** No locally-pending (uncommitted/optimistic)
   write overlaps `O.reads`: the local view differs from the writer's basis,
   so the local run is meaningful. Refuse adoption.
@@ -61,6 +65,27 @@ read set does the rest. Adoption is allowed only when ALL hold:
   harmless — the run's completion resubscribes from its own log and re-sets
   clean, an equivalent view (deterministic action over the same committed
   reads), and its unchanged output is quiet per I5.
+- **C6 — same reader only (server-enforced).** A `scope:"user"` address
+  names DIFFERENT data per principal and `scope:"session"` per session,
+  with the SAME doc id — so C1's id match holds while the determinism
+  premise ("same committed reads") is false across readers. Falsified
+  empirically: lunch-poll's deposed-host assertion — the receiver adopted
+  the other user's `isAdmin`-family run, which cleared exactly the dirt the
+  writer's own `adminName` commit had just caused, so the receiver's
+  per-user derivation never recomputed. The server therefore gates rows by
+  the writer's commit session key (persisted per observation row): rows
+  touching session-scope addresses ship to no other session; rows touching
+  user-scope addresses ship only to sessions of the writer's principal
+  (the second-tab case that makes same-user adoption valuable), failing
+  closed when the writer is unknown. The gate applies to BOTH deliveries —
+  the live attach fan-out and the boot snapshot listing. The reload flavor
+  matters because the store keeps one row per actionId and each new
+  observation clears the shared dirty markers: whichever principal ran
+  last would otherwise hand its clean row to every other principal's
+  reload, marking their (possibly stale) per-user rows clean. The receiver
+  cannot check this itself — observations do not carry the writer's
+  principal on the wire — which is acceptable on the same trust basis as
+  the doc diff: the server already scopes every pushed byte per reader.
 
 What adoption does — the reload primitive, applied live
 (`rehydrateActionFromObservation`): restore the write surface, resubscribe
@@ -113,6 +138,22 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   seq from the receiving session). Sourcing from the store makes the push
   idempotent and batching-agnostic: a re-pushed or coalesced window carries
   the same rows.
+
+  The window is then filtered to what THIS session may adopt, exactly as
+  the doc diff is scoped (`v2-adoption-attach-test.ts` pins all three):
+
+  - **Watch-scoped:** a row ships only when every read in
+    `reads ∪ shallowReads` is inside the session's tracked doc set. A
+    receiver never gets pushes for untracked docs, so it could never
+    verify such a row current (C2) — and pre-filter, the row poisoned the
+    receiver into the C2 deadlock (the flag-ON multiUserTest stall).
+  - **Reader-scoped (C6):** rows touching session-scope addresses are
+    dropped; rows touching user-scope addresses ship only when the row's
+    persisted writer session key carries the receiving session's
+    principal. `scheduler_observation.session_id` now stores the writer's
+    commit session key for this purpose.
+  - Dropped rows degrade to the receiver running the action itself —
+    adoption stays an optimization, never a correctness dependency.
 - **Client:** zero memory-client changes — the field rides `SessionSync`
   through `WatchView.applySync`'s emit. The runner's `applySessionSync`
   (storage/v2.ts) applies the upserts, fires the existing `integrate`
@@ -141,12 +182,16 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   observation arrives; the per-element ops adopt in-window (§3's benign
   race, value-identical no-op).
 - Scoping: observations ride only sync pushes the session receives anyway,
-  in spaces it is authorized to read. The boot listing already exposes the
-  whole space's snapshot rows to any session that can list, so this adds
-  no new disclosure class; the addresses inside `reads` are opaque doc
-  ids. Flag for the standing CFC review pass regardless (existence-channel
-  precedent). Observations remain scheduling metadata — never
-  authorization or label evidence.
+  in spaces it is authorized to read, and (per the attach filters above)
+  only rows whose read set lies inside the session's own watch — pushed
+  observation metadata now stays inside the same boundary that scopes the
+  doc diff itself. The boot listing remains space-wide (the reload path's
+  mark-clean legitimacy comes from the receiver's own persisted doc
+  values, not cross-reader determinism), so its exposure class is
+  unchanged; the addresses inside `reads` are opaque doc ids. Flag for
+  the standing CFC review pass regardless (existence-channel precedent).
+  Observations remain scheduling metadata — never authorization or label
+  evidence.
 
 ## 5. What this buys, concretely
 
