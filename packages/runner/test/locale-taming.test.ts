@@ -1,0 +1,117 @@
+/**
+ * Sanitized locale methods under SES lockdown (locale-taming.ts).
+ *
+ * `localeTaming: "safe"` used to alias every `toLocale*` method to its
+ * non-locale equivalent, silently ignoring arguments. The sanitized wrappers
+ * keep the methods functional but pin the ambient defaults: omitted locale →
+ * "en-US", omitted Date timeZone → "UTC". Explicit arguments pass through.
+ *
+ * Assertions run INSIDE a lockdown compartment (the pattern-visible surface).
+ * Fixed timestamp: 1752192000000 = 2025-07-11T00:00:00Z, a Friday.
+ *
+ * Expected strings are exact for date-only / number formatting (stable across
+ * ICU versions); time strings match the AM/PM separator loosely because ICU
+ * 72 changed it to U+202F.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
+
+const T = 1752192000000; // 2025-07-11T00:00:00Z (Friday)
+
+const inSES = (expr: string): unknown =>
+  evaluateFunctionSourceInSES(`(() => (${expr}))()`, { lockdown: true });
+
+describe("sanitized locale methods under SES lockdown", () => {
+  describe("Date.prototype.toLocaleDateString", () => {
+    it("honors the options bag (the localeTaming:'safe' alias ignored it)", () => {
+      expect(
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })`,
+        ),
+      ).toBe("Friday, Jul 11");
+    });
+
+    it("defaults an omitted timeZone to UTC, not the host timezone", () => {
+      // 2025-07-11T00:00:00Z is 7/11 in UTC but 7/10 in every zone west of it;
+      // an ambient-timezone default would make this assertion host-dependent.
+      expect(inSES(`new Date(${T}).toLocaleDateString()`)).toBe("7/11/2025");
+    });
+
+    it("defaults an omitted locale to en-US, including the [] spelling", () => {
+      expect(
+        inSES(`new Date(${T}).toLocaleDateString([], { month: "long" })`),
+      ).toBe("July");
+    });
+
+    it("honors an explicit timeZone", () => {
+      expect(
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", { timeZone: "America/New_York" })`,
+        ),
+      ).toBe("7/10/2025");
+    });
+
+    it("honors an explicit locale", () => {
+      expect(inSES(`new Date(${T}).toLocaleDateString("de-DE")`)).toBe(
+        "11.7.2025",
+      );
+    });
+  });
+
+  describe("Date.prototype.toLocaleTimeString / toLocaleString", () => {
+    it("formats UTC midnight, honoring options", () => {
+      const time = inSES(
+        `new Date(${T}).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })`,
+      ) as string;
+      // ICU ≥72 uses U+202F before AM/PM; older ICU uses a plain space.
+      expect(time).toMatch(/^12:00[\s ]AM$/);
+    });
+
+    it("toLocaleString combines date and time in UTC by default", () => {
+      const s = inSES(`new Date(${T}).toLocaleString()`) as string;
+      expect(s).toMatch(/^7\/11\/2025, 12:00:00[\s ]AM$/);
+    });
+  });
+
+  describe("Number / BigInt toLocaleString", () => {
+    it("defaults to en-US grouping (the alias returned toString output)", () => {
+      expect(inSES(`(1234567.89).toLocaleString()`)).toBe("1,234,567.89");
+    });
+
+    it("honors an explicit locale", () => {
+      expect(inSES(`(1234567.89).toLocaleString("de-DE")`)).toBe(
+        "1.234.567,89",
+      );
+    });
+
+    it("covers BigInt", () => {
+      expect(inSES(`(123456789n).toLocaleString()`)).toBe("123,456,789");
+    });
+  });
+
+  describe("String locale methods", () => {
+    it("localeCompare defaults deterministically and honors explicit locales", () => {
+      // "ä" sorts before "z" in German but after "z" in Swedish — the classic
+      // collation divergence; both being honored proves arguments flow through.
+      expect(inSES(`"ä".localeCompare("z", "de")`)).toBeLessThan(0);
+      expect(inSES(`"ä".localeCompare("z", "sv")`)).toBeGreaterThan(0);
+      expect(inSES(`"a".localeCompare("b")`)).toBeLessThan(0);
+    });
+
+    it("case mappings default to en-US and honor explicit locales", () => {
+      expect(inSES(`"i".toLocaleUpperCase()`)).toBe("I");
+      // Turkish dotted capital İ — only with the explicit locale.
+      expect(inSES(`"i".toLocaleUpperCase("tr")`)).toBe("İ");
+    });
+  });
+
+  describe("delegating methods", () => {
+    it("Array.prototype.toLocaleString reaches the sanitized element methods", () => {
+      expect(inSES(`[1234.5, new Date(${T})].toLocaleString()`)).toMatch(
+        /^1,234\.5,7\/11\/2025, 12:00:00[\s ]AM$/,
+      );
+    });
+  });
+});

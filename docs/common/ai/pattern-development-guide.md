@@ -205,6 +205,22 @@ The current exported helper names are `safeDateNow()` and
 `nonPrivateRandom()`. Older shorthand such as `dateNow` or `insecureRandom`
 does not match the current API.
 
+Locale-sensitive formatting works, with pinned defaults:
+
+- `toLocaleDateString` / `toLocaleTimeString` / `toLocaleString` (and the
+  Number, BigInt, and String locale methods) honor their arguments, but an
+  omitted locale defaults to `"en-US"` and an omitted Date `timeZone` to
+  `"UTC"` — never the host locale or timezone.
+- Pass `timeZone` explicitly (an IANA name) to format in a specific zone. For
+  viewer-local display, compose from the local getters (`getFullYear()`,
+  `getDay()`, `getHours()`, …), which remain host-local; the sandbox exposes
+  no way to obtain the viewer's IANA zone name, so `toLocale*` output is
+  deterministic rather than viewer-local.
+- Watch the mixed-zone trap: a `Date` constructed at *local* midnight (e.g.
+  `new Date("2025-07-11T00:00:00")`) formatted without an explicit `timeZone`
+  renders in UTC and can land on the previous day for zones east of UTC.
+  Construct in UTC (`"…T00:00:00Z"`) or pass the matching `timeZone`.
+
 ```tsx
 // Shown inside a pattern body.
 const createItem = action(() => {
