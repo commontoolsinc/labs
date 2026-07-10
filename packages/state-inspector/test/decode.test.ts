@@ -48,13 +48,18 @@ Deno.test("decode: a modern fvj1-encoded link round-trips to a recognized link",
   JSON.stringify(annotate(decoded));
 });
 
-Deno.test("decode: summarizeLink shortens of: and computed: ids alike", () => {
+Deno.test("decode: summarizeLink keeps the computed: scheme visible", () => {
   const summary = (id: string) => summarizeLink({ id, hasSchema: false });
-  // Same hash body, either scheme: the scheme is stripped for display (the
-  // kind-salted preimage keeps real bodies distinct across schemes).
-  assertEquals(
-    summary("of:fid1:abcdefghijklmnop"),
-    summary("computed:fid1:abcdefghijklmnop"),
+  // The hash preimage is kind-free, so of:fid1:H and computed:fid1:H can be
+  // two distinct docs for one cause — the display must NOT conflate them.
+  assert(
+    summary("of:fid1:abcdefghijklmnop") !==
+      summary("computed:fid1:abcdefghijklmnop"),
+    "schemes must stay distinguishable",
+  );
+  assert(
+    summary("computed:fid1:abcdefghijklmnop").includes("computed:"),
+    "computed marker survives shortening",
   );
   assert(
     summary("computed:fid1:abcdefghijklmnop").includes("fid1:abc"),
