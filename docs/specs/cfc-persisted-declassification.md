@@ -221,12 +221,20 @@ declassification event. Contract, if and when built:
 2. **Policy-guarded**: the acting principal's authority over the target
    clause verified exactly as a grant writer would (inv-7), plus §8.10.5.2 —
    a broader audience is a new release judgment with its own evidence.
-3. **A new monotonicity gate**: today no runtime `canUpdateStoreLabel` check
-   exists (declared entries evolve only via the schema-walk re-mint). The
-   event is the *sanctioned exception* to a gate that must first exist —
-   build the gate (reject non-monotone declared-component changes outside an
-   event) before the exception, or the "never an ordinary write" clause is
-   unenforced prose.
+3. **A new monotonicity gate**: the event is the *sanctioned exception* to a
+   gate that must exist first — without an enforced gate rejecting
+   non-monotone declared-component changes outside an event, the "never an
+   ordinary write" clause is unenforced prose. _Implementation note
+   (2026-07-09): shipped in #4647 behind
+   `RuntimeOptions.cfcDeclaredMonotonicity` (`off | observe | enforce`,
+   default `off`) — the prepare-time re-mint check of §5's gate bullet
+   (`cfc/declared-monotonicity.ts`, hooked at the persist walk), comparing
+   each re-minted declared entry against the per-path join of the stored
+   declared entries via the A2/A3 clause kernel, with
+   `setCfcDeclaredWideningExemption` (trusted-builtin only, one
+   `(doc, path, clauseDigest)` triple per tx, `cfcCanonicalClauseDigest`
+   clause identity) as the event writer's exemption seam. The gate still
+   has to soak at `enforce` before the event ships._
 4. **The event record**, adjacent to but not inside the `["cfc"]` envelope
    (SC-11 keeps envelopes churn-free and version-neutral): a **create-only
    document causal to the consumed intent's id** — the shipped receipt
@@ -265,21 +273,24 @@ mechanism level (2026-07-09):
   clause form (`normalizeClause` + the canonical digest idiom) needs only a
   small `clauseDigest` helper; attribution — verified identities +
   `writeAuthorizedBy` builtin arm.
-- **Missing, buildable now**: the declared-component **monotonicity gate**
-  (§4.3) — a self-contained prepare-time check comparing a re-minted
+- **Shipped 2026-07-09, soaking**: the declared-component **monotonicity
+  gate** (§4.3) — a self-contained prepare-time check comparing a re-minted
   declared entry against the stored one under `canUpdateStoreLabel`
   semantics (confidentiality may only add clauses or drop alternatives;
   integrity may only drop atoms — the A2/A3 clause helpers give
   subsumption), dialed `off | observe | enforce` like every other gate,
-  with the event writer as its sanctioned exception hook. Nothing blocks
-  it; it must ship and soak **before** the exception exists.
+  with the event writer as its sanctioned exception hook. Built in #4647
+  exactly in this shape (including the `cfcCanonicalClauseDigest` helper
+  the "Exists" bullet anticipated); the remaining criterion is soak at
+  `enforce` **before** the exception exists.
 - **Missing, assurance-only**: the four §6 evidence pieces (§4.1) — they
   upgrade a v1, they do not gate it.
 
 So the only *hard* remaining gate is (a): a real export/publish/portability
 requirement that grants demonstrably cannot serve — a product decision, not
-a substrate one. When (a) holds, build order is: monotonicity gate → soak →
-reduced-evidence v1 (§4.1) → §6 evidence upgrades as they land.
+a substrate one. When (a) holds, build order is: soak the shipped
+monotonicity gate → reduced-evidence v1 (§4.1) → §6 evidence upgrades as
+they land.
 Until then, "publish" is served by route 3 (copy-forward), which is honest
 about being a new value.
 
