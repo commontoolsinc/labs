@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -1278,6 +1279,145 @@ Deno.test("acl enforce: ACL mutations must preserve a concrete owner", async () 
   }
 });
 
+Deno.test("acl enforce: ACL mutations are default-branch ACL-only commits", async () => {
+  const server = createAclServer("memory://acl-validate-commit-shape", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-validate-commit-shape";
+  const alice = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    const opened = await openSession(alice, space, ALICE);
+    assertExists(opened.ok);
+
+    const nonDefaultBranch = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("acl-non-default-branch"),
+      space,
+      sessionId: opened.ok.sessionId,
+      commit: {
+        branch: "feature",
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: { value: { [ALICE]: "OWNER", [BOB]: "READ" } },
+        }],
+      },
+    });
+    assertEquals(nonDefaultBranch.error?.name, "ProtocolError");
+
+    const mixed = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("acl-mixed-commit"),
+      space,
+      sessionId: opened.ok.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: `of:${space}`,
+            value: { value: { [ALICE]: "OWNER", [BOB]: "READ" } },
+          },
+          {
+            op: "set",
+            id: "of:ordinary",
+            value: { value: { mixed: true } },
+          },
+        ],
+      },
+    });
+    assertEquals(mixed.error?.name, "ProtocolError");
+    assertEquals(await server.readDocument(space, "of:ordinary"), null);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities", async () => {
+  const diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+  const database = new Database(diskPath);
+  database.exec("CREATE TABLE lookup (value TEXT)");
+  database.exec("INSERT INTO lookup (value) VALUES ('visible')");
+  database.close();
+
+  const server = createAclServer("memory://acl-auxiliary-surfaces", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-auxiliary-surfaces";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  const carol = await connect(server);
+  const diskId = "of:acl-disk-source";
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+      [CAROL]: "WRITE",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    const carolSession = await openSession(carol, space, CAROL);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+    assertExists(carolSession.ok);
+
+    const deniedRegistration = await server.sqliteRegisterDiskSource({
+      type: "sqlite.register-disk-source",
+      requestId: nextRequestId("acl-disk-register-denied"),
+      space,
+      sessionId: carolSession.ok.sessionId,
+      id: diskId,
+      path: diskPath,
+    });
+    assertEquals(deniedRegistration.error?.name, "AuthorizationError");
+
+    const registered = await server.sqliteRegisterDiskSource({
+      type: "sqlite.register-disk-source",
+      requestId: nextRequestId("acl-disk-register"),
+      space,
+      sessionId: aliceSession.ok.sessionId,
+      id: diskId,
+      path: diskPath,
+    });
+    assertExists(registered.ok);
+
+    const sqliteRead = await server.sqliteQuery({
+      type: "sqlite.query",
+      requestId: nextRequestId("acl-sqlite-read"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+      db: { id: diskId },
+      sql: "SELECT value FROM lookup",
+    });
+    assertEquals(sqliteRead.ok?.rows, [{ value: "visible" }]);
+
+    const snapshots = await server.listSchedulerActionSnapshots({
+      type: "scheduler.snapshot.list",
+      requestId: nextRequestId("acl-scheduler-snapshots"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+      query: {},
+    });
+    assertEquals(snapshots.ok?.snapshots, []);
+
+    const watch = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: nextRequestId("acl-watch-add"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+      watches: [],
+    });
+    assertExists(watch.ok);
+  } finally {
+    await server.close();
+    await Deno.remove(diskPath);
+  }
+});
+
 Deno.test("acl enforce: direct writes cannot create or mutate ACL state", async () => {
   const server = createAclServer("memory://acl-direct-write", {
     mode: "enforce",
@@ -1302,6 +1442,35 @@ Deno.test("acl enforce: direct writes cannot create or mutate ACL state", async 
     await server.writeDocument(space, "of:doc:existing", { direct: true });
   } finally {
     await server.close();
+  }
+});
+
+Deno.test("acl enforce: direct writes reject malformed stored ACL state", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "memory-acl-direct-" });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-acl-direct-invalid";
+  try {
+    const seedServer = createAclServer(store, { mode: "off" });
+    try {
+      await seedServer.writeDocument(space, `of:${space}`, {
+        [ALICE]: "READ",
+      });
+    } finally {
+      await seedServer.close();
+    }
+
+    const server = createAclServer(store, { mode: "enforce" });
+    try {
+      await assertRejects(
+        () => server.writeDocument(space, "of:ordinary", { blocked: true }),
+        Error,
+        "invalid ACL state",
+      );
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
   }
 });
 
