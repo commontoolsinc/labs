@@ -270,9 +270,14 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const txB = rt.edit();
     txB.readOrThrow(readAddress(criteriaB, []));
     txB.writeOrThrow(
-      { space, scope: "space", id: outId as `${string}:${string}`, path: [
-        "value",
-      ] },
+      {
+        space,
+        scope: "space",
+        id: outId as `${string}:${string}`,
+        path: [
+          "value",
+        ],
+      },
       { observed: "second" },
     );
     txB.prepareCfc();
@@ -289,9 +294,14 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const txC = rt.edit();
     txC.readOrThrow(readAddress(criteriaC, []));
     txC.writeOrThrow(
-      { space, scope: "space", id: outId as `${string}:${string}`, path: [
-        "value",
-      ] },
+      {
+        space,
+        scope: "space",
+        id: outId as `${string}:${string}`,
+        path: [
+          "value",
+        ],
+      },
       { observed: "third" },
     );
     txC.prepareCfc();
@@ -326,9 +336,14 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
     again.writeOrThrow(
-      { space, scope: "space", id: outId as `${string}:${string}`, path: [
-        "value",
-      ] },
+      {
+        space,
+        scope: "space",
+        id: outId as `${string}:${string}`,
+        path: [
+          "value",
+        ],
+      },
       { observed: "same" },
     );
     again.prepareCfc();
@@ -424,7 +439,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const rt = runtime;
     // Foreign labeled doc whose label carries a Caveat with plaintext source.
     const seed = rt.edit();
-    const criteria = rt.getCell(foreignSpace, "mp-xs-criteria", undefined, seed);
+    const criteria = rt.getCell(
+      foreignSpace,
+      "mp-xs-criteria",
+      undefined,
+      seed,
+    );
     const criteriaId = criteria.getAsNormalizedFullLink().id;
     seed.writeOrThrow(
       { space: foreignSpace, scope: "space", id: criteriaId, path: [] },
@@ -518,7 +538,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     // Recursive value read at the root.
     const txValue = rt.edit();
     txValue.readOrThrow(readAddress(seededId, []));
-    const outValue = rt.getCell(space, "mp-guard-out-value", undefined, txValue);
+    const outValue = rt.getCell(
+      space,
+      "mp-guard-out-value",
+      undefined,
+      txValue,
+    );
     outValue.set({ observed: true });
     txValue.prepareCfc();
     expect((await txValue.commit()).ok).toBeDefined();
@@ -531,7 +556,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     // Shape probe (nonRecursive) at the root.
     const txShape = rt.edit();
     txShape.readOrThrow(readAddress(seededId, []), { nonRecursive: true });
-    const outShape = rt.getCell(space, "mp-guard-out-shape", undefined, txShape);
+    const outShape = rt.getCell(
+      space,
+      "mp-guard-out-shape",
+      undefined,
+      txShape,
+    );
     outShape.set({ observed: true });
     txShape.prepareCfc();
     expect((await txShape.commit()).ok).toBeDefined();

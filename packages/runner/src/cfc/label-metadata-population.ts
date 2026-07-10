@@ -175,8 +175,7 @@ const scanAlternative = (
   if (isCfcFieldCommitment(alternative)) {
     return true;
   }
-  const isAtom =
-    typeof (alternative as { type?: unknown }).type === "string" ||
+  const isAtom = typeof (alternative as { type?: unknown }).type === "string" ||
     typeof (alternative as { kind?: unknown }).kind === "string";
   const context = isAtom ? alternative : undefined;
   let found = false;
