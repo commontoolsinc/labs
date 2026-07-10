@@ -143,12 +143,15 @@ Verification added or run for this work:
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
 
-- ✅ Stored in a **`PerSpace<HistoryEntry[]>` array** (the `visits` input),
-  capped at the most-recent `MAX_HISTORY` (200) entries by date. Each entry is
+- ✅ Stored in a **`PerSpace<HistoryEntry[]>` array** (the `visits` input). Each
+  new entry is a deterministic keyed entity containing
   `{ id, title, loggedByName (frozen), loggedBy (live Cell<User> link), wentAt,
   votes }`.
-  Appended via the host-only `logVisit` (`visits.push`, then a cap-trim only on
-  overflow). Each option still has a "✓ we went here" button.
+  The host-only `logVisit` migrates readable legacy rows to keyed links and uses
+  a conflict-checked rewrite to keep the most-recent `MAX_HISTORY` (200)
+  entries. Opaque pre-keying memberships are preserved and use best-effort
+  capping rather than being silently deleted. Each option still has a "✓ we went
+  here" button.
   - History was briefly on a **SQLite `visits` table** (#4144/#4145, the team's
     first dogfood of the SQLite builtins, #3776/#3848). It surfaced real builtin
     bugs (below), but SQLite wasn't the right fit for a small in-cell collection
@@ -156,10 +159,13 @@ nobody suggests the same place three days running.
 - ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
   today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
   date draft clears after each log so it defaults back to today.
-- ✅ **Editing:** `removeHistoryEntry({ id })` (a `visits.set(filter)`) drops a
-  single mistaken entry via a per-row ✕; `clearHistory` (two-step confirm)
-  empties the log (`visits.set([])`). Both host-only. The embedded vote snapshot
-  goes with the entry — no separate cascade to keep aligned.
+- ✅ **Editing:** `removeHistoryEntry({ id })` drops keyed membership and clears
+  its entity (with a positional fallback for readable legacy rows);
+  `clearHistory` clears every readable keyed entity and then explicitly empties
+  all membership, including opaque legacy links. Both are host-only. The
+  embedded vote snapshot goes with a readable entry — no separate cascade to
+  keep aligned. An opaque target document is not guessed at or destroyed when
+  its membership is cleared.
 - ✅ Shown as a **"Recently eaten" list below the options** (8 most recent,
   newest first), a `computed` over `visits` rendered with the plain-JSX `.map`
   idiom, labelled with each visit's own date ("Tuesday, May 20").

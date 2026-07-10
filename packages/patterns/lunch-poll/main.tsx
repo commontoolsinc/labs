@@ -26,8 +26,12 @@
  * options (8 most recent); the host can delete a single mistaken entry
  * (`removeHistoryEntry`) or clear the whole log.
  *
- * Storage: visits live in a `PerSpace<HistoryEntry[]>` array, capped at the
- * MAX_HISTORY most recent (by date). Each `logVisit` embeds a snapshot of
+ * Storage: visits live in a `PerSpace<HistoryEntry[]>` array. Fully readable
+ * history is capped at the MAX_HISTORY most recent (by date). Each new visit is
+ * a keyed entity addressed by its generated id, so its full item schema
+ * survives a cold storage traversal. Opaque or pre-keying memberships are
+ * preserved rather than dropped; their cap is best-effort until they can be
+ * read, repaired, or explicitly cleared. Each `logVisit` embeds a snapshot of
  * everyone's current vote in the entry's `votes` list — the option title is
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
@@ -263,10 +267,28 @@ const parseVisitDate = (draft: string | undefined): number => {
   return Number.isNaN(t) ? safeDateNow() : t;
 };
 
-// Cap the stored visit log at the most-recent MAX_HISTORY entries (by date). A
-// fabric array lives in one cell, so an unbounded log would grow every computed
-// that reads it; 200 is generous for a lunch poll.
+// Cap fully readable visit history at the most-recent MAX_HISTORY entries (by
+// date). A fabric array lives in one cell, so an unbounded log would grow every
+// computed that reads it; 200 is generous for a lunch poll. Opaque legacy
+// memberships are preserved even when that means temporarily exceeding it.
 const MAX_HISTORY = 200;
+
+// Remove one visit by its deterministic entity address. Visits created before
+// keyed history used append-addressed entities, so retain a positional fallback
+// for those rows. The explicit list read in that fallback stays in the conflict
+// set, making a concurrent membership change retry before the index is used.
+const removeVisitEntity = (visits: HistoryCell, id: string): void => {
+  const entry: Writable<HistoryEntry | undefined> = visits.elementById(id);
+  if (entry.get()) {
+    visits.removeByValue(visits.elementById(id));
+    // The entity document outlives its membership link; clear it so capped or
+    // explicitly deleted visits do not leave keyed history documents behind.
+    entry.set(undefined);
+    return;
+  }
+  const legacyIndex = visits.get().findIndex((visit) => visit.id === id);
+  if (legacyIndex >= 0) visits.removeByValue(visits.key(legacyIndex));
+};
 
 // Label for a visit derived purely from its own timestamp — never from the
 // current clock, so it stays idempotent inside reactive computations (timestamps
@@ -384,8 +406,9 @@ const clearMyVote = handler<ClearVoteEvent, {
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
 // group actually ate — by option id (resolved to its title) or a free title —
-// appending an entry to the `visits` array with everyone's current vote
-// snapshotted inline. Capped at the MAX_HISTORY most-recent entries (by date).
+// adding a keyed entry to the `visits` array with everyone's current vote
+// snapshotted inline. Fully readable history is capped at the MAX_HISTORY
+// most-recent entries (by date).
 const logVisit = handler<LogVisitEvent, {
   visits: HistoryCell;
   options: OptionsCell;
@@ -436,22 +459,59 @@ const logVisit = handler<LogVisitEvent, {
       });
     }
 
-    const entry: HistoryEntry = {
-      id: newHistoryId(),
+    const id = newHistoryId();
+    const entryValue: HistoryEntry = {
+      id,
       title: place,
       loggedByName: me,
       loggedBy: cellForName(me),
       wentAt: when,
       votes: voteSnapshot,
     };
-    // Append (push round-trips the live links); cap to the MAX_HISTORY most
-    // recent only on overflow.
-    visits.push(entry);
-    const all = visits.get();
-    if (all.length > MAX_HISTORY) {
-      visits.set(
-        [...all].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY),
+    const entry = visits.elementById(id);
+    entry.set(entryValue);
+
+    // A legacy or otherwise opaque visit may survive durably as a membership
+    // whose target schema-aware projection cannot return. (`length` still
+    // counts the raw link.) Never CAS-normalize such a list: doing so would
+    // silently delete the opaque member. Add the new keyed row mergeably and
+    // defer exact capping/migration until every membership is readable.
+    const projectedVisits = visits.get() ?? [];
+    const membershipCount = visits.key("length").get();
+    if (projectedVisits.length !== membershipCount) {
+      visits.addUnique(entry);
+      visitDate.set("");
+      return;
+    }
+
+    // A capped newest-N list is content-dependent, not a mergeable set: two
+    // writers can each addUnique from 199 → 200 and converge at 201. Preserve
+    // every item as an entity link, but CAS-rewrite membership/order so a
+    // conflicting writer re-runs against the winner and reapplies the cap.
+    // Re-seed existing rows through the same deterministic address. This
+    // migrates legacy append-addressed memberships whose stored links omitted
+    // the item schema; every retained membership below points at a fully
+    // schema-bearing HistoryEntry entity.
+    const candidates = projectedVisits.map((value) => {
+      const cell = visits.elementById(value.id);
+      cell.set(value);
+      return { value, cell };
+    });
+    candidates.push({ value: entryValue, cell: entry });
+    const ordered = candidates.sort((a, b) => b.value.wentAt - a.value.wentAt);
+    const kept = ordered.slice(0, MAX_HISTORY);
+    const dropped = ordered.slice(MAX_HISTORY);
+    visits.set(kept.map(({ cell }) => cell));
+
+    // A keyed entity document outlives its membership. Clear every dropped
+    // deterministic target (legacy rows were seeded into one just above).
+    // The original anonymous legacy document may remain unreachable, but its
+    // opaque membership is never discarded by this path.
+    for (const oldEntry of dropped) {
+      const oldEntity: Writable<HistoryEntry | undefined> = visits.elementById(
+        oldEntry.value.id,
       );
+      if (oldEntity.get()) oldEntity.set(undefined);
     }
 
     // Reset the date draft so the next log defaults back to today.
@@ -468,7 +528,7 @@ const removeHistoryEntry = handler<RemoveHistoryEntryEvent, {
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
   // The embedded vote snapshot goes with the entry — no separate cascade.
-  visits.set(visits.get().filter((v) => v.id !== id));
+  removeVisitEntity(visits, id);
 });
 
 const clearHistory = handler<ClearHistoryEvent, {
@@ -479,6 +539,15 @@ const clearHistory = handler<ClearHistoryEvent, {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
+  // Explicit host clear-all is authorized destructive semantics. Clear every
+  // readable keyed document first, then overwrite membership so opaque
+  // links (which projection cannot enumerate) cannot leave historyCount /
+  // hasHistory stuck. The projected read remains a commit precondition, so a
+  // concurrent readable log conflicts and retries instead of being silently
+  // lost.
+  for (const entry of visits.get() ?? []) {
+    removeVisitEntity(visits, entry.id);
+  }
   visits.set([]);
 });
 
@@ -551,10 +620,11 @@ export interface CozyPollInput {
   users?: PerSpace<User[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
-  // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
-  // at MAX_HISTORY most-recent entries in `logVisit`. optionDraft etc. are
-  // internal form drafts, declared as local per-session cells in the pattern
-  // body (parking-coordinator idiom).
+  // Durable "we went here" log; each keyed entry embeds its own vote snapshot.
+  // Fully readable history is capped at MAX_HISTORY in `logVisit`; opaque
+  // legacy memberships are retained rather than silently normalized away.
+  // optionDraft etc. are internal form drafts, declared as local per-session
+  // cells in the pattern body (parking-coordinator idiom).
   visits?: PerSpace<HistoryEntry[] | Default<[]>>;
 }
 
@@ -1425,9 +1495,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // didn't write them, and a computed that RETURNS undefined is
       // indistinguishable from "not yet computed" for cross-runtime readers —
       // so every snapshot yields a real, stable value (the shared EMPTY
-      // constants keep the fallback idempotent across recomputes). The visit
-      // history is no longer a PerSpace input — it lives in SQLite now and is
-      // surfaced via `recentVisits`/`mostRecentTitle` below.
+      // constants keep the fallback idempotent across recomputes). Keyed
+      // PerSpace visit history is surfaced via `recentVisits` and the scalar
+      // projections below.
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),

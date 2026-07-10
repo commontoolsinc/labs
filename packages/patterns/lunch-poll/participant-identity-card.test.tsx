@@ -1,5 +1,7 @@
 import { action, computed, Default, pattern, UI, Writable } from "commonfabric";
-import ParticipantIdentityCard from "./participant-identity-card.tsx";
+import ParticipantIdentityCard, {
+  joinAsParticipant,
+} from "./participant-identity-card.tsx";
 import type { User } from "./main.tsx";
 import {
   findNode,
@@ -22,6 +24,45 @@ const findByProp = (
   });
 
 export default pattern(() => {
+  // Bind the handler to deliberately unmaterialized profile values. This is
+  // the runtime shape that exposed the staging failure: an explicit event name
+  // is usable, but unrelated asynchronous wish captures are still undefined.
+  const unresolvedProfileNameSource = new Writable<string>();
+  const unresolvedProfileAvatarSource = new Writable<string>();
+  const unresolvedProfileName = computed(() =>
+    unresolvedProfileNameSource.get()
+  );
+  const unresolvedProfileAvatar = computed(() =>
+    unresolvedProfileAvatarSource.get()
+  );
+  const unresolvedUsers = new Writable<User[] | Default<[]>>([]);
+  const unresolvedMyName = new Writable<string | Default<"">>("");
+  const unresolvedAdminName = new Writable<string | Default<"">>("");
+  const unresolvedJoinName = new Writable<string | Default<"">>("");
+  const joinWithUnresolvedProfile = joinAsParticipant({
+    users: unresolvedUsers,
+    myName: unresolvedMyName,
+    adminName: unresolvedAdminName,
+    joinName: unresolvedJoinName,
+    profileName: unresolvedProfileName,
+    profileAvatar: unresolvedProfileAvatar,
+  });
+
+  // The profile-first path still supplies both resolved values to the same
+  // handler; making those captures optional must not discard the avatar.
+  const profileUsers = new Writable<User[] | Default<[]>>([]);
+  const profileMyName = new Writable<string | Default<"">>("");
+  const profileAdminName = new Writable<string | Default<"">>("");
+  const profileJoinName = new Writable<string | Default<"">>("");
+  const joinWithProfile = joinAsParticipant({
+    users: profileUsers,
+    myName: profileMyName,
+    adminName: profileAdminName,
+    joinName: profileJoinName,
+    profileName: "Profile Pat",
+    profileAvatar: "pat-avatar.png",
+  });
+
   const users = new Writable<User[] | Default<[]>>([]);
   const myName = new Writable<string | Default<"">>("");
   const adminName = new Writable<string | Default<"">>("");
@@ -29,6 +70,32 @@ export default pattern(() => {
     users,
     myName,
     adminName,
+  });
+
+  const action_join_with_unresolved_profile_captures = action(() => {
+    joinWithUnresolvedProfile.send({ name: "Fallback Host" });
+  });
+
+  const assert_joined_despite_unresolved_profile_captures = computed(() => {
+    const currentUsers = unresolvedUsers.get();
+    return currentUsers.length === 1 &&
+      currentUsers[0]?.name === "Fallback Host" &&
+      currentUsers[0]?.avatar === "" &&
+      unresolvedMyName.get() === "Fallback Host" &&
+      unresolvedAdminName.get() === "Fallback Host";
+  });
+
+  const action_join_with_resolved_profile = action(() => {
+    joinWithProfile.send({});
+  });
+
+  const assert_profile_name_and_avatar_preserved = computed(() => {
+    const currentUsers = profileUsers.get();
+    return currentUsers.length === 1 &&
+      currentUsers[0]?.name === "Profile Pat" &&
+      currentUsers[0]?.avatar === "pat-avatar.png" &&
+      profileMyName.get() === "Profile Pat" &&
+      profileAdminName.get() === "Profile Pat";
   });
 
   // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
@@ -129,6 +196,10 @@ export default pattern(() => {
 
   return {
     tests: [
+      { action: action_join_with_unresolved_profile_captures },
+      { assertion: assert_joined_despite_unresolved_profile_captures },
+      { action: action_join_with_resolved_profile },
+      { assertion: assert_profile_name_and_avatar_preserved },
       { assertion: assert_initial },
       { assertion: assert_manual_fallback_renders },
       { action: action_join_empty },
