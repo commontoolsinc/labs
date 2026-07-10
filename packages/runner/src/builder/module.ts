@@ -376,7 +376,8 @@ interface DeriveSchedulerOptions {
    * Transformer-emitted assertion that capability analysis ran over the
    * callback with no capture escaping tracking, so
    * `materializerWriteInputPaths` is an EXHAUSTIVE record of writes through
-   * captures. See `docs/specs/computed-cell-identity.md`.
+   * captures. Exhaustive-write provenance only — not consumed by the
+   * computed-cell classifier (replayable compute writes qualify regardless).
    */
   captureWritesAnalyzed?: boolean;
 }

@@ -3,7 +3,6 @@ import {
   BaseFabricPrimitive,
   type EntityKind,
   FabricHash,
-  withEntityKind,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
@@ -45,9 +44,11 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
  */
 export type CreateRefOptions = {
   /**
-   * Entity kind minted into BOTH the hash preimage and the visible tag
-   * (`fid2:computed:<hash>`), so the two representations cannot diverge and
-   * a kind change necessarily names a different entity. See
+   * Entity kind salted into the hash preimage. The kind's VISIBLE form is
+   * the URI scheme (`computed:fid1:<hash>`), applied by `toURI` at the same
+   * mint site from the same argument; the preimage salt here guarantees the
+   * bytes also differ, so a kind change necessarily names a different entity
+   * even for code paths that compare bare hashes. See
    * `docs/specs/computed-cell-identity.md`.
    */
   kind?: EntityKind;
@@ -158,16 +159,17 @@ export function createRef(
   }
 
   const kind = options?.kind;
-  // The kind changes the preimage SHAPE, not just a key: an untagged preimage
+  // The kind changes the preimage SHAPE, not just a key: an unkinded preimage
   // always carries a top-level `causal` key, while the kind envelope never
-  // does, so no untagged id can collide bytes-for-bytes with a kind-tagged one
-  // (guards code paths that compare `hashString`/bytes instead of the full
-  // tagged form).
+  // does, so no unkinded id can collide bytes-for-bytes with a kinded one.
+  // This salt is the byte-distinctness BACKSTOP: the kind's visible form is
+  // the URI scheme (applied by `toURI`, not here — the hash tag stays
+  // `fid1`), so this guards code paths that compare `hashString`/bytes
+  // instead of the full URI.
   const preimage = kind === undefined
     ? { ...source, causal: cause }
     : { entityKind: kind, inner: { ...source, causal: cause } };
-  const hash = hashOf(traverse(preimage));
-  return entityIdFrom(kind === undefined ? hash : withEntityKind(hash, kind));
+  return entityIdFrom(hashOf(traverse(preimage)));
 }
 
 /**
@@ -175,8 +177,10 @@ export function createRef(
  */
 export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
-    // Handle URI format with "of:" prefix
-    if (value.startsWith("of:")) value = fromURI(value);
+    // Handle URI format with an entity scheme ("of:" or "computed:")
+    if (value.startsWith("of:") || value.startsWith("computed:")) {
+      value = fromURI(value);
+    }
     return entityRefFromString(value);
   }
 

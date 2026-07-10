@@ -96,8 +96,9 @@ export class CellHandle<T = unknown> {
   }
 
   id(): string {
+    // Display/lookup form: entity URI scheme (`of:` / `computed:`) stripped.
     const id = this.#ref.id;
-    return (id && id.startsWith("of:")) ? id.substring(3) : id;
+    return id ? id.replace(/^(of|computed):/, "") : id;
   }
 
   /**

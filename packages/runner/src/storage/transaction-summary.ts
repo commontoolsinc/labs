@@ -358,8 +358,12 @@ function formatValueForSummary(value: unknown): string {
  * Shorten an ID for display
  */
 function shortenId(id: string): string {
-  if (id.startsWith("of:")) {
-    return id.substring(3, 15) + "...";
+  // Entity URI schemes (`of:fid1:<hash>`, `computed:fid1:<hash>`): drop the
+  // scheme and show the head of the tagged hash. Safe to conflate — the kind
+  // is salted into the hash preimage, so the bodies never collide.
+  const body = id.replace(/^(of|computed):/, "");
+  if (body !== id) {
+    return body.substring(0, 12) + "...";
   }
   if (id.length > 20) {
     return id.substring(0, 20) + "...";

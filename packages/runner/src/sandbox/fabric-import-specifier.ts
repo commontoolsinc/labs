@@ -12,7 +12,7 @@ export interface FabricRef {
   space?: string;
   ref:
     | { kind: "slug"; slug: string }
-    | { kind: "uri"; scheme: "of" | "pattern"; hash: string };
+    | { kind: "uri"; scheme: "of" | "pattern" | "computed"; hash: string };
   /** Path inside the target program. */
   subpath?: string;
   /** Trailing @<hash> pin. */
@@ -102,7 +102,7 @@ export function formatFabricRef(ref: FabricRef): string {
     ? ref.ref.slug
     : ref.ref.scheme === "pattern"
     ? `pattern:${ref.ref.hash}`
-    : `of:fid1:${ref.ref.hash}`;
+    : `${ref.ref.scheme}:fid1:${ref.ref.hash}`;
   const subpath = ref.subpath === undefined ? "" : `/${ref.subpath}`;
   const pin = ref.pin === undefined ||
       (ref.ref.kind === "uri" &&
@@ -181,10 +181,14 @@ function parseRefToken(
         hash: parseHash(parts[1], specifier),
       };
     }
-    if (parts.length === 3 && parts[0] === "of" && parts[1] === "fid1") {
+    if (
+      parts.length === 3 &&
+      (parts[0] === "of" || parts[0] === "computed") &&
+      parts[1] === "fid1"
+    ) {
       return {
         kind: "uri",
-        scheme: "of",
+        scheme: parts[0],
         hash: parseHash(parts[2], specifier),
       };
     }

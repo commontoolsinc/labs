@@ -1,9 +1,9 @@
 /**
  * Engine tests for the computed-cell ack-and-drop conflict policy
  * (docs/specs/computed-cell-identity.md): a commit whose semantic operations
- * ALL target computed-kind entities (`fid2:computed:` ids) is acknowledged as
- * committed but its operations dropped when its reads are stale, instead of
- * being rejected. The dropped commit still consumes its localSeq and — via
+ * ALL target computed-kind entities (`computed:fid1:` ids — the kind rides
+ * the URI scheme) is acknowledged as committed but its operations dropped
+ * when its reads are stale, instead of being rejected. The dropped commit still consumes its localSeq and — via
  * its zero-revision commit row — satisfies replay dedupe, dependent pending
  * reads, and origin-committed preconditions. Mixed and untagged commits keep
  * strict conflict semantics.
@@ -30,8 +30,8 @@ const createEngine = async (): Promise<{ engine: Engine; path: string }> => {
 };
 
 const INPUT_ID = "of:fid1:input";
-const COMPUTED_ID = "of:fid2:computed:out";
-const OTHER_COMPUTED_ID = "of:fid2:computed:other";
+const COMPUTED_ID = "computed:fid1:out";
+const OTHER_COMPUTED_ID = "computed:fid1:other";
 const STATE_ID = "of:fid1:state";
 
 const revisionCount = (engine: Engine, id: string): number =>
@@ -342,7 +342,7 @@ Deno.test("all-computed commit with a missing pending dependency is dropped", as
   }
 });
 
-Deno.test("unknown kinds stay strict", async () => {
+Deno.test("unknown id schemes stay strict", async () => {
   const { engine, path } = await createEngine();
   try {
     seedStaleInput(engine);
@@ -362,8 +362,8 @@ Deno.test("unknown kinds stay strict", async () => {
             },
             operations: [{
               op: "set",
-              // A future kind this engine does not know must not relax.
-              id: "of:fid2:future:mystery",
+              // A future scheme this engine does not know must not relax.
+              id: "future:fid1:mystery",
               value: toEntityDocument({ q: 1 }),
             }],
           },

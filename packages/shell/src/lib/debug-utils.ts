@@ -189,15 +189,20 @@ function getDefaultDid(): string {
 function normalizeEntityId(
   options?: Pick<DebugCellOptions, "did" | "id">,
 ): string {
+  // Bare ids get the default `of:` scheme; already-schemed ids (`of:` or
+  // `computed:`) pass through — never double-prefix, the scheme is part of
+  // the identity.
+  const withScheme = (value: string): string =>
+    /^(of|computed):/.test(value) ? value : `of:${value}`;
   const id = options?.id;
   if (id) {
-    return id.startsWith("of:") ? id : `of:${id}`;
+    return withScheme(id);
   }
   const did = options?.did ?? getDefaultDid();
   if (!did) {
     return "";
   }
-  return did.startsWith("of:") ? did : `of:${did}`;
+  return withScheme(did);
 }
 
 function buildCellRef(

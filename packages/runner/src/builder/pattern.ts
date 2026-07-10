@@ -42,6 +42,10 @@ import {
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
+  REPLAYABLE_BUILTIN_REFS,
+  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
+} from "./builtin-replayability.ts";
+import {
   getStableInternalPathSegment,
   KeepAsCell,
   sanitizeSchemaForLinks,
@@ -521,7 +525,6 @@ function factoryFromPattern<T, R>(
       allNodes,
       derivedInternalPartialCausesByRoot,
       derivedInternalCells,
-      result,
     );
   }
 
@@ -642,59 +645,125 @@ const READ_ONLY_CELL_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * True if this schema position's own `asCell` marker grants a write-capable
+ * handle (an entry whose kind is not provably read-only). Positional only —
+ * does not look at subschemas.
+ */
+function asCellGrantsWritableHere(
+  schema: Record<string | number | symbol, unknown>,
+): boolean {
+  if (!Array.isArray(schema.asCell)) return false;
+  for (const entry of schema.asCell) {
+    const kind = typeof entry === "string"
+      ? entry
+      : isRecord(entry)
+      ? entry.kind
+      : undefined;
+    if (typeof kind !== "string" || !READ_ONLY_CELL_KINDS.has(kind)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Recursively true if a schema grants a write-capable cell handle anywhere in
- * its subtree (an `asCell` entry whose kind is not provably read-only). For
- * computed-kind classification any occurrence disqualifies — deliberately
- * over-broad (a value coincidentally containing an `asCell` key inside a
- * `default` also trips it); the failure direction is only a missed
- * optimization.
+ * its subtree (an `asCell` entry whose kind is not provably read-only). Used
+ * as the conservative fallback for value/schema subtrees the aligned walk in
+ * `assignComputedCellKinds` cannot model — deliberately over-broad (a value
+ * coincidentally containing an `asCell` key inside a `default` also trips
+ * it); the failure direction is only a missed optimization.
  */
 function schemaGrantsWritableHandles(schema: unknown): boolean {
   if (Array.isArray(schema)) return schema.some(schemaGrantsWritableHandles);
   if (!isRecord(schema)) return false;
-  if (Array.isArray(schema.asCell)) {
-    for (const entry of schema.asCell) {
-      const kind = typeof entry === "string"
-        ? entry
-        : isRecord(entry)
-        ? entry.kind
-        : undefined;
-      if (typeof kind !== "string" || !READ_ONLY_CELL_KINDS.has(kind)) {
-        return true;
-      }
-    }
-  }
+  if (asCellGrantsWritableHere(schema)) return true;
   return Object.values(schema).some(schemaGrantsWritableHandles);
 }
 
 /**
- * Marks derived internal cells with `kind: "computed"` when the serialized
- * graph proves they are written ONLY by pure compute nodes, so their ids are
- * minted kind-tagged (`fid2:computed:`) and the memory server may apply
- * relaxed conflict semantics to their writes. Classification must be
- * conservative: tagging a computed cell as state costs a missed optimization,
- * tagging state as computed silently drops user writes. See
+ * Like {@link schemaGrantsWritableHandles}, but also true when the subtree
+ * contains a `$ref`/`$dynamicRef`: the referenced schema is not inline, so a
+ * writable grant could hide behind it. This is the ONLY safe "provably
+ * handle-free" test for the input-side walk — an inline-only grant scan would
+ * fail OPEN on a `$ref` whose target (e.g. under the root `$defs`) grants a
+ * handle, and under-collection here means silently dropped user writes.
+ */
+function schemaMayGrantWritableHandles(schema: unknown): boolean {
+  if (Array.isArray(schema)) return schema.some(schemaMayGrantWritableHandles);
+  if (!isRecord(schema)) return false;
+  if (asCellGrantsWritableHere(schema)) return true;
+  if ("$ref" in schema || "$dynamicRef" in schema) return true;
+  return Object.values(schema).some(schemaMayGrantWritableHandles);
+}
+
+/**
+ * Schema keywords that can route a subschema to a value position through a
+ * mechanism the aligned walk does not model. Their presence at a position
+ * makes the walk fall back to treating the whole value subtree as writably
+ * bound (when a grant may exist below). The walk models only `properties`,
+ * `additionalProperties`, and `items`; `$defs`/`definitions` are harmless
+ * without a `$ref` (which is listed).
+ */
+const UNMODELED_SCHEMA_KEYWORDS: readonly string[] = [
+  "$ref",
+  "$dynamicRef",
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "not",
+  "if",
+  "then",
+  "else",
+  "dependentSchemas",
+  "prefixItems",
+  "contains",
+  "patternProperties",
+  "propertyNames",
+  "contentSchema",
+];
+
+/**
+ * Marks derived internal cells with `kind: "computed"` so their ids are
+ * minted kind-tagged and the memory server may apply relaxed (ack-and-drop)
+ * conflict semantics to their writes. See
  * `docs/specs/computed-cell-identity.md`.
  *
- * A cell qualifies iff:
- * - every node writing it (listing its root under `node.outputs`) is a plain
- *   javascript compute module — not a handler wrapper, not an effect, not a
- *   builtin/pattern/raw node — with no writable-input markers of its own
- *   (`materializerWriteInputPaths`, `writableProxy`, or an argument schema
- *   granting cell handles), and there is at least one such writer;
- * - its root never appears in the INPUTS of any node that could write through
- *   them (handlers capture their whole closure under `$ctx`; materializers,
- *   effects, builtins, and sub-patterns may write inputs — any appearance
- *   disqualifies, even a read-only capture);
- * - it is not a stream; and
- * - the result surface never exposes it through an alias whose schema still
- *   grants a cell handle (a consumer could write through the handle).
+ * Internals with a writer are computed BY DEFAULT — even when the
+ * computation involves writes (capture writes, materializer write paths): a
+ * replayable writer deterministically reproduces its writes, so dropping one
+ * loses nothing. A cell is tagged iff:
+ * - it has at least one writer (a node listing its root under
+ *   `node.outputs`) — zero-writer cells are seeded state, never tagged — and
+ *   no writer disqualifies (`writerDisqualifies`): handler wrappers,
+ *   writable-proxy modules, effects, raw/isolated modules, and builtin refs
+ *   not proven replayable by name (see `builtin-replayability.ts`);
+ * - its root is never handed WRITABLE into another node
+ *   (`collectInputDisqualifiedRoots`): read-only handler captures no longer
+ *   disqualify, but `asCell` bindings granting a write-capable handle,
+ *   schema-less / writable-proxy handlers, sub-pattern arguments,
+ *   op-sub-pattern builtin inputs (map/filter/flatMap), and every input of a
+ *   non-replayable node (`llmDialog` writes through its inputs) still do;
+ * - it is not a stream.
+ *
+ * The failure directions are asymmetric by design. SHAPE questions fail open
+ * only where write capability is provably absent — writes in schema-carrying
+ * handlers flow solely through non-read-only `asCell` handles — and any
+ * structural doubt (unmodeled schema keywords, `$ref`s, value/schema
+ * mismatch) disqualifies the whole subtree. NAME questions (builtin refs)
+ * fail strict: unknown names disqualify. Tagging a computed cell as state
+ * costs a missed optimization; tagging state as computed silently drops user
+ * writes.
+ *
+ * ACCEPTED consequence: exposure on the result surface no longer
+ * disqualifies. An embedder that writes through an exposed writable handle
+ * into a computed cell has that write ack-and-dropped on conflict; the
+ * derivation re-establishes the value.
  */
 function assignComputedCellKinds(
   allNodes: Set<NodeRef>,
   partialCausesByRoot: Map<OpaqueCell<any>, JSONValue>,
   derivedInternalCells: DerivedInternalCellDescriptor[],
-  serializedResult: JSONValue,
 ): void {
   const collectCellRoots = (value: unknown): Set<OpaqueCell<any>> => {
     const roots = new Set<OpaqueCell<any>>();
@@ -706,26 +775,184 @@ function assignComputedCellKinds(
     return roots;
   };
 
-  // A writer we can vouch for: a plain compute that also cannot write through
-  // its own inputs. (Handlers never appear as writers — their `outputs` is
-  // `{}` — but ref builtins, sub-patterns, raw/isolated modules, and effects
-  // do, and none of their outputs are replayable.)
-  //
-  // Handle-bearing argument schemas (asCell entries) disqualify only when the
-  // module's capture writes are UNVERIFIED: when the transformer's capability
-  // analysis vouches for the callback (`captureWritesAnalyzed`, emitted only
-  // with no wildcard escape and no recursion short-circuit, with `.send()`
-  // counted as a write), possession of a handle is not use — a computed may
-  // embed event streams in its JSX output and still be a pure derivation.
-  const writerQualifies = (module: NodeRef["module"]): boolean =>
-    isModule(module) &&
-    module.type === "javascript" &&
-    module.wrapper !== "handler" &&
-    module.isEffect !== true &&
-    (module.materializerWriteInputPaths?.length ?? 0) === 0 &&
-    module.writableProxy !== true &&
-    (module.captureWritesAnalyzed === true ||
-      !schemaGrantsWritableHandles(module.argumentSchema));
+  // A writer that disqualifies its output cells from the computed kind:
+  // anything whose writes are not a deterministic replay of its inputs.
+  // Handlers never appear as writers (their `outputs` is `{}`), but the
+  // checks stay for hand-built nodes. `javascript` computes qualify even
+  // with capture writes / `materializerWriteInputPaths` — those writes
+  // replay. `pattern` writers qualify (instantiation writes converge on
+  // replay; see plan risk 4 — flip to disqualifying if that fails in
+  // practice). `passthrough` qualifies: it is a one-shot deterministic copy
+  // of its input binding to its outputs (runner.ts,
+  // `instantiatePassthroughNode`), with no code that could write elsewhere.
+  const writerDisqualifies = (module: NodeRef["module"]): boolean => {
+    if (!isModule(module)) return true; // Opaque module value: assume the worst.
+    if (module.wrapper === "handler" || module.writableProxy === true) {
+      return true;
+    }
+    if (module.isEffect === true) return true;
+    switch (module.type) {
+      case "javascript":
+      case "pattern":
+      case "passthrough":
+        return false;
+      case "ref":
+        // Builtins are string names here (runtime registrations are not
+        // visible to the builder); unknown names fail strict.
+        return typeof module.implementation !== "string" ||
+          !REPLAYABLE_BUILTIN_REFS.has(module.implementation);
+      default: // "raw", "isolated", and anything unrecognized: opaque.
+        return true;
+    }
+  };
+
+  // Walks a handler's bound `$ctx` value in parallel with its `$ctx` schema
+  // and collects the cell roots the handler could WRITE through: roots
+  // covered by a subschema that may grant a non-read-only `asCell` handle.
+  // Read-only captures (no possible grant in the covering subschema) collect
+  // nothing — in a schema-carrying, non-writableProxy handler, write
+  // capability flows only through `asCell` handles, so a plain value binding
+  // cannot be written through. Any subtree the walk cannot align (boolean or
+  // missing subschema with a possible grant, unmodeled schema keywords,
+  // value/schema shape mismatch) conservatively collects ALL roots in that
+  // value subtree.
+  const collectWritablyBoundRoots = (
+    value: unknown,
+    schema: unknown,
+    out: Set<OpaqueCell<any>>,
+    seen: Set<unknown> = new Set(),
+  ): void => {
+    // Provably handle-free subschema (no writable `asCell` grant inline and
+    // no `$ref` a grant could hide behind): nothing to collect. This is the
+    // branch that lets read-only handler captures stay computed.
+    if (!schemaMayGrantWritableHandles(schema)) return;
+    const collectAll = () =>
+      collectCellRoots(value).forEach((root) => out.add(root));
+    if (!isRecord(schema) || Array.isArray(schema)) {
+      // A grant may exist but the schema is not a plain object (unreachable
+      // for booleans, which never grant): fail safe.
+      collectAll();
+      return;
+    }
+    if (asCellGrantsWritableHere(schema)) {
+      // Writable handle at this very position: everything under it is
+      // reachable through the handle.
+      collectAll();
+      return;
+    }
+    if (UNMODELED_SCHEMA_KEYWORDS.some((keyword) => keyword in schema)) {
+      collectAll();
+      return;
+    }
+    let target = value;
+    if (isCellResultForDereferencing(target)) target = getCellOrThrow(target);
+    if (isCell(target)) {
+      // A cell bound where a deeper grant may exist: the handle the handler
+      // obtains deeper in writes INTO this root.
+      out.add(target.export().cell);
+      return;
+    }
+    if (target === null || typeof target !== "object") return; // Primitives hold no roots.
+    if (seen.has(target)) return;
+    seen.add(target);
+    if (Array.isArray(target)) {
+      const items = schema.items;
+      if (items === undefined) {
+        collectAll(); // Array value under an object-shaped schema: misaligned.
+        return;
+      }
+      for (const element of target) {
+        collectWritablyBoundRoots(element, items, out, seen);
+      }
+      return;
+    }
+    if (isRecord(target) && !isReactive(target)) {
+      const properties =
+        isRecord(schema.properties) && !Array.isArray(schema.properties)
+          ? schema.properties
+          : undefined;
+      for (const [key, child] of Object.entries(target)) {
+        const childSchema = properties !== undefined && key in properties
+          ? properties[key]
+          : schema.additionalProperties;
+        if (childSchema !== undefined) {
+          collectWritablyBoundRoots(child, childSchema, out, seen);
+        }
+        // No covering subschema (undeclared property, no
+        // additionalProperties): no `asCell` position exists for it, so the
+        // handler receives at most a plain, unwritable value — nothing to
+        // collect.
+      }
+      return;
+    }
+    // Anything else (pattern factories, non-cell reactives, exotic objects):
+    // unmodeled — fail safe.
+    collectAll();
+  };
+
+  // Roots bound into a node's inputs disqualify when the node could write
+  // through them.
+  const collectInputDisqualifiedRoots = (
+    node: NodeRef,
+  ): Set<OpaqueCell<any>> => {
+    const module = node.module;
+    const all = () => collectCellRoots(node.inputs);
+    const none = new Set<OpaqueCell<any>>();
+    if (!isModule(module)) return all();
+    if (module.wrapper === "handler") {
+      // Handlers capture their closure under `$ctx` (builder/module.ts binds
+      // `{ $ctx, $event }` against an argumentSchema of shape
+      // `{ properties: { $event, $ctx } }`, see generateHandlerSchema).
+      // Without a schema — or with the legacy writable proxy — every capture
+      // is writable.
+      if (module.writableProxy === true) return all();
+      const schema = module.argumentSchema;
+      const properties = isRecord(schema) && !Array.isArray(schema) &&
+          isRecord(schema.properties) && !Array.isArray(schema.properties)
+        ? schema.properties
+        : undefined;
+      if (properties === undefined || !isRecord(node.inputs)) return all();
+      const roots = new Set<OpaqueCell<any>>();
+      for (const [key, bound] of Object.entries(node.inputs)) {
+        if (key === "$ctx" && properties[key] !== undefined) {
+          collectWritablyBoundRoots(bound, properties[key], roots);
+        } else {
+          // `$event` is the node's own event stream (never a qualifying
+          // root, streams are excluded anyway); any unexpected key means a
+          // hand-built node — disqualify everything bound there.
+          collectCellRoots(bound).forEach((root) => roots.add(root));
+        }
+      }
+      return roots;
+    }
+    if (module.writableProxy === true) return all(); // Defensive: only handlers carry it today.
+    if (module.isEffect === true) return all();
+    switch (module.type) {
+      case "javascript":
+      case "passthrough":
+        // Qualifying computes and the passthrough copy read their inputs;
+        // their (replayable) writes are covered on the writer side.
+        return none;
+      case "pattern":
+        // Sub-pattern arguments are writable-by-default aliases and any
+        // handler inside the sub-pattern is invisible here.
+        return all();
+      case "ref": {
+        const name = module.implementation;
+        if (typeof name !== "string" || !REPLAYABLE_BUILTIN_REFS.has(name)) {
+          // Non-replayable/unknown builtins may write through their inputs
+          // (llmDialog pushes onto its `messages` input).
+          return all();
+        }
+        // Replayable, but the op sub-pattern argument may contain handlers
+        // that write the source elements.
+        if (SUBPATTERN_ARGUMENT_BUILTIN_REFS.has(name)) return all();
+        return none;
+      }
+      default: // "raw", "isolated", unrecognized: opaque.
+        return all();
+    }
+  };
 
   const writersByRoot = new Map<OpaqueCell<any>, NodeRef["module"][]>();
   const disqualified = new Set<OpaqueCell<any>>();
@@ -735,43 +962,18 @@ function assignComputedCellKinds(
       writers.push(node.module);
       writersByRoot.set(root, writers);
     });
-    if (!writerQualifies(node.module)) {
-      collectCellRoots(node.inputs).forEach((root) => disqualified.add(root));
-    }
+    collectInputDisqualifiedRoots(node).forEach((root) =>
+      disqualified.add(root)
+    );
   });
-
-  // Result aliases that still grant a cell handle expose the cell writable to
-  // consumers; collect their partial causes for disqualification.
-  const handleExposedPartialCauses: JSONValue[] = [];
-  const collectHandleExposures = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      value.forEach(collectHandleExposures);
-      return;
-    }
-    if (!isRecord(value)) return;
-    const alias = (value as LegacyAlias).$alias;
-    if (
-      isRecord(alias) && alias.partialCause !== undefined &&
-      schemaGrantsWritableHandles(alias.schema)
-    ) {
-      handleExposedPartialCauses.push(alias.partialCause);
-    }
-    Object.values(value).forEach(collectHandleExposures);
-  };
-  collectHandleExposures(serializedResult);
 
   partialCausesByRoot.forEach((partialCause, root) => {
     const writers = writersByRoot.get(root);
     if (writers === undefined || writers.length === 0) return;
-    if (!writers.every(writerQualifies)) return;
+    if (writers.some(writerDisqualifies)) return;
     if (disqualified.has(root)) return;
     const { value } = root.export();
     if (isRecord(value) && value.$stream === true) return;
-    if (
-      handleExposedPartialCauses.some((cause) => deepEqual(cause, partialCause))
-    ) {
-      return;
-    }
     const descriptor = derivedInternalCells.find((candidate) =>
       deepEqual(candidate.partialCause, partialCause)
     );

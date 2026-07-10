@@ -3,66 +3,55 @@ import { expect } from "@std/expect";
 
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import {
+  COMPUTED_URI_SCHEME,
   entityKindOfIdString,
-  entityKindOfTag,
   getComputedCellIdsConfig,
   isEntityKind,
   resetComputedCellIdsConfig,
   setComputedCellIdsConfig,
-  withEntityKind,
+  uriSchemeForEntityKind,
 } from "@/fabric-primitives/entity-kind.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("entity-kind", () => {
   const base = hashOf({ probe: "entity-kind" });
 
-  it("versions the tag to fid2:<kind> with the same bytes", () => {
-    const kinded = withEntityKind(base, "computed");
-    expect(kinded.tag).toBe("fid2:computed");
-    expect(kinded.hashString).toBe(base.hashString);
-    expect(kinded.taggedHashString).toBe(`fid2:computed:${base.hashString}`);
+  it("maps kinds to URI schemes, no kind to plain of:", () => {
+    expect(uriSchemeForEntityKind(undefined)).toBe("of");
+    expect(uriSchemeForEntityKind("computed")).toBe(COMPUTED_URI_SCHEME);
+    expect(COMPUTED_URI_SCHEME).toBe("computed");
   });
 
-  it("round-trips a kind-tagged hash through the string form", () => {
-    const kinded = withEntityKind(base, "computed");
-    const parsed = FabricHash.fromString(kinded.toString());
-    expect(parsed.tag).toBe("fid2:computed");
-    expect(parsed.hashString).toBe(base.hashString);
-    expect(parsed.toString()).toBe(kinded.toString());
-  });
-
-  it("keeps kind-tagged and untagged forms distinct identities", () => {
-    const kinded = withEntityKind(base, "computed");
-    expect(kinded.toString()).not.toBe(base.toString());
-  });
-
-  it("refuses to mint a kind twice or onto non-fid1 tags", () => {
-    const kinded = withEntityKind(base, "computed");
-    expect(() => withEntityKind(kinded, "computed")).toThrow(
-      /kinds are minted once/,
+  it("keeps the kind out of the FabricHash tag (scheme rides the URI)", () => {
+    // The kinded URI form wraps a plain fid1 tagged hash; parsing the hash
+    // portion is unchanged.
+    const uri = `${COMPUTED_URI_SCHEME}:${base.toString()}`;
+    const parsed = FabricHash.fromString(
+      uri.slice(`${COMPUTED_URI_SCHEME}:`.length),
     );
-    expect(() =>
-      withEntityKind(new FabricHash(base.bytes, "legacy"), "computed")
-    )
-      .toThrow(/kinds are minted once/);
+    expect(parsed.tag).toBe("fid1");
+    expect(parsed.hashString).toBe(base.hashString);
   });
 
-  it("parses kinds from tags, treating unknown kinds as absent", () => {
-    expect(entityKindOfTag("fid2:computed")).toBe("computed");
-    expect(entityKindOfTag("fid1")).toBeUndefined();
-    expect(entityKindOfTag("legacy")).toBeUndefined();
-    // Unknown kind suffixes must read as strict/authoritative.
-    expect(entityKindOfTag("fid2:future")).toBeUndefined();
+  it("parses the kind from a computed: id string", () => {
+    expect(entityKindOfIdString(`computed:${base.toString()}`)).toBe(
+      "computed",
+    );
   });
 
-  it("parses kinds from id strings and of: URIs", () => {
-    const kinded = withEntityKind(base, "computed");
-    expect(entityKindOfIdString(kinded.toString())).toBe("computed");
-    expect(entityKindOfIdString(`of:${kinded.toString()}`)).toBe("computed");
-    expect(entityKindOfIdString(base.toString())).toBeUndefined();
+  it("treats of:, bare, data:, and colon-free ids as unkinded", () => {
     expect(entityKindOfIdString(`of:${base.toString()}`)).toBeUndefined();
+    expect(entityKindOfIdString(base.toString())).toBeUndefined();
     expect(entityKindOfIdString("data:application/json,{}")).toBeUndefined();
     expect(entityKindOfIdString("no-colon")).toBeUndefined();
+  });
+
+  it("treats unknown schemes as unkinded (strict/authoritative)", () => {
+    // An unknown scheme must never read as a relaxed kind: old servers seeing
+    // a future scheme fall back to strict conflict semantics.
+    expect(entityKindOfIdString(`future:${base.toString()}`)).toBeUndefined();
+    expect(entityKindOfIdString(`fid2:computed:${base.hashString}`))
+      .toBeUndefined();
   });
 
   it("recognizes only known kinds", () => {

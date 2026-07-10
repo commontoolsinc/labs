@@ -230,8 +230,10 @@ declare module "@commonfabric/api" {
      * Transformer assertion that capability analysis ran over this module's
      * callback and no capture escaped tracking, making
      * `materializerWriteInputPaths` an exhaustive record of capture writes
-     * (`.send()` included). Lets the computed-cell classifier accept
-     * handle-bearing argument schemas when no writes were observed.
+     * (`.send()` included). Pure provenance: the computed-cell classifier no
+     * longer consumes it (replayable compute writes qualify regardless — see
+     * `assignComputedCellKinds`), but the exhaustive-write guarantee stays
+     * available to consumers that need a closed-world write record.
      */
     captureWritesAnalyzed?: boolean;
     /** Run this module's result in a specific space. */

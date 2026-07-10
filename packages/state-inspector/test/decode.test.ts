@@ -11,7 +11,12 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 
-import { annotate, collectLinks, decodedLinkOf } from "../decode.ts";
+import {
+  annotate,
+  collectLinks,
+  decodedLinkOf,
+  summarizeLink,
+} from "../decode.ts";
 import { decodeStored } from "../decode.ts";
 
 Deno.test("decode: modern FabricLink is recognized as a link", () => {
@@ -41,6 +46,20 @@ Deno.test("decode: a modern fvj1-encoded link round-trips to a recognized link",
   assert(links.some((l) => l.id === "of:x"), "modern link must be found");
   // and it must not throw when lowered for export
   JSON.stringify(annotate(decoded));
+});
+
+Deno.test("decode: summarizeLink shortens of: and computed: ids alike", () => {
+  const summary = (id: string) => summarizeLink({ id, hasSchema: false });
+  // Same hash body, either scheme: the scheme is stripped for display (the
+  // kind-salted preimage keeps real bodies distinct across schemes).
+  assertEquals(
+    summary("of:fid1:abcdefghijklmnop"),
+    summary("computed:fid1:abcdefghijklmnop"),
+  );
+  assert(
+    summary("computed:fid1:abcdefghijklmnop").includes("fid1:abc"),
+    "hash body head survives",
+  );
 });
 
 Deno.test("decode: BigInt and Fabric instances are JSON-safe after annotate", () => {

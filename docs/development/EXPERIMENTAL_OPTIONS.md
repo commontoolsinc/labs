@@ -30,7 +30,7 @@ in the same change.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic-only — in the canonical env registry) | off | Bernhard Seefeld (#4090) | graduate with scheduler-v2 speculation lineage | implemented, off by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
-| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 |
+| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -228,17 +228,25 @@ the per-epic implementation notes).
   (through the canonical env registry) or `RuntimeOptions.experimental`.
 - **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
   `docs/specs/computed-cell-identity.md`).
-- **Purpose.** Mints kind-tagged entity ids (`fid2:computed:`) for internal
-  cells the builder proves are written only by compute nodes. Gates minting
-  only; readers accept both id forms unconditionally, so the flag can flip
-  either way without a migration.
+- **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
+  `computed:` URI scheme replacing `of:`) for derived internal cells. The
+  builder classifies internals as computed by default, disqualifying only
+  cells written by (or handed writable into) handlers, streams, and
+  non-replayable builtins. Gates minting only; readers accept both id forms
+  unconditionally, so the flag can flip either way without a migration —
+  but see the version-skew note below.
 - **Current default and planned end state.** Off by default. Graduates to
   always-on together with the computed-cell write-conflict policy (ack-and-drop
-  for stale all-computed commits), then the flag is deleted.
+  for stale all-computed commits), then the flag is deleted. The flag is the
+  rollout gate for version skew: clients predating the `computed:` scheme
+  throw on such ids arriving via sync, so it must not graduate until every
+  syncing client carries the readers (old servers are safe — an unknown
+  scheme parses as no kind and stays strict).
 - **Status on 2026-07-09.** In development on
-  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-tagged minting) and
-  phase 2 (ack-and-drop of stale all-computed commits) implemented behind the
-  flag; classifier widening via capture-write verification in progress.
+  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
+  redesigned from a retired kind-in-hash-tag format that never shipped) and
+  phase 2 (ack-and-drop of stale all-computed commits) implemented behind
+  the flag.
 
 ### `cfcEnforcementMode`
 

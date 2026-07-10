@@ -6,7 +6,7 @@
 //   - legacy: plain JSON
 // In both, links/refs/streams appear as plain-data sigils:
 //   link   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
-//   ref    { "/": "of:…" | "fid1:…" }
+//   ref    { "/": "of:…" | "computed:…" | "fid1:…" }
 //   stream { "$stream": true }
 // `decodeStored()` routes by the `fvj1:` tag; everything else here is pure JSON
 // walking + recognition (no live runtime/Cell needed). In the fvj1 form embedded
@@ -79,7 +79,7 @@ export function decodedLinkOf(v: Json): DecodedLink | null {
   return null;
 }
 
-/** An entity reference: `{ "/": "of:…" | "fid1:…" }`. */
+/** An entity reference: `{ "/": "of:…" | "computed:…" | "fid1:…" }`. */
 export function parseEntityRef(v: Json): string | null {
   if (!isPlainObject(v)) return null;
   const keys = Object.keys(v);
@@ -100,7 +100,9 @@ function shortDid(did?: string): string | undefined {
 
 function shortId(id?: string): string | undefined {
   if (!id) return undefined;
-  const body = id.startsWith("of:") ? id.slice(3) : id;
+  // Strip the entity URI scheme (`of:` / `computed:`); the kind-salted hash
+  // bodies never collide across schemes.
+  const body = id.replace(/^(of|computed):/, "");
   return body.length > 14 ? `${body.slice(0, 8)}…${body.slice(-4)}` : body;
 }
 

@@ -207,8 +207,9 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
         : undefined);
   result.space = resultCell.space;
   // TODO(@ubik2): This should really just be sourceURI, but I'd need
-  // to update all the consumers. For now, strip the 'of:'
-  result.pieceId = resultCell.sourceURI.slice("of:".length);
+  // to update all the consumers. For now, strip the URI scheme
+  // ('of:' — or 'computed:', defensively; piece roots are minted unkinded).
+  result.pieceId = resultCell.sourceURI.replace(/^(of|computed):/, "");
   return result;
 }
 

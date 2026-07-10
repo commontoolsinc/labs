@@ -778,7 +778,7 @@ export interface AppliedCommit {
   /**
    * Set when the commit was acknowledged-as-committed but its operations were
    * DROPPED under the computed-cell conflict policy: every semantic operation
-   * targeted a computed-kind entity (`fid2:computed:` id) and the commit's
+   * targeted a computed-kind entity (`computed:fid1:` id) and the commit's
    * reads were stale, so reactivity guarantees the writer recomputes from the
    * newer inputs — no rejection, no retry, no revisions. The commit still
    * consumes its localSeq and satisfies dependent pending reads and
@@ -3803,10 +3803,10 @@ const schedulerObservationReadDropReason = (
 /**
  * The computed-cell drop policy's gate: returns a drop reason iff the commit
  * carries at least one semantic operation, EVERY semantic operation targets a
- * computed-kind entity (`fid2:computed:` id), and the commit's reads are
+ * computed-kind entity (`computed:fid1:` id), and the commit's reads are
  * stale. Any non-computed or sqlite operation disqualifies the whole commit —
  * mixed commits keep strict all-or-nothing conflict semantics, preserving
- * atomicity. Unknown kinds parse as no-kind and therefore stay strict.
+ * atomicity. Unknown URI schemes parse as no-kind and therefore stay strict.
  *
  * Cost note: an all-computed commit with current reads validates its reads
  * here AND in the throwing validators afterwards. Correctness first; the two

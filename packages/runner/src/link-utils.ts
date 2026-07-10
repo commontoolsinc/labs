@@ -761,15 +761,21 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    id: toURI(createRef(
-      {},
-      {
-        parent,
-        type: "internal",
-        cause: descriptor.partialCause,
-      },
-      descriptor.kind !== undefined ? { kind: descriptor.kind } : undefined,
-    )),
+    // The kind flows to BOTH createRef (hash-preimage salt) and toURI (URI
+    // scheme) from this one argument, so the two representations of the kind
+    // cannot diverge.
+    id: toURI(
+      createRef(
+        {},
+        {
+          parent,
+          type: "internal",
+          cause: descriptor.partialCause,
+        },
+        descriptor.kind !== undefined ? { kind: descriptor.kind } : undefined,
+      ),
+      descriptor.kind,
+    ),
     path: [],
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),

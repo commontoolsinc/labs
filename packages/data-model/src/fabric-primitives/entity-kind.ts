@@ -1,32 +1,25 @@
-import { FabricHash } from "./FabricHash.ts";
-
 /**
- * Entity kinds version a `FabricHash`'s format tag: `fid2:computed:<hash>`
+ * Entity kinds version an entity id's URI SCHEME: `computed:fid1:<hash>`
  * names an entity whose contents are a pure function of its pattern's
  * inputs, re-derivable by any runtime holding the same inputs. The kind
- * participates in identity — it is minted into the hash preimage AND the
- * visible tag from the same argument (`createRef`'s `kind` option), so the
- * two representations cannot diverge and a kind change necessarily names a
+ * participates in identity — it is salted into the hash preimage (see
+ * `createRef`) AND selects the URI scheme from the same argument, so the two
+ * representations cannot diverge and a kind change necessarily names a
  * different entity.
  *
- * `fid1:<hash>` remains the untagged form with strict, authoritative
- * semantics. `fid2` is a FORMAT version, not a new hash algorithm: the bytes
- * are produced by the same fid1 hashing, and the version bump exists so the
- * first segment stays a pure format discriminator — a parser that only knows
- * fid1 fails loudly on a kinded id instead of silently mis-handling it.
- * `FabricHash.fromString` splits at the last colon (the hash segment is
- * base64url and never contains one), so the parsed `tag` of a kinded id is
- * `"fid2:<kind>"`.
+ * `of:fid1:<hash>` remains the unkinded form with strict, authoritative
+ * semantics. The kind rides the scheme, NOT the `FabricHash` format tag: the
+ * tag stays `fid1` (same bytes, same hashing) and `FabricHash.fromString`
+ * is unaffected. Because the scheme is part of the URI string, the URI
+ * string IS the identity — never rebuild a computed cell's URI from its
+ * bare hash.
  *
  * See `docs/specs/computed-cell-identity.md`.
  */
 export type EntityKind = "computed";
 
-/** The format tag prefix of kind-tagged entity ids (`fid2:<kind>:<hash>`). */
-export const KINDED_ID_TAG_PREFIX = "fid2:";
-
-/** The format tag of untagged entity ids, which kinded minting upgrades. */
-const UNKINDED_ID_TAG = "fid1";
+/** The URI scheme of computed-kind entity ids (`computed:fid1:<hash>`). */
+export const COMPUTED_URI_SCHEME = "computed";
 
 const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set(["computed"]);
 
@@ -35,50 +28,34 @@ export function isEntityKind(value: unknown): value is EntityKind {
 }
 
 /**
- * Returns a `FabricHash` with the same bytes whose format tag carries `kind`
- * (`fid1` → `fid2:<kind>`). Throws on any other input tag: kinds are minted
- * exactly once, at id creation, and only on top of the fid1 format.
+ * The URI scheme that carries `kind`: `undefined` (no kind) maps to the
+ * plain `"of"` scheme, `"computed"` to {@link COMPUTED_URI_SCHEME}.
  */
-export function withEntityKind(hash: FabricHash, kind: EntityKind): FabricHash {
-  if (hash.tag !== UNKINDED_ID_TAG) {
-    throw new Error(
-      `Cannot mint a kind onto tag "${hash.tag}"; kinds are minted once, ` +
-        `onto ${UNKINDED_ID_TAG} hashes only`,
-    );
-  }
-  return new FabricHash(
-    hash.bytes,
-    `${KINDED_ID_TAG_PREFIX}${kind}`,
-  );
+export function uriSchemeForEntityKind(
+  kind: EntityKind | undefined,
+): "of" | typeof COMPUTED_URI_SCHEME {
+  return kind === undefined ? "of" : COMPUTED_URI_SCHEME;
 }
 
 /**
- * Parses the kind from a format tag (e.g. `"fid2:computed"` → `"computed"`).
- * Unknown kind suffixes return `undefined` — callers must treat unrecognized
- * kinds as strict/authoritative, never relaxed.
- */
-export function entityKindOfTag(tag: string): EntityKind | undefined {
-  if (!tag.startsWith(KINDED_ID_TAG_PREFIX)) return undefined;
-  const kind = tag.slice(KINDED_ID_TAG_PREFIX.length);
-  return isEntityKind(kind) ? kind : undefined;
-}
-
-/**
- * Parses the kind from an id string in tagged-hash form
- * (`fid2:computed:<hash>`) or `of:`-prefixed URI form. Non-entity URIs
- * (e.g. `data:`) and untagged ids return `undefined`.
+ * Parses the kind from an id string's URI scheme (the segment before the
+ * FIRST colon): `computed:fid1:<hash>` → `"computed"`. Every other form —
+ * `of:` URIs, bare tagged hashes (`fid1:<hash>`), non-entity URIs (e.g.
+ * `data:`), colon-free strings, and UNKNOWN schemes (e.g. `future:fid1:…`)
+ * — returns `undefined`, which callers must treat as strict/authoritative,
+ * never relaxed.
  */
 export function entityKindOfIdString(id: string): EntityKind | undefined {
-  const start = id.startsWith("of:") ? 3 : 0;
-  const lastColon = id.lastIndexOf(":");
-  if (lastColon <= start) return undefined;
-  return entityKindOfTag(id.slice(start, lastColon));
+  const colon = id.indexOf(":");
+  if (colon === -1) return undefined;
+  const scheme = id.slice(0, colon);
+  return scheme === COMPUTED_URI_SCHEME ? "computed" : undefined;
 }
 
 let computedCellIdsEnabled = false;
 
 /**
- * Ambient runtime flag gating the MINTING of kind-tagged computed-cell ids.
+ * Ambient runtime flag gating the MINTING of kind-schemed computed-cell ids.
  * Readers accept both forms unconditionally regardless of this flag — new-form
  * ids are a data-compatibility event, so only creation is gated.
  */
