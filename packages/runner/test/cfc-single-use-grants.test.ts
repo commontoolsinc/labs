@@ -573,6 +573,66 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       }
     });
 
+    it("a metadata-only (value-less) receipt document still counts as consumed", async () => {
+      // Memory v2 documents can exist with no `value` subpath (a
+      // metadata-only write). Presence of the receipt DOCUMENT is the
+      // consumption signal, so the resolver must read the document root: a
+      // value-subpath read would report `undefined` for such a document and
+      // re-arm the grant at evaluation time (cubic P1 on #4649). The
+      // create-only backstop would still kill the release at commit — any
+      // prior set on the entity fails the entity-absent precondition — but
+      // resolution itself must already fail closed as consumed.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const observeRuntime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        experimental: { commitPreconditions: true },
+        cfcEnforcementMode: "observe",
+        cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+        cfcPolicyEvaluation: "enforce",
+      });
+      try {
+        const grantId = cfcGrantDocId({
+          space: signer.did(),
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+        });
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        await writeGrant(observeRuntime);
+        // A full-document write with NO value key: the document exists, its
+        // ["value"] subpath does not (the `source`-only sibling-field shape).
+        const seed = observeRuntime.edit();
+        seed.writeOrThrow({
+          space: signer.did(),
+          id: receiptId,
+          type: "application/json",
+          path: [],
+        }, { source: { note: "metadata-only" } } as never);
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = observeRuntime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+            consumption: "consuming",
+          }),
+        ).toEqual([]);
+        // The receipt joined the consulted set as PRESENT, not absent.
+        expect(
+          tx.getCfcState().consultedGrants.some((g) =>
+            g.id === receiptId && g.digest !== CFC_GRANT_ABSENT_DIGEST
+          ),
+        ).toBe(true);
+        tx.abort();
+      } finally {
+        await observeRuntime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("flag off: unsatisfiable even in consuming queries, with a diagnostic", async () => {
       await withRuntime({ receipts: false }, async (runtime) => {
         await writeGrant(runtime);

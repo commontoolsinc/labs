@@ -654,20 +654,29 @@ const resolveSingleUseGrant = (
   const claims = claimsFor(tx);
   const own = claims.get(receiptId);
   if (own === undefined) {
-    const receiptValue = tx.readOrThrow({
+    // Read the document ROOT, not the ["value"] subpath: presence of the
+    // receipt DOCUMENT is the consumption signal, and a Memory v2 document
+    // can exist with no value (a metadata-only write). A value-subpath read
+    // would report `undefined` for such a document and re-arm the grant at
+    // evaluation time (cubic P1 on #4649) — the create-only backstop would
+    // still kill the release at commit (any prior set on the entity fails
+    // the entity-absent precondition), but resolution must already fail
+    // closed. Grant documents keep their ["value"] reads: there ABSENCE is
+    // the fail-closed direction (a value-less grant doc must not resolve).
+    const receiptDoc = tx.readOrThrow({
       space: grant.space as MemorySpace,
       id: receiptId,
       type: "application/json",
-      path: ["value"],
+      path: [],
     }, { meta: INTERNAL_VERIFIER_META });
     tx.recordCfcConsultedGrant({
       space: grant.space as MemorySpace,
       id: receiptId,
-      digest: receiptValue === undefined
+      digest: receiptDoc === undefined
         ? CFC_GRANT_ABSENT_DIGEST
-        : hashStringOf(receiptValue),
+        : hashStringOf(receiptDoc),
     });
-    if (receiptValue !== undefined) {
+    if (receiptDoc !== undefined) {
       // Consumed (or unreadable garbage at the receipt address — same
       // outcome): the durable decision was already spent.
       return [];
