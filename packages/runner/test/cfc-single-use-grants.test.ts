@@ -253,6 +253,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       receipts?: boolean;
       policyEvaluation?: "off" | "observe" | "enforce";
       enforcement?: "enforce-explicit" | "observe" | "disabled";
+      rules?: readonly ExchangeRule[];
     },
     body: (runtime: Runtime) => void | Promise<void>,
   ): Promise<void> => {
@@ -265,7 +266,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       experimental: { commitPreconditions: opts.receipts ?? true },
       cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
-      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+      cfcPolicyRecords: [{
+        id: "share-policy",
+        rules: [...(opts.rules ?? [sinkShareRule])],
+      }],
       cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
     });
     try {
@@ -1064,6 +1068,76 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
           ),
         ).toBe(false);
         release.tx.abort();
+      });
+    });
+
+    it("the input-requirement gate (gated write) consumes too: releases once, then fails closed", async () => {
+      // The OTHER consuming site (design §2.2 seam decision): a write whose
+      // maxConfidentiality ceiling is satisfied through the grant persists a
+      // released value — the ceiling decision is durable, so it consumes
+      // exactly like the sink gate. The rule carries no boundary guard
+      // (write gates mint no BoundaryContext atoms).
+      const writeGateRule: ExchangeRule = {
+        ...sinkShareRule,
+        preCondition: {
+          policyState: sinkShareRule.preCondition!.policyState,
+        },
+      };
+      const gatedSchema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "string",
+            ifc: { maxConfidentiality: [userBob] },
+          },
+        },
+        required: ["out"],
+      } as const satisfies JSONSchema;
+      const readThenGatedWrite = (runtime: Runtime, suffix: string) => {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "gated-write",
+          SECRET_SCHEMA.schema,
+          tx,
+        );
+        expect(cell.key("secret").get()).toBe("rosebud");
+        runtime.getCell(
+          signer.did(),
+          `gated-write-out${suffix}`,
+          gatedSchema,
+          tx,
+        ).set({ out: "derived" });
+        tx.prepareCfc();
+        const state = tx.getCfcState();
+        return {
+          tx,
+          reasons: state.prepare.status === "invalidated"
+            ? [...state.prepare.reasons]
+            : [],
+        };
+      };
+      await withRuntime({ rules: [writeGateRule] }, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "gated-write", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+
+        const first = readThenGatedWrite(runtime, "-1");
+        expect(first.reasons).toEqual([]);
+        expect(stagedReceiptWrite(first.tx, receiptId)).toBe(true);
+        expect((await first.tx.commit()).ok).toBeDefined();
+        expect(readReceipt(runtime, receiptId)).toBeDefined();
+
+        // Spent: the same gated write no longer releases.
+        const second = readThenGatedWrite(runtime, "-2");
+        expect(
+          second.reasons.some((reason) =>
+            reason.includes("maxConfidentiality failed")
+          ),
+        ).toBe(true);
+        second.tx.abort();
       });
     });
 
