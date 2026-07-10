@@ -252,11 +252,6 @@ export const piece = new Command()
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
-  .option(
-    "--no-register",
-    "Do not add the piece to the home piece list. " +
-      "Requires --slug and the home space.",
-  )
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -270,7 +265,6 @@ export const piece = new Command()
       {
         start: options.start,
         slug: options.slug,
-        register: options.register,
       },
     );
     render(pieceId);

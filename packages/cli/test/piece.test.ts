@@ -10,15 +10,8 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import {
-  PieceManager,
-  resolvePieceAddress,
-  SlugResolutionError,
-} from "@commonfabric/piece";
+import { PieceManager, SlugResolutionError } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { type Cell, Runtime, type RuntimeProgram } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createSession, Identity } from "@commonfabric/identity";
 import {
   normalizeApiUrl,
   parseLink,
@@ -413,8 +406,7 @@ describe("cli piece parsing", () => {
     const output = stripAnsi(stdout.join("\n"));
     expect(code).toBe(0);
     expect(output).toContain("--slug");
-    expect(output).toContain("--no-register");
-    expect(output).toContain("Requires --slug and the home space");
+    expect(output).not.toContain("--no-register");
   });
 
   it("preflights registration before resolving or creating a piece", async () => {
@@ -470,8 +462,27 @@ describe("cli piece parsing", () => {
 
     expect(calls).toEqual(["load-manager", "ensure-root", "preflight"]);
     expect(message).toContain("No new piece was created");
-    expect(message).toContain("--no-register --slug <slug>");
+    expect(message).toContain("home space is not a piece registry");
+    expect(message).toContain("piece new --space <space-name> <main>");
     expect(message).not.toContain("recreate-root");
+  });
+
+  it("validates a slug before loading a manager", async () => {
+    let managerLoaded = false;
+    const deps: NewPieceDependencies = {
+      loadManager: () => {
+        managerLoaded = true;
+        return Promise.reject(new Error("manager must not load"));
+      },
+    };
+
+    await expect(newPiece(
+      { apiUrl: API_URL, space: "named-space", identity: ID },
+      { mainPath: "/tmp/pattern.tsx" },
+      { slug: "Invalid Slug" },
+      deps,
+    )).rejects.toThrow(/lowercase letters, numbers/);
+    expect(managerLoaded).toBe(false);
   });
 
   it("retains root repair guidance for non-home initialization failure", async () => {
@@ -506,229 +517,6 @@ describe("cli piece parsing", () => {
     expect(message).toContain("Could not initialize the space's root pattern");
     expect(message).toContain("piece recreate-root");
     expect(message).not.toContain("--no-register");
-  });
-
-  it("creates a slug-addressable home piece without registration", async () => {
-    const homeSpace = "did:key:z6Mktest-home";
-    const calls: string[] = [];
-    const pieceCell = {} as Cell<unknown>;
-    const manager = {
-      getSpace: () => homeSpace,
-      runtime: { userIdentityDID: homeSpace },
-      assertCanAddPieces: () => {
-        calls.push("preflight");
-        return Promise.resolve();
-      },
-      add: () => {
-        calls.push("add");
-        return Promise.resolve();
-      },
-    } as unknown as PieceManager;
-    const controller = {
-      ensureDefaultPattern: () => {
-        calls.push("ensure-root");
-        return Promise.resolve({});
-      },
-      create: () => {
-        calls.push("create");
-        return Promise.resolve({
-          id: "fid1:test-piece",
-          getCell: () => pieceCell,
-        });
-      },
-    } as unknown as PiecesController;
-    const deps: NewPieceDependencies = {
-      loadManager: () => {
-        calls.push("load-manager");
-        return Promise.resolve(manager);
-      },
-      createController: () => controller,
-      getProgram: () => {
-        calls.push("resolve-program");
-        return Promise.resolve({} as RuntimeProgram);
-      },
-      assignSlug: (_manager, cell, slug) => {
-        expect(cell).toBe(pieceCell);
-        expect(slug).toBe("lunchpoll");
-        calls.push("assign-slug");
-        return Promise.resolve();
-      },
-    };
-
-    const id = await newPiece(
-      { apiUrl: API_URL, space: homeSpace, identity: ID },
-      { mainPath: "/tmp/pattern.tsx" },
-      { register: false, slug: "lunchpoll" },
-      deps,
-    );
-
-    expect(id).toBe("fid1:test-piece");
-    expect(calls).toEqual([
-      "load-manager",
-      "resolve-program",
-      "create",
-      "assign-slug",
-    ]);
-  });
-
-  it("reports the created piece ID when unregistered slug assignment fails", async () => {
-    const homeSpace = "did:key:z6Mktest-home";
-    const pieceCell = {} as Cell<unknown>;
-    const manager = {
-      getSpace: () => homeSpace,
-      runtime: { userIdentityDID: homeSpace },
-    } as unknown as PieceManager;
-    const controller = {
-      create: () =>
-        Promise.resolve({
-          id: "fid1:created-but-unlinked",
-          getCell: () => pieceCell,
-        }),
-    } as unknown as PiecesController;
-    const deps: NewPieceDependencies = {
-      loadManager: () => Promise.resolve(manager),
-      createController: () => controller,
-      getProgram: () => Promise.resolve({} as RuntimeProgram),
-      assignSlug: () => Promise.reject(new Error("storage unavailable")),
-    };
-
-    let message = "";
-    try {
-      await newPiece(
-        { apiUrl: API_URL, space: homeSpace, identity: ID },
-        { mainPath: "/tmp/pattern.tsx" },
-        { register: false, slug: "lunchpoll" },
-        deps,
-      );
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-
-    expect(message).toContain("fid1:created-but-unlinked");
-    expect(message).toContain("storage unavailable");
-    expect(message).toContain(
-      `${API_URL}/${homeSpace}/fid1:created-but-unlinked`,
-    );
-    expect(message).toContain(
-      "piece set-slug --space did:key:z6Mktest-home lunchpoll " +
-        "fid1:created-but-unlinked",
-    );
-  });
-
-  it("cold-loads an unregistered home piece through its persisted slug", async () => {
-    const identity = await Identity.fromPassphrase(
-      "cli unregistered home piece cold persistence",
-    );
-    const storageManager = StorageManager.emulate({ as: identity });
-    const firstRuntime = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-    });
-    let freshRuntime: Runtime | undefined;
-    const program: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [{
-        name: "/main.tsx",
-        contents: [
-          "/// <cf-disable-transform />",
-          "import { pattern } from 'commonfabric';",
-          "export default pattern(() => ({ marker: 'persisted' }));",
-        ].join("\n"),
-      }],
-    };
-
-    try {
-      const firstSession = await createSession({
-        identity,
-        spaceDid: identity.did(),
-      });
-      const firstManager = new PieceManager(firstSession, firstRuntime);
-      await firstManager.synced();
-
-      const id = await newPiece(
-        {
-          apiUrl: "http://toolshed.test",
-          space: identity.did(),
-          identity: "/unused/test.key",
-        },
-        { mainPath: "/unused/main.tsx" },
-        { register: false, slug: "cold-home-piece" },
-        {
-          loadManager: () => Promise.resolve(firstManager),
-          getProgram: () => Promise.resolve(program),
-        },
-      );
-
-      expect(await firstManager.getDefaultPattern(false)).toBeUndefined();
-      expect(await resolvePieceAddress(firstManager, "cold-home-piece")).toBe(
-        id,
-      );
-      await firstManager.synced();
-      await firstManager.stopPiece(id);
-
-      const freshSession = await createSession({
-        identity,
-        spaceDid: identity.did(),
-      });
-      freshRuntime = new Runtime({
-        apiUrl: new URL("http://toolshed.test"),
-        storageManager,
-      });
-      const freshManager = new PieceManager(freshSession, freshRuntime);
-      await freshManager.synced();
-
-      expect(await freshManager.getDefaultPattern(false)).toBeUndefined();
-      expect(await resolvePieceAddress(freshManager, "cold-home-piece")).toBe(
-        id,
-      );
-      const freshPiece = await new PiecesController(freshManager).get(id, true);
-      expect(await freshPiece.result.get()).toEqual({ marker: "persisted" });
-    } finally {
-      await freshRuntime?.dispose();
-      await firstRuntime.dispose();
-      await storageManager.close();
-    }
-  });
-
-  it("rejects --no-register without a slug before loading a manager", async () => {
-    let managerLoaded = false;
-    const deps: NewPieceDependencies = {
-      loadManager: () => {
-        managerLoaded = true;
-        return Promise.reject(new Error("manager must not load"));
-      },
-    };
-
-    await expect(newPiece(
-      { apiUrl: API_URL, space: "did:key:z6Mktest-home", identity: ID },
-      { mainPath: "/tmp/pattern.tsx" },
-      { register: false },
-      deps,
-    )).rejects.toThrow(/requires --slug/);
-    expect(managerLoaded).toBe(false);
-  });
-
-  it("rejects --no-register outside the home space before creation", async () => {
-    const manager = {
-      getSpace: () => "did:key:z6Mktest-other",
-      runtime: { userIdentityDID: "did:key:z6Mktest-home" },
-    } as unknown as PieceManager;
-    let controllerCreated = false;
-    const deps: NewPieceDependencies = {
-      loadManager: () => Promise.resolve(manager),
-      createController: () => {
-        controllerCreated = true;
-        return {} as PiecesController;
-      },
-    };
-
-    await expect(newPiece(
-      { apiUrl: API_URL, space: "did:key:z6Mktest-other", identity: ID },
-      { mainPath: "/tmp/pattern.tsx" },
-      { register: false, slug: "lunchpoll" },
-      deps,
-    )).rejects.toThrow(/only supported.*home space/);
-    expect(controllerCreated).toBe(false);
   });
 
   it("shows set-slug command options", async () => {

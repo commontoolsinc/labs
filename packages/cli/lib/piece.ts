@@ -392,7 +392,6 @@ export async function resolveLinkEndpointAddress(
 export interface NewPieceOptions {
   start?: boolean;
   slug?: string;
-  register?: boolean;
 }
 
 export interface NewPieceDependencies {
@@ -402,7 +401,6 @@ export interface NewPieceDependencies {
     manager: PieceManager,
     entry: EntryConfig,
   ) => Promise<RuntimeProgram>;
-  assignSlug?: typeof assignSlug;
 }
 
 // Creates a new piece from source code and optional input.
@@ -415,78 +413,56 @@ export async function newPiece(
   const slug = options.slug === undefined
     ? undefined
     : validateSlug(options.slug);
-  const shouldRegister = options.register !== false;
-  if (!shouldRegister && slug === undefined) {
-    throw new Error(
-      `${cliCommand(["piece", "new", "--no-register"])} requires ` +
-        "--slug so the unlisted piece remains addressable.",
-    );
-  }
 
   const manager = await timeCliPhase(
     "newPiece.loadManager",
     () => (deps.loadManager ?? loadManager)(config),
   );
   const isHomeSpace = manager.getSpace() === manager.runtime.userIdentityDID;
-
-  if (!shouldRegister && !isHomeSpace) {
-    throw new Error(
-      `${cliCommand(["piece", "new", "--no-register"])} is only ` +
-        "supported when targeting the identity's home space.",
-    );
-  }
   const pieces = deps.createController?.(manager) ??
     new PiecesController(manager);
 
-  if (shouldRegister) {
-    const homeNoRegisterHint =
-      `Create it through the supported home-space workflow instead: ` +
-      cliCommand([
-        "piece",
-        "new",
-        "--no-register",
-        "--slug",
-        "<slug>",
-        "<main>",
-      ]);
-    const nonHomeRepairHint = `Repair the non-home space root with: ` +
-      cliCommand(["piece", "recreate-root"]);
+  const homeSpaceHint =
+    `The home space is not a piece registry. Target a named space instead: ` +
+    cliCommand(["piece", "new", "--space", "<space-name>", "<main>"]);
+  const nonHomeRepairHint = `Repair the non-home space root with: ` +
+    cliCommand(["piece", "recreate-root"]);
 
-    // Registration is a hard requirement in the default mode. Initialize the
-    // root first, then separately validate its actual addPiece stream before
-    // resolving source or creating the piece. Keeping the errors separate is
-    // important for healthy custom home roots, which need not expose addPiece.
-    try {
-      await timeCliPhase(
-        "newPiece.ensureDefaultPattern",
-        () => pieces.ensureDefaultPattern(),
-      );
-    } catch (error) {
-      throw new Error(
-        `Could not initialize the space's root pattern: ${
-          error instanceof Error ? error.message : String(error)
-        }\n` +
-          `No new piece was created.\n` +
-          (isHomeSpace ? homeNoRegisterHint : nonHomeRepairHint),
-        { cause: error },
-      );
-    }
+  // Registration is a hard requirement. Initialize the root first, then
+  // separately validate its actual addPiece stream before resolving source or
+  // creating the piece. A healthy system home intentionally has no addPiece;
+  // ordinary pieces belong in a named space whose default-app root registers
+  // them.
+  try {
+    await timeCliPhase(
+      "newPiece.ensureDefaultPattern",
+      () => pieces.ensureDefaultPattern(),
+    );
+  } catch (error) {
+    throw new Error(
+      `Could not initialize the space's root pattern: ${
+        error instanceof Error ? error.message : String(error)
+      }\n` +
+        `No new piece was created.\n` +
+        (isHomeSpace ? homeSpaceHint : nonHomeRepairHint),
+      { cause: error },
+    );
+  }
 
-    try {
-      await timeCliPhase(
-        "newPiece.assertCanAddPieces",
-        () => manager.assertCanAddPieces(),
-      );
-    } catch (error) {
-      throw new Error(
-        `The space's root pattern cannot register a new piece: ${
-          error instanceof Error ? error.message : String(error)
-        }\n` +
-          `No new piece was created.\n` +
-          (isHomeSpace ? homeNoRegisterHint : nonHomeRepairHint),
-        { cause: error },
-      );
-    }
+  try {
+    await timeCliPhase(
+      "newPiece.assertCanAddPieces",
+      () => manager.assertCanAddPieces(),
+    );
+  } catch (error) {
+    throw new Error(
+      `The space's root pattern cannot register a new piece: ${
+        error instanceof Error ? error.message : String(error)
+      }\n` +
+        `No new piece was created.\n` +
+        (isHomeSpace ? homeSpaceHint : nonHomeRepairHint),
+      { cause: error },
+    );
   }
 
   const program = await timeCliPhase(
@@ -514,45 +490,17 @@ export async function newPiece(
   });
 
   if (slug !== undefined) {
-    try {
-      await timeCliPhase(
-        "newPiece.assignSlug",
-        () => (deps.assignSlug ?? assignSlug)(manager, piece.getCell(), slug),
-      );
-    } catch (error) {
-      if (!shouldRegister) {
-        const directUrl = `${config.apiUrl.replace(/\/+$/, "")}/` +
-          `${config.space}/${piece.id}`;
-        const recoveryCommand = cliCommand([
-          "piece",
-          "set-slug",
-          "--space",
-          config.space,
-          slug,
-          piece.id,
-        ]);
-        throw new Error(
-          `The unregistered piece was created as ${piece.id}, but assigning ` +
-            `slug "${slug}" failed: ${
-              error instanceof Error ? error.message : String(error)
-            }\n` +
-            `The piece remains addressable by ID at ${directUrl}\n` +
-            `Retry slug assignment with the same API and identity:\n  ` +
-            recoveryCommand,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-  }
-
-  if (shouldRegister) {
-    // Explicitly add the piece to the space's allPieces list.
     await timeCliPhase(
-      "newPiece.addToDefaultPattern",
-      () => manager.add([piece.getCell()]),
+      "newPiece.assignSlug",
+      () => assignSlug(manager, piece.getCell(), slug),
     );
   }
+
+  // Explicitly add the piece to the space's allPieces list.
+  await timeCliPhase(
+    "newPiece.addToDefaultPattern",
+    () => manager.add([piece.getCell()]),
+  );
 
   return piece.id;
 }
