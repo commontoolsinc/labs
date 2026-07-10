@@ -69,6 +69,10 @@ export type {
   WritePolicyInput,
 } from "./types.ts";
 export {
+  cfcCanonicalClauseDigest,
+  collectDeclaredMonotonicityViolations,
+} from "./declared-monotonicity.ts";
+export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
