@@ -473,19 +473,24 @@ audit, and deriving "who could have this" (current grants ∪ past egress).
 State the shared-vs-sent vocabulary distinction normatively so UIs cannot
 present an egress as revocable. `open`.
 
-**SC-27 [normative] Attested deployment config is a federation-sound policy
+**SC-28 [normative] Attested deployment config is a federation-sound policy
 store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The
 archived B2b plan (`docs/history/plans/cfc-future-work-implementation.md`
 §3, decision 2) treated `RuntimeOptions.cfcPolicyRecords` as an interim
 source because two federated instances with different deployment config
 would silently fire different exchange rules, and scheduled space-hosted
-policy docs as the federation-correct form. Owner decision (2026-07-09,
-revising this): remote attestation covers deployment config for
-security-sensitive inputs like `cfcPolicyRecords` — the §5.7.2
-runtime-environment claims extend to the enforcement configuration the
-runtime boots with (measured image identity covers it) — so attested
-federated peers provably evaluate the same record set, and space-hosted
-policy documents are not needed for federation soundness. Proposed edit:
+policy docs as the federation-correct form — restated as recently as the
+SC-14 Stage-3 federation constraint ("B2a's deployment-config policy source
+is federation-hostile"). Revised owner decision (2026-07-10, extending the
+same day's federation resolution — SC-26's superseded note, SC-27): remote
+attestation covers deployment config for security-sensitive inputs like
+`cfcPolicyRecords` — the §5.7.2 runtime-environment claims extend to the
+enforcement configuration the runtime boots with (measured image identity
+covers it) — so attested federated peers provably evaluate the same record
+set, and space-hosted policy documents are not needed for federation
+soundness (the Stage-3 note's conclusion is superseded in place; its
+*evidence replicates, evaluation is local* rule stands — config rides the
+attested evaluator, not the data). Proposed edit:
 §4.4.1's storage-location list gains the attested deployment/system policy
 root as a sanctioned primary store (space-hosted discovery stays optional,
 never required for federation); §4.4.5 adds the CT-1874/SP-1 constraint —

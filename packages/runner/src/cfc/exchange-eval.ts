@@ -47,12 +47,12 @@ import type { TrustResolver } from "./trust.ts";
  * `Policy(...)`/`Context(...)` ref atom (§4.4.2/§4.4.3, fail-closed on
  * mismatch or absence), and their rules may rewrite ONLY the ref's home
  * clause(s) — the CT-1874 constraint; see `matchRule`. Records live in the
- * deployment snapshot in both modes: the owner decision (2026-07-09,
+ * deployment snapshot in both modes: the owner decision (2026-07-10,
  * revising the earlier space-hosted-docs plan) is that remote attestation
  * covers deployment config for security-sensitive inputs like
  * `cfcPolicyRecords`, so attested federated peers provably evaluate the
  * same record set and space-hosted policy documents are not needed for
- * federation soundness (docs/specs/cfc-spec-changes.md SC-27).
+ * federation soundness (docs/specs/cfc-spec-changes.md SC-28).
  *
  * Termination (spec §4.4.5): add-only rule sets converge by monotonicity;
  * add+drop sets can cycle, so the evaluator is fuelled and FAILS CLOSED on

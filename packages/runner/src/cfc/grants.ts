@@ -66,7 +66,7 @@ import type {
  * by living in the space it governs. Grants hosted in shared spaces (a team
  * space's policy root) need per-document write-attribution verification —
  * future work on its own track: the B2b space-hosted policy-doc plan this
- * was once coupled to is descoped (SC-27: attestation covers deployment
+ * was once coupled to is descoped (SC-28: attestation covers deployment
  * config; policy records stay in `RuntimeOptions.cfcPolicyRecords`), which
  * leaves grants as the one space-hosted policy state.
  */
@@ -221,7 +221,7 @@ export const prepareCfcGrantWrite = (
     // v1 governing-space posture (module doc): grants live in the owner's
     // identity space. Shared-space grant roots need per-document
     // write-attribution verification (future work; no longer coupled to the
-    // descoped B2b policy-doc storage — SC-27).
+    // descoped B2b policy-doc storage — SC-28).
     throw new Error(
       "cfc-grant: space must equal owner (grants live in the owner's " +
         "identity space; shared-space grant roots are future work)",

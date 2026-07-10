@@ -13,7 +13,7 @@ import type { AtomPattern } from "./atom-pattern.ts";
  * for security-sensitive inputs like this one, so attested federated peers
  * provably evaluate the same record set and the originally planned
  * space-hosted policy documents are not needed for federation soundness
- * (owner decision 2026-07-09; docs/specs/cfc-spec-changes.md SC-27). Rule
+ * (owner decision 2026-07-10; docs/specs/cfc-spec-changes.md SC-28). Rule
  * scoping is per record: `ambient` records apply through their rules'
  * `appliesTo` patterns to every label (spec §4.4.1's deployment/system
  * policy root as a discovery source); `referenced` records are selected by

@@ -165,12 +165,12 @@ rewrite event:
    `experimental.commitPreconditions`; blocked only on that flag's
    maturation, not on new machinery.
 
-Dependency note (revised 2026-07-09): the B2b space-hosted policy-doc plan
+Dependency note (revised 2026-07-10): the B2b space-hosted policy-doc plan
 this substrate was to be shared with is DESCOPED — the owner decision is
 that remote attestation covers deployment config for security-sensitive
 inputs like `cfcPolicyRecords`, so attested federated peers provably
 evaluate the same record set and space-hosted policy documents are not
-needed for federation soundness (`cfc-spec-changes.md` SC-27). What B2b
+needed for federation soundness (`cfc-spec-changes.md` SC-28). What B2b
 still meant beyond storage shipped against the deployment snapshot:
 label-carried `Policy(...)`/`Context(...)` selection with the CT-1874
 home-clause gate (`referenced` records in `policy.ts` /

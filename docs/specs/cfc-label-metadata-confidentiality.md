@@ -237,10 +237,19 @@ consumes inbound views, redacting the outbound copies is safe.
   deployment the default stays `commitment`; `reference` is admissible only
   with per-reader materialization proven on realistic flows, and only for
   the highest-sensitivity fields. Grants and `commitment`-form labels
-  satisfy the rule as-is; B2a's deployment-config policy source does not
-  (federated instances with different `cfcPolicyRecords` silently fire
-  different rules — B2b's space-hosted, replicating policy docs are the
-  federation-correct source).
+  satisfy the rule as-is. The deployment-config policy source
+  (`cfcPolicyRecords`) satisfies it through the ATTESTATION channel rather
+  than replication (revised owner decision 2026-07-10, superseding this
+  note's earlier "federation-hostile" conclusion; SC-28 in
+  [`cfc-spec-changes.md`](./cfc-spec-changes.md)): remote attestation
+  covers deployment config for security-sensitive inputs, so attested
+  federated peers provably run the same record set — a config difference is
+  an attestation difference, never a silent rule divergence. The
+  space-hosted policy docs originally scheduled as B2b are descoped; the
+  label-carried `Policy(...)`/`Context(...)` selection half of B2b shipped
+  against the deployment snapshot (its ref fields classified in the §2
+  table: name/hash public so refs stay dereferenceable at the destination,
+  subject commitment).
 
 Dependencies: none on Epics B/D/E remainder; Stage 2's full population
 profile co-builds with the SC-4/SC-8 envelope design. The D4 value-level

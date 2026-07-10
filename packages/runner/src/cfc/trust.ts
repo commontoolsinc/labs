@@ -12,7 +12,7 @@ import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
  * statements an acting principal accepts, and concept edges order concepts.
  *
  * Mirrors the policy-record posture: a deployment-configured, frozen trust
- * set on `RuntimeOptions` — and, per the revised B2b decision (SC-27 in
+ * set on `RuntimeOptions` — and, per the revised B2b decision (SC-28 in
  * docs/specs/cfc-spec-changes.md), the enduring form: remote attestation
  * covers deployment config for security-sensitive inputs, so attested
  * federated peers provably share it and space-hosted stores are not needed
