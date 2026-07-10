@@ -18,15 +18,13 @@ const initializeRuntime = () => {
 
     // Options assembly (the MEMORY_URL/API_URL split, EXPERIMENTAL_* wiring)
     // lives in runtime-options.ts, where it is unit-tested (CT-1814).
-    // Construction + the runtime→OTel bridge attach live in
-    // runtime-options.ts (unit-tested there, like the options wiring).
-    ({ runtime } = createToolshedRuntime(
+    runtime = createToolshedRuntime(
       env,
       StorageManager.open({
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
-    ));
+    ).runtime;
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {

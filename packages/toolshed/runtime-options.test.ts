@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import type { RuntimeOptions } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  attachRuntimeOtelBridge,
   createToolshedRuntime,
   toolshedRuntimeOptions,
 } from "@/runtime-options.ts";
@@ -63,4 +64,23 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
     await runtime.dispose();
     await storageManager.close();
   }
+
+  // Attach failures are logged, never fatal: a runtime whose preflight gate
+  // throws must resolve false, not reject.
+  const throwingRuntime = {
+    telemetry: new EventTarget(),
+    scheduler: {
+      setEventPreflightTelemetryEnabled() {
+        throw new Error("gate unavailable");
+      },
+    },
+  } as unknown as Parameters<typeof attachRuntimeOtelBridge>[0];
+  assertEquals(
+    await attachRuntimeOtelBridge(throwingRuntime, {
+      OTEL_ENABLED: true,
+      OTEL_SERVICE_NAME: "toolshed-test",
+      ENV: "test",
+    }),
+    false,
+  );
 });

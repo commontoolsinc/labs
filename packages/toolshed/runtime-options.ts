@@ -51,11 +51,18 @@ export function createToolshedRuntime(
   const runtime = new Runtime(
     toolshedRuntimeOptions(config, storageManager, envGet),
   );
-  return { runtime, otelBridgeAttached: attachOtelBridge(runtime, config) };
+  return {
+    runtime,
+    otelBridgeAttached: attachRuntimeOtelBridge(runtime, config),
+  };
 }
 
-async function attachOtelBridge(
-  runtime: Runtime,
+/**
+ * Exported for tests; production reaches it through createToolshedRuntime.
+ * Structural param so failure paths can be exercised with a stub.
+ */
+export async function attachRuntimeOtelBridge(
+  runtime: Pick<Runtime, "telemetry" | "scheduler">,
   config: OtelEnv,
 ): Promise<boolean> {
   if (!config.OTEL_ENABLED) return false;
