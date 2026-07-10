@@ -369,6 +369,12 @@ export type WritePolicyInput =
  * "looked, found nothing" so a grant APPEARING between prepare and commit
  * invalidates too). Recorded by the runner-side grant resolver
  * (`createTxCfcGrantResolver`), folded into `PreparedDigestInput` below.
+ *
+ * Single-use CONSUMPTION RECEIPTS (design §2.2) ride the same entries: a
+ * consuming resolution of a `singleUse` grant records the receipt address
+ * with its present/absent state, so a receipt appearing between evaluations
+ * invalidates the prepared digest exactly like a changed grant — the
+ * digest-level complement to the create-only commit race.
  */
 export type ConsultedGrant = {
   readonly space: MemorySpace;

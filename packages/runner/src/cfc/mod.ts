@@ -140,6 +140,7 @@ export {
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
 export type {
+  CfcGrantConsumptionContext,
   CfcGrantResolver,
   CfcGrantResolverQuery,
   ExchangeEvalContext,
@@ -152,17 +153,20 @@ export {
 } from "./exchange-eval.ts";
 export type {
   CfcGrant,
+  CfcGrantConsumptionReceipt,
   CfcGrantIdentity,
   CfcGrantWriteInput,
 } from "./grants.ts";
 export {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
+  cfcGrantConsumedReceiptId,
   cfcGrantDocId,
   cfcGrantIsLive,
   createTxCfcGrantResolver,
   disallowedGrantAudienceEntryReason,
   expandCfcGrantFacts,
+  flushCfcGrantConsumptionClaims,
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "./grants.ts";

@@ -58,8 +58,14 @@ import {
   cfcIntegritySatisfiesFloorCoherently,
   uniqueCfcAtoms,
 } from "./observation.ts";
-import { evaluateExchangeRules } from "./exchange-eval.ts";
-import { createTxCfcGrantResolver } from "./grants.ts";
+import {
+  type CfcGrantConsumptionContext,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
+import {
+  createTxCfcGrantResolver,
+  flushCfcGrantConsumptionClaims,
+} from "./grants.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
   commitmentAwareEquals,
@@ -3111,12 +3117,16 @@ const verifyInputRequirements = (
         const confidentiality = read.label?.confidentiality ?? [];
         if (mode === "off") return fitsLegacy(confidentiality);
         // Evaluate the consumed label to fixpoint (Epic B5). No boundary
-        // atoms: this is a write-target input gate, not a sink.
+        // atoms: this is a write-target input gate, not a sink. A gated
+        // WRITE is a consuming site for single-use grants — the ceiling
+        // decision persists with the written value — but only under the
+        // enforce dial, where this evaluation's outcome IS the decision.
         const outcome = evaluateGatedConfidentiality(
           tx,
           confidentiality,
           read.label?.integrity ?? [],
           [],
+          mode === "enforce" ? "consuming" : "observing",
         );
         if (mode === "enforce") {
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
@@ -3776,12 +3786,27 @@ const collectConsumedLabel = (
  * `exhausted` flag with the ORIGINAL confidentiality (never a partial
  * rewrite) — the caller decides whether that fails closed (enforce) or is a
  * diagnostic (observe).
+ *
+ * `consumption` is the single-use-grant seam (design §2.2): the two callers
+ * — the sink-request egress ceiling and the input-requirement gate on gated
+ * writes — are exactly the sites where an evaluation outcome changes a
+ * persisted/egress decision inside a writing transaction's prepare, so they
+ * pass `"consuming"` when (and only when) the policy-evaluation dial is
+ * `enforce` (the rewritten label IS the decision there; under `observe` the
+ * decision is the raw label and the evaluation is diagnostics-only, which
+ * must never spend a grant). Every other evaluation site (the render
+ * ceiling's display boundary, hand-built contexts) never states a consuming
+ * context, so single-use grants are unsatisfiable there — fail closed.
+ * Claims registered by a consuming resolution are staged into receipt
+ * writes at the end of `prepareBoundaryCommit` (the same pass), so
+ * consumption commits atomically with the release.
  */
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
   confidentiality: readonly unknown[],
   integrity: readonly unknown[],
   boundary: readonly unknown[],
+  consumption: CfcGrantConsumptionContext,
 ): {
   confidentiality: readonly unknown[];
   exhausted: boolean;
@@ -3803,6 +3828,7 @@ const evaluateGatedConfidentiality = (
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
       grantResolver: createTxCfcGrantResolver(tx),
+      grantConsumption: consumption,
     },
   );
   return {
@@ -3851,11 +3877,16 @@ const verifySinkRequestCeilings = (
         cfcAtom.boundaryContext("sink", sink),
         cfcAtom.boundaryContext("sinkClass", "network"),
       ];
+      // The sink egress gate is a consuming site for single-use grants
+      // (design §2.2) under the enforce dial — the rewritten label decides
+      // whether the request flushes past the ceiling. Observe evaluates for
+      // diagnostics only and must never spend a grant.
       const outcome = evaluateGatedConfidentiality(
         tx,
         consumed.confidentiality,
         consumed.integrity,
         boundary,
+        mode === "enforce" ? "consuming" : "observing",
       );
       if (mode === "enforce") {
         if (outcome.exhausted) {
@@ -5314,6 +5345,17 @@ export const prepareBoundaryCommit = (
     }, metadata as unknown as FabricValue);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
+  // Single-use grant consumption (design §2.2): stage every claim the
+  // consuming gates above registered — the receipt write plus its
+  // create-only mark — into THIS transaction, inside the privileged scope
+  // prepareCfc wraps this whole pass in (the receipt is reserved-namespace
+  // policy state; the unprivileged arm is the S18 gate). After every gate so
+  // all resolutions are registered; before the return so a claim that cannot
+  // stage fails closed as a prepare reason. The staged write rides the
+  // releasing commit: consumption is atomic with the release, a failed
+  // commit consumes nothing (spec §6.5.2 no-consume-on-failure), and the
+  // create-only race loser dies as a permanent `receipt-exists` rejection.
+  reasons.push(...flushCfcGrantConsumptionClaims(tx));
   // Stage-0 summary: at most once per prepare, and only when a protected
   // write was measured — a prepare that gated nothing has no precision to
   // report.

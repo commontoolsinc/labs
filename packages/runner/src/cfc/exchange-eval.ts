@@ -66,6 +66,21 @@ export type RuleFiring = {
 };
 
 /**
+ * Whether a `policyState` evaluation site is a CONSUMING context (design
+ * §2.2 single-use releases). Consuming sites are exactly the boundary gates
+ * whose evaluation outcome changes a persisted or egress decision inside a
+ * writing transaction's prepare — the sink-request egress ceiling and the
+ * input-requirement gate on gated writes, and only under the `enforce`
+ * policy-evaluation dial (under `observe` the decision is made on the raw
+ * label, so the evaluation is diagnostics-only). Everything else — the
+ * render ceiling, observe-dial evaluation, any read-path resolution — is
+ * OBSERVING: a single-use grant is unsatisfiable there, fail closed, because
+ * a grant consumed by looking at it would be spent by rendering. Standing
+ * grants ignore this axis entirely.
+ */
+export type CfcGrantConsumptionContext = "consuming" | "observing";
+
+/**
  * The point-query a `policyState` guard sends to the grant resolver: the
  * guard's concrete `kind` plus every guard field that is concrete under the
  * current binding environment (a literal value, or a pattern whose variables
@@ -75,6 +90,13 @@ export type RuleFiring = {
 export type CfcGrantResolverQuery = {
   readonly kind: string;
   readonly fields: Readonly<Record<string, unknown>>;
+  /**
+   * The evaluation site's consumption context, stamped from
+   * {@link ExchangeEvalContext.grantConsumption}. ABSENT means observing
+   * (fail closed): a hand-built query that never states its context cannot
+   * resolve a single-use grant.
+   */
+  readonly consumption?: CfcGrantConsumptionContext;
 };
 
 /**
@@ -112,6 +134,14 @@ export type ExchangeEvalContext = {
    * policyState guard is unsatisfied and its rule never fires (fail closed).
    */
   readonly grantResolver?: CfcGrantResolver;
+  /**
+   * Consuming vs observing evaluation site (single-use releases, design
+   * §2.2) — stamped onto every resolver query. Absent = observing (fail
+   * closed): only the writing-transaction boundary gates in prepare.ts pass
+   * `"consuming"`, coupled to the claim staging that flushes at the end of
+   * the same prepare pass. See {@link CfcGrantConsumptionContext}.
+   */
+  readonly grantConsumption?: CfcGrantConsumptionContext;
 };
 
 export type ExchangeEvalResult = {
@@ -166,6 +196,7 @@ type RuleMatch = {
 const grantGuardQuery = (
   pattern: unknown,
   bindings: AtomPatternBindings,
+  consumption: CfcGrantConsumptionContext,
 ): CfcGrantResolverQuery | undefined => {
   if (
     !isRecord(pattern) || Array.isArray(pattern) ||
@@ -185,7 +216,7 @@ const grantGuardQuery = (
       fields[key] = instantiated.value;
     }
   }
-  return { kind, fields };
+  return { kind, fields, consumption };
 };
 
 /**
@@ -201,11 +232,12 @@ const extendThroughGrantGuard = (
   environments: readonly AtomPatternBindings[],
   pattern: unknown,
   resolver: CfcGrantResolver | undefined,
+  consumption: CfcGrantConsumptionContext,
 ): AtomPatternBindings[] => {
   if (resolver === undefined) return [];
   const next: AtomPatternBindings[] = [];
   for (const environment of environments) {
-    const query = grantGuardQuery(pattern, environment);
+    const query = grantGuardQuery(pattern, environment, consumption);
     if (query === undefined) continue;
     let facts: readonly unknown[];
     try {
@@ -333,6 +365,9 @@ const matchRule = (
             environments,
             pattern,
             ctx.grantResolver,
+            // Absent = observing, fail closed: a context that never states
+            // it is a consuming site cannot resolve single-use grants.
+            ctx.grantConsumption ?? "observing",
           );
           if (environments.length === 0) break;
         }

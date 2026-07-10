@@ -157,9 +157,23 @@ rewrite event:
    trusted-builtin writer verifying authority directly → grant → release on
    read; the §13.4.3 verification list minus the intent-evidence rows, which
    strengthen when intents land.
-5. Single-use grants — the receipt discipline exists behind
-   `experimental.commitPreconditions`; blocked only on that flag's
-   maturation, not on new machinery.
+5. Single-use grants — **shipped (#4649)**: `CfcGrant.singleUse: true`
+   satisfies a `policyState` guard only in a CONSUMING evaluation context
+   (the sink-request egress ceiling and the input-requirement gate on gated
+   writes, under the `enforce` policy-evaluation dial — never the render
+   ceiling or observe-dial diagnostics, where a grant would be spent by
+   looking at it) and only while its consumption receipt is absent. The
+   receipt is `grant:cfc:` + a digest of `{grantConsumed: {grantId}}` — the
+   §6.5.1 `consumedCellId` shape on the item-2 address idiom, so the
+   S18-class reserved-namespace write gate covers forging AND the
+   re-arming delete. The releasing transaction stages the receipt write +
+   create-only mark inside `prepareBoundaryCommit`, so consumption commits
+   atomically with the release (no-consume-on-failure, §6.5.2) and a
+   racing second release dies as a permanent `receipt-exists` rejection.
+   **Requires `experimental.commitPreconditions`** (the storage commit
+   emits entity-absent preconditions only under it): with the flag off —
+   the default — single-use grants are unsatisfiable everywhere, fail
+   closed, never silently multi-use. Standing grants are flag-independent.
 
 Dependency note: (1)+(2) are B2b-adjacent — the same reserved-path,
 content-addressed, verify-on-read machinery. If B2b is built first, grants
@@ -184,8 +198,10 @@ the acting principal — the fuller §13.4.3 intent-evidence chain lands with
 item 4. Lookups ride `internalVerifierRead`;
 `PreparedDigestInput.consultedGrants` binds each consulted grant's content
 address (absent candidates carry an `"absent"` marker so a grant appearing
-also invalidates), with a live prepare→revoke→commit-reject test. Items 4–5
-remain open._
+also invalidates), with a live prepare→revoke→commit-reject test. Item 5
+shipped in #4649 (single-use consumption receipts — see the build-order
+entry above; receipt consulted-state rides the same `consultedGrants`
+binding). Item 4 remains open._
 
 ## 4. The rewrite event (specify now, build later)
 
