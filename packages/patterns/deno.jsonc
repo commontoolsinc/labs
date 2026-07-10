@@ -62,5 +62,11 @@
   },
   "exports": {
     ".": "./mod.ts"
+  },
+  // Interface-only (side-effect free); used by the multi-runtime harness
+  // worker to hand the runtime→OTel bridge the ambient tracer/meter when the
+  // process runs under Deno's native OpenTelemetry.
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0"
   }
 }
