@@ -251,7 +251,10 @@ New `packages/lib-shell/src/version-gate.ts` (or nearest worker-side util):
 
 ```ts
 // Shown for illustration only.
-/** undefined = unknown (missing gitSha either side) → treated as "skew". */
+/** undefined = unknown (missing gitSha either side) → gate fails, but skip
+ * SILENTLY ("skipped-unknown-build"): the versionSkew signal is reserved for a
+ * PROVEN mismatch (both shas known and different). Signalling on unknown would
+ * raise the shell's reload banner on every space open in local dev (#4653). */
 export async function toolshedGitSha(runtime, host): Promise<string | undefined>;
 export function clientGitSha(): string | undefined;
 /** True only when both are known AND equal. Unknown → false (fail-safe: do not update). */
@@ -343,7 +346,8 @@ New method on `PiecesController` (`pieces-controller.ts`):
 
 ```ts
 // Shown for illustration only.
-/** Returns "updated" | "current" | "skipped-skew" | "skipped-disabled". */
+/** Returns "updated" | "current" | "skipped-skew" | "skipped-unknown-build"
+ *  | "skipped-disabled". */
 async checkAndUpdateDefaultPattern(space): Promise<UpdateOutcome>;
 ```
 
@@ -357,8 +361,10 @@ Steps (exactly):
    *(This per-space host is a change from `ensureDefaultPattern`'s global
    `runtime.apiUrl` at `pieces-controller.ts:274/375`; use the space host
    here.)*
-4. **Version gate** (M1.2): `if (!(await buildsMatch(runtime, host)))` → emit
-   `versionSkew` IPC, return `"skipped-skew"`.
+4. **Version gate** (M1.2): `if (!(await buildsMatch(runtime, host)))` → if
+   both shas are known (a proven mismatch) emit the `versionSkew` IPC and
+   return `"skipped-skew"`; if either sha is unknown (dev/source servers)
+   return `"skipped-unknown-build"` with no signal (#4653).
 5. `currentId = await cachedPatternIdentity(host, url)` (M3.2).
 6. `running = getPatternIdentityRef(root)?.identity`. If `currentId ===
    running` → `"current"`.
@@ -410,8 +416,9 @@ pattern source; you may need a fake `?identity`/source responder):
 - **State preserved**: seed a durable cell the root reads by stable key; after
   update, it is still readable (guards the in-place property — use
   `default-app.tsx`-shaped state).
-- **Skew**: force `buildsMatch` false → `"skipped-skew"`, no write, one
-  `versionSkew` IPC.
+- **Skew**: force a proven mismatch (both shas known, different) →
+  `"skipped-skew"`, no write, one `versionSkew` IPC. An unknown sha on either
+  side → `"skipped-unknown-build"`, no write, NO IPC (#4653).
 - **Cache**: two checks in a row do one `?identity` fetch; after a simulated
   socket reset, the next check re-fetches.
 - **Failure isolation**: a throwing `?identity` fetch → the check logs and

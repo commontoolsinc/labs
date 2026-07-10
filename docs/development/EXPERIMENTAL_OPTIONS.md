@@ -180,8 +180,8 @@ propagate](#how-flags-propagate).
   `RuntimeOptions.experimental.eagerSourceAnnotation`. The ambient control point
   is `setEagerSourceAnnotation` in
   [`packages/runner/src/builder/module.ts`](../../packages/runner/src/builder/module.ts).
-  Unlike the other three, the runtime propagates this one only when it is set
-  explicitly, because the ambient flag is also a test seam.
+  Unlike the other env-backed flags, the runtime propagates this one only when
+  it is set explicitly, because the ambient flag is also a test seam.
 - **Added by.** gideon, in "make fn.src lazy/debug-only — re-root identity off
   .src" (#4458, 2026-07-06).
 - **Purpose.** Resolves the per-primitive debug source annotation (`fn.src`)
