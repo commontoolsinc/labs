@@ -11,5 +11,10 @@ export function cellRefToKey(cell: CellRef): string {
   const cfcLabelView = cell.cfcLabelView
     ? `:${JSON.stringify(cloneCfcLabelView(cell.cfcLabelView))}`
     : "";
-  return `${cell.space}:${id}:${cell.path.join(".")}${schema}${cfcLabelView}`;
+  // JSON.stringify the path: a `.` join is ambiguous (["."] and ["", ""]
+  // both join to "."), so segments containing dots or empty strings would
+  // collide keys for distinct paths.
+  return `${cell.space}:${id}:${
+    JSON.stringify(cell.path)
+  }${schema}${cfcLabelView}`;
 }

@@ -254,6 +254,16 @@ describe("CellHandle CFC label IPC", () => {
       cellRefToKey(refFor("fid1:abc")),
     );
 
+    // Paths are JSON-encoded in keys: a "." join would conflate ["."] with
+    // ["", ""].
+    const withPath = (path: string[]): CellRef => ({
+      ...refFor("of:fid1:abc"),
+      path,
+    });
+    expect(cellRefToKey(withPath(["."]))).not.toEqual(
+      cellRefToKey(withPath(["", ""])),
+    );
+
     // CellHandle.id() is the FULL schemed id — a true identity accessor.
     // The routing/display strip lives on PageHandle.id().
     expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
