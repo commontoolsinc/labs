@@ -556,7 +556,7 @@ describe("cli piece parsing", () => {
     ]);
   });
 
-  it("reports the durable piece address when registration fails", async () => {
+  it("reports an unknown outcome when registration settling fails", async () => {
     const calls: string[] = [];
     const manager = {
       getSpace: () => "did:key:z6Mktest-space",
@@ -599,9 +599,14 @@ describe("cli piece parsing", () => {
     expect(calls).toEqual(["register"]);
     expect(message).toContain("fid1:created-but-unregistered");
     expect(message).toContain("transaction exhausted");
-    expect(message).toContain("was not registered");
+    expect(message).toContain("registration outcome is unknown");
+    expect(message).toContain("may have committed before settling failed");
     expect(message).toContain(
       `${API_URL}/named-space/fid1:created-but-unregistered`,
+    );
+    expect(message).toContain(
+      `cf piece ls --identity /tmp/test.key --api-url ${API_URL} ` +
+        "--space named-space",
     );
   });
 
@@ -656,6 +661,49 @@ describe("cli piece parsing", () => {
       "cf piece set-slug --identity /tmp/test.key " +
         `--api-url ${API_URL} --space named-space demo ` +
         "fid1:registered-without-slug",
+    );
+  });
+
+  it("shell-quotes dynamic values in recovery commands", async () => {
+    const identity = "/tmp/key with 'quote.key";
+    const apiUrl = "https://cf.dev/root?x=1&y=$(nope)";
+    const space = "named space;echo nope";
+    const manager = {
+      getSpace: () => "did:key:z6Mktest-space",
+      runtime: { userIdentityDID: "did:key:z6Mktest-home" },
+      assertCanAddPieces: () => Promise.resolve(),
+      add: () => Promise.resolve(),
+    } as unknown as PieceManager;
+    const controller = {
+      ensureDefaultPattern: () => Promise.resolve({}),
+      create: () =>
+        Promise.resolve({
+          id: "fid1:shell-safe-recovery",
+          getCell: () => ({}),
+        }),
+    } as unknown as PiecesController;
+
+    let message = "";
+    try {
+      await newPiece(
+        { apiUrl, space, identity },
+        { mainPath: "/tmp/pattern.tsx" },
+        { slug: "demo" },
+        {
+          loadManager: () => Promise.resolve(manager),
+          createController: () => controller,
+          getProgram: () => Promise.resolve({} as RuntimeProgram),
+          assignSlug: () => Promise.reject(new Error("slug write failed")),
+        },
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain(
+      "cf piece set-slug --identity '/tmp/key with '\\''quote.key' " +
+        "--api-url 'https://cf.dev/root?x=1&y=$(nope)' " +
+        "--space 'named space;echo nope' demo fid1:shell-safe-recovery",
     );
   });
 

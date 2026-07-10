@@ -404,6 +404,11 @@ export interface NewPieceDependencies {
   assignSlug?: typeof assignSlug;
 }
 
+function shellQuoteCliArgument(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 // Creates a new piece from source code and optional input.
 export async function newPiece(
   config: SpaceConfig,
@@ -502,12 +507,25 @@ export async function newPiece(
       () => manager.add([piece.getCell()]),
     );
   } catch (error) {
+    const inspectCommand = cliCommand([
+      "piece",
+      "ls",
+      "--identity",
+      shellQuoteCliArgument(config.identity),
+      "--api-url",
+      shellQuoteCliArgument(config.apiUrl),
+      "--space",
+      shellQuoteCliArgument(config.space),
+    ]);
     throw new Error(
-      `The piece was created as ${piece.id}, but registration failed: ${
-        error instanceof Error ? error.message : String(error)
-      }\n` +
-        `The piece was not registered in the space's piece list.\n` +
-        `It remains addressable by ID at ${directUrl}`,
+      `The piece was created as ${piece.id}, but registration did not ` +
+        `complete cleanly: ${
+          error instanceof Error ? error.message : String(error)
+        }\n` +
+        `The registration outcome is unknown because the add may have ` +
+        `committed before settling failed.\n` +
+        `The piece remains addressable by ID at ${directUrl}\n` +
+        `Inspect the space's piece list before retrying:\n  ${inspectCommand}`,
       { cause: error },
     );
   }
@@ -523,13 +541,13 @@ export async function newPiece(
         "piece",
         "set-slug",
         "--identity",
-        config.identity,
+        shellQuoteCliArgument(config.identity),
         "--api-url",
-        config.apiUrl,
+        shellQuoteCliArgument(config.apiUrl),
         "--space",
-        config.space,
-        slug,
-        piece.id,
+        shellQuoteCliArgument(config.space),
+        shellQuoteCliArgument(slug),
+        shellQuoteCliArgument(piece.id),
       ]);
       throw new Error(
         `The piece was created and registered as ${piece.id}, but assigning ` +
