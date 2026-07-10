@@ -92,7 +92,7 @@ export const STDDEV_FACTOR = 3;
 /** Minimum percentage increase over median to flag a regression. */
 export const MIN_REGRESSION_PCT = 0.50;
 
-/** Minimum absolute increase (in seconds) over median for non-bench metrics. */
+/** Minimum absolute increase (in seconds) over median to flag a regression. */
 export const MIN_ABSOLUTE_DELTA = 2;
 
 /** Concurrency limit for API calls. */
@@ -1293,7 +1293,7 @@ const COMPILE_CACHE_TEST_LABEL_RE = /^(?:sub)?test: ([^/]+)\//;
 /**
  * Map a metric name to the compile-cache family whose cold cache inflates
  * it, or null for metrics with no compile cache (Runner Tests,
- * pattern-reload-integration, `coverage-debt:`, `bench:`, ...). The mapping
+ * pattern-reload-integration, `coverage-debt:`, ...). The mapping
  * mirrors the names `extractMetrics` and `extractTestFileMetrics` emit.
  */
 export function compileCacheFamilyForMetric(
@@ -1849,19 +1849,12 @@ export function formatDuration(seconds: number): string {
   return `${m}m ${s.toFixed(0)}s`;
 }
 
-export function formatNanos(ns: number): string {
-  if (ns < 1_000) return `${ns.toFixed(1)}ns`;
-  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(1)}us`;
-  if (ns < 1_000_000_000) return `${(ns / 1_000_000).toFixed(1)}ms`;
-  return `${(ns / 1_000_000_000).toFixed(2)}s`;
-}
-
 export function formatMetricValue(name: string, value: number): string {
   if (isCoverageDebtMetric(name)) {
     const rounded = Math.round(value);
     return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
   }
-  return name.startsWith("bench:") ? formatNanos(value) : formatDuration(value);
+  return formatDuration(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -1970,7 +1963,6 @@ export async function fetchCurrentPRBody(
  *
  * Format (visible markdown, one per line):
  *   NEW_PERF_BASELINE: job: Package Integration Tests = 300s
- *   NEW_PERF_BASELINE: bench: foo > bar = 500us
  *   NEW_COVERAGE_BASELINE
  *
  * Values require a unit suffix: s, ms, us/µs, ns, line, or lines.
@@ -2030,10 +2022,6 @@ export function parseBaselineOverrides(body: string): BaselineOverrides {
         break;
     }
 
-    if (metric.startsWith("bench:")) {
-      value *= 1e9;
-    }
-
     result.metrics.set(metric, value);
   }
 
@@ -2051,13 +2039,6 @@ export function formatOverrideSuggestion(
   if (isCoverageDebtMetric(metric)) {
     const rounded = Math.ceil(value);
     return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
-  }
-  if (metric.startsWith("bench:")) {
-    // value is in nanoseconds
-    if (value < 1_000) return `${value.toFixed(0)}ns`;
-    if (value < 1_000_000) return `${(value / 1_000).toFixed(0)}us`;
-    if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(0)}ms`;
-    return `${(value / 1_000_000_000).toFixed(1)}s`;
   }
   // value is in seconds
   return `${Math.ceil(value)}s`;

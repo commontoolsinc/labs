@@ -665,7 +665,6 @@ Deno.test("compileCacheFamilyForMetric returns null for metrics without a compil
       "test: package-integration/packages/runner/foo.test.ts",
       "subtest: pattern-unit/packages/patterns/foo.test.tsx > case",
       "coverage-debt: workspace uncovered lines",
-      "bench: packages/runner/bench/cell.bench.ts > set",
     ]
   ) {
     assertEquals(compileCacheFamilyForMetric(metric), null, metric);
