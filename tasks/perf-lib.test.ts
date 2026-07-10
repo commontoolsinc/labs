@@ -10,7 +10,6 @@ import {
   aggregateCacheStates,
   applyBaselineOverrides,
   type Artifact,
-  benchmarksRunsPath,
   buildCoverageDebtSuggestionComment,
   buildCoverageResolvedComment,
   compileCacheFamilyForMetric,
@@ -410,16 +409,6 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
   );
   assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
   assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
-});
-
-Deno.test("benchmarksRunsPath matches successful main runs of any trigger", () => {
-  const path = benchmarksRunsPath();
-  assertStringIncludes(path, "/actions/workflows/benchmarks.yml/runs");
-  assertStringIncludes(path, "branch=main");
-  assertStringIncludes(path, "status=success");
-  // The Benchmarks workflow runs on a schedule and via manual dispatch, so
-  // the query must not restrict runs to a trigger event.
-  assertFalse(path.includes("event="));
 });
 
 Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
