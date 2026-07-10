@@ -762,3 +762,29 @@ Plus the ~15-line dispatch seam in `runner.ts`, the flag in `runtime.ts`, and
 the `$patternRef` binding in `pattern-binding.ts`. Tests live in
 `packages/runner/test/reactive-interpreter/` (unit + differential + measurement)
 and top-level runner tests (`pattern-node-patternref`, scope, resume).
+
+---
+
+## 18. Before default-on — the gating list
+
+The interpreter ships **default-off** and is sound in that state (byte-equal
+results, fail-safe labels, green both flags). Flipping the default to *on* is
+gated on the items below. They are tracked here — not just in issue trackers
+— because they interact (all three bite only once the flag is on across a
+real multi-realm, CFC-enforcing deployment), and the default-on decision
+needs them in one place. Each is **not** a correctness bug in the flag-off
+product; each **is** a blocker for flag-default-on.
+
+| # | Blocker | Status | Fix / lever |
+| --- | --- | --- | --- |
+| **B1** | **Uniform capability across realms.** A partial rollout (Deno interprets, browser worker runs legacy) is a *capability skew* that produced a 20–38× slowdown on multi-runtime CFC tests (divergent write/label behavior → mutual conflict/re-run churn). See §16. | Browser-worker flag plumbed (`felt define → env.ts → lib-shell → protocol → worker`); uniform-on measured at wall-clock parity with off. | **Invariant, not a task:** turn the interpreter on in *every* realm at once — Deno + browser worker + in-process servers — never per-realm. Any future realm must carry the flag. |
+| **B2** | **Cross-space pull-amplification.** A standing whole-state sink deep-traversing the coalesced result graph, combined with a reader-isolated cross-space doc that never loads, forms a re-sync/re-dirty loop (an earlier meta-node design hit ~226–270× timeouts). This interpreter's chat sim runs clean, but the pathology is latent under the sink×isolation combination. | Absent in the current corpus/chat-sim; **not** structurally prevented. | Per-doc scheduler state + subscription-carried adoption (the "f6c" line of work) is the measured lever — flag-on beat main there. Land + re-measure the isolated multi-runtime case before flipping. |
+| **B3** | **Segment CFC label coarsening** (§13). A segment collapses N nodes into one tx, so `deriveFlowJoin(tx)` stamps *both* independent mixed-label outputs with the join — coarser than legacy's per-node labels. **Fail-safe** (over-taint, never under-taint — no leak) but **over-blocks** a public output under render-ceiling enforcement. | Pinned by `segment-cfc-labels.test.ts` (soundness superset invariant + the current coarsening as characterization); §13 corrected. | Per-op label attribution mirroring the per-op **scope** work: the segment records which reads belong to which op, and `prepare` stamps each write-path with *its op's* read-join instead of the whole-tx join. Cross-layer (runner segment ↔ `cfc/prepare`); needs a per-op-label differential-vs-legacy oracle. |
+
+**And the measurement, not just the mechanism.** Once B1–B3 are resolved and
+the flag is uniform-on in a CFC-enforcing build, re-run the corpus + full
+integration A/B and judge it on the metric the interpreter actually moves —
+**action / commit reduction and conflict surface, not the persisted document
+*count*** (§16). The document-count intuition does not survive contact with a
+rendered app (its store is mostly preserved boundary docs); do not headline a
+doc-count win that a micro-benchmark suggested but a real app will not show.

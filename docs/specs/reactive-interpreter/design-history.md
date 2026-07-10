@@ -356,6 +356,39 @@ count win is real only where non-rendered pure computation dominates.
 **Lesson: measure the metric your mechanism actually moves, on a realistic
 input, before you headline it — a micro-benchmark's ratio is not the app's.**
 
+### L-SEGMENT-LABEL-COARSENING — the interpreter did per-op scope but not per-op labels
+
+A review question — "isn't the flag-off version already writing per-path
+labels?" — exposed a real precision regression and a false spec claim. Yes:
+legacy writes per-node/per-path confidentiality labels, and the interpreter
+does **not** — a segment collapses N nodes into one transaction, and
+`deriveFlowJoin(tx)` is one join per tx, so two *independent* mixed-label
+outputs collapsed into a segment both get the join
+(`{fromSecret:[SECRET], fromPublic:[PUBLIC]}` legacy → `[PUBLIC,SECRET]` on
+both, flag-on, `cfcFlowLabels:persist`). Spec §13's "per-segment ≈ legacy
+granularity — parity" was wrong for confidentiality; corrected.
+
+The tell was an **asymmetry the design already contained**: the scope work
+built per-op attribution (`runScoped` brackets, `ri2PerOpOutputScopes`) and
+was careful about it — but labels were left to the whole-tx `deriveFlowJoin`,
+which is per-segment. Two properties that legacy derives per-node
+(scope, label) got split: one made per-op, one left coarse. Nobody noticed
+because the differential oracle is label-blind (L-DIFFERENTIAL-…) and the
+pointwise suite only covers *collections* (per-element tx), never scalar
+segment collapse.
+
+It is **fail-safe** — over-taint, never under-taint, so no leak — which is
+why it is a default-on precision blocker (over-blocks a public output under
+render enforcement) rather than a flag-off correctness bug. Pinned by
+`segment-cfc-labels.test.ts` with a soundness superset invariant (interpreter
+labels ⊇ legacy) that holds regardless, plus the current coarsening as
+characterization so the eventual per-op-label fix flips the test loudly.
+**Lessons:** (1) when a transform derives *several* per-node properties, audit
+that *each* survives at the same granularity — one can silently coarsen while
+its sibling stays precise; (2) a green differential across an
+enforcement-off suite says nothing about the enforcement-on labels; test the
+property under the mode that consumes it. Tracked in spec §18 (B3).
+
 ---
 
 ## Part VII — Control emission (built — spec §7.1)
