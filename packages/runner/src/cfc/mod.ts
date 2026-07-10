@@ -37,6 +37,8 @@ export {
 export type {
   AttemptedWrite,
   CfcAddress,
+  CfcDeclaredMonotonicityMode,
+  CfcDeclaredWideningExemption,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -67,9 +69,14 @@ export type {
   WritePolicyInput,
 } from "./types.ts";
 export {
+  cfcCanonicalClauseDigest,
+  collectDeclaredMonotonicityViolations,
+} from "./declared-monotonicity.ts";
+export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
+  DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,

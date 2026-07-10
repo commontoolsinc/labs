@@ -497,6 +497,48 @@ export type CfcLabelMetadataProtectionMode = "off" | "observe" | "enforce";
 export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
   CfcLabelMetadataProtectionMode = "off";
 
+/**
+ * Declared-component monotonicity gate dial (WP5; spec §8.12.1/§8.12.8;
+ * docs/specs/cfc-persisted-declassification.md §4 item 3), orthogonal to the
+ * enforcement ladder: the declared (store-policy) component of a persisted
+ * path evolves only through the schema-walk re-mint in prepare, and §8.12.1's
+ * `canUpdateStoreLabel` (confidentiality may only add clauses or remove
+ * alternatives; the declared integrity claim may only remove atoms) had no
+ * runtime check. `off` = nothing runs (bytes identical to before the dial);
+ * `observe` = compare each re-minted declared entry against the stored
+ * declared entry at the same path and emit a structured diagnostic on a
+ * non-monotone re-mint, persisting today's behavior; `enforce` = a
+ * non-monotone re-mint records a fail-closed prepare reason (rejecting the
+ * commit under the enforcing enforcement modes). The gate governs ONLY the
+ * `declared` component — derived/link-carried/structure components follow
+ * their own §8.12.8 disciplines and are never touched. The sanctioned
+ * exception (§8.12.7 route 2b, the future declassification-event writer) is
+ * the per-tx privileged widening exemption below.
+ */
+export type CfcDeclaredMonotonicityMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_DECLARED_MONOTONICITY_MODE:
+  CfcDeclaredMonotonicityMode = "off";
+
+/**
+ * Per-transaction privileged marker exempting exactly ONE (doc, path,
+ * clauseDigest) triple from the declared-monotonicity gate (the seam for the
+ * §8.12.7 route 2b declassification event; docs/specs/
+ * cfc-persisted-declassification.md §4). `clauseDigest` is the canonical
+ * clause digest (`cfcCanonicalClauseDigest`) of the STORED clause whose
+ * dropping/widening the event sanctions — clause indices are
+ * evaluation-ephemeral, digests are not. Settable only under the same
+ * privileged discipline as `writeCfcGrant` (a trusted-builtin implementation
+ * identity); absent = the gate applies in full; integrity violations are
+ * never exemptable (the event widens a confidentiality clause).
+ */
+export type CfcDeclaredWideningExemption = {
+  readonly space: MemorySpace;
+  readonly id: string;
+  readonly path: readonly string[];
+  readonly clauseDigest: string;
+};
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
@@ -505,6 +547,12 @@ export type CfcTxState = {
   triggerReadGating: CfcTriggerReadGating;
   policyEvaluationMode: CfcPolicyEvaluationMode;
   labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
+  declaredMonotonicityMode: CfcDeclaredMonotonicityMode;
+  // The one sanctioned per-tx exemption from the declared-monotonicity gate
+  // (§8.12.7 route 2b seam). Absent = gate applies. Set only through the
+  // privileged `setCfcDeclaredWideningExemption` (trusted-builtin identity),
+  // write-once, validated fail-closed — see the type's doc comment.
+  declaredWideningExemption?: CfcDeclaredWideningExemption;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Result containers a list coordinator (filter/flatMap) declares each

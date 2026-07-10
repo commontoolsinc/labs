@@ -49,6 +49,7 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
   atomsOutsideCeiling,
@@ -4616,6 +4617,44 @@ export const prepareBoundaryCommit = (
             }]
             : [];
         });
+    // WP5 (§8.12.1/§8.12.8; docs/specs/cfc-persisted-declassification.md §4
+    // item 3): the declared-component monotonicity gate. Each declared entry
+    // this walk is about to persist replaces the stored declared entry at
+    // the same path (the carry-forward below skips replaced paths), so this
+    // is the ONE point where the store policy can change — compare against
+    // the stored entries per canUpdateStoreLabel before it does. The stored
+    // metadata was read above under the internal-verifier meta
+    // (storedMetadataFor), so the gate consumes no additional reads. Under
+    // `enforce` a violation records fail-closed reasons and skips persisting
+    // this target's labels (mirroring requirementFailure — the stored,
+    // stronger entries stay in place under non-rejecting enforcement modes;
+    // an ingest target keeps only the runtime's mark); under `observe` it
+    // diagnoses and persists today's bytes; `off` runs nothing.
+    if (state.declaredMonotonicityMode !== "off" && existing !== undefined) {
+      const monotonicityViolations = collectDeclaredMonotonicityViolations({
+        space,
+        docId: id,
+        storedEntries: existing.labelMap.entries,
+        proposedEntries: persistedLabelEntries,
+        exemption: state.declaredWideningExemption,
+      });
+      if (monotonicityViolations.length > 0) {
+        if (state.declaredMonotonicityMode === "enforce") {
+          reasons.push(...monotonicityViolations);
+          if (!isIngestTarget) continue;
+          // Mirror ingestVerificationFailed above: the runtime's ingest mark
+          // (appended below) still persists in non-rejecting modes, but the
+          // non-monotone declared claims must not.
+          persistedLabelEntries.length = 0;
+        } else {
+          for (const violation of monotonicityViolations) {
+            tx.noteCfcDiagnostic(
+              `declared-monotonicity(observe): ${violation}`,
+            );
+          }
+        }
+      }
+    }
     const persistedLabelEntryKeys = new Set(
       persistedLabelEntries.map((entry) => pathKey(entry.path)),
     );
