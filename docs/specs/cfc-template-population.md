@@ -65,16 +65,32 @@ per-class label. That combination is the whole fix:
 Shown for illustration only.
 { path: ["items", "*"], label: {confidentiality: J}, origin: "structure", observes: "shape" }
 { path: ["items", "*"], label: {confidentiality: J}, origin: "structure", observes: "value" }
+{ path: ["items", "*"], label: {confidentiality: J}, origin: "structure", observes: "followRef" }
 ```
 
 One entry per class per container — O(1) in the container's size — where
 the spec's naive encoding needed O(n) per-slot records. The child-probe
-read (`shape` class at `["items","3"]`) resolves the `*` entry through
-`isPrefix` as an equal-length match; the sigil-materialization read
-(`value` class at the slot) resolves the `value` twin; and a `followRef`
-read consumes neither, because `readConsumesEntry` filters by class — the
-**pointer/content split that today hangs on the exact-path anchoring hack
-moves onto the class axis, where it belongs**.
+read (`shape` class at `["items","3"]`) resolves the `shape` entry
+through `isPrefix` as an equal-length match; a raw sigil-materialization
+read (`value` class at the slot) resolves the `value` twin; and — because
+the runner classifies slot-pointer observations as `followRef`
+(`isLinkResolutionProbe` → `followRef` in `forEachFlowObservation`;
+observation-classes §4/§7) — the **`followRef` twin is what actually
+closes the pointer-identity residual**: a probe or dereference at a
+computed slot consumes the assignment decision (`J` decided *which*
+element the reader resolves through — inv-9 flow-path confidentiality),
+while still consuming nothing of the container's *content* classes and
+nothing of the target beyond its own link entry. The pointer/content
+split that today hangs on the exact-path anchoring hack moves onto the
+class axis, where it belongs — refined, not dissolved: probes stay clean
+of content taint (`shape`/`value` templates are not followRef-consumable)
+but carry the slot-assignment taint they genuinely depend on. One caution
+is inherited from the reactive-interpreter work, where over-tainting
+probes has bitten before (list-root reads misclassified as probes): the
+followRef template must carry only the membership `J`, never the
+container's value-class label, and Stage A must run the S16
+filter/group-chat integration flows to catch over-taint regressions
+before merge.
 
 ## 3. Entry semantics
 
@@ -157,9 +173,18 @@ Arrays have a template spelling (`items` → `*`); record-keyed containers
 have none — `walkIfcSchema` does not descend `additionalProperties` at
 all, so "every child of this map" is inexpressible even as a declared
 label. This design extends the schema walk: `additionalProperties`
-(schema-object form) descends as the same `*` segment, giving record
-containers the declared-template spelling arrays have and making the
-runtime mints of §3.1 uniform across both container kinds. (`count` stays
+(schema-object form) descends as the same `*` segment — **restricted to
+record-only objects (no `properties` present)**. The restriction is
+load-bearing: `isPrefix`'s `*` matches *any* segment, but
+`additionalProperties` semantically covers only keys *not* listed under
+`properties` (the runner's own `schemaAtPath` traversal consults
+`additionalProperties` only on a `properties` miss) — an unrestricted `*`
+entry from a mixed schema would over-taint the named fields. Mixed
+fixed-plus-record-tail schemas therefore remain template-inexpressible
+for now; expressing them would need exclusion semantics on the entry,
+which §3.3's plain-`IFCLabel`-only rule forbids. Record-only maps (the
+per-user/group-chat shapes) get the spelling arrays have, and the runtime
+mints of §3.1 stay uniform across both container kinds. (`count` stays
 folded into `enumerate` per C0; the spec's separable `iterate.count` is
 noted for the owed §4.6.3 spec-table PR, not resurrected here.)
 
@@ -190,12 +215,17 @@ minted into the same entries, not the mechanism.
 
 ## 6. Staging, tests, and measures
 
-- **Stage A (substrate + SC-8 fixes; one PR):** the two `*`-child mints at
-  the structure-stamp sites, the shape-class join exception (§3.2.1), the
-  `additionalProperties` walk, red-first tests: the §1.1 probe consumes
-  membership `J` (red on main today — write it first and confirm the
-  under-taint); the §1.2 sigil-materialization read consumes the `value`
-  template; `followRef` at a slot consumes neither (the split, pinned);
+- **Stage A (substrate + SC-8 fixes; one PR):** the three `*`-child mints
+  at the structure-stamp sites, the shape-class join exception (§3.2.1),
+  the record-only `additionalProperties` walk, red-first tests: the §1.1
+  probe consumes membership `J` (red on main today — write it first and
+  confirm the under-taint); the §1.2 slot observation consumes the
+  assignment `J` through the `followRef` template (and a raw sigil `value`
+  read through the `value` twin); a slot `followRef` consumes NO
+  content-class template and nothing of the target beyond its link entry
+  (the refined split, pinned); a mixed properties+additionalProperties
+  schema mints no `*` entry (the §4 restriction, pinned); the S16
+  filter/group-chat integration flows green (probe over-taint guard);
   frozen+template join; replace-from-criteria restamp; SC-11 recompute
   no-op with templates present; Stage-1 transform applies to template
   labels; declared `*` entries byte-identical (regression); coalescing +
