@@ -38,6 +38,7 @@ was last checked against the code.
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation) | `RuntimeOptions.cfcPolicyEvaluation` | `off` | Bernhard Seefeld (#4566) | move toward `enforce` | implemented, staged rollout |
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity) | `RuntimeOptions.cfcDeclaredMonotonicity` | `off` | Bernhard Seefeld (#4647) | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships) | implemented, off by default |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
+| [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
@@ -384,6 +385,34 @@ the per-epic implementation notes).
   criteria are deliberately unscheduled in the spec's §8), the counters either
   fold into that feature or are removed. Because enforcement is unaffected,
   retiring it is low-risk.
+
+### `cfcLabelMetadataProtection`
+
+- **Toggle via.** `RuntimeOptions.cfcLabelMetadataProtection`.
+- **Added by.** Bernhard Seefeld, in "inv-12 stage 1 — cross-space
+  label-metadata representation transform" (#4638, 2026-07-09).
+- **Purpose.** Applies the invariant-12 representation classes at the
+  cross-space persist seam: source-bearing atom fields of label entries whose
+  observations originate outside the destination space are persisted as
+  `{digestOf: …}` commitment forms (or verbatim where the classification
+  table says `public`), identically at the `["cfc"]` envelope and the
+  sigil-carried label views, so a destination space's replicas stop
+  disclosing source-space principal identities (`Caveat.source`, clause
+  DIDs, `LinkReference` addresses). Values are `off`, `observe`, and
+  `enforce`: `observe` computes the transformed form and emits a structured
+  divergence diagnostic while persisting today's bytes (the rollout
+  metric); `enforce` persists the transformed form. Enforcement matching is
+  commitment-aware in both directions (read gating digests the candidate;
+  exchange patterns digest-match concrete values and refuse to bind
+  variables over committed fields). Same-space-only labels always persist
+  verbatim.
+- **Current default and planned end state.** `off` by default. Target is
+  `observe` to count divergences, then `enforce`
+  (`docs/specs/cfc-label-metadata-confidentiality.md` §5, SC-25).
+- **Status on 2026-07-09.** Implemented, staged rollout.
+- **Path to removal.** Not planned for removal: the representation rule is a
+  permanent inv-12 obligation; once `enforce` soaks the dial settles there
+  with the lower rungs kept for diagnostics, like the other CFC ladders.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
 > `cfcPolicyRecords`, and `cfcTrustConfig` are CFC *configuration inputs* (the
