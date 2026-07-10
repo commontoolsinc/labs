@@ -260,6 +260,18 @@ if cf acl set $DID_USER1 READ $SPACE_ARGS_USER2 2>/dev/null; then
 fi
 success "Downgraded USER2 cannot manage ACL"
 
+# Test 13: The last concrete owner cannot be removed
+echo ""
+echo "Test 13: Last-owner protection"
+if cf acl remove $DID_OWNER $SPACE_ARGS_OWNER 2>/dev/null; then
+  error "Removing the last concrete OWNER should be rejected"
+fi
+ACL_OUTPUT=$(cf acl ls $SPACE_ARGS_OWNER)
+if ! echo "$ACL_OUTPUT" | grep "$DID_OWNER" | grep -q "OWNER"; then
+  error "Rejected last-owner removal must preserve the ACL"
+fi
+success "Last concrete OWNER is preserved"
+
 # Cleanup
 echo ""
 echo "=========================================="

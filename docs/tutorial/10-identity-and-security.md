@@ -88,14 +88,22 @@ Beyond authentication, per-space **ACLs** are now wired into the v2 server
 itself. A space can carry an ACL document (its entity id is the space DID;
 types in `packages/memory/acl.ts`, managed by the runner's `ACLManager`
 and surfaced as `cf acl ...`) granting READ/WRITE/OWNER capabilities. The
-server evaluates them per message — session-open, queries, and watches
-need READ; `transact` needs WRITE; writing the ACL itself needs OWNER —
-and seeds the space's creator as owner on first open. Enforcement is a
-deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`,
-`packages/memory/v2/server.ts`); the default is still `off`, and `enforce`
-additionally revokes live sessions that lose access. So the machinery
-exists, but check your deployment's mode before relying on a specific
-enforcement property.
+server evaluates them per message — session-open, queries, and watches need
+READ; `transact` needs WRITE; writing the ACL itself needs OWNER. A fresh space
+is read-only until its space identity (or a configured service DID) writes a
+valid ACL with at least one concrete OWNER. Named-space bootstrap uses a
+temporary space-identity session to grant the active user OWNER, then remounts
+as that user; home spaces use the same identity for both roles and claim
+`{ [space]: "OWNER" }`, including an ACL-less legacy home.
+
+As a temporary pre-launch compatibility rule, a populated space that has never
+had an ACL is authenticated-public READ/WRITE but never OWNER. A malformed,
+ownerless, or retracted ACL fails closed. ACL replacement must be a whole,
+space-scoped document and may not remove the last concrete owner. Enforcement
+is a deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`); the default
+is still `off`, and `enforce` additionally revokes live sessions that lose
+access. Structural ACL validity and fresh-space genesis remain hard invariants
+in `observe` mode.
 
 ## Running untrusted code: three rings
 

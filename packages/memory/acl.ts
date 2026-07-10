@@ -23,6 +23,14 @@ export function isACL(value: unknown): value is ACL {
   return true;
 }
 
+/** An enforceable ACL must retain an OWNER tied to a concrete DID. A wildcard
+ *  OWNER may coexist with one, but cannot by itself administer the ACL. */
+export function hasConcreteOwner(acl: ACL): boolean {
+  return Object.entries(acl).some(([principal, capability]) =>
+    principal !== ANYONE_USER && capability === "OWNER"
+  );
+}
+
 const CapabilityMap: Record<Capability, number> = {
   READ: 0,
   WRITE: 1,

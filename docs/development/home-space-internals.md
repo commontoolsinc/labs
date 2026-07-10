@@ -20,9 +20,14 @@ const runtime = new Runtime({
 
 ## ACL Initialization
 
-The home space requires special ACL handling since there's no separate space
-identity to delegate from. When `space === runtime.userIdentityDID`, the
-PieceManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
+The home space has no separate derived space signer: the active user identity
+is itself the space identity. `StorageManager` recognizes
+`space === storageManager.as.did()`, checks the space's ACL document, and—when
+it is absent—uses a temporary space-authenticated session to write
+`{ [space]: "OWNER" }`. It closes that bootstrap session and mounts a fresh
+normal session so local sequence numbers and user/session scope partitions are
+not shared with bootstrap work.
 
-See `packages/piece/src/manager.ts` (home space detection) and
-`packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.
+Unlike named-space bootstrap, the home path also claims a populated legacy
+space with no ACL. `session.open` remains read-only; the claim is an ordinary,
+conflict-checked ACL transaction. See `packages/runner/src/storage/v2.ts`.

@@ -804,8 +804,10 @@ sweep does not mistake them for missing experimental flags:
   `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`.
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
-- **Operational and build toggles**: `MEMORY_DUMP_ENABLED` (state-inspector dump
-  endpoint), `OTEL_ENABLED`, `PRODUCTION` (shell build mode).
+- **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /
+  `enforce` space-access policy), `MEMORY_DUMP_ENABLED` (state-inspector dump
+  endpoint), `OTEL_ENABLED`, `PRODUCTION` (shell build mode). ACL mode is a
+  permanent deployment policy ladder, not an experimental runtime feature.
 - **Test controls**: `TEST_LLM`, `TEST_HTTP`, and the integration-test
   environment variables (`HEADLESS`, `PIPE_CONSOLE`, `CFC_BROWSER_PROFILE_COUNT`,
   `CF_WAITFOR_DELAY_MS`).

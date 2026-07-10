@@ -1,4 +1,5 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import { toFileUrl } from "@std/path";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -9,6 +10,7 @@ import {
   type ResponseMessage,
   type ServerMessage,
   type SessionOpenAuthMetadata,
+  type SessionOpenResult,
 } from "../v2.ts";
 
 const HELLO_FLAGS = getMemoryProtocolFlags();
@@ -40,14 +42,14 @@ const assertResponse = <Result>(
 /** Server whose session principal is taken (untested-crypto, test-only) from
  *  `invocation.iss`, mirroring the toolshed hook's result. */
 const createAclServer = (
-  store: string,
+  store: string | URL,
   acl?: {
     mode: "off" | "observe" | "enforce";
     serviceDids?: readonly string[];
   },
 ) =>
   new Server({
-    store: new URL(store),
+    store: typeof store === "string" ? new URL(store) : store,
     subscriptionRefreshDelayMs: 0,
     authorizeSessionOpen: (message) => {
       const iss = message.invocation?.iss;
@@ -82,7 +84,7 @@ const openSession = async (
   { connection, messages, sessionOpen }: Harness,
   space: string,
   principal: string,
-): Promise<ResponseMessage<{ sessionId: string; serverSeq: number }>> => {
+): Promise<ResponseMessage<SessionOpenResult>> => {
   await connection.receive(encodeMemoryBoundary({
     type: "session.open",
     requestId: nextRequestId("open"),
@@ -94,17 +96,16 @@ const openSession = async (
       challenge: sessionOpen.challenge.value,
     },
   }));
-  return assertResponse<{ sessionId: string; serverSeq: number }>(
+  return assertResponse<SessionOpenResult>(
     shiftMessage(messages),
   );
 };
 
-const transactSet = async (
-  { connection, messages }: Harness,
+const transactOperation = async (
+  { connection, messages }: Pick<Harness, "connection" | "messages">,
   space: string,
   sessionId: string,
-  id: string,
-  value: unknown,
+  operation: Record<string, unknown>,
   localSeq: number,
 ): Promise<ResponseMessage<{ seq: number }>> => {
   await connection.receive(encodeMemoryBoundary({
@@ -115,10 +116,27 @@ const transactSet = async (
     commit: {
       localSeq,
       reads: { confirmed: [], pending: [] },
-      operations: [{ op: "set", id, value: { value } }],
+      operations: [operation],
     },
   }));
   return assertResponse<{ seq: number }>(shiftMessage(messages));
+};
+
+const transactSet = async (
+  { connection, messages }: Harness,
+  space: string,
+  sessionId: string,
+  id: string,
+  value: unknown,
+  localSeq: number,
+): Promise<ResponseMessage<{ seq: number }>> => {
+  return await transactOperation(
+    { connection, messages },
+    space,
+    sessionId,
+    { op: "set", id, value: { value } },
+    localSeq,
+  );
 };
 
 const graphQuery = async (
@@ -137,7 +155,28 @@ const graphQuery = async (
   return assertResponse<GraphQueryResult>(shiftMessage(messages));
 };
 
-Deno.test("acl enforce: creator is seeded as OWNER and a stranger is denied", async () => {
+/** Initialize a fresh space through the space identity, then transfer OWNER
+ *  to the normal user. This mirrors the named-space bootstrap path. */
+const initializeSpaceAcl = async (
+  server: Server,
+  space: string,
+  acl: Record<string, "READ" | "WRITE" | "OWNER">,
+): Promise<void> => {
+  const authority = await connect(server);
+  const opened = await openSession(authority, space, space);
+  assertExists(opened.ok, "space identity should open its own space");
+  const initialized = await transactSet(
+    authority,
+    space,
+    opened.ok.sessionId,
+    `of:${space}`,
+    acl,
+    1,
+  );
+  assertExists(initialized.ok, "space identity should initialize the ACL");
+};
+
+Deno.test("acl enforce: an ordinary opener cannot claim or write a new space", async () => {
   const server = createAclServer("memory://acl-enforce-stranger", {
     mode: "enforce",
   });
@@ -145,9 +184,64 @@ Deno.test("acl enforce: creator is seeded as OWNER and a stranger is denied", as
   const alice = await connect(server);
   try {
     const opened = await openSession(alice, space, ALICE);
-    assertExists(opened.ok, "creator open should succeed");
+    assertExists(
+      opened.ok,
+      "an authenticated principal may inspect a new space",
+    );
+    assertEquals(opened.ok.serverSeq, 0, "an ordinary open must not claim it");
 
-    // The seed is a real commit: the ACL doc is readable and names the creator.
+    const acl = await graphQuery(
+      alice,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+    );
+    assertExists(acl.ok);
+    assertEquals(
+      acl.ok.entities[0]?.document ?? null,
+      null,
+      "ordinary open must not seed an ACL",
+    );
+
+    const write = await transactSet(
+      alice,
+      space,
+      opened.ok.sessionId,
+      "of:doc:1",
+      { hello: "world" },
+      1,
+    );
+    assertEquals(write.error?.name, "AuthorizationError");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: the space identity initializes a private space", async () => {
+  const server = createAclServer("memory://acl-enforce-space-genesis", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-genesis";
+  const authority = await connect(server);
+  const alice = await connect(server);
+  try {
+    const authoritySession = await openSession(authority, space, space);
+    assertExists(authoritySession.ok, "space identity should open its space");
+    assertEquals(authoritySession.ok.serverSeq, 0);
+
+    const genesis = await transactSet(
+      authority,
+      space,
+      authoritySession.ok.sessionId,
+      `of:${space}`,
+      { [ALICE]: "OWNER" },
+      1,
+    );
+    assertExists(genesis.ok, "space identity should write the genesis ACL");
+
+    const opened = await openSession(alice, space, ALICE);
+    assertExists(opened.ok, "the initialized owner should open the space");
+
     const acl = await graphQuery(
       alice,
       space,
@@ -158,10 +252,9 @@ Deno.test("acl enforce: creator is seeded as OWNER and a stranger is denied", as
     const aclDoc = JSON.stringify(acl.ok);
     assert(
       aclDoc.includes(ALICE) && aclDoc.includes("OWNER"),
-      `seeded ACL doc should grant creator OWNER, got: ${aclDoc}`,
+      `genesis should grant the user OWNER, got: ${aclDoc}`,
     );
 
-    // Creator can write.
     const write = await transactSet(
       alice,
       space,
@@ -170,9 +263,8 @@ Deno.test("acl enforce: creator is seeded as OWNER and a stranger is denied", as
       { hello: "world" },
       1,
     );
-    assertExists(write.ok, "creator write should succeed");
+    assertExists(write.ok, "initialized owner should be able to write");
 
-    // A stranger cannot even open a session.
     const bob = await connect(server);
     const denied = await openSession(bob, space, BOB);
     assertEquals(denied.error?.name, "AuthorizationError");
@@ -189,19 +281,12 @@ Deno.test("acl enforce: WRITE grant allows transact but not ACL-doc writes", asy
   const alice = await connect(server);
   const bob = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "WRITE",
+    });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
-
-    // Owner grants Bob WRITE (owner may write the ACL doc).
-    const grant = await transactSet(
-      alice,
-      space,
-      aliceSession.ok.sessionId,
-      `of:${space}`,
-      { [ALICE]: "OWNER", [BOB]: "WRITE" },
-      1,
-    );
-    assertExists(grant.ok, "owner should be able to write the ACL doc");
 
     const bobSession = await openSession(bob, space, BOB);
     assertExists(bobSession.ok, "WRITE grant should allow session open");
@@ -239,23 +324,19 @@ Deno.test("acl enforce: READ grant allows queries but not writes", async () => {
   const alice = await connect(server);
   const carol = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [CAROL]: "READ",
+    });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
     await transactSet(
       alice,
       space,
       aliceSession.ok.sessionId,
-      `of:${space}`,
-      { [ALICE]: "OWNER", [CAROL]: "READ" },
-      1,
-    );
-    await transactSet(
-      alice,
-      space,
-      aliceSession.ok.sessionId,
       "of:doc:shared",
       { shared: true },
-      2,
+      1,
     );
 
     const carolSession = await openSession(carol, space, CAROL);
@@ -291,16 +372,12 @@ Deno.test("acl enforce: '*' READ opens the space to any principal read-only", as
   const alice = await connect(server);
   const bob = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      "*": "READ",
+    });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
-    await transactSet(
-      alice,
-      space,
-      aliceSession.ok.sessionId,
-      `of:${space}`,
-      { [ALICE]: "OWNER", "*": "READ" },
-      1,
-    );
 
     const bobSession = await openSession(bob, space, BOB);
     assertExists(bobSession.ok, "'*' READ should allow any principal to open");
@@ -327,10 +404,9 @@ Deno.test("acl enforce: service DIDs have implicit OWNER and do not claim spaces
   const service = await connect(server);
   const alice = await connect(server);
   try {
-    // Service touches (and effectively creates) the space first...
     const serviceSession = await openSession(service, space, SERVICE);
     assertExists(serviceSession.ok, "service DID should open any space");
-    const write = await transactSet(
+    const ordinaryWrite = await transactSet(
       service,
       space,
       serviceSession.ok.sessionId,
@@ -338,18 +414,39 @@ Deno.test("acl enforce: service DIDs have implicit OWNER and do not claim spaces
       { from: "service" },
       1,
     );
-    assertExists(write.ok, "service DID should write any space");
+    assertEquals(
+      ordinaryWrite.error?.name,
+      "AuthorizationError",
+      "even the service must initialize a new space with an ACL",
+    );
 
-    // ...but must NOT have claimed ownership: the space now has data and no
-    // ACL doc, so a later regular principal is denied (not silently second).
-    const denied = await openSession(alice, space, ALICE);
-    assertEquals(denied.error?.name, "AuthorizationError");
+    const initialize = await transactSet(
+      service,
+      space,
+      serviceSession.ok.sessionId,
+      `of:${space}`,
+      { [ALICE]: "OWNER" },
+      2,
+    );
+    assertExists(initialize.ok, "service DID should initialize a valid ACL");
+
+    const aliceSession = await openSession(alice, space, ALICE);
+    assertExists(aliceSession.ok);
+    const write = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      "of:doc:alice",
+      { from: "alice" },
+      1,
+    );
+    assertExists(write.ok);
   } finally {
     await server.close();
   }
 });
 
-Deno.test("acl enforce: principal equal to the space DID has implicit OWNER", async () => {
+Deno.test("acl enforce: principal equal to the space DID can claim it privately", async () => {
   const server = createAclServer("memory://acl-enforce-space-key", {
     mode: "enforce",
   });
@@ -358,13 +455,22 @@ Deno.test("acl enforce: principal equal to the space DID has implicit OWNER", as
   try {
     const session = await openSession(holder, space, space);
     assertExists(session.ok, "space-key principal should open its own space");
+    const claim = await transactSet(
+      holder,
+      space,
+      session.ok.sessionId,
+      `of:${space}`,
+      { [space]: "OWNER" },
+      1,
+    );
+    assertExists(claim.ok, "space-key principal should initialize its ACL");
     const write = await transactSet(
       holder,
       space,
       session.ok.sessionId,
       "of:doc:self",
       { self: true },
-      1,
+      2,
     );
     assertExists(write.ok);
   } finally {
@@ -380,16 +486,12 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
   const alice = await connect(server);
   const bob = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "WRITE",
+    });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
-    await transactSet(
-      alice,
-      space,
-      aliceSession.ok.sessionId,
-      `of:${space}`,
-      { [ALICE]: "OWNER", [BOB]: "WRITE" },
-      1,
-    );
 
     const bobSession = await openSession(bob, space, BOB);
     assertExists(bobSession.ok);
@@ -411,7 +513,7 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
       aliceSession.ok.sessionId,
       `of:${space}`,
       { [ALICE]: "OWNER" },
-      2,
+      1,
     );
     assertExists(revoke.ok);
 
@@ -445,6 +547,415 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
   }
 });
 
+Deno.test("acl enforce: revocation during resumed catch-up fails the open", async () => {
+  const server = createAclServer("memory://acl-enforce-resume-revoke-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-resume-revoke-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  const catchupStarted = Promise.withResolvers<void>();
+  const releaseCatchup = Promise.withResolvers<void>();
+  const originalSync = server.syncSessionForConnection.bind(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    bob.connection.close();
+    await server.idle();
+    const resumed = await connect(server);
+
+    const blockedSync: Server["syncSessionForConnection"] = async (...args) => {
+      catchupStarted.resolve();
+      await releaseCatchup.promise;
+      return await originalSync(...args);
+    };
+    server.syncSessionForConnection = blockedSync;
+
+    const reopening = server.openSession({
+      type: "session.open",
+      requestId: nextRequestId("resume-revoke-race"),
+      space,
+      session: {
+        sessionId: bobSession.ok.sessionId,
+        sessionToken: bobSession.ok.sessionToken,
+      },
+      invocation: {
+        iss: BOB,
+        aud: resumed.sessionOpen.audience,
+        challenge: resumed.sessionOpen.challenge.value,
+      },
+    }, resumed.connection);
+    await catchupStarted.promise;
+
+    const revoke = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("resume-revoke-race-revoke"),
+      space,
+      sessionId: aliceSession.ok.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: { value: { [ALICE]: "OWNER" } },
+        }],
+      },
+    });
+    assertExists(revoke.ok);
+    releaseCatchup.resolve();
+
+    const reopened = await reopening;
+    assertEquals(reopened.ok, undefined);
+    assertEquals(reopened.error?.name, "SessionRevokedError");
+    assertEquals(
+      server.isSessionAttached(
+        space,
+        bobSession.ok.sessionId,
+        resumed.connection.id,
+      ),
+      false,
+    );
+  } finally {
+    releaseCatchup.resolve();
+    server.syncSessionForConnection = originalSync;
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: a concurrent post-revocation write is re-authorized", async () => {
+  const server = createAclServer("memory://acl-enforce-revoke-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-revoke-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "OWNER",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    // Starting the revoke first deterministically queues both transactions at
+    // the old ACL. Authorization must be checked synchronously beside apply:
+    // once Alice's ACL commit lands, Bob's already-started request is denied.
+    const [revoke, write] = await Promise.all([
+      server.transact({
+        type: "transact",
+        requestId: nextRequestId("revoke-race"),
+        space,
+        sessionId: aliceSession.ok.sessionId,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${space}`,
+            value: { value: { [ALICE]: "OWNER" } },
+          }],
+        },
+      }),
+      server.transact({
+        type: "transact",
+        requestId: nextRequestId("write-race"),
+        space,
+        sessionId: bobSession.ok.sessionId,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:doc:bob-race",
+            value: { value: { shouldNotLand: true } },
+          }],
+        },
+      }),
+    ]);
+    assertExists(revoke.ok);
+    assertEquals(write.error?.name, "AuthorizationError");
+    assertEquals(await server.readDocument(space, "of:doc:bob-race"), null);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: a concurrent graph query is evaluated before revocation", async () => {
+  const server = createAclServer("memory://acl-enforce-query-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-query-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    // Starting the query first deterministically queues both operations at the
+    // old ACL. Authorization and graph evaluation must share one engine turn:
+    // Bob may receive the old ACL, but must never read the post-revoke ACL.
+    const [query, revoke] = await Promise.all([
+      server.graphQuery({
+        type: "graph.query",
+        requestId: nextRequestId("query-race"),
+        space,
+        sessionId: bobSession.ok.sessionId,
+        query: {
+          roots: [{
+            id: `of:${space}`,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }),
+      server.transact({
+        type: "transact",
+        requestId: nextRequestId("query-race-revoke"),
+        space,
+        sessionId: aliceSession.ok.sessionId,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${space}`,
+            value: { value: { [ALICE]: "OWNER" } },
+          }],
+        },
+      }),
+    ]);
+
+    assertExists(revoke.ok);
+    assertEquals(query.ok?.entities[0]?.document?.value, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: revocation settles an in-flight query with a typed error", async () => {
+  const server = createAclServer("memory://acl-enforce-query-send-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-query-send-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    const queryRequestId = nextRequestId("query-send-race");
+    const query = bob.connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: queryRequestId,
+      space,
+      sessionId: bobSession.ok.sessionId,
+      query: {
+        roots: [{
+          id: `of:${space}`,
+          selector: { path: [], schema: false },
+        }],
+      },
+    }));
+    // Let the connection enter graphQuery and block on its engine turn before
+    // the competing ACL commit runs.
+    await Promise.resolve();
+    const revoke = server.transact({
+      type: "transact",
+      requestId: nextRequestId("query-send-race-revoke"),
+      space,
+      sessionId: aliceSession.ok.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: { value: { [ALICE]: "OWNER" } },
+        }],
+      },
+    });
+    assertExists((await revoke).ok);
+    await query;
+
+    assertEquals(bob.messages, [
+      {
+        type: "session/revoked",
+        space,
+        sessionId: bobSession.ok.sessionId,
+        reason: "unauthorized",
+      },
+      {
+        type: "response",
+        requestId: queryRequestId,
+        error: {
+          name: "SessionRevokedError",
+          message: "Session was revoked while the request was in flight",
+        },
+      },
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: a concurrent watch set is evaluated before revocation", async () => {
+  const server = createAclServer("memory://acl-enforce-watch-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-watch-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    const [watch, revoke] = await Promise.all([
+      server.watchSet({
+        type: "session.watch.set",
+        requestId: nextRequestId("watch-race"),
+        space,
+        sessionId: bobSession.ok.sessionId,
+        watches: [{
+          id: "acl",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: `of:${space}`,
+              selector: { path: [], schema: false },
+            }],
+          },
+        }],
+      }),
+      server.transact({
+        type: "transact",
+        requestId: nextRequestId("watch-race-revoke"),
+        space,
+        sessionId: aliceSession.ok.sessionId,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${space}`,
+            value: { value: { [ALICE]: "OWNER" } },
+          }],
+        },
+      }),
+    ]);
+
+    assertExists(revoke.ok);
+    assertEquals(watch.ok?.sync.upserts[0]?.doc?.value, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: an in-flight refresh cannot emit after revocation", async () => {
+  const server = createAclServer("memory://acl-enforce-refresh-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-refresh-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "READ",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    const watchedId = "of:doc:refresh-race";
+    await bob.connection.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch-refresh-race"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+      watches: [{
+        id: "acl",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: watchedId,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    assertExists(assertResponse(shiftMessage(bob.messages)).ok);
+
+    // Make the watched graph differ from Bob's cached snapshot. writeDocument
+    // schedules its normal timer refresh, but the manual refresh below starts
+    // in this turn before that timer can run.
+    await server.writeDocument(space, watchedId, { changed: true });
+
+    // refreshDirty yields while re-evaluating the watch. The revoke then drops
+    // Bob's session before the refresh result is ready to send.
+    const refresh = bob.connection.refreshDirty(space);
+    const revoke = server.transact({
+      type: "transact",
+      requestId: nextRequestId("refresh-race-revoke"),
+      space,
+      sessionId: aliceSession.ok.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: { value: { [ALICE]: "OWNER" } },
+        }],
+      },
+    });
+    assertExists((await revoke).ok);
+    await refresh;
+
+    assertEquals(bob.messages, [{
+      type: "session/revoked",
+      space,
+      sessionId: bobSession.ok.sessionId,
+      reason: "unauthorized",
+    }]);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("acl enforce: owner removing their own access still gets the commit response", async () => {
   // The writing session must receive its transact response before any
   // revocation — otherwise the client treats session/revoked as terminal and
@@ -456,6 +967,7 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
   const space = "did:key:z6Mk-acl-space-self";
   const alice = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
 
@@ -496,12 +1008,310 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
   }
 });
 
+Deno.test("acl enforce: legacy data without an ACL is authenticated public read/write", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "memory-acl-public-" });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-acl-legacy-public";
+  try {
+    const seedServer = createAclServer(store, { mode: "off" });
+    try {
+      const seed = await connect(seedServer);
+      const opened = await openSession(seed, space, ALICE);
+      assertExists(opened.ok);
+      const write = await transactSet(
+        seed,
+        space,
+        opened.ok.sessionId,
+        "of:doc:legacy",
+        { legacy: true },
+        1,
+      );
+      assertExists(write.ok);
+    } finally {
+      await seedServer.close();
+    }
+
+    const server = createAclServer(store, { mode: "enforce" });
+    try {
+      const bob = await connect(server);
+      const opened = await openSession(bob, space, BOB);
+      assertExists(opened.ok, "legacy ACL-less space should be public");
+
+      const read = await graphQuery(
+        bob,
+        space,
+        opened.ok.sessionId,
+        "of:doc:legacy",
+      );
+      assertExists(read.ok);
+      assertEquals(read.ok.entities[0]?.document?.value, { legacy: true });
+
+      const write = await transactSet(
+        bob,
+        space,
+        opened.ok.sessionId,
+        "of:doc:bob",
+        { public: true },
+        1,
+      );
+      assertExists(write.ok, "public compatibility includes WRITE");
+
+      const claim = await transactSet(
+        bob,
+        space,
+        opened.ok.sessionId,
+        `of:${space}`,
+        { [BOB]: "OWNER" },
+        2,
+      );
+      assertEquals(
+        claim.error?.name,
+        "AuthorizationError",
+        "public compatibility must never grant OWNER",
+      );
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("acl enforce: the space identity can privatize a legacy home space", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "memory-acl-home-" });
+  const store = toFileUrl(`${directory}/`);
+  const space = ALICE;
+  try {
+    const seedServer = createAclServer(store, { mode: "off" });
+    try {
+      const bob = await connect(seedServer);
+      const opened = await openSession(bob, space, BOB);
+      assertExists(opened.ok);
+      assertExists(
+        (await transactSet(
+          bob,
+          space,
+          opened.ok.sessionId,
+          "of:doc:legacy-home",
+          { legacy: true },
+          1,
+        )).ok,
+      );
+    } finally {
+      await seedServer.close();
+    }
+
+    const server = createAclServer(store, { mode: "enforce" });
+    try {
+      const legacyReader = await connect(server);
+      const legacySession = await openSession(legacyReader, space, BOB);
+      assertExists(legacySession.ok, "legacy home starts public");
+
+      const holder = await connect(server);
+      const opened = await openSession(holder, space, space);
+      assertExists(opened.ok);
+      const claim = await transactSet(
+        holder,
+        space,
+        opened.ok.sessionId,
+        `of:${space}`,
+        { [space]: "OWNER" },
+        1,
+      );
+      assertExists(claim.ok);
+
+      assertEquals(shiftMessage(legacyReader.messages), {
+        type: "session/revoked",
+        space,
+        sessionId: legacySession.ok.sessionId,
+        reason: "unauthorized",
+      });
+
+      const bob = await connect(server);
+      const denied = await openSession(bob, space, BOB);
+      assertEquals(denied.error?.name, "AuthorizationError");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("acl enforce: ACL mutations must preserve a concrete owner", async () => {
+  const server = createAclServer("memory://acl-validate-owner", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-validate-owner";
+  const alice = await connect(server);
+  try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    const opened = await openSession(alice, space, ALICE);
+    assertExists(opened.ok);
+
+    const invalidOperations: Record<string, unknown>[] = [
+      { op: "set", id: `of:${space}`, value: { value: {} } },
+      {
+        op: "set",
+        id: `of:${space}`,
+        value: { value: { "*": "OWNER" } },
+      },
+      {
+        op: "set",
+        id: `of:${space}`,
+        value: { value: { [ALICE]: "READ" } },
+      },
+      {
+        op: "set",
+        id: `of:${space}`,
+        value: { value: { [ALICE]: "ADMIN" } },
+      },
+      { op: "delete", id: `of:${space}` },
+      {
+        op: "patch",
+        id: `of:${space}`,
+        patches: [{ op: "remove", path: `/${ALICE}` }],
+      },
+      {
+        op: "set",
+        id: `of:${space}`,
+        scope: "user",
+        value: { value: { [ALICE]: "OWNER" } },
+      },
+    ];
+
+    let localSeq = 1;
+    for (const operation of invalidOperations) {
+      const response = await transactOperation(
+        alice,
+        space,
+        opened.ok.sessionId,
+        operation,
+        localSeq++,
+      );
+      assertEquals(response.error?.name, "ProtocolError");
+    }
+
+    const acl = await graphQuery(
+      alice,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+    );
+    assertEquals(acl.ok?.entities[0]?.document?.value, { [ALICE]: "OWNER" });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: direct writes cannot create or mutate ACL state", async () => {
+  const server = createAclServer("memory://acl-direct-write", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-direct-write";
+  try {
+    await assertRejects(
+      () => server.writeDocument(space, "of:doc:direct", { direct: true }),
+      Error,
+      "ACL",
+    );
+
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    await assertRejects(
+      () => server.writeDocument(space, `of:${space}`, { [BOB]: "OWNER" }),
+      Error,
+      "ACL",
+    );
+
+    // Blob authorization is explicitly postponed: the direct path may still
+    // update an ordinary document once the space has real ACL state.
+    await server.writeDocument(space, "of:doc:existing", { direct: true });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: malformed and ownerless stored ACLs fail closed", async () => {
+  for (
+    const [label, value] of [
+      ["malformed", { [ALICE]: "ADMIN" }],
+      ["ownerless", { [ALICE]: "WRITE" }],
+    ] as const
+  ) {
+    const directory = await Deno.makeTempDir({
+      prefix: `memory-acl-${label}-`,
+    });
+    const store = toFileUrl(`${directory}/`);
+    const space = `did:key:z6Mk-acl-${label}`;
+    try {
+      const seedServer = createAclServer(store, { mode: "off" });
+      try {
+        await seedServer.writeDocument(space, `of:${space}`, value);
+      } finally {
+        await seedServer.close();
+      }
+
+      for (const mode of ["observe", "enforce"] as const) {
+        const server = createAclServer(store, { mode });
+        try {
+          const alice = await connect(server);
+          const denied = await openSession(alice, space, ALICE);
+          assertEquals(denied.error?.name, "AuthorizationError");
+        } finally {
+          await server.close();
+        }
+      }
+    } finally {
+      await Deno.remove(directory, { recursive: true });
+    }
+  }
+});
+
+Deno.test("acl enforce: a retracted ACL fails closed instead of becoming public", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "memory-acl-deleted-" });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-acl-deleted";
+  try {
+    const seedServer = createAclServer(store, { mode: "off" });
+    try {
+      await seedServer.writeDocument(space, `of:${space}`, {
+        [ALICE]: "OWNER",
+      });
+      const alice = await connect(seedServer);
+      const opened = await openSession(alice, space, ALICE);
+      assertExists(opened.ok);
+      const deleted = await transactOperation(
+        alice,
+        space,
+        opened.ok.sessionId,
+        { op: "delete", id: `of:${space}` },
+        1,
+      );
+      assertExists(deleted.ok);
+    } finally {
+      await seedServer.close();
+    }
+
+    const server = createAclServer(store, { mode: "enforce" });
+    try {
+      const alice = await connect(server);
+      const denied = await openSession(alice, space, ALICE);
+      assertEquals(denied.error?.name, "AuthorizationError");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("acl observe: stranger is allowed but the would-deny is counted", async () => {
   const server = createAclServer("memory://acl-observe", { mode: "observe" });
   const space = "did:key:z6Mk-acl-space-8";
   const alice = await connect(server);
   const bob = await connect(server);
   try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
     const aliceSession = await openSession(alice, space, ALICE);
     assertExists(aliceSession.ok);
 
@@ -525,7 +1335,7 @@ Deno.test("acl observe: stranger is allowed but the would-deny is counted", asyn
   }
 });
 
-Deno.test("acl observe: creator seeding still happens (migration path)", async () => {
+Deno.test("acl observe: fresh-space genesis remains a hard invariant", async () => {
   const server = createAclServer("memory://acl-observe-seed", {
     mode: "observe",
   });
@@ -534,17 +1344,19 @@ Deno.test("acl observe: creator seeding still happens (migration path)", async (
   try {
     const opened = await openSession(alice, space, ALICE);
     assertExists(opened.ok);
-    const acl = await graphQuery(
+    const denied = await transactSet(
       alice,
       space,
       opened.ok.sessionId,
-      `of:${space}`,
+      "of:doc:alice",
+      { value: true },
+      1,
     );
-    const aclDoc = JSON.stringify(acl.ok ?? {});
-    assert(
-      aclDoc.includes(ALICE) && aclDoc.includes("OWNER"),
-      `observe mode should seed creator OWNER, got: ${aclDoc}`,
-    );
+    assertEquals(denied.error?.name, "AuthorizationError");
+
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    const reopened = await openSession(await connect(server), space, ALICE);
+    assertExists(reopened.ok);
   } finally {
     await server.close();
   }
