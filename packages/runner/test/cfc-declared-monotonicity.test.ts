@@ -1054,6 +1054,116 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       expect(entry?.label.integrity).toEqual([ATOM_X]);
     });
 
+    it("multiple stored declared entries at one path are joined before the integrity check", async () => {
+      // Stored duplicates at one path can arrive from peers/hydration. The
+      // stored declared CLAIM at the path is their join — keeping an atom
+      // that ANY same-path declared entry already claimed is a shrink, not
+      // an addition, so proposed [X] against stored entries [X] and [Y]
+      // must pass (codex/cubic review on this PR: the per-entry comparison
+      // reported X as added while iterating the [Y] entry).
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      const seeder = makeRuntime({
+        storageManager,
+        cfcEnforcementMode: "disabled",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-multi-entry",
+          SCHEMA_MINT_X,
+          { out: "v1" },
+        );
+        expect(first.error).toBeUndefined();
+        await rewriteStoredEntries(seeder, first.docId, (entries) => [
+          ...entries,
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_A], integrity: [ATOM_Y] },
+          },
+        ]);
+        const second = await commitWrite(
+          runtime,
+          "dm-multi-entry",
+          SCHEMA_MINT_X,
+          { out: "v2" },
+        );
+        expect(second.error).toBeUndefined();
+        const entry = declaredEntryAt(
+          persistedEntriesFor(storageManager, second.docId),
+          ["out"],
+        );
+        expect(entry?.label.integrity).toEqual([ATOM_X]);
+      } finally {
+        await runtime.dispose();
+        await seeder.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("an atom outside the joined same-path claim still rejects", async () => {
+      // The dual guard on the join fix: aggregating stored entries must not
+      // hollow the check out — an atom no same-path declared entry claimed
+      // is still an addition.
+      const schemaMintXZ = {
+        type: "object",
+        properties: {
+          out: {
+            type: "string",
+            ifc: {
+              confidentiality: [CLAUSE_A],
+              addIntegrity: [ATOM_X, "integrity-z"],
+            },
+          },
+        },
+        required: ["out"],
+      } as const satisfies JSONSchema;
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      const seeder = makeRuntime({
+        storageManager,
+        cfcEnforcementMode: "disabled",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-multi-entry-z",
+          SCHEMA_MINT_X,
+          { out: "v1" },
+        );
+        expect(first.error).toBeUndefined();
+        await rewriteStoredEntries(seeder, first.docId, (entries) => [
+          ...entries,
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_A], integrity: [ATOM_Y] },
+          },
+        ]);
+        const second = await commitWrite(
+          runtime,
+          "dm-multi-entry-z",
+          schemaMintXZ,
+          { out: "v2" },
+        );
+        const message = String((second.error as Error | undefined)?.message);
+        expect(message).toContain("declared-monotonicity integrity");
+        expect(message).toContain(JSON.stringify("integrity-z"));
+        expect(message).not.toContain(`atom ${JSON.stringify(ATOM_X)} added`);
+      } finally {
+        await runtime.dispose();
+        await seeder.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("an identical re-mint passes (equality is monotone)", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({

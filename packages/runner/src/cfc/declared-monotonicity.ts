@@ -97,11 +97,35 @@ export const collectDeclaredMonotonicityViolations = (input: {
       input.exemption.id === input.docId
     ? input.exemption
     : undefined;
+  // Both sides are compared as the per-path JOIN of same-path declared
+  // entries, not entry-by-entry (codex/cubic review on this PR). The walk
+  // mints at most one declared entry per path (divergent-branch ifc is
+  // rejected at merge time), but STORED metadata is data — peers/hydration
+  // can present duplicates — and reads join same-component entries at one
+  // path. Joining means: the stored clause set is the union across the
+  // group (all clauses apply — a stored clause survives if ANY proposed
+  // entry witnesses it), and the stored integrity CLAIM is the union of
+  // atoms any same-path declared entry already claimed — keeping such an
+  // atom is a shrink of the claim, not an addition, so proposed [X] against
+  // stored entries [X] and [Y] is monotone.
+  const storedByPath = new Map<
+    string,
+    { path: readonly string[]; entries: LabelMapEntry[] }
+  >();
   for (const stored of input.storedEntries) {
     if (stored.origin !== "declared") {
       continue;
     }
     const storedPath = canonicalizeLogicalPath(stored.path);
+    const key = JSON.stringify(storedPath);
+    const group = storedByPath.get(key);
+    if (group === undefined) {
+      storedByPath.set(key, { path: storedPath, entries: [stored] });
+    } else {
+      group.entries.push(stored);
+    }
+  }
+  for (const { path: storedPath, entries: storedAt } of storedByPath.values()) {
     const proposedAt = proposedDeclared.filter((entry) =>
       samePath(entry.path, storedPath)
     );
@@ -109,45 +133,60 @@ export const collectDeclaredMonotonicityViolations = (input: {
       continue;
     }
     const at = `for ${input.docId} at /${storedPath.join("/")}`;
-    // The walk mints at most one declared entry per path (divergent-branch
-    // ifc is rejected at merge time), but reads join same-component entries
-    // at one path, so quantify over all of them defensively: a stored
-    // clause survives if ANY proposed entry witnesses it; a proposed atom
-    // is an addition only if NO stored atom equals it.
     const proposedClauses = proposedAt.flatMap((entry) =>
       entry.label.confidentiality ?? []
     );
-    for (const storedClause of stored.label.confidentiality ?? []) {
-      const witnessed = proposedClauses.some((proposedClause) =>
-        clauseSubsumes(proposedClause, storedClause)
-      );
-      if (witnessed) {
-        continue;
+    // Duplicate stored clauses across group entries would repeat the same
+    // reason; report each canonical clause once.
+    const reportedClauses = new Set<string>();
+    for (const stored of storedAt) {
+      for (const storedClause of stored.label.confidentiality ?? []) {
+        const witnessed = proposedClauses.some((proposedClause) =>
+          clauseSubsumes(proposedClause, storedClause)
+        );
+        if (witnessed) {
+          continue;
+        }
+        const storedDigest = cfcCanonicalClauseDigest(storedClause);
+        if (
+          exemption !== undefined &&
+          samePath(exemption.path, storedPath) &&
+          exemption.clauseDigest === storedDigest
+        ) {
+          // The sanctioned §8.12.7 route 2b exemption: exactly this stored
+          // clause, at exactly this path of exactly this doc, may be dropped
+          // or widened in this transaction.
+          continue;
+        }
+        if (reportedClauses.has(storedDigest)) {
+          continue;
+        }
+        reportedClauses.add(storedDigest);
+        violations.push(
+          `declared-monotonicity confidentiality violation ${at} ` +
+            `(canUpdateStoreLabel, §8.12.1): stored clause ` +
+            `${JSON.stringify(normalizeClause(storedClause))} dropped or ` +
+            `weakened ` +
+            `(clauses may be added and alternatives removed, never the reverse)`,
+        );
       }
-      const storedCanonical = normalizeClause(storedClause);
-      if (
-        exemption !== undefined &&
-        samePath(exemption.path, storedPath) &&
-        exemption.clauseDigest === cfcCanonicalClauseDigest(storedClause)
-      ) {
-        // The sanctioned §8.12.7 route 2b exemption: exactly this stored
-        // clause, at exactly this path of exactly this doc, may be dropped
-        // or widened in this transaction.
-        continue;
-      }
-      violations.push(
-        `declared-monotonicity confidentiality violation ${at} ` +
-          `(canUpdateStoreLabel, §8.12.1): stored clause ` +
-          `${JSON.stringify(storedCanonical)} dropped or weakened ` +
-          `(clauses may be added and alternatives removed, never the reverse)`,
-      );
     }
-    const storedIntegrity = stored.label.integrity ?? [];
+    const storedIntegrity = storedAt.flatMap((stored) =>
+      stored.label.integrity ?? []
+    );
+    // A proposed atom repeated across proposed entries would repeat the
+    // reason; report each atom once.
+    const reportedAtoms = new Set<string>();
     for (const proposedEntry of proposedAt) {
       for (const atom of proposedEntry.label.integrity ?? []) {
         if (storedIntegrity.some((storedAtom) => deepEqual(storedAtom, atom))) {
           continue;
         }
+        const atomKey = hashStringOf(atom);
+        if (reportedAtoms.has(atomKey)) {
+          continue;
+        }
+        reportedAtoms.add(atomKey);
         violations.push(
           `declared-monotonicity integrity violation ${at} ` +
             `(canUpdateStoreLabel, §8.12.1): integrity atom ` +
