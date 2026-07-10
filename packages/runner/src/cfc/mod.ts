@@ -42,6 +42,7 @@ export type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
@@ -72,6 +73,19 @@ export {
   cfcCanonicalClauseDigest,
   collectDeclaredMonotonicityViolations,
 } from "./declared-monotonicity.ts";
+export {
+  CONF_LABEL_NOT_AVAILABLE,
+  evaluateConfLabelQuery,
+  parseConfLabelTargetPath,
+} from "./label-introspection.ts";
+export type {
+  ConfLabelQuery,
+  ConfLabelQueryEvaluation,
+  InspectConfLabelResult,
+  LabelAtomProjection,
+} from "./label-introspection.ts";
+export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
+export type { LabelMetadataObservationClass } from "./observation-classes.ts";
 export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
