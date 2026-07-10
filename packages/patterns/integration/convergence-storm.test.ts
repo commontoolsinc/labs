@@ -18,7 +18,7 @@
  * cells over the list, the void read is recorded at seq 0 into their commits,
  * which then conflict forever once the docs land — the wedge / retry-storm /
  * starvation tower measured in the browser investigation
- * (docs/plans/2026-06-30-profile-loading-investigation.md).
+ * (docs/history/plans/2026-07-02-convergence-evidence-appendix.md).
  *
  * A third, INDEPENDENT defect — B3, the writer-side integration gap (a writer
  * that interleaves its own append never integrates a peer's concurrent append;
@@ -35,8 +35,7 @@
  *    blackout/wedge before the fix).
  *
  * Full context + measurements:
- * docs/plans/2026-06-30-profile-loading-investigation.md and
- * docs/plans/2026-07-02-convergence-evidence-appendix.md.
+ * docs/history/plans/2026-07-02-convergence-evidence-appendix.md.
  */
 
 import { assertEquals } from "@std/assert";

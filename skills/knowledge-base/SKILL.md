@@ -51,6 +51,14 @@ Code is always right about what it does.
 Good for learning, but may contain outdated or speculative information. Validate
 against code when precision matters.
 
+### Not evidence: `docs/history/`
+
+`docs/history/` holds frozen point-in-time records (audits, executed plans,
+superseded designs — see `docs/history/README.md`). They describe the system as
+it was on their `created` date, not as it is. Use them for background and
+provenance only, never as authority about current behavior, and never update
+them.
+
 ## The Rule
 
 **Concrete beats abstract. Specifications beat speculation. Code beats comments.

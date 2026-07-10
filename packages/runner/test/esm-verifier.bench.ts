@@ -209,12 +209,69 @@ console.error(
 );
 
 // ---------------------------------------------------------------------------
+// Bench naming: performance tracking keys each benchmark's timeline by the
+// origin file, group, and verbatim name, so groups and names must stay
+// stable across commits — no content hashes, byte counts, or module counts.
+// Volatile sizes go to stderr.
+// ---------------------------------------------------------------------------
+
+/** Basenames too vague to identify a module on their own. */
+const GENERIC_BASENAMES = new Set([
+  "mod.ts",
+  "mod.tsx",
+  "index.ts",
+  "index.tsx",
+]);
+
+/** Strips the whole-program `/<id>` prefix from a resolved module path. */
+function stripProgramPrefix(path: string, programId: string): string {
+  return path.startsWith(`/${programId}/`)
+    ? path.slice(programId.length + 2)
+    : path;
+}
+
+/**
+ * Short label for a module's source path: the basename, with the parent
+ * directory prepended when the basename is generic.
+ */
+function moduleLabel(path: string, programId: string): string {
+  const segments = stripProgramPrefix(path, programId).split("/");
+  const basename = segments[segments.length - 1];
+  return GENERIC_BASENAMES.has(basename) && segments.length > 1
+    ? segments.slice(-2).join("/")
+    : basename;
+}
+
+const parkingLabelBySpecifier = new Map<string, string>();
+{
+  const usedLabels = new Set<string>();
+  for (const [path, specifier] of parkingGraph.graph.specifierByPath) {
+    let label = moduleLabel(path, parkingGraph.id);
+    // On a label collision, use the prefix-stripped path so names stay
+    // unique and free of the whole-program hash.
+    if (usedLabels.has(label)) {
+      label = stripProgramPrefix(path, parkingGraph.id);
+    }
+    usedLabels.add(label);
+    parkingLabelBySpecifier.set(specifier, label);
+  }
+}
+
+function labelFor(specifier: string): string {
+  const label = parkingLabelBySpecifier.get(specifier);
+  if (label === undefined) {
+    throw new Error(`no label for module specifier ${specifier}`);
+  }
+  return label;
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks: small program
 // ---------------------------------------------------------------------------
 
 Deno.bench(
-  `ESM body verify (all bodies summed): small [${smallBodies.length} modules]`,
-  { group: "esm-verifier-small", baseline: true },
+  "body verify: small",
+  { group: "small", baseline: true },
   () => {
     for (const [specifier, body] of smallBodies) {
       verifyCompiledModuleBody(body, specifier);
@@ -223,8 +280,8 @@ Deno.bench(
 );
 
 Deno.bench(
-  `ESM graph verify: small [${smallRecords.size} records]`,
-  { group: "esm-verifier-small" },
+  "graph verify: small",
+  { group: "small" },
   () => {
     verifyModuleGraph(smallRecords, smallMainSpec);
   },
@@ -235,8 +292,8 @@ Deno.bench(
 // ---------------------------------------------------------------------------
 
 Deno.bench(
-  `ESM body verify (all bodies summed): parking-coordinator [${parkingBodies.length} modules]`,
-  { group: "esm-verifier-parking", baseline: true },
+  "body verify: parking",
+  { group: "parking", baseline: true },
   () => {
     for (const [specifier, body] of parkingBodies) {
       verifyCompiledModuleBody(body, specifier);
@@ -245,8 +302,8 @@ Deno.bench(
 );
 
 Deno.bench(
-  `ESM graph verify: parking-coordinator [${parkingRecords.size} records]`,
-  { group: "esm-verifier-parking" },
+  "graph verify: parking",
+  { group: "parking" },
   () => {
     verifyModuleGraph(parkingRecords, parkingMainSpec);
   },
@@ -258,12 +315,19 @@ Deno.bench(
 // pattern, the per-module numbers help pinpoint which module dominates).
 // ---------------------------------------------------------------------------
 
+console.error(
+  "parking-coordinator modules: " +
+    parkingBodies
+      .map(([specifier, body]) =>
+        `${labelFor(specifier)} (${body.length} bytes)`
+      )
+      .join(", "),
+);
+
 for (const [specifier, body] of parkingBodies) {
-  // Trim specifier to a readable label (last 12 hex chars of the hash)
-  const label = specifier.replace("cf:module/", "").slice(-12);
   Deno.bench(
-    `ESM body verify: module …${label} [${body.length} bytes]`,
-    { group: "esm-verifier-per-module" },
+    `body: ${labelFor(specifier)}`,
+    { group: "per-module" },
     () => {
       verifyCompiledModuleBody(body, specifier);
     },
@@ -284,17 +348,21 @@ const [dominantSpec, dominantBody] = parkingBodies.reduce((max, cur) =>
   cur[1].length > max[1].length ? cur : max
 );
 
+console.error(
+  `dominant module: ${labelFor(dominantSpec)} (${dominantBody.length} bytes)`,
+);
+
 Deno.bench(
-  `ESM body verify (current, two-pass): dominant module [${dominantBody.length} bytes]`,
-  { group: "esm-verifier-regression-delta", baseline: true },
+  "two-pass: dominant",
+  { group: "shadow-delta", baseline: true },
   () => {
     verifyCompiledModuleBody(dominantBody, dominantSpec);
   },
 );
 
 Deno.bench(
-  `ESM body verify (legacy single-pass, pre-shadow-detection): dominant module [${dominantBody.length} bytes]`,
-  { group: "esm-verifier-regression-delta" },
+  "single-pass: dominant",
+  { group: "shadow-delta" },
   () => {
     verifyCompiledModuleBodyLegacy(dominantBody, dominantSpec);
   },
@@ -302,8 +370,8 @@ Deno.bench(
 
 // Also run the regression delta over all parking bodies summed
 Deno.bench(
-  `ESM body verify (current, two-pass): parking all bodies [${parkingBodies.length} modules]`,
-  { group: "esm-verifier-regression-all", baseline: true },
+  "two-pass: parking",
+  { group: "shadow-delta-all", baseline: true },
   () => {
     for (const [specifier, body] of parkingBodies) {
       verifyCompiledModuleBody(body, specifier);
@@ -312,8 +380,8 @@ Deno.bench(
 );
 
 Deno.bench(
-  `ESM body verify (legacy single-pass): parking all bodies [${parkingBodies.length} modules]`,
-  { group: "esm-verifier-regression-all" },
+  "single-pass: parking",
+  { group: "shadow-delta-all" },
   () => {
     for (const [specifier, body] of parkingBodies) {
       verifyCompiledModuleBodyLegacy(body, specifier);

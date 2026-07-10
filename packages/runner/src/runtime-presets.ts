@@ -53,7 +53,11 @@
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
+ * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
+ * |                            | rollout: observe first, then enforce)            |
  * | cfcPolicyRecords           | core-default (none declared) — same              |
+ * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
+ * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
@@ -127,7 +131,9 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcWriteFloor",
   "cfcTriggerReadGating",
   "cfcPolicyEvaluation",
+  "cfcLabelMetadataProtection",
   "cfcPolicyRecords",
+  "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
   "cfcSinkMaxConfidentiality",
   "trustSnapshotProvider",
@@ -162,6 +168,10 @@ export type EnvReader = (name: string) => string | undefined;
  * `flagValue()` read anything but "false" as true, the CLI read anything but
  * "true" as false — so `EXPERIMENTAL_MODERN_CELL_REP=1` enabled the flag on
  * toolshed and disabled it under `cf test`.)
+ *
+ * Every experimental flag is catalogued in
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`; update that registry when adding
+ * or removing an entry here.
  */
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
@@ -239,9 +249,10 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // lives once. Same value as the constructor default today.
     cfcEnforcementMode: "enforce-explicit",
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
-    // cfcPolicyEvaluation / cfcPolicyRecords / cfcTrustConfig /
-    // cfcSinkMaxConfidentiality ride the constructor defaults (off / none) —
-    // deliberately absent here until a first-party rollout begins.
+    // cfcPolicyEvaluation / cfcLabelMetadataProtection / cfcPolicyRecords /
+    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
+    // defaults (off / none) — deliberately absent here until a first-party
+    // rollout begins.
   };
 }
 

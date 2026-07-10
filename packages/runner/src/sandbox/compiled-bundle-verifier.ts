@@ -57,7 +57,7 @@ export interface BindingInfo {
  * per-module ESM record body. AMD passes the canonical wrapper shadow guards
  * and reserved bindings; the ESM path passes empty sets (no `define`/
  * `runtimeDeps`/`__cfAmdHooks` in scope to shadow). See
- * docs/specs/module-loading-verifier-and-engine-design.md.
+ * docs/history/specs/module-loading-verifier-and-engine-design.md.
  */
 export interface ModuleItemClassificationOptions {
   /** Canonical shadow-guard statements that MUST be present (AMD) or none (ESM). */

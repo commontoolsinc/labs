@@ -9,19 +9,30 @@
 // The output is a PNG whose width scales with run length and whose height scales
 // with the number of jobs.
 //
+// Each median bar is split into "setup", "work" and "shutdown" segments so the
+// shared scaffolding around a job (checkout, tool install, cache restore,
+// coverage upload) is visually separated from the job's own work. For matrix
+// shards this shows how much of a shard's wall time is setup duplicated across
+// every shard versus the unique work that shard does. A step is placed into a
+// phase by the marker emoji its name starts with; the segment widths are the
+// median time spent in each phase, scaled to fill the median bar. The marker
+// vocabulary lives in docs/development/CI_PERFORMANCE.md ("Step phase markers")
+// and is mirrored in PHASE_MARKERS below.
+//
 // Usage:
 //   scripts/ci-gantt.ts [options]
 //     --repo OWNER/REPO     default commontoolsinc/labs
 //     --workflow FILE       default deno.yml
 //     --limit N             runs to fetch, default 100
-//     --out PATH            output PNG, default ci-gantt.png
+//     --out PATH            output file, default ci-gantt.png; a .svg path
+//                           writes the raw SVG instead of a rasterized PNG
 //     --scale N             raster scale factor, default 2
 //     --concurrency N       parallel job fetches, default 8
 //     --min-runs N          drop jobs seen in fewer than N runs (default: 10% of runs)
 //     --main-only           only fetch pushes to main, skipping pre-land PR runs
 //     --run-id ID           chart this workflow run ID, repeatable
 //     --theme NAME          color palette: "default" (light) or "dark"
-//     --colors JSON         override palette keys, e.g. '{"bar":"#6ea8fe"}'
+//     --colors JSON         override palette keys, e.g. '{"work":"#6ea8fe"}'
 
 const args = Deno.args;
 function opt(name: string, def: string): string {
@@ -176,12 +187,21 @@ interface Run {
   workflowName?: string;
 }
 
+interface Step {
+  name: string;
+  number: number;
+  conclusion: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 interface Job {
   name: string;
   status: string;
   conclusion: string | null;
   started_at: string | null;
   completed_at: string | null;
+  steps?: Step[];
 }
 
 function hasTiming(job: Job): boolean {
@@ -189,6 +209,86 @@ function hasTiming(job: Job): boolean {
   const st = Date.parse(job.started_at);
   const en = Date.parse(job.completed_at);
   return Number.isFinite(st) && Number.isFinite(en) && en > st;
+}
+
+// ---------------------------------------------------------------------------
+// Step phases
+//
+// Every step is placed into a phase from the marker emoji its name begins with.
+// The emoji is load-bearing: workflow and composite-action authors pick one from
+// the vocabulary below, and the chart splits each job bar into these phases
+// without having to recognise step wording. The authoritative table is
+// docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them in sync.
+// A step whose name carries no known marker lands in "other" and is reported to
+// stderr so a missing marker is easy to spot. In a normal run the only unmarked
+// steps are the ones GitHub injects ("Set up job", "Post …", "Complete job"),
+// which are classified below by name because their wording is not ours to set.
+// ---------------------------------------------------------------------------
+
+type Phase = "setup" | "work" | "shutdown" | "other";
+
+// Chart order, left to right (matches the order steps run in). "other" trails so
+// an unmarked step stands out at the end of the bar.
+const PHASE_ORDER: Phase[] = ["setup", "work", "shutdown", "other"];
+
+// Marker emoji -> phase. Each emoji maps to exactly one phase; when a step's
+// natural emoji would land it in the wrong phase, the step name is changed to a
+// marker that fits (see docs/development/CI_PERFORMANCE.md). Matching ignores a
+// trailing variation selector, so the base emoji covers both the plain and the
+// selector-suffixed form of a glyph.
+const PHASE_MARKERS: [string, Phase][] = [
+  // setup: fetch code, install tools and dependencies, restore caches,
+  // authenticate, and bring test servers and devices up before the real work.
+  ["📥", "setup"], // checkout / download inputs
+  ["🦕", "setup"], // set up Deno
+  ["🔍", "setup"], // verify lock file & install, resolve refs
+  ["📦", "setup"], // install packages, cache dependencies
+  ["♻️", "setup"], // restore/save build caches
+  ["🛡️", "setup"], // relax sandbox for browser tests
+  ["🔧", "setup"], // enable devices
+  ["⚙️", "setup"], // set up external SDKs
+  ["🔑", "setup"], // authenticate to a cloud
+  ["🔌", "setup"], // start a local server for tests
+  ["⏳", "setup"], // wait for a service to be ready
+  ["💾", "setup"], // restore/save caches
+  ["🧮", "setup"], // compute a cache identity
+  // work: the job's actual purpose.
+  ["🔎", "work"], // checks (format, type, patterns, attestations)
+  ["🚧", "work"], // guard that fails the build on a banned pattern
+  ["🧪", "work"], // run tests
+  ["🧩", "work"], // run integration tests
+  ["🧹", "work"], // lint
+  ["🧭", "work"], // check skill facts
+  ["📄", "work"], // type-check docs
+  ["🏗️", "work"], // build binaries/assets
+  ["🏋️", "work"], // run benchmarks
+  ["📊", "work"], // produce performance metrics / status reports
+  ["🧬", "work"], // combine coverage
+  ["📝", "work"], // generate attestations
+  ["🔐", "work"], // sign binaries
+  ["🚀", "work"], // deploy
+  ["💬", "work"], // post a PR comment
+  // shutdown: post-work reports, artifact uploads, log capture, teardown.
+  ["🧾", "shutdown"], // write coverage report
+  ["📤", "shutdown"], // upload artifacts
+  ["📋", "shutdown"], // capture logs on failure
+];
+
+const stripVS = (s: string) => s.replace(/\uFE0F/g, "");
+
+function phaseOf(stepName: string): Phase {
+  const name = stepName.trim();
+  // A leading marker wins, so a step named "💬 Post …" is classified by its
+  // marker rather than the "Post " rule below.
+  const norm = stripVS(name);
+  for (const [emoji, phase] of PHASE_MARKERS) {
+    if (norm.startsWith(stripVS(emoji))) return phase;
+  }
+  // Steps GitHub injects carry no marker; their wording is not ours to set.
+  if (name.startsWith("Post ")) return "shutdown";
+  if (name === "Set up job") return "setup";
+  if (name === "Complete job") return "shutdown";
+  return "other";
 }
 
 const JOBS_PER_PAGE = 100;
@@ -232,6 +332,7 @@ interface JobAgg {
   dur: Stat; // seconds
   count: number;
   mainOnly: boolean; // never observed on a pull_request
+  phase: Record<Phase, number>; // median seconds spent in each phase
 }
 
 function shardKeyOf(name: string): string {
@@ -307,8 +408,17 @@ const jobsPerRun = await pool(completed, CONCURRENCY, async (run, i) => {
 // Accumulate timings keyed by exact job name (each shard is its own key).
 const acc = new Map<
   string,
-  { start: number[]; end: number[]; dur: number[]; events: Set<string> }
+  {
+    start: number[];
+    end: number[];
+    dur: number[];
+    events: Set<string>;
+    phase: Record<Phase, number[]>; // per-run seconds in each phase
+  }
 >();
+// Step names that carried no known marker, surfaced at the end so a missing
+// marker can be fixed.
+const unmarkedSteps = new Set<string>();
 
 for (const { run, jobs } of jobsPerRun) {
   const startCandidates = [
@@ -335,12 +445,42 @@ for (const { run, jobs } of jobsPerRun) {
     if (startOff < -5) continue;
     let e = acc.get(j.name);
     if (!e) {
-      acc.set(j.name, e = { start: [], end: [], dur: [], events: new Set() });
+      acc.set(
+        j.name,
+        e = {
+          start: [],
+          end: [],
+          dur: [],
+          events: new Set(),
+          phase: { setup: [], work: [], shutdown: [], other: [] },
+        },
+      );
     }
     e.start.push(startOff);
     e.end.push(endOff);
     e.dur.push(dur);
     e.events.add(run.event);
+    // Sum this run's step durations by phase, keyed off each step's marker.
+    const perPhase: Record<Phase, number> = {
+      setup: 0,
+      work: 0,
+      shutdown: 0,
+      other: 0,
+    };
+    for (const step of j.steps ?? []) {
+      if (!step.started_at || !step.completed_at) continue;
+      const ss = Date.parse(step.started_at);
+      const se = Date.parse(step.completed_at);
+      if (!(se > ss)) continue;
+      const p = phaseOf(step.name);
+      perPhase[p] += (se - ss) / 1000;
+      if (p === "other") unmarkedSteps.add(step.name);
+    }
+    // Only record a phase row when this run had step timing, so a run whose job
+    // came back without steps doesn't drag the medians toward zero.
+    if (PHASE_ORDER.some((p) => perPhase[p] > 0)) {
+      for (const p of PHASE_ORDER) e.phase[p].push(perPhase[p]);
+    }
   }
 }
 
@@ -350,6 +490,13 @@ const minRuns = MIN_RUNS_OVERRIDE ??
 const aggregates: JobAgg[] = [];
 for (const [name, e] of acc) {
   if (e.start.length < minRuns) continue;
+  const phase = { setup: 0, work: 0, shutdown: 0, other: 0 } as Record<
+    Phase,
+    number
+  >;
+  for (const p of PHASE_ORDER) {
+    phase[p] = e.phase[p].length ? stat(e.phase[p]).med : 0;
+  }
   aggregates.push({
     name,
     base: name.replace(/\s*\([^)]*\)\s*$/, ""),
@@ -363,7 +510,15 @@ for (const [name, e] of acc) {
     mainOnly: RUN_IDS.length || MAIN_ONLY
       ? false
       : !e.events.has("pull_request"),
+    phase,
   });
+}
+if (unmarkedSteps.size) {
+  console.error(
+    `${unmarkedSteps.size} step name(s) had no phase marker and were counted ` +
+      `as "other" (see docs/development/CI_PERFORMANCE.md "Step phase markers"):`,
+  );
+  for (const n of unmarkedSteps) console.error(`  - ${n}`);
 }
 if (aggregates.length === 0) {
   console.error("No jobs met the minimum run threshold; nothing to draw.");
@@ -441,9 +596,17 @@ interface Palette {
   sub: string;
   grid: string;
   axis: string;
-  bar: string;
-  main: string;
+  main: string; // main-branch-only bars
   whisker: string;
+  envelope: string; // neutral fill for the min-start..max-end range
+  // Phase segment colors. Work is the deep, saturated blue so the job's own work
+  // reads as the focus; the shared scaffolding around it — setup and shutdown
+  // — share one subtle teal so they recede together, leaving the work standing
+  // out between them. "other" marks a step whose name carried no phase marker.
+  setup: string;
+  work: string;
+  shutdown: string;
+  other: string;
 }
 const THEMES: Record<string, Palette> = {
   default: {
@@ -452,9 +615,13 @@ const THEMES: Record<string, Palette> = {
     sub: "#57606a",
     grid: "#e7e7e7",
     axis: "#8a8a8a",
-    bar: "#3f7fb8",
     main: "#8a897f",
     whisker: "#2a2a2a",
+    envelope: "#aab2bd",
+    setup: "#6ba7bd",
+    work: "#2f6fa8",
+    shutdown: "#6ba7bd",
+    other: "#c2c8cf",
   },
   dark: {
     bg: "#0d0e11",
@@ -462,18 +629,26 @@ const THEMES: Record<string, Palette> = {
     sub: "#9aa0ab",
     grid: "#23262d",
     axis: "#6a7079",
-    bar: "#5f9ae6",
     main: "#7c828c",
     whisker: "#8a93a5",
+    envelope: "#454b54",
+    setup: "#345f92",
+    work: "#5f9ae6",
+    shutdown: "#345f92",
+    other: "#5a616b",
   },
 };
 // --theme picks a base palette; --colors '<json>' then overrides individual keys.
 const C: Palette = { ...(THEMES[opt("theme", "default")] ?? THEMES.default) };
 const colorsArg = opt("colors", "");
 if (colorsArg) {
-  // Accept only hex/rgb values for known palette keys, so an override can't
-  // inject markup into the SVG or set a nonsense fill.
-  const COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$|^rgba?\([\d.,\s%]+\)$/;
+  // Accept only well-formed hex, rgb() and rgba() values for known palette keys,
+  // so an override can't inject markup into the SVG or set a nonsense fill. The
+  // rgb/rgba branches require three numeric components (plus an alpha for rgba)
+  // so a malformed body like "rgb(,,,)" is rejected and reported, not written
+  // into a fill as a color the renderer silently falls back from.
+  const COLOR_RE =
+    /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$|^rgb\(\s*\d{1,3}%?(?:\s*,\s*\d{1,3}%?){2}\s*\)$|^rgba\(\s*\d{1,3}%?(?:\s*,\s*\d{1,3}%?){2}\s*,\s*\d*\.?\d+%?\s*\)$/;
   try {
     const overrides = JSON.parse(colorsArg) as Record<string, unknown>;
     for (const k of Object.keys(C) as (keyof Palette)[]) {
@@ -510,26 +685,47 @@ function drawSection(title: string, jobs: JobAgg[]) {
   for (const j of jobs) {
     const top = y;
     const cy = top + BAR_H / 2;
-    const fill = j.mainOnly ? C.main : C.bar;
     const xs = x(j.start.min), xe = x(j.end.max);
 
     // envelope: full min-start to max-end extent
     body.push(
       `<rect x="${xs.toFixed(1)}" y="${top}" width="${
         Math.max(1, xe - xs).toFixed(1)
-      }" height="${BAR_H}" rx="2" fill="${fill}" fill-opacity="0.18"/>`,
+      }" height="${BAR_H}" rx="2" fill="${C.envelope}" fill-opacity="0.25"/>`,
     );
-    // median bar
+    // median bar, split into phase segments. Segment widths are the median time
+    // in each phase, scaled so they fill the median start-to-finish span.
     const mb = x(j.start.med), me = x(j.end.med);
-    body.push(
-      `<rect x="${mb.toFixed(1)}" y="${top}" width="${
-        Math.max(2, me - mb).toFixed(1)
-      }" height="${BAR_H}" rx="2" fill="${fill}"/>`,
-    );
+    const barW = Math.max(2, me - mb);
+    const segs = PHASE_ORDER
+      .map((p) => ({ p, sec: j.phase[p] }))
+      .filter((s) => s.sec > 0);
+    const phaseTotal = segs.reduce((sum, s) => sum + s.sec, 0);
+    if (phaseTotal > 0) {
+      let cum = 0;
+      let prevX = mb;
+      for (const s of segs) {
+        cum += s.sec;
+        const nextX = mb + (cum / phaseTotal) * barW;
+        body.push(
+          `<rect x="${prevX.toFixed(1)}" y="${top}" width="${
+            Math.max(0.5, nextX - prevX).toFixed(1)
+          }" height="${BAR_H}" fill="${C[s.p]}"/>`,
+        );
+        prevX = nextX;
+      }
+    } else {
+      // No step timing for this job: fall back to a plain work-colored bar.
+      body.push(
+        `<rect x="${mb.toFixed(1)}" y="${top}" width="${
+          barW.toFixed(1)
+        }" height="${BAR_H}" rx="2" fill="${C.work}"/>`,
+      );
+    }
     if (j.mainOnly) {
       body.push(
-        `<rect x="${xs.toFixed(1)}" y="${top}" width="${
-          Math.max(1, xe - xs).toFixed(1)
+        `<rect x="${mb.toFixed(1)}" y="${top}" width="${
+          barW.toFixed(1)
         }" height="${BAR_H}" rx="2" fill="url(#hatch)"/>`,
       );
     }
@@ -640,7 +836,11 @@ function legendBox(color: string, hatch: boolean, label: string) {
   );
   lx += 30 + label.length * 6.2;
 }
-legendBox(C.bar, false, "median bar");
+legendBox(C.setup, false, "setup / shutdown");
+legendBox(C.work, false, "work");
+if (aggregates.some((j) => j.phase.other > 0)) {
+  legendBox(C.other, false, "other (unmarked)");
+}
 if (mainJobs.length) legendBox(C.main, true, "main branch only");
 {
   const cyl = legendY - 4, a = lx, b = lx + 22;
@@ -688,7 +888,8 @@ const titleCount = RUN_IDS.length
   }`;
 const title = `${REPO} · ${workflowLabel} — ${titleScope} (${titleCount})`;
 const subtitle =
-  `Bars = median start to finish; whiskers = min/max; text = median (min–max) duration; ` +
+  `Bars = median start to finish, split into setup/work/shutdown by step; ` +
+  `whiskers = min/max; text = median (min–max) duration; ` +
   `${
     SUCCESS_ONLY ? "successful jobs only" : "all conclusions"
   }; ${runKind} finishes ~${clock(prFinish)} · generated ${date}`;
@@ -710,21 +911,28 @@ const svg = [
 ].join("\n");
 
 // ---------------------------------------------------------------------------
-// Rasterize to PNG
+// Write output: the raw SVG when --out ends in .svg, otherwise a rasterized PNG.
 // ---------------------------------------------------------------------------
 
-const { Resvg } = await import("npm:@resvg/resvg-js@2.6.2");
-const resvg = new Resvg(svg, {
-  fitTo: { mode: "zoom", value: SCALE },
-  font: { loadSystemFonts: true, defaultFontFamily: "Helvetica" },
-  background: "white",
-});
-const png = resvg.render().asPng();
-await Deno.writeFile(OUT, png);
-console.error(
-  `Wrote ${OUT} (${totalW}×${totalH} @ ${SCALE}x = ${
-    Math.round(totalW * SCALE)
-  }×${
-    Math.round(totalH * SCALE)
-  } px, ${png.length} bytes, ${aggregates.length} jobs)`,
-);
+if (OUT.toLowerCase().endsWith(".svg")) {
+  await Deno.writeTextFile(OUT, svg);
+  console.error(
+    `Wrote ${OUT} (${totalW}×${totalH} SVG, ${aggregates.length} jobs)`,
+  );
+} else {
+  const { Resvg } = await import("npm:@resvg/resvg-js@2.6.2");
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: "zoom", value: SCALE },
+    font: { loadSystemFonts: true, defaultFontFamily: "Helvetica" },
+    background: "white",
+  });
+  const png = resvg.render().asPng();
+  await Deno.writeFile(OUT, png);
+  console.error(
+    `Wrote ${OUT} (${totalW}×${totalH} @ ${SCALE}x = ${
+      Math.round(totalW * SCALE)
+    }×${
+      Math.round(totalH * SCALE)
+    } px, ${png.length} bytes, ${aggregates.length} jobs)`,
+  );
+}

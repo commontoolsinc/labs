@@ -102,8 +102,8 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 
 - [Non-Idempotent Detection](non-idempotent-detection.md) - Detect non-settling computations, cycles, and non-idempotent actions
 - [Debugging Settle Waves](settle-wave-investigation.md) - Workflow for tracing worker fan-out: baselines, settle stats, trigger/action-run/write traces
+  - Dated findings from the March 2026 investigation are archived in [settle-wave-2026-03-findings](../../history/development/debugging/settle-wave-2026-03-findings.md)
 - [Browser Integration Test Diagnostics](integration-test-diagnostics.md) - Integration-test failures are self-diagnosing: fill phase ledger, host bound-cell probe, pending-IPC table, worker request ledger, console tail — read the failure output before instrumenting
-  - Dated findings from the March 2026 investigation are archived in [archive/settle-wave-2026-03-findings](archive/settle-wave-2026-03-findings.md)
 
 ### Workflows
 

@@ -5,6 +5,7 @@ import type {
   CfcAddress,
   CfcDereferenceTrace,
   CfcMetadata,
+  ConsultedGrant,
   ConsumedRead,
   OrderedWriteAttempt,
   PreparedDigestInput,
@@ -69,6 +70,15 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
   const leftPointer = logicalPathToPointer(left.path);
   const rightPointer = logicalPathToPointer(right.path);
   return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
+};
+
+const compareConsultedGrant = (
+  left: ConsultedGrant,
+  right: ConsultedGrant,
+): number => {
+  if (left.space !== right.space) return left.space < right.space ? -1 : 1;
+  if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  return left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0;
 };
 
 const compareWritePolicyInput = (
@@ -296,6 +306,16 @@ export const canonicalizePreparedDigestInput = (
   // snapshot (Epic B5). Absent (no policies configured) stays absent so
   // pre-B5 digests are unchanged.
   policySnapshot: input.policySnapshot,
+  // Consulted grants (§8.12.7 route 2a): address-sorted so recording order
+  // cannot perturb the digest (order-insensitive by design — which guard
+  // consulted a grant first is not decision content). An EMPTY set collapses
+  // to ABSENT: "no grants consulted" has one spelling, and pre-grant digests
+  // are unchanged.
+  ...(input.consultedGrants !== undefined && input.consultedGrants.length > 0
+    ? {
+      consultedGrants: [...input.consultedGrants].sort(compareConsultedGrant),
+    }
+    : {}),
 });
 
 export const preparedDigestFor = (input: PreparedDigestInput): string =>

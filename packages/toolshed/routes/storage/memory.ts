@@ -1,9 +1,8 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import * as FS from "@std/fs";
-import * as Path from "@std/path";
 import env from "@/env.ts";
-import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
+import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
 
 const memoryAudience = identity.did();
@@ -16,22 +15,15 @@ const authorizeSessionOpen = (
   context: Parameters<typeof verifySessionOpenAuthorization>[1],
 ): Promise<string> => verifySessionOpenAuthorization(message, context);
 
-// Determine store URL: DB_PATH (single-file mode) or MEMORY_DIR (directory mode)
-let storeUrl: URL;
-
+// The store URL is derived in memory-store-url.ts (DB_PATH single-file mode or
+// MEMORY_DIR directory mode). Log which mode is active for this server.
 if (env.DB_PATH) {
-  // Single file mode: use explicit database file (must be absolute path)
-  storeUrl = Path.toFileUrl(env.DB_PATH);
   console.log(`Memory: Using single database file: ${env.DB_PATH}`);
 } else {
-  // Directory mode: use MEMORY_DIR (existing behavior)
-  storeUrl = new URL(env.MEMORY_DIR);
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-export const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
-  singleFileMode: Boolean(env.DB_PATH),
-});
+export { memoryEngineStoreUrl };
 await FS.ensureDir(memoryEngineStoreUrl);
 
 export const memoryServer = new MemoryServer.Server({

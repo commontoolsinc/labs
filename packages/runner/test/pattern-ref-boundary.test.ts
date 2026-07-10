@@ -157,6 +157,9 @@ describe("resolveOpPattern", () => {
   });
 
   it("passes a plain stored graph through (no-entry-ref writer)", () => {
+    // The stored-keyless remnant path (see stored-pattern-rehydration.test.ts
+    // for the end-to-end contract; live keyless ops are minted identities at
+    // instantiation instead — CT-1812).
     const graph = { nodes: [], result: {} } as never;
     expect(resolveOpPattern({} as never, graph, "map")).toBe(graph);
   });

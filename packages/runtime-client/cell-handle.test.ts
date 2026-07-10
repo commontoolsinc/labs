@@ -100,7 +100,13 @@ describe("CellHandle CFC label IPC", () => {
     }]);
   });
 
-  it("serializes ref-carried label views into transient sigil links", () => {
+  // Inv-12 Stage 0: toJSON output is what JSON.stringify emits when a handle
+  // lands in CustomEvent.detail (drag/drop sourceCell) — a raw sigil link
+  // that re-enters the worker through the VDOM event path, bypassing
+  // getCell/cellRefToSigilLink. The ref's display view must not ride it
+  // (codex/cubic review on the Stage 0 PR); like toWireString, only
+  // addressing fields (+schema) serialize.
+  it("does not serialize the ref-carried label view into sigil links", () => {
     const runtime = {
       [$conn]: () => ({
         request: () => Promise.resolve({}),
@@ -129,13 +135,6 @@ describe("CellHandle CFC label IPC", () => {
           space: "did:key:test",
           scope: "space",
           path: ["value"],
-          cfcLabelView: {
-            version: 1,
-            entries: [{
-              path: [],
-              label: { integrity: ["selected-by-alice"] },
-            }],
-          },
         },
       },
     });

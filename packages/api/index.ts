@@ -358,7 +358,12 @@ export type MetaLinkField =
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
  * and also lets the argument and derived internal cells link back to the result cell.
- * The cfc code accesses the `cfc` field directly, but I include it here too.
+ *
+ * `cfc` is deliberately NOT a MetaField: the `["cfc"]` document field holds
+ * raw label metadata (Caveat.source and other principal identities), which
+ * must not ride the raw meta seam (inv-12 Stage 0 / SC-14 / SC-25). The cfc
+ * code reads the field directly through its own verifier seams; display
+ * consumers get the redacted view via getCfcLabel.
  */
 export type MetaField =
   | MetaLinkField
@@ -367,8 +372,7 @@ export type MetaField =
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "internal"
   | "schema"
-  | "slug"
-  | "cfc";
+  | "slug";
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;

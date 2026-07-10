@@ -5,7 +5,10 @@ import {
   type ExchangeRule,
   type PolicySnapshot,
 } from "./policy.ts";
-import { evaluateExchangeRules } from "./exchange-eval.ts";
+import {
+  type CfcGrantResolver,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import { clauseAlternatives } from "./clause.ts";
 import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
 import type { SpaceMembershipProvider } from "./space-membership.ts";
@@ -122,6 +125,15 @@ export type RenderConfidentialityResolverConfig = {
    * blocked.
    */
   readonly membershipProvider?: SpaceMembershipProvider;
+  /**
+   * Grant lookup for `policyState`-guarded render rules (§8.12.7 route 2a).
+   * The standard SpaceReaderAccess rule carries no policyState guard, so this
+   * stays inert until display-boundary rules consume grants (the ShareGrant
+   * end-to-end build-order item) — threaded now for parity with the sink
+   * gate, which resolves grants through the same context field. Fail closed
+   * when absent, exactly like `trustResolver`.
+   */
+  readonly grantResolver?: CfcGrantResolver;
 };
 
 /**
@@ -212,6 +224,9 @@ export const createRenderConfidentialityResolver = (
         boundary,
         trustResolver,
         actingPrincipal,
+        // §8.12.7 route 2a grant lookups at the display boundary (H3b) —
+        // see the config field's doc; absent fails closed.
+        grantResolver: config.grantResolver,
       },
     );
     return result.exhausted

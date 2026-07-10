@@ -13,7 +13,7 @@ The goal is to answer four questions quickly:
 4. What should be instrumented next if the existing logs are not enough?
 
 A worked example with concrete measurements from one investigation is archived
-in [settle-wave-2026-03-findings](archive/settle-wave-2026-03-findings.md).
+in [settle-wave-2026-03-findings](../../history/development/debugging/settle-wave-2026-03-findings.md).
 Console API details for every command used below live in
 [console-commands](console-commands.md).
 
@@ -270,7 +270,7 @@ Start with these locations when traces or logs point to worker churn:
 If the existing traces and logs still leave ambiguity, add or expose more
 instrumentation rather than guessing. For what one full investigation
 measured, concluded, and recommended next, see the archived
-[March 2026 findings](archive/settle-wave-2026-03-findings.md). The full
+[March 2026 findings](../../history/development/debugging/settle-wave-2026-03-findings.md). The full
 `commonfabric.*` API reference is in [console-commands](console-commands.md),
 and [non-idempotent-detection](non-idempotent-detection.md) covers ruling out
 true loops.
