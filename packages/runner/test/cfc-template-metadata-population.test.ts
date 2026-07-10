@@ -15,6 +15,7 @@ import {
   inspectStoredConfLabel,
 } from "../src/cfc/label-introspection.ts";
 import { containsCfcFieldCommitment } from "../src/cfc/label-representation.ts";
+import { cfcLabelViewFromMetadata } from "../src/cfc/label-view-state.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
@@ -757,6 +758,56 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
     );
     expect(result.status).toBe("ok");
     expect(consumedConfidentiality).toContainEqual("secret");
+  });
+
+  it("refuses a target whose resolved CELL path lands in the metadata subtree", async () => {
+    // parseConfLabelTargetPath catches a `/cfc/...` query pointer; the
+    // resolved-path guard catches a target cell whose OWN path collides with
+    // the metadata sibling — labels-of-labels stays refused however
+    // addressed.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(space, "mp-cfc-path-target", undefined, tx);
+      const link = cell.getAsNormalizedFullLink();
+      const outcome = inspectStoredConfLabel(
+        tx,
+        { ...link, path: ["cfc", "labels"] },
+        "/x",
+        {},
+      );
+      expect(outcome).toEqual({ status: "notAvailable" });
+      expect(tx.getCfcState().labelMetadataObservations).toHaveLength(0);
+      await tx.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("label views exclude the envelope-local templates", () => {
+    // Link transport / display / LLM-observation views ride
+    // cfcLabelViewFromMetadata: templates describe THIS envelope's payload
+    // entries and never travel (the link target's own envelope mints its
+    // own).
+    const view = cfcLabelViewFromMetadata(
+      metadataWith([
+        derivedBodyEntry(),
+        templateEntry(["body"], [], ["tmpl-atom-label"]),
+        templateEntry(["body"], ["source"], ["tmpl-source-label"]),
+      ]),
+      [],
+    );
+    expect(view?.entries.map((entry) => entry.path.join("/"))).toEqual([
+      "body",
+    ]);
+    expect(JSON.stringify(view)).not.toContain("tmpl-");
   });
 
   it("never enumerates template entries as payload label atoms", () => {
