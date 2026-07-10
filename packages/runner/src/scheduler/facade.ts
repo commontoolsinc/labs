@@ -365,6 +365,16 @@ export class Scheduler {
   // doc links (space-qualified), so they are unique within a runtime.
   private actionsByActionId = new Map<string, Action>();
 
+  // Actions registered with resumeMode "always-run" — the map/filter/flatMap
+  // coordinators that must run their reconcile to (re)register per-element
+  // children. Live adoption must exclude them for the SAME reason register()
+  // excludes them on reload: adopting one clean skips the reconcile, so a
+  // remotely-appended row's child action is never registered and that row's
+  // reactivity is dead. Object-keyed (once a coordinator, always a
+  // coordinator) and the only failure direction is refusing a safe adoption,
+  // so a stale membership just runs the action locally — never incorrect.
+  private alwaysRunActions = new WeakSet<Action>();
+
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
@@ -515,6 +525,9 @@ export class Scheduler {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
     }
     this.actionsByActionId.set(this.getActionId(action), action);
+    if (options.resumeMode === "always-run") {
+      this.alwaysRunActions.add(action);
+    }
     const subscribeOptions = {
       isEffect: options.isEffect,
       debounce: options.debounce,
@@ -801,6 +814,13 @@ export class Scheduler {
       // node was removed through a path that bypassed unsubscribe()).
       if (!this.nodes.get(action)) continue;
       if (this.nodes.isKnownEffect(action)) continue;
+      // Never adopt a child-starting coordinator clean: its reconcile is what
+      // (re)registers per-element children, so skipping it strands a remotely
+      // appended row unregistered — the reload path's always-run guard, live.
+      if (this.alwaysRunActions.has(action)) {
+        logger.debug("adopt/miss/always-run", () => [observation.actionId]);
+        continue;
+      }
       if (!this.observationMatchesCurrentAction(action, observation)) {
         continue;
       }

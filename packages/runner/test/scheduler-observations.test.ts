@@ -743,6 +743,85 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("live adoption refuses always-run coordinators (would strand new rows)", async () => {
+    // Live adoption twin of the reload guard above. A map/filter/flatMap
+    // coordinator declares resumeMode "always-run" because its reconcile is
+    // what (re)registers per-element children. Adopting it clean from a remote
+    // observation skips that reconcile, so a remotely-appended row's child
+    // action is never registered and its per-element reactivity dies. The
+    // guard must exclude always-run actions from adoptRemoteObservations
+    // exactly as register() excludes them from snapshot-apply on resume.
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const makeComputation = (name: string) => {
+        // Named-function trick: fn.name is the action id for hash-less actions,
+        // so the hand-built observation matches by actionId + fingerprints.
+        const action = Object.assign(
+          { [name]: function () {} }[name] as Action,
+          { writes: [writeLink] },
+        );
+        const snapshot: PersistedSchedulerObservationSnapshot = {
+          observation: buildSchedulerActionObservation({
+            actionId: name,
+            actionKind: "computation",
+            branch: "",
+            pieceId: "space:coordinator-process",
+            processGeneration: 1,
+            implementationFingerprint: schedulerImplementationFingerprint(
+              action,
+              name,
+              undefined,
+            ),
+            runtimeFingerprint: schedulerRuntimeFingerprint(),
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+          }),
+        };
+        return { action, snapshot };
+      };
+
+      const control = makeComputation("adoptableComputation");
+      const coordinator = makeComputation("alwaysRunCoordinator");
+
+      // Register both as live computation nodes (no isEffect → computation, so
+      // both clear adoption's computation/effect gates). Only resumeMode
+      // differs — the isolated variable.
+      scheduler.subscribe(control.action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      scheduler.subscribe(coordinator.action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, { resumeMode: "always-run" });
+      await testRuntime.runtime.idle();
+
+      // Permissive oracle: reads current, no pending local write — so the ONLY
+      // thing that can refuse adoption is the always-run guard.
+      const oracle = {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      };
+
+      // Control adopts; the always-run coordinator is refused and must run its
+      // own reconcile instead (return count excludes it).
+      expect(scheduler.adoptRemoteObservations([control.snapshot], oracle))
+        .toBe(1);
+      expect(scheduler.adoptRemoteObservations([coordinator.snapshot], oracle))
+        .toBe(0);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("persists no observation for identity-less registrations", async () => {
     // Only doc-keyed observations persist: an action registered without
     // rehydration identity (session-scoped effects like sinks/pull) can never

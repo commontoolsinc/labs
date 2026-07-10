@@ -634,6 +634,51 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
   }
 });
 
+Deno.test("memory v2 scheduler observation row follows the latest writer session", async () => {
+  // The writer's commit session key gates reader-isolated adoption (C6,
+  // incremental-observation-adoption.md): a user-scope row is offered only to
+  // sessions of the writer's principal. When a second writer commits the
+  // IDENTICAL observation (same actionId + payload → coalesces onto the one
+  // row), the row must name the LATEST writer — otherwise adoption/reload is
+  // offered to the wrong principal or withheld from the actual latest writer.
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer-a:sess-a",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+    });
+    const listWriter = () =>
+      listSchedulerActionSnapshots(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      }).snapshots[0]?.writerSessionId;
+    assertEquals(listWriter(), "session:writer-a:sess-a");
+
+    // Different writer, identical observation payload → coalesces (one row).
+    applyCommit(engine, {
+      sessionId: "session:writer-b:sess-b",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: { ...observation, observedAtLocalSeq: 2 },
+      },
+    });
+    assertEquals(countRows(engine, "scheduler_observation"), 1);
+    assertEquals(listWriter(), "session:writer-b:sess-b");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 rejects mismatched observation-only commit replay", async () => {
   const { engine, path } = await createEngine();
 

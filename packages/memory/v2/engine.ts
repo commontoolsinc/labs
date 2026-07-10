@@ -1631,7 +1631,16 @@ const upsertSchedulerObservationTransaction = (
       observation,
       payload,
     });
-  if (latest && payloadChanged) {
+  if (latest) {
+    // Refresh the row even when the payload is unchanged (a later identical
+    // observation from a different writer coalesces onto this row): the
+    // writer's session key gates reader-isolated adoption (C6,
+    // incremental-observation-adoption.md), so it must name the LATEST writer,
+    // not whoever created the row first. Otherwise a user-scope row would be
+    // offered to the wrong principal or withheld from the actual latest
+    // writer. commit_seq/observed_at_seq on the snapshot row are already kept
+    // current by upsertSchedulerSnapshot below; this keeps o.session_id (the
+    // adoption gate's source) and o.commit_seq consistent too.
     updateSchedulerObservationRow(engine, {
       observationId,
       commitSeq: options.commitSeq ?? null,
