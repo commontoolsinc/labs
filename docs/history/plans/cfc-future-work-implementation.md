@@ -501,7 +501,7 @@ entries per written path — bench before/after (canonicalize + label-sync).
 
 **Goal.** Close the three composing holes that let an injected `sendMail`
 recipient send under `enforce` (scoping doc:
-[docs/history/specs/cfc-trusted-agent-tool-integrity.md](../../specs/cfc-trusted-agent-tool-integrity.md)),
+[docs/history/specs/cfc-trusted-agent-tool-integrity.md](../specs/cfc-trusted-agent-tool-integrity.md)),
 and build the write-side `requiredIntegrity` floor (§8.12.4.1 / SC-18). Track
 runs independently of A/B (D5 excepted) — **start immediately; this is the
 security-urgent track.**
