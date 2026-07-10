@@ -2,7 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { cfcAtom } from "@commonfabric/api/cfc";
 
-// Epic D1b (docs/plans/cfc-future-work-implementation.md): model output written
+// Epic D1b (docs/history/plans/cfc-future-work-implementation.md): model output written
 // by the `llm`, `generateText`, and `generateObject` builtins carries an
 // explicit `LlmDerived` provenance stamp — the same mark D1 attaches to dialog
 // messages, so "model-derived" is explicit provenance rather than mere absence

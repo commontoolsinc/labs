@@ -8,7 +8,7 @@ import {
 } from "../src/cfc/observation.ts";
 import { clausesEqual, normalizeClause } from "../src/cfc/clause.ts";
 
-// Decision 6 of docs/plans/cfc-future-work-implementation.md (corrected
+// Decision 6 of docs/history/plans/cfc-future-work-implementation.md (corrected
 // 2026-07-02, #4482): the general clause meet is the pairwise
 // alternative-set UNION. This file carries the targeted algebra cases and
 // the both-direction property test the plan requires before clause ceilings

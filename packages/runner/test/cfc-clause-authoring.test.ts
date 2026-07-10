@@ -15,7 +15,7 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-clause-authoring");
 
-// Epic A4 (docs/plans/cfc-future-work-implementation.md): authors may write
+// Epic A4 (docs/history/plans/cfc-future-work-implementation.md): authors may write
 // disjunctive confidentiality clauses (`{anyOf:[…]}`) in schema
 // `ifc.confidentiality`. Principal-like alternatives persist intact; Expires /
 // Caveat alternatives are rejected fail-closed (spec §3.1.8).
@@ -79,7 +79,7 @@ describe("CFC authored disjunctive confidentiality", () => {
 
   it("persisted clause read by a clause-UNAWARE flat reader is outside every ceiling (mixed-version fail-closed, design decision 1)", async () => {
     // The mixed-version story of design decision 1
-    // (docs/plans/cfc-future-work-implementation.md, Epic A): a reader that
+    // (docs/history/plans/cfc-future-work-implementation.md, Epic A): a reader that
     // predates clause subsumption (#4470) deepEquals the WHOLE `{anyOf:[…]}`
     // object against each ceiling entry, so an authored clause can only ever
     // over-restrict on old readers — never leak. Confirmed end-to-end: schema

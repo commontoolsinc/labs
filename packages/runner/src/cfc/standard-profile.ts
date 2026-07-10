@@ -3,7 +3,7 @@ import type { CfcPolicyRecordInput, ExchangeRule } from "./policy.ts";
 
 /**
  * The §10.1 standard prompt-caveat profile, expressed entirely as ordinary
- * exchange rules (Epic B6 of docs/plans/cfc-future-work-implementation.md §3;
+ * exchange rules (Epic B6 of docs/history/plans/cfc-future-work-implementation.md §3;
  * spec §10.1 / §8.10.5). There is NO prompt-specific runtime branch: the
  * runtime surfaces atoms (caveats in confidentiality, evidence in integrity,
  * `BoundaryContext` at release sites) and these rules decide discharge.

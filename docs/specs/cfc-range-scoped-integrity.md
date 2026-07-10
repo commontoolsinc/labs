@@ -1,7 +1,7 @@
 # CFC range-scoped integrity for collaborative fields (Epic F) — design
 
 _Epic F of
-[`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md)
+[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md)
 (§8). Spec: `commontoolsinc/specs` `cfc/14-open-problems-and-proposals.md`
 §14.4.8 (collaborative documents, OT materialization, range-scoped integrity)
 plus the `views` storage hook the spec already reserves in
