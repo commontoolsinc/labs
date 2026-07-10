@@ -22,6 +22,7 @@ import {
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
   fetchCommitsBehindMain,
+  fetchLatestBaselineRunSha,
   fetchMainHeadSha,
   fetchPRForCommitWithError,
   formatBaselineSourceRunAge,
@@ -448,6 +449,31 @@ Deno.test("fetchMainHeadSha reads the main branch commit", async () => {
   );
 
   assertEquals(result, SHA_A);
+});
+
+Deno.test("fetchLatestBaselineRunSha reads the newest baseline run's head", async () => {
+  const result = await withMockFetch(
+    (input) => {
+      // The one-run baseline query against the workflow's successful main pushes.
+      assertStringIncludes(String(input), "/actions/workflows/");
+      assertStringIncludes(String(input), "per_page=1");
+      return new Response(
+        JSON.stringify({ workflow_runs: [{ head_sha: SHA_A }] }),
+      );
+    },
+    () => fetchLatestBaselineRunSha(),
+  );
+
+  assertEquals(result, SHA_A);
+});
+
+Deno.test("fetchLatestBaselineRunSha is undefined when no baseline run exists", async () => {
+  const result = await withMockFetch(
+    () => new Response(JSON.stringify({ workflow_runs: [] })),
+    () => fetchLatestBaselineRunSha(),
+  );
+
+  assertEquals(result, undefined);
 });
 
 Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async () => {

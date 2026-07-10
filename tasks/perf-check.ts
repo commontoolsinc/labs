@@ -85,10 +85,9 @@ import {
   writePerfMetricsFile,
 } from "./perf-lib.ts";
 import {
-  changedPathsOf,
-  classifyCacheKeyState,
-  classifyRunAgainstPredecessor,
-  uniformCacheStates,
+  fillMissingFamiliesFromFingerprint,
+  inferCurrentRunFallbackState,
+  recordUnstampedBaselineRunState,
 } from "./perf-cache-state.ts";
 import * as path from "@std/path";
 import {
@@ -222,6 +221,19 @@ export async function fetchMainHeadSha(): Promise<string> {
     `/repos/${REPO}/branches/main`,
   );
   return branch.commit.sha;
+}
+
+/**
+ * The head SHA of the latest prior baseline run — the run whose compile cache
+ * the current main push would have restored. Used to fingerprint-classify a
+ * main push that carries no recorded cache state. Undefined when there is no
+ * prior baseline run (e.g. an empty run history).
+ */
+export async function fetchLatestBaselineRunSha(): Promise<string | undefined> {
+  const recent = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+    workflowRunsPathForBaseline(1),
+  );
+  return recent.workflow_runs[0]?.head_sha;
 }
 
 function pluralize(value: number, unit: string): string {
@@ -1428,45 +1440,19 @@ export async function main() {
     `Compile cache states: ${formatCompileCacheStates(currentCacheStates)}`,
   );
 
-  // Fallback for families with no recorded state (artifact missing, upload
-  // or download failed): infer the run-level state from the compile
-  // fingerprint — the PR's changed files, or the compare against the
-  // previous main run. Recorded states are ground truth and win; the fill
-  // only applies to UNKNOWN families and only when the fingerprint rotated
-  // (a warm fill would change nothing — unknown already gates normally).
-  const inferredRunState = prNumber
-    ? (prFiles.length > 0
-      ? classifyCacheKeyState(changedPathsOf(prFiles))
-      : "unknown")
-    : await (async () => {
-      try {
-        const recent = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-          workflowRunsPathForBaseline(1),
-        );
-        return await classifyRunAgainstPredecessor(
-          currentRunInfo.head_sha,
-          recent.workflow_runs[0]?.head_sha,
-        );
-      } catch {
-        return "unknown" as const;
-      }
-    })();
-  if (inferredRunState === "cold") {
-    let filled = 0;
-    for (const [family, state] of Object.entries(uniformCacheStates("cold"))) {
-      if (!(family in currentCacheStates)) {
-        currentCacheStates[family as keyof typeof currentCacheStates] = state;
-        filled++;
-      }
-    }
-    if (filled > 0) {
-      console.log(
-        `Compile fingerprint changed in this run; ${filled} unknown famil${
-          filled === 1 ? "y" : "ies"
-        } treated as cold.`,
-      );
-    }
-  }
+  // Fallback for families with no recorded state (artifact missing, upload or
+  // download failed): infer the run-level state from the compile fingerprint —
+  // the PR's changed files, or the compare against the previous main run — and
+  // fill only the families with no recorded state. Recorded states are ground
+  // truth and win (see inferCurrentRunFallbackState /
+  // fillMissingFamiliesFromFingerprint).
+  const inferredRunState = await inferCurrentRunFallbackState({
+    isPullRequestRun: !!prNumber,
+    prFiles,
+    headSha: currentRunInfo.head_sha,
+    fetchLatestBaselineSha: fetchLatestBaselineRunSha,
+  });
+  fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
 
   // Extract per-test metrics from JUnit artifacts
   try {
@@ -1655,25 +1641,16 @@ export async function main() {
         if (artifactResult.added && artifactResult.compileCacheStates) {
           cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
         } else {
-          // Unstamped run (pre-rollout artifact, backfill, or live
-          // extraction): retro-infer the run-level state from the compile
-          // fingerprint diff against its predecessor and apply it to every
-          // family — a fingerprint rotation colds them all at once. Runs
-          // that were cold for other reasons (eviction) stay unknown and are
-          // kept, exactly as before this mechanism.
-          const inferred = await classifyRunAgainstPredecessor(
-            run.head_sha,
+          // Unstamped run (an artifact carrying no recorded stamp — a backfill
+          // or a live extraction): retro-classify it from the compile
+          // fingerprint against its predecessor (see
+          // recordUnstampedBaselineRunState).
+          await recordUnstampedBaselineRunState(
+            cacheStatesByRunId,
+            run,
             predecessorShaByRunId.get(run.id),
+            pr ? `PR #${pr.number}` : run.head_sha.slice(0, 8),
           );
-          if (inferred !== "unknown") {
-            cacheStatesByRunId.set(run.id, uniformCacheStates(inferred));
-          }
-          if (inferred === "cold") {
-            const pretty = pr ? `PR #${pr.number}` : run.head_sha.slice(0, 8);
-            console.log(
-              `  Baseline run ${run.id} (${pretty}) retro-classified cold: compile fingerprint changed vs predecessor.`,
-            );
-          }
         }
         if (artifactResult.added) {
           return;
