@@ -304,6 +304,8 @@ export interface PRInfo {
 
 export interface PRFile {
   filename: string;
+  /** Old path for renamed files; the fingerprint classifier needs both. */
+  previous_filename?: string;
   /** Unified diff for this file. Absent for binary or oversized changes. */
   patch?: string;
 }
