@@ -34,6 +34,7 @@ import {
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
+import { noteDependencyArm } from "./scheduler/dependency-arm-stats.ts";
 import {
   findAllWriteRedirectCells,
   unwrapOneLevelAndBindtoDoc,
@@ -3372,6 +3373,7 @@ export class Runner {
       : reads;
     const populateDependencies = reads.length > 0
       ? (depTx: IExtendedStorageTransaction, event: any) => {
+        noteDependencyArm("handlerDeclaredReads");
         this.populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
         this.populateHandlerEventSchedulerReads(
           module.argumentSchema,
@@ -3382,6 +3384,7 @@ export class Runner {
       }
       : module.argumentSchema
       ? (depTx: IExtendedStorageTransaction, event: any) => {
+        noteDependencyArm("handlerArgumentSchema");
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -3683,8 +3686,10 @@ export class Runner {
       logger.timeStart("action", "populateDependencies");
       try {
         if (reads.length > 0) {
+          noteDependencyArm("actionDeclaredReads");
           this.populateDeclaredSchedulerReads(reads, depTx);
         } else if (module.argumentSchema !== undefined) {
+          noteDependencyArm("actionArgumentSchema");
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             inputs,
@@ -4154,6 +4159,7 @@ export class Runner {
       try {
         // Capture read dependencies - use custom if provided, otherwise read all inputs
         if (builtinPopulateDependencies) {
+          noteDependencyArm("builtinCustom");
           if (typeof builtinPopulateDependencies === "function") {
             builtinPopulateDependencies(depTx);
           } else {
@@ -4164,6 +4170,7 @@ export class Runner {
           }
         } else {
           // Default: read all inputs
+          noteDependencyArm("builtinReadAllInputs");
           for (const input of inputCells) {
             this.runtime.getCellFromLink(input, undefined, depTx)?.get();
           }
