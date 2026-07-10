@@ -454,11 +454,18 @@ Out-of-fabric egress is irrevocable; modeling it with the same revocable
 artifact as internal sharing invites the un-sending confusion (revoking the
 record of a send is not un-sending). Proposed edit
 ([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)
-§6): at a send-sink release the committing transaction MUST mint a
-create-only **egress record** causal to the consumed intent/event id —
-`{valueDigest, destination, boundaryContext, releasedAudienceEvidence, at,
-intentId}`, the destination captured per the §8.10.5.2 destination/audience
-binding (this discharges the audit's open "destination-binding follow-up").
+§6): the permanent **sent** record is minted by the successful post-commit
+send path (the transaction commits before the outbox flush, and the release
+can still be refused during the flush — a commit-time record would assert
+disclosures that never happened): a create-only record causal to the outbox
+idempotency key — `{valueDigest, destination, boundaryContext,
+releasedAudienceEvidence, at, intentId}`, destination per the §8.10.5.2
+destination/audience binding (discharging the audit's open
+"destination-binding follow-up"), written record-then-clear against the
+outbox entry so the record can understate but never overstate; an optional
+commit-time attempt marker MUST NOT display as sent. Spec this together
+with the audit's open "post-commit outbox + sink-release re-verification
+contract" item (§8.10 is entirely pre-commit today).
 The record is permanent (create-only, never deleted, no revocation surface)
 and has **no enforcement role**: it never feeds a future release decision —
 labels keep governing what the fabric serves; the record exists for honesty,

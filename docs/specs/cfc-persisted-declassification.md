@@ -316,16 +316,26 @@ the grant disappear and reasonably believes the disclosure is undone, when
 only the *record that we sent it* changed. The fix is a second artifact
 class with the opposite lifecycle:
 
-- At a send-sink release (the §8.10 boundary that lets a value leave the
-  fabric), the committing transaction mints an **egress record**: a
-  create-only document causal to the consumed intent/event id, shaped
-  `{valueDigest, destination, boundaryContext, releasedAudienceEvidence,
-  at, intentId}` — the destination captured per §8.10.5.2's
-  destination/audience binding (the spec's open destination-binding
-  follow-up is exactly this evidence).
-- **Permanent by construction**: create-only (the receipt discipline),
-  never deleted, no revocation surface. Reserved-path hosted like grants;
-  readable as provenance.
+- The record is minted in two phases, because the transaction commits
+  **before** the outbox flush and the release can still be refused during
+  the flush (`verifySinkRequestRelease` runs post-commit): the committing
+  transaction MAY stage an **attempt** marker, but the permanent **sent**
+  record is created only by the **successful post-commit send path** — a
+  create-only document causal to the outbox idempotency key (itself bound
+  to the consumed intent), shaped `{valueDigest, destination,
+  boundaryContext, releasedAudienceEvidence, at, intentId}`, the
+  destination captured per §8.10.5.2's destination/audience binding (the
+  spec's open destination-binding follow-up is exactly this evidence).
+  Write ordering: **record, then clear the outbox entry** — a crash between
+  send and record leaves a live outbox entry to reconcile from, so the
+  record can understate but never overstate. An attempt marker with no sent
+  record after the retry window means known-not-sent and MUST NOT display
+  as "sent". (This is the same seam as the audit's open "post-commit outbox
+  + sink-release re-verification contract" item — the two should be specced
+  together.)
+- **Permanent by construction**: the sent record is create-only (the
+  receipt discipline), never deleted, no revocation surface. Reserved-path
+  hosted like grants; readable as provenance.
 - **No enforcement role.** The record never feeds a future release
   decision — the label keeps governing what the fabric itself serves (an
   external copy existing is not a reason for our runtime to serve the
