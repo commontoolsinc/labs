@@ -35,6 +35,7 @@ import type {
   ID as IDSymbol,
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
+  InspectConfLabelFunction,
   JSONSchema,
   JSONValue,
   JSXElement,
@@ -345,6 +346,7 @@ export interface BuilderFunctionsAndConstants {
   cfLink: SqliteCfLinkFunction;
   cfSqlite: CfSqliteHelpers;
   navigateTo: NavigateToFunction;
+  inspectConfLabel: InspectConfLabelFunction;
   wish: WishFunction;
 
   // Cell creation

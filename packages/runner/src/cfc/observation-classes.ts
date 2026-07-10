@@ -1,4 +1,8 @@
-import type { LabelMapEntry, LabelObservationClass } from "./types.ts";
+import type {
+  LabelMapEntry,
+  LabelMetadataObservationClass,
+  LabelObservationClass,
+} from "./types.ts";
 
 // Read-side half of the observation-class design (Epic C stage C1,
 // docs/specs/cfc-observation-classes.md §4/§6; spec §4.6.3): every concrete
@@ -19,6 +23,24 @@ import type { LabelMapEntry, LabelObservationClass } from "./types.ts";
  *   dereference — observes WHICH reference sits at the slot.
  */
 export type ReadObservationShape = "value" | "shape" | "followRef";
+
+/**
+ * The label-METADATA observation class (inv-12 Stage 2), beside the payload
+ * shapes above. An `inspectConfLabel` evaluation observes the first-layer
+ * label metadata subtree (`/cfc/labels/<target-envelope-path>/...`), not
+ * payload content, so it is NOT a `ReadObservationShape`: journal reads never
+ * classify as it (raw `["cfc"]` reads stay verifier-marked / flow-excluded,
+ * SC-6), it consumes no persisted labelMap entry class (its labels come from
+ * the §4.6.4.2 population rule, computed from the entry in hand), and its
+ * records enter the transaction explicitly
+ * (`recordCfcLabelMetadataObservation`) rather than through the journal. The
+ * consumed-set/flow consumers fold those records in beside the classified
+ * journal reads (`deriveFlowJoin`, `collectConsumedLabel`,
+ * `verifyInputRequirements`).
+ */
+export const LABEL_METADATA_OBSERVATION: LabelMetadataObservationClass =
+  "labelMetadata";
+export type { LabelMetadataObservationClass };
 
 /**
  * Entry selection for a read: one of the classified shapes, or `"all"` for

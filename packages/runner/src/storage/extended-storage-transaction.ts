@@ -70,6 +70,7 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcGrantWriteInput,
+  type CfcLabelMetadataObservation,
   type CfcLabelMetadataProtectionMode,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
@@ -277,6 +278,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     diagnostics: [],
     unprivilegedSystemWrites: [],
     consultedGrants: [],
+    labelMetadataObservations: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
@@ -894,6 +896,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcLabelMetadataObservation(
+    observation: CfcLabelMetadataObservation,
+  ): void {
+    // Public observations (empty population label) are dropped, not stored:
+    // an empty label adds nothing to the flow join, the consumed set, or any
+    // gate, and skipping them keeps "an observation was recorded" ⇔ "the tx
+    // consumed protected label metadata" — which is exactly the relevance
+    // condition below.
+    if (observation.confidentiality.length === 0) {
+      return;
+    }
+    this.#cfcState.labelMetadataObservations.push(deepFreeze(observation));
+    // A labeled metadata observation makes the transaction CFC-relevant
+    // directly (like noteSystemWrite): its taint must reach the flow
+    // derivation and the enforcement gates even when nothing else in the tx
+    // touches labeled data — the commit-time relevance probes only inspect
+    // journal reads and write targets, which this channel bypasses.
+    this.markCfcRelevant("label-metadata-observation");
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("label-metadata-observation-added");
+    }
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -1134,6 +1159,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // revocation then takes effect on the next evaluation (design §2.2).
       ...(this.#cfcState.consultedGrants.length > 0
         ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+        : {}),
+      // Label-metadata observations (inv-12 Stage 2): boundary-decision
+      // inputs (they change the flow join and the consumed set), bound like
+      // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
+      // byte-identical.
+      ...(this.#cfcState.labelMetadataObservations.length > 0
+        ? {
+          labelMetadataObservations: [
+            ...this.#cfcState.labelMetadataObservations,
+          ],
+        }
         : {}),
     };
   }
@@ -1872,6 +1908,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     this.wrapped.recordCfcConsultedGrant(consulted);
+  }
+
+  recordCfcLabelMetadataObservation(
+    observation: CfcLabelMetadataObservation,
+  ): void {
+    this.wrapped.recordCfcLabelMetadataObservation(observation);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
