@@ -124,6 +124,47 @@ describe("CFC policy records (B2a)", () => {
     });
   });
 
+  describe("selection scope (B2b: label-carried policy selection)", () => {
+    it("defaults to ambient and accepts an explicit selection", () => {
+      const defaulted = buildCfcPolicySnapshot([record()])!;
+      expect(defaulted.records[0].selection).toBe("ambient");
+      const referenced = buildCfcPolicySnapshot([
+        record({ selection: "referenced" }),
+      ])!;
+      expect(referenced.records[0].selection).toBe("referenced");
+    });
+
+    it("digests explicit ambient identically to the default", () => {
+      const a = buildCfcPolicySnapshot([record()])!;
+      const b = buildCfcPolicySnapshot([record({ selection: "ambient" })])!;
+      expect(a.records[0].digest).toBe(b.records[0].digest);
+      expect(a.digest).toBe(b.digest);
+    });
+
+    it("treats the selection mode as record content (digest binding)", () => {
+      // A selection flip re-scopes every rule in the record, so it must
+      // invalidate prepared digests through the snapshot digest the same way
+      // a rule edit does (PreparedDigestInput.policySnapshot, Epic B5).
+      const a = buildCfcPolicySnapshot([record()])!;
+      const b = buildCfcPolicySnapshot([record({ selection: "referenced" })])!;
+      expect(a.records[0].digest).not.toBe(b.records[0].digest);
+      expect(a.digest).not.toBe(b.digest);
+    });
+
+    it("rejects unknown selection values", () => {
+      expect(() =>
+        buildCfcPolicySnapshot([
+          record({ selection: "label" as never }),
+        ])
+      ).toThrow(/selection must be "ambient" or "referenced"/);
+      expect(() =>
+        buildCfcPolicySnapshot([
+          record({ selection: 7 as never }),
+        ])
+      ).toThrow(/selection must be "ambient" or "referenced"/);
+    });
+  });
+
   describe("freeze discipline", () => {
     it("deep-freezes the snapshot, records, rules, and patterns", () => {
       const snapshot = buildCfcPolicySnapshot([record()])!;

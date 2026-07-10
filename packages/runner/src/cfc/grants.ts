@@ -61,13 +61,16 @@ import type {
  *   does not hash to the address it sits at (a forgery/corruption), before
  *   any lifecycle or audience check. Fail closed throughout.
  *
- * The GOVERNING SPACE for this PR is the owner's identity space
- * (`space === owner`): only the owner (and their runtime) holds write
- * authority there, so a verified document at the derived address carries the
- * owner's release authority implicitly — the same way the space ACL document
- * is owner-gated by living in the space it governs. Grants hosted in shared
- * spaces (a team space's policy root) need per-document write-attribution
- * verification and arrive with the B2b space-hosted policy work.
+ * The GOVERNING SPACE is the owner's identity space (`space === owner`):
+ * only the owner (and their runtime) holds write authority there, so a
+ * verified document at the derived address carries the owner's release
+ * authority implicitly — the same way the space ACL document is owner-gated
+ * by living in the space it governs. Grants hosted in shared spaces (a team
+ * space's policy root) need per-document write-attribution verification —
+ * future work on its own track: the B2b space-hosted policy-doc plan this
+ * was once coupled to is descoped (SC-28: attestation covers deployment
+ * config; policy records stay in `RuntimeOptions.cfcPolicyRecords`), which
+ * leaves grants as the one space-hosted policy state.
  */
 
 /** Reserved id scheme for grant documents. The whole document is policy
@@ -408,10 +411,12 @@ export const prepareCfcGrantWrite = (
   const space = input.space ?? owner;
   if (space !== owner) {
     // v1 governing-space posture (module doc): grants live in the owner's
-    // identity space. Shared-space policy roots arrive with B2b.
+    // identity space. Shared-space grant roots need per-document
+    // write-attribution verification (future work; no longer coupled to the
+    // descoped B2b policy-doc storage — SC-28).
     throw new Error(
       "cfc-grant: space must equal owner (grants live in the owner's " +
-        "identity space until B2b space-hosted policy roots)",
+        "identity space; shared-space grant roots are future work)",
     );
   }
   if (
@@ -492,7 +497,7 @@ export const prepareCfcGrantWrite = (
 };
 
 /**
- * Verify-on-read (B2b storage discipline): a stored value is a grant only if
+ * Verify-on-read (the grants storage discipline): a stored value is a grant only if
  * it is shape-valid AND its identity fields re-derive the exact address it
  * was read from AND its audience passes the §3.1.8 principal-like validation
  * (defense in depth — a document written by a client that skipped the write

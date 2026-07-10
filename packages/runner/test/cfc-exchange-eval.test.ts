@@ -795,4 +795,269 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       }
     });
   });
+
+  describe("label-carried selection (B2b, CT-1874)", () => {
+    const MALLORY = "did:key:mallory";
+    const SECRET = "https://example.com/atoms/Secret";
+    const secretBob = { type: SECRET, subject: BOB };
+
+    // Referenced share policy: the §4.3.3 space-reader rule, in scope only
+    // where a label clause carries its hash-bound ref atom (spec §4.4.2).
+    const shareInput = {
+      id: "share-flow",
+      selection: "referenced" as const,
+      rules: [spaceReaderRule],
+    };
+    const shareSnapshot = buildCfcPolicySnapshot([shareInput])!;
+    const shareDigest = shareSnapshot.records[0].digest;
+    const shareRef = cfcAtom.policyRef("share-flow", ALICE, shareDigest);
+
+    it("keeps a referenced record OUT of scope without a label-carried ref", () => {
+      const result = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [roleAliceX] },
+        shareSnapshot,
+      );
+      expect(result.firings).toEqual([]);
+      expect(result.label.confidentiality).toEqual([spaceX]);
+    });
+
+    it("fires a referenced record's rule on the ref's home clause only", () => {
+      // spaceY sits in an INDEPENDENT sibling clause that appliesTo also
+      // matches — the home-clause gate must keep the rule off it even though
+      // the evidence (roleAliceY) would satisfy the guard.
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [{ anyOf: [spaceX, shareRef] }, spaceY],
+          integrity: [roleAliceX, roleAliceY],
+        },
+        shareSnapshot,
+      );
+      expect(result.firings).toEqual([{
+        recordId: "share-flow",
+        ruleId: "space-reader-access",
+        clauseIndex: 0,
+        kind: "add",
+        added: [userAlice],
+      }]);
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        { anyOf: [spaceX, shareRef, userAlice] },
+        spaceY,
+      ])).toBe(true);
+    });
+
+    it("refuses the CT-1874 laundering trace: a policy referenced in clause 0 never rewrites sibling clause 1", () => {
+      // Mallory's policy is admitted as an ALTERNATIVE of clause 0 by that
+      // clause's author. Its rule targets Secret(?x) — present only in
+      // clause 1, Bob's independent requirement. Firing there would be a
+      // cross-principal implicit release (invariant 11 / spec §3.1.8(3)):
+      // Bob never admitted Mallory's policy as a release path.
+      const evil = buildCfcPolicySnapshot([{
+        id: "evil",
+        selection: "referenced" as const,
+        rules: [{
+          id: "launder",
+          appliesTo: { type: SECRET, subject: { var: "$x" } },
+          post: {
+            addAlternatives: [{ type: CFC_ATOM_TYPE.User, subject: MALLORY }],
+          },
+        }],
+      }])!;
+      const evilRef = cfcAtom.policyRef(
+        "evil",
+        MALLORY,
+        evil.records[0].digest,
+      );
+      const label: IFCLabel = {
+        confidentiality: [{ anyOf: [userAlice, evilRef] }, secretBob],
+      };
+      const result = evaluateExchangeRules(label, evil);
+      expect(result.firings).toEqual([]);
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        { anyOf: [userAlice, evilRef] },
+        secretBob,
+      ])).toBe(true);
+      expect(result.exhausted).toBe(false);
+    });
+
+    it("selects a ref whose subject crossed spaces in commitment form (inv-12)", () => {
+      // The SC-25 transform persists DID-bearing fields as {digestOf}
+      // markers; name/hash stay public so the destination can still
+      // dereference the snapshot. Selection must accept the transformed
+      // subject — it keys on name+hash and only checks subject well-formed.
+      const committedRef = {
+        type: CFC_ATOM_TYPE.Policy,
+        name: "share-flow",
+        subject: { digestOf: "abc123" },
+        hash: shareDigest,
+      };
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [{ anyOf: [spaceX, committedRef] }],
+          integrity: [roleAliceX],
+        },
+        shareSnapshot,
+      );
+      expect(result.firings.length).toBe(1);
+      expect(result.firings[0].clauseIndex).toBe(0);
+    });
+
+    it("selects by Context refs exactly like Policy refs", () => {
+      const ctxRef = cfcAtom.contextRef("share-flow", ALICE, shareDigest);
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [{ anyOf: [spaceX, ctxRef] }],
+          integrity: [roleAliceX],
+        },
+        shareSnapshot,
+      );
+      expect(result.firings.length).toBe(1);
+      expect(result.firings[0].clauseIndex).toBe(0);
+    });
+
+    it("fails closed on unbound, mismatched, or cross-wired refs (§4.4.3)", () => {
+      const other = buildCfcPolicySnapshot([
+        shareInput,
+        {
+          id: "other",
+          selection: "referenced" as const,
+          rules: [dropExpiresRule],
+        },
+      ])!;
+      const otherDigest = other.records.find((r) => r.id === "other")!.digest;
+      const cases: unknown[] = [
+        // Unbound name (no hash) — a schema-time PolicyNameAtom must select
+        // nothing at runtime (§4.4.2: hash required).
+        { type: CFC_ATOM_TYPE.Policy, name: "share-flow", subject: ALICE },
+        // Hash mismatch: the name resolves, the content binding does not.
+        cfcAtom.policyRef("share-flow", ALICE, "sha256:bogus"),
+        // Cross-wired: another record's digest under this record's name.
+        cfcAtom.policyRef("share-flow", ALICE, otherDigest),
+        // Absent record: nothing in the snapshot under this name.
+        cfcAtom.policyRef("unknown", ALICE, shareDigest),
+        // Malformed: no subject.
+        { type: CFC_ATOM_TYPE.Policy, name: "share-flow", hash: shareDigest },
+      ];
+      for (const ref of cases) {
+        const result = evaluateExchangeRules(
+          {
+            confidentiality: [{ anyOf: [spaceX, ref] }],
+            integrity: [roleAliceX],
+          },
+          other,
+        );
+        expect(result.firings).toEqual([]);
+      }
+    });
+
+    it("skips non-record alternatives while locating the home clause", () => {
+      // Legacy string atoms are valid clause alternatives; selection walks
+      // past them (they cannot be refs). Clause 0 holds only the string, so
+      // the walk must scan and skip it before finding the ref in clause 1 —
+      // and the firing stays on clause 1 (the string clause is not a home).
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [
+            "legacy-string-atom",
+            { anyOf: [spaceX, shareRef] },
+          ],
+          integrity: [roleAliceX],
+        },
+        shareSnapshot,
+      );
+      expect(result.firings.length).toBe(1);
+      expect(result.firings[0].clauseIndex).toBe(1);
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        "legacy-string-atom",
+        { anyOf: [spaceX, shareRef, userAlice] },
+      ])).toBe(true);
+    });
+
+    it("never selects a hand-built record with an empty digest (§4.4.2 belt)", () => {
+      // buildCfcPolicySnapshot always digests, so this only arises through a
+      // hand-built snapshot — an empty digest must not become selectable via
+      // a ref that also carries an empty hash.
+      const handmade = {
+        records: [{
+          id: "handmade",
+          digest: "",
+          rules: [spaceReaderRule],
+          selection: "referenced" as const,
+        }],
+        digest: "",
+      };
+      const emptyHashRef = {
+        type: CFC_ATOM_TYPE.Policy,
+        name: "handmade",
+        subject: ALICE,
+        hash: "",
+      };
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [{ anyOf: [spaceX, emptyHashRef] }],
+          integrity: [roleAliceX],
+        },
+        handmade,
+      );
+      expect(result.firings).toEqual([]);
+    });
+
+    it("brings a rule-added ref into scope for the next batch (§4.4.5 recompute)", () => {
+      // An ambient rule ADDS the hash-bound ref as an alternative; the
+      // referenced record's rule must then fire on that clause in the SAME
+      // evaluation ("rules can add policy principals as alternatives, so
+      // this is recomputed" — spec §4.4.5).
+      const adder = {
+        id: "adder",
+        rules: [{
+          id: "add-ref",
+          appliesTo: { type: CFC_ATOM_TYPE.Space, id: "space:x" },
+          post: { addAlternatives: [shareRef] },
+        }],
+      };
+      const combined = buildCfcPolicySnapshot([shareInput, adder])!;
+      const result = evaluateExchangeRules(
+        { confidentiality: [spaceX], integrity: [roleAliceX] },
+        combined,
+      );
+      expect(result.firings.map((f) => f.ruleId)).toEqual([
+        "add-ref",
+        "space-reader-access",
+      ]);
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        { anyOf: [spaceX, shareRef, userAlice] },
+      ])).toBe(true);
+    });
+
+    it("tracks home clauses across a drop-splice (indices shift mid-evaluation)", () => {
+      // Clause 0 is dropped by an ambient rule earlier in the same pass,
+      // shifting the ref's home from index 1 to 0 — and shifting Bob's
+      // independent Space clause INTO the ref's stale index. Home tracking
+      // must follow the clause, not a pass-start index snapshot: User(alice)
+      // lands in the referenced clause, never in Bob's (which the guard
+      // evidence roleAliceY would otherwise satisfy).
+      const combined = buildCfcPolicySnapshot([
+        { id: "a-expiry", rules: [dropExpiresRule] },
+        shareInput,
+      ])!;
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [
+            cfcAtom.expires(1234),
+            { anyOf: [spaceX, shareRef] },
+            spaceY,
+          ],
+          integrity: [
+            { type: "https://example.com/atoms/DetectedBy" },
+            roleAliceX,
+            roleAliceY,
+          ],
+        },
+        combined,
+      );
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        { anyOf: [spaceX, shareRef, userAlice] },
+        spaceY,
+      ])).toBe(true);
+    });
+  });
 });

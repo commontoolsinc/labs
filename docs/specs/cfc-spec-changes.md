@@ -473,6 +473,41 @@ audit, and deriving "who could have this" (current grants ∪ past egress).
 State the shared-vs-sent vocabulary distinction normatively so UIs cannot
 present an egress as revocable. `open`.
 
+**SC-28 [normative] Attested deployment config is a federation-sound policy
+store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The
+archived B2b plan (`docs/history/plans/cfc-future-work-implementation.md`
+§3, decision 2) treated `RuntimeOptions.cfcPolicyRecords` as an interim
+source because two federated instances with different deployment config
+would silently fire different exchange rules, and scheduled space-hosted
+policy docs as the federation-correct form — restated as recently as the
+SC-14 Stage-3 federation constraint ("B2a's deployment-config policy source
+is federation-hostile"). Revised owner decision (2026-07-10, extending the
+same day's federation resolution — SC-26's superseded note, SC-27): remote
+attestation covers deployment config for security-sensitive inputs like
+`cfcPolicyRecords` — the §5.7.2 runtime-environment claims extend to the
+enforcement configuration the runtime boots with (measured image identity
+covers it) — so attested federated peers provably evaluate the same record
+set, and space-hosted policy documents are not needed for federation
+soundness (the Stage-3 note's conclusion is superseded in place; its
+*evidence replicates, evaluation is local* rule stands — config rides the
+attested evaluator, not the data). Proposed edit:
+§4.4.1's storage-location list gains the attested deployment/system policy
+root as a sanctioned primary store (space-hosted discovery stays optional,
+never required for federation); §4.4.5 adds the CT-1874/SP-1 constraint —
+rules a label-carried `Policy(...)`/`Context(...)` principal brings into
+scope may rewrite ONLY that principal's home clause(s), the mechanical form
+of §5.3.3's clause-local declassification authority (§4.4.5's informative
+pseudocode selects target clauses purely by pattern match and would
+otherwise let a policy referenced in clause k widen sibling clause j: a
+cross-principal implicit release, invariant 11/§3.1.8(3)). Runner-side,
+labs#4652: the surviving non-storage half of B2b
+shipped against the deployment snapshot — `PolicyRecord.selection:
+"ambient" | "referenced"` (`policy.ts`, digest projection v3), hash-bound
+fail-closed ref matching per §4.4.2/§4.4.3, the home-clause gate with
+per-batch recomputation (`exchange-eval.ts`), and inv-12 representation
+rows for the ref atom's fields (name/hash public, subject commitment);
+grants (labs#4627) remain the one space-hosted policy state. `open`.
+
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
 
