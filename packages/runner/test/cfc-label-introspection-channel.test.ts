@@ -416,7 +416,7 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
     }
   });
 
-  it("inspectStoredConfLabel records the observation at the metadata subtree address", async () => {
+  it("inspectStoredConfLabel records the observation at the concrete metadata path", async () => {
     const { storageManager, runtime } = makeRuntime({
       cfcFlowLabels: "persist",
     });
@@ -432,15 +432,25 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       );
       expect(outcome.status).toBe("ok");
       const observations = tx.getCfcState().labelMetadataObservations;
+      // The seeded label holds two clauses ("secret" — a public type-only
+      // string atom, nothing recorded — and the source-bearing caveat): one
+      // protected whole-atom projection.
       expect(observations).toHaveLength(1);
       expect(observations[0].observes).toBe("labelMetadata");
-      // The record addresses the FIRST-LAYER metadata subtree, never a
-      // payload path (§4.6.4.1 addressing).
+      // The record addresses the CONCRETE first-layer metadata path the
+      // projection consulted (§4.6.4.1 addressing; template-population
+      // Stage B upgraded the record from the subtree root to the
+      // clause/alternative-indexed path) — never a payload path.
       expect([...observations[0].target.path]).toEqual([
         "cfc",
         "labels",
         "value",
         "body",
+        "confidentiality",
+        "clauses",
+        "1",
+        "alternatives",
+        "0",
       ]);
       expect(observations[0].target.id).toBe(id);
       expect([...observations[0].confidentiality]).toContainEqual("secret");

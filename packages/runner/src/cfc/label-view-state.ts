@@ -43,17 +43,26 @@ export const cfcLabelViewFromMetadata = (
   return rebaseCfcLabelView(
     {
       version: 1,
-      entries: metadata.labelMap.entries.map((entry) => {
+      entries: metadata.labelMap.entries.flatMap((entry) => {
         // The view carries the EFFECTIVE class: the persisted
         // `origin:"link"` ⇒ implicit `followRef` carve-out (C0 §3) is
         // resolved here, so view consumers classify without knowing about
         // origins.
         const observes = entryObservationClass(entry);
-        return {
+        // Label-metadata population templates (template-population Stage B)
+        // are envelope-LOCAL: they describe this envelope's own payload
+        // entries and are re-derived per envelope at persist, so they never
+        // ride label views — a link transports the source's payload labels,
+        // and the target's envelope mints its own templates from whatever
+        // entries land there.
+        if (observes === "labelMetadata") {
+          return [];
+        }
+        return [{
           path: entry.path,
           label: entry.label,
           ...(observes !== undefined ? { observes } : {}),
-        };
+        }];
       }),
     },
     path,

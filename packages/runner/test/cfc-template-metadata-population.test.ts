@@ -853,24 +853,26 @@ describe("CFC template metadata population (Stage B): derivation unit properties
       ]),
     ).toEqual(["atom-label"]);
     // Equally specific covers JOIN (fail-toward-taint).
-    expect(
-      resolveLabelMetadataTemplateConfidentiality([
-        ...entries,
-        templateEntry(["items", "3"], ["source"], ["concrete-label"]),
-      ], [
-        "cfc",
-        "labels",
-        "value",
-        "items",
-        "3",
-        "confidentiality",
-        "clauses",
-        "0",
-        "alternatives",
-        "0",
-        "source",
-      ])?.sort(),
-    ).toEqual(["concrete-label", "source-label"]);
+    const joined = resolveLabelMetadataTemplateConfidentiality([
+      ...entries,
+      templateEntry(["items", "3"], ["source"], ["concrete-label"]),
+    ], [
+      "cfc",
+      "labels",
+      "value",
+      "items",
+      "3",
+      "confidentiality",
+      "clauses",
+      "0",
+      "alternatives",
+      "0",
+      "source",
+    ]);
+    expect([...(joined ?? [])].sort()).toEqual([
+      "concrete-label",
+      "source-label",
+    ]);
     // No cover → undefined (the caller falls back to the in-hand rule).
     expect(
       resolveLabelMetadataTemplateConfidentiality(entries, [

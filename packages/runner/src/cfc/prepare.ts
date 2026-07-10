@@ -68,6 +68,10 @@ import {
 } from "./grants.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
+  deriveLabelMetadataTemplateEntries,
+  isLabelMetadataTemplateEntry,
+} from "./label-metadata-population.ts";
+import {
   commitmentAwareEquals,
   containsCfcFieldCommitment,
   transformCfcLabelForCrossSpacePersist,
@@ -4939,6 +4943,16 @@ export const prepareBoundaryCommit = (
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
+      // Label-metadata population templates (template-population Stage B,
+      // spec §4.6.4.2) are a pure function of the payload entries in this
+      // same envelope: never carried forward — re-derived below from the
+      // FINAL payload entry set, so they replace on overwrite and clear
+      // with the entries they describe by construction (and a stale
+      // template left by a mixed-version writer heals on the next persist
+      // here).
+      if (isLabelMetadataTemplateEntry(entry)) {
+        continue;
+      }
       // RUNTIME-MINTED shape-class (existence) entries survive every
       // overwrite of a still-existing path (freeze-at-creation): not the
       // flow-clear, not a link write replacing the slot, not a declared
@@ -5607,6 +5621,23 @@ export const prepareBoundaryCommit = (
         );
       }
     }
+
+    // Stage B (template-population §5/§6; spec §4.6.4.2): derive the
+    // label-metadata population templates from the FINAL payload entries —
+    // after every clear/carry/mint AND after the Stage-1 representation
+    // transform above, so template label content is byte-identical to the
+    // payload labels it describes (the transform applies to templates by
+    // construction: they copy post-transform bytes — one transform, both
+    // sinks). Deterministic per payload-entry set, so the SC-11 canonical
+    // comparison below still skips unchanged recomputes; coalescing next
+    // joins the per-entry population labels of same-path payload entries
+    // (the C2 value/shape split) into one per-path template, which is what
+    // the per-path §4.6.4.1 metadata addressing requires. No new dial: the
+    // templates describe whatever payload entries the existing dials
+    // persisted.
+    persistedLabelEntries.push(
+      ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
+    );
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 
