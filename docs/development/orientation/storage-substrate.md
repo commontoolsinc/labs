@@ -70,10 +70,10 @@ Two pieces of `data-model` are worth knowing by name because they are where
 future migrations will land:
 
 - **Content addressing** (`value-hash.ts`, `schema-hash.ts`). `hashOf` feeds
-  type-tagged bytes into an incremental SHA-256 (from `content-hash`) with
-  length and index prefixes (from `leb128`), so structurally different values
-  cannot collide and structurally equal values hash identically. Schemas are
-  interned and hash-cached.
+  bytes into an incremental SHA-256 (from `content-hash`) using per-value type
+  tags, `leb128` length prefixes, `TAG_END` terminators, and UTF-8-sorted object
+  keys, so structurally different values cannot collide and structurally equal
+  values hash identically. Schemas are interned and hash-cached.
 - **The cell-representation bridge** (`cell-rep.ts`). This is the single file
   that decides how a reference to a cell is serialized — either a bare
   `FabricHash` (the "modern" representation) or a `{ "/": "tag:hash" }` envelope
@@ -169,10 +169,11 @@ sequenceDiagram
     alt a read changed underneath
         Engine-->>Client: ConflictError (client retries)
     else still valid
-        Engine->>DB: append revision rows, update head, write commit row
+        Engine->>DB: write commit row, append revision rows, update head (one atomic tx)
         Engine->>DB: COMMIT
         Engine-->>Server: ok
-        Server-->>Client: pushed SessionEffect to every watcher whose query intersects
+        Server-->>Client: commit accepted
+        Note over Server: separately, a batched timer pushes session/effect to watcher<br/>sessions (usually other connections) whose tracked ids intersect the change
     end
 ```
 
@@ -215,7 +216,7 @@ flowchart LR
     space["space access granted"]
 
     id --> did
-    id --> sign --> verify --> reg --> acl --> space
+    id --> sign --> verify --> acl --> reg --> space
 ```
 
 A subtlety worth flagging: a space's DID can itself be a derived keypair.
@@ -234,11 +235,14 @@ kinds of thing.
   document/operation vocabulary (`EntityDocument`, `Operation`, `ClientCommit`,
   `GraphQuery`). New work is v2; the fact model persists and confuses newcomers.
   `lib.ts` is the legacy entry point.
-- **The `memory ↔ runner` cycle is one import** but architecturally real:
-  `v2/query.ts` imports `@commonfabric/runner/traverse` because answering a
+- **The `memory ↔ runner` cycle is narrow but deeper than the counts suggest.**
+  `v2/query.ts` forms the cycle with one package-alias import
+  (`@commonfabric/runner/traverse`), but the same file also reaches into runner's
+  internals through three relative-path imports (`ContextualFlowControl`, the
+  extended storage transaction, and the builder `JSONSchema` type). Answering a
   schema-aware graph query and evaluating per-row CFC labels needs the runtime's
-  traversal logic. This is the seam to know if you ever try to extract `memory`
-  as a standalone library.
+  traversal and CFC logic. This is the seam to know if you ever try to extract
+  `memory` as a standalone library.
 - **The SQL guard is intentionally conservative** (`v2/sqlite/guard.ts`). It
   rejects some valid statements (single-statement only, no PRAGMA/ATTACH, no
   references to core engine tables) to keep the attack surface small.

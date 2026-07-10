@@ -119,7 +119,7 @@ flowchart TB
     subgraph io["read vs write are asymmetric"]
         read["read(): pure memory, slice the in-memory tree (no RPC)"]
         write["write(): buffer, return success immediately"]
-        flush["flush/fsync: parse buffer → CellBridge.writeValue → cell.set()"]
+        flush["flush (on close) / release: parse buffer → CellBridge.writeValue → cell.set()"]
         inval["the cell change fires a subscription → rebuild subtree → invalidate kernel cache"]
         write --> flush --> inval
     end

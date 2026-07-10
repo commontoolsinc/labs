@@ -100,7 +100,7 @@ flowchart TB
     ports["read base ports from ports.json, apply PORT_OFFSET"]
     shell["start shell dev server (deno task dev-local)<br/>wait for 'Dev server listening' + HTTP 200"]
     toolshed["start toolshed (index.ts, --unstable-otel)<br/>wait for 'Server running' + /_health 200"]
-    bg["optional --bg-updater:<br/>start background-piece-service (polls every 60s)"]
+    bg["optional --bg-updater:<br/>start background-piece-service (reruns each piece every 60s)"]
 
     ports --> shell --> toolshed --> bg
 ```

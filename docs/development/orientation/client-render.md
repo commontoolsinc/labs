@@ -68,19 +68,23 @@ flowchart TB
 
 Two facts that catch people out:
 
-- **VNodes are plain serializable JSON.** They contain no functions. Event
-  handlers cross the worker/main boundary as integer `handlerId`s, not closures.
-  This is why the reconciler can live in a worker at all.
+- **Cell-backed VNodes are plain serializable JSON.** Event handlers cross the
+  worker/main boundary as integer `handlerId`s, not closures (the reconciler will
+  accept a raw function prop and register it to a `handlerId`, so a VNode can hold
+  a function transiently, but nothing function-valued crosses the wire). This is
+  why the reconciler can live in a worker at all.
 - **The reconciler enforces CFC render policy.** It can replace blocked content
   with a `cf-cfc-blocked` placeholder. If UI content "disappears," suspect the
   flow-control policy before suspecting a render bug.
 
 On the component side, a `cf-*` element binds to a cell through a
-`CellController` (a Lit reactive controller). The controller subscribes via
-`.sink()` and calls `requestUpdate()` on change; writing back goes through a
-transaction (`runtime.edit()` → `cell.withTx(tx).set(v)` → `tx.commit()`), with
-debounce and blur timing for inputs. The runtime and the current space arrive
-through Lit context (`runtimeContext`, `spaceContext`).
+`CellController` (a Lit reactive controller). The controller subscribes via the
+main-thread `CellHandle.subscribe()` and calls `requestUpdate()` on change;
+writing back calls `cellHandle.set(v)`, which sends a `CellSet` request over IPC
+to the worker, and the worker applies it in a transaction
+(`runtime.edit()` → `withTx(tx).set(v)` → `tx.commit()`). Debounce and blur
+timing for inputs live on the controller. The runtime and the current space
+arrive through Lit context (`runtimeContext`, `spaceContext`).
 
 ---
 

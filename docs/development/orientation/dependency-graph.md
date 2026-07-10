@@ -10,7 +10,7 @@ two passes is itself informative and is noted where it changes the story.
 
 Some apparent edges were discarded after inspection because they were comments
 or strings rather than real imports: `api → runner`, `api → memory`,
-`runner → piece`, `home-schemas → runner`, `html → ui`, and
+`api → utils`, `runner → piece`, `home-schemas → runner`, `html → ui`, and
 `state-inspector → runner` are all mentions in comments, not import statements.
 They are not drawn. (The `runner → piece` "edge" is in fact a comment that reads
 "Avoid importing from `@commonfabric/piece` to prevent circular deps in tests" —
@@ -21,8 +21,10 @@ the absence is deliberate.)
 ## The spine: `runner` is the hub, four leaves are the floor
 
 The graph is not a balanced tree. It is one very large hub (`runner`) sitting on
-a small floor of leaf libraries (`utils`, `data-model`, `api`, `identity`,
-`memory`), with everything else arranged around the hub. Edge labels are the
+a small floor of foundation libraries (`utils`, `data-model`, `api`, `identity`,
+`memory`), with everything else arranged around the hub. Of those, `utils`,
+`api`, and `identity` are true leaves (no outgoing package edges); `data-model`
+and `memory` are not — they sit on the leaves below them. Edge labels are the
 number of importing references in production code, so they show where the heavy
 coupling is.
 
@@ -51,7 +53,6 @@ flowchart TD
     datamodel -->|1| leb128
     memory -->|18| datamodel
     memory -->|7| api
-    api -->|3| utils
     identity -->|2| utils
     contenthash -->|2| utils
     jsc -->|1| schemagen["schema-generator"]
@@ -66,9 +67,10 @@ Three things to take from this:
 - **`runner` is the gravity well.** It pulls in `data-model` 150 times,
   `utils` 149 times, and `memory` 72 times in production code alone. Any change
   to `data-model` or `memory` ripples straight into the runtime.
-- **`api` is mostly types.** It sits near the floor because it is the authoring
-  surface — almost entirely TypeScript declarations that author code is compiled
-  against.
+- **`api` is mostly types, and a pure leaf.** It sits at the very floor because
+  it is the authoring surface — almost entirely TypeScript declarations that
+  author code is compiled against — and it has no outgoing package imports at all
+  (its only `@commonfabric/utils` references are "duplicated from…" comments).
 
 ---
 
@@ -151,7 +153,7 @@ flowchart LR
 | Cycle | Edge into the lower layer | The single seam to know about |
 |---|---|---|
 | `runner ↔ html` | `runner/src/builder` and `builtins/wish.ts` import `h()` to build UI nodes | The builder produces view nodes, so the UI primitive leaks into the foundation |
-| `runner ↔ memory` | `memory/v2/query.ts` imports `@commonfabric/runner/traverse` | One import. Memory needs the runtime's schema traversal to answer graph queries and evaluate per-row CFC labels |
+| `runner ↔ memory` | `memory/v2/query.ts` imports `@commonfabric/runner/traverse` | The one cycle-forming package edge; the same file also pulls runner's CFC, storage-transaction, and builder-type internals through relative paths. Memory needs the runtime's schema traversal and CFC to answer graph queries and evaluate per-row labels |
 | `runner ↔ llm` | `llm/src/prompts/json-import.ts` imports `createJsonSchema` | One import. A prompt helper reaches up into the runtime |
 | `ui ↔ shell` | `ui` imports `@commonfabric/shell/shared` in four `cf-*` components | Narrowed to URL/navigation helpers, but real |
 
@@ -223,9 +225,10 @@ folder (it now names the real `packages/patterns/deprecated`); the dangling
 the root `deno.jsonc` lint config no longer excludes a `patterns-saves-backup`
 directory that never existed. The genuinely still-live ones:
 
-- **Two storage vocabularies.** `memory` has a legacy "fact" model
-  (`assert`/`retract`, defined in `interface.ts` and `fact.ts` and re-exported by
-  the `lib.ts` barrel) and the current "v2" document/operation model (in `v2/`).
+- **Two storage vocabularies.** `memory` has a legacy "fact" model — the
+  `assert`/`retract` constructors in `fact.ts` (their types in `interface.ts`),
+  reached through the `@commonfabric/memory/fact` subpath that runner's storage
+  layer still imports — and the current "v2" document/operation model (in `v2/`).
   New work is v2. The fact vocabulary is still exported and still confuses
   people. See the [storage page](storage-substrate.md).
 - **`cf-harness` is misleadingly named.** It is not a test harness for the
@@ -240,7 +243,7 @@ For completeness, every production import edge with its reference count. "Prod"
 means test, fixture, integration, and benchmark files were excluded.
 
 ```
-api               → memory(comment only), runner(comment only), utils(3)
+api               → memory(comment only), runner(comment only), utils(comment only)
 background-piece  → identity(9), piece(2), runner(15), utils(3)
 cf-harness        → api(18), llm(4), runner(28), utils(2)
 cli               → api(5), data-model(3), fuse(1), html(1), identity(9),

@@ -155,12 +155,12 @@ writes.
 flowchart TB
     cell["Cell"]
     tx["V2StorageTransaction (journaled reads/writes)"]
-    replica["SpaceReplica / Provider (local doc cache)"]
-    mgr["StorageManager"]
+    mgr["StorageManager (owns the per-space providers)"]
+    replica["SpaceReplica / Provider (local doc cache + its own session)"]
     ws["v2-remote-session (WebSocket)"]
     host["remote memory host"]
 
-    cell --> tx --> replica --> mgr --> ws --> host
+    cell --> tx --> mgr --> replica --> ws --> host
 
     subgraph sub["Query subscription path"]
         sel["selector-tracker (dedup schema+path selectors)"]

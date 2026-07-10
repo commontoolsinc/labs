@@ -39,8 +39,9 @@ flowchart LR
 - **`js-compiler`** wraps `npm:typescript` and runs it entirely in memory (no
   disk, no network). It type-checks, runs a caller-supplied list of transformers
   during emit, and produces one CommonJS module body plus a source map per
-  source file. It does not itself know about Common Fabric — the transformers
-  are injected by the caller.
+  source file. It carries none of the Common Fabric transformer logic — that
+  pipeline is injected by the caller (its only Common-Fabric-specific detail is
+  the default JSX factory, `h` / `__cfHelpers.h.fragment`).
 - **`ts-transformers`** is the TypeScript AST transformer pipeline. It rewrites
   natural reactive TypeScript into explicit, schema-annotated runtime form.
 - **`schema-generator`** walks a TypeScript type into a JSON Schema object,
@@ -73,9 +74,11 @@ flowchart TB
 ## The transformer pipeline: 20 stages in three phases
 
 The pipeline is an ordered list (`cf-pipeline.ts`, `CFC_TRANSFORMER_STAGE_SPECS`).
-The ordering matters: validation runs first so illegal code is rejected before
-anything is rewritten; structural lowering runs in the middle; schema work runs
-late, because schema generation reads synthetic type nodes that an earlier stage
+The ordering matters: most validation runs first so illegal code is rejected
+before anything is rewritten (one write-authorization check runs mid-pipeline,
+because it inspects the lowered schema calls); structural lowering runs in the
+middle; schema work runs late, because schema generation reads synthetic type
+nodes that an earlier stage
 injected.
 
 ```mermaid
@@ -194,9 +197,10 @@ generator walks the node instead of the type.
   goldens (`UPDATE_GOLDENS=1`) and reviewing large diffs. The fast-iteration path
   is `FIXTURE=<name>`.
 - **`api` declarations must stay in sync by hand.** `api/index.ts` is
-  `declare const` / ambient declarations that must match the real
-  implementations in `runner`. There is an explicit sync note at the top of the
-  file. Changing a builder signature means editing it in two places.
+  `declare const` / ambient declarations that must match implementations
+  elsewhere — the builder vocabulary against `runner/src/builder`, and (per an
+  explicit sync note at the top of the file) the Fabric value types against
+  `data-model`. Changing a signature means editing it in two places.
 - **The biggest files are the densest part of the system.**
   `schema-injection.ts` (4123 lines) and `type-shrinking.ts` (3285) are the
   least approachable region; budget accordingly.

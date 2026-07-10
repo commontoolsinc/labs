@@ -70,10 +70,11 @@ flowchart TB
 ```
 
 The memory WebSocket handler is the most intricate file in `toolshed`. It
-upgrades the request, buffers text frames until it can recognize a valid first
-message of the memory protocol, then hands the socket to the in-process memory
-server and bridges frames in both directions. This is the channel `shell`, the
-`cli`, and `background-piece-service` all use for durable state.
+upgrades the request, takes the first text frame as the candidate handshake and
+validates it against the memory protocol (buffering any later frames until the
+handoff so none are lost), then hands the socket to the in-process memory server
+and bridges frames in both directions. This is the channel `shell`, the `cli`,
+and `background-piece-service` all use for durable state.
 
 ### The route groups
 
@@ -118,9 +119,10 @@ flowchart LR
     stream["AI SDK streamText()"]
     prov["provider (Anthropic / OpenAI / Groq / Vertex / gateway)"]
     ndjson["NDJSON event stream:<br/>text-delta / tool-call / tool-result / finish"]
+    cached["return cached final message<br/>as a single JSON body"]
 
     client --> post --> cache
-    cache -->|hit| ndjson
+    cache -->|hit| cached --> client
     cache -->|miss| find --> stream --> prov --> ndjson --> client
 ```
 
