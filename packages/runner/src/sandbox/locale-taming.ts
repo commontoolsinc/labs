@@ -58,12 +58,19 @@ export const pinLocales = (locales: Locales): unknown[] | string => {
   return [locales, DEFAULT_LOCALE];
 };
 
-// An omitted `options.timeZone` becomes UTC — never the host timezone.
+// An omitted `options.timeZone` becomes UTC — never the host timezone. That
+// is the ONLY path to the host zone: unlike locale resolution (which silently
+// falls back, see pinLocales), ECMA-402 throws RangeError on any invalid
+// timeZone value rather than falling back. So explicit values — including
+// null, which natively throws — pass through untouched; only `undefined`
+// (omitted) is pinned.
 const pinDateOptions = (
   options: Intl.DateTimeFormatOptions | undefined,
 ): Intl.DateTimeFormatOptions => ({
   ...options,
-  timeZone: options?.timeZone ?? DEFAULT_TIME_ZONE,
+  timeZone: options?.timeZone === undefined
+    ? DEFAULT_TIME_ZONE
+    : options.timeZone,
 });
 
 type AnyLocaleMethod = (

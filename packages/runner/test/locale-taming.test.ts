@@ -137,6 +137,29 @@ describe("sanitized locale methods under SES lockdown", () => {
         RangeError,
       );
     });
+
+    it("timeZone has no analogous fallback hole: invalid values throw, they never resolve to the host zone", () => {
+      // The ECMA-402 asymmetry: locale resolution silently falls back (the
+      // leak pinLocales closes); timeZone validation throws. Only omission
+      // (undefined) reaches a default — and the wrapper pins that to UTC.
+      expect(() =>
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", { timeZone: "Not/AZone" })`,
+        )
+      ).toThrow(RangeError);
+      // undefined = omitted → pinned UTC; null is an explicit invalid value
+      // and throws natively — the wrapper preserves that.
+      expect(
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", { timeZone: undefined })`,
+        ),
+      ).toBe("7/11/2025");
+      expect(() =>
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", { timeZone: null })`,
+        )
+      ).toThrow(RangeError);
+    });
   });
 
   describe("delegating methods", () => {
