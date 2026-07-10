@@ -499,8 +499,8 @@ scope may rewrite ONLY that principal's home clause(s), the mechanical form
 of §5.3.3's clause-local declassification authority (§4.4.5's informative
 pseudocode selects target clauses purely by pattern match and would
 otherwise let a policy referenced in clause k widen sibling clause j: a
-cross-principal implicit release, invariant 11/§3.1.8(3)). Runner-side, in
-the PR introducing this entry: the surviving non-storage half of B2b
+cross-principal implicit release, invariant 11/§3.1.8(3)). Runner-side,
+labs#4652: the surviving non-storage half of B2b
 shipped against the deployment snapshot — `PolicyRecord.selection:
 "ambient" | "referenced"` (`policy.ts`, digest projection v3), hash-bound
 fail-closed ref matching per §4.4.2/§4.4.3, the home-clause gate with
