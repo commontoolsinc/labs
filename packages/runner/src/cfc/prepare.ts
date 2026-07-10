@@ -232,12 +232,14 @@ const effectiveReadLabel = (
     consumes: ReadClassSelection;
     /**
      * Entries excluded from this read's consumption on top of class
-     * selection. Sole current use: the §8.12.8 replace-from-criteria
-     * readback exclusion in `deriveFlowJoin` — a transaction re-deriving a
-     * container's membership stamps must not consume the very entries it
-     * replaces (see `ownRestampContainerPaths`). Absent on every other
-     * call site (notably the `"all"`-selection write gate, which stays
-     * over-inclusive by design).
+     * selection. Sole current user is `deriveFlowJoin`'s pair of template
+     * machinery boundaries: the §8.12.8 replace-from-criteria readback
+     * exclusion (a transaction re-deriving a container's membership stamps
+     * must not consume the very entries it replaces — see
+     * `ownRestampContainerPaths`) and the C0 §6.1 row-4 rule extended to
+     * plain reads (trace-covered resolution machinery skips `*`
+     * templates). Absent on every other call site (notably the
+     * `"all"`-selection write gate, which stays over-inclusive by design).
      */
     excludeEntry?: (entry: LabelMapEntry) => boolean;
   },
@@ -4948,11 +4950,27 @@ export const prepareBoundaryCommit = (
       // under any written path are dropped (fresh ones for this tx are
       // appended below / by the link machinery). Declared and legacy
       // entries are never cleared here.
+      //
+      // `*`-path templates clear only under a write that covers their
+      // CONTAINER (template-population §3.1 "cleared on covering writes"):
+      // `isPrefix`'s bidirectional wildcard would let a bare SLOT write
+      // (["1"]) "cover" the ["*"] template — but a slot write replaces one
+      // child, not the membership, and clearing there (with no re-mint;
+      // slot writes stamp nothing) would open an unlabeled window until
+      // the next declared reconcile. The container-anchored enumerate
+      // stamp survives slot writes for exactly the same reason (exact-path
+      // never matches a deeper write), so the twins match its discipline.
+      const clearProbePath = isRuntimeMintedTemplate({
+          origin: entry.origin,
+          path: entryPath,
+        }) && entryPath[entryPath.length - 1] === "*"
+        ? entryPath.slice(0, -1)
+        : entryPath;
       if (
         flowPersist &&
         (entry.origin === "derived" || entry.origin === "link" ||
           entry.origin === "structure") &&
-        flowWrittenPaths.some((written) => isPrefix(written, entryPath))
+        flowWrittenPaths.some((written) => isPrefix(written, clearProbePath))
       ) {
         flowCleared = true;
         if (

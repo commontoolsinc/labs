@@ -385,6 +385,43 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     expect(frozen[0].label.confidentiality).toEqual(["creation-atom"]);
   });
 
+  // A bare SLOT write does not clear the container's templates: it
+  // replaces one child, not the membership, and slot writes mint nothing —
+  // clearing would open an unlabeled window until the next declared
+  // reconcile. The container-anchored enumerate stamp already survives
+  // slot writes (exact-path never matches a deeper write); the twins
+  // follow the same discipline. Only a write covering the CONTAINER
+  // clears.
+  it("slot writes leave the container's templates in place", async () => {
+    const rt = makeRuntime();
+    await seedDoc(rt, "tp-el-sw", { n: 1 }, []);
+    const otherId = await seedDoc(rt, "tp-el-sw-2", { n: 2 }, []);
+    const criteriaId = await seedDoc(rt, "tp-criteria-sw", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildList(rt, "tp-list-sw", criteriaId, ["tp-el-sw"]);
+
+    // Clean tx replaces slot 0 with a link to another doc — no declaration,
+    // no covering write.
+    const slotWrite = rt.edit();
+    slotWrite.writeOrThrow(
+      { space, scope: "space", id: uri(listId), path: ["value", "0"] },
+      { "/": { "link@1": { id: otherId, path: [] } } },
+    );
+    slotWrite.prepareCfc();
+    expect((await slotWrite.commit()).ok).toBeDefined();
+
+    const templates = entriesOf(listId).filter(
+      (e) => e.origin === "structure" && e.path.length === 1,
+    );
+    expect(templates.map((e) => e.observes).sort()).toEqual(
+      ["followRef", "shape", "value"],
+    );
+    for (const entry of templates) {
+      expect(entry.label.confidentiality).toEqual(["memb-secret"]);
+    }
+  });
+
   // SC-11 with templates present: an identical re-declaration (same
   // criteria, same members, no value write) re-derives byte-identical
   // metadata and must not write the ["cfc"] envelope at all.
