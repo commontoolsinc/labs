@@ -74,8 +74,6 @@ export interface WatchMutationResult {
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_JITTER_RATIO = 0.2;
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 const reconnectDelayMs = (attempt: number): number => {
   const baseDelay = Math.min(
@@ -110,6 +108,7 @@ export class Client {
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
+  #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
   #closed = false;
 
@@ -136,6 +135,7 @@ export class Client {
   async close(): Promise<void> {
     this.#closed = true;
     this.#connected = false;
+    this.#cancelReconnectDelay?.();
     this.rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
     this.#spaces.clear();
@@ -409,14 +409,26 @@ export class Client {
     }
   }
 
-  private async waitForReconnectDelay(delayMs: number): Promise<void> {
-    for (
-      let remaining = delayMs;
-      remaining > 0 && !this.#closed;
-      remaining -= RECONNECT_BASE_DELAY_MS
-    ) {
-      await sleep(Math.min(RECONNECT_BASE_DELAY_MS, remaining));
+  // The reconnect attempt is event-driven: `hello()` awaits the transport's
+  // real open/error/close. The pause between a failed attempt and the next
+  // runs on a timer, since a returning server raises no event to await. The
+  // delay bounds the retry rate, and `close()` ends it through the stored
+  // canceller.
+  private waitForReconnectDelay(delayMs: number): Promise<void> {
+    if (this.#closed) {
+      return Promise.resolve();
     }
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.#cancelReconnectDelay = null;
+        resolve();
+      }, delayMs);
+      this.#cancelReconnectDelay = () => {
+        clearTimeout(timer);
+        this.#cancelReconnectDelay = null;
+        resolve();
+      };
+    });
   }
 
   private rejectPending(error: Error): void {
