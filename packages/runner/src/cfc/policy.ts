@@ -7,12 +7,18 @@ import type { AtomPattern } from "./atom-pattern.ts";
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of
  * docs/history/plans/cfc-future-work-implementation.md §3).
  *
- * This is stage B2a: a deployment-configured, frozen policy set supplied via
- * `RuntimeOptions.cfcPolicyRecords` — the degenerate single-policy-root case
- * of spec §4.4.1's content-addressed policy storage. Rule scoping happens
- * through each rule's explicit `appliesTo` pattern rather than through
- * label-carried `Policy(...)` principals; space-hosted, hash-bound policy
- * docs (B2b) arrive later and reuse these record shapes verbatim.
+ * A deployment-configured, frozen policy set supplied via
+ * `RuntimeOptions.cfcPolicyRecords` — and, per the revised B2b decision,
+ * the ENDURING record store: remote attestation covers deployment config
+ * for security-sensitive inputs like this one, so attested federated peers
+ * provably evaluate the same record set and the originally planned
+ * space-hosted policy documents are not needed for federation soundness
+ * (owner decision 2026-07-09; docs/specs/cfc-spec-changes.md SC-27). Rule
+ * scoping is per record: `ambient` records apply through their rules'
+ * `appliesTo` patterns to every label (spec §4.4.1's deployment/system
+ * policy root as a discovery source); `referenced` records are selected by
+ * label-carried, hash-bound `Policy(...)`/`Context(...)` principals and
+ * rewrite only their home clauses (CT-1874; `exchange-eval.ts`).
  */
 
 /**
