@@ -592,8 +592,20 @@ Consequences that fall out of the architecture:
 - **Read isolation is enforced, not asserted**: per-element evaluation runs
   against a scoped view where a cross-element read is an error. A deliberately
   de-isolated interpreter must fail the pointwise oracle (a permanent CI gate).
-- **Per-segment ≈ legacy granularity**: legacy is per-node/per-tx, so a segment
-  recovers legacy precision while collapsing nodes — parity, not improvement.
+- **Per-segment label granularity is COARSER than legacy (known gap).** Scope
+  is attributed per op (§12, the `runScoped` brackets), but the CFC flow-join
+  is one `deriveFlowJoin(tx)` per segment transaction, so a segment that
+  collapses two *independent* mixed-label ops stamps **both** outputs with the
+  join. Legacy runs each in its own tx and keeps them separate
+  (`{fromSecret:[SECRET], fromPublic:[PUBLIC]}` legacy → `[PUBLIC,SECRET]` on
+  both, flag-on). This is **fail-safe** (over-taint, never under-taint — no
+  leak) but a real **precision regression**: under render-ceiling enforcement
+  an over-tainted public output over-blocks. Zero impact flag-off; a
+  **default-on blocker** for mixed-label patterns. The fix is per-op label
+  attribution mirroring the per-op scope work (segment records per-op reads;
+  `prepare` stamps each write-path with its op's read-join) — tracked, not yet
+  built. Pinned by `control-emission`/label characterization tests in the
+  fail-safe direction.
 - **Boundary read-through by construction**: because the IR carries
   `effect.inputs`/`writeTargets`, every boundary-input document is produced by a
   labelled read-through as a property of emission — no "remember to extend
