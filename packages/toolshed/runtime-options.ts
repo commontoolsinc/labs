@@ -47,14 +47,13 @@ export function createToolshedRuntime(
   config: Pick<ToolshedEnv, "MEMORY_URL" | "API_URL"> & OtelEnv,
   storageManager: RuntimeOptions["storageManager"],
   envGet: EnvReader = Deno.env.get,
-): { runtime: Runtime; otelBridgeAttached: Promise<boolean> } {
+): Runtime {
   const runtime = new Runtime(
     toolshedRuntimeOptions(config, storageManager, envGet),
   );
-  return {
-    runtime,
-    otelBridgeAttached: attachRuntimeOtelBridge(runtime, config),
-  };
+  // Fire-and-forget; the attach itself is exported and unit-tested.
+  void attachRuntimeOtelBridge(runtime, config);
+  return runtime;
 }
 
 /**

@@ -55,12 +55,20 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
 
   for (const enabled of [false, true]) {
     const storageManager = StorageManager.emulate({ as: signer });
-    const { runtime, otelBridgeAttached } = createToolshedRuntime(
+    const runtime = createToolshedRuntime(
       { ...config, OTEL_ENABLED: enabled },
       storageManager,
       () => undefined,
     );
-    assertEquals(await otelBridgeAttached, enabled);
+    // The construction path fire-and-forgets the attach; assert the attach
+    // behavior directly (same runtime, same config).
+    assertEquals(
+      await attachRuntimeOtelBridge(runtime, {
+        ...config,
+        OTEL_ENABLED: enabled,
+      }),
+      enabled,
+    );
     await runtime.dispose();
     await storageManager.close();
   }

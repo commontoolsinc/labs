@@ -24,7 +24,7 @@ const initializeRuntime = () => {
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
-    ).runtime;
+    );
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {
