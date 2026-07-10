@@ -65,13 +65,6 @@ export const pinLocales = (locales: Locales): unknown[] | string => {
   return [...Array.from(locales as ArrayLike<unknown>), DEFAULT_LOCALE];
 };
 
-const dataDescriptor = (value: unknown): PropertyDescriptor => ({
-  value,
-  enumerable: true,
-  writable: true,
-  configurable: true,
-});
-
 // Pin the Date `timeZone` so formatting can never fall through to the host
 // zone. Fail closed: only two shapes are accepted — `undefined` (omitted), and
 // a plain object whose `timeZone` is either absent or a plain OWN data
@@ -119,9 +112,12 @@ const pinDateOptions = (
   // resolve through the prototype chain.
   const timeZone = descriptor?.value;
   return Object.create(options, {
-    timeZone: dataDescriptor(
-      timeZone === undefined ? DEFAULT_TIME_ZONE : timeZone,
-    ),
+    timeZone: {
+      value: timeZone === undefined ? DEFAULT_TIME_ZONE : timeZone,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    },
   });
 };
 
