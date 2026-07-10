@@ -27,7 +27,7 @@ get_pids_on_port() {
             "$lsof_bin" -ti :"$port" -sTCP:LISTEN 2>/dev/null
         elif command -v ss &>/dev/null; then
             # Use awk instead of grep -P for portability
-            ss -tlnp "sport = :$port" 2>/dev/null | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | sort -u
+            ss -tlnp "sport = :$port" 2>/dev/null | awk -F'pid=' '{for(i=2;i<=NF;i++){split($i,a,","); print a[1]}}' | sort -u
         elif [[ "$(uname)" == "Linux" ]] && command -v fuser &>/dev/null; then
             # Linux only: macOS fuser has no port/tcp form and would print
             # an error instead of PIDs. fuser outputs to stderr, and
