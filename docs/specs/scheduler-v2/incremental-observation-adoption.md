@@ -86,6 +86,20 @@ read set does the rest. Adoption is allowed only when ALL hold:
   cannot check this itself — observations do not carry the writer's
   principal on the wire — which is acceptable on the same trust basis as
   the doc diff: the server already scopes every pushed byte per reader.
+- **C7 — no child-starting coordinators (`resumeMode: "always-run"`).** A
+  `map`/`filter`/`flatMap` coordinator's run is not a pure recomputation:
+  its reconcile is what (re)registers the per-element child actions. Its
+  outputs being in the store does NOT make adoption equivalent to running
+  it — adopting it clean skips the reconcile, so a remotely-appended row's
+  child action is never registered and that row's per-element reactivity is
+  dead. These actions register with `resumeMode: "always-run"` and are the
+  same ones `register()` refuses to rehydrate clean on reload
+  ([[per-doc-rehydration]] §3.3); live adoption refuses them symmetrically
+  (`Scheduler.alwaysRunActions`). This is a scheduler-side exclusion, not a
+  server gate: the coordinator's observation still ships and persists (it is
+  a legitimate `computation`), the receiver just always runs its own
+  reconcile. Only the three collection builtins produce `always-run`; a
+  future adoption entry point must consult the same set.
 
 What adoption does — the reload primitive, applied live
 (`rehydrateActionFromObservation`): restore the write surface, resubscribe

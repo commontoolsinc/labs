@@ -679,6 +679,60 @@ Deno.test("memory v2 scheduler observation row follows the latest writer session
   }
 });
 
+Deno.test("memory v2 identical observation-only coalesce keeps the row in the adoption window", async () => {
+  // Regression guard for the writer-session refresh. A semantic commit (data +
+  // observation bundled) sets the row's commit_seq; a later IDENTICAL
+  // observation-only re-run must not erase it. The adoption-window filter reads
+  // COALESCE(s.commit_seq, o.commit_seq), and observation-only commits null
+  // s.commit_seq — so o.commit_seq is the sole surviving carrier of the
+  // semantic seq. Clobbering it would drop the row from every
+  // sinceCommitSeq/throughCommitSeq window, i.e. from the live adoption
+  // fan-out (attachAdoptionObservations).
+  const { engine, path } = await createEngine();
+
+  try {
+    const semantic = applyCommit(engine, {
+      sessionId: "session:writer-a:sess-a",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:adoption-window-doc",
+          value: { value: { n: 1 } },
+        }],
+        schedulerObservation: observation,
+      },
+    });
+    const window = () =>
+      listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: 0,
+        throughCommitSeq: semantic.seq,
+      }).snapshots;
+    assertEquals(window().length, 1);
+
+    // Identical observation-only re-run from a different writer → coalesces.
+    applyCommit(engine, {
+      sessionId: "session:writer-b:sess-b",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: { ...observation, observedAtLocalSeq: 2 },
+      },
+    });
+    assertEquals(countRows(engine, "scheduler_observation"), 1);
+    // Still window-visible via the preserved o.commit_seq, AND re-attributed to
+    // the latest writer.
+    const after = window();
+    assertEquals(after.length, 1);
+    assertEquals(after[0]?.writerSessionId, "session:writer-b:sess-b");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 rejects mismatched observation-only commit replay", async () => {
   const { engine, path } = await createEngine();
 

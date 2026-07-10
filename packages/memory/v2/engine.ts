@@ -1631,16 +1631,7 @@ const upsertSchedulerObservationTransaction = (
       observation,
       payload,
     });
-  if (latest) {
-    // Refresh the row even when the payload is unchanged (a later identical
-    // observation from a different writer coalesces onto this row): the
-    // writer's session key gates reader-isolated adoption (C6,
-    // incremental-observation-adoption.md), so it must name the LATEST writer,
-    // not whoever created the row first. Otherwise a user-scope row would be
-    // offered to the wrong principal or withheld from the actual latest
-    // writer. commit_seq/observed_at_seq on the snapshot row are already kept
-    // current by upsertSchedulerSnapshot below; this keeps o.session_id (the
-    // adoption gate's source) and o.commit_seq consistent too.
+  if (latest && payloadChanged) {
     updateSchedulerObservationRow(engine, {
       observationId,
       commitSeq: options.commitSeq ?? null,
@@ -1648,6 +1639,25 @@ const upsertSchedulerObservationTransaction = (
       sessionId: options.sessionId ?? null,
       observation,
       payload,
+    });
+  } else if (latest) {
+    // Identical-payload coalesce (a later re-run of the same observation, and
+    // possibly from a DIFFERENT writer): refresh ONLY the writer session key.
+    // That key gates reader-isolated adoption (C6,
+    // incremental-observation-adoption.md), so it must name the LATEST writer,
+    // not whoever created the row first — else a user-scope row is offered to
+    // the wrong principal or withheld from the actual latest writer.
+    //
+    // Deliberately does NOT touch commit_seq: the adoption-window filter reads
+    // COALESCE(s.commit_seq, o.commit_seq), and upsertSchedulerSnapshot nulls
+    // s.commit_seq on observation-only commits, so o.commit_seq is the ONLY
+    // surviving carrier of the original semantic commit seq. Overwriting it
+    // with this (null) observation-only seq would drop the row from every
+    // sinceCommitSeq/throughCommitSeq window — silently killing the adoption
+    // this metadata is here to enable.
+    updateSchedulerObservationWriterSession(engine, {
+      observationId,
+      sessionId: options.sessionId ?? null,
     });
   }
 
@@ -2548,6 +2558,29 @@ function updateSchedulerObservationRow(
       action_id: options.observation.actionId,
       process_generation: options.observation.processGeneration,
       payload: options.payload,
+    });
+  });
+}
+
+// Refresh ONLY the writer session key of an existing observation row. Used on
+// the identical-payload coalesce path so the C6 adoption gate names the latest
+// writer WITHOUT disturbing commit_seq (the adoption-window carrier — see the
+// coalesce branch in upsertSchedulerObservationTransaction).
+function updateSchedulerObservationWriterSession(
+  engine: Engine,
+  options: {
+    observationId: number;
+    sessionId: string | null;
+  },
+): void {
+  runSchedulerObservationStatement("update observation writer session", () => {
+    engine.database.prepare(`
+      UPDATE scheduler_observation
+      SET session_id = :session_id
+      WHERE observation_id = :observation_id
+    `).run({
+      observation_id: options.observationId,
+      session_id: options.sessionId,
     });
   });
 }

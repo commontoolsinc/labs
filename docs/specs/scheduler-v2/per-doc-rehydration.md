@@ -175,6 +175,13 @@ change this contract, only who performs the attach.
 The `builtins/map.ts` resume comment becomes true again and is updated to
 say why the coordinator deliberately never rehydrates clean.
 
+The live-adoption path has the same hazard and the same guard: adopting a
+coordinator's remote observation clean would skip the reconcile exactly as
+rehydrating it on reload would. `Scheduler.adoptRemoteObservations` refuses
+`always-run` actions via an `alwaysRunActions` set populated at registration
+— the live twin of the `register()` skip above. See
+`incremental-observation-adoption.md` C7.
+
 ## 4. Degradation and edge cases
 
 - **Per-node degrade (I7)**: cache miss, fingerprint mismatch, listing
