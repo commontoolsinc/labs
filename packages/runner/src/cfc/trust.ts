@@ -11,9 +11,13 @@ import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
  * concrete principals to concepts, verifier delegations decide whose
  * statements an acting principal accepts, and concept edges order concepts.
  *
- * Mirrors B2a's posture: a deployment-configured, frozen trust set on
- * `RuntimeOptions` (signatures and space-hosted trust stores arrive with the
- * B2b-style storage work; deployment config is already operator-trusted).
+ * Mirrors the policy-record posture: a deployment-configured, frozen trust
+ * set on `RuntimeOptions` — and, per the revised B2b decision (SC-28 in
+ * docs/specs/cfc-spec-changes.md), the enduring form: remote attestation
+ * covers deployment config for security-sensitive inputs, so attested
+ * federated peers provably share it and space-hosted stores are not needed
+ * for federation soundness. Deployment config is already operator-trusted;
+ * signed, space-hosted trust statements would need their own motivation.
  *
  * Determinism contract (the folded-in "trust-snapshot determinism" item):
  * `conceptSatisfied` is a pure function of (frozen config, arguments) — no

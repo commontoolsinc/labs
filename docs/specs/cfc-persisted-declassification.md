@@ -54,9 +54,11 @@ Two artifacts of exactly this kind already exist or are specced:
   surface concept, share authority).
 
 A grant generalizes both: a content-addressed record at a reserved space-root
-path (the B2b storage discipline: "content-addressed records verified on
-read, read under `internalVerifierRead` so policy lookups never taint"),
-written only by a trusted policy writer, shaped
+path (the storage discipline the archived B2b plan first named:
+"content-addressed records verified on read, read under
+`internalVerifierRead` so policy lookups never taint" — grants are now its
+sole consumer, see the dependency note below), written only by a trusted
+policy writer, shaped
 
 ```ts
 // Shown for illustration only.
@@ -125,9 +127,11 @@ Properties inherited for free:
    invalidation discipline — a grant changed between prepare and commit
    invalidates).
 4. **Clause locality**: a grant releases only the clause(s) its consuming
-   rule matched — inherited from the evaluator, but the B2b home-clause
-   constraint (CT-1874) applies identically when grants are discovered from
-   label-carried atoms: a grant referenced from clause k must not widen
+   rule matched — inherited from the evaluator, where the CT-1874
+   home-clause gate is now SHIPPED for label-carried policy selection
+   (`referenced` records rewrite only the ref atom's home clauses,
+   `exchange-eval.ts`); it applies identically when grants are discovered
+   from label-carried atoms: a grant referenced from clause k must not widen
    clause j ≠ k.
 5. **Cross-space representation**: a grant names DIDs; when its *existence*
    crosses spaces it is label-adjacent metadata and the inv-12 classification
@@ -150,8 +154,8 @@ rewrite event:
 
 1. `policyState` guard kind + grant resolution in `exchange-eval.ts`
    (evaluator change is additive; guards default-absent).
-2. Reserved grant path + trusted-writer gate + §3.1.8 validation (storage
-   discipline shared with B2b's policy docs — build once).
+2. Reserved grant path + trusted-writer gate + §3.1.8 validation (the
+   reserved-path, content-addressed, verify-on-read storage discipline).
 3. Digest binding of consulted grants.
 4. ShareGrant end-to-end: share UI → (until §6 intents ship) a
    trusted-builtin writer verifying authority directly → grant → release on
@@ -175,11 +179,18 @@ rewrite event:
    the default — single-use grants are unsatisfiable everywhere, fail
    closed, never silently multi-use. Standing grants are flag-independent.
 
-Dependency note: (1)+(2) are B2b-adjacent — the same reserved-path,
-content-addressed, verify-on-read machinery. If B2b is built first, grants
-are a second record kind on the same substrate; if grants go first, B2b
-inherits the substrate. Either order, with CT-1874's home-clause gate in the
-shared selection layer.
+Dependency note (revised 2026-07-10): the B2b space-hosted policy-doc plan
+this substrate was to be shared with is DESCOPED — the owner decision is
+that remote attestation covers deployment config for security-sensitive
+inputs like `cfcPolicyRecords`, so attested federated peers provably
+evaluate the same record set and space-hosted policy documents are not
+needed for federation soundness (`cfc-spec-changes.md` SC-28). What B2b
+still meant beyond storage shipped against the deployment snapshot:
+label-carried `Policy(...)`/`Context(...)` selection with the CT-1874
+home-clause gate (`referenced` records in `policy.ts` /
+`exchange-eval.ts`). Grants therefore remain the ONE space-hosted policy
+state, and this section's reserved-path machinery has no second consumer
+planned.
 
 _Implementation note (2026-07-09): items 1–3 shipped in #4627. The
 `policyState` guard resolves through `ExchangeEvalContext.grantResolver`
@@ -278,9 +289,9 @@ already works today with no new machinery.
 ## 5. Entry criteria
 
 Build **grants** when a product surface needs durable sharing (the share UI,
-group-membership beyond space ACLs) — B2b-adjacent, no blockers beyond the
-evaluator extension. For the **rewrite event**, the dependency picture at
-mechanism level (2026-07-09):
+group-membership beyond space ACLs) — no blockers; the evaluator extension
+and storage substrate shipped in #4627. For the **rewrite event**, the
+dependency picture at mechanism level (2026-07-09):
 
 - **Exists**: single-use consumption — `experimental.commitPreconditions`
   receipts (durable event id, event-causal record ids, create-only
