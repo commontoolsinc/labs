@@ -466,10 +466,22 @@ const logVisit = handler<LogVisitEvent, {
   myName: NameCell;
   adminName: NameCell;
   visitDate: NameCell;
+  today: TodayCell;
+  loadedAt: number;
 }>(
   (
     { optionId, title, wentAt },
-    { visits, options, votes, users, myName, adminName, visitDate },
+    {
+      visits,
+      options,
+      votes,
+      users,
+      myName,
+      adminName,
+      visitDate,
+      today,
+      loadedAt,
+    },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -496,8 +508,12 @@ const logVisit = handler<LogVisitEvent, {
     // Snapshot the current live votes, embedded in the entry. Denormalize the
     // option title (options can be removed later; the title is the record).
     // Only today's votes are "current opinion": stale votes are hidden from
-    // the UI, so they stay out of the snapshot too.
-    const nowDay = dayKeyOf(safeDateNow());
+    // the UI, so they stay out of the snapshot too. Same day source as the
+    // UI's `todaysVotes` (`today` override, else this session's load time) —
+    // the snapshot must capture what the host is looking at, not the wall
+    // clock's day, or a tab crossing midnight logs an empty new-day snapshot
+    // of a board still showing yesterday's votes.
+    const nowDay = dayKeyOf(today.get() || loadedAt);
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
     for (const v of votes.get()) {
@@ -755,6 +771,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myName,
       adminName,
       visitDate,
+      today,
+      loadedAt,
     });
     const boundRemoveHistoryEntry = removeHistoryEntry({
       visits,
