@@ -673,6 +673,69 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
+    it("one resolver never serves a consuming resolution to an observing query (memo isolation)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        const fields = { owner: signer.did(), resource: PHOTO_REF };
+        // Consuming first (facts memoized under the consuming key)…
+        expect(
+          resolver({ kind: "ShareGrant", fields, consumption: "consuming" })
+            .length,
+        ).toBe(1);
+        // …must not leak to an observing query on the SAME instance.
+        expect(resolver({ kind: "ShareGrant", fields })).toEqual([]);
+        expect(
+          resolver({ kind: "ShareGrant", fields, consumption: "observing" }),
+        ).toEqual([]);
+        tx.abort();
+      });
+    });
+
+    it("fails closed when the storage cannot enforce create-only (no markCreateOnly)", async () => {
+      // A hand-built transaction without markCreateOnly (the optional
+      // interface member): the claim's exactly-once witness cannot be
+      // enforced, so staging must fail closed with a reason — never a
+      // silently unguarded receipt write. The ambient flag is forced on so
+      // the resolver reaches the claim path at all.
+      const { setCommitPreconditionsConfig, resetCommitPreconditionsConfig } =
+        await import("@commonfabric/memory/v2");
+      setCommitPreconditionsConfig(true);
+      try {
+        const writes: unknown[] = [];
+        const grantValue = prepareCfcGrantWrite(
+          { ...baseInput, singleUse: true },
+          ALICE,
+        );
+        const stubTx = {
+          readOrThrow: (address: { id: string }) =>
+            address.id === grantValue.id ? grantValue.value : undefined,
+          recordCfcConsultedGrant: () => {},
+          noteCfcDiagnostic: () => {},
+          writeOrThrow: (address: unknown, value: unknown) =>
+            writes.push([address, value]),
+          // no markCreateOnly
+        } as unknown as Parameters<typeof createTxCfcGrantResolver>[0];
+        const resolver = createTxCfcGrantResolver(stubTx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: ALICE, resource: PHOTO_REF },
+            consumption: "consuming",
+          }).length,
+        ).toBe(1);
+        const failures = flushCfcGrantConsumptionClaims(stubTx);
+        expect(failures.length).toBe(1);
+        expect(failures[0]).toContain("markCreateOnly");
+        // Mark-first discipline: the refused mark left no unguarded receipt
+        // value in the journal.
+        expect(writes).toEqual([]);
+      } finally {
+        resetCommitPreconditionsConfig();
+      }
+    });
+
     it("fails closed when a claim cannot be staged (cross-space write isolation)", async () => {
       await withRuntime({}, async (runtime) => {
         await writeGrant(runtime);
