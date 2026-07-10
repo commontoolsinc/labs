@@ -424,10 +424,32 @@ describe("scheduler.run.complete / scheduler.settle / storage join keys", () => 
     }));
     expect(t.spans[0].attributes["commit.local_seq"]).toBe(7);
     expect(t.spans[0].attributes["space.did"]).toBe("did:key:zX");
-    bridge.handleMarker(
-      marker({ id: "push:did:key:zX:7", type: "storage.push.complete" }),
-    );
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:7",
+      type: "storage.push.complete",
+      sessionId: "session-a",
+    }));
+    expect(t.spans[0].setAttributes["session.id"]).toBe("session-a");
     expect(t.spans[0].ended).toBe(true);
+
+    // Error half: the rejected-commit span keeps the same join keys and
+    // carries the rejection name.
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:8",
+      type: "storage.push.start",
+      operation: "transact",
+      localSeq: 8,
+      spaceDid: "did:key:zX",
+    }));
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:8",
+      type: "storage.push.error",
+      sessionId: "session-a",
+      error: "ConflictError",
+    }));
+    expect(t.spans[1].setAttributes["session.id"]).toBe("session-a");
+    expect(t.spans[1].status?.message).toBe("ConflictError");
+    expect(t.spans[1].ended).toBe(true);
   });
 });
 

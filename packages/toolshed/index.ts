@@ -1,9 +1,9 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import { Runtime } from "@commonfabric/runner";
+import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { toolshedRuntimeOptions } from "@/runtime-options.ts";
+import { createToolshedRuntime } from "@/runtime-options.ts";
 import { memory } from "@/routes/storage/memory.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
@@ -18,37 +18,15 @@ const initializeRuntime = () => {
 
     // Options assembly (the MEMORY_URL/API_URL split, EXPERIMENTAL_* wiring)
     // lives in runtime-options.ts, where it is unit-tested (CT-1814).
-    runtime = new Runtime(toolshedRuntimeOptions(
+    // Construction + the runtime→OTel bridge attach live in
+    // runtime-options.ts (unit-tested there, like the options wiring).
+    ({ runtime } = createToolshedRuntime(
       env,
       StorageManager.open({
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
     ));
-    // Second consumer of the runtime's telemetry bus → OTel. Toolshed's own
-    // Runtime only executes patterns for webhook deliveries (interactive
-    // patterns run in browser/bg-piece runtimes), so this is low-volume — but
-    // without it those runs emit markers into the void. Fire-and-forget: the
-    // dynamic import defers OTel module load off the startup path.
-    if (env.OTEL_ENABLED) {
-      Promise.all([
-        import("@commonfabric/runner/telemetry-otel-bridge"),
-        import("@opentelemetry/api"),
-      ]).then(([{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }]) => {
-        attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
-          tracer: trace.getTracer("ct-runner-bridge"),
-          meter: metrics.getMeter("ct-runner-bridge"),
-          attributes: { "ct.runtime": "server" },
-          metricAttributes: {
-            "service.name": env.OTEL_SERVICE_NAME,
-            "deployment.environment": env.ENV,
-          },
-        });
-        runtime.scheduler.setEventPreflightTelemetryEnabled(true);
-      }).catch((error) => {
-        console.warn("Runtime OTel bridge attach failed:", error);
-      });
-    }
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {
