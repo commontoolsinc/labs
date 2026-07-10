@@ -233,13 +233,26 @@ export class PieceManager {
     return piecesCell;
   }
 
-  async add(newPieces: Cell<unknown>[]): Promise<void> {
+  private async getAddPieceHandler() {
     const defaultPattern = await timePiecePhase(
-      "add.getDefaultPattern",
+      "getAddPieceHandler.getDefaultPattern",
       () => this.getDefaultPattern(true),
     );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
+    }
+
+    // Applying an `asCell: ["stream"]` schema to an absent property still
+    // produces a stream-shaped Cell. Check the stored output first so the
+    // schema view below cannot fabricate a false-positive handler.
+    const defaultPatternOutput = defaultPattern.getRaw();
+    if (
+      !isRecord(defaultPatternOutput) ||
+      Reflect.get(defaultPatternOutput, "addPiece") === undefined
+    ) {
+      throw new Error(
+        "Cannot add pieces: addPiece handler not found on default pattern",
+      );
     }
 
     const cell = defaultPattern.asSchema({
@@ -255,6 +268,22 @@ export class PieceManager {
         "Cannot add pieces: addPiece handler not found on default pattern",
       );
     }
+
+    return addPieceHandler;
+  }
+
+  /**
+   * Verify that this space's root pattern can register pieces.
+   *
+   * This performs the same lookup and stream validation as {@link add}, but
+   * does not send an event or mutate the piece list.
+   */
+  async assertCanAddPieces(): Promise<void> {
+    await this.getAddPieceHandler();
+  }
+
+  async add(newPieces: Cell<unknown>[]): Promise<void> {
+    const addPieceHandler = await this.getAddPieceHandler();
 
     // Send each piece and wait for transaction commit.
     // The onCommit callback fires both on success AND when retries are
