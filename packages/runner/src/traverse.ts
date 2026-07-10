@@ -3487,10 +3487,20 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (this.isValidType(curSelector.schema!, "null")) {
             arrayObj[index] = null;
           } else {
-            // this array is invalid; one or more items do not match the schema
+            // This array is invalid; one or more items do not match the
+            // schema — the ENTIRE array voids for this reader. Info, not
+            // warn: transient mid-update element states void-and-heal as a
+            // normal part of reactive convergence (a warn here fires dozens
+            // of times in healthy list patterns and fails the pattern-test
+            // harness's console-warning gate). The index + address make the
+            // persistent case diagnosable when traverse logs are enabled.
             logger.info(
               "traverse",
-              () => ["Item doesn't match array schema", curDoc, curSelector],
+              () => [
+                "Array element does not match the item schema — voiding the whole array read",
+                `index=${index}`,
+                curDoc.address,
+              ],
             );
             valid = false;
           }
@@ -3729,6 +3739,68 @@ export class SchemaObjectTraverser<V extends FabricValue>
         for (const requiredProperty of required) {
           if (unresolvableLinkProps.has(requiredProperty)) continue;
           if (!(requiredProperty in filteredObj)) {
+            // Generation-skew grace (element objects only, like the B2 link
+            // grace above): voiding one element voids the WHOLE containing
+            // array read (the "Topics (0)" blanking, 2026-07-10 board
+            // outage), so two evolution signatures degrade the field instead
+            // of voiding. Everything else — a key PRESENT under a satisfiable
+            // schema that failed validation (corruption, not evolution), and
+            // every non-element object (the scheduler defers consumers on
+            // that invalidation) — keeps strict semantics.
+            const propSchema = schemaAtPathCanonical(
+              this.cfc,
+              schema,
+              [requiredProperty],
+              true,
+            );
+            // Signature 1: the property's combined subschema is `false` —
+            // statically unsatisfiable, so the requirement can never be met
+            // by ANY write. This is what an element link stamped by an older
+            // generation produces for fields it never knew (combineSchema's
+            // closed-world additionalProperties), whether or not a newer
+            // generation has since written the key. There is no genuine
+            // value to mask and nothing to defer for; omit the field.
+            if (
+              elementGrace &&
+              ContextualFlowControl.isFalseSchema(propSchema)
+            ) {
+              logger.info("traverse", () => [
+                "Required property's combined subschema is unsatisfiable on an array element — degraded (element link from an older generation?)",
+                requiredProperty,
+                "at",
+                doc.address,
+              ]);
+              continue;
+            }
+            // Signature 2: the KEY is absent from the stored value (and no
+            // schema default filled it) — a document written before the
+            // field existed. asCell/asStream properties become live cells at
+            // their path (the field is observable if a newer generation ever
+            // writes it); plain properties stay omitted.
+            if (
+              elementGrace && isRecord(doc.value) &&
+              !Object.hasOwn(doc.value, requiredProperty)
+            ) {
+              if (
+                !this.traverseCells &&
+                SchemaObjectTraverser.hasAsCell(propSchema)
+              ) {
+                const propAddress = {
+                  ...doc.address,
+                  path: appendToPath(doc.address.path, requiredProperty),
+                };
+                const cellLink = getNormalizedLink(propAddress, propSchema);
+                filteredObj[requiredProperty] = this.objectCreator
+                  .createObject(cellLink, undefined);
+              }
+              logger.info("traverse", () => [
+                "Required property absent from stored value on an array element — degraded (older pattern generation, or a scope-isolated writer?)",
+                requiredProperty,
+                "at",
+                doc.address,
+              ]);
+              continue;
+            }
             logger.info("traverse", () => [
               "Missing required property",
               requiredProperty,

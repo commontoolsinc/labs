@@ -229,6 +229,166 @@ describe("Schema - Link Resolution", () => {
       expect(links[0].id).not.toBe(links[2].id);
     });
 
+    it("degrades required keys absent from an older-generation element (generation skew)", () => {
+      // 2026-07-10 topics-dev board outage: a NEWER pattern generation's
+      // items schema requires fields an OLDER generation's stored result
+      // never wrote. The element must degrade — plain absent keys omitted,
+      // asCell absent keys materialized as live cells at their path — rather
+      // than void the element and blank the whole array read.
+      const oldGenCell = runtime.getCell(
+        space,
+        "gen-skew-old-topic",
+        {
+          type: "object",
+          properties: { title: { type: "string" } },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      oldGenCell.set({ title: "old gen" });
+
+      const newItemSchema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          editingBody: { type: "boolean" },
+          draft: { type: "string", asCell: ["cell"] },
+        },
+        required: ["title", "editingBody", "draft"],
+      } as const satisfies JSONSchema;
+      const listSchema = {
+        type: "object",
+        properties: {
+          topics: { type: "array", items: newItemSchema },
+        },
+        required: ["topics"],
+      } as const satisfies JSONSchema;
+
+      const listCell = runtime.getCell(
+        space,
+        "gen-skew-board",
+        listSchema,
+        tx,
+      );
+      listCell.set({
+        topics: [
+          // A link carrying the OLD generation's narrower schema (the real
+          // board shape: element links are stamped at push time). Combining
+          // it with the reader's item schema turns the unknown new fields
+          // into `false` subschemas — still listed in `required`.
+          oldGenCell as any,
+          {
+            [ID]: "gen-skew-new-topic",
+            title: "new gen",
+            editingBody: false,
+            draft: "hello",
+          } as any,
+          // An element whose schema DOES know the asCell field but whose
+          // value never wrote it — the affordance materializes as a cell.
+          {
+            [ID]: "gen-skew-partial-topic",
+            title: "partial gen",
+            editingBody: true,
+          } as any,
+        ],
+      });
+
+      const result = listCell.get();
+      // The whole array is readable — one old-generation element no longer
+      // blanks it ("Topics (0)").
+      expect(result.topics.length).toBe(3);
+      expect(result.topics[0].title).toBe("old gen");
+      expect(result.topics[1].title).toBe("new gen");
+      expect(result.topics[1].editingBody).toBe(false);
+      // Old-schema link: both absent keys degrade to omission (the stored
+      // schema combines their subschemas to `false`, so no cell can be
+      // offered there).
+      expect(
+        Object.hasOwn(result.topics[0] as object, "editingBody"),
+      ).toBe(false);
+      expect(
+        Object.hasOwn(result.topics[0] as object, "draft"),
+      ).toBe(false);
+      // Fully-written element: the asCell field reads as a live cell.
+      expect(isCell(result.topics[1].draft)).toBe(true);
+      expect(result.topics[1].draft.get()).toBe("hello");
+      // Absent asCell key under a schema that knows it: a live cell at the
+      // field's path, so a consumer bound to the affordance observes it if
+      // a newer generation ever writes it (B2 parity).
+      expect(result.topics[2].title).toBe("partial gen");
+      expect(isCell(result.topics[2].draft)).toBe(true);
+      expect(result.topics[2].draft.get()).toBeUndefined();
+    });
+
+    it("degrades an upgraded element behind a stale old-generation link (present key, unsatisfiable subschema)", () => {
+      // The residual of the generation-skew class: the sub-piece has been
+      // UPGRADED (its doc now writes the new field), but the array element
+      // link still carries the old generation's schema. combineSchema's
+      // closed-world additionalProperties turns the now-present field into a
+      // `false` subschema that stays required — statically unsatisfiable, so
+      // without the grace this element re-voids the whole array on the NEXT
+      // schema evolution even though every doc involved is healthy.
+      const oldSchema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+      } as const satisfies JSONSchema;
+      const staleLinkCell = runtime.getCell(
+        space,
+        "gen-skew-upgraded-topic",
+        oldSchema,
+        tx,
+      );
+      staleLinkCell.set({ title: "upgraded" });
+      // The same doc, written through a current-generation handle: the new
+      // field is now PRESENT in the stored value.
+      runtime.getCell(
+        space,
+        "gen-skew-upgraded-topic",
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            editingBody: { type: "boolean" },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      ).key("editingBody").set(true);
+
+      const listSchema = {
+        type: "object",
+        properties: {
+          topics: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                editingBody: { type: "boolean" },
+              },
+              required: ["title", "editingBody"],
+            },
+          },
+        },
+        required: ["topics"],
+      } as const satisfies JSONSchema;
+      const listCell = runtime.getCell(
+        space,
+        "gen-skew-stale-link-board",
+        listSchema,
+        tx,
+      );
+      // The array stores the STALE-schema handle's link.
+      listCell.set({ topics: [staleLinkCell as any] });
+
+      const result = listCell.get();
+      expect(result.topics.length).toBe(1);
+      expect(result.topics[0].title).toBe("upgraded");
+      // The field is unreadable under the stale link's combined schema
+      // (`false` subschema) — degraded to omission, not a voided array.
+      expect(
+        Object.hasOwn(result.topics[0] as object, "editingBody"),
+      ).toBe(false);
+    });
+
     it("should create URIs for plain objects not marked asCell", () => {
       const schema = {
         type: "object",
