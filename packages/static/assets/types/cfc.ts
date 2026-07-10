@@ -34,6 +34,7 @@ export declare const CFC_ATOM_TYPE: {
     "https://commonfabric.org/cfc/atom/CaveatAssessment";
   readonly CaveatScreened: "https://commonfabric.org/cfc/atom/CaveatScreened";
   readonly Concept: "https://commonfabric.org/cfc/atom/Concept";
+  readonly Context: "https://commonfabric.org/cfc/atom/Context";
   readonly DisclaimerAttached:
     "https://commonfabric.org/cfc/atom/DisclaimerAttached";
   readonly DisclosureAcknowledged:
@@ -47,6 +48,7 @@ export declare const CFC_ATOM_TYPE: {
   readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
   readonly LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived";
   readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
+  readonly Policy: "https://commonfabric.org/cfc/atom/Policy";
   readonly PolicyCertified: "https://commonfabric.org/cfc/atom/PolicyCertified";
   readonly PersonalSpace: "https://commonfabric.org/cfc/atom/PersonalSpace";
   readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
@@ -115,6 +117,12 @@ export type CfcExternalIngestAtom = CfcAtomObject & {
 export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
   readonly subject: string;
+};
+export type CfcPolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy | typeof CFC_ATOM_TYPE.Context;
+  readonly name: string;
+  readonly subject: string;
+  readonly hash: string;
 };
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
@@ -265,6 +273,16 @@ export declare const cfcAtom: {
     valueDigest: string,
   ) => CfcPromptSlotBoundAtom<Source, Role>;
   readonly user: (subject: string) => CfcUserAtom;
+  readonly policyRef: (
+    name: string,
+    subject: string,
+    hash: string,
+  ) => CfcPolicyRefAtom;
+  readonly contextRef: (
+    name: string,
+    subject: string,
+    hash: string,
+  ) => CfcPolicyRefAtom;
   readonly space: (id: string) => CfcSpaceAtom;
   readonly personalSpace: (owner: string) => CfcPersonalSpaceAtom;
   readonly expires: (timestamp: number) => CfcExpiresAtom;
