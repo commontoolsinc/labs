@@ -48,9 +48,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-single-use-grants");
 
 const ALICE = "did:key:alice";
 const BOB = "did:key:bob";
-const MALLORY = "did:key:mallory";
 const userBob = cfcAtom.user(BOB);
-const userMallory = cfcAtom.user(MALLORY);
 const PHOTO_REF = "of:photo42";
 
 const identity = {
@@ -301,7 +299,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     return written;
   };
 
-  const grantIdFor = (runtime: Runtime): URI =>
+  const grantIdFor = (_runtime: Runtime): URI =>
     cfcGrantDocId({
       space: signer.did(),
       kind: "ShareGrant",
@@ -1091,7 +1089,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
   // ---------------------------------------------------------------------------
   describe("digest binding of the receipt state", () => {
     it("a receipt appearing between evaluations invalidates the prepared digest", async () => {
-      await withRuntime({}, async (runtime) => {
+      await withRuntime({}, (runtime) => {
         const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
         const tx = runtime.edit();
         // Prepare with the receipt consulted ABSENT (as a consuming
