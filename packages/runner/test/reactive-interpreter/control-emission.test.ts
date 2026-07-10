@@ -646,4 +646,154 @@ describe("native control emission (W8)", () => {
       "expected the ternary-element map to run the INLINE coordinator",
     );
   });
+
+  // The untaken-leg contract, pinned in BOTH contexts (differs by context —
+  // the interpreter matches legacy in each, which is the actual invariant):
+  //  - TOP-LEVEL: legacy's ifElse links to the taken branch and pull
+  //    scheduling never runs the untaken leg, so an untaken branch that
+  //    throws surfaces NO error. The W8 demand-driven segment matches (it
+  //    evaluates the predicate + taken side only, R-CONTROL-READS).
+  //  - MATERIALIZED ELEMENT: a child-pattern element runs BOTH branch lifts
+  //    on its per-element evaluation (legacy), so an untaken throw DOES
+  //    surface. The inline coordinator's eager evalRog matches (both arms
+  //    compute in-memory). This is parity, not a regression — the element
+  //    context never had top-level's don't-run-untaken property.
+  it("untaken control leg: top-level skips it, materialized element runs it — flag-on matches legacy in both", async () => {
+    const num = { type: "number" } as const;
+    const runTop = async (interpreter: boolean) => {
+      const h = makeHarness(interpreter);
+      const { runtime, cf } = h;
+      const errs: string[] = [];
+      runtime.scheduler.onError((e: unknown) =>
+        errs.push(String((e as { message?: unknown })?.message ?? e))
+      );
+      const tx = runtime.edit();
+      const { pattern, lift, ifElse } = cf;
+      // deno-lint-ignore no-explicit-any
+      const Root = pattern((input: any) => {
+        const good = lift((v: number) => v + 1, num, num)(input.n);
+        const boom = lift(
+          () => {
+            throw new Error("BOOM-top");
+          },
+          num,
+          num,
+        )(input.n);
+        const cond = lift((v: number) => v >= 0, num, { type: "boolean" })(
+          input.n,
+        );
+        return { out: ifElse(cond, good, boom) };
+      });
+      const arg = runtime.getCell(
+        space,
+        `leg-top-${interpreter}`,
+        undefined,
+        tx,
+      );
+      arg.set({ n: 5 });
+      const rc = runtime.getCell(
+        space,
+        `leg-top-r-${interpreter}`,
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, Root, arg, rc);
+      await tx.commit();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      await result.pull();
+      const cancel = result.key("out").sink(() => {});
+      await runtime.idle();
+      const out = result.key("out").get() as unknown;
+      cancel();
+      await h.dispose();
+      return { out, boom: errs.filter((e) => e.includes("BOOM-top")).length };
+    };
+
+    const runElem = async (interpreter: boolean) => {
+      const h = makeHarness(interpreter);
+      const { runtime, cf } = h;
+      const errs: string[] = [];
+      runtime.scheduler.onError((e: unknown) =>
+        errs.push(String((e as { message?: unknown })?.message ?? e))
+      );
+      const tx = runtime.edit();
+      const { pattern, lift, ifElse } = cf;
+      const itemSchema = {
+        type: "object",
+        properties: {
+          element: {
+            type: "object",
+            properties: { ok: { type: "boolean" }, n: num },
+            required: ["ok", "n"],
+          },
+        },
+        required: ["element"],
+      };
+      const Row = pattern(
+        // deno-lint-ignore no-explicit-any
+        (i: any) => {
+          const good = lift((v: number) => `g:${v}`, num, { type: "string" })(
+            i.element.n,
+          );
+          const boom = lift(
+            () => {
+              throw new Error("BOOM-elem");
+            },
+            num,
+            { type: "string" },
+          )(i.element.n);
+          return { label: ifElse(i.element.ok, good, boom) };
+        },
+        itemSchema,
+      );
+      // deno-lint-ignore no-explicit-any
+      const Root = pattern((input: any) => ({
+        rows: input.items.mapWithPattern(Row, {}),
+      }));
+      const argCell = runtime.getCell<{ items: { ok: boolean; n: number }[] }>(
+        space,
+        `leg-elem-${interpreter}`,
+        undefined,
+        tx,
+      );
+      argCell.set({ items: [{ ok: true, n: 1 }, { ok: true, n: 2 }] });
+      const rc = runtime.getCell(
+        space,
+        `leg-elem-r-${interpreter}`,
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, Root, argCell, rc);
+      await tx.commit();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      await result.pull();
+      const cancel = result.key("rows").sink(() => {});
+      await runtime.idle();
+      const labels = ((result.key("rows").get() ?? []) as Array<
+        { label?: unknown }
+      >).map((r) => r?.label);
+      cancel();
+      await h.dispose();
+      return {
+        labels,
+        boom: errs.filter((e) => e.includes("BOOM-elem")).length,
+      };
+    };
+
+    const topOff = await runTop(false);
+    const topOn = await runTop(true);
+    const elOff = await runElem(false);
+    const elOn = await runElem(true);
+
+    // Top-level: value 6, and the untaken throwing leg surfaces NO error —
+    // both flags.
+    assertEquals(topOff, { out: 6, boom: 0 });
+    assertEquals(topOn, topOff);
+    // Element: values correct, and the untaken throwing leg DOES surface (one
+    // per element) — both flags. Flag-on matches legacy's run-both-lifts.
+    assertEquals(elOff, { labels: ["g:1", "g:2"], boom: 2 });
+    assertEquals(elOn, elOff);
+  });
 });
