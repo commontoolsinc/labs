@@ -360,7 +360,10 @@ the D3 write floor's check (§8.12.4.1) under its staged dial — an
 unconditional read-side rejection would duplicate it under `enforce` and
 break the pinned dial-off/observe byte-compat. If the spec wants the read
 gate itself to reject empty-input floored writes independent of the floor
-dial, that needs its own normative text + rollout dial.
+dial, that needs its own normative text + rollout dial. _Spec home landed:
+specs#14 added §8.9.1.1 (journal-order structural precision — the prefix,
+its bounds, trigger reads, digest binding), discharging the owed home; the
+interpretation recorded here is now normative text._
 
 **SC-24 [normative] Journal-order precision blessed; span-attributed
 provenance profiled — §8.9.1.** SC-23's interpretation still has no spec home:
@@ -384,7 +387,12 @@ opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
 remains only for semantic claims beyond runtime structure. States that the
 egress ceiling / flow join / floor credit MAY upgrade from transaction-global
 where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
-deliberate to staged). `open`.
+deliberate to staged). `applied` — specs#14 (2026-07-09): part (1) as
+§8.9.1.1, part (2) as the §8.9.1.2 span-attributed provenance profile
+(executor classes incl. the instance rule, late-error framing, digest
+discipline, predictions-never-narrow). Runner-side stage 0 (precision
+counters) shipped as labs#4623; span machinery remains behind the
+entry criteria in `cfc-value-level-provenance.md`.
 
 **SC-25 [normative] Cross-space label-metadata representation classes —
 §4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
@@ -405,7 +413,14 @@ effective confidentiality — sound because the §8.9.2 conservative join
 contains each influencing source's confidentiality; else fail closed —
 computable without new persisted metadata), and SC-6's "revisit when
 invariant 12 is implemented" note is discharged by the introspection-surface
-observation channel. `open`.
+observation channel. `applied` — specs#14 (2026-07-09): the §4.6.4.1
+known-exposure paragraph upgraded to the normative representation rule
+(public/commitment/reference, same-form matching, `notAvailable` collapse)
+and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
+stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
+redaction, classification table), stage 1 as labs#4638
+(`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
+commitment-aware matching); stages 2–3 remain per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
 event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
@@ -424,7 +439,13 @@ causal to the consumed intent's id — the shipped `commitPreconditions`
 receipt discipline — with canonical clause-digest identity, outside the
 churn-free envelope). Guidance refines to:
 2a when revocable or policy-derived; 2b only when the widening must survive
-without evaluation (export/publish). Unconflate the §13 table row. `open`.
+without evaluation (export/publish). Unconflate the §13 table row.
+`applied` — specs#14 (2026-07-09): §8.12.7 route 2 split into 2a/2b with the
+2b contract (including the create-only intent-causal record shape) and the
+§13 summary-table row unconflated. Runner-side: grants build-order items 1–3
+shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
+consulted-grant digest binding); the rewrite event stays unscheduled per
+`cfc-persisted-declassification.md` §5.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)

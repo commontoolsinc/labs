@@ -1,7 +1,7 @@
 # CFC per-write read-prefix provenance (Epic D4) — soundness review
 
 _Epic D, stage D4, of
-[`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
+[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
 This doc is a **soundness review** of the plan's proposed prefix approximation,
 grounded in the CFC spec (`commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`
 §8.9, §8.9.1, §8.9.2). It found a real unsoundness in the plan text and fixes the

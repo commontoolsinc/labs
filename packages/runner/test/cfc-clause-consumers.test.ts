@@ -8,7 +8,7 @@ import {
 import { isOrClause } from "../src/cfc/clause.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
-// Epic A5 (docs/plans/cfc-future-work-implementation.md): the flat-assumption
+// Epic A5 (docs/history/plans/cfc-future-work-implementation.md): the flat-assumption
 // consumer sweep. Every remaining site that iterates `.confidentiality` as a
 // bare atom list must treat an OR-clause CORRECTLY — opaque where that is
 // fail-safe (over-restrict), and clause-aware where opacity would under-

@@ -8,7 +8,7 @@ import {
 } from "../src/cfc/observation.ts";
 import { normalizeClause } from "../src/cfc/clause.ts";
 
-// Epic A2 (docs/plans/cfc-future-work-implementation.md): the ceiling-fit
+// Epic A2 (docs/history/plans/cfc-future-work-implementation.md): the ceiling-fit
 // check becomes CNF clause subsumption (spec §8.10.3). The load-bearing case
 // is the reader-enumeration quantifier fix — a multi-party label must NOT fit
 // an "A or B may observe" ceiling.

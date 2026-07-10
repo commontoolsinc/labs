@@ -15,7 +15,7 @@ import type { SpaceMembershipProvider } from "./space-membership.ts";
 
 /**
  * Display-sink render ceiling resolution (Epic H3b of
- * docs/plans/cfc-future-work-implementation.md §7; spec §8.10.6).
+ * docs/history/plans/cfc-future-work-implementation.md §7; spec §8.10.6).
  *
  * The render path is a display-sink egress boundary. Spec §8.10.6: "Ordinary
  * exchange-rule evaluation runs before the fit check, as at any boundary.

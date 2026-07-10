@@ -20,7 +20,7 @@ import { clauseAlternatives, clausesEqual } from "../src/cfc/clause.ts";
 import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
 import { normalizeClause } from "../src/cfc/clause.ts";
 
-// Epic B6 (docs/plans/cfc-future-work-implementation.md §3): the §10.1
+// Epic B6 (docs/history/plans/cfc-future-work-implementation.md §3): the §10.1
 // standard prompt-caveat profile as PolicyRecords. The goldens prove the
 // material-risk discharge rule reproduces the retired `filterMaterialRiskAtoms`
 // strip byte-for-byte; the remaining tests exercise the tier upgrades,

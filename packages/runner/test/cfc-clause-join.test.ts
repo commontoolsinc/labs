@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { mergeCfcLabelViews, mergeLabel } from "../src/cfc/label-view-core.ts";
 import { clauseAlternatives, isOrClause } from "../src/cfc/clause.ts";
 
-// Epic A3 (docs/plans/cfc-future-work-implementation.md): the confidentiality
+// Epic A3 (docs/history/plans/cfc-future-work-implementation.md): the confidentiality
 // join is clause CONCATENATION with normalize-on-ingest. It upholds the
 // §3.1.8 prohibitions: never merge distinct clauses, never union alternative
 // sets, never dedup an atom across a singleton and an OR-clause containing it.

@@ -1,7 +1,7 @@
 # CFC observation classes (`PathLabelTemplate`) — design
 
 _Epic C, stage C0, of
-[`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
+[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
 Spec: `commontoolsinc/specs` `cfc/04-label-representation.md` §4.6.3 (the
 primitive read profile) and §4.5.2; the residuals are SC-4 / SC-8 in
 [`cfc-spec-changes.md`](./cfc-spec-changes.md). This doc settles the semantics

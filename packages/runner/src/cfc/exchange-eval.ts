@@ -21,7 +21,7 @@ import type { TrustResolver } from "./trust.ts";
 
 /**
  * The guarded-rewrite evaluator (spec §4.4.5, Epic B4 of
- * docs/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
+ * docs/history/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
  * exchange rules over one label to a fuelled fixpoint. The ONLY things a
  * firing may do:
  *

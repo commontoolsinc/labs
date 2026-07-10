@@ -12,7 +12,7 @@ import {
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy");
 
-// Epic B2a (docs/plans/cfc-future-work-implementation.md §3): deployment
+// Epic B2a (docs/history/plans/cfc-future-work-implementation.md §3): deployment
 // policy records — validation, content digests, freeze discipline, and the
 // Runtime → tx snapshot injection. The evaluator that consumes these lands
 // in B4/B5.

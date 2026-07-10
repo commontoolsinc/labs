@@ -35,6 +35,7 @@ export type MarkdownVariant = "default" | "inverse";
  * @cssprop [--cf-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
  * @cssprop [--cf-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
  * @cssprop [--cf-markdown-inverse-accent=rgba(255,255,255,0.6)] - Accent color for inverse (blockquote border)
+ * @cssprop [--cf-markdown-table-col-min-width=8rem] - Minimum width per table column before the table scrolls horizontally
  *
  * @example
  * <cf-markdown content="# Hello World\n\nThis is **bold** text."></cf-markdown>
@@ -55,6 +56,17 @@ export class CFMarkdown extends BaseElement {
       :host {
         display: block;
         box-sizing: border-box;
+        /* Keep the host within its container so a wide table scrolls inside
+        * the .table-scroll wrapper instead of blowing the host out. Two
+        * cases: as a normal block, max-width:100% is a no-op; as a
+        * non-stretched flex child (e.g. inside a cf-vstack with
+        * align-items:flex-start), max-width caps the host at the column width
+        * — otherwise the host grows to the table's content width and gets
+        * clipped by an ancestor (cf-screen sets overflow-x:hidden) with no
+        * scroll. min-width:0 lets it shrink below content in the flex main
+        * axis for the same reason. */
+        min-width: 0;
+        max-width: 100%;
         font-family: var(
           --cf-theme-font-family,
           system-ui,
@@ -318,10 +330,24 @@ export class CFMarkdown extends BaseElement {
       }
 
       /* Tables */
+      /* Scroll container so a wide table scrolls horizontally instead of
+      * cramming its columns on narrow (mobile) screens. Injected around every
+      * <table> by _wrapTablesForScroll. */
+      .markdown-content .table-scroll {
+        overflow-x: auto;
+        max-width: 100%;
+        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
+        -webkit-overflow-scrolling: touch;
+      }
+
       .markdown-content table {
         border-collapse: collapse;
-        width: 100%;
-        margin: var(--cf-theme-spacing-normal, var(--cf-spacing-3, 0.75rem)) 0;
+        /* Fill the available width, but grow past it when the per-column
+        * minimum widths demand more room — at which point .table-scroll
+        * scrolls rather than the columns collapsing. */
+        width: auto;
+        min-width: 100%;
+        margin: 0;
       }
 
       .markdown-content th,
@@ -329,6 +355,10 @@ export class CFMarkdown extends BaseElement {
         border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         padding: 0.5em 1em;
         text-align: left;
+        /* Keep columns readable; below this they'd collapse into the cramped
+        * grid this fix exists to prevent. Content still wraps within a
+        * column. Tunable per context via --cf-markdown-table-col-min-width. */
+        min-width: var(--cf-markdown-table-col-min-width, 8rem);
       }
 
       .markdown-content th {
@@ -421,6 +451,9 @@ export class CFMarkdown extends BaseElement {
     // Wrap code blocks with copy buttons
     renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
 
+    // Wrap tables so wide tables scroll horizontally instead of cramming
+    renderedHtml = this._wrapTablesForScroll(renderedHtml);
+
     // Replace cell links with cf-cell-link
     renderedHtml = this._replaceCellLinks(renderedHtml);
 
@@ -472,6 +505,25 @@ export class CFMarkdown extends BaseElement {
           ></cf-copy-button>
         </div>`;
       },
+    );
+  }
+
+  /**
+   * Wrap each rendered <table> in a horizontally scrollable container.
+   *
+   * marked emits a bare <table> with no wrapper, and the table CSS keeps
+   * columns at a readable minimum width. On a narrow screen (mobile) a wide
+   * table therefore overflows; the wrapper's `overflow-x: auto` gives it its
+   * own horizontal scroll so the overflow is handled inside the markdown block
+   * rather than being clipped by an ancestor (cf-screen sets
+   * `overflow-x: hidden`) or cramming the columns. Mirrors the code-block
+   * wrapper approach above. GFM tables cannot nest, so a non-greedy match is
+   * sufficient.
+   */
+  private _wrapTablesForScroll(html: string): string {
+    return html.replace(
+      /<table[\s\S]*?<\/table>/g,
+      (table) => `<div class="table-scroll">${table}</div>`,
     );
   }
 
