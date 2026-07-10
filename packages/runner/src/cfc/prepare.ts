@@ -1535,6 +1535,20 @@ export const deriveFlowJoin = (
       return false;
     },
   );
+  // Label-metadata observations (inv-12 Stage 2, the SC-6 revisit): the
+  // introspection surface's explicit records join the derivation with their
+  // §4.6.4.2 population-rule labels. Confidentiality only, like followRef
+  // observations above: observing label METADATA is not consuming content,
+  // so it must neither seed nor empty the hereditary integrity meet. The
+  // observation's space counts as a label contributor for the Stage 1
+  // cross-space predicate — a foreign doc's metadata observed here makes the
+  // stamped entry representation-eligible, same posture as a foreign labeled
+  // read.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    if (observation.confidentiality.length === 0) continue;
+    labeledSpaces?.add(observation.target.space);
+    atoms.push(...observation.confidentiality);
+  }
   const confidentiality = uniqueCfcAtoms(atoms);
   const integrity: unknown[] = [...(hereditaryMeet ?? [])];
   // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
@@ -2926,6 +2940,25 @@ const verifyInputRequirements = (
     // membership.
     hasLabelValues(read.label)
   );
+  // Label-metadata observations (inv-12 Stage 2) join the gate with their
+  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have no
+  // journal position, so they sit at -Infinity and join EVERY protected
+  // write's prefix — the conservative direction for a screen, and only new
+  // introspection-using code ever records one (no existing flow regresses).
+  // Confidentiality-only records: never provenance-only, never a floor
+  // witness.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    gatedReads.push({
+      space: observation.target.space,
+      id: observation.target.id as URI,
+      scope: normalizeCellScope(observation.target.scope),
+      path: canonicalizeLogicalPath(observation.target.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: { confidentiality: [...observation.confidentiality] },
+    });
+  }
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
@@ -3770,6 +3803,16 @@ const collectConsumedLabel = (
       atoms.push(...(entry.label.confidentiality ?? []));
       integrityAtoms.push(...(entry.label.integrity ?? []));
     }
+  }
+  // Label-metadata observations (inv-12 Stage 2): the introspection
+  // surface's records enter the egress consumed set with their §4.6.4.2
+  // population-rule labels — a request assembled after inspecting protected
+  // label metadata is gated exactly like one assembled after reading the
+  // protected value. Confidentiality only: a metadata observation carries no
+  // evidence, so it contributes nothing to the exchange evaluator's guard
+  // pool.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    atoms.push(...observation.confidentiality);
   }
   // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
   return {

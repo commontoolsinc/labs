@@ -6,6 +6,7 @@ import type { Metadata } from "../storage/interface.ts";
 import type {
   CfcLabelView,
   IFCLabel,
+  LabelMetadataObservationClass,
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
@@ -15,6 +16,7 @@ import type { CfcTrustConfig } from "./trust.ts";
 export type {
   CfcLabelView,
   IFCLabel,
+  LabelMetadataObservationClass,
   LabelObservationClass,
 } from "./label-view-core.ts";
 
@@ -291,6 +293,28 @@ export type CfcDereferenceTrace = Immutable<{
   kind: "value" | "write-redirect";
 }>;
 
+/**
+ * One label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2; the SC-6
+ * partial revisit): the introspection surface (`inspectConfLabel`) observed
+ * first-layer label metadata, and the observation enters the reading
+ * transaction's consumed set carrying its §4.6.4.2 population-rule label.
+ *
+ * `target.path` is the ENVELOPE metadata subtree address the observation is
+ * about — `["cfc","labels",...]`, never a payload path — so the record is
+ * self-describing and cannot be confused with a payload read. The raw
+ * `["cfc"]` journal read underneath stays a runtime-internal verifier read
+ * (excluded from flow/consumed derivations exactly as before, SC-6); THIS
+ * record is the application-observation channel. `confidentiality` is the
+ * joined population-rule label of the per-field observations the query
+ * consumed — non-empty by construction (public observations record nothing:
+ * an empty label adds nothing to any join, gate, or digest).
+ */
+export type CfcLabelMetadataObservation = Immutable<{
+  target: CfcAddress;
+  observes: LabelMetadataObservationClass;
+  confidentiality: unknown[];
+}>;
+
 export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
@@ -412,6 +436,11 @@ export type PreparedDigestInput = {
   // cannot commit under another. Absent when no grants were consulted, so
   // pre-existing digests are unchanged; canonicalized address-sorted.
   readonly consultedGrants?: readonly ConsultedGrant[];
+  // Label-metadata observations (inv-12 Stage 2): boundary-decision inputs —
+  // they change the flow join and the consumed set — bound under the same
+  // discipline as writePolicyInputs. Absent when none were recorded, so
+  // pre-Stage-2 digests are unchanged; canonicalized address-sorted.
+  readonly labelMetadataObservations?: readonly CfcLabelMetadataObservation[];
 };
 
 export type PostCommitSideEffect = {
@@ -628,4 +657,13 @@ export type CfcTxState = {
   // this transaction (§8.12.7 route 2a), recorded by the runner-side grant
   // resolver, deduplicated by address. Folded into PreparedDigestInput.
   consultedGrants: ConsultedGrant[];
+  // Label-metadata observations recorded by the introspection surface
+  // (inv-12 Stage 2, `recordCfcLabelMetadataObservation`): application
+  // observations of first-layer label metadata, carrying their §4.6.4.2
+  // population-rule labels. Folded into the flow derivation
+  // (`deriveFlowJoin`), the egress consumed set (`collectConsumedLabel`),
+  // the per-write input gate (`verifyInputRequirements`), and
+  // PreparedDigestInput. Only labeled observations are recorded (empty =
+  // public = nothing to derive, gate, or bind).
+  labelMetadataObservations: CfcLabelMetadataObservation[];
 };

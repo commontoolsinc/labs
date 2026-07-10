@@ -224,7 +224,44 @@ consumes inbound views, redacting the outbound copies is safe.
   entries (no envelope rewrite on migration) and the local external-ingest
   mark._
 - **Stage 2 (observation):** `inspectConfLabel` + interim population rule +
-  the label-metadata observation channel (SC-6 revisit).
+  the label-metadata observation channel (SC-6 revisit). _Implementation note
+  (2026-07-09): shipped (reduced form — §3 items 2–4; the full per-field
+  `PathLabelTemplate` profile stays with the SC-4/SC-8 co-build, designed in
+  [`cfc-template-population.md`](./cfc-template-population.md) — its Stage B
+  upgrades this stage's computed-in-hand labels to persisted templates). The
+  §4.6.4.1 evaluator + §4.6.4.2 interim population rule live in
+  `runner/src/cfc/label-introspection.ts`: equality predicates over the six
+  query fields; first-layer only (a `/cfc/...` target path refuses — payload
+  fields literally named `cfc` fail closed on the collision); ONE normalized
+  `notAvailable` constant across the unobservable / missing /
+  matching-but-unreadable arms; Stage 1 commitment-aware matching with
+  verbatim committed projections (a miss over committed fields still
+  consumes the per-field labels); population = atom presence/`type`/`kind`
+  public, §2-table-`public` fields public, every other present field
+  source-protected — the source identity's confidentiality when known (no
+  carrier exists yet), else the derived-component (`derived`/`structure`)
+  entry's own effective confidentiality, else fail closed. The
+  pattern-facing surface is the `inspectConfLabel` BUILTIN
+  (`runner/src/builtins/inspect-conf-label.ts`, exposed as
+  `commonfabric.inspectConfLabel`): builtins are the one channel pattern
+  code has into runtime capability and the node runs inside the observing
+  transaction; the target rides `asCell`, so inspecting a label never reads
+  the labeled payload; the display path (`getCfcLabel`) is untouched.
+  Consumption is a `labelMetadata` observation class beside
+  value/shape/followRef, recorded explicitly
+  (`recordCfcLabelMetadataObservation`) with the population-rule label and
+  folded into `deriveFlowJoin` (confidentiality-only, like followRef), the
+  egress consumed set (`collectConsumedLabel`), the per-write input gate
+  (`verifyInputRequirements`, at -Infinity like trigger reads), and the
+  prepared digest (absent-when-empty); runtime-internal verifier reads stay
+  excluded exactly as before. No new dial: the API is additive and
+  fail-closed by construction — a result whose evaluation consumed
+  protected metadata observations is returned only when
+  `cfcFlowLabels: "persist"` under a non-disabled enforcement mode can carry
+  the joined label onto the result doc through the normal flow derivation;
+  under every other configuration it degrades to the same `notAvailable`
+  (never an unlabeled copy of protected label metadata, and the degraded
+  arm stays indistinguishable from the hidden ones)._
 - **Stage 3 (strong form):** `reference`-form carried labels + per-reader
   materialization; entry criteria: a concrete deployment whose threat model
   includes targeted DID probing, and cross-space resolution latency measured
