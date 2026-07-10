@@ -4617,7 +4617,9 @@ export const prepareBoundaryCommit = (
           persistedLabelEntries.length = 0;
         } else {
           for (const violation of monotonicityViolations) {
-            tx.noteCfcDiagnostic(`declared-monotonicity(observe): ${violation}`);
+            tx.noteCfcDiagnostic(
+              `declared-monotonicity(observe): ${violation}`,
+            );
           }
         }
       }

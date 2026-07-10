@@ -355,18 +355,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           { out: "v1" },
         );
         expect(first.error).toBeUndefined();
-        await rewriteStoredEntries(seeder, first.docId, (entries) =>
-          entries.map((entry) =>
-            entry.origin === "declared" && entry.path.join("/") === "out"
-              ? {
-                ...entry,
-                label: {
-                  ...entry.label,
-                  confidentiality: [CLAUSE_A, CLAUSE_B],
-                },
-              }
-              : entry
-          ));
+        await rewriteStoredEntries(
+          seeder,
+          first.docId,
+          (entries) =>
+            entries.map((entry) =>
+              entry.origin === "declared" && entry.path.join("/") === "out"
+                ? {
+                  ...entry,
+                  label: {
+                    ...entry.label,
+                    confidentiality: [CLAUSE_A, CLAUSE_B],
+                  },
+                }
+                : entry
+            ),
+        );
         const second = await commitWrite(
           runtime,
           "dm-char-entry-drop",
@@ -406,18 +410,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           { out: "v1" },
         );
         expect(first.error).toBeUndefined();
-        await rewriteStoredEntries(seeder, first.docId, (entries) =>
-          entries.map((entry) =>
-            entry.origin === "declared" && entry.path.join("/") === "out"
-              ? {
-                ...entry,
-                label: {
-                  ...entry.label,
-                  confidentiality: [CLAUSE_A, CLAUSE_B],
-                },
-              }
-              : entry
-          ));
+        await rewriteStoredEntries(
+          seeder,
+          first.docId,
+          (entries) =>
+            entries.map((entry) =>
+              entry.origin === "declared" && entry.path.join("/") === "out"
+                ? {
+                  ...entry,
+                  label: {
+                    ...entry.label,
+                    confidentiality: [CLAUSE_A, CLAUSE_B],
+                  },
+                }
+                : entry
+            ),
+        );
         const second = await commitWrite(
           runtime,
           "dm-char-ratchet",
@@ -674,12 +682,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         out: "v1",
       });
       expect(first.error).toBeUndefined();
-      await rewriteStoredEntries(seeder, first.docId, (entries) =>
-        entries.map((entry) =>
-          entry.origin === "declared" && entry.path.join("/") === "out"
-            ? opts.mutateEntry(entry)
-            : entry
-        ));
+      await rewriteStoredEntries(
+        seeder,
+        first.docId,
+        (entries) =>
+          entries.map((entry) =>
+            entry.origin === "declared" && entry.path.join("/") === "out"
+              ? opts.mutateEntry(entry)
+              : entry
+          ),
+      );
       const tx = runtime.edit();
       const cell = runtime.getCell(signer.did(), opts.name, opts.schema, tx);
       cell.set({ out: "v2" } as never);
@@ -772,18 +784,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           aux: "v1",
         });
         expect(first.error).toBeUndefined();
-        await rewriteStoredEntries(seeder, first.docId, (entries) =>
-          entries.map((entry) =>
-            entry.origin === "declared" && entry.path.join("/") === "aux"
-              ? {
-                ...entry,
-                label: {
-                  ...entry.label,
-                  confidentiality: [CLAUSE_A, CLAUSE_B],
-                },
-              }
-              : entry
-          ));
+        await rewriteStoredEntries(
+          seeder,
+          first.docId,
+          (entries) =>
+            entries.map((entry) =>
+              entry.origin === "declared" && entry.path.join("/") === "aux"
+                ? {
+                  ...entry,
+                  label: {
+                    ...entry.label,
+                    confidentiality: [CLAUSE_A, CLAUSE_B],
+                  },
+                }
+                : entry
+            ),
+        );
         const tx = runtime.edit();
         const cell = runtime.getCell(
           signer.did(),
@@ -832,18 +848,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           { out: "v1" },
         );
         expect(first.error).toBeUndefined();
-        await rewriteStoredEntries(seeder, first.docId, (entries) =>
-          entries.map((entry) =>
-            entry.origin === "declared" && entry.path.join("/") === "out"
-              ? {
-                ...entry,
-                label: {
-                  ...entry.label,
-                  confidentiality: [CLAUSE_A, CLAUSE_B],
-                },
-              }
-              : entry
-          ));
+        await rewriteStoredEntries(
+          seeder,
+          first.docId,
+          (entries) =>
+            entries.map((entry) =>
+              entry.origin === "declared" && entry.path.join("/") === "out"
+                ? {
+                  ...entry,
+                  label: {
+                    ...entry.label,
+                    confidentiality: [CLAUSE_A, CLAUSE_B],
+                  },
+                }
+                : entry
+            ),
+        );
         const tx = runtime.edit();
         const cell = runtime.getCell(
           signer.did(),
@@ -1194,9 +1214,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
             CLAUSE_A,
           ]);
           expect(
-            second.diagnostics.some((d) =>
-              d.includes("declared-monotonicity")
-            ),
+            second.diagnostics.some((d) => d.includes("declared-monotonicity")),
             `dial=${dial}`,
           ).toBe(false);
         } finally {
@@ -1320,18 +1338,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           aux: "v1",
         });
         expect(first.error).toBeUndefined();
-        await rewriteStoredEntries(seeder, first.docId, (entries) =>
-          entries.map((entry) =>
-            entry.origin === "declared"
-              ? {
-                ...entry,
-                label: {
-                  ...entry.label,
-                  confidentiality: [CLAUSE_A, CLAUSE_B],
-                },
-              }
-              : entry
-          ));
+        await rewriteStoredEntries(
+          seeder,
+          first.docId,
+          (entries) =>
+            entries.map((entry) =>
+              entry.origin === "declared"
+                ? {
+                  ...entry,
+                  label: {
+                    ...entry.label,
+                    confidentiality: [CLAUSE_A, CLAUSE_B],
+                  },
+                }
+                : entry
+            ),
+        );
         const tx = runtime.edit();
         const cell = runtime.getCell(signer.did(), "dm-ex-paths", schema, tx);
         cell.set({ out: "v2", aux: "v2" });
@@ -1414,18 +1436,22 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
             { out: "v1" },
           );
           expect(first.error).toBeUndefined();
-          await rewriteStoredEntries(seeder, first.docId, (entries) =>
-            entries.map((entry) =>
-              entry.origin === "declared" && entry.path.join("/") === "out"
-                ? {
-                  ...entry,
-                  label: {
-                    ...entry.label,
-                    confidentiality: [CLAUSE_A, CLAUSE_B],
-                  },
-                }
-                : entry
-            ));
+          await rewriteStoredEntries(
+            seeder,
+            first.docId,
+            (entries) =>
+              entries.map((entry) =>
+                entry.origin === "declared" && entry.path.join("/") === "out"
+                  ? {
+                    ...entry,
+                    label: {
+                      ...entry.label,
+                      confidentiality: [CLAUSE_A, CLAUSE_B],
+                    },
+                  }
+                  : entry
+              ),
+          );
           const tx = runtime.edit();
           const cell = runtime.getCell(
             signer.did(),

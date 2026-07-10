@@ -71,9 +71,9 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
+  type CfcDeclaredMonotonicityMode,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
-  type CfcDeclaredMonotonicityMode,
   type CfcLabelMetadataProtectionMode,
   type CfcLabelView,
   type CfcPolicyEvaluationMode,
