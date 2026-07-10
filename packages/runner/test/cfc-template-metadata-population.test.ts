@@ -843,7 +843,33 @@ describe("CFC template metadata population (Stage B): derivation unit properties
       },
       { path: ["body"], label: { confidentiality: [caveatAtom()] } },
       templateEntry(["body"], ["source"], [caveatAtom()]),
+      // A template entry stays skipped by origin even without its class.
+      {
+        path: ["cfc", "labels", "value", "body"],
+        label: { confidentiality: [caveatAtom()] },
+        origin: "label-metadata",
+      },
+      // Integrity-only derived entries have no confidentiality clauses to
+      // describe.
+      {
+        path: ["body"],
+        label: { integrity: [caveatAtom()] },
+        origin: "derived",
+      },
     ])).toEqual([]);
+  });
+
+  it("array and bare-marker alternatives mint the whole-atom template only", () => {
+    // An array alternative smuggling a protected record and a bare
+    // commitment-marker alternative are protected CONTENT with no direct
+    // field addressing: whole-atom template, no per-field entries.
+    const derived = deriveLabelMetadataTemplateEntries([
+      derivedEntry([
+        ["tag", { custom: "protected-field-in-array" }],
+        { digestOf: "abc" },
+      ]),
+    ]);
+    expect(derived.map((e) => e.path.at(-1))).toEqual(["*"]);
   });
 
   it("resolves the most specific template with wildcard segments (replace-down)", () => {
@@ -915,6 +941,30 @@ describe("CFC template metadata population (Stage B): derivation unit properties
         "0",
         "alternatives",
         "0",
+      ]),
+    ).toBeUndefined();
+    // Only well-formed templates resolve: a label-metadata entry missing
+    // its class, and payload entries of other origins, never cover.
+    expect(
+      resolveLabelMetadataTemplateConfidentiality([
+        {
+          path: ["cfc", "labels", "value", "items", "*"],
+          label: { confidentiality: ["classless"] },
+          origin: "label-metadata",
+        },
+        {
+          path: ["cfc", "labels", "value", "items", "*", "confidentiality"],
+          label: { confidentiality: ["wrong-origin"] },
+          origin: "derived",
+          observes: "value",
+        },
+      ], [
+        "cfc",
+        "labels",
+        "value",
+        "items",
+        "*",
+        "confidentiality",
       ]),
     ).toBeUndefined();
   });
