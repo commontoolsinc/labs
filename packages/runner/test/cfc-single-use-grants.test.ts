@@ -3,7 +3,15 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  EmulatedStorageManager,
+  type Options as StorageManagerOptions,
+  StorageManager,
+} from "../src/storage/cache.deno.ts";
+import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { isPermanentRejection } from "../src/storage/rejection.ts";
 import { Runtime } from "../src/runtime.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
@@ -168,6 +176,1006 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       expect(receipt).not.toBe(grantId);
       const other = cfcGrantDocId({ ...identity, resource: "of:other" });
       expect(cfcGrantConsumedReceiptId(other)).not.toBe(receipt);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Shared harness (cfc-grant-records.test.ts style): a labeled cell, a
+  // policyState-guarded sink rule, and a Runtime whose experimental
+  // commitPreconditions flag is the receipts dial.
+  // ---------------------------------------------------------------------------
+  const SECRET_SCHEMA = internSchema(
+    {
+      type: "object",
+      properties: {
+        secret: { type: "string", ifc: { confidentiality: ["never-fits"] } },
+      },
+      required: ["secret"],
+    } satisfies JSONSchema,
+    true,
+  );
+
+  const seedLabeledCell = async (
+    runtime: Runtime,
+    id: string,
+    label: { confidentiality: unknown[]; integrity?: unknown[] },
+  ): Promise<void> => {
+    const seed = runtime.edit();
+    const target = runtime.getCell(signer.did(), id, undefined, seed);
+    const targetId = target.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: targetId,
+      path: [],
+    }, {
+      value: { secret: "rosebud" },
+      cfc: {
+        version: 1,
+        schemaHash: SECRET_SCHEMA.taggedHashString,
+        labelMap: { version: 1, entries: [{ path: ["secret"], label }] },
+      },
+    });
+    seed.writeOrThrow({
+      space: signer.did(),
+      scope: "space",
+      id: `cid:${SECRET_SCHEMA.taggedHashString}`,
+      path: [],
+    }, { value: SECRET_SCHEMA.schema });
+    expect((await seed.commit()).ok).toBeDefined();
+  };
+
+  // The §13.4.4 rule at the network egress boundary (grant-records shape).
+  const sinkShareRule: ExchangeRule = {
+    id: "user-to-user-share",
+    appliesTo: { type: CFC_ATOM_TYPE.User, subject: { var: "$owner" } },
+    preCondition: {
+      policyState: [{
+        kind: "ShareGrant",
+        owner: { var: "$owner" },
+        resource: PHOTO_REF,
+        audience: { type: CFC_ATOM_TYPE.User, subject: { var: "$recipient" } },
+      }],
+      boundary: [{
+        type: CFC_ATOM_TYPE.BoundaryContext,
+        key: "sinkClass",
+        value: "network",
+      }],
+    },
+    post: {
+      addAlternatives: [{
+        type: CFC_ATOM_TYPE.User,
+        subject: { var: "$recipient" },
+      }],
+    },
+  };
+
+  const withRuntime = async (
+    opts: {
+      receipts?: boolean;
+      policyEvaluation?: "off" | "observe" | "enforce";
+      enforcement?: "enforce-explicit" | "observe" | "disabled";
+    },
+    body: (runtime: Runtime) => void | Promise<void>,
+  ): Promise<void> => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      // The receipts dial: the Runtime constructor propagates it to the
+      // ambient commit-preconditions config the storage commit consults.
+      experimental: { commitPreconditions: opts.receipts ?? true },
+      cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
+      cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
+      cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+      cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
+    });
+    try {
+      await body(runtime);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  };
+
+  const writeGrant = async (
+    runtime: Runtime,
+    overrides: Record<string, unknown> = {},
+  ): Promise<{ space: string; id: string }> => {
+    const tx = runtime.edit();
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "cfc-grant-writer",
+    });
+    const written = tx.writeCfcGrant({
+      kind: "ShareGrant",
+      owner: signer.did(),
+      resource: PHOTO_REF,
+      audience: [userBob],
+      grantedAt: 1000,
+      singleUse: true,
+      ...overrides,
+    });
+    const result = await tx.commit();
+    expect(result.ok).toBeDefined();
+    return written;
+  };
+
+  const grantIdFor = (runtime: Runtime): URI =>
+    cfcGrantDocId({
+      space: signer.did(),
+      kind: "ShareGrant",
+      owner: signer.did(),
+      resource: PHOTO_REF,
+    });
+
+  // Read the labeled cell, enqueue the gated egress, prepare. Returns the
+  // OPEN transaction plus its prepare outcome; callers commit or abort.
+  const buildRelease = (
+    runtime: Runtime,
+    id: string,
+    effectSuffix = "",
+  ) => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell(signer.did(), id, SECRET_SCHEMA.schema, tx);
+    expect(cell.key("secret").get()).toBe("rosebud");
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchJson",
+      `fetchJson:single-use-${id}${effectSuffix}`,
+      createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+      "fetchJson-start",
+      () => {},
+    );
+    tx.prepareCfc();
+    const state = tx.getCfcState();
+    return {
+      tx,
+      reasons: state.prepare.status === "invalidated"
+        ? [...state.prepare.reasons]
+        : [],
+      diagnostics: [...state.diagnostics],
+      prepare: state.prepare,
+    };
+  };
+
+  const readReceipt = (runtime: Runtime, receiptId: URI): unknown => {
+    const tx = runtime.edit();
+    const value = tx.readOrThrow({
+      space: signer.did(),
+      id: receiptId,
+      type: "application/json",
+      path: ["value"],
+    });
+    tx.abort();
+    return value;
+  };
+
+  const stagedReceiptWrite = (
+    tx: ReturnType<Runtime["edit"]>,
+    receiptId: URI,
+  ): boolean =>
+    [...(tx.getWriteDetails?.(signer.did() as MemorySpace) ?? [])].some(
+      (write) => write.address.id === receiptId,
+    );
+
+  // ---------------------------------------------------------------------------
+  // Consuming vs observing context (the seam decision): single-use grants
+  // resolve ONLY in consuming contexts; everywhere else they are
+  // unsatisfiable, fail closed.
+  // ---------------------------------------------------------------------------
+  describe("consumption context (resolver + evaluator threading)", () => {
+    const singleUseRule: ExchangeRule = {
+      id: "single-use-share",
+      appliesTo: { type: CFC_ATOM_TYPE.User, subject: { var: "$owner" } },
+      preCondition: {
+        policyState: [{
+          kind: "ShareGrant",
+          owner: { var: "$owner" },
+          resource: PHOTO_REF,
+          audience: {
+            type: CFC_ATOM_TYPE.User,
+            subject: { var: "$recipient" },
+          },
+        }],
+      },
+      post: {
+        addAlternatives: [{
+          type: CFC_ATOM_TYPE.User,
+          subject: { var: "$recipient" },
+        }],
+      },
+    };
+    const ruleSnapshot = buildCfcPolicySnapshot([{
+      id: "p",
+      rules: [singleUseRule],
+    }])!;
+
+    it("stamps the context onto resolver queries (absent = observing)", () => {
+      const queries: CfcGrantResolverQuery[] = [];
+      const resolver = (query: CfcGrantResolverQuery) => {
+        queries.push(query);
+        return [];
+      };
+      evaluateExchangeRules(
+        { confidentiality: [cfcAtom.user(ALICE)] },
+        ruleSnapshot,
+        { grantResolver: resolver },
+      );
+      evaluateExchangeRules(
+        { confidentiality: [cfcAtom.user(ALICE)] },
+        ruleSnapshot,
+        { grantResolver: resolver, grantConsumption: "consuming" },
+      );
+      expect(queries.length).toBe(2);
+      expect(queries[0].consumption).toBe("observing");
+      expect(queries[1].consumption).toBe("consuming");
+    });
+
+    it("a single-use grant is unsatisfiable in observing queries; a standing grant resolves", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime); // singleUse: true
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        const fields = { owner: signer.did(), resource: PHOTO_REF };
+        // Absent consumption → observing → unsatisfiable.
+        expect(resolver({ kind: "ShareGrant", fields })).toEqual([]);
+        // Explicit observing → unsatisfiable.
+        expect(
+          resolver({ kind: "ShareGrant", fields, consumption: "observing" }),
+        ).toEqual([]);
+        // No receipt was consulted for the observing evaluations — the grant
+        // is unsatisfiable there regardless of receipt state, so the decision
+        // never depended on it.
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        expect(
+          tx.getCfcState().consultedGrants.some((g) => g.id === receiptId),
+        ).toBe(false);
+        tx.abort();
+
+        // The SAME release scope as a standing grant resolves in an
+        // observing query (regression pin: the context axis is single-use
+        // only).
+        await writeGrant(runtime, { singleUse: undefined });
+        const tx2 = runtime.edit();
+        const standingResolver = createTxCfcGrantResolver(tx2);
+        expect(
+          standingResolver({ kind: "ShareGrant", fields }).length,
+        ).toBe(1);
+        tx2.abort();
+      });
+    });
+
+    it("resolves in a consuming query, records the receipt consulted-absent, and stages the claim", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const grantId = grantIdFor(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        const facts = resolver({
+          kind: "ShareGrant",
+          fields: { owner: signer.did(), resource: PHOTO_REF },
+          consumption: "consuming",
+        });
+        expect(facts.length).toBe(1);
+        expect(facts[0]).toMatchObject({ singleUse: true });
+        // Both the grant AND the receipt joined the consulted set — the
+        // receipt as ABSENT (digest binding, same discipline as the grant).
+        const consulted = tx.getCfcState().consultedGrants;
+        expect(consulted.some((g) => g.id === grantId)).toBe(true);
+        expect(
+          consulted.some((g) =>
+            g.id === receiptId && g.digest === CFC_GRANT_ABSENT_DIGEST
+          ),
+        ).toBe(true);
+        // The claim flushes into a receipt write + create-only mark.
+        expect(stagedReceiptWrite(tx, receiptId)).toBe(false);
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        expect(stagedReceiptWrite(tx, receiptId)).toBe(true);
+        tx.abort();
+      });
+    });
+
+    it("a durably consumed receipt makes the grant unsatisfiable in consuming queries", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const grantId = grantIdFor(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        // Seed a receipt as another release would have committed it.
+        const seed = runtime.edit();
+        seed.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-grant-writer",
+        });
+        // Receipts live in the reserved namespace: use an OBSERVE-mode
+        // runtime? No — write privileged is not reachable here, so seed
+        // through a fresh observe-enforcement runtime sharing storage is
+        // overkill; instead exercise the real path: a full release commit.
+        seed.abort();
+        await seedLabeledCell(runtime, "consumed-check", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        const release = buildRelease(runtime, "consumed-check");
+        expect(release.reasons).toEqual([]);
+        expect((await release.tx.commit()).ok).toBeDefined();
+        expect(readReceipt(runtime, receiptId)).toBeDefined();
+
+        // Now the consuming query fails closed and records the receipt as
+        // PRESENT (content digest, not the absent marker).
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+            consumption: "consuming",
+          }),
+        ).toEqual([]);
+        expect(
+          tx.getCfcState().consultedGrants.some((g) =>
+            g.id === receiptId && g.digest !== CFC_GRANT_ABSENT_DIGEST
+          ),
+        ).toBe(true);
+        // No claim staged for a consumed grant.
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        expect(stagedReceiptWrite(tx, receiptId)).toBe(false);
+        tx.abort();
+      });
+    });
+
+    it("garbage at the receipt address still counts as consumed (presence is the signal)", async () => {
+      // Seed garbage at the receipt address through an observe-enforcement
+      // runtime (the forged-write diagnosis path — same discipline as the
+      // malformed-grant test in cfc-grant-records).
+      const storageManager = StorageManager.emulate({ as: signer });
+      const observeRuntime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        experimental: { commitPreconditions: true },
+        cfcEnforcementMode: "observe",
+        cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+        cfcPolicyEvaluation: "enforce",
+      });
+      try {
+        const grantId = cfcGrantDocId({
+          space: signer.did(),
+          kind: "ShareGrant",
+          owner: signer.did(),
+          resource: PHOTO_REF,
+        });
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        await writeGrant(observeRuntime);
+        const seed = observeRuntime.edit();
+        seed.writeOrThrow({
+          space: signer.did(),
+          id: receiptId,
+          type: "application/json",
+          path: ["value"],
+        }, { forged: "garbage" });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = observeRuntime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+            consumption: "consuming",
+          }),
+        ).toEqual([]);
+        tx.abort();
+      } finally {
+        await observeRuntime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("flag off: unsatisfiable even in consuming queries, with a diagnostic", async () => {
+      await withRuntime({ receipts: false }, async (runtime) => {
+        await writeGrant(runtime);
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+            consumption: "consuming",
+          }),
+        ).toEqual([]);
+        expect(
+          tx.getCfcState().diagnostics.some((note) =>
+            note.includes("commitPreconditions")
+          ),
+        ).toBe(true);
+        // Nothing claimed, nothing staged.
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        tx.abort();
+      });
+    });
+
+    it("evaluator: a consuming context fires the rule; an observing one does not", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const label = { confidentiality: [cfcAtom.user(signer.did())] };
+        const observing = runtime.edit();
+        const observed = evaluateExchangeRules(
+          label,
+          ruleSnapshot,
+          { grantResolver: createTxCfcGrantResolver(observing) },
+        );
+        expect(observed.firings).toEqual([]);
+        observing.abort();
+
+        const consuming = runtime.edit();
+        const consumed = evaluateExchangeRules(
+          label,
+          ruleSnapshot,
+          {
+            grantResolver: createTxCfcGrantResolver(consuming),
+            grantConsumption: "consuming",
+          },
+        );
+        expect(consumed.firings.length).toBe(1);
+        consuming.abort();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Claim staging arms.
+  // ---------------------------------------------------------------------------
+  describe("claim staging (flushCfcGrantConsumptionClaims)", () => {
+    it("no claims → no writes, no reasons", async () => {
+      await withRuntime({}, (runtime) => {
+        const tx = runtime.edit();
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        tx.abort();
+      });
+    });
+
+    it("is idempotent across repeated flushes (re-prepare shape)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        const tx = runtime.edit();
+        const resolver = createTxCfcGrantResolver(tx);
+        resolver({
+          kind: "ShareGrant",
+          fields: { owner: signer.did(), resource: PHOTO_REF },
+          consumption: "consuming",
+        });
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        expect(stagedReceiptWrite(tx, receiptId)).toBe(true);
+        tx.abort();
+      });
+    });
+
+    it("own claim: a second resolution in the same tx still resolves (re-prepare)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const tx = runtime.edit();
+        const query = {
+          kind: "ShareGrant",
+          fields: { owner: signer.did(), resource: PHOTO_REF },
+          consumption: "consuming" as const,
+        };
+        expect(createTxCfcGrantResolver(tx)(query).length).toBe(1);
+        expect(flushCfcGrantConsumptionClaims(tx)).toEqual([]);
+        // Fresh resolver instance (a re-prepare builds one per evaluation):
+        // the receipt now sits in this tx's journal, but it is OUR claim —
+        // the same consumption, so the grant still resolves.
+        expect(createTxCfcGrantResolver(tx)(query).length).toBe(1);
+        tx.abort();
+      });
+    });
+
+    it("fails closed when a claim cannot be staged (cross-space write isolation)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const tx = runtime.edit();
+        // Claim another space as the write target first: the receipt write
+        // (owner's space) then violates single-space write isolation.
+        tx.writeOrThrow({
+          space: BOB as MemorySpace,
+          id: "of:elsewhere" as URI,
+          type: "application/json",
+          path: ["value"],
+        }, { probe: true });
+        const resolver = createTxCfcGrantResolver(tx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: signer.did(), resource: PHOTO_REF },
+            consumption: "consuming",
+          }).length,
+        ).toBe(1);
+        const failures = flushCfcGrantConsumptionClaims(tx);
+        expect(failures.length).toBe(1);
+        expect(failures[0]).toContain("staging consumption receipt");
+        tx.abort();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The core: consumption semantics at the sink egress gate, end to end.
+  // ---------------------------------------------------------------------------
+  describe("single-use release at the sink egress gate", () => {
+    it("releases once, committing the receipt atomically; the second evaluation fails closed", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "single-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+
+        const first = buildRelease(runtime, "single-release", "-1");
+        expect(first.reasons).toEqual([]);
+        // The receipt write is staged in the SAME transaction (atomic).
+        expect(stagedReceiptWrite(first.tx, receiptId)).toBe(true);
+        expect((await first.tx.commit()).ok).toBeDefined();
+        // The receipt committed with the release.
+        expect(readReceipt(runtime, receiptId)).toMatchObject({
+          grantConsumed: { grantId: grantIdFor(runtime) },
+        });
+
+        // Second evaluation: the receipt exists → the rule no longer fires →
+        // fail closed, exactly like revoked/expired.
+        const second = buildRelease(runtime, "single-release", "-2");
+        expect(
+          second.reasons.some((reason) =>
+            reason.includes("sink-request confidentiality exceeds ceiling")
+          ),
+        ).toBe(true);
+        second.tx.abort();
+      });
+    });
+
+    it("standing grants (singleUse absent) release repeatedly with no receipt (regression pin)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime, { singleUse: undefined });
+        const grantId = grantIdFor(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        await seedLabeledCell(runtime, "standing-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        for (const suffix of ["-1", "-2"]) {
+          const release = buildRelease(runtime, "standing-release", suffix);
+          expect(release.reasons).toEqual([]);
+          // No receipt machinery for standing grants: no staged write, no
+          // receipt consulted — byte-identical decision inputs to #4627.
+          expect(stagedReceiptWrite(release.tx, receiptId)).toBe(false);
+          const prepared = release.prepare;
+          expect(prepared.status).toBe("prepared");
+          if (prepared.status === "prepared") {
+            // The grant itself was consulted (plus any absent candidate
+            // addresses the fixpoint's label-carried discovery probed — the
+            // added User(bob) alternative re-matches the rule and probes
+            // Bob's own would-be grant scope, #4627 behavior), but never
+            // the consumption receipt.
+            const consulted = prepared.input.consultedGrants!;
+            expect(consulted.some((g) => g.id === grantId)).toBe(true);
+            expect(consulted.some((g) => g.id === receiptId)).toBe(false);
+          }
+          expect((await release.tx.commit()).ok).toBeDefined();
+        }
+        expect(readReceipt(runtime, receiptId)).toBeUndefined();
+      });
+    });
+
+    it("two racing releases in one runtime: exactly one commits; the re-run does not fire", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "racing-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+
+        // Both transactions resolve the grant before either commits: both
+        // see the receipt durably absent, both stage the claim.
+        const first = buildRelease(runtime, "racing-release", "-1");
+        const second = buildRelease(runtime, "racing-release", "-2");
+        expect(first.reasons).toEqual([]);
+        expect(second.reasons).toEqual([]);
+
+        expect((await first.tx.commit()).ok).toBeDefined();
+        // SAME-replica loser: the local replica already applied the winner,
+        // so the loser dies on the client-side consistency guard
+        // (StorageTransactionInconsistent — retryable class) before its
+        // commit ever reaches the server precondition. Either rejection
+        // surface converges identically: the re-run re-evaluates, the
+        // receipt exists, the rule does not fire. The server-side
+        // receipt-exists classification proper (a REMOTE second replica
+        // that could not know) is pinned by the next test.
+        const lost = await second.tx.commit();
+        expect(lost.error).toBeDefined();
+
+        // Exactly one release: the winner's receipt.
+        expect(readReceipt(runtime, receiptId)).toMatchObject({
+          grantConsumed: { grantId: grantIdFor(runtime) },
+        });
+
+        // Re-evaluation after the lost race: the receipt exists → the rule
+        // no longer fires.
+        const rerun = buildRelease(runtime, "racing-release", "-3");
+        expect(
+          rerun.reasons.some((reason) =>
+            reason.includes("sink-request confidentiality exceeds ceiling")
+          ),
+        ).toBe(true);
+        rerun.tx.abort();
+      });
+    });
+
+    it("a remote racing claim loses as a permanent receipt-exists rejection (create-only race)", async () => {
+      // The create-only race proper needs a second REPLICA on the same
+      // server: a same-replica loser is caught by the local consistency
+      // guard first (previous test). A second storage manager sharing the
+      // base manager's in-process server plays the remote releaser whose
+      // replica never observed the winner's receipt.
+      class SharedServerStorageManager extends EmulatedStorageManager {
+        static shareServerOf(
+          base: EmulatedStorageManager,
+        ): SharedServerStorageManager {
+          return new SharedServerStorageManager(
+            {
+              as: signer,
+              memoryHost: new URL("memory://"),
+            } satisfies StorageManagerOptions,
+            () =>
+              (base as unknown as { server(): MemoryV2Server.Server })
+                .server(),
+          );
+        }
+        // The server belongs to the base manager; EmulatedStorageManager's
+        // close would close the shared instance's cached reference to it.
+        // Close only the storage-manager half (the grandparent close).
+        override close(): Promise<void> {
+          return V2StorageManager.prototype.close.call(this);
+        }
+      }
+
+      const base = StorageManager.emulate({ as: signer });
+      const remote = SharedServerStorageManager.shareServerOf(base);
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager: base,
+        experimental: { commitPreconditions: true },
+        cfcEnforcementMode: "enforce-explicit",
+        cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
+        cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
+        cfcPolicyEvaluation: "enforce",
+      });
+      try {
+        await writeGrant(runtime);
+        const grantId = grantIdFor(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        await seedLabeledCell(runtime, "remote-racing-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+
+        // The remote releaser stages its claim — the receipt write plus the
+        // create-only mark, exactly the shape flushCfcGrantConsumptionClaims
+        // stages — against a replica that has not observed any receipt.
+        const remoteTx = new ExtendedStorageTransaction(remote.edit());
+        remoteTx.writeOrThrow({
+          space: signer.did(),
+          id: receiptId,
+          type: "application/json",
+          path: ["value"],
+        }, {
+          version: 1,
+          grantConsumed: { grantId },
+          space: signer.did(),
+          consumedAt: 1000,
+        });
+        remoteTx.markCreateOnly({ space: signer.did(), id: receiptId });
+
+        // The local release wins.
+        const local = buildRelease(runtime, "remote-racing-release");
+        expect(local.reasons).toEqual([]);
+        expect((await local.tx.commit()).ok).toBeDefined();
+
+        // The remote claim reaches the server unaware — and dies on the
+        // entity-absent precondition as the PERMANENT receipt-exists
+        // rejection the scheduler never retries.
+        const lost = await remoteTx.commit();
+        expect(lost.error).toBeDefined();
+        expect(lost.error!.name).toBe("PreconditionFailedError");
+        expect(
+          (lost.error as { precondition?: string }).precondition,
+        ).toBe("receipt-exists");
+        expect(isPermanentRejection(lost.error!)).toBe(true);
+      } finally {
+        await runtime.dispose();
+        await remote.close();
+        await base.close();
+      }
+    });
+
+    it("a failed commit consumes nothing; a retry can still consume (no-consume-on-failure)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "failed-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        // A doc the release reads (confirmed) and an interloper then bumps,
+        // making the release's commit fail on a stale confirmed read.
+        const seedY = runtime.edit();
+        seedY.writeOrThrow({
+          space: signer.did(),
+          id: "of:conflict-anchor" as URI,
+          type: "application/json",
+          path: ["value"],
+        }, { rev: 1 });
+        expect((await seedY.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        expect(
+          tx.readOrThrow({
+            space: signer.did(),
+            id: "of:conflict-anchor" as URI,
+            type: "application/json",
+            path: ["value"],
+          }),
+        ).toMatchObject({ rev: 1 });
+        const cell = runtime.getCell(
+          signer.did(),
+          "failed-release",
+          SECRET_SCHEMA.schema,
+          tx,
+        );
+        expect(cell.key("secret").get()).toBe("rosebud");
+        enqueueSinkRequestPostCommitEffect(
+          tx,
+          "fetchJson",
+          "fetchJson:single-use-failed-release",
+          createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+          "fetchJson-start",
+          () => {},
+        );
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        expect(stagedReceiptWrite(tx, receiptId)).toBe(true);
+
+        // Interloper bumps the anchor; the prepared release's basis is stale.
+        const interloper = runtime.edit();
+        interloper.writeOrThrow({
+          space: signer.did(),
+          id: "of:conflict-anchor" as URI,
+          type: "application/json",
+          path: ["value"],
+        }, { rev: 2 });
+        expect((await interloper.commit()).ok).toBeDefined();
+
+        const failed = await tx.commit();
+        expect(failed.error).toBeDefined();
+        // The staged receipt rode the failed transaction: nothing landed.
+        expect(readReceipt(runtime, receiptId)).toBeUndefined();
+
+        // The retry (a fresh transaction, as the scheduler would run it)
+        // re-resolves the grant — the receipt is still absent — and lands.
+        const retry = buildRelease(runtime, "failed-release", "-retry");
+        expect(retry.reasons).toEqual([]);
+        expect((await retry.tx.commit()).ok).toBeDefined();
+        expect(readReceipt(runtime, receiptId)).toBeDefined();
+      });
+    });
+
+    it("re-prepare in one transaction: still releases, one receipt, commit ok", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "reprepare-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        const release = buildRelease(runtime, "reprepare-release");
+        expect(release.reasons).toEqual([]);
+        // Invalidate and re-prepare: the resolver finds its own staged
+        // receipt in the journal and recognizes the claim as this
+        // transaction's own consumption.
+        release.tx.invalidateCfc("test-reprepare");
+        release.tx.prepareCfc();
+        expect(release.tx.getCfcState().prepare.status).toBe("prepared");
+        expect((await release.tx.commit()).ok).toBeDefined();
+        expect(readReceipt(runtime, receiptId)).toBeDefined();
+
+        // Spent: the next evaluation fails closed.
+        const next = buildRelease(runtime, "reprepare-release", "-next");
+        expect(next.reasons.length).toBeGreaterThan(0);
+        next.tx.abort();
+      });
+    });
+
+    it("flag off: a single-use grant is unsatisfiable at the gate (never silently multi-use)", async () => {
+      await withRuntime({ receipts: false }, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "flag-off-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        const release = buildRelease(runtime, "flag-off-release");
+        expect(
+          release.reasons.some((reason) =>
+            reason.includes("sink-request confidentiality exceeds ceiling")
+          ),
+        ).toBe(true);
+        expect(
+          release.diagnostics.some((note) =>
+            note.includes("commitPreconditions")
+          ),
+        ).toBe(true);
+        expect(stagedReceiptWrite(release.tx, receiptId)).toBe(false);
+        release.tx.abort();
+
+        // A standing grant under the SAME flag-off runtime keeps releasing
+        // (the flag gates single-use consumption, nothing else).
+        await writeGrant(runtime, { singleUse: undefined });
+        const standing = buildRelease(runtime, "flag-off-release", "-standing");
+        expect(standing.reasons).toEqual([]);
+        standing.tx.abort();
+      });
+    });
+
+    it("observe dial: decides on the raw label and never stages a claim", async () => {
+      await withRuntime({ policyEvaluation: "observe" }, async (runtime) => {
+        await writeGrant(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        await seedLabeledCell(runtime, "observe-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        const release = buildRelease(runtime, "observe-release");
+        // Observe decides on the raw label: the egress still rejects.
+        expect(
+          release.reasons.some((reason) =>
+            reason.includes("sink-request confidentiality exceeds ceiling")
+          ),
+        ).toBe(true);
+        // And the observing evaluation must not spend the grant: no claim.
+        expect(stagedReceiptWrite(release.tx, receiptId)).toBe(false);
+        release.tx.abort();
+      });
+    });
+
+    it("receipt lookups never taint (internalVerifierRead discipline)", async () => {
+      await withRuntime({}, async (runtime) => {
+        await writeGrant(runtime);
+        await seedLabeledCell(runtime, "no-taint-release", {
+          confidentiality: [cfcAtom.user(signer.did())],
+        });
+        const release = buildRelease(runtime, "no-taint-release");
+        expect(release.prepare.status).toBe("prepared");
+        if (release.prepare.status !== "prepared") return;
+        // Grant + receipt were consulted…
+        const grantId = grantIdFor(runtime);
+        const receiptId = cfcGrantConsumedReceiptId(grantId);
+        const consulted = release.prepare.input.consultedGrants!;
+        expect(consulted.some((g) => g.id === grantId)).toBe(true);
+        expect(
+          consulted.some((g) =>
+            g.id === receiptId && g.digest === CFC_GRANT_ABSENT_DIGEST
+          ),
+        ).toBe(true);
+        // …but neither entered the consumed read set.
+        expect(
+          release.prepare.input.consumedReads.some((read) =>
+            read.id.startsWith(CFC_GRANT_ID_PREFIX)
+          ),
+        ).toBe(false);
+        release.tx.abort();
+      });
+    });
+
+    it("rejects an unprivileged write at the receipt address (S18 gate)", async () => {
+      await withRuntime({}, async (runtime) => {
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        const tx = runtime.edit();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: receiptId,
+          type: "application/json",
+          path: ["value"],
+        }, { forged: true });
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Digest binding (item 3): receipt consulted-state rides consultedGrants
+  // with the grants' own canonicalization + invalidation discipline.
+  // ---------------------------------------------------------------------------
+  describe("digest binding of the receipt state", () => {
+    it("a receipt appearing between evaluations invalidates the prepared digest", async () => {
+      await withRuntime({}, async (runtime) => {
+        const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
+        const tx = runtime.edit();
+        // Prepare with the receipt consulted ABSENT (as a consuming
+        // resolution records it)…
+        tx.recordCfcConsultedGrant({
+          space: signer.did(),
+          id: receiptId,
+          digest: CFC_GRANT_ABSENT_DIGEST,
+        });
+        tx.markCfcRelevant("test");
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        // …then the receipt APPEARS (a re-evaluation records it present):
+        // the prepared decision consumed "absent", so it must invalidate —
+        // the cfc-prepared-digest-mismatch class, independent of the
+        // create-only race.
+        tx.recordCfcConsultedGrant({
+          space: signer.did(),
+          id: receiptId,
+          digest: "receipt-present-digest",
+        });
+        const state = tx.getCfcState().prepare;
+        expect(state.status).toBe("invalidated");
+        if (state.status === "invalidated") {
+          expect(state.reasons).toContain("consulted-grant-changed");
+        }
+        tx.abort();
+      });
+    });
+
+    it("present vs absent receipt state digests differently (pure)", async () => {
+      const { preparedDigestFor } = await import("../src/cfc/canonical.ts");
+      const base = {
+        consumedReads: [],
+        attemptedWrites: [],
+        writes: [],
+        writeAttemptLog: [],
+        dereferenceTraces: [],
+        triggerReads: [],
+        writePolicyInputs: [],
+      };
+      const receiptId = cfcGrantConsumedReceiptId(
+        cfcGrantDocId(identity),
+      );
+      const absent = preparedDigestFor({
+        ...base,
+        consultedGrants: [{
+          space: ALICE as MemorySpace,
+          id: receiptId,
+          digest: CFC_GRANT_ABSENT_DIGEST,
+        }],
+      });
+      const present = preparedDigestFor({
+        ...base,
+        consultedGrants: [{
+          space: ALICE as MemorySpace,
+          id: receiptId,
+          digest: "receipt-present-digest",
+        }],
+      });
+      expect(absent).not.toBe(present);
+      expect(preparedDigestFor(base)).not.toBe(absent);
+      // Order-insensitive alongside the grant's own entry.
+      const grantEntry = {
+        space: ALICE as MemorySpace,
+        id: cfcGrantDocId(identity),
+        digest: "grant-digest",
+      };
+      const receiptEntry = {
+        space: ALICE as MemorySpace,
+        id: receiptId,
+        digest: CFC_GRANT_ABSENT_DIGEST,
+      };
+      expect(
+        preparedDigestFor({
+          ...base,
+          consultedGrants: [grantEntry, receiptEntry],
+        }),
+      ).toBe(
+        preparedDigestFor({
+          ...base,
+          consultedGrants: [receiptEntry, grantEntry],
+        }),
+      );
     });
   });
 });
