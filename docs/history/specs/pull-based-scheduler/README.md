@@ -1,9 +1,17 @@
+---
+status: historical
+created: 2025-12-31
+archived: 2026-07-09
+reason: "Superseded design; the scheduler-v2 spec replaced the pull-based scheduler behavior reference."
+superseded-by: docs/specs/scheduler-v2/README.md
+---
+
 # Scheduler Behavior Reference
 
 > **Status**: Superseded by scheduler-v2.
 
 Scheduler behavior is now documented in
-[`../scheduler-v2/README.md`](../scheduler-v2/README.md). The old pull-based
+[`docs/specs/scheduler-v2/README.md`](../../../specs/scheduler-v2/README.md). The old pull-based
 scheduler document was retired after the scheduler-v2 cutover so the repo has
 one behavior reference.
 

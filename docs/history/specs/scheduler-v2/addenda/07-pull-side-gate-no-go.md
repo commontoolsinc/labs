@@ -1,8 +1,15 @@
+---
+status: historical
+created: 2026-07-01
+archived: 2026-07-09
+reason: "Scheduler-v2 investigation record: the pull-side gate (push-pull Track 1) measured as a structural no-go."
+---
+
 # Addendum A7 — Pull-side gate (push-pull Track 1) — structural NO-GO
 
 > **Status**: Structural NO-GO
 > **Context**: multi-user cfc-group-chat scheduler-v2 vs main slowness investigation (2026-06/07), informing PR #4288.
-> **Companion**: [scheduler-v2 README](../README.md); sibling addenda in this folder.
+> **Companion**: [scheduler-v2 README](../../../../specs/scheduler-v2/README.md); sibling addenda in this folder.
 
 ## Finding
 

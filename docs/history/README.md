@@ -93,6 +93,8 @@ One line per archived document; each document's header carries the fuller
   and
   [module-graph-import-issues-report.md](future-tasks/code-quality-tasks/module-graph-import-issues-report.md)
   — code-quality audits, June 2025.
+- [scheduler-v2/current-system-inventory.md](specs/scheduler-v2/current-system-inventory.md)
+  — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
 - [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
   runtime bug survey, December 2025.
 
@@ -109,6 +111,29 @@ One line per archived document; each document's header carries the fuller
   — the ESM module-record loader rollout.
 - [pattern-id-retirement.md](specs/pattern-id-retirement.md) — retiring
   pattern ids (work orders W0–W4).
+- [scheduler-v2/migration-plan.md](specs/scheduler-v2/migration-plan.md) — the
+  v1→v2 scheduler migration phases, as executed (#4288).
+- [scheduler-v2/implementation/00-README.md](specs/scheduler-v2/implementation/00-README.md)
+  — the scheduler-v2 work-order index and reading order.
+- [01-phase0-remove-push-mode.md](specs/scheduler-v2/implementation/01-phase0-remove-push-mode.md)
+  — scheduler-v2 work order: remove push mode.
+- [02-phaseE0-event-identity.md](specs/scheduler-v2/implementation/02-phaseE0-event-identity.md)
+  — scheduler-v2 work order: event identity and rejection taxonomy.
+- [03-phaseE1-speculation-lineage.md](specs/scheduler-v2/implementation/03-phaseE1-speculation-lineage.md)
+  — scheduler-v2 work order: speculation lineage.
+- [04-phaseE2-receipts.md](specs/scheduler-v2/implementation/04-phaseE2-receipts.md)
+  — scheduler-v2 work order: receipts as result cells.
+- [05-phase1-static-write-surface.md](specs/scheduler-v2/implementation/05-phase1-static-write-surface.md)
+  — scheduler-v2 work order: static write surface.
+- [06-phase2-tx-identity.md](specs/scheduler-v2/implementation/06-phase2-tx-identity.md)
+  — scheduler-v2 work order: transaction-carried identity.
+- [07-phase3-cutover.md](specs/scheduler-v2/implementation/07-phase3-cutover.md)
+  — scheduler-v2 work order: node records, liveness, the new settle pass (the
+  cutover).
+- [08-later-phases.md](specs/scheduler-v2/implementation/08-later-phases.md) —
+  scheduler-v2 work order: post-cutover phases 4, 5, 7.
+- [PROGRESS.md](specs/scheduler-v2/implementation/PROGRESS.md) — the
+  scheduler-v2 implementation progress log.
 - [sqlite-builtin/implementation-plan.md](specs/sqlite-builtin/implementation-plan.md)
   — the SQLite builtin workstreams, as built.
 - [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.
@@ -133,6 +158,9 @@ One line per archived document; each document's header carries the fuller
   — superseded pattern-construction exploration.
 - [pattern-integration-tests.md](specs/pattern-construction/pattern-integration-tests.md)
   — early harness design the shipped harness diverged from.
+- [pull-based-scheduler/README.md](specs/pull-based-scheduler/README.md) —
+  redirect stub for the retired v1 scheduler behavior reference, superseded by
+  scheduler-v2.
 - [federation-pr5-design.md](development/federation-pr5-design.md) — earlier
   federation auth design, replaced by memory-v2 auth.
 - [DESIGN_ifelse_schema_injection.md](packages/ts-transformers/DESIGN_ifelse_schema_injection.md),
@@ -157,6 +185,32 @@ One line per archived document; each document's header carries the fuller
   — convergence-investigation evidence.
 - [cellset-lww-context.md](specs/memory-v2/cellset-lww-context.md) — working
   context for the cellset LWW fix.
+- [scheduler-v2/addenda/00-README.md](specs/scheduler-v2/addenda/00-README.md)
+  — index of the scheduler-v2 performance-investigation addenda, June–July
+  2026.
+- [01-headline-and-node-multiplication.md](specs/scheduler-v2/addenda/01-headline-and-node-multiplication.md)
+  — scheduler-v2 addendum: the headline A/B regression root-caused to node
+  multiplication.
+- [02-multi-runtime-amplification-and-commit-cost.md](specs/scheduler-v2/addenda/02-multi-runtime-amplification-and-commit-cost.md)
+  — scheduler-v2 addendum: multi-runtime commit/push amplification and
+  per-commit cost.
+- [03-transaction-census.md](specs/scheduler-v2/addenda/03-transaction-census.md)
+  — scheduler-v2 addendum: census of what the extra commits are.
+- [04-refuted-free-fixes.md](specs/scheduler-v2/addenda/04-refuted-free-fixes.md)
+  — scheduler-v2 addendum: refuted free fixes (declared reads, asCell
+  read-depth).
+- [05-serialized-scheduler-state-is-reload-only.md](specs/scheduler-v2/addenda/05-serialized-scheduler-state-is-reload-only.md)
+  — scheduler-v2 addendum: serialized scheduler state is reload-only, not a
+  version skip.
+- [06-cross-runtime-adoption-what-would-be-needed.md](specs/scheduler-v2/addenda/06-cross-runtime-adoption-what-would-be-needed.md)
+  — scheduler-v2 addendum: what cross-runtime derivation adoption would need.
+- [07-pull-side-gate-no-go.md](specs/scheduler-v2/addenda/07-pull-side-gate-no-go.md)
+  — scheduler-v2 addendum: the pull-side gate measured as a structural no-go.
+- [08-effect-defer-neutral.md](specs/scheduler-v2/addenda/08-effect-defer-neutral.md)
+  — scheduler-v2 addendum: per-wave effect coalescing measured neutral.
+- [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
+  — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
+  version-skip.
 - [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
   — traverse optimization log.
 - [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),

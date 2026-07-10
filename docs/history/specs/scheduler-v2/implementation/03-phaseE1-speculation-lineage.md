@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase E1: speculation lineage); shipped in the #4288 cutover."
+---
+
 # Work order 03 — Phase E1: Speculation lineage
 
 > Implements invariant I10 (spec §7.6): work launched by a handler attempt

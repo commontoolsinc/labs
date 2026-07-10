@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase E2: receipts as result cells); shipped in the #4288 cutover."
+---
+
 # Work order 04 — Phase E2: Receipts = result cells (exactly-once)
 
 > Implements invariant I11 (spec §7.6): at most one handling commit per

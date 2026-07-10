@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase E0: event identity and rejection taxonomy); shipped in the #4288 cutover."
+---
+
 # Work order 02 — Phase E0: Event identity + rejection taxonomy
 
 > Shared infrastructure for lineage (03) and receipts (04). No behavior

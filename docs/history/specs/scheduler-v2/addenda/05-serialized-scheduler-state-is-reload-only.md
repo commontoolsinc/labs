@@ -1,8 +1,15 @@
+---
+status: historical
+created: 2026-07-01
+archived: 2026-07-09
+reason: "Scheduler-v2 investigation record: the serialized scheduler state is reload-only, not a version skip."
+---
+
 # Addendum A5 — The serialized scheduler state is reload-only, not a version skip
 
 > **Status**: Refuted hypothesis
 > **Context**: multi-user cfc-group-chat scheduler-v2 vs main slowness investigation (2026-06/07), informing PR #4288.
-> **Companion**: [scheduler-v2 README](../README.md); sibling addenda in this folder.
+> **Companion**: [scheduler-v2 README](../../../../specs/scheduler-v2/README.md); sibling addenda in this folder.
 
 ## Finding
 The serialized/persistent scheduler state (the "scheduler observation") is a **reload-only rehydration record** on both main and v2 — not a mechanism that lets one runtime skip a re-derivation by adopting a peer's already-computed result. It stores read-set **addresses** (no per-read version), is consumed **only at preload**, and decides re-run on the **presence** of an address-overlap dirty marker rather than a version compare. Its cross-space wiring propagates **dirtiness** to force peers to recompute — the opposite of result adoption. It is default-OFF and not enabled in the benchmark, so it cannot be the source of the steady-state +16%. Verified via a 4-reader plus adversarial-synthesis pass against main @8b8471a48 and v2 @893037972; the synthesis verdict was "refuted".

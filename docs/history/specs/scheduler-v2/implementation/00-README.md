@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Index of the executed scheduler-v2 implementation work orders (#4288); the shipped spec is docs/specs/scheduler-v2/README.md."
+---
+
 # Scheduler v2 — Implementation Work Orders
 
 > **Audience**: the implementing agent. Follow these documents literally and
@@ -10,7 +17,7 @@
 
 ## Required reading (before any code)
 
-1. [`../README.md`](../README.md) — the v2 spec. You must know §2
+1. [`docs/specs/scheduler-v2/README.md`](../../../../specs/scheduler-v2/README.md) — the v2 spec. You must know §2
    (principles), §4 (nodes), §7 (execution/events), §11 (invariants).
 2. [`../current-system-inventory.md`](../current-system-inventory.md) — what
    each existing mechanism does and its fate. When you are about to delete

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase 3: node records, liveness, the new settle pass — the cutover); shipped in #4288."
+---
+
 # Work order 07 — Phase 3: Node records, liveness, the new pass
 
 > The structural cutover. Each sub-order is its own stacked branch/PR

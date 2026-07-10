@@ -1,8 +1,15 @@
+---
+status: historical
+created: 2026-07-01
+archived: 2026-07-09
+reason: "Scheduler-v2 A/B investigation record: transaction census of the extra commits."
+---
+
 # Addendum A3 — Transaction census — what the extra commits actually are
 
 > **Status**: Confirmed mechanism + value-level characterized (non-perturbing digest measurement, 2026-07-01)
 > **Context**: multi-user cfc-group-chat scheduler-v2 vs main slowness investigation (2026-06/07), informing PR #4288.
-> **Companion**: [scheduler-v2 README](../README.md); sibling addenda in this folder.
+> **Companion**: [scheduler-v2 README](../../../../specs/scheduler-v2/README.md); sibling addenda in this folder.
 
 ## Finding
 
@@ -21,7 +28,7 @@ The extra commits scheduler-v2 pays on multi-user cfc-group-chat are **per-SPACE
   - **60% redundant**: 78 of 196 writes produced a value never-before-seen for that cell in that runtime; **118 (60%) repeated a value the same cell+runtime had already produced.**
   - **63% cross-runtime duplicated**: of 48 distinct `(cell, value)` pairs, **30 were produced by *both* runtimes** (byte-identical digest) — each computed twice, once per runtime; only 18 were single-runtime.
   - **Per-stream shape**: 16 streams are *progression + consecutive-duplicate* (each new state computed ~2× in a row), 3 are *oscillation*, 2 are *all-same*.
-  - **Apex oscillation, directly observed**: the whole-state render (`main.tsx:309`) runs a clean 7-step progression (each value doubled) then **flip-flops between two digests `908f7b ⇄ 3b27a3` for ~4 cycles** — re-rendering superseded intermediate states as cross-runtime notifications land (matches the diamond-apex re-render mechanism in the [README](../README.md) decision-17).
+  - **Apex oscillation, directly observed**: the whole-state render (`main.tsx:309`) runs a clean 7-step progression (each value doubled) then **flip-flops between two digests `908f7b ⇄ 3b27a3` for ~4 cycles** — re-rendering superseded intermediate states as cross-runtime notifications land (matches the diamond-apex re-render mechanism in the [README](../../../../specs/scheduler-v2/README.md) decision-17).
   - **Per-row CFC label** (`trusted.tsx:955`): clean progression, each of 7 values computed **exactly twice consecutively** — legitimate new states, double-computed.
 
 ## What it means

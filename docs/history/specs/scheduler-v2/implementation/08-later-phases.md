@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Scheduler-v2 work order for the post-cutover phases (4, 5, 7); point-in-time record of the #4288 implementation effort."
+---
+
 # Work order 08 — Phases 4, 5, 7 (post-cutover)
 
 > Three independent follow-ups to the phase-3 cutover, in this order:

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-07-01
+archived: 2026-07-09
+reason: "Index of the scheduler-v2 performance-investigation addenda (2026-06/07 A/B measurements informing #4288)."
+---
+
 # Scheduler v2 — Performance Investigation Addenda
 
 On the multi-user cfc-group-chat benchmark, scheduler-v2 is a stable ~16% slower

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Phase-by-phase progress log of the executed scheduler-v2 implementation (#4288)."
+---
+
 # Scheduler v2 implementation — progress log
 
 > Maintained by the implementing agent (rule G7 in `00-README.md`).

@@ -1,6 +1,13 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Point-in-time inventory of the v1 scheduler's mechanisms and their v2 dispositions; the v1 scheduler was replaced by the scheduler-v2 cutover (#4288)."
+---
+
 # Scheduler v1 — Mechanism Inventory and v2 Disposition
 
-> **Status**: Companion to [`README.md`](./README.md) (the v2 spec). Snapshot
+> **Status**: Companion to [`README.md`](../../../specs/scheduler-v2/README.md) (the v2 spec). Snapshot
 > of the implementation as of June 2026 (`packages/runner/src/scheduler.ts` +
 > `packages/runner/src/scheduler/*`, ~13k lines).
 

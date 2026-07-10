@@ -1,6 +1,13 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed migration plan for the scheduler-v2 cutover (#4288); the shipped spec is docs/specs/scheduler-v2/README.md."
+---
+
 # Scheduler v2 — Migration Plan
 
-> **Status**: Proposal, companion to [`README.md`](./README.md) and
+> **Status**: Proposal, companion to [`README.md`](../../../specs/scheduler-v2/README.md) and
 > [`current-system-inventory.md`](./current-system-inventory.md).
 
 Sequencing principle: each phase lands independently, keeps the full test

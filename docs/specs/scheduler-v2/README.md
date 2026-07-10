@@ -2,13 +2,14 @@
 
 > **Status**: Proposal (design spec, not yet implemented)
 > **Replaces (once implemented)**: the behavior described in
-> `docs/specs/pull-based-scheduler/README.md`
-> **Companion docs**:
-> [`current-system-inventory.md`](./current-system-inventory.md) — every
-> mechanism in today's scheduler and what subsumes it here;
-> [`migration-plan.md`](./migration-plan.md) — phased path from v1 to v2;
-> [`implementation/`](./implementation/00-README.md) — step-by-step work
-> orders for the implementing agent (start at `00-README.md`).
+> `docs/history/specs/pull-based-scheduler/README.md`
+> **Companion records** (archived point-in-time documents):
+> [`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md)
+> — every mechanism in the v1 scheduler and what subsumes it here;
+> [`migration-plan.md`](../../history/specs/scheduler-v2/migration-plan.md) —
+> the executed v1→v2 phase plan;
+> [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
+> — the executed work orders (start at `00-README.md`).
 > **Persistence**: builds on `docs/specs/persistent-scheduler-state.md`
 > (the observation/rehydration model carries over with a smaller payload).
 
@@ -1063,7 +1064,7 @@ hook), `getMightWrite` (meaningless under P4; snapshot exposes outputs).
 ## 14. What v2 deletes, and why it is safe
 
 Summary table; the full per-mechanism walkthrough with file references is in
-[`current-system-inventory.md`](./current-system-inventory.md).
+[`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md).
 
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase 0: remove push mode); shipped in the #4288 cutover."
+---
+
 # Work order 01 — Phase 0: Remove push mode
 
 > Pure deletion. Production behavior must be byte-for-byte unchanged (pull

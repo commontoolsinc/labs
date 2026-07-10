@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase 1: static write surface); shipped in the #4288 cutover."
+---
+
 # Work order 05 — Phase 1: Static write surface
 
 > Freezes each action's write surface at registration (spec P4) and deletes

@@ -6,7 +6,7 @@ execution as the event end-state, scoped derivation on the executor as the
 end-state, state-residency §6.7). No implementation in this spec.
 
 Related specs: `docs/specs/scheduler-v2/`,
-`docs/specs/persistent-scheduler-state.md`, `docs/specs/pull-based-scheduler/`,
+`docs/specs/persistent-scheduler-state.md`,
 `docs/specs/content-addressed-action-identity.md`,
 `docs/history/specs/pattern-id-retirement.md`, `docs/specs/memory-v2/`,
 `docs/specs/toolshed-access-control.md`, `docs/specs/cfc-write-prefix-provenance.md`.

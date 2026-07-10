@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-06-11
+archived: 2026-07-09
+reason: "Executed scheduler-v2 work order (Phase 2: transaction-carried identity); shipped in the #4288 cutover."
+---
+
 # Work order 06 — Phase 2: Transaction-carried identity
 
 > Replaces the `inFlightSources` bookkeeping with one object-identity
