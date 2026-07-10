@@ -59,7 +59,7 @@ type PathMatcher = (path: string) => boolean;
  * glob shape in the workflow must extend this and the drift test together
  * rather than silently mis-matching.
  */
-function matcherForGlob(glob: string): PathMatcher {
+export function matcherForGlob(glob: string): PathMatcher {
   if (glob.endsWith("/**")) {
     const prefix = glob.slice(0, -"**".length);
     return (path) => path.startsWith(prefix);
@@ -163,4 +163,101 @@ export function uniformCacheStates(
     states[family] = state;
   }
   return states;
+}
+
+/**
+ * The current run's fallback fingerprint verdict, used only to fill families
+ * that have no recorded cache state. A PR run reads its own changed-file list;
+ * a main-push run compares its head against the latest prior baseline run.
+ * A fetch failure — or a PR whose file list did not load — yields "unknown", so
+ * the caller fills nothing and every family gates on its recorded state alone.
+ *
+ * `fetchLatestBaselineSha` and `fetchChanged` are injected so the selection is
+ * exercised without the GitHub API.
+ */
+export async function inferCurrentRunFallbackState(opts: {
+  isPullRequestRun: boolean;
+  prFiles: readonly { filename: string; previous_filename?: string }[];
+  headSha: string;
+  fetchLatestBaselineSha: () => Promise<string | undefined>;
+  fetchChanged?: (baseSha: string, headSha: string) => Promise<string[]>;
+}): Promise<CacheKeyState | "unknown"> {
+  if (opts.isPullRequestRun) {
+    return opts.prFiles.length > 0
+      ? classifyCacheKeyState(changedPathsOf(opts.prFiles))
+      : "unknown";
+  }
+  let predecessorSha: string | undefined;
+  try {
+    predecessorSha = await opts.fetchLatestBaselineSha();
+  } catch {
+    return "unknown";
+  }
+  return classifyRunAgainstPredecessor(
+    opts.headSha,
+    predecessorSha,
+    opts.fetchChanged,
+  );
+}
+
+/**
+ * Fill families with no recorded cache state from a run-level fingerprint
+ * verdict, mutating `states`. Recorded states are ground truth and always win,
+ * so only families absent from `states` are touched. A "cold" verdict fills
+ * those families "cold"; "warm" and "unknown" fill nothing — a family with no
+ * recorded state already gates normally, so a warm fill would be a no-op.
+ * Returns the number of families newly filled, and logs a non-zero fill for the
+ * CI transcript.
+ */
+export function fillMissingFamiliesFromFingerprint(
+  states: CompileCacheStates,
+  inferred: CacheKeyState | "unknown",
+): number {
+  if (inferred !== "cold") return 0;
+  let filled = 0;
+  for (const family of COMPILE_CACHE_FAMILIES) {
+    if (!(family in states)) {
+      states[family] = "cold";
+      filled++;
+    }
+  }
+  if (filled > 0) {
+    console.log(
+      `Compile fingerprint changed in this run; ${filled} unknown famil${
+        filled === 1 ? "y" : "ies"
+      } treated as cold.`,
+    );
+  }
+  return filled;
+}
+
+/**
+ * Retro-classify an unstamped baseline run — one whose artifacts carry no
+ * recorded stamp — from the compile fingerprint against its predecessor, and
+ * record the result in `cacheStatesByRunId` keyed by run id. A "cold"/"warm"
+ * verdict applies to every family at once (the shared key prefix); "unknown"
+ * (no predecessor, or an unreadable compare) records nothing, leaving the run
+ * to gate on its kept samples like any run whose cache state cannot be
+ * determined. A cold retro-classification is logged for the CI transcript.
+ * `fetchChanged` is injected so the classification is testable offline.
+ */
+export async function recordUnstampedBaselineRunState(
+  cacheStatesByRunId: Map<number, CompileCacheStates>,
+  run: { id: number; head_sha: string },
+  predecessorSha: string | undefined,
+  label: string,
+  fetchChanged?: (baseSha: string, headSha: string) => Promise<string[]>,
+): Promise<void> {
+  const inferred = await classifyRunAgainstPredecessor(
+    run.head_sha,
+    predecessorSha,
+    fetchChanged,
+  );
+  if (inferred === "unknown") return;
+  cacheStatesByRunId.set(run.id, uniformCacheStates(inferred));
+  if (inferred === "cold") {
+    console.log(
+      `  Baseline run ${run.id} (${label}) retro-classified cold: compile fingerprint changed vs predecessor.`,
+    );
+  }
 }
