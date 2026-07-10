@@ -196,6 +196,7 @@ const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 //     data its own later syncs have already superseded.
 //
 // Default off. Do NOT enable without re-measuring on the target workload.
+// Catalogued in docs/development/EXPERIMENTAL_OPTIONS.md (conflictAdmissionMode).
 type ConflictAdmissionMode = "off" | "preempt" | "hold";
 let conflictAdmissionModeOverride: ConflictAdmissionMode | undefined;
 export function setConflictAdmissionMode(

@@ -2,8 +2,27 @@ export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
+  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
+  stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
+export {
+  CLASSIFIED_KIND_FAMILIES,
+  classifyAtomField,
+  classifyLabelField,
+  LABEL_FIELD_CLASSIFICATION,
+  type LabelAtomFamily,
+  type LabelFieldClassificationEntry,
+  type LabelFieldRepresentationClass,
+} from "./label-field-classification.ts";
+export {
+  type CfcFieldCommitment,
+  commitCfcFieldValue,
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  isCfcFieldCommitment,
+  transformCfcLabelForCrossSpacePersist,
+} from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
@@ -21,6 +40,7 @@ export type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
   CfcPrepareState,
@@ -35,6 +55,7 @@ export type {
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
@@ -51,6 +72,7 @@ export {
   cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
@@ -111,6 +133,8 @@ export {
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
 export type {
+  CfcGrantResolver,
+  CfcGrantResolverQuery,
   ExchangeEvalContext,
   ExchangeEvalResult,
   RuleFiring,
@@ -119,6 +143,22 @@ export {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+export type {
+  CfcGrant,
+  CfcGrantIdentity,
+  CfcGrantWriteInput,
+} from "./grants.ts";
+export {
+  CFC_GRANT_ABSENT_DIGEST,
+  CFC_GRANT_ID_PREFIX,
+  cfcGrantDocId,
+  cfcGrantIsLive,
+  createTxCfcGrantResolver,
+  disallowedGrantAudienceEntryReason,
+  expandCfcGrantFacts,
+  prepareCfcGrantWrite,
+  verifyCfcGrantDocument,
+} from "./grants.ts";
 export type {
   RenderConfidentialityResolver,
   RenderConfidentialityResolverConfig,
@@ -137,10 +177,17 @@ export {
   spaceReaderRole,
 } from "./space-membership.ts";
 export {
+  CFC_PREFIX_PROVENANCE_MAX_WRITES,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
   prepareBoundaryCommit,
+} from "./prepare.ts";
+export type {
+  CfcPrefixBoundSource,
+  CfcPrefixProvenanceSummary,
+  CfcPrefixProvenanceWrite,
+  CfcPrepareInstrumentation,
 } from "./prepare.ts";
 export {
   createSinkRequestPolicyInput,

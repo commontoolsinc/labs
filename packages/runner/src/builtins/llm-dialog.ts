@@ -2064,7 +2064,7 @@ function toolInputValueIntegrity(
 
 // Walk a tool's `inputSchema` for fields declaring `ifc.requiredIntegrity` and
 // verify the model-supplied value at each carries every required atom (Epic D2,
-// docs/specs/cfc-trusted-agent-tool-integrity.md piece A/C). A control/routing
+// docs/history/specs/cfc-trusted-agent-tool-integrity.md piece A/C). A control/routing
 // field (e.g. `sendMail.recipient`) declaring the agent-kernel integrity floor
 // can only be satisfied by an integrity-bearing reference the model passed, not
 // by a string it copied out of a hostile briefing — that fails closed. Returns
@@ -3273,7 +3273,7 @@ async function startRequest(
 
   const messagesCell = inputs.key("messages");
 
-  // Epic D1 (docs/specs/cfc-trusted-agent-tool-integrity.md piece B): model-
+  // Epic D1 (docs/history/specs/cfc-trusted-agent-tool-integrity.md piece B): model-
   // produced bytes — assistant content and tool results entering the dialog
   // transcript — are stamped `LlmDerived` at the point they enter the store,
   // so "untrusted model output" is explicit provenance rather than absence of

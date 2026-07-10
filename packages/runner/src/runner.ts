@@ -94,7 +94,11 @@ import {
 } from "./cfc/types.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  isTrustedBuilderArtifact,
+  resolveOriginal,
+} from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -4065,8 +4069,27 @@ export class Runner {
    * the freshly bound (mutable, unfrozen) copy produced by
    * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
    * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the
-   * op is left as the embedded graph.
+   * (assigned post-eval by `registerEvaluatedModules`).
+   *
+   * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
+   * — hand-built through the in-process builder DSL, or evaluated through the
+   * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
+   * copy carries a derivation link to its pristine in-memory pattern. It is
+   * minted its content-hash session identity right here (the same pointer
+   * `entryRefForPattern` mints for a keyless ROOT pattern), so it rides a
+   * `$patternRef` to that pristine artifact. Leaving it embedded instead
+   * would send it through the immutable-cell JSON round-trip, which corrupts
+   * a nested sub-pattern's output-alias `defer` levels (CT-1812 — the
+   * CT-1811 corruption, reachable ref-lessly). The trust gate stays intact:
+   * minting BRANDS, so only a value whose original is already a trusted
+   * builder pattern is minted.
+   *
+   * An op with no ref AND no live original — a plain deserialized graph,
+   * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
+   * pinned by stored-pattern-rehydration.test.ts) — is left embedded: there
+   * is no pristine artifact in existence to point at, and re-rooting the
+   * graph bind-free is exactly the defer surgery CT-1812 records as the
+   * residual there. Such an op takes the builtin's legacy graph path.
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
@@ -4081,9 +4104,17 @@ export class Runner {
     if (!isRecord(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
     if (!isRecord(op)) return;
-    const ref = this.runtime.patternManager.getArtifactEntryRef(
+    let ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
+    if (!ref) {
+      const original = resolveOriginal(op as unknown as object);
+      if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+        ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
+          original as unknown as Pattern,
+        );
+      }
+    }
     if (ref) {
       (inputBindings as Record<string, unknown>).op = {
         $patternRef: { identity: ref.identity, symbol: ref.symbol },

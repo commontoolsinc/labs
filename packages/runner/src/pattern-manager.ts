@@ -35,6 +35,7 @@ import {
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
+  WRITE_TARGET_EDGE_SYNC_SCHEMA,
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -1398,13 +1399,25 @@ export class PatternManager {
     }
   }
 
+  // Write-target pre-syncs carry the one-hop edge selector (CT-1848): a
+  // schema-less sync delivers only the root doc, leaving the per-edge element
+  // docs unknown to the replica, so a re-write of pre-existing docs touches
+  // them blind and conflicts one engine round per edge (the CT-1824 loop).
+  // With the edge docs materialized up front the write-back diffs against
+  // true state and commits on the first attempt; the retry budget in
+  // writeBackCompileCache remains as a backstop. Same-microtask syncs batch
+  // into a single server round trip.
   private async syncSourceCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
   ): Promise<void> {
     await Promise.all(
       modules.map((module) =>
-        this.runtime.getCell(space, sourceDocKey(module.identity)).sync()
+        this.runtime.getCell(
+          space,
+          sourceDocKey(module.identity),
+          WRITE_TARGET_EDGE_SYNC_SCHEMA,
+        ).sync()
       ),
     );
   }
@@ -1416,10 +1429,15 @@ export class PatternManager {
   ): Promise<void> {
     await Promise.all(
       modules.flatMap((module) => [
-        this.runtime.getCell(space, sourceDocKey(module.identity)).sync(),
+        this.runtime.getCell(
+          space,
+          sourceDocKey(module.identity),
+          WRITE_TARGET_EDGE_SYNC_SCHEMA,
+        ).sync(),
         this.runtime.getCell(
           space,
           compiledDocKey(opts.runtimeVersion, module.identity),
+          WRITE_TARGET_EDGE_SYNC_SCHEMA,
         ).sync(),
       ]),
     );

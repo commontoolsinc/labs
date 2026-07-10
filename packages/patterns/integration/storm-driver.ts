@@ -7,7 +7,8 @@
  *
  * Prints per-session views, raw replica reads of the messages doc, and
  * logger-count deltas, then exits. Used to pin down which conditions are
- * necessary for the divergence (docs/plans/2026-06-30-profile-loading-investigation.md).
+ * necessary for the divergence
+ * (docs/history/plans/2026-07-02-convergence-evidence-appendix.md).
  */
 
 import { join } from "@std/path";

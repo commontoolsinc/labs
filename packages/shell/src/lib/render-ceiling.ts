@@ -12,6 +12,8 @@
  * which is fixed for a runtime's lifetime: unlike worker-console forwarding
  * there is no live apply — flipping the flag takes effect on the next
  * runtime (reload or re-login).
+ *
+ * Catalogued in docs/development/EXPERIMENTAL_OPTIONS.md (cfcRenderCeiling).
  */
 
 const STORAGE_KEY = "cfcRenderCeiling";

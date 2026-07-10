@@ -6,9 +6,9 @@ execution as the event end-state, scoped derivation on the executor as the
 end-state, state-residency §6.7). No implementation in this spec.
 
 Related specs: `docs/specs/scheduler-v2/`,
-`docs/specs/persistent-scheduler-state.md`, `docs/specs/pull-based-scheduler/`,
+`docs/specs/persistent-scheduler-state.md`,
 `docs/specs/content-addressed-action-identity.md`,
-`docs/specs/pattern-id-retirement.md`, `docs/specs/memory-v2/`,
+`docs/history/specs/pattern-id-retirement.md`, `docs/specs/memory-v2/`,
 `docs/specs/toolshed-access-control.md`, `docs/specs/cfc-write-prefix-provenance.md`.
 Related in-flight PRs: #4288 (scheduler-v2 cutover), #4514 / #4298 (reactive
 interpreter v2/v1), #4427 (event parking), #4495 (conflict catch-up), #4139
@@ -221,7 +221,7 @@ Merkle-verified closure with `loadPatternByIdentity` +
 `compileCache:<runtimeVersion>/<identity>` for cold recovery (single-flighted,
 #4460). Action identity is per-instance
 (`cf:module/<hash>:<symbol>:<instanceKey>`,
-`docs/specs/action-id-per-instance-decision.md`), reload-stable.
+`docs/history/specs/action-id-per-instance-decision.md`), reload-stable.
 
 Contribution: **doc → producing piece lives on the docs themselves, not in
 an index.** The document envelope defines the chain

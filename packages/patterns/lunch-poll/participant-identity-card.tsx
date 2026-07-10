@@ -169,11 +169,9 @@ export default pattern<
     const profileDisplayName = computed(() =>
       trimmedName(profileNameWish.result ?? "")
     );
-    const hasProfile = computed(() =>
-      trimmedName(profileNameWish.result ?? "") !== ""
-    );
+    const hasProfile = computed(() => profileDisplayName !== "");
     const showManualEntry = computed(() =>
-      trimmedName(profileNameWish.result ?? "") === "" || useCustomName.get()
+      profileDisplayName === "" || useCustomName.get()
     );
 
     const me = computed(() => trimmedName(myName.get()));

@@ -68,7 +68,7 @@ step, and we'll ratchet targets down as we improve.
 
 **First flow profiled:** steady-state note creation in the default-app shell
 integration test — see
-[performance/default-app-note-create.md](performance/default-app-note-create.md)
+[default-app-note-create.md](../history/development/performance/default-app-note-create.md)
 for the logger + worker-CPU-profile breakdown, the benchmarks derived from it,
 and the ranked optimization candidates.
 

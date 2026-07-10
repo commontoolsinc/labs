@@ -44,10 +44,13 @@ import type {
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcGrantWriteInput,
+  CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -963,6 +966,14 @@ export interface IExtendedStorageTransaction
    */
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
   /**
+   * Set the cross-space label-metadata representation dial (inv-12 Stage 1 /
+   * SC-25, spec §4.6.4.1). Anti-downgrade pinned: once `enforce`, weakening
+   * throws.
+   */
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void;
+  /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation
    * even when the run never re-reads them.
@@ -1059,6 +1070,33 @@ export interface IExtendedStorageTransaction
    * `compareWritePolicyInput`.
    */
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
+
+  /**
+   * Records a grant document consulted by policyState-guarded boundary
+   * evaluation (§8.12.7 route 2a) — address plus resolution-time content
+   * digest — for the prepared-digest binding (`PreparedDigestInput.
+   * consultedGrants`). Deduplicated by address; the argument is
+   * `deepFreeze()`d on entry. Called by the runner-side grant resolver
+   * (`createTxCfcGrantResolver`); recording is not itself an enforcement
+   * decision, so exposure is harmless (like `noteCfcDiagnostic`).
+   */
+  recordCfcConsultedGrant(consulted: ConsultedGrant): void;
+
+  /**
+   * The trusted policy-writer path for CFC grant documents (§8.12.7 route
+   * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT
+   * implementation identity to be a trusted builtin (the arm
+   * `writeAuthorizedBy` and the runtime-mint gate trust for runtime
+   * evidence — ordinary pattern/handler code is refused); validates the
+   * grant — audience entries principal-like per §3.1.8, `owner` equal to
+   * this transaction's acting principal (release authority), lifecycle
+   * shape — derives the content-addressed id under the reserved
+   * `grant:cfc:` namespace, and writes the document inside the privileged
+   * system-write scope. Throws on any violation. Any OTHER write to the
+   * reserved namespace is recorded as an unprivileged system write and
+   * fails closed at prepare (S18 class).
+   */
+  writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string };
 
   /**
    * Surfaces a post-commit sink-request release rejection (the effect is fail-

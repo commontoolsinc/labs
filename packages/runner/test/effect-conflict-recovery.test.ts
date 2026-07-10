@@ -225,7 +225,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
   // scheduler-v2 cutover: the debounced variant of #4210's effect-conflict
   // coverage was dropped here. It pinned the v1 `conditionallyScheduledEffects`
   // path, which scheduler-v2 deletes (see
-  // docs/specs/scheduler-v2/current-system-inventory.md, "Conditional effects
+  // docs/history/specs/scheduler-v2/current-system-inventory.md, "Conditional effects
   // — Delete"). Under v2's pull-based settle a `debounce` effect defers its
   // first run, so B's read-repair brings the source to the post-bump value
   // before the effect runs: the first read is fresh (not the stale value the

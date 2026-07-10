@@ -7,33 +7,22 @@
 
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { URI } from "@commonfabric/memory/interface";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryProtocolFlags,
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-remove-coverage");
 const space = signer.did();
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -67,77 +56,28 @@ const getObjectValue = (
 // Answers the watch.add with a sync that upserts every requested root and then
 // removes `removedId` in the same batch, simulating a watched doc deleted
 // upstream as the watch is established.
-class WatchAddRemoveTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
-
-  constructor(private readonly removedId: URI) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+class WatchAddRemoveTransport extends ScriptedSessionTransport {
+  constructor(private readonly removedId: URI) {
+    super({
+      name: "watch-remove-coverage",
+      sessionId: "session:watch-remove-coverage",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override ackServerSeq(): number {
+    return 5;
   }
 
-  send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      invocation?: { aud?: unknown; challenge?: unknown };
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "watch-remove-coverage-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return Promise.resolve();
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `watch-remove-coverage-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:watch-remove-coverage",
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return Promise.resolve();
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 5,
-          },
-        });
-        return Promise.resolve();
       case "session.watch.add": {
         const roots =
           message.watches?.flatMap((watch) =>
             watch.query?.roots?.map((root) => root.id as URI) ?? []
           ) ?? [];
         const toSeq = roots.length + 1;
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -153,20 +93,11 @@ class WatchAddRemoveTransport implements MemoryV2Client.Transport {
             } satisfies SessionSync,
           },
         });
-        return Promise.resolve();
+        return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 

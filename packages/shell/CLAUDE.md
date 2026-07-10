@@ -7,9 +7,11 @@ code in this repository.
 
 ### Build & Serve
 
-- **Development build with hot reload**: `deno task dev` (serves at
-  http://127.0.0.1:5173, access via http://localhost:8000 when running with
-  toolshed)
+- **Development build with hot reload**: `deno task dev-local` against a local
+  Toolshed (serves at http://127.0.0.1:5173, access via http://localhost:8000
+  when running with toolshed). `deno task dev` points at the **production**
+  backend — use `dev-local` for local work. See
+  [LOCAL_DEV_SERVERS.md](../../docs/development/LOCAL_DEV_SERVERS.md).
 - **Production build**: `deno task build` or `deno task production`
 - **Serve built files**: `deno task serve` (serves dist/ at http://0.0.0.0:9099)
 - **Check types**: Run from workspace root: `deno task check`

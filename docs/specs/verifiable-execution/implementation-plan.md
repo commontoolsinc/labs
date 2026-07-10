@@ -302,7 +302,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ### 3.3 Scheduler Hooks
 
-- [ ] Integrate with pull-based scheduler (see `docs/specs/pull-based-scheduler/`)
+- [ ] Integrate with pull-based scheduler (see `docs/specs/scheduler-v2/README.md`)
 - [ ] Provide activity data to scheduler for dependency tracking
 - [ ] Support partial re-execution based on changed paths
 

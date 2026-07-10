@@ -74,7 +74,7 @@ export const CFC_ATOM_TYPE = {
   // transcript). Makes "untrusted model output" EXPLICIT provenance rather
   // than mere absence of integrity, so requiredIntegrity floors fail
   // positively on model-derived values (Epic D1,
-  // docs/specs/cfc-trusted-agent-tool-integrity.md piece B). Evidence — not
+  // docs/history/specs/cfc-trusted-agent-tool-integrity.md piece B). Evidence — not
   // authorable in schemas.
   LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived",
   Origin: "https://commonfabric.org/cfc/atom/Origin",

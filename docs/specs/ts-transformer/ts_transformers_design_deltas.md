@@ -463,7 +463,7 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - schema generation coupling in
   `packages/ts-transformers/src/transformers/schema-generator.ts`
 - docs currently describing “safe context,” including
-  `packages/ts-transformers/docs/SAFE_CONTEXT_TRANSFORMS_DESIGN.md`
+  `docs/history/packages/ts-transformers/docs/SAFE_CONTEXT_TRANSFORMS_DESIGN.md`
 
 ## Simplification Recommendations
 

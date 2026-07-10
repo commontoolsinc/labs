@@ -192,14 +192,14 @@ the middle one):
   `inputSchema.ifc.requiredIntegrity`; the only gate is write-target-scoped; and it
   is **vacuous when the consumed-read set is empty** — a plain model-output literal
   skips it entirely, so an injected `sendMail` recipient is sent under `enforce`.
-  (`cfc-trusted-agent-tool-integrity.md`.)
+  (`docs/history/specs/cfc-trusted-agent-tool-integrity.md`.)
 - **D4 — `LlmDerived` / untrust stamping.** Untrust is represented only as
   *absence* of an integrity atom, so a `requiredIntegrity` gate can fail only on
   absence — which, combined with D3's vacuous pass, lets model bytes pass silently.
   Stamp `LlmDerived`/`DerivedFromAdmitted` at `createToolResultMessages` / message
   append. (§14.2.2 — note this is a "Proposed" spec surface.)
 - **Depends on:** Epic B's matcher for concept-level floors (D1); otherwise
-  standalone. Ref: SC-18; `cfc-trusted-agent-tool-integrity.md`.
+  standalone. Ref: SC-18; `docs/history/specs/cfc-trusted-agent-tool-integrity.md`.
 
 ## Epic E — Row-set reads, per-row labels & sqlite Phase 3.b/3.c
 

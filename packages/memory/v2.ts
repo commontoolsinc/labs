@@ -652,6 +652,9 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
   "no cell reconstruction at the memory boundary",
 );
 
+// These ambient flags and the memory protocol flags below are catalogued, with
+// their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
+// Update that registry when adding or removing one.
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = false;
 let syncSchemaTableEnabled = true;
