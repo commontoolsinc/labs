@@ -110,7 +110,6 @@ authenticate, and bring test servers and devices up before the real work:
 | 🧭 | check skill facts |
 | 📄 | type-check docs |
 | 🏗️ | build binaries or assets |
-| 🏋️ | run benchmarks |
 | 📊 | produce performance metrics or status reports |
 | 🧬 | combine coverage |
 | 📝 | generate attestations |

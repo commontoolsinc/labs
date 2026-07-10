@@ -7,9 +7,7 @@
  * re-check) and on the storage subscription path (`watchIdForEntry` is hit
  * once per watch registration).
  *
- * Tracked metrics live under `bench: packages/runner/test/cfc-canonicalize.bench.ts > ...`
- * once `benchmarks.yml` runs on a main-branch push and the artifact is
- * ingested by `tasks/perf-regression.ts`.
+ * Run with `deno bench -A packages/runner/test/cfc-canonicalize.bench.ts`.
  */
 
 import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";

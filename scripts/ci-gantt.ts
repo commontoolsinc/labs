@@ -261,7 +261,6 @@ const PHASE_MARKERS: [string, Phase][] = [
   ["🧭", "work"], // check skill facts
   ["📄", "work"], // type-check docs
   ["🏗️", "work"], // build binaries/assets
-  ["🏋️", "work"], // run benchmarks
   ["📊", "work"], // produce performance metrics / status reports
   ["🧬", "work"], // combine coverage
   ["📝", "work"], // generate attestations
