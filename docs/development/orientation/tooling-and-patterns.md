@@ -36,7 +36,7 @@ longer existed; that dangling export has since been removed.)
 
 ## `patterns`: example programs of unequal authority
 
-`patterns` is by far the largest directory (327k lines), but it is example code,
+`patterns` is by far the largest directory (~321k non-test lines), but it is example code,
 not engine code. The most important thing a newcomer must learn here is that
 **the patterns do not carry equal authority.** Copying the wrong one teaches you
 a deprecated idiom. The authority ladder is tracked in
@@ -64,13 +64,15 @@ that never existed; it now names the real one.)
 
 ## The test runner fan-out
 
-`deno task test` runs `tasks/test.ts`, which reads the workspace member list
+`deno task test` runs `tasks/test.ts`, a thin entry point that delegates to
+`tasks/workspace-tests.ts` (kept separate so `deno coverage` does not skip the
+logic for ending in `test.ts`). That module reads the workspace member list
 from the root `deno.jsonc` and spawns `deno task test` in each package
 concurrently, each with its own working directory and coverage directory.
 
 ```mermaid
 flowchart TB
-    runner_["tasks/test.ts"]
+    runner_["tasks/test.ts → tasks/workspace-tests.ts"]
     list["read workspace[] from root deno.jsonc"]
     skip["minus ALL_DISABLED (just vendor-astral)<br/>and TEST_DISABLED_PACKAGES"]
     fan["spawn 'deno task test' per package, concurrently"]
@@ -148,7 +150,7 @@ and a few more.
 | `vendor-astral` | A vendored copy of Astral, a Deno-native browser-automation library over the Chrome DevTools Protocol. Excluded from lint, format, and the test runner. Do not edit it as if it were first-party. |
 | `integration` | The browser-driving test harness: a `Browser`/`Page` wrapper over the Chrome DevTools Protocol, an `env` module of test knobs (target URL, headless toggle, per-run space name), and shell login helpers. Its own `test` task is a stub; the tests that use it live in other packages. |
 | `home-schemas` | Schemas for the "home" space. Exists specifically so that `runner` and `piece` can share schemas without importing each other — a deliberate shared leaf to break a cycle. |
-| `generated-patterns` | 296 machine-generated test patterns plus the harness that generates them (`ralph/`). |
+| `generated-patterns` | 145 machine-generated test patterns (each with a paired test) plus the harness that generates them (`ralph/`). |
 
 ---
 
@@ -161,9 +163,9 @@ and a few more.
 - `tasks/test.ts`, `tasks/integration.ts`, and `tasks/cfcheck.ts` are the test,
   integration, and pattern-check runners, all of which shard in CI.
 - `.github/workflows/deno.yml` is the main CI: format check, lint,
-  `deno task check`, the workspace test fan-out (on a self-hosted runner that
-  installs FUSE and disables AppArmor for browser tests), and a four-way-sharded
-  `cfcheck`. Coverage, benchmarks, perf-regression, and deploy have their own
+  `deno task check`, the workspace test fan-out (on a GitHub-hosted
+  `ubuntu-latest` runner that installs FUSE and disables AppArmor for browser
+  tests), and a four-way-sharded `cfcheck`. Coverage, benchmarks, perf-regression, and deploy have their own
   workflows.
 - `.githooks/pre-commit` runs `deno fmt` and `deno lint`, and refuses to commit
   if there are unstaged tracked changes. Install it with

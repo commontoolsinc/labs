@@ -19,13 +19,13 @@ large hub files at the top level.
 | `runtime.ts` | The `Runtime` class — the composition root. One per host. Owns and wires every subsystem by dependency injection. Hands out transactions via `edit()` and `readTx()`. |
 | `runner.ts` | The `Runner` class. Takes a pattern's serialized node graph and instantiates each node into live scheduler actions. |
 | `cell.ts` | The `Cell` and `Stream` abstractions — typed reactive handles over a path in a document in a space. |
-| `traverse.ts` | Schema-driven traversal of the value-and-link graph; resolves a (schema, path) query into concrete reads, following links. Largest file in the repo. |
+| `traverse.ts` | Schema-driven traversal of the value-and-link graph; resolves a (schema, path) query into concrete reads, following links. One of the largest files in the package. |
 | `schema.ts` | Schema resolution, validate-and-transform, default-value handling. |
 | `link-utils.ts`, `link-types.ts`, `sigil-types.ts` | The link system: the serialized `SigilLink`, the in-memory `NormalizedLink`, and the deprecated `LegacyAlias`. |
 | `scheduler/` + `scheduler.ts` | The reactive engine: dependency graph, trigger index, topological execution, and the pull-based settle loop. |
 | `storage/` | Layered persistence and remote sync: the storage manager, per-space replica, journaled transactions, and the WebSocket session to the memory host. |
 | `builder/` | The authoring surface that turns pattern code into a serializable node graph (`pattern`, `lift`, `reactive`/`cell`, `createNodeFactory`). |
-| `builtins/` | Built-in modules patterns can call: `map`/`filter`/`ifElse`/`when`, `llm`/`generateText`/`generateObject`, `fetch-data`, `navigate-to`, `wish`, and SQLite builtins. |
+| `builtins/` | Built-in modules patterns can call: `map`/`filter`/`ifElse`/`when`, `llm`/`generateText`/`generateObject`, the fetch builtins (`fetchJson`/`fetchText`/`fetchProgram`/`streamData`), `navigateTo`, `wish`, and SQLite builtins. |
 | `harness/` | The `Engine` that compiles TypeScript to a verified module-record graph and evaluates it in a secure sandbox. |
 | `sandbox/` | The Secure-EcmaScript (SES) compartment machinery: bundle verification, parsing, module-record compilation, compartment globals, policy. |
 | `cfc/` | Contextual Flow Control: data labeling, the write-policy gate (`prepare.ts`), and the egress gate. |
@@ -190,7 +190,7 @@ fires a notification that re-enters the same scheduler loop shown above.
 - **A layering violation lives in the builtins.** `builtins/wish.ts` imports a
   home-domain schema from `home-schemas`, so a foundation builtin is coupled to
   an end-user-program schema.
-- **Two link representations coexist.** A serialized `SigilLink`, an in-memory
+- **Three link representations coexist.** A serialized `SigilLink`, an in-memory
   `NormalizedLink`, and a deprecated `LegacyAlias` that is still in the
   `PrimitiveCellLink` union (`link-types.ts:89`). New readers meet all three.
 - **The scheduler is pull-based**, which is counterintuitive if you expect a
@@ -202,9 +202,9 @@ fires a notification that re-enters the same scheduler loop shown above.
   `cfc/`, `traverse.ts`, and `cell.ts` marks an incomplete migration: several
   graph walks do not yet admit the newer `FabricValue` special objects on every
   path. It is a known, in-progress seam, not a set of isolated bugs.
-- **A self-referential import** in `runtime.ts` pulls a type from the package's
-  own `@commonfabric/runner` barrel — a load-order trap to be aware of when
-  reordering exports.
+- **A self-referential import** in `runtime.ts` pulls a value (the
+  `RuntimeTelemetry` class) from the package's own `@commonfabric/runner` barrel
+  — a load-order trap to be aware of when reordering exports.
 
 ---
 

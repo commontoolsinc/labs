@@ -77,8 +77,10 @@ server and bridges frames in both directions. This is the channel `shell`, the
 
 ### The route groups
 
-Each group follows a `*.routes.ts` (the Zod/OpenAPI schema) plus `*.handlers.ts`
-(the logic) plus `*.index.ts` (the wiring) convention.
+Most groups follow a `*.routes.ts` (the Zod/OpenAPI schema) plus `*.handlers.ts`
+(the logic) plus `*.index.ts` (the wiring) convention. A few (`telemetry`,
+`blobs`) skip the triad and register plain Hono routes inline in their
+`*.index.ts` instead.
 
 | Path | What it does |
 |---|---|
@@ -169,17 +171,20 @@ recreates the worker. The default rerun interval is 60 seconds.
 - **The shell route's headers are deliberately non-isolating.** The COOP/COEP
   headers are set the way they are as defense-in-depth for the SES-sandboxed
   patterns. Do not "fix" them without understanding why.
-- **`background-piece-service` carries the most TODOs in this group**, all about
-  the scheduler being approximate: space managers should watch their own pieces,
-  a terminal error cannot always be attributed to a specific piece (so a stray
-  failure can disable a whole space), and sync is assumed never to return partial
-  results.
+- **`background-piece-service` carries the most TODOs in this group**, several
+  about the scheduler being approximate: space managers should watch their own
+  pieces, a terminal error cannot always be attributed to a specific piece (so a
+  stray failure can disable a whole space), and sync is assumed never to return
+  partial results. Others are about worker/piece lifecycle and cleanup.
 - **`bcs` depends on hardcoded constants** — the system-space DID and a dated
   cause string `BG_CELL_CAUSE = "bgUpdater-2025-03-18"` in `schema.ts` — and
   requires a one-time admin grant before any piece is polled.
-- **The wire still says "charm" in one place.** The handler stream is the
-  `bgUpdater` stream and the cause string keeps its original date; the rename to
-  "piece" stopped at the persisted/wire names to avoid breaking existing spaces.
+- **The rename kept a few backward-compat identifiers.** So existing spaces keep
+  resolving, the charm→piece rename intentionally left the persisted/wire names
+  alone: the `bgUpdater` handler-stream name, the cause string
+  `BG_CELL_CAUSE = "bgUpdater-2025-03-18"`, and the derived system-space DID
+  (`BG_SYSTEM_SPACE_ID`), all in `schema.ts`/`worker.ts`. None of them contain
+  the word "charm"; they are simply legacy-shaped.
 - **A tool-loop cap is hardcoded** (`stepCountIs(8)`) in `generateText.ts` as a
   runaway guard.
 

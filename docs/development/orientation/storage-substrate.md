@@ -121,7 +121,7 @@ erDiagram
         string branch_id_scope PK
         int seq
         int op_index
-        json op
+        string op
         json data
     }
     head {
@@ -130,7 +130,7 @@ erDiagram
         int op_index
     }
     snapshot {
-        string key PK
+        string branch_id_scope_seq PK
         json value
     }
     blob_store {
@@ -189,8 +189,9 @@ value of any entity at any `(branch, seq)`, and answers who/what/when questions
 — time-travel, conflict inspection, and cross-space queries — with no live
 runtime and no capture step. It depends only on `memory` (7 imports),
 `data-model`, `identity`, and `api`, so it is a clean leaf consumer of the
-storage layer. It ships a `cf-inspect` CLI (`deno task inspect`) and a matching
-`state-inspector` agent skill. This is the tool to reach for when debugging what
+storage layer. It is wired into the `cf` CLI as `cf inspect` (the package also
+exposes a local `deno task inspect`), and has a matching `state-inspector` agent
+skill. This is the tool to reach for when debugging what
 a space actually recorded.
 
 ---
@@ -208,7 +209,7 @@ flowchart LR
     id["Identity (Ed25519 keypair)"]
     did["did:key:… (its DID)"]
     sign["signs a session.open invocation"]
-    verify["v2/session-open-auth.ts verifies<br/>(issuer, optional audience, optional expiry)"]
+    verify["v2/session-open-auth.ts verifies<br/>(issuer, required audience, required expiry + clock-skew grace)"]
     reg["SessionRegistry (principal-bound)"]
     acl["ACL check"]
     space["space access granted"]
@@ -241,13 +242,16 @@ kinds of thing.
 - **The SQL guard is intentionally conservative** (`v2/sqlite/guard.ts`). It
   rejects some valid statements (single-statement only, no PRAGMA/ATTACH, no
   references to core engine tables) to keep the attack surface small.
-- **CFC row labels fail closed.** `v2/sqlite/row-label.ts` rejects `any()` and
-  OR-style clauses and ReDoS-prone regexes rather than risk an unsound read
-  label.
-- **The cell-representation flip is not fully wired.** `data-model/cell-rep.ts`
-  has the modern-mode dispatch to a `FabricLink` deliberately left unwired,
-  pending the migration. There are matching `TODO(danfuzz)` markers in
-  `data-model` about values that `structuredClone` would mangle.
+- **CFC row labels fail closed.** `v2/sqlite/row-label.ts` accepts well-formed
+  disjunctive confidentiality clauses but rejects the unsound cases — an `any()`
+  alternative that is itself a conjunction or nested disjunction, disjunctive
+  *integrity* (which "does not exist"), ambiguous multi-op nodes, and
+  ReDoS-shaped regexes — rather than risk an unsound read label.
+- **The modern cell representation is behind a default-off flag.**
+  `data-model/cell-rep.ts` fully implements both the modern (bare `FabricHash` /
+  `FabricLink`) and the legacy (`{ "/": "tag:hash" }` envelope) forms; which one
+  is used is chosen by the module-level `modernCellRepEnabled` flag, which
+  defaults off. When the representation flips, it flips here.
 
 ---
 
@@ -256,7 +260,7 @@ kinds of thing.
 - **`data-model`** — no root export; import subpaths (`fabric-value`,
   `value-hash`, `cell-rep`, the codecs).
 - **`memory`** — `.` (the legacy interface), `./v2`, `./v2/engine`,
-  `./v2/server`, `./v2/client`, `./v2/query`, `./sqlite` and subpaths,
+  `./v2/server`, `./v2/client`, `./sqlite` and subpaths,
   `./v2/session-open-auth`, `./v2/standalone` (an in-process test server).
 - **`identity`** — `.` exports `Identity`, `VerifierIdentity`, `PassKey`,
   `KeyStore`, `createSession`/`Session`.

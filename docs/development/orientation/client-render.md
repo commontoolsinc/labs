@@ -112,8 +112,9 @@ The outer frame validates the message origin against the known host origin. The
 host side registers a single `IframeContextHandler` whose methods
 (`read`/`write`/`subscribe`/`onLLMRequest`/`onPerform`) wire guest requests to
 the real reactive runtime. The README documents the deliberately accepted
-security gaps (for example, a CDN allowlist can still be used to exfiltrate, and
-`target=_blank` can leak a referrer).
+security gaps (for example, a hardcoded-CDN allowlist and anchors with
+`target=_blank` are both exfiltration vectors, and `document.baseURI` leaks the
+parent URL into the iframe).
 
 ---
 
@@ -177,7 +178,8 @@ tools.
 ## Public surfaces
 
 - **`html`** — `.` (`h`, a few UI helpers), plus `./client`, `./jsx-runtime`,
-  `./worker`, `./main`, `./vdom-ops`, `./mock-doc`.
+  `./jsx-dev-runtime`, `./worker`, `./main`, `./vdom-ops`, `./mock-doc`,
+  `./utils`, `./debug`.
 - **`ui`** — `.` → `v2/index.ts` (the `BaseElement`, `CellController`, the Lit
   contexts, the style tokens, and all `cf-*` classes, which self-register).
 - **`iframe-sandbox`** — `.` exports `CommonIframeSandboxElement`, the `IPC`

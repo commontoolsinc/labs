@@ -249,8 +249,8 @@ is, how a write decides which readers to re-run — are on the
 
 These words appear everywhere and rarely get defined in one place.
 
-- **Pattern** — a reactive program written in TypeScript/JSX. Older code and
-  some transformers call this a "recipe." Same thing.
+- **Pattern** — a reactive program written in TypeScript/JSX. Older code called
+  this a "recipe"; the current source has moved off that term.
 - **Piece** — a running, deployed instance of a pattern, rooted at a result
   cell. Formerly called a "charm." The rename is now essentially complete in
   source; see the top of this page.
@@ -263,8 +263,9 @@ These words appear everywhere and rarely get defined in one place.
   write-only, event-channel sibling of a Cell.
 - **Reactive** — the build-time stand-in for a future Cell, used while a
   pattern's graph is being constructed. Exported to authors as `cell`. (This was
-  called `OpaqueRef` until that spelling was removed; you may still see the old
-  name in git history.)
+  called `OpaqueRef` until that spelling was removed from the authoring surface;
+  the name survives only as a backward-compatibility symbol check in
+  `ts-transformers` and in git history.)
 - **Schema** — a JSON Schema. The compile pipeline derives one from your
   TypeScript types and attaches it at every reactive boundary; subscriptions are
   driven by schema-plus-path queries.

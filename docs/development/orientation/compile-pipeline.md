@@ -60,7 +60,7 @@ flowchart TB
     src[".tsx source + a Program (entry + in-memory sources)"]
     compiler["TypeScriptCompiler<br/>(virtual filesystem host, type-check)"]
     bridge["harness/engine.ts supplies beforeTransformers =<br/>CommonFabricTransformerPipeline.toFactories()"]
-    emit["tsProgram.emit() runs the 19 transformer stages"]
+    emit["tsProgram.emit() runs the 20 transformer stages"]
     out["per-module CommonJS + source map"]
     records["module records → runner evaluates in the SES sandbox"]
 
@@ -70,7 +70,7 @@ flowchart TB
 
 ---
 
-## The transformer pipeline: 19 stages in three phases
+## The transformer pipeline: 20 stages in three phases
 
 The pipeline is an ordered list (`cf-pipeline.ts`, `CFC_TRANSFORMER_STAGE_SPECS`).
 The ordering matters: validation runs first so illegal code is rejected before
@@ -85,13 +85,14 @@ flowchart TB
         v2["EmptyArrayOfValidation"]
         v3["OpaqueGetValidation"]
         v4["PatternContextValidation"]
-        v5["WriteAuthorizedByValidation"]
+        v5["MergeablePushValidation"]
     end
     subgraph p2["Phase 2 · Lower (rewrite structure)"]
         l1["JsxExpressionSiteRouter"]
         l2["LiftLowering"]
         l3["Closure (handlers, actions, array methods)"]
         l4["ExpressionSiteLowering (pattern-owned, helper-owned)"]
+        l4b["WriteAuthorizedByValidation"]
         l5["PatternCallbackLowering"]
     end
     subgraph p3["Phase 3 · Schemas + module scope"]
@@ -99,7 +100,7 @@ flowchart TB
         s2["BuilderCallHoisting"]
         s3["SchemaGenerator (reads the registry → JSON Schema)"]
         s4["ReactiveVariableFor"]
-        s5["ModuleScope: shadowing, __cfReg cf-data, function hardening"]
+        s5["ModuleScope: shadowing, __cfReg cf-data,<br/>PatternCoverage, function hardening"]
     end
     p1 --> p2 --> p3
     s1 -.->|"hands off via CrossStageState"| s3
@@ -129,7 +130,7 @@ flowchart TB
     origin{"originates from<br/>Common Fabric?"}
     alias["follow const aliases<br/>(const f = lift)"]
     synth["recognize __cfHelpers.* synthetic calls"]
-    kind["CallKind union:<br/>ifElse / when / unless / builder(lift,handler,pattern,computed) /<br/>array-method / lift-applied / cell-factory / wish /<br/>generate-text / generate-object / runtime-call"]
+    kind["CallKind union:<br/>ifElse / when / unless / builder(lift,handler,pattern,computed) /<br/>array-method / lift-applied / cell-factory / cell-for / wish / pattern-tool /<br/>generate-text / generate-object / runtime-call"]
 
     call --> resolve --> origin
     origin -->|yes| alias --> kind
@@ -187,15 +188,17 @@ generator walks the node instead of the type.
   The README explicitly tells you to read the behavior spec rather than infer
   from the code. Believe it.
 - **Behavior is pinned by golden files.** Both `ts-transformers` and
-  `schema-generator` are driven by hundreds of `*.input` / `*.expected` fixture
-  pairs. Changing emit shape means regenerating goldens (`UPDATE_GOLDENS=1`) and
-  reviewing large diffs. The fast-iteration path is `FIXTURE=<name>`.
+  `schema-generator` are golden-file driven — `ts-transformers` by hundreds of
+  `*.input.tsx` / `*.expected.jsx` pairs, `schema-generator` by dozens of
+  `*.input.ts` / `*.expected.json` pairs. Changing emit shape means regenerating
+  goldens (`UPDATE_GOLDENS=1`) and reviewing large diffs. The fast-iteration path
+  is `FIXTURE=<name>`.
 - **`api` declarations must stay in sync by hand.** `api/index.ts` is
   `declare const` / ambient declarations that must match the real
   implementations in `runner`. There is an explicit sync note at the top of the
   file. Changing a builder signature means editing it in two places.
 - **The biggest files are the densest part of the system.**
-  `schema-injection.ts` (4017 lines) and `type-shrinking.ts` (3286) are the
+  `schema-injection.ts` (4123 lines) and `type-shrinking.ts` (3285) are the
   least approachable region; budget accordingly.
 - **The `lift-applied` distinction is subtle.** `__cfHelpers.lift(cb)(input)` —
   a single application — is classified as `lift-applied` and is what `computed`

@@ -126,7 +126,7 @@ flowchart LR
         runner1["runner"]:::cyc
         html1["html"]:::cyc
         runner1 -->|"builder/built-in.ts, factory.ts,<br/>builtins/wish.ts import h()"| html1
-        html1 -->|"worker reconciler imports<br/>isCell, getCellOrThrow, schemas"| runner1
+        html1 -->|"worker reconciler imports<br/>isCell, ContextualFlowControl, JSONSchema"| runner1
     end
     subgraph c2["Cycle 2"]
         runner2["runner"]:::cyc
@@ -188,8 +188,8 @@ counts are lines.
 
 | File | Lines | What it is |
 |---|---|---|
-| `runner/src/cfc/prepare.ts` | 4802 | The Contextual-Flow-Control write-policy gate |
-| `runner/src/runner.ts` | 4471 | Instantiates a pattern's nodes into scheduler actions |
+| `runner/src/cfc/prepare.ts` | 5078 | The Contextual-Flow-Control write-policy gate |
+| `runner/src/runner.ts` | 4528 | Instantiates a pattern's nodes into scheduler actions |
 | `memory/v2/engine.ts` | 4406 | The transactional SQLite core |
 | `runner/src/traverse.ts` | 4350 | Schema-driven traversal of the value/link graph |
 | `ts-transformers/src/transformers/schema-injection.ts` | 4123 | Attaches schemas to reactive boundaries |
@@ -197,14 +197,17 @@ counts are lines.
 | `runner/src/builtins/llm-dialog.ts` | 3804 | The LLM dialog builtin |
 | `ts-transformers/src/policy/capability-analysis.ts` | 3446 | CFC capability analysis for the transformer |
 | `runner/src/cell.ts` | 3432 | The Cell and Stream abstractions |
-| `runner/src/storage/v2.ts` | 3017 | The storage manager, provider, and space replica |
+| `runner/src/storage/v2.ts` | 3018 | The storage manager, provider, and space replica |
 | `runner/src/scheduler.ts` | 2638 | The reactive scheduler |
 
 `runner` alone holds seven of the eleven, and its single largest file is now the
 CFC write-policy gate — Contextual Flow Control has grown into the biggest piece
-of the runtime. The complexity is real and concentrated. (The mechanically
-largest file in the repo, `html/src/jsx.d.ts` at ~5.5k lines, is omitted here
-because it is generated JSX type declarations, not code to read.)
+of the runtime. The complexity is real and concentrated. (A large generated JSX
+type-declaration file, `html/src/jsx.d.ts` at ~5.5k lines, is omitted here
+because it is generated declarations, not code to read. Bigger files still —
+`patterns/scrabble/scrabble-words.ts` at ~179k lines and the vendored and
+generated blobs under `vendor-astral/` and `static/assets/` — are data, not
+code.)
 
 ---
 
@@ -221,10 +224,10 @@ the root `deno.jsonc` lint config no longer excludes a `patterns-saves-backup`
 directory that never existed. The genuinely still-live ones:
 
 - **Two storage vocabularies.** `memory` has a legacy "fact" model
-  (`assert`/`retract`, in `interface.ts` and `lib.ts`) and the current "v2"
-  document/operation model (in `v2/`). New work is v2. The fact vocabulary is
-  still exported and still confuses people. See the
-  [storage page](storage-substrate.md).
+  (`assert`/`retract`, defined in `interface.ts` and `fact.ts` and re-exported by
+  the `lib.ts` barrel) and the current "v2" document/operation model (in `v2/`).
+  New work is v2. The fact vocabulary is still exported and still confuses
+  people. See the [storage page](storage-substrate.md).
 - **`cf-harness` is misleadingly named.** It is not a test harness for the
   runtime. It is an experimental agent runtime — an LLM tool-calling loop with
   sandboxing and CFC awareness. See the [CLI/piece page](cli-piece-fuse.md).
