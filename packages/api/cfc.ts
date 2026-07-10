@@ -43,6 +43,10 @@ export const CFC_ATOM_TYPE = {
   // shape is satisfied via the acting principal's trust closure — never by a
   // literal Concept atom in carried integrity.
   Concept: "https://commonfabric.org/cfc/atom/Concept",
+  // Context principal (confidentiality; spec §4.1.2/§5.1): the CI-context
+  // form of a policy reference — same field shape and selection semantics as
+  // `Policy` (see there).
+  Context: "https://commonfabric.org/cfc/atom/Context",
   // Trusted evidence that a source-linked disclaimer was attached to content
   // emitted through a sink (spec §15.4). Trusted-minted.
   DisclaimerAttached: "https://commonfabric.org/cfc/atom/DisclaimerAttached",
@@ -78,6 +82,13 @@ export const CFC_ATOM_TYPE = {
   // authorable in schemas.
   LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived",
   Origin: "https://commonfabric.org/cfc/atom/Origin",
+  // Policy principal (confidentiality; spec §4.1.2 PolicyRefAtom, §4.4.2):
+  // references a policy record whose exchange rules may rewrite the clause
+  // the atom sits in — and ONLY that clause (CT-1874 clause-local scoping).
+  // Runtime labels must carry the record's content `hash`; selection fails
+  // closed on mismatch or absence (§4.4.3). Interpreted only by trusted
+  // evaluators at boundary points, never satisfiable as an access principal.
+  Policy: "https://commonfabric.org/cfc/atom/Policy",
   // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
   // via the class-aware meet — present on an output only when present on
   // every input.
@@ -205,6 +216,19 @@ export type CfcExternalIngestAtom = CfcAtomObject & {
 export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
   readonly subject: string;
+};
+
+/**
+ * Hash-bound policy reference (spec §4.1.2 `PolicyRefAtom`): `name` selects
+ * the record, `subject` is the principal the policy speaks for, `hash` binds
+ * the exact record content (required in runtime labels, §4.4.2 — an unbound
+ * name selects nothing). `Policy` and `Context` share the shape.
+ */
+export type CfcPolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy | typeof CFC_ATOM_TYPE.Context;
+  readonly name: string;
+  readonly subject: string;
+  readonly hash: string;
 };
 
 export type CfcSpaceAtom = CfcAtomObject & {
@@ -440,6 +464,14 @@ export const cfcAtom = {
 
   user(subject: string): CfcUserAtom {
     return { type: CFC_ATOM_TYPE.User, subject };
+  },
+
+  policyRef(name: string, subject: string, hash: string): CfcPolicyRefAtom {
+    return { type: CFC_ATOM_TYPE.Policy, name, subject, hash };
+  },
+
+  contextRef(name: string, subject: string, hash: string): CfcPolicyRefAtom {
+    return { type: CFC_ATOM_TYPE.Context, name, subject, hash };
   },
 
   space(id: string): CfcSpaceAtom {
