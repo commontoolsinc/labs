@@ -102,13 +102,16 @@ describe("checkAndUpdateDefaultPattern", () => {
   let controller: PiecesController;
   let versionSkews: VersionSkewInfo[];
 
-  async function setup(experimental: Record<string, boolean>) {
+  async function setup(
+    experimental: Record<string, boolean>,
+    clientVersion: string | undefined = BUILD_SHA,
+  ) {
     versionSkews = [];
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      clientVersion: BUILD_SHA,
+      clientVersion,
       experimental,
       onVersionSkew: (info) => versionSkews.push(info),
     });
@@ -191,6 +194,43 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(versionSkews.length).toBe(1);
     expect(versionSkews[0].clientVersion).toBe(BUILD_SHA);
     expect(versionSkews[0].toolshedVersion).toBe("a-different-build");
+  });
+
+  it("skips silently when both builds are unknown (dev servers)", async () => {
+    // Local dev: a source-run toolshed serves gitSha null and a dev shell
+    // build carries no COMMIT_SHA. Nothing is provably newer, so the check
+    // must skip WITHOUT the versionSkew signal — the signal raises the
+    // shell's "reload to update" banner, which would appear on every space
+    // open in local dev where no reload can help.
+    await setup({ systemPatternAutoUpdate: true }, undefined);
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell())?.identity;
+
+    stub.setSource(SOURCE_V2);
+    stub.setGitSha(null);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+      "skipped-unknown-build",
+    );
+    // No write, no signal, and the gate failed before any ?identity fetch.
+    expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
+    expect(versionSkews.length).toBe(0);
+    expect(stub.identityFetches()).toBe(0);
+  });
+
+  it("skips silently when only the toolshed build is unknown", async () => {
+    // A known client build against a sha-less toolshed proves nothing either
+    // — only a KNOWN, DIFFERENT pair is a skew worth surfacing.
+    await setup({ systemPatternAutoUpdate: true });
+    await controller.ensureDefaultPattern();
+
+    stub.setGitSha(null);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+      "skipped-unknown-build",
+    );
+    expect(versionSkews.length).toBe(0);
+    expect(stub.identityFetches()).toBe(0);
   });
 
   it("caches ?identity and re-fetches after the caches are cleared", async () => {
