@@ -9,6 +9,7 @@ import {
   cfcCanonicalClauseDigest,
   type CfcDeclaredMonotonicityMode,
 } from "../src/cfc/mod.ts";
+import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
 
@@ -741,6 +742,148 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       expect(message).toContain("at /out");
     });
 
+    it("untouched paths are not gated (carry-forward preserves the stored entry)", async () => {
+      // A stored declared entry at a path this write does not touch is never
+      // re-minted — the carry-forward keeps it verbatim, so there is nothing
+      // for the gate to compare (proposedAt empty) and no false positive.
+      const schema = {
+        type: "object",
+        properties: {
+          out: { type: "string", ifc: { confidentiality: [CLAUSE_A] } },
+          aux: { type: "string", ifc: { confidentiality: [CLAUSE_A] } },
+        },
+      } as const satisfies JSONSchema;
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcFlowLabels: "persist",
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      const seeder = makeRuntime({
+        storageManager,
+        cfcEnforcementMode: "disabled",
+      });
+      try {
+        const first = await commitWrite(runtime, "dm-enf-untouched", schema, {
+          out: "v1",
+          aux: "v1",
+        });
+        expect(first.error).toBeUndefined();
+        await rewriteStoredEntries(seeder, first.docId, (entries) =>
+          entries.map((entry) =>
+            entry.origin === "declared" && entry.path.join("/") === "aux"
+              ? {
+                ...entry,
+                label: {
+                  ...entry.label,
+                  confidentiality: [CLAUSE_A, CLAUSE_B],
+                },
+              }
+              : entry
+          ));
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-enf-untouched",
+          schema,
+          tx,
+        );
+        cell.key("out").set("v2");
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.error).toBeUndefined();
+        const entry = declaredEntryAt(
+          persistedEntriesFor(storageManager, first.docId),
+          ["aux"],
+        );
+        expect(entry?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
+      } finally {
+        await runtime.dispose();
+        await seeder.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("an ingest target keeps the runtime's mark but not the non-monotone declared claims", async () => {
+      // The ingest carve-out (mirroring ingestVerificationFailed): under a
+      // NON-REJECTING enforcement mode the fail-closed reason cannot abort
+      // the commit, so the gate drops the weakened fresh declared entries —
+      // the stored, stronger ones carry forward — while the runtime's
+      // ExternalIngest mark still persists.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcEnforcementMode: "observe",
+        cfcFlowLabels: "persist",
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      const seeder = makeRuntime({
+        storageManager,
+        cfcEnforcementMode: "disabled",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-enf-ingest",
+          SCHEMA_ONE_CLAUSE,
+          { out: "v1" },
+        );
+        expect(first.error).toBeUndefined();
+        await rewriteStoredEntries(seeder, first.docId, (entries) =>
+          entries.map((entry) =>
+            entry.origin === "declared" && entry.path.join("/") === "out"
+              ? {
+                ...entry,
+                label: {
+                  ...entry.label,
+                  confidentiality: [CLAUSE_A, CLAUSE_B],
+                },
+              }
+              : entry
+          ));
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-enf-ingest",
+          SCHEMA_ONE_CLAUSE,
+          tx,
+        );
+        cell.set({ out: "v2" });
+        stampExternalIngest(tx, {
+          channel: "did:key:channel",
+          audience: "did:key:presenter",
+          receivedAt: "2026-07-09T12:00:00.000Z",
+          valueDigest: "sha256:payload-v2",
+          target: {
+            space: signer.did(),
+            id: first.docId as URI,
+            scope: "space",
+            path: [],
+          },
+        });
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.error).toBeUndefined();
+        const entries = persistedEntriesFor(storageManager, first.docId);
+        // The stored (stronger) declared entry carried forward; the weakened
+        // fresh mint did not land.
+        const declared = declaredEntryAt(entries, ["out"]);
+        expect(declared?.label.confidentiality).toEqual([CLAUSE_A, CLAUSE_B]);
+        // The runtime's mark persisted regardless.
+        expect(entries.some((e) => e.origin === "external-ingest")).toBe(true);
+        // The violation is on record as a fail-closed reason.
+        expect(
+          tx.getCfcState().diagnostics.some((d) =>
+            d.includes("declared-monotonicity confidentiality")
+          ),
+        ).toBe(true);
+      } finally {
+        await runtime.dispose();
+        await seeder.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("an added integrity atom rejects (the declared claim may only shrink)", async () => {
       // The pure schema-evolution route (no seeding, flow labels off): the
       // schema merge allows addIntegrity growth, so only this gate stands
@@ -1114,6 +1257,35 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           label: { ...entry.label, confidentiality: [CLAUSE_A, CLAUSE_B] },
         }),
         beforeSecondCommit: withExemption(cfcCanonicalClauseDigest(CLAUSE_A)),
+      });
+      expect(
+        String((result.error as Error | undefined)?.message),
+      ).toContain("declared-monotonicity confidentiality");
+    });
+
+    it("an exemption naming another doc exempts nothing", async () => {
+      const result = await seededRemintScenario({
+        storageManager: StorageManager.emulate({ as: signer }),
+        name: "dm-ex-other-doc",
+        schema: SCHEMA_ONE_CLAUSE,
+        dial: "enforce",
+        mutateEntry: (entry) => ({
+          ...entry,
+          label: { ...entry.label, confidentiality: [CLAUSE_A, CLAUSE_B] },
+        }),
+        beforeSecondCommit: (tx) => {
+          tx.setCfcImplementationIdentity({
+            kind: "builtin",
+            builtinId: "cfc-declassification-event-writer",
+          });
+          tx.setCfcDeclaredWideningExemption({
+            space: signer.did(),
+            id: "of:some-unrelated-doc",
+            path: ["out"],
+            clauseDigest: cfcCanonicalClauseDigest(CLAUSE_B),
+          });
+          tx.setCfcImplementationIdentity(undefined);
+        },
       });
       expect(
         String((result.error as Error | undefined)?.message),
