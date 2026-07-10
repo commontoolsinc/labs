@@ -194,6 +194,17 @@ export type CfcSandboxResult = {
  *   runtime-minted gate; anchored at the ingest target cell and re-minted
  *   (replacing the prior mark for that doc) on each ingest. Its update
  *   discipline is replace-per-doc, driven by the ingest stamp.
+ * - `label-metadata`: the §4.6.4.2 field-precise population profile
+ *   (template-population Stage B) — multi-`*` templates under the
+ *   `/cfc/labels/<target-envelope-path>/...` metadata subtree carrying the
+ *   observation labels of the payload label's source-bearing fields. Update
+ *   discipline: a pure function of the payload entries in the same envelope,
+ *   re-derived from the FINAL payload entry set at every persist (so they
+ *   replace on overwrite, clear with the entries they describe, and stay
+ *   SC-11 no-op on unchanged recomputes by construction; never carried
+ *   forward). Always paired with `observes:"labelMetadata"`: no payload read
+ *   class consumes them — the introspection surface (`inspectConfLabel`) is
+ *   their only consumer. See `label-metadata-population.ts`.
  * Entries without an origin are legacy (pre-component) entries and are
  * treated as one combined component with the historical update rules.
  * The effective label at a path is the join of all components.
@@ -203,7 +214,8 @@ export type LabelEntryOrigin =
   | "link"
   | "derived"
   | "structure"
-  | "external-ingest";
+  | "external-ingest"
+  | "label-metadata";
 
 /**
  * Consumption class of a persisted labelMap entry (Epic C,
@@ -234,7 +246,13 @@ export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
-  observes?: LabelObservationClass;
+  /**
+   * Payload consumption classes, or — on `origin:"label-metadata"`
+   * population templates only (Stage B) — the `labelMetadata` class, which
+   * no payload read consumes (`readConsumesEntry`): those entries are
+   * resolved exclusively by the introspection surface.
+   */
+  observes?: LabelObservationClass | LabelMetadataObservationClass;
 };
 
 export type CfcMetadata = {

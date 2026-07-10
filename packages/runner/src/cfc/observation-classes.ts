@@ -71,7 +71,7 @@ const CONSUMED_CLASSES: Record<
  */
 export const entryObservationClass = (
   entry: Pick<LabelMapEntry, "origin" | "observes">,
-): LabelObservationClass | undefined =>
+): LabelObservationClass | LabelMetadataObservationClass | undefined =>
   entry.observes ?? (entry.origin === "link" ? "followRef" : undefined);
 
 /** Whether a read of the given shape consumes the given entry's label. */
@@ -93,6 +93,17 @@ export const readConsumesEntry = (
     // consumption is still strictly wider than pre-C1 behavior, which
     // consumed nothing for probes.
     return selection !== "followRef";
+  }
+  if (entryClass === LABEL_METADATA_OBSERVATION) {
+    // Persisted label-metadata population templates (template-population
+    // Stage B): NO payload read class consumes them — the introspection
+    // surface is their only consumer, resolving them explicitly
+    // (`resolveLabelMetadataTemplateConfidentiality`). The classified arms
+    // above already returned for `"all"`, which deliberately stays
+    // over-inclusive (a screen; the templates' content duplicates the
+    // payload entries they were derived from, so the write gate sees no
+    // new atoms through them).
+    return false;
   }
   return CONSUMED_CLASSES[selection].includes(entryClass);
 };
