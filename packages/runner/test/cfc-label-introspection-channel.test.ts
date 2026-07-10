@@ -5,7 +5,9 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { CfcLabelMetadataObservation } from "../src/cfc/types.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { URI } from "@commonfabric/memory/interface";
@@ -62,7 +64,13 @@ const seedLabeledDoc = async (
           version: 1,
           entries: [{
             path: ["body"],
-            label: { confidentiality: ["secret"] },
+            label: {
+              confidentiality: ["secret", {
+                type: CFC_ATOM_TYPE.Caveat,
+                kind: "prompt-influence",
+                source: { space: "did:key:remote-a", id: "of:origin-a" },
+              }],
+            },
             origin: "derived",
           }],
         },
@@ -255,6 +263,62 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       expect(
         stored?.labelMap.entries.some((entry) => entry.origin === "derived"),
       ).not.toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("inspectStoredConfLabel records the observation at the metadata subtree address", async () => {
+    const { storageManager, runtime } = makeRuntime({
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const id = await seedLabeledDoc(runtime, "channel-direct-src");
+      const tx = runtime.edit();
+      const cell = runtime.getCell(space, "channel-direct-src", undefined, tx);
+      const outcome = inspectStoredConfLabel(
+        tx,
+        cell.getAsNormalizedFullLink(),
+        "/body",
+        {},
+      );
+      expect(outcome.status).toBe("ok");
+      const observations = tx.getCfcState().labelMetadataObservations;
+      expect(observations).toHaveLength(1);
+      expect(observations[0].observes).toBe("labelMetadata");
+      // The record addresses the FIRST-LAYER metadata subtree, never a
+      // payload path (§4.6.4.1 addressing).
+      expect([...observations[0].target.path]).toEqual([
+        "cfc",
+        "labels",
+        "value",
+        "body",
+      ]);
+      expect(observations[0].target.id).toBe(id);
+      expect([...observations[0].confidentiality]).toContainEqual("secret");
+      await tx.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("collapses a metadata read error to the unobservable arm", async () => {
+    const { storageManager, runtime } = makeRuntime({
+      cfcFlowLabels: "persist",
+    });
+    try {
+      await seedLabeledDoc(runtime, "channel-err-src");
+      const tx = runtime.edit();
+      const cell = runtime.getCell(space, "channel-err-src", undefined, tx);
+      const link = cell.getAsNormalizedFullLink();
+      tx.abort(new Error("simulated storage failure"));
+      // Reads on an aborted transaction throw; the introspection step must
+      // collapse that to the SAME notAvailable as missing metadata.
+      const outcome = inspectStoredConfLabel(tx, link, "/body", {});
+      expect(outcome).toEqual({ status: "notAvailable" });
+      expect(tx.getCfcState().labelMetadataObservations).toHaveLength(0);
     } finally {
       await runtime.dispose();
       await storageManager.close();

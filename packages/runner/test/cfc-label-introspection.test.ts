@@ -63,6 +63,12 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       // ENVELOPE spelling of payload "/body" and normalizes to it.
       expect(parseConfLabelTargetPath("/value/body")).toEqual(["body"]);
     });
+
+    it("refuses malformed pointers", () => {
+      // Not a JSON pointer (no leading slash): fail closed like every other
+      // unevaluable input.
+      expect(parseConfLabelTargetPath("body")).toBeUndefined();
+    });
   });
 
   describe("match evaluation", () => {
@@ -362,6 +368,35 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       // A miss over a committed field is still a membership observation and
       // consumes the same per-field labels.
       expect(consumedConfidentiality).toContainEqual("secret");
+    });
+
+    it("labels a whole-atom commitment marker by the protected chain", () => {
+      // A clause alternative that IS a bare marker (crafted data; Stage 1
+      // commits fields, not atoms): projecting it is a protected
+      // observation — derived entries fall back, declared entries collapse.
+      const marker = commitCfcFieldValue(SOURCE_A);
+      const derived = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: { confidentiality: ["secret", marker] },
+          origin: "derived" as const,
+        }]),
+        ["body"],
+        {},
+      );
+      expect(derived.result.status).toBe("ok");
+      expect(derived.consumedConfidentiality).toContainEqual("secret");
+
+      const declared = evaluateConfLabelQuery(
+        metadataWith([{
+          path: ["body"],
+          label: { confidentiality: [marker] },
+          origin: "declared" as const,
+        }]),
+        ["body"],
+        {},
+      );
+      expect(declared.result).toEqual({ status: "notAvailable" });
     });
 
     it("fails closed on committed fields of declared entries too", () => {
