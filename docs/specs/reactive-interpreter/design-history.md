@@ -313,6 +313,49 @@ slots, so it kept the raw idiom with a comment. **Lesson: when hardening a
 suite-wide idiom, the one site that resists is often telling you something
 true — don't force it green.**
 
+### L-CAPABILITY-SKEW — a mixed-realm rollout manufactures the pathology it looks like
+
+A full-integration A/B first showed flag-on **1.8× slower** overall, with
+multi-runtime CFC tests **20–38× slower** (cfc-render-policy 4 s → 2m33s).
+It read exactly like intrinsic cross-space pull-amplification. It was not.
+The browser worker had no way to receive the flag (`lib-shell`'s
+`ExperimentalRuntimeFlags` lacked the key; workers have no `Deno.env`), so
+the Deno-side runtime interpreted while the *same test's* browser realm ran
+legacy. The two realms produced divergent write/label behavior and hammered
+each other with conflicts and re-runs. Plumbing the flag through the browser
+worker (one env var now flips the whole stack) and re-running with **both
+memory stores wiped per run** and **each run's shell bundle's baked flag
+verified**: the slowdown **vanished** — wall-clock parity with flag-off
+(420 s vs 429 s), the CFC tests back to flag-off speed, and commits actually
+*down* ~10% (the inverse of the skewed run's +25%). **Lessons:** (1) the
+interpreter must roll out **uniformly across every realm at once** — a
+per-realm rollout reproduces this, so browser-flag plumbing is a default-on
+*prerequisite*, not an optimization; (2) a performance A/B across a
+multi-realm stack is invalid unless you prove the capability is uniform —
+verify the flag reached *every* realm (build-define inspection + behavioral
+check), not just the one you launched; (3) wipe persistent stores between
+runs — an accumulated multi-GB store made the *baseline* slow and muddied
+the first comparison. Same failure family as the f6c per-doc-scheduler work
+(in-process servers in other realms silently flag-off).
+
+### L-DOC-COUNT-IS-THE-WRONG-HEADLINE — the store is mostly boundaries the interpreter preserves
+
+The micro-benchmark −56% documents on a pure `map` (spec §16) does not
+generalize, and an early §16 draft claiming "document count is the metric
+that matters most, which the −56% directly reduces" was **wrong for real
+apps** — my own L-PROXY-METRIC applied to my own prose. Sampling the
+integration store: it is plurality **rendered VNodes**, plus result-tree,
+handler, piece-metadata, and CFC-label docs — all **boundaries** the
+interpreter preserves by construction (NG5 + boundaries-verbatim). The class
+it removes, *internal pure-computation* cells, is only a few percent of a
+rendered app's store, and a rendered list's per-element outputs are
+materialized VNodes, not the transient zero-doc case. So the honest general
+lever is **action / commit reduction** (≈ half the scheduler nodes, ~10%
+fewer commits = less churn/sync/conflict), not document *count*; the
+count win is real only where non-rendered pure computation dominates.
+**Lesson: measure the metric your mechanism actually moves, on a realistic
+input, before you headline it — a micro-benchmark's ratio is not the app's.**
+
 ---
 
 ## Part VII — Control emission (built — spec §7.1)

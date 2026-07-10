@@ -693,12 +693,37 @@ Engagement on the authored corpus (the 87-file pattern-test run, flag-on):
 224 interpret decisions with **60% of node-ops collapsed**, and control
 emission engages broadly — **764 controls fused across 128 instantiations,
 with 1,254 branch-gated ops** whose alias writes (documents) are elided.
-Integration suites are flat-to-slightly-faster (fixed compile/sync costs
-dominate their wall time); the multi-user chat simulation is flat and,
-critically, free of the cross-space pull-amplification pathology that an
-earlier meta-node design hit (~226–270× timeouts). The metric that matters
-most at scale is the document count — storage, sync traffic, and conflict
-surface — which the −56% on lists and the gated-op elision directly reduce.
+
+**What the micro-benchmarks measure vs. what a real app sees.** The table's
+per-scenario numbers (−56% documents on a pure `map`, −43%–58% nodes) are
+*pure-computation* micro-benchmarks — the compressed docs *are* the whole
+pattern. They do **not** generalize to a real app's document count. A
+full-integration A/B (both realms uniform, see below) found the persisted
+document count essentially flat (−2.2%, single noisy run) while **commits
+dropped ~10%**. The reason: a real app's persisted store is dominated by
+**boundary** documents — rendered VNodes (the plurality), result-tree and
+handler docs, piece metadata — all of which the interpreter preserves by
+design (NG5 + boundaries-verbatim). The documents it removes are *internal
+pure-computation* cells, only a few percent of a rendered app's store, and a
+rendered list's per-element outputs are materialized VNodes (boundaries),
+not the transient zero-doc case. **So the interpreter's general lever is
+action / commit reduction — roughly half the scheduler nodes and ~10% fewer
+commits, i.e. less re-run churn, sync traffic, and conflict surface — not a
+large drop in the document *count*.** The document-count win is real only
+where pure computation dominates: non-rendered data-transform pipelines and
+derived state.
+
+**Realms must roll out uniformly.** A full-integration A/B where the
+Deno-side runtime interpreted while the browser worker ran legacy produced a
+20–38× slowdown on multi-runtime CFC tests — a **capability-skew artifact**
+(divergent write/label behavior across realms → mutual conflict/re-run
+churn), *not* interpreter cost. With the flag plumbed through the browser
+worker so both realms interpret, the slowdown vanishes and wall-clock is at
+**parity** with flag-off (420 s vs 429 s), the multi-runtime chat/CFC tests
+run at flag-off speed, and there is no pull-amplification pathology (the
+~226–270× timeouts an earlier meta-node design hit are absent). The
+interpreter must therefore go default-on across *every* realm at once
+(Deno + browser worker + in-process servers), never per-realm.
 
 Outputs are asserted byte-equal to legacy across the differential, scope,
 transient-collection, and coverage suites; the root test suite is green under
