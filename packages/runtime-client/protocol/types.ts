@@ -172,7 +172,7 @@ export interface InitializationData {
     | "enforce-explicit"
     | "enforce-strict";
   // Flow-label propagation dial for the worker runtime (S16 default
-  // transition; docs/plans/cfc-future-work-implementation.md Epic H1):
+  // transition; docs/history/plans/cfc-future-work-implementation.md Epic H1):
   // "off" = no derivation; "observe" = compute the per-tx conservative
   // join and emit diagnostics, persist nothing; "persist" = write derived
   // label components. Propagation never rejects by itself. Absent =

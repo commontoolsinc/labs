@@ -74,9 +74,10 @@ type CfcGrant = {
 
 ### 2.2 Consumption: the `policyState` guard kind
 
-Shipped `ExchangeRule.preCondition` admits `confidentiality | integrity |
-boundary` guards only — §13.4.4's `policyState` guard kind is unimplementable
-in B2a. The extension: a `policyState` guard names a grant `kind` plus field
+Before #4627, `ExchangeRule.preCondition` admitted `confidentiality |
+integrity | boundary` guards only — §13.4.4's `policyState` guard kind was
+unimplementable in B2a. The extension: a `policyState` guard names a grant
+`kind` plus field
 patterns; at evaluation the runtime resolves matching, unexpired, unrevoked
 grants from the governing space's grant path (point query per candidate, the
 §4.9.3 discipline: fail-closed on absent/malformed/unsynced; discovered from
@@ -166,6 +167,26 @@ are a second record kind on the same substrate; if grants go first, B2b
 inherits the substrate. Either order, with CT-1874's home-clause gate in the
 shared selection layer.
 
+_Implementation note (2026-07-09): items 1–3 shipped in #4627. The
+`policyState` guard resolves through `ExchangeEvalContext.grantResolver`
+(evaluator stays pure; variables bind from grant fields; unresolvable or
+throwing resolution fails closed). `CfcGrant` records live in the **owner's
+identity space** at `grant:cfc:` + a digest of the release scope
+`{version, space, kind, owner, resource}` — identity is the scope only, so
+the audience and lifecycle live in the value and revocation keeps the
+address (a full-record hash would give revocations a fresh address while
+the stale one kept resolving). Writes go through
+`IExtendedStorageTransaction.writeCfcGrant()` and require a trusted
+**builtin** implementation identity (pattern/handler code cannot author
+durable release state); audience entries pass the §3.1.8 principal-like
+validation shared with authored clauses (`clause.ts`); `owner` must equal
+the acting principal — the fuller §13.4.3 intent-evidence chain lands with
+item 4. Lookups ride `internalVerifierRead`;
+`PreparedDigestInput.consultedGrants` binds each consulted grant's content
+address (absent candidates carry an `"absent"` marker so a grant appearing
+also invalidates), with a live prepare→revoke→commit-reject test. Items 4–5
+remain open._
+
 ## 4. The rewrite event (specify now, build later)
 
 When a widening must survive without evaluation (§2.4), route 2 proper: an
@@ -182,8 +203,21 @@ declassification event. Contract, if and when built:
    frame derives causally from it, and a create-only receipt cell is the
    exactly-once witness — duplicate handlings collide as `receipt-exists`
    permanent rejections. What is still missing is the **refinement/evidence
-   half** of §6: the `IntentEvent → IntentOnce` chain, gesture-provenance
-   binding to rendered state, and the bounded-retry attempt-cell ledger.
+   half** of §6, four named pieces: the `IntentEvent → IntentOnce`
+   refinement chain, gesture-provenance binding to rendered state
+   (§6.3/§6.7.3), the `exp`/`maxAttempts` attempt-cell ledger (§6.5.3), and
+   long-intent display/cancellation. **None of the four gates the
+   mechanism** — they raise assurance from "owner-authenticated call" to
+   "provably user-gestured". A **reduced-evidence v1 is buildable on the
+   receipt substrate alone**: the declassification event is an ordinary
+   stream event `{doc, path, clauseDigest, audience}`; its handler is a
+   trusted builtin that verifies release authority directly (`owner` ===
+   acting principal from the trust snapshot — the shipped `writeCfcGrant`
+   discipline) and consumes the event's receipt as the single-use gate. For
+   the owner-decided case §3.8.4's conjunctive gate is satisfied in this
+   form: the release condition *is* the authenticated owner's event, and
+   the parameters' integrity is the verified session identity. The four
+   §6 pieces slot in later without changing the event record or the gate.
 2. **Policy-guarded**: the acting principal's authority over the target
    clause verified exactly as a grant writer would (inv-7), plus §8.10.5.2 —
    a broader audience is a new release judgment with its own evidence.
@@ -221,13 +255,31 @@ already works today with no new machinery.
 
 Build **grants** when a product surface needs durable sharing (the share UI,
 group-membership beyond space ACLs) — B2b-adjacent, no blockers beyond the
-evaluator extension. Build the **rewrite event** only when all hold: (a) a
-real export/publish/portability requirement that grants demonstrably cannot
-serve; (b) the §6 refinement/evidence half exists on top of the shipped
-receipt discipline (the `IntentEvent → IntentOnce` chain and
-gesture-provenance binding — the consumption half is already behind
-`experimental.commitPreconditions`); (c) the declared-component monotonicity
-gate (§4.3) has shipped and soaked.
+evaluator extension. For the **rewrite event**, the dependency picture at
+mechanism level (2026-07-09):
+
+- **Exists**: single-use consumption — `experimental.commitPreconditions`
+  receipts (durable event id, event-causal record ids, create-only
+  exactly-once witness); authority verification — the `writeCfcGrant`
+  owner === acting-principal discipline; clause identity — the canonical
+  clause form (`normalizeClause` + the canonical digest idiom) needs only a
+  small `clauseDigest` helper; attribution — verified identities +
+  `writeAuthorizedBy` builtin arm.
+- **Missing, buildable now**: the declared-component **monotonicity gate**
+  (§4.3) — a self-contained prepare-time check comparing a re-minted
+  declared entry against the stored one under `canUpdateStoreLabel`
+  semantics (confidentiality may only add clauses or drop alternatives;
+  integrity may only drop atoms — the A2/A3 clause helpers give
+  subsumption), dialed `off | observe | enforce` like every other gate,
+  with the event writer as its sanctioned exception hook. Nothing blocks
+  it; it must ship and soak **before** the exception exists.
+- **Missing, assurance-only**: the four §6 evidence pieces (§4.1) — they
+  upgrade a v1, they do not gate it.
+
+So the only *hard* remaining gate is (a): a real export/publish/portability
+requirement that grants demonstrably cannot serve — a product decision, not
+a substrate one. When (a) holds, build order is: monotonicity gate → soak →
+reduced-evidence v1 (§4.1) → §6 evidence upgrades as they land.
 Until then, "publish" is served by route 3 (copy-forward), which is honest
 about being a new value.
 
@@ -274,6 +326,6 @@ frame cause derived from it (`runner.ts` — "every id minted in this frame
 derives from the durable event id"), create-only receipt cell
 `{resultFor: cause}` + `markCreateOnly` as the exactly-once witness,
 `receipt-exists` permanent rejection (`scheduler/events.ts`). Labs-side:
-Epic B decision 1 (`docs/plans/cfc-future-work-implementation.md`), CT-1874
+Epic B decision 1 (`docs/history/plans/cfc-future-work-implementation.md`), CT-1874
 (home-clause constraint), [`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md)
 (grant records as label-adjacent metadata).

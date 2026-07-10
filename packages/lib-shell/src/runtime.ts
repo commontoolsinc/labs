@@ -53,7 +53,7 @@ export type RuntimeRenderConfidentialityCeiling = NonNullable<
 
 /**
  * The §8.10.6 initial display-sink release ceiling (Epic H3a/H3b,
- * docs/plans/cfc-future-work-implementation.md): what a display surface
+ * docs/history/plans/cfc-future-work-implementation.md): what a display surface
  * admits when no authored policy covers it. The audience of a display sink
  * is the acting user, so the identity/personal-space principal forms naming
  * exactly that audience are admissible by construction. Shared `Space(...)`
@@ -215,7 +215,7 @@ export function createRuntimeClientOptions({
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
-  // Epic H2 (docs/plans/cfc-future-work-implementation.md): shell hosts run the
+  // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This
   // activates inv-9 (flow-path confidentiality) in real shell deployments:

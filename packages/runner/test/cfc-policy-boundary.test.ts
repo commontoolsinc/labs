@@ -18,7 +18,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy-boundary");
 
-// Epic B5 (docs/plans/cfc-future-work-implementation.md §3): exchange-rule
+// Epic B5 (docs/history/plans/cfc-future-work-implementation.md §3): exchange-rule
 // evaluation wired into the boundary gates behind the cfcPolicyEvaluation
 // dial. `off` is byte-identical to the pre-dial gates; `observe` evaluates
 // and diagnoses but decides on the raw label; `enforce` decides on the

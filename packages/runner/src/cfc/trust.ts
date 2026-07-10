@@ -5,7 +5,7 @@ import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
 
 /**
  * User-scoped trust closure (spec §4.8, Epic B3 of
- * docs/plans/cfc-future-work-implementation.md §3): concept guards in
+ * docs/history/plans/cfc-future-work-implementation.md §3): concept guards in
  * exchange rules and integrity floors are satisfied from CONCRETE carried
  * integrity via the acting principal's trust closure — trust statements bind
  * concrete principals to concepts, verifier delegations decide whose

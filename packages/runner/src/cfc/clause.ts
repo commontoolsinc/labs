@@ -7,7 +7,7 @@ import { uniqueCfcAtoms } from "./observation.ts";
 
 /**
  * CNF confidentiality clauses (spec §3.1.8 / §4.2.1; Epic A of
- * docs/plans/cfc-future-work-implementation.md).
+ * docs/history/plans/cfc-future-work-implementation.md).
  *
  * A confidentiality label is a conjunction of clauses. Each clause is either
  * a bare atom (a singleton clause — every entry in today's flat labels) or an
