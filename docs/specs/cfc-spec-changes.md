@@ -444,8 +444,27 @@ without evaluation (export/publish). Unconflate the §13 table row.
 2b contract (including the create-only intent-causal record shape) and the
 §13 summary-table row unconflated. Runner-side: grants build-order items 1–3
 shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
-consulted-grant digest binding); the rewrite event stays unscheduled per
-`cfc-persisted-declassification.md` §5.
+consulted-grant digest binding); the rewrite event is **superseded** per
+`cfc-persisted-declassification.md` §5 (owner decision 2026-07-10: in-fabric
+federation trust comes from remote attestation, so trust-free release buys
+nothing; out-of-fabric irrevocability is served by egress records, SC-27).
+
+**SC-27 [normative] Egress records at send sinks — §8.10.5.2 follow-up.**
+Out-of-fabric egress is irrevocable; modeling it with the same revocable
+artifact as internal sharing invites the un-sending confusion (revoking the
+record of a send is not un-sending). Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)
+§6): at a send-sink release the committing transaction MUST mint a
+create-only **egress record** causal to the consumed intent/event id —
+`{valueDigest, destination, boundaryContext, releasedAudienceEvidence, at,
+intentId}`, the destination captured per the §8.10.5.2 destination/audience
+binding (this discharges the audit's open "destination-binding follow-up").
+The record is permanent (create-only, never deleted, no revocation surface)
+and has **no enforcement role**: it never feeds a future release decision —
+labels keep governing what the fabric serves; the record exists for honesty,
+audit, and deriving "who could have this" (current grants ∪ past egress).
+State the shared-vs-sent vocabulary distinction normatively so UIs cannot
+present an egress as revocable. `open`.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
