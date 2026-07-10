@@ -5,7 +5,7 @@ import type { AtomPattern } from "./atom-pattern.ts";
 
 /**
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of
- * docs/plans/cfc-future-work-implementation.md §3).
+ * docs/history/plans/cfc-future-work-implementation.md §3).
  *
  * This is stage B2a: a deployment-configured, frozen policy set supplied via
  * `RuntimeOptions.cfcPolicyRecords` — the degenerate single-policy-root case

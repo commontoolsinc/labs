@@ -18,7 +18,7 @@ import {
 import type { IFCLabel } from "../src/cfc/label-view-core.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-// Epic B4 (docs/plans/cfc-future-work-implementation.md §3): the guarded
+// Epic B4 (docs/history/plans/cfc-future-work-implementation.md §3): the guarded
 // rewrite + fuelled fixpoint (spec §4.4.5). Property tests (i)-(vi) from the
 // plan, plus the worked examples the calculus exists for.
 

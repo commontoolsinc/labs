@@ -200,7 +200,7 @@ describe("sqlite read-time clearance across runtimes", () => {
   });
 
   it("releases nothing about withheld rows beyond the declared surface", async () => {
-    // §6 E3 (docs/plans/cfc-future-work-implementation.md): "the
+    // §6 E3 (docs/history/plans/cfc-future-work-implementation.md): "the
     // withheld-count is not observable in the result shape beyond the
     // declared release". The raw stored doc — read with NO result-schema
     // shaping, so it is the query's ENTIRE observable surface — must carry

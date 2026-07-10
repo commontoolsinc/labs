@@ -19,7 +19,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "../src/builtins/llm-schemas.ts";
 
-// Epic D1b (docs/plans/cfc-future-work-implementation.md): the `llm`,
+// Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the `llm`,
 // `generateText`, and `generateObject` builtins stamp their MODEL-OUTPUT
 // writebacks with an explicit `LlmDerived` provenance atom — the same mark D1
 // (cfc-llm-derived-stamp.test.ts) attaches to dialog messages. These tests are

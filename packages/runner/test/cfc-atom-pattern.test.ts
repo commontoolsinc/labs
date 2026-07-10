@@ -14,7 +14,7 @@ import {
 import { atomPropagationClass } from "../src/cfc/atom-classes.ts";
 import { clauseSubsumes } from "../src/cfc/clause.ts";
 
-// Epic B1 (docs/plans/cfc-future-work-implementation.md §3): the atom
+// Epic B1 (docs/history/plans/cfc-future-work-implementation.md §3): the atom
 // pattern-matching kernel of the exchange-rule calculus (spec §4.3.3/§4.3.4)
 // plus the per-family entailment hook and the new atom families' registry
 // entries. Pure helpers — B4 wires them into the fuelled evaluator.

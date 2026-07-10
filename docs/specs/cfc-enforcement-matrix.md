@@ -1,7 +1,7 @@
 # CFC enforcement × propagation × write-floor × trigger gating — the deployment mode matrix
 
 _Epic H, stage H4 (first sub-step), of
-[`docs/plans/cfc-future-work-implementation.md`](../plans/cfc-future-work-implementation.md).
+[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
 Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
 the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
 **which combinations of the five CFC dials are conforming deployment states and

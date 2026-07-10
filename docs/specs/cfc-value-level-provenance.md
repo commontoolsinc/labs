@@ -239,13 +239,21 @@ SC-11 idempotence intact. (1) is self-contained. (3) rides (2).
 
 ## 6. Stage 0 — measure before building
 
-There is today **no counter measuring prefix precision** (nothing records
-`boundFor` `+Infinity` rates, reads excluded per write, or would-flip
-decisions). Before any span machinery:
+Stage 0 gives the prefix its missing precision counters (before it, nothing
+recorded `boundFor` `+Infinity` rates, reads excluded per write, or
+would-flip decisions). Before any span machinery:
 
 - Extend `CfcInstrumentationHooks` with per-prepare precision counters:
   gated-read count per protected write (prefix vs transaction-global), bound
   source (real / `+Infinity` / clock-less), S7-exemption fire count.
+  _Implementation note (2026-07-09): shipped in #4623 —
+  `CfcInstrumentationHooks.onPrefixProvenance` emits a per-prepare
+  `CfcPrefixProvenanceSummary` (per-write prefix vs pre-D4 transaction-global
+  gated counts, bound classification `real`/`infinityFallback`/`clockLess`,
+  within-prefix S7 fires, clock-less read count; per-write paths in RFC 6901
+  via `encodePointer`), opt-in via `RuntimeOptions.cfcPrefixProvenanceStats`
+  with nine `prefix*` totals aggregated into `getCfcStats()`. Zero
+  allocation when the hook is absent; enforcement decisions byte-identical._
 - In the interpreter branch, a shadow mode: compute `feeds(w)` from the
   existing `runScoped` brackets **without enforcement**, and log
   `would-flip` — decisions (rejections *and* label joins) that differ between
