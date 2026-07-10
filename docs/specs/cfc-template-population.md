@@ -174,7 +174,9 @@ have none — `walkIfcSchema` does not descend `additionalProperties` at
 all, so "every child of this map" is inexpressible even as a declared
 label. This design extends the schema walk: `additionalProperties`
 (schema-object form) descends as the same `*` segment — **restricted to
-record-only objects (no `properties` present)**. The restriction is
+record-only objects (no named property; an empty `properties: {}` names
+no key, so every key is a properties miss and it stays record-only —
+settled on the Stage-A PR review)**. The restriction is
 load-bearing: `isPrefix`'s `*` matches *any* segment, but
 `additionalProperties` semantically covers only keys *not* listed under
 `properties` (the runner's own `schemaAtPath` traversal consults
@@ -230,6 +232,43 @@ minted into the same entries, not the mechanism.
   no-op with templates present; Stage-1 transform applies to template
   labels; declared `*` entries byte-identical (regression); coalescing +
   canonicalization property tests with multi-`*` paths.
+
+  **Implementation note (Stage A landed).** Shipped in
+  `packages/runner/src/cfc/prepare.ts` + `types.ts` with the full test
+  list in `packages/runner/test/cfc-template-population.test.ts` (both
+  §1 under-taints red-first on main: the child probe joined nothing, the
+  slot probe joined only the transport label). Two measured refinements
+  against the §2 caution, both found by the phase-B pointwise suite —
+  the same arbiter that forced the C0 §6.1 refinements:
+
+  1. **Template mints ride the DECLARED coordinator route only** (the S16
+     `recordCfcStructureContainer` containers — filter/flatMap results,
+     where the §8.5.6.1 membership decision lives), not the generic
+     pure-link value-write route. Minting on every pure-link write puts
+     templates on the runtime's own builder/coordination plumbing (alias
+     shells, internal arrays), and the op-instantiation machinery reads
+     those docs' child paths (slot scalars, `length`) as scaffolding with
+     no distinguishing journal marker — neither probe-classified nor
+     trace-covered — so each reconcile's `J` smeared into the next
+     (measured: `cfc-flow-pointwise` map). The generic route keeps
+     today's container-anchored stamps; extending mints to it needs a
+     machinery-read marker first (recorded as the remaining slice of the
+     SC-8 residual in `cfc-spec-changes.md`).
+  2. **Two machinery boundaries on template consumption**, both
+     inherited-from-existing disciplines rather than new semantics: a
+     transaction re-deriving a container's membership stamps does not
+     consume the very entries it replaces (`ownRestampContainerPaths` —
+     otherwise an incremental reconciler's readback of its own previous
+     output turns §8.12.8 replace-from-criteria into accumulate-forever,
+     measured on the no-write re-stamp test), and reads covered by a
+     same-tx dereference trace skip templates (the C0 §6.1 row-4
+     machinery rule extended to the plain reads resolution journals at
+     followed slots; standalone observations — the row-3 SC-8 closures —
+     consume in full). Consequence of the second: a full dereference
+     consumes the target's content but not the slot's membership `J`;
+     §2's "probe **or dereference**" overstated what the shipped row-3/
+     row-4 boundary distinguishes, and the probe/standalone-read half is
+     what landed.
 - **Stage B (Stage-2 full population; one PR, after A):** the
   `/cfc/labels/...` template mints per §5 + `inspectConfLabel` consuming
   them (upgrading WP7's computed-in-hand labels to persisted templates),

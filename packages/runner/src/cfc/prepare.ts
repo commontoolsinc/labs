@@ -118,6 +118,18 @@ const labelAtPath = (
     ? undefined
     : labelForEntriesAtPath(metadata.labelMap.entries, path);
 
+// A runtime-minted `*`-path class template (template-population §3.1): the
+// membership/slot twins minted beside the container-anchored structure
+// stamps (and any future derived-origin population entries of the same
+// form). Declared `*` entries (items/additionalProperties schemas) are NOT
+// templates in this sense — they keep the declared component's resolution
+// untouched.
+const isRuntimeMintedTemplate = (
+  entry: Pick<LabelMapEntry, "path" | "origin">,
+): boolean =>
+  (entry.origin === "structure" || entry.origin === "derived") &&
+  entry.path.includes("*");
+
 const labelForEntriesAtPath = (
   entries: readonly LabelMapEntry[],
   path: readonly string[],
@@ -136,23 +148,44 @@ const labelForEntriesAtPath = (
     if (!isPrefix(entry.path, path)) {
       continue;
     }
-    // Structure entries label the container's SHAPE: they apply when the
-    // container node itself is observed (read at exactly the entry path),
-    // not to reads strictly below it — slot pointer reads and dereferences
-    // are pointer handling, and tainting them with shape would re-smear
-    // the pointwise split the structure component exists to preserve.
-    if (entry.origin === "structure" && entry.path.length !== path.length) {
+    const template = isRuntimeMintedTemplate(entry);
+    // CONCRETE structure entries label the container's SHAPE: they apply
+    // when the container node itself is observed (read at exactly the
+    // entry path), not to reads strictly below it — slot pointer reads and
+    // dereferences are pointer handling, and tainting them with shape
+    // would re-smear the pointwise split the structure component exists to
+    // preserve. `*`-path templates are the opposite by construction
+    // (template-population §3.2): their whole point is consumption at
+    // matching child paths, so the exact-path rule does not apply to them.
+    if (
+      entry.origin === "structure" && !template &&
+      entry.path.length !== path.length
+    ) {
       continue;
     }
     const component = entry.origin ?? "legacy";
-    const match = matches.get(component);
+    // Frozen-existence vs membership-template join (template-population
+    // §3.2.1): a frozen concrete `shape` entry records departed HISTORY;
+    // the `*` membership template records CURRENT shape. They answer
+    // different questions under one class, so where both cover a read
+    // their labels JOIN rather than compete in replace-down — replacing
+    // would let a stale frozen label mask current membership taint or
+    // vice versa. Scoped to structure/derived-origin shape-class
+    // templates (a separate resolution bucket per component); everything
+    // else keeps replace-down.
+    const bucket = template && entry.observes === "shape"
+      ? `${component}\u0000shape-template`
+      : component;
+    const match = matches.get(bucket);
     if (match === undefined || match.path.length < entry.path.length) {
-      matches.set(component, entry);
+      matches.set(bucket, entry);
     } else if (match.path.length === entry.path.length) {
       // Two equally specific prefixes of one queried path are the same
-      // path; duplicate (path, origin) entries shouldn't survive
-      // coalescing, but join defensively rather than drop one.
-      matches.set(component, {
+      // path — or, with wildcard segments, a concrete entry and a `*`
+      // template covering the same slot; duplicate (path, origin) entries
+      // shouldn't survive coalescing, but join defensively (fail-toward-
+      // taint) rather than drop one.
+      matches.set(bucket, {
         path: match.path,
         label: mergeLabels(match.label, entry.label),
       });
@@ -197,17 +230,34 @@ const effectiveReadLabel = (
   read: {
     nonRecursive: boolean | undefined;
     consumes: ReadClassSelection;
+    /**
+     * Entries excluded from this read's consumption on top of class
+     * selection. Sole current user is `deriveFlowJoin`'s pair of template
+     * machinery boundaries: the §8.12.8 replace-from-criteria readback
+     * exclusion (a transaction re-deriving a container's membership stamps
+     * must not consume the very entries it replaces — see
+     * `ownRestampContainerPaths`) and the C0 §6.1 row-4 rule extended to
+     * plain reads (trace-covered resolution machinery skips `*`
+     * templates). Absent on every other call site (notably the
+     * `"all"`-selection write gate, which stays over-inclusive by design).
+     */
+    excludeEntry?: (entry: LabelMapEntry) => boolean;
   },
 ): IFCLabel | undefined => {
-  const view = read.consumes === "all" || metadata === undefined ? metadata : {
-    ...metadata,
-    labelMap: {
-      ...metadata.labelMap,
-      entries: metadata.labelMap.entries.filter((entry) =>
-        readConsumesEntry(read.consumes, entry)
-      ),
-    },
-  };
+  const view = (read.consumes === "all" && read.excludeEntry === undefined) ||
+      metadata === undefined
+    ? metadata
+    : {
+      ...metadata,
+      labelMap: {
+        ...metadata.labelMap,
+        entries: metadata.labelMap.entries.filter((entry) =>
+          (read.consumes === "all" ||
+            readConsumesEntry(read.consumes, entry)) &&
+          read.excludeEntry?.(entry) !== true
+        ),
+      },
+    };
   const base = labelAtPath(view, path);
   if (read.nonRecursive === true || view === undefined) {
     return base;
@@ -1316,6 +1366,13 @@ const forEachFlowObservation = (
     observation: {
       shape: ReadObservationShape;
       nonRecursive: boolean | undefined;
+      // True when a same-tx dereference-trace source covers this read
+      // at-or-above (the C0 §6.1 row-4 machinery predicate). Probe reads
+      // never arrive covered (they are skipped outright); a covered PLAIN
+      // read is the resolution machinery's ordinary journal shape at a
+      // followed slot, and is excluded from `*`-template consumption in
+      // `deriveFlowJoin`.
+      coveredByTrace: boolean;
     },
   ) => boolean,
 ): boolean => {
@@ -1382,9 +1439,15 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
+    const coveredByTrace = probeBelongsToDereference(
+      space,
+      id,
+      scope,
+      logicalPath,
+    );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (probeBelongsToDereference(space, id, scope, logicalPath)) {
+      if (coveredByTrace) {
         continue;
       }
       shape = "followRef";
@@ -1398,7 +1461,14 @@ const forEachFlowObservation = (
         scope,
         (read.type ?? "application/json") as MediaType,
         logicalPath,
-        { shape, nonRecursive: read.nonRecursive },
+        // `coveredByTrace` extends the C0 §6.1 row-3/row-4 boundary to
+        // PLAIN reads for the one entry kind whose consumption at slot
+        // paths is new (the `*`-path class templates): resolution
+        // machinery journals ordinary reads at followed slots and inside
+        // their link sigils, and those must stay pointer HANDLING, not
+        // pointer observation — see the template exclusion in
+        // `deriveFlowJoin`.
+        { shape, nonRecursive: read.nonRecursive, coveredByTrace },
       )
     ) {
       return true;
@@ -1437,13 +1507,85 @@ const forEachFlowObservation = (
         normalizeCellScope(trigger.scope),
         "application/json",
         trigger.path,
-        { shape: "value", nonRecursive: false },
+        { shape: "value", nonRecursive: false, coveredByTrace: false },
       )
     ) {
       return true;
     }
   }
   return false;
+};
+
+// The containers whose membership stamps THIS transaction re-derives this
+// attempt — the §8.12.8 replace-from-criteria readback exclusion set
+// (template-population §3.1). Two re-stamp routes, mirroring the persist
+// region: containers a list coordinator DECLARED this reconcile
+// (`recordCfcStructureContainer`), and container nodes of pure-link-structure
+// value writes. A reconciling coordinator reads its own previous output as
+// diff/identity scaffolding; with the `*`-child class templates persisted,
+// those readback reads would resolve the very entries this attempt drops and
+// re-mints — joining J_prev into J on every reconcile and turning the
+// normative replace-from-criteria into the accumulate-forever §8.12.8
+// rejects. So the writer's own flow join skips exactly the REPLACED entries
+// (the enumerate stamp and the `*`-child templates of its own re-stamped
+// containers); the frozen existence entry is not replaced and not excluded.
+// Foreign readers — and this transaction's reads of every OTHER container —
+// consume templates in full, which is what closes the SC-4/SC-8 residuals.
+const ownRestampContainerPaths = (
+  tx: IExtendedStorageTransaction,
+): Map<string, Set<string>> => {
+  const result = new Map<string, Set<string>>();
+  const add = (key: string, containerPath: readonly string[]) => {
+    let paths = result.get(key);
+    if (paths === undefined) {
+      paths = new Set();
+      result.set(key, paths);
+    }
+    paths.add(pathKey(containerPath));
+  };
+  for (const addr of tx.getCfcState().structureContainers) {
+    add(
+      targetKey({
+        space: addr.space,
+        id: addr.id as URI,
+        scope: normalizeCellScope(addr.scope),
+      }),
+      canonicalizeLogicalPath(addr.path),
+    );
+  }
+  for (const [key, target] of valueWriteTargets(tx)) {
+    for (const path of target.paths) {
+      const written = target.valuesByPath.get(pathKey(path));
+      if (written === undefined || !isPureLinkStructure(written)) {
+        continue;
+      }
+      const containers: (readonly string[])[] = [];
+      pureLinkContainerPaths(written, path, containers);
+      for (const container of containers) {
+        add(key, container);
+      }
+    }
+  }
+  return result;
+};
+
+// Whether `entry` is one of the membership entries a re-stamp of the given
+// container paths replaces: the container-anchored enumerate stamp, or a
+// `*`-child class template of one of the containers.
+const isReplacedMembershipEntry = (
+  entry: LabelMapEntry,
+  containers: ReadonlySet<string>,
+): boolean => {
+  if (entry.origin !== "structure") {
+    return false;
+  }
+  const entryPath = canonicalizeLogicalPath(entry.path);
+  if (entry.observes === "enumerate") {
+    return containers.has(pathKey(entryPath));
+  }
+  return entryPath.length > 0 &&
+    entryPath[entryPath.length - 1] === "*" &&
+    containers.has(pathKey(entryPath.slice(0, -1)));
 };
 
 // Exported for tests: the trigger-read cid: guard above defends
@@ -1483,6 +1625,8 @@ export const deriveFlowJoin = (
     ? new Set<MemorySpace>()
     : undefined;
   const metadataByDoc = new Map<string, CfcMetadata | undefined>();
+  // §8.12.8 readback exclusion: see `ownRestampContainerPaths`.
+  const ownRestamps = ownRestampContainerPaths(tx);
   forEachFlowObservation(
     tx,
     (space, id, scope, type, logicalPath, observation) => {
@@ -1490,12 +1634,38 @@ export const deriveFlowJoin = (
       if (!metadataByDoc.has(key)) {
         metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
       }
+      const ownedContainers = ownRestamps.get(key);
+      // `*`-template consumption keeps the C0 §6.1 row-3/row-4 boundary the
+      // probe channel already has, extended to PLAIN reads: resolution
+      // machinery journals ordinary reads at followed slots (the slot
+      // scalar, the sigil interior) on its way to the target, and those
+      // must not consume the slot templates — the follow's taint arrives
+      // via the target's own reads (row 4), while STANDALONE slot
+      // observations (no covering trace) consume in full (row 3, the SC-8
+      // closures). Without this, every traversal hop through a stamped
+      // container smears the container's J onto whatever the transaction
+      // writes — re-importing the pointwise smear the S16 substrate
+      // removed (measured: the phase-B pointwise map suite).
+      const excludesTemplates = observation.coveredByTrace ||
+        ownedContainers !== undefined;
       const label = effectiveReadLabel(
         metadataByDoc.get(key),
         logicalPath,
         {
           nonRecursive: observation.nonRecursive,
           consumes: observation.shape,
+          ...(excludesTemplates
+            ? {
+              excludeEntry: (entry: LabelMapEntry) =>
+                (observation.coveredByTrace &&
+                  isRuntimeMintedTemplate({
+                    origin: entry.origin,
+                    path: canonicalizeLogicalPath(entry.path),
+                  })) ||
+                (ownedContainers !== undefined &&
+                  isReplacedMembershipEntry(entry, ownedContainers)),
+            }
+            : {}),
         },
       );
       // Any observation with label CONTENT marks its space as a label
@@ -1762,6 +1932,34 @@ const walkIfcSchema = (
     }
     if (typeof resolved.items === "object" && resolved.items !== null) {
       walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, active);
+    }
+    // Record-only `additionalProperties` descends as the same `*` segment
+    // arrays get from `items` (template-population §4) — RESTRICTED to
+    // record-only objects (no NAMED property). The restriction is
+    // load-bearing: `isPrefix`'s `*` matches ANY segment, but
+    // `additionalProperties` semantically covers only keys NOT listed under
+    // `properties` (schemaAtPath consults it only on a properties miss), so
+    // an unrestricted `*` entry from a mixed schema would over-taint the
+    // named fields. Mixed fixed-plus-record-tail schemas therefore mint no
+    // `*` entry (expressing them needs exclusion semantics §3.3 forbids).
+    // An EMPTY `properties` object is still record-only — it names no key,
+    // so every key is a properties miss and `additionalProperties` covers
+    // all of them; schema helpers routinely emit that wrapper shape, and
+    // skipping it would silently drop the declared map label (codex/cubic
+    // review on this PR).
+    if (
+      (resolved.properties === undefined ||
+        Object.keys(resolved.properties).length === 0) &&
+      typeof resolved.additionalProperties === "object" &&
+      resolved.additionalProperties !== null
+    ) {
+      walkIfcSchema(
+        resolved.additionalProperties,
+        [...path, "*"],
+        entries,
+        childRoot,
+        active,
+      );
     }
     return entries;
   } finally {
@@ -3789,11 +3987,16 @@ const collectConsumedLabel = (
     // false-reject valid commits (review round 2 on #3993).
     for (const entry of metadata.labelMap.entries) {
       const entryPath = canonicalizeLogicalPath(entry.path);
-      // Structure entries label only the container node's shape: an
-      // ancestor structure entry does not apply to a read strictly below
-      // it (same exact-path rule as `labelAtPath`); as a descendant of a
-      // recursive read it does apply (the read materializes the shape).
-      const overlapsRead = entry.origin === "structure"
+      // CONCRETE structure entries label only the container node's shape:
+      // an ancestor structure entry does not apply to a read strictly
+      // below it (same exact-path rule as `labelAtPath`); as a descendant
+      // of a recursive read it does apply (the read materializes the
+      // shape). `*`-path templates (template-population §3.2) exist to be
+      // consumed at matching child paths, so they take the generic
+      // ancestor-or-equal arm — this collector stays additive; templates
+      // just participate.
+      const overlapsRead = entry.origin === "structure" &&
+          !isRuntimeMintedTemplate({ origin: entry.origin, path: entryPath })
         ? (entryPath.length === path.length
           ? isPrefix(entryPath, path)
           : read.nonRecursive !== true && isPrefix(path, entryPath))
@@ -4743,13 +4946,19 @@ export const prepareBoundaryCommit = (
       // observes:"shape" entry is policy, not measurement — it keeps the
       // declared component's own discipline (grow-only re-mint through
       // the schema walk) and must not be captured by the freeze carry
-      // (review on this PR). Known residual: deletion leaves the frozen
-      // entry in place (over-taint) and re-creation keeps it instead of
-      // re-minting at the re-creating join — re-mint-on-recreation needs
-      // per-path previousValue plumbing.
+      // (review on this PR). `*`-path TEMPLATES are excluded too: the
+      // shape-class membership template records CURRENT shape under
+      // replace-from-criteria (template-population §3.1/§3.2.1), so
+      // freezing it here would both unhinge it from the criteria and
+      // accumulate stale J forever through the coalesce join. Known
+      // residual: deletion leaves the frozen entry in place (over-taint)
+      // and re-creation keeps it instead of re-minting at the re-creating
+      // join — re-mint-on-recreation needs per-path previousValue
+      // plumbing.
       if (
         (entry.origin === "derived" || entry.origin === "structure") &&
-        entry.observes === "shape"
+        entry.observes === "shape" &&
+        !isRuntimeMintedTemplate({ origin: entry.origin, path: entryPath })
       ) {
         persistedLabelEntries.push({
           path: entryPath,
@@ -4790,11 +4999,27 @@ export const prepareBoundaryCommit = (
       // under any written path are dropped (fresh ones for this tx are
       // appended below / by the link machinery). Declared and legacy
       // entries are never cleared here.
+      //
+      // `*`-path templates clear only under a write that covers their
+      // CONTAINER (template-population §3.1 "cleared on covering writes"):
+      // `isPrefix`'s bidirectional wildcard would let a bare SLOT write
+      // (["1"]) "cover" the ["*"] template — but a slot write replaces one
+      // child, not the membership, and clearing there (with no re-mint;
+      // slot writes stamp nothing) would open an unlabeled window until
+      // the next declared reconcile. The container-anchored enumerate
+      // stamp survives slot writes for exactly the same reason (exact-path
+      // never matches a deeper write), so the twins match its discipline.
+      const clearProbePath = isRuntimeMintedTemplate({
+          origin: entry.origin,
+          path: entryPath,
+        }) && entryPath[entryPath.length - 1] === "*"
+        ? entryPath.slice(0, -1)
+        : entryPath;
       if (
         flowPersist &&
         (entry.origin === "derived" || entry.origin === "link" ||
           entry.origin === "structure") &&
-        flowWrittenPaths.some((written) => isPrefix(written, entryPath))
+        flowWrittenPaths.some((written) => isPrefix(written, clearProbePath))
       ) {
         flowCleared = true;
         if (
@@ -5061,20 +5286,29 @@ export const prepareBoundaryCommit = (
       // stamp (origin structure, observes enumerate — replace-from-criteria,
       // §8.12.8-normative per #4546) from J this reconcile even with no value
       // write: drop the carried-forward enumerate entry at the exact container
-      // path and re-stamp it below with the current J. The frozen existence
-      // entry (observes shape) and legacy covering entries are left in place —
-      // deleting the frozen entry would make the stamp loop re-mint it from
-      // the CURRENT join, silently unfreezing it; legacy entries await the
-      // write-path migration absorb.
+      // path and re-stamp it below with the current J. The `*`-child class
+      // templates minted beside it (template-population §3.1) follow the same
+      // replace-from-criteria discipline, so the carried template twins at
+      // [...container, "*"] are dropped and re-minted too — leaving them would
+      // coalesce-JOIN with the fresh mints and accumulate stale J forever.
+      // The frozen existence entry (observes shape, concrete path) and legacy
+      // covering entries are left in place — deleting the frozen entry would
+      // make the stamp loop re-mint it from the CURRENT join, silently
+      // unfreezing it; legacy entries await the write-path migration absorb.
       const structureContainerPath = structureContainerPaths.get(key);
       if (structureContainerPath !== undefined) {
         const containerPathKey = pathKey(structureContainerPath);
+        const containerTemplateKey = pathKey([
+          ...structureContainerPath,
+          "*",
+        ]);
         for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
           const candidateEntry = persistedLabelEntries[i];
           if (
             candidateEntry.origin === "structure" &&
-            candidateEntry.observes === "enumerate" &&
-            pathKey(candidateEntry.path) === containerPathKey
+            ((candidateEntry.observes === "enumerate" &&
+              pathKey(candidateEntry.path) === containerPathKey) ||
+              pathKey(candidateEntry.path) === containerTemplateKey)
           ) {
             persistedLabelEntries.splice(i, 1);
           }
@@ -5197,8 +5431,7 @@ export const prepareBoundaryCommit = (
         // normative for it, so it carries the current J only, never the
         // pool. Labs-axis mapping note: the `observes` axis is read-op
         // shaped, so "enumerate" here approximates the spec's container-
-        // level `iterate.{order,count}` classes; the spec's per-child
-        // shape encoding of membership remains a recorded residual.
+        // level `iterate.{order,count}` classes.
         if (flowHasLabels && flowConfidentiality.length > 0) {
           persistedLabelEntries.push(markFlowStampEntry({
             path,
@@ -5206,6 +5439,55 @@ export const prepareBoundaryCommit = (
             origin: "structure",
             observes: "enumerate",
           }));
+        }
+        // `*`-child CLASS TEMPLATES (template-population §3.1, closing the
+        // SC-4/SC-8 residuals): the same J, minted once per class at
+        // [...container, "*"] — O(1) in the container's size where the
+        // spec's per-child `shape` encoding (§8.5.6.1) needed O(n).
+        //  - `shape`: a per-child existence probe ("is /items/3
+        //    present?", §8.10.1.1) consumes the membership decision;
+        //  - `value`: materializing the reference scalar at a slot
+        //    (§4.6.3 ref-container rule) consumes it too;
+        //  - `followRef`: a slot-pointer probe/deref consumes the
+        //    assignment J — WHICH element the reader resolves through
+        //    was decided by it (inv-9) — while `shape`/`value` templates
+        //    stay out of probes (readConsumesEntry), keeping blind
+        //    pass-through clean of content taint. All three carry ONLY
+        //    the membership J (confidentiality-only, like every
+        //    structure stamp), never the container's content label.
+        // Same replace-from-criteria discipline as the enumerate stamp:
+        // dropped + re-minted from the current J each reconcile, cleared
+        // (never pooled — `poolsExistence` requires a class-less entry)
+        // on covering writes.
+        //
+        // DECLARED-CONTAINER ROUTE ONLY — a measured deviation from the
+        // design's §3.1 "both routes" (documented in
+        // cfc-template-population.md §6 Stage A). Minting templates on
+        // EVERY pure-link-structure value write puts them on the runtime's
+        // own builder/coordination plumbing (alias shells, internal
+        // arrays), and the op-instantiation machinery reads those docs'
+        // child paths (slot scalars, length) as scaffolding with NO
+        // distinguishing journal marker — neither probe-classified nor
+        // trace-covered — so each reconcile's J smears into the next
+        // (measured: the phase-B pointwise map suite). The declared
+        // list-coordinator containers (filter/flatMap results — the actual
+        // §8.5.6.1/SC-7 membership subjects) are where the membership
+        // decision lives; their templates close the SC-4/SC-8 residuals,
+        // and the generic value-write route keeps today's
+        // container-anchored stamps until machinery reads carry a marker.
+        if (
+          flowHasLabels && flowConfidentiality.length > 0 &&
+          structureContainerPath !== undefined &&
+          pathKey(structureContainerPath) === pathKey(path)
+        ) {
+          for (const observes of ["shape", "value", "followRef"] as const) {
+            persistedLabelEntries.push(markFlowStampEntry({
+              path: [...path, "*"],
+              label: { confidentiality: [...flowConfidentiality] },
+              origin: "structure",
+              observes,
+            }));
+          }
         }
         // FROZEN existence entry (freeze-at-creation, spec branch
         // cfc/existence-freeze-at-creation): minted once — at the first

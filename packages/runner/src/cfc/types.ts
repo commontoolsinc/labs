@@ -163,13 +163,31 @@ export type CfcSandboxResult = {
  * - `structure`: flow label on a container's SHAPE (membership, key set,
  *   order, length — §8.5.6.1/SC-7) for written values made purely of
  *   references, where per-slot link entries already label each reference.
- *   Applies only to reads at exactly the entry's path (observing the
- *   container is observing its shape); reads strictly below it (slot
- *   pointer reads, dereferences) are pointer handling and stay clean —
- *   that asymmetry is what lets membership taint persist without smearing
- *   the pointwise per-element split. Update discipline matches `derived`.
- *   Readers that predate this component treat it as covering (over-taint,
- *   fail-safe).
+ *   A CONCRETE-path structure entry applies only to reads at exactly its
+ *   path (observing the container is observing its shape); reads strictly
+ *   below it are pointer handling and stay clean. On DECLARED
+ *   list-coordinator containers (the S16 `recordCfcStructureContainer`
+ *   hook — filter/flatMap results, where the membership decision lives)
+ *   the runtime additionally mints three `*`-child CLASS TEMPLATES at
+ *   `[...container, "*"]` beside the container-anchored
+ *   `observes:"enumerate"` stamp — `shape`, `value`, `followRef` —
+ *   carrying the same per-tx J (docs/specs/cfc-template-population.md §3):
+ *   templates ARE consumed at matching child paths, so a per-child
+ *   existence probe or a slot-pointer observation consumes the
+ *   membership/assignment decision (the SC-4/SC-8 residual fixes) while
+ *   `readConsumesEntry`'s class table keeps probes clean of content taint
+ *   — the pointer/content split moves onto the class axis instead of
+ *   hanging on path anchoring alone. Two machinery boundaries keep
+ *   scaffolding out (measured on the phase-B pointwise suite): reads
+ *   covered by a same-tx dereference trace are resolution machinery and
+ *   skip templates (the C0 §6.1 row-4 rule extended to plain reads), and
+ *   a transaction re-deriving a container's membership stamps does not
+ *   consume the entries it replaces (§8.12.8 replace-from-criteria
+ *   readback exclusion). Update discipline matches `derived` (templates
+ *   replace-from-criteria with the enumerate stamp they accompany;
+ *   concrete `observes:"shape"` existence entries freeze at creation).
+ *   Readers that predate this component treat its entries as covering
+ *   (over-taint, fail-safe).
  * - `external-ingest`: the `ExternalIngest` provenance mark a vouched ingest
  *   channel mints onto the value it durably appends. Builtin-authored from
  *   verified channel metadata only (the split-mint), so it bypasses the
