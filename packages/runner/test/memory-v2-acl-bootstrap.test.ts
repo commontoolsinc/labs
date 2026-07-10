@@ -86,19 +86,43 @@ Deno.test("storage ACL bootstrap uses the named-space identity then returns to t
     assert(!sync.error, sync.error?.message);
 
     const acl = await server.readDocument(space, `of:${space}`);
-    assertEquals(acl?.value, { [user.did()]: "OWNER" });
+    assertEquals(acl?.value, {
+      [user.did()]: "OWNER",
+      "*": "WRITE",
+    });
     assertEquals(factory.principals, [
       user.did(),
       spaceIdentity.did(),
       user.did(),
     ]);
+
+    const guest = await Identity.fromPassphrase("acl bootstrap named guest");
+    const guestConnection = await new RecordingLoopbackSessionFactory(server)
+      .create(space, guest);
+    try {
+      await guestConnection.session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:guest-write",
+          value: { value: { public: true } },
+        }],
+      });
+      assertEquals(
+        (await server.readDocument(space, "of:guest-write"))?.value,
+        { public: true },
+      );
+    } finally {
+      await guestConnection.client.close();
+    }
   } finally {
     await manager.close();
     await server.close();
   }
 });
 
-Deno.test("concurrent named-space bootstrap has a single winning owner", async () => {
+Deno.test("concurrent named-space bootstrap has one owner and both sessions succeed", async () => {
   const alice = await Identity.fromPassphrase("acl bootstrap race alice");
   const bob = await Identity.fromPassphrase("acl bootstrap race bob");
   const spaceIdentity = await Identity.fromPassphrase(
@@ -119,17 +143,23 @@ Deno.test("concurrent named-space bootstrap has a single winning owner", async (
       aliceManager.open(space).sync("of:race-alice" as URI),
       bobManager.open(space).sync("of:race-bob" as URI),
     ]);
+    // One ACL genesis wins. The losing initializer can still reopen and write
+    // through the winner's rollout-default wildcard WRITE grant.
     assertEquals(
       results.filter((result) => result.error === undefined).length,
-      1,
+      2,
     );
 
     const acl = (await server.readDocument(space, `of:${space}`))?.value;
-    assert(
-      JSON.stringify(acl) === JSON.stringify({ [alice.did()]: "OWNER" }) ||
-        JSON.stringify(acl) === JSON.stringify({ [bob.did()]: "OWNER" }),
-      `expected exactly one bootstrap winner, got ${JSON.stringify(acl)}`,
+    assert(acl !== null && typeof acl === "object" && !Array.isArray(acl));
+    const grants = acl as Record<string, unknown>;
+    assertEquals(grants["*"], "WRITE");
+    assertEquals(
+      [alice.did(), bob.did()].filter((did) => grants[did] === "OWNER")
+        .length,
+      1,
     );
+    assertEquals(Object.keys(grants).length, 2);
   } finally {
     await aliceManager.close();
     await bobManager.close();

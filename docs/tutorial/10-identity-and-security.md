@@ -92,8 +92,9 @@ server evaluates them per message — session-open, queries, and watches need
 READ; `transact` needs WRITE; writing the ACL itself needs OWNER. A fresh space
 is read-only until its space identity (or a configured service DID) writes a
 valid ACL with at least one concrete OWNER. Named-space bootstrap uses a
-temporary space-identity session to grant the active user OWNER, then remounts
-as that user; home spaces use the same identity for both roles and claim
+temporary space-identity session to grant the active user OWNER plus `"*"`
+WRITE as the rollout default, then remounts as that user. Home spaces use the
+same identity for both roles and remain private by claiming
 `{ [space]: "OWNER" }`, including an ACL-less legacy home.
 
 As a temporary pre-launch compatibility rule, a populated space that has never

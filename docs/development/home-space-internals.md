@@ -31,3 +31,5 @@ not shared with bootstrap work.
 Unlike named-space bootstrap, the home path also claims a populated legacy
 space with no ACL. `session.open` remains read-only; the claim is an ordinary,
 conflict-checked ACL transaction. See `packages/runner/src/storage/v2.ts`.
+The home ACL is owner-only. Fresh named spaces use the rollout default
+`{ [activeUser]: "OWNER", "*": "WRITE" }` until ACL management has a UI.

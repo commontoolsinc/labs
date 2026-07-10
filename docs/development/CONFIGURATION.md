@@ -176,6 +176,9 @@ configured service DID writes a valid ACL with a concrete OWNER. A populated
 space that has never had an ACL remains authenticated-public READ/WRITE as a
 temporary pre-launch compatibility rule; public access never includes OWNER.
 Retracted, malformed, and ownerless ACLs fail closed.
+Normal fresh named-space bootstrap currently creates
+`{ [activeUser]: "OWNER", "*": "WRITE" }` so new non-home spaces are public
+read/write until ACL management has a UI. Home bootstrap remains owner-only.
 
 ---
 

@@ -818,11 +818,12 @@ export class StorageManager implements IStorageManager {
    * durable session always authenticates as `signer`, preserving user/session
    * scope partitioning.
    *
-   * Named-space keys only initialize a truly fresh space. Populated ACL-less
+   * Named-space keys only initialize a truly fresh space, with the active user
+   * as OWNER and wildcard WRITE as the rollout default. Populated ACL-less
    * spaces are the temporary public-compatibility case and stay public. The
-   * home identity (`signer.did() === space`) is the explicit exception: it
-   * claims a never-created ACL even when legacy data already exists. A
-   * retracted ACL remains a tombstone and must not be recreated.
+   * home identity (`signer.did() === space`) is the explicit private exception:
+   * it claims a never-created owner-only ACL even when legacy data already
+   * exists. A retracted ACL remains a tombstone and must not be recreated.
    */
   async #createInitializedSession(
     space: MemorySpace,
@@ -875,6 +876,9 @@ export class StorageManager implements IStorageManager {
         snapshot.document === null;
       if (aclStillNeverCreated && (isHomeSpace || current.serverSeq === 0)) {
         try {
+          const bootstrapAcl = isHomeSpace
+            ? { [signer.did()]: "OWNER" }
+            : { [signer.did()]: "OWNER", "*": "WRITE" };
           await bootstrap.session.transact({
             localSeq: 1,
             reads: {
@@ -888,7 +892,7 @@ export class StorageManager implements IStorageManager {
             operations: [{
               op: "set",
               id: aclId,
-              value: { value: { [signer.did()]: "OWNER" } },
+              value: { value: bootstrapAcl },
             }],
           });
         } catch (error) {

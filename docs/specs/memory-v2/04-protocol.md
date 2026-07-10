@@ -549,10 +549,12 @@ ordinary capability shortfalls on an already valid ACL.
 
 Genesis remains an explicit transaction. For a fresh named space, the storage
 manager briefly authenticates as the derived space identity, writes
-`{ [activeUser]: "OWNER" }` against a confirmed absent ACL, closes that
-bootstrap session, and mounts the durable session as the active user. This
+`{ [activeUser]: "OWNER", "*": "WRITE" }` against a confirmed absent ACL,
+closes that bootstrap session, and mounts the durable session as the active
+user. The wildcard grant is the rollout default until ACL management has a UI;
+the active user remains the concrete owner who can later narrow it. This
 preserves user/session-scoped partitioning. When the active identity already is
-the space DID (the home space), the same flow writes
+the space DID (the home space), the same flow instead writes
 `{ [space]: "OWNER" }`; that narrow path also privatizes a populated legacy
 home with no ACL. Populated named spaces with no ACL remain public under the
 compatibility row above.
