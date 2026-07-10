@@ -658,6 +658,15 @@ the missing case always falls back to legacy or to a preserved boundary.
 - **Per-path read-set deltas** — segments re-run wholesale on any read-set
   change; selective per-trigger recompute for large segments/collections is a
   future optimization, never a correctness dependency.
+- **Monolithic egress materialization** — a *second* flag that collapses the
+  rendered vdom (including mapped elements) into one document instead of
+  per-element docs, making incrementality opt-in. This is the lever that would
+  actually move the document count for rendered UIs (§16). Designed in
+  [egress-materialization.md](./egress-materialization.md); reuses the
+  transient path via a retention-policy flip, scoped to presentation (state /
+  pieces / handlers stay their own docs). Its CFC precision is the **B3** fix
+  (§18); its real cost is O(N) re-render, so large/mutable lists opt back into
+  per-element.
 
 Known residual: under the flag, a specific resume-with-held-documents test path
 leaves one pending async op at process exit (the test passes; flag-off is clean;
@@ -788,3 +797,12 @@ integration A/B and judge it on the metric the interpreter actually moves —
 *count*** (§16). The document-count intuition does not survive contact with a
 rendered app (its store is mostly preserved boundary docs); do not headline a
 doc-count win that a micro-benchmark suggested but a real app will not show.
+
+**The document-count lever, if it's wanted, is a separate flag.** Reducing the
+persisted doc count for *rendered* UIs is not something the base interpreter
+does — it needs monolithic egress materialization (collapse the vdom into one
+doc, incrementality opt-in), designed in
+[egress-materialization.md](./egress-materialization.md). Its CFC precision is
+**B3** above (same fix); its cost is O(N) re-render. It is orthogonal to
+B1–B3 (it can ship, gated, independently) and is the thing to reach for only
+if the corpus shows the doc count actually matters.
