@@ -52,7 +52,12 @@ Until the `shape`/`value`/`iterate` observation classes are implemented, one
 label covers all observation kinds at a path; replacing a derived label on
 overwrite then also shrinks the _existence_ label, leaving "this path was once
 written" as a public bit. Document as a known residual of the phase profile,
-fixed by PathLabelTemplate observation classes.
+fixed by PathLabelTemplate observation classes. (Closed in two steps: the C2/C3
+persist split gave existence its own frozen `observes:"shape"` entry, and
+template-population Stage A closed the per-child half — a `*`-path `shape`
+template on declared list-coordinator containers makes a per-child existence
+probe consume the membership `J`; see
+[`cfc-template-population.md`](./cfc-template-population.md) §6.)
 
 **SC-5 [normative] Bless the prepare/digest factoring — §8.10.1.** The runner
 implements the per-attempt verify loop as verify-at-prepare + a canonical-digest
@@ -96,7 +101,10 @@ carry the writing tx's J as exact-path shape labels — joined by reads at the
 container path and by recursive ancestor reads, never by reads strictly below —
 so the §8.5.6.1 membership/length channel is labeled while per-slot pointer
 handling stays clean. Pointer identity at a slot, i.e. WHICH element sits
-there observed without dereferencing, remains an SC-4/SC-8 residual.)
+there observed without dereferencing, was an SC-4/SC-8 residual until
+template-population Stage A: on declared list-coordinator containers a
+standalone slot observation now consumes the assignment `J` through the
+`*`-path `followRef` template — see the SC-8 note below for what remains.)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/ `followRef`,
@@ -112,10 +120,21 @@ container-anchored structure stamp is an undefined compaction with a known
 under-taint — a static per-child existence probe ("is `/items/3` present?")
 is a `shape` read at the child (§8.10.1.1) and does not consume the
 exact-path container stamp. The spec-conforming fix is per-slot shape
-entries, at the per-row entry-count cost (#3998); recorded here until an
-implementation decides to pay it. Existence-entry update discipline settled
-as freeze-at-creation — spec §8.12.8 amendment on branch
-`cfc/existence-freeze-at-creation`.)
+entries, at the per-row entry-count cost (#3998). **Closed by
+template-population Stage A for declared list-coordinator containers** (the
+actual §8.5.6.1 membership subjects): runtime-minted `*`-path per-class
+entries — O(1) per container where per-slot entries were O(n) — make the
+per-child probe, the raw slot materialization, and the standalone
+slot-pointer observation consume the membership/assignment `J`
+([`cfc-template-population.md`](./cfc-template-population.md) §6 Stage A,
+including the frozen-vs-membership join rule and two machinery boundaries).
+The remaining slice: generic pure-link value writes (non-declared
+containers) keep the container-anchored compaction — extending the mints
+there needs a machinery-read marker first, because the runner's
+op-instantiation scaffolding reads plumbing containers' child paths with no
+distinguishing journal shape (measured re-smear on the phase-B pointwise
+suite). Existence-entry update discipline settled as freeze-at-creation —
+spec §8.12.8 amendment on branch `cfc/existence-freeze-at-creation`.)
 
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
@@ -567,4 +586,7 @@ this file is the single tracking place:
   [`cfc-template-population.md`](./cfc-template-population.md)**:
   runtime-minted `*`-path per-class entries (the existing declared-`*`
   entry form; no new wire shape), closing both SC-8 under-taints in Stage
-  A and carrying Stage-2 full metadata population in Stage B.
+  A and carrying Stage-2 full metadata population in Stage B. **Stage A
+  landed** (declared list-coordinator containers; the generic
+  pure-link-write slice stays open pending a machinery-read marker — see
+  the SC-8 note and the design's §6 implementation note).
