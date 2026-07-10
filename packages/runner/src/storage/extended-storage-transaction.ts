@@ -1268,13 +1268,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void {
     this.assertWritable("markCreateOnly");
+    // Fail closed, same posture as addCommitPrecondition above: a
+    // create-only mark is a commit gate — the exactly-once witness for
+    // event receipts and single-use grant consumption — so silently
+    // swallowing it over an inner transaction that cannot enforce it would
+    // let a duplicate commit through unguarded (cubic P1 on #4649). Every
+    // production transaction (v2) implements it; this arm exists for
+    // hand-built/legacy inner transactions.
+    if (!this.tx.markCreateOnly) {
+      throw new Error(
+        "storage transaction does not support markCreateOnly()",
+      );
+    }
     let marks = this.createOnlyMarks.get(link.space);
     if (!marks) {
       marks = new Set();
       this.createOnlyMarks.set(link.space, marks);
     }
     marks.add(createOnlyMarkKey(link));
-    this.tx.markCreateOnly?.(link);
+    this.tx.markCreateOnly(link);
   }
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
