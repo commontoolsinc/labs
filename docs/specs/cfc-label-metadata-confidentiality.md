@@ -26,10 +26,13 @@ persists into a space-B document:
 | `cfc.schemaHash` + replicated schema doc (`ensureSchemaDocument`) | policy structure, field names | schema-driven enforcement |
 
 Two corrections to the audit item's inherited wording: `Origin` URIs have **no
-mint site** in the runner (nothing persists them), and **policy names are never
-persisted** (B2a policy ids reach the prepared digest only; label-carried
-`Policy(...)` is B2b, unbuilt). The live leak set is the DID-bearing rows
-above.
+mint site** in the runner (nothing persists them), and policy names were never
+persisted **until label-carried `Policy(...)`/`Context(...)` refs shipped**
+(B2b label-carried selection, 2026-07-09): a ref atom persists `name` + `hash`
+(public by design — they identify a deployment policy profile and must stay
+dereferenceable against the destination's snapshot) and a DID `subject`
+(commitment, same posture as `User.subject`). The live leak set is the
+DID-bearing rows above.
 
 Three structural facts shape everything below:
 
@@ -91,6 +94,8 @@ Default assignments (initial table, revisable per family):
 | `Caveat.source`, nested caveat sources | commitment | consumed by equality-shaped evidence binding; the audit's named leak |
 | `User.subject` / `PersonalSpace.owner` in confidentiality clauses | commitment | gating is pure equality against the acting reader |
 | `Space.id` in clauses | **public** (initially) | §4.9.3 must dereference it for the ACL point query; a commitment breaks membership-based release. Space DIDs identify a *container*, not a person; revisit under `reference` when cross-space resolution ships |
+| `Policy`/`Context` ref `.name`/`.hash` | **public** | B2b label-carried selection must dereference them against the destination's deployment snapshot (the `Space.id` argument); they identify a policy profile, not a person, and `hash` is already a content digest |
+| `Policy`/`Context` ref `.subject` | commitment | a DID, equality-shaped at selection (well-formedness only — selection keys on name+hash and accepts the commitment marker); rules binding variables from it fail closed at the destination, the narrow direction |
 | `LinkReference.source/target` | commitment (paths), public (space? no — commitment) | display/provenance only; nothing dereferences the persisted copy |
 | `TransformedBy.identity.sourceFile/bindingPath` | commitment | human-readable code layout is the leak; trust statements should bind the content-addressed `moduleIdentity` (public) instead |
 | `authored-by` / `represents-principal` `.subject` | public | product-displayed attribution, minted under the acting principal's own authority |
