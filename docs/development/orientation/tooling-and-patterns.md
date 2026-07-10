@@ -10,7 +10,7 @@ the skills system.
 
 ## `utils` is the universal leaf
 
-Everything depends on `utils`. It is imported by 294 files across the repo. Its
+Everything depends on `utils`. It is imported by 302 files across the repo. Its
 own `src/index.ts` deliberately **throws**, to force callers to import the
 specific subpath they need rather than the whole barrel.
 
@@ -18,7 +18,7 @@ specific subpath they need rather than the whole barrel.
 flowchart TB
     classDef leaf fill:#27ae60,stroke:#1e8449,color:#fff
     utils["utils (subpath-only)<br/>logger, defer, cache, deep-equal,<br/>base64url, bigint, arrays, types,<br/>sandbox-contract, async-local-store"]:::leaf
-    runner["runner (143 files)"]
+    runner["runner (148 files)"]
     datamodel["data-model (27 files)"]
     others["…every other package…"]
 

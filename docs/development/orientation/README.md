@@ -140,7 +140,7 @@ graph LR
     classDef big fill:#c0392b,stroke:#7b241c,color:#fff
     classDef mid fill:#e67e22,stroke:#a04000,color:#fff
     classDef small fill:#27ae60,stroke:#1e8449,color:#fff
-    R["runner — 95k loc"]:::big
+    R["runner — 100k loc"]:::big
     U["ui — 53k loc"]:::big
     T["ts-transformers — 40k loc"]:::mid
     C["cli — 25k loc"]:::mid

@@ -40,11 +40,11 @@ flowchart TD
     contenthash["content-hash"]
     leb128["leb128"]
 
-    runner -->|149| datamodel
-    runner -->|144| utils
-    runner -->|70| memory
-    runner -->|58| api
-    runner -->|20| jsc["js-compiler"]
+    runner -->|150| datamodel
+    runner -->|149| utils
+    runner -->|72| memory
+    runner -->|62| api
+    runner -->|22| jsc["js-compiler"]
     datamodel -->|35| utils
     datamodel -->|12| api
     datamodel -->|1| contenthash
@@ -60,11 +60,11 @@ flowchart TD
 
 Three things to take from this:
 
-- **`utils` is the universal floor.** It is imported by 294 files across the
+- **`utils` is the universal floor.** It is imported by 302 files across the
   repo. Its own `index.ts` deliberately throws, to force callers to import the
   specific subpath they need (for example `@commonfabric/utils/defer`).
-- **`runner` is the gravity well.** It pulls in `data-model` 149 times,
-  `utils` 144 times, and `memory` 70 times in production code alone. Any change
+- **`runner` is the gravity well.** It pulls in `data-model` 150 times,
+  `utils` 149 times, and `memory` 72 times in production code alone. Any change
   to `data-model` or `memory` ripples straight into the runtime.
 - **`api` is mostly types.** It sits near the floor because it is the authoring
   surface — almost entirely TypeScript declarations that author code is compiled
@@ -188,7 +188,7 @@ counts are lines.
 
 | File | Lines | What it is |
 |---|---|---|
-| `runner/src/cfc/prepare.ts` | 5078 | The Contextual-Flow-Control write-policy gate |
+| `runner/src/cfc/prepare.ts` | 5366 | The Contextual-Flow-Control write-policy gate |
 | `runner/src/runner.ts` | 4528 | Instantiates a pattern's nodes into scheduler actions |
 | `memory/v2/engine.ts` | 4406 | The transactional SQLite core |
 | `runner/src/traverse.ts` | 4350 | Schema-driven traversal of the value/link graph |
@@ -261,9 +261,9 @@ llm               → api(1), runner(1), utils(1)
 memory            → api(7), data-model(18), identity(2), runner(1), utils(6)
 piece             → api(3), data-model(2), home-schemas(1), identity(2),
                     js-compiler(1), runner(11), utils(4)
-runner            → api(58), content-hash(1), data-model(149), home-schemas(1),
-                    html(3), identity(2), js-compiler(20), llm(2), memory(70),
-                    piece(comment only), static(3), ts-transformers(6), utils(144)
+runner            → api(62), content-hash(1), data-model(150), home-schemas(1),
+                    html(3), identity(1), js-compiler(22), llm(2), memory(72),
+                    piece(comment only), static(2), ts-transformers(6), utils(149)
 runtime-client    → api(1), data-model(6), home-schemas(2), html(1), identity(6),
                     js-compiler(4), llm(1), piece(2), runner(22), utils(13)
 schema-generator  → api(18), data-model(1), utils(9)

@@ -1,7 +1,7 @@
 # The runtime core: `runner`
 
 `runner` is the reactive engine. It is the package everything else is arranged
-around, it is the largest hand-written package (95k non-test lines), and it
+around, it is the largest hand-written package (100k non-test lines), and it
 holds four of the eleven biggest files in the repo. If you understand `runner`,
 the rest of the system is mostly plumbing around it.
 
