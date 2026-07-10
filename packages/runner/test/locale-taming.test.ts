@@ -162,6 +162,57 @@ describe("sanitized locale methods under SES lockdown", () => {
     });
   });
 
+  describe("faithful argument handling (no leak, no lost behavior)", () => {
+    it("honors an array-LIKE locale list, not just real arrays", () => {
+      // ECMA-402 CanonicalizeLocaleList accepts array-likes; treating one as a
+      // single tag would ToString it to "[object Object]" and throw.
+      expect(
+        inSES(`(1234.5).toLocaleString({ 0: "de-DE", length: 1 })`),
+      ).toBe("1.234,5");
+    });
+
+    it("reads a stateful timeZone getter exactly once (no re-read leak)", () => {
+      // An adversarial getter that returned a real zone on the check-read and
+      // undefined on the forward-read would re-open the host-zone leak. The
+      // wrapper reads once and hands native a stable data property, so the
+      // format matches the explicit-NY result regardless of later reads.
+      const viaGetter = inSES(`(() => {
+        let n = 0;
+        const opts = { get timeZone() { n++; return n === 1 ? "America/New_York" : undefined; } };
+        return new Date(${T}).toLocaleDateString("en-US", opts);
+      })()`);
+      expect(viaGetter).toBe("7/10/2025"); // NY: 2025-07-11T00:00Z is 7/10 local
+    });
+
+    it("honors an inherited timeZone (a spread would have dropped it → UTC)", () => {
+      expect(
+        inSES(
+          `new Date(${T}).toLocaleDateString("en-US", Object.create({ timeZone: "America/New_York" }))`,
+        ),
+      ).toBe("7/10/2025");
+    });
+
+    it("lets native reject invalid options instead of coercing them valid", () => {
+      // `{ ...null }` would have become `{ timeZone: "UTC" }` and succeeded;
+      // native throws TypeError on null options, and the wrapper preserves that.
+      expect(() => inSES(`new Date(${T}).toLocaleDateString("en-US", null)`))
+        .toThrow(TypeError);
+    });
+  });
+
+  describe("Intl is absent from the compartment", () => {
+    it("exposes no Intl object — resolvedOptions().timeZone is unreachable", () => {
+      // The toLocale* methods format via the engine's INTERNAL Intl; the
+      // compartment global `Intl` is not installed, so the classic host-zone
+      // read `new Intl.DateTimeFormat().resolvedOptions().timeZone` throws
+      // rather than returning the host zone.
+      expect(inSES(`typeof Intl`)).toBe("undefined");
+      expect(() =>
+        inSES(`new Intl.DateTimeFormat().resolvedOptions().timeZone`)
+      ).toThrow();
+    });
+  });
+
   describe("delegating methods", () => {
     it("Array.prototype.toLocaleString reaches the sanitized element methods", () => {
       expect(inSES(`[1234.5, new Date(${T})].toLocaleString()`)).toMatch(

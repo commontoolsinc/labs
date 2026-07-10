@@ -54,8 +54,15 @@ type Locales = string | string[] | undefined;
 // mechanism and ECMA-402 resolution does the rest.
 export const pinLocales = (locales: Locales): unknown[] | string => {
   if (locales === undefined) return DEFAULT_LOCALE;
-  if (Array.isArray(locales)) return [...locales, DEFAULT_LOCALE];
-  return [locales, DEFAULT_LOCALE];
+  // A bare string is a single tag. Everything else — a real array OR an
+  // array-like (`{ 0: "de-DE", length: 1 }`), both of which ECMA-402's
+  // CanonicalizeLocaleList accepts — is materialized to the elements native
+  // would iterate, then the pinned fallback is appended so resolution can
+  // never fall through to the host default locale. `Array.from` also turns a
+  // no-length object into `[]` (→ just the fallback), matching native's
+  // empty-list-uses-default behavior while keeping our default, not the host's.
+  if (typeof locales === "string") return [locales, DEFAULT_LOCALE];
+  return [...Array.from(locales as ArrayLike<unknown>), DEFAULT_LOCALE];
 };
 
 // An omitted `options.timeZone` becomes UTC — never the host timezone. That
@@ -66,12 +73,30 @@ export const pinLocales = (locales: Locales): unknown[] | string => {
 // (omitted) is pinned.
 const pinDateOptions = (
   options: Intl.DateTimeFormatOptions | undefined,
-): Intl.DateTimeFormatOptions => ({
-  ...options,
-  timeZone: options?.timeZone === undefined
-    ? DEFAULT_TIME_ZONE
-    : options.timeZone,
-});
+): unknown => {
+  // Omitted → native leaves timeZone unset and formats in the host zone. Pin.
+  if (options === undefined) return { timeZone: DEFAULT_TIME_ZONE };
+  // Non-object (null, primitives): native's GetOptionsObject throws. Forward
+  // as-is so it still throws rather than being silently coerced to a valid
+  // `{ timeZone: "UTC" }` (which a `{ ...options }` spread of null would do).
+  if (typeof options !== "object" || options === null) return options;
+  // Read the security-sensitive timeZone EXACTLY ONCE (via a normal get, so
+  // an inherited value is honored like native does), then hand native a
+  // stable own data property. Three separate reads (spread + `=== undefined`
+  // check + forward) let a stateful/adversarial getter pass the check with a
+  // real zone yet forward `undefined`, re-opening the host-zone leak. Other
+  // options keep their normal (incl. inherited) lookup through the prototype
+  // chain — only timeZone must be stabilized.
+  const timeZone = options.timeZone;
+  return Object.create(options, {
+    timeZone: {
+      value: timeZone === undefined ? DEFAULT_TIME_ZONE : timeZone,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    },
+  });
+};
 
 type AnyLocaleMethod = (
   this: unknown,
