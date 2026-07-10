@@ -8,6 +8,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import {
   cfcCanonicalClauseDigest,
   type CfcDeclaredMonotonicityMode,
+  collectDeclaredMonotonicityViolations,
 } from "../src/cfc/mod.ts";
 import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
@@ -1548,6 +1549,50 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         await runtime.dispose();
         await storageManager.close();
       }
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // Reason dedup on degenerate duplicate entries (direct unit call: the
+  // walk mints one declared entry per path and dedups atoms, so the
+  // duplicate arms are reachable only through the exported function).
+  // ------------------------------------------------------------------
+  describe("violation-reason dedup (unit)", () => {
+    it("reports each violated clause and added atom once across duplicate entries", () => {
+      const violations = collectDeclaredMonotonicityViolations({
+        space: signer.did(),
+        docId: "of:dedup-doc",
+        storedEntries: [
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_B] },
+          },
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_B] },
+          },
+        ],
+        proposedEntries: [
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_A], integrity: [ATOM_Y] },
+          },
+          {
+            path: ["out"],
+            origin: "declared",
+            label: { confidentiality: [CLAUSE_A], integrity: [ATOM_Y] },
+          },
+        ],
+      });
+      expect(
+        violations.filter((v) => v.includes("confidentiality violation")),
+      ).toHaveLength(1);
+      expect(
+        violations.filter((v) => v.includes("integrity violation")),
+      ).toHaveLength(1);
     });
   });
 
