@@ -31,6 +31,8 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic-only — in the canonical env registry) | off | Bernhard Seefeld (#4090) | graduate with scheduler-v2 speculation lineage | implemented, off by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
+| [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -66,9 +68,11 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Three flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`); `commitPreconditions` is deliberately mapped to `null`
-there, which records "not env-reachable" as a decision rather than an omission.
+Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
+`systemPatternAutoUpdateHome`); `commitPreconditions` is deliberately mapped to
+`null` there, which records "not env-reachable" as a decision rather than an
+omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
 propagate](#how-flags-propagate).
@@ -201,6 +205,57 @@ propagate](#how-flags-propagate).
 - **Path to removal.** There is no planned removal. It would only be deleted if
   the debug source-annotation mechanism itself were removed, which is unlikely
   because `.src` is a public debugging surface.
+
+### `systemPatternAutoUpdate`
+
+- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` environment variable
+  (through the canonical mapping) server-side, the shell build define of the
+  same name (injected by
+  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) via
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts))
+  browser-side, or `RuntimeOptions.experimental.systemPatternAutoUpdate`.
+- **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
+  rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
+  #4619 (2026-07-09).
+- **Purpose.** At space open, rolls a space's **non-home** root system pattern
+  (default-app) forward in place when its toolshed serves a newer content
+  identity: version gate (client vs toolshed build sha) → cached `?identity`
+  compare → in-place `patternIdentity` swap, re-instantiated by the existing
+  pattern watcher onto the same result cell. Best-effort and non-blocking: no
+  failure of the check may break space open. When either build sha is unknown
+  (dev/source servers carry none) the check skips silently; the `versionSkew`
+  IPC signal — which raises the shell's reload banner — fires only on a proven
+  mismatch (both shas known and different). See
+  [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+- **Current default and planned end state.** The runner built-in default is off
+  like every flag in this category; the shell build injects `true` unless the
+  define is set to `"false"`, so the deployed product (and local shell dev
+  builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
+  background piece service) leave it off unless the env var is set. End state:
+  graduate to always-on for system roots once golden-replay coverage has soaked
+  and the home audit lands, then delete both auto-update flags.
+- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
+  off elsewhere.
+- **Path to removal.** Graduate the home root (below), make the check
+  unconditional, and remove both flags together.
+
+### `systemPatternAutoUpdateHome`
+
+- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` environment
+  variable, the shell build define of the same name, or
+  `RuntimeOptions.experimental.systemPatternAutoUpdateHome`.
+- **Added by.** Bernhard Seefeld, in #4611 (2026-07-08).
+- **Purpose.** Second gate holding the **home** root (home.tsx) out of
+  [`systemPatternAutoUpdate`](#systempatternautoupdate): the home root carries
+  real user data (favorites, journal, the spaces list) and stays pinned until
+  the stable-addressing audit verifies an in-place swap preserves that state.
+  Both flags must be on for a home root to auto-update.
+- **Current default and planned end state.** Off everywhere (no shell-side
+  default-on). End state: flip on after the home.tsx stable-addressing audit,
+  then remove together with `systemPatternAutoUpdate`.
+- **Status on 2026-07-09.** Implemented, off by default.
+- **Path to removal.** Complete the audit, default the home root on, and delete
+  both flags when the check becomes unconditional.
 
 ---
 
@@ -563,10 +618,12 @@ the per-epic implementation notes).
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
-`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`)
-reach the runtime through the deployed processes. The runtime-only flags
-(`commitPreconditions`, the CFC dials) reach it only through the `RuntimeOptions`
-passed to `new Runtime(...)`.
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
+`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME`) reach the runtime through the
+deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
+dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 
 All first-party processes build their `RuntimeOptions` through a construction
 preset in
