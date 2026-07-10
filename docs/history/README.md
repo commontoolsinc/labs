@@ -113,6 +113,9 @@ One line per archived document; each document's header carries the fuller
   — the ESM module-record loader rollout.
 - [pattern-id-retirement.md](specs/pattern-id-retirement.md) — retiring
   pattern ids (work orders W0–W4).
+- [system-pattern-updates-implementation-plan.md](specs/pattern-imports/system-pattern-updates-implementation-plan.md)
+  — system-pattern auto-update (M0 toolshed `?identity`, M1 version gate, M2
+  `patternSource`, M3 in-place swap, M4 flag rollout), shipped 2026-07.
 - [sqlite-builtin/implementation-plan.md](specs/sqlite-builtin/implementation-plan.md)
   — the SQLite builtin workstreams, as built.
 - [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.
