@@ -2638,7 +2638,15 @@ class SpaceReplica implements ISpaceReplica {
             const record = this.#docs.get(
               docKey(read.id as URI, read.scope as CellScope | undefined),
             );
-            if (record !== undefined && record.confirmed.seq > seq) {
+            // A doc this replica never loaded (or holds without a confirmed
+            // base) cannot be verified current. Worse, adopting would skip
+            // the very run that loads and subscribes it, so no later push
+            // would ever invalidate the action — a permanently stale
+            // receiver. Refuse; the local run establishes the subscription.
+            if (record === undefined || record.confirmed.seq === 0) {
+              return false;
+            }
+            if (record.confirmed.seq > seq) {
               return false;
             }
           }

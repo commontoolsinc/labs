@@ -48,6 +48,21 @@ const resolveCommitSessionKey = (
 ): string =>
   principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
 
+// Principal segment of a stored commit/observation session key
+// (`session:<principal>:<sessionId>` per resolvePrincipalSessionKey).
+// Principal-less sessions store the bare session id — no principal. The
+// segments are encodeURIComponent-encoded, so splitting on ":" is exact.
+export const principalOfSessionKey = (key: string): string | undefined => {
+  if (!key.startsWith("session:")) return undefined;
+  const parts = key.split(":");
+  if (parts.length !== 3) return undefined;
+  try {
+    return decodeURIComponent(parts[1]);
+  } catch {
+    return undefined;
+  }
+};
+
 export const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
@@ -835,6 +850,9 @@ export interface SchedulerObservationSnapshotWithState
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
+  // Session that persisted the observation — the adoption fan-out needs it
+  // to gate reader-isolated (user/session-scope) rows by writer principal.
+  writerSessionId?: string;
 }
 
 export interface SchedulerObservationSnapshotPage {
@@ -1609,6 +1627,7 @@ const upsertSchedulerObservationTransaction = (
       branch,
       commitSeq: options.commitSeq ?? null,
       observedAtSeq: options.observedAtSeq,
+      sessionId: options.sessionId ?? null,
       observation,
       payload,
     });
@@ -1617,6 +1636,7 @@ const upsertSchedulerObservationTransaction = (
       observationId,
       commitSeq: options.commitSeq ?? null,
       observedAtSeq: options.observedAtSeq,
+      sessionId: options.sessionId ?? null,
       observation,
       payload,
     });
@@ -1745,6 +1765,7 @@ export const listSchedulerActionSnapshots = (
       COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
       s.observed_at_seq AS observed_at_seq,
       s.payload,
+      o.session_id AS writer_session_id,
       a.direct_dirty_seq,
       a.stale_seq,
       a.unknown_reason
@@ -1818,6 +1839,7 @@ export const listSchedulerActionSnapshots = (
     commit_seq: number | null;
     observed_at_seq: number;
     payload: string;
+    writer_session_id: string | null;
     direct_dirty_seq: number | null;
     stale_seq: number | null;
     unknown_reason: string | null;
@@ -1832,6 +1854,9 @@ export const listSchedulerActionSnapshots = (
       row.payload,
       row.observed_at_seq,
     ),
+    ...(row.writer_session_id !== null
+      ? { writerSessionId: row.writer_session_id }
+      : {}),
     ...(row.direct_dirty_seq !== null
       ? { directDirtySeq: row.direct_dirty_seq }
       : {}),
@@ -2432,6 +2457,9 @@ function insertSchedulerObservationRow(
     branch: BranchName;
     commitSeq: number | null;
     observedAtSeq: number;
+    // Commit session key of the writer (resolveCommitSessionKey) — the
+    // adoption fan-out gates reader-isolated rows by its principal segment.
+    sessionId: string | null;
     observation: SchedulerActionObservation;
     payload: string;
   },
@@ -2464,7 +2492,7 @@ function insertSchedulerObservationRow(
       branch: options.branch,
       commit_seq: options.commitSeq,
       observed_at_seq: options.observedAtSeq,
-      session_id: null,
+      session_id: options.sessionId,
       local_seq: null,
       piece_id: options.observation.pieceId,
       action_id: options.observation.actionId,
@@ -2483,6 +2511,9 @@ function updateSchedulerObservationRow(
     observationId: number;
     commitSeq: number | null;
     observedAtSeq: number;
+    // See insertSchedulerObservationRow — kept current so the row always
+    // names the writer whose run the stored payload came from.
+    sessionId: string | null;
     observation: SchedulerActionObservation;
     payload: string;
   },
@@ -2493,6 +2524,7 @@ function updateSchedulerObservationRow(
       SET
         commit_seq = :commit_seq,
         observed_at_seq = :observed_at_seq,
+        session_id = :session_id,
         piece_id = :piece_id,
         action_id = :action_id,
         process_generation = :process_generation,
@@ -2502,6 +2534,7 @@ function updateSchedulerObservationRow(
       observation_id: options.observationId ?? null,
       commit_seq: options.commitSeq,
       observed_at_seq: options.observedAtSeq,
+      session_id: options.sessionId,
       piece_id: options.observation.pieceId,
       action_id: options.observation.actionId,
       process_generation: options.observation.processGeneration,
