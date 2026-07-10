@@ -533,14 +533,22 @@ export class Runtime {
       ...options.experimental,
     };
 
-    // Log any overridden experimental flags.
+    // Log any overridden experimental flags. Never on stdout: the cf CLI's
+    // machine-readable output (`cf piece ls` etc.) is consumed by scripts, and
+    // this banner made every command's stdout non-empty under a flag override.
+    // Not console.error/warn either: the cf test console enforcement fails
+    // tests on those. Direct process stderr in Deno; plain console in browser
+    // realms (no stdout contract there).
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.log(
-        `Experimental flag overrides: ${overrideFlags.join(", ")}`,
-      );
+      const banner = `Experimental flag overrides: ${overrideFlags.join(", ")}`;
+      if (typeof Deno !== "undefined" && Deno.stderr) {
+        Deno.stderr.writeSync(new TextEncoder().encode(banner + "\n"));
+      } else {
+        console.log(banner);
+      }
     }
 
     // Propagate experimental flags to their ambient control points, then read
