@@ -175,8 +175,8 @@ const LARGE_INPUT: PreparedDigestInput = {
 // `hashStringOf()` tiebreaker. With the chokepoint freeze in place each
 // frozen input is cache-eligible, so the within-sort cache fires from
 // iteration two onward; without it, every comparator call rehashes from
-// scratch. Synthetic worst case, included so the regression detector flags
-// any future regression in the cache-eligibility pathway.
+// scratch. Synthetic worst case, included so a benchmark run surfaces any
+// future regression in the cache-eligibility pathway.
 const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: [],
   attemptedWrites: [],
