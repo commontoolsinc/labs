@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcDeclaredMonotonicityMode } from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
 
@@ -96,6 +97,7 @@ const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcEnforcementMode?: "disabled" | "observe" | "enforce-explicit";
   cfcFlowLabels?: "off" | "observe" | "persist";
+  cfcDeclaredMonotonicity?: CfcDeclaredMonotonicityMode;
 }) =>
   new Runtime({
     apiUrl: new URL("https://example.com"),
@@ -103,6 +105,9 @@ const makeRuntime = (opts: {
     cfcEnforcementMode: opts.cfcEnforcementMode ?? "enforce-explicit",
     ...(opts.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: opts.cfcFlowLabels }
+      : {}),
+    ...(opts.cfcDeclaredMonotonicity !== undefined
+      ? { cfcDeclaredMonotonicity: opts.cfcDeclaredMonotonicity }
       : {}),
   });
 
@@ -426,6 +431,198 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       } finally {
         await runtime.dispose();
         await seeder.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // The dial: cfcDeclaredMonotonicity, mirroring cfcWriteFloor exactly.
+  // ------------------------------------------------------------------
+  describe("the cfcDeclaredMonotonicity dial", () => {
+    it("the enforce pin cannot be weakened mid-transaction", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const tx = runtime.edit();
+        expect(() => tx.setCfcDeclaredMonotonicityMode("off")).toThrow(
+          "cannot be weakened",
+        );
+        expect(() => tx.setCfcDeclaredMonotonicityMode("observe")).toThrow(
+          "cannot be weakened",
+        );
+        // Re-asserting enforce is fine.
+        tx.setCfcDeclaredMonotonicityMode("enforce");
+        expect(tx.getCfcState().declaredMonotonicityMode).toBe("enforce");
+        await tx.commit();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("a real mode change after prepare invalidates the prepared decision", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-dial-invalidate",
+          SCHEMA_ONE_CLAUSE,
+          tx,
+        );
+        cell.set({ out: "v1" });
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcDeclaredMonotonicityMode("enforce");
+        const prepare = tx.getCfcState().prepare;
+        expect(prepare.status).toBe("invalidated");
+        expect(
+          prepare.status === "invalidated" &&
+            prepare.reasons.includes("declared-monotonicity-mode-changed"),
+        ).toBe(true);
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // The exception seam: the per-tx privileged widening exemption
+  // (§8.12.7 route 2b; design doc §4). Setter discipline only here —
+  // the gate-facing semantics are in the enforce block below.
+  // ------------------------------------------------------------------
+  describe("the widening-exemption seam (setter discipline)", () => {
+    const EXEMPTION = () => ({
+      space: signer.did(),
+      id: "of:some-doc",
+      path: ["out"],
+      clauseDigest: "digest-of-clause",
+    });
+
+    it("pattern/handler code cannot set it: no identity fails closed", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        expect(() => tx.setCfcDeclaredWideningExemption(EXEMPTION())).toThrow(
+          /builtin/,
+        );
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("pattern/handler code cannot set it: a verified identity fails closed", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "verified",
+          moduleIdentity: "mod:example",
+        });
+        expect(() => tx.setCfcDeclaredWideningExemption(EXEMPTION())).toThrow(
+          /builtin/,
+        );
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("a malformed or over-broad marker fails closed (no wildcard exemptions)", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-declassification-event-writer",
+        });
+        const attempt = (marker: unknown) => () =>
+          tx.setCfcDeclaredWideningExemption(marker as never);
+        expect(attempt({ ...EXEMPTION(), space: "" })).toThrow(/malformed/);
+        expect(attempt({ ...EXEMPTION(), id: "" })).toThrow(/malformed/);
+        expect(attempt({ ...EXEMPTION(), clauseDigest: "" })).toThrow(
+          /malformed/,
+        );
+        expect(attempt({ ...EXEMPTION(), path: "out" })).toThrow(/malformed/);
+        expect(attempt({ ...EXEMPTION(), path: [42] })).toThrow(/malformed/);
+        expect(attempt({ ...EXEMPTION(), clauseDigest: undefined })).toThrow(
+          /malformed/,
+        );
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("write-once: a second exemption in the same transaction fails closed", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-declassification-event-writer",
+        });
+        tx.setCfcDeclaredWideningExemption(EXEMPTION());
+        expect(tx.getCfcState().declaredWideningExemption).toMatchObject({
+          id: "of:some-doc",
+          clauseDigest: "digest-of-clause",
+        });
+        expect(() =>
+          tx.setCfcDeclaredWideningExemption({
+            ...EXEMPTION(),
+            clauseDigest: "another-digest",
+          })
+        ).toThrow(/already set/);
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("setting the exemption after prepare invalidates the prepared decision", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-seam-invalidate",
+          SCHEMA_ONE_CLAUSE,
+          tx,
+        );
+        cell.set({ out: "v1" });
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-declassification-event-writer",
+        });
+        tx.prepareCfc();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        tx.setCfcDeclaredWideningExemption(EXEMPTION());
+        const prepare = tx.getCfcState().prepare;
+        expect(prepare.status).toBe("invalidated");
+        expect(
+          prepare.status === "invalidated" &&
+            prepare.reasons.includes("declared-widening-exemption-added"),
+        ).toBe(true);
+        tx.abort();
+      } finally {
+        await runtime.dispose();
         await storageManager.close();
       }
     });
