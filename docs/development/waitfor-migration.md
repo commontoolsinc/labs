@@ -289,3 +289,47 @@ already-listening server, and on reconnect the subscriber re-issues its watch
 against the fresh server, which reads current committed state — so the update is
 delivered whether the write lands before or after the reconnect completes. The
 sleeps were removed with no replacement wait.
+
+## Production reconnect backoff (evaluated separately)
+
+Removing those post-restart test sleeps drew attention to a retry loop in
+production code that sits right next to them: `MemoryClient.reconnect()` in
+`packages/memory/v2/client.ts`. When the websocket to the memory server drops,
+the client loops. It re-runs the `hello` handshake and re-opens every mounted
+space's session, and when an attempt fails it waits a short, growing delay
+before trying again. A retry loop with a sleep is exactly the shape the rest of
+this note works to remove, so it was evaluated on its own terms rather than
+changed in passing. The conclusion is that the delay is a legitimate exception,
+and it is recorded here.
+
+The connection attempt itself is already event-driven. `hello()` calls
+`transport.send()`, which opens the websocket. The websocket transport
+(`WebSocketTransport` in `packages/runner/src/storage/v2-remote-session.ts`)
+resolves the open on the real `open` event and rejects it on the real `error`
+or `close` event. The client never polls to discover whether a connection
+attempt has succeeded; it awaits the transport event. So on the success path
+there is no timer standing in for a missing event.
+
+The delay is only the pause between one failed attempt and the next, and that
+pause cannot be replaced by awaiting an event, because there is no event to
+await. A server that is down or restarting is, from the client's point of view,
+just a host that refuses the connection. When the host refuses, the websocket
+`error` event fires almost immediately. Nothing tells the client when the server
+has come back. The only way to find out is to try to connect again. Without a
+delay between attempts the loop would open a socket, receive an instant error,
+and open another socket as fast as the event loop allows, which is a busy loop
+hammering the host. The growing backoff — 25 milliseconds doubling to a
+30-second cap, with up to 20 percent jitter — is the honest way to keep checking
+whether the server is back without flooding it. It is the same shape as the
+committed-write backoff described in `committed-write-backpressure.md`, where a
+capped exponential backoff also stands in for a retry that has no event to wait
+on.
+
+One part of the old code was a genuine poll, and it has been removed. The wait
+between attempts used to run in a loop that slept in 25-millisecond chunks and
+re-checked a `closed` flag between chunks, so that closing the client during a
+backoff would end the wait within 25 milliseconds instead of after the full
+delay. That chunked re-check was a poll on the flag. It is now a single timer
+that `close()` cancels directly, so a client closed mid-backoff settles at once
+and nothing wakes on an interval. The backoff delay between attempts stays; only
+the polling that implemented its cancellation is gone.
