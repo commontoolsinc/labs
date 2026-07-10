@@ -17,6 +17,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
+import { pinLocales } from "../src/sandbox/locale-taming.ts";
 
 const T = 1752192000000; // 2025-07-11T00:00:00Z (Friday)
 
@@ -104,6 +105,37 @@ describe("sanitized locale methods under SES lockdown", () => {
       expect(inSES(`"i".toLocaleUpperCase()`)).toBe("I");
       // Turkish dotted capital İ — only with the explicit locale.
       expect(inSES(`"i".toLocaleUpperCase("tr")`)).toBe("İ");
+    });
+  });
+
+  describe("host-locale leak closure (unsupported-tag fallback)", () => {
+    // ECMA-402 resolves a well-formed-but-unsupported requested tag to the
+    // HOST default locale — a read of the user's language/region. pinLocales
+    // closes it by appending "en-US" to every request, so resolution never
+    // reaches the host default. The closure itself can't be asserted
+    // in-process (the realm's default locale is fixed at startup and CI hosts
+    // run en/C); it was verified manually via
+    //   LC_ALL=de_DE.UTF-8 deno eval '...toLocaleString("xx")'
+    // — so these tests pin the mechanism (the appended fallback) and the
+    // resulting in-compartment behavior.
+    it("appends the pinned default to every requested-locales shape", () => {
+      expect(pinLocales(undefined)).toBe("en-US");
+      expect(pinLocales([])).toEqual(["en-US"]);
+      expect(pinLocales("de-DE")).toEqual(["de-DE", "en-US"]);
+      expect(pinLocales(["fr", "de-DE"])).toEqual(["fr", "de-DE", "en-US"]);
+    });
+
+    it("resolves an unsupported tag to en-US output, not the host default", () => {
+      expect(inSES(`(1234567.89).toLocaleString("xx")`)).toBe("1,234,567.89");
+      expect(inSES(`new Date(${T}).toLocaleDateString("xx")`)).toBe(
+        "7/11/2025",
+      );
+    });
+
+    it("still throws RangeError on malformed tags", () => {
+      expect(() => inSES(`(1).toLocaleString("not a tag!")`)).toThrow(
+        RangeError,
+      );
     });
   });
 

@@ -12,11 +12,12 @@
  * ICU/CLDR tables), so amputation throws away a legitimately useful surface.
  *
  * We sanitize instead: each method that `localeTaming: "safe"` would alias is
- * replaced with a wrapper that pins the ambient defaults — locale → "en-US",
- * Date timeZone → "UTC" — and delegates to the original, passing explicit
- * arguments through untouched. Lockdown then runs with
- * `localeTaming: "unsafe"` so SES leaves the sanitized methods in place and
- * hardens them like any other intrinsic.
+ * replaced with a wrapper that pins every ambient default — an omitted locale
+ * → "en-US", an omitted Date timeZone → "UTC", and the unsupported-tag
+ * FALLBACK locale → "en-US" (see pinLocales) — and delegates to the original,
+ * passing explicit arguments through otherwise untouched. Lockdown then runs
+ * with `localeTaming: "unsafe"` so SES leaves the sanitized methods in place
+ * and hardens them like any other intrinsic.
  *
  * Two consequences to be aware of:
  *
@@ -39,14 +40,23 @@ const DEFAULT_TIME_ZONE = "UTC";
 
 type Locales = string | string[] | undefined;
 
-// An omitted `locales` — undefined or an empty array, both meaning "host
-// default" per ECMA-402 — becomes the pinned default. Explicit values pass
-// through, including explicit BCP 47 tags the host may or may not have data
-// for (ECMA-402 fallback semantics apply as usual).
-const pinLocales = (locales: Locales): string | string[] =>
-  locales === undefined || (Array.isArray(locales) && locales.length === 0)
-    ? DEFAULT_LOCALE
-    : locales;
+// Pin every path that ECMA-402 would resolve to the host's default locale:
+// an omitted `locales` (undefined or an empty array) becomes the pinned
+// default, and — the subtle one — the pinned default is APPENDED to every
+// explicit request, because a well-formed-but-unsupported tag ("xx") would
+// otherwise fall back to the host default locale, letting sandboxed code
+// read the user's language/region off the formatted output. With the
+// fallback appended, resolution picks the caller's tag when the host
+// supports it and "en-US" when it doesn't — never the host default.
+// Malformed tags still throw RangeError, unchanged.
+// Exported for tests: the leak closure itself can't be asserted in-process
+// (the realm's default locale is fixed at startup), so the tests pin this
+// mechanism and ECMA-402 resolution does the rest.
+export const pinLocales = (locales: Locales): unknown[] | string => {
+  if (locales === undefined) return DEFAULT_LOCALE;
+  if (Array.isArray(locales)) return [...locales, DEFAULT_LOCALE];
+  return [locales, DEFAULT_LOCALE];
+};
 
 // An omitted `options.timeZone` becomes UTC — never the host timezone.
 const pinDateOptions = (
