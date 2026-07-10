@@ -139,6 +139,11 @@ describe("PieceManager default pattern persistence", () => {
     );
   });
 
+  it("preflight resolves once the default pattern registers pieces", async () => {
+    await createDefaultPatternPieceWithResult(manager);
+    await manager.assertCanAddPieces();
+  });
+
   it("reads persisted allPieces without restarting the default pattern", async () => {
     const { commonfabric } = createBuilder();
     const { handler, pattern } = commonfabric;
