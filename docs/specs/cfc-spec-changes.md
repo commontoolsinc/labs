@@ -430,10 +430,11 @@ and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
 stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
 redaction, classification table), stage 1 as labs#4638
 (`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
-commitment-aware matching), stage 2 in reduced form 2026-07-09
+commitment-aware matching), stage 2 in reduced form as labs#4657
 (`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
 `labelMetadata` observation channel — the SC-6 revisit discharged; the full
-per-field `PathLabelTemplate` population profile co-builds with SC-4/SC-8);
+per-field `PathLabelTemplate` population profile co-builds with SC-4/SC-8,
+[`cfc-template-population.md`](./cfc-template-population.md) Stage B);
 stage 3 remains per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
