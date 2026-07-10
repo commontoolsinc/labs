@@ -576,4 +576,9 @@ this file is the single tracking place:
 - §8.12.8 already documents the observation-class residuals (existence
   channel; pointer-identity-at-a-slot) as profile residuals with
   `PathLabelTemplate` named as the fix; the open part of that build is the
-  envelope persistence/population design, tracked with SC-4/SC-8.
+  envelope persistence/population design, tracked with SC-4/SC-8 — **design
+  settled 2026-07-10 in
+  [`cfc-template-population.md`](./cfc-template-population.md)**:
+  runtime-minted `*`-path per-class entries (the existing declared-`*`
+  entry form; no new wire shape), closing both SC-8 under-taints in Stage
+  A and carrying Stage-2 full metadata population in Stage B.
