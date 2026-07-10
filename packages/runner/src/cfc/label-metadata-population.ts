@@ -3,6 +3,7 @@ import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives } from "./clause.ts";
 import { classifyAtomField } from "./label-field-classification.ts";
 import { isCfcFieldCommitment } from "./label-representation.ts";
+import { cfcLabelPathPrefixMatches } from "./label-view-core.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import type { IFCLabel, LabelEntryOrigin, LabelMapEntry } from "./types.ts";
 
@@ -260,21 +261,6 @@ export const deriveLabelMetadataTemplateEntries = (
   return out;
 };
 
-// Bidirectional wildcard prefix — the same rule `labelAtPath` /
-// `collectConsumedLabel` resolve payload entries with (`isPrefix` in
-// prepare.ts): `*` in either the entry path or the queried path matches any
-// segment, so a concrete consultation path resolves multi-`*` templates and
-// a template minted for a `*`-path payload target (a Stage-A membership
-// template) resolves for concrete slot consultations.
-const wildcardIsPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
-
 /**
  * Resolve the persisted population label at one CONCRETE metadata path
  * (`["cfc","labels","value",...,"clauses","1","alternatives","0","source"]`)
@@ -303,8 +289,14 @@ export const resolveLabelMetadataTemplateConfidentiality = (
     ) {
       continue;
     }
+    // Bidirectional wildcard prefix — the canonical matcher label views and
+    // the payload resolution share (`*` in either the entry path or the
+    // queried path matches any segment), so a concrete consultation path
+    // resolves multi-`*` templates and a template minted for a `*`-path
+    // payload target (a Stage-A membership template) resolves for concrete
+    // slot consultations.
     const entryPath = canonicalizeLogicalPath(entry.path);
-    if (!wildcardIsPrefix(entryPath, path)) {
+    if (!cfcLabelPathPrefixMatches(entryPath, path)) {
       continue;
     }
     const confidentiality = entry.label.confidentiality ?? [];

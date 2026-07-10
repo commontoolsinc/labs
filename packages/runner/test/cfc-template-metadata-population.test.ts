@@ -604,6 +604,58 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
   });
 
+  // Mixed-version healing, the template-ONLY arm (cubic P2 on this PR): an
+  // envelope whose only surviving entries are stale templates (an older
+  // runtime cleared the payload entries while carrying the unknown-origin
+  // templates forward) must heal to an EMPTY label map on the next Stage-B
+  // persist — dropping the templates counts as a clear, so the empty final
+  // map is written rather than short-circuited into keeping the stale bytes.
+  it("heals a stale template-only envelope to an empty label map", async () => {
+    const rt = makeRuntime();
+    // Seed the stale state with a RESOLVABLE schema document (a real
+    // mixed-version envelope always references a stored cid: schema).
+    const interned = internSchema({ type: "object" } as JSONSchema, true);
+    const seed = rt.edit();
+    const seedCell = rt.getCell(space, "mp-heal", undefined, seed);
+    const seededId = seedCell.getAsNormalizedFullLink().id;
+    seed.writeOrThrow(
+      {
+        space,
+        scope: "space",
+        id: `cid:${interned.taggedHashString}` as `${string}:${string}`,
+        path: [],
+      },
+      { value: interned.schema },
+    );
+    seed.writeOrThrow({ space, scope: "space", id: seededId, path: [] }, {
+      value: { x: 1 },
+      cfc: {
+        version: 1,
+        schemaHash: interned.taggedHashString,
+        labelMap: {
+          version: 1,
+          entries: [
+            templateEntry([], [], ["stale-tmpl-atom"]),
+            templateEntry([], ["source"], ["stale-tmpl-atom"]),
+          ],
+        },
+      },
+    });
+    expect((await seed.commit()).ok).toBeDefined();
+    expect(entriesOf(seededId).length).toBe(2);
+
+    // A clean (unlabeled) value write: no payload entries survive the
+    // re-derivation, so no templates re-derive either — the heal writes the
+    // empty label map instead of keeping the stale bytes.
+    const tx = rt.edit();
+    const cell = rt.getCell(space, "mp-heal", undefined, tx);
+    cell.set({ fresh: true } as never);
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(entriesOf(seededId)).toEqual([]);
+  });
+
   // The recorded labelMetadata observations reference the CONCRETE metadata
   // paths the evaluation consulted (clause/alternative indices), not the
   // subtree root.
@@ -878,6 +930,40 @@ describe("CFC template metadata population (Stage B): derivation unit properties
       derivedEntry([{ kind: "authored-by", subject: caveatAtom() }]),
     ]);
     expect(smuggling.map((e) => e.path.at(-1))).toEqual(["*"]);
+
+    // Deeper smuggling shapes stay whole-atom-only through the nested scan:
+    // an ARRAY under a public wrapper field whose element is itself a
+    // public-fielded claim atom wrapping the protected caveat (the scan
+    // recurses array elements and unprotected record fields), ...
+    const nestedArray = deriveLabelMetadataTemplateEntries([
+      derivedEntry([{
+        kind: "authored-by",
+        subject: [{ kind: "authored-by", subject: caveatAtom() }],
+      }]),
+    ]);
+    expect(nestedArray.map((e) => e.path.at(-1))).toEqual(["*"]);
+
+    // ...and a bare commitment marker nested under a public wrapper field
+    // (protected content wherever it sits, mirroring the projection walk's
+    // marker arm).
+    const nestedMarker = deriveLabelMetadataTemplateEntries([
+      derivedEntry([{
+        kind: "authored-by",
+        subject: { digestOf: "committed-nested" },
+      }]),
+    ]);
+    expect(nestedMarker.map((e) => e.path.at(-1))).toEqual(["*"]);
+
+    // An all-public nested shape mints nothing through the same scan.
+    expect(deriveLabelMetadataTemplateEntries([
+      derivedEntry([{
+        kind: "authored-by",
+        subject: ["did:key:alice", {
+          kind: "authored-by",
+          subject: "did:key:bob",
+        }],
+      }]),
+    ])).toEqual([]);
   });
 
   it("derives nothing from non-containment or template entries", () => {

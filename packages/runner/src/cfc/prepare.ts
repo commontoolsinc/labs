@@ -4602,12 +4602,23 @@ export const prepareBoundaryCommit = (
         target.scope,
         target.type,
       );
+      const existingEntries = existingMeta?.labelMap.entries ?? [];
       if (
-        existingMeta?.labelMap.entries.some((entry) =>
+        existingEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "link" ||
             entry.origin === "structure") &&
           target.paths.some((written) => isPrefix(written, entry.path))
-        )
+        ) ||
+        // Stage B healing, the template-ONLY arm (cubic P2 on the Stage B
+        // PR): an envelope whose entries are ALL label-metadata templates
+        // has no payload entry a written path could cover, so it would
+        // never re-enter this loop — and its templates describe entries
+        // that no longer exist. Admit it so the re-derivation writes the
+        // healed (empty) label map. Envelopes with any payload entry heal
+        // through the ordinary covering-write arm above (the re-derivation
+        // rebuilds templates whenever payload entries are re-persisted).
+        (existingEntries.length > 0 &&
+          existingEntries.every((entry) => isLabelMetadataTemplateEntry(entry)))
       ) {
         targetKeys.add(key);
       }
@@ -4912,6 +4923,15 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     let flowCleared = false;
+    // Stage B: stored label-metadata templates this persist drops (they are
+    // re-derived from the FINAL payload entry set below). Tracked so a
+    // TEMPLATE-ONLY stale envelope — a mixed-version writer cleared the
+    // payload entries while carrying the unknown-origin templates forward —
+    // heals: dropping them counts as a clear, so an empty final label map
+    // is WRITTEN rather than short-circuited into keeping the stale bytes
+    // (cubic P2 on the Stage B PR). When the final entries are non-empty
+    // the flag is inert — the SC-11 canonical comparison decides as usual.
+    let droppedLabelMetadataTemplates = false;
     // SC-4 (C3, disciplines settled with the spec 2026-07-06 — freeze-at-
     // creation, specs branch cfc/existence-freeze-at-creation): existence
     // never shrinks, but it does not grow either. When a clear drops a
@@ -4949,8 +4969,10 @@ export const prepareBoundaryCommit = (
       // FINAL payload entry set, so they replace on overwrite and clear
       // with the entries they describe by construction (and a stale
       // template left by a mixed-version writer heals on the next persist
-      // here).
+      // here — see `droppedLabelMetadataTemplates` for the template-only
+      // arm).
       if (isLabelMetadataTemplateEntry(entry)) {
+        droppedLabelMetadataTemplates = true;
         continue;
       }
       // RUNTIME-MINTED shape-class (existence) entries survive every
@@ -5641,7 +5663,10 @@ export const prepareBoundaryCommit = (
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 
-    if (coalescedLabelEntries.length === 0 && !flowCleared) {
+    if (
+      coalescedLabelEntries.length === 0 && !flowCleared &&
+      !droppedLabelMetadataTemplates
+    ) {
       continue;
     }
 

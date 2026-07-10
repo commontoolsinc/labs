@@ -132,8 +132,10 @@ export type ConfLabelQueryEvaluation = {
    */
   consumedConfidentiality: readonly unknown[];
   /**
-   * The same consumption, per concrete metadata path (deduped per path,
-   * labels joined). Empty exactly when `consumedConfidentiality` is.
+   * The same consumption, one record per consulted concrete metadata path
+   * (paths are unique by construction — clause/alternative indices plus
+   * distinct predicate fields), each record's label deduped. Empty exactly
+   * when `consumedConfidentiality` is.
    */
   consumedObservations: readonly ConfLabelConsumedObservation[];
 };
@@ -433,10 +435,13 @@ export const evaluateConfLabelQuery = (
   // and template resolution reads at those concrete paths.
   const metaBase = ["cfc", "labels", "value", ...targetPath];
   const consumed: unknown[] = [];
-  const consumedByPath = new Map<
-    string,
-    { path: readonly string[]; atoms: unknown[] }
-  >();
+  // One record per labeled consultation. Paths are UNIQUE by construction —
+  // per-field consultations key on (clauseIndex, alternativeIndex, predicate
+  // field) with the six predicate fields distinct, whole-atom projections
+  // key on (clauseIndex, alternativeIndex), and a field path can never equal
+  // an alternative path (field paths extend an alternative path by one
+  // segment) — so no per-path merge step exists to reach.
+  const consumedObservations: ConfLabelConsumedObservation[] = [];
   const consumeAt = (
     path: readonly string[],
     atoms: readonly unknown[],
@@ -445,13 +450,10 @@ export const evaluateConfLabelQuery = (
       return;
     }
     consumed.push(...atoms);
-    const key = encodePointer(path);
-    const bucket = consumedByPath.get(key);
-    if (bucket === undefined) {
-      consumedByPath.set(key, { path, atoms: [...atoms] });
-    } else {
-      bucket.atoms.push(...atoms);
-    }
+    consumedObservations.push({
+      path,
+      confidentiality: uniqueCfcAtoms([...atoms]),
+    });
   };
   const atoms: LabelAtomProjection[] = [];
   let clauseIndex = 0;
@@ -592,10 +594,7 @@ export const evaluateConfLabelQuery = (
   return {
     result: { status: "ok", atoms },
     consumedConfidentiality: uniqueCfcAtoms(consumed),
-    consumedObservations: [...consumedByPath.values()].map((bucket) => ({
-      path: bucket.path,
-      confidentiality: uniqueCfcAtoms(bucket.atoms),
-    })),
+    consumedObservations,
   };
 };
 
