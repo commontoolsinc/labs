@@ -60,20 +60,6 @@ type UnwrapOneLevelOptions = {
   sourceSchemas?: {
     argument?: JSONSchema;
   };
-  /**
-   * CT-1812: mint a KEYLESS pattern's content-hash session identity so a
-   * ref-less pattern value with a live trusted original rides a
-   * `$patternRef` instead of the structural-copy path (whose immutable-cell
-   * JSON round-trip corrupts nested output-alias `defer` levels — the
-   * CT-1811 mechanism, reachable ref-lessly). Trust-gated by the supplier
-   * (minting BRANDS; see `Runner.mintKeylessPatternRef`); returns undefined
-   * for values whose original is not a trusted builder pattern — those keep
-   * the legacy embedded copy (the stored-keyless remnant,
-   * stored-pattern-rehydration.test.ts).
-   */
-  mintKeylessPatternRef?: (
-    value: object,
-  ) => { identity: string; symbol: string } | undefined;
 };
 
 /**
@@ -492,9 +478,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       // just runs legacy.) This generalizes the former
       // `Runner.substituteOpPatternRefs` — which did the same for the
       // `map`/`filter`/`flatMap` `op` input only — to the whole binding
-      // channel, including the directly-invoked-sub-pattern node. Its
-      // CT-1812 keyless-minting arm survives below via
-      // `options.mintKeylessPatternRef`.
+      // channel, including the directly-invoked-sub-pattern node. (Its
+      // CT-1812 keyless arm stays runner-side and `op`-scoped —
+      // `Runner.substituteOpKeylessPatternRef`.)
       const ref = getArtifactEntryRef(binding);
       if (ref !== undefined) {
         // Match `patternToJSON`'s JSON-boundary form EXACTLY (json-utils.ts):
@@ -510,26 +496,17 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           resultSchema: binding.resultSchema,
         };
       }
-      // No entry ref, but a LIVE trusted original (CT-1812): mint its keyless
-      // content-hash session identity and ride a `$patternRef` to the
-      // pristine artifact — the copy path below would round-trip the graph
-      // through the immutable-cell JSON model, corrupting nested output-alias
-      // `defer` levels (the CT-1811 mechanism, reachable ref-lessly).
-      if (typeof binding === "object") {
-        const minted = options?.mintKeylessPatternRef?.(binding);
-        if (minted !== undefined) {
-          return {
-            $patternRef: { identity: minted.identity, symbol: minted.symbol },
-            argumentSchema: binding.argumentSchema,
-            resultSchema: binding.resultSchema,
-          };
-        }
-      }
-      // No entry ref and no mintable original: a stored no-entry-ref pattern
-      // value with no live canonical to resolve to. Preserve the legacy
-      // behavior — a callable pattern passes through unchanged; an object
-      // pattern is structurally copied (one alias level unwrapped) and linked
-      // to its original so trust and any later-indexed ref still resolve.
+      // No entry ref: a manually-constructed / bare-Engine pattern with no
+      // live canonical to resolve to. Preserve the legacy behavior — a
+      // callable pattern passes through unchanged; an object pattern is
+      // structurally copied (one alias level unwrapped) and linked to its
+      // original so trust and any later-indexed ref still resolve. (For the
+      // list builtins' `op` input specifically, the runner then mints a
+      // keyless session identity for copies with a live trusted original —
+      // `Runner.substituteOpKeylessPatternRef`, CT-1812. That stays scoped to
+      // `op`: minting every bound pattern value would hand sentinels to
+      // consumers that read pattern fields structurally, e.g. the llm-dialog
+      // tool catalog.)
       if (typeof binding !== "object") return binding;
       const copy: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [

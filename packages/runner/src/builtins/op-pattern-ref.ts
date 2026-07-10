@@ -50,10 +50,10 @@ export function isPatternRefSentinel(
  *   storage-backed `loadPatternByIdentity`.
  * - Otherwise `op` is an embedded pattern graph, used as-is. Post-CT-1812
  *   this is ONLY the stored-keyless remnant: a live op whose original is a
- *   trusted builder pattern gets a `keyless:` identity minted at bind time
- *   (`unwrapOneLevelAndBindtoDoc` via `Runner.mintKeylessPatternRef`) and
- *   arrives here as a sentinel; what still arrives embedded is a graph
- *   deserialized from a
+ *   trusted builder pattern gets a `keyless:` identity minted at node
+ *   instantiation (`Runner.substituteOpKeylessPatternRef`) and arrives here
+ *   as a sentinel; what still arrives embedded is a graph deserialized
+ *   from a
  *   stored no-entry-ref pattern VALUE (the live keyless writer path pinned
  *   by stored-pattern-rehydration.test.ts), for which no pristine artifact
  *   exists to resolve instead. CT-1812 residual: for THAT form, a nested

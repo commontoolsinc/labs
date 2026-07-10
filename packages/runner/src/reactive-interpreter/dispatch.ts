@@ -850,12 +850,19 @@ function tryBuildInlineCollectionNode(
       type: "raw",
       implementation,
       debugName: `ri2:${collectionOp}-inline`,
+      // The runner's keyless-op minting (CT-1812,
+      // `Runner.substituteOpKeylessPatternRef`) gates on the list-builtin
+      // name; a synthetic raw module has no `moduleRefName`, so it carries
+      // the name explicitly — a ref-less op must mint the same identity
+      // whether the coordinator is legacy or inline.
+      ri2ListBuiltin: collectionOp,
     } as unknown as Module,
     // The op carried in these inputs keeps the CT-1623 by-identity protocol
     // automatically: `unwrapOneLevelAndBindtoDoc`'s `convert` replaces any
-    // pattern-valued input with a `{ $patternRef }` sentinel at bind time
-    // (compact through the session artifact index; loud on miss), so this raw
-    // node needs no special-casing.
+    // ref-having pattern-valued input with a `{ $patternRef }` sentinel at
+    // bind time (compact through the session artifact index; loud on miss),
+    // and the runner mints keyless ops post-bind, so this raw node needs no
+    // special-casing.
     inputs: original.inputs,
     outputs: original.outputs,
   };

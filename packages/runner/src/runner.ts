@@ -2277,10 +2277,7 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        mintKeylessPatternRef: this.mintKeylessPatternRef,
-      },
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -3906,30 +3903,48 @@ export class Runner {
   }
 
   /**
-   * CT-1812 (ported from main's `substituteOpPatternRefs`, which the
-   * `$patternRef` binding generalization replaced): the trust gate for
-   * minting a KEYLESS pattern's content-hash session identity at bind time.
-   * A pattern value with no content-addressed entry ref but a LIVE trusted
-   * original — hand-built through the in-process builder DSL, or evaluated
-   * through the bare non-registering `Engine.compileAndEvaluateModules` —
-   * rides a `$patternRef` to the pristine artifact instead of taking the
-   * structural-copy path, whose immutable-cell JSON round-trip corrupts a
-   * nested sub-pattern's output-alias `defer` levels (the CT-1811
-   * mechanism, reachable ref-lessly). Minting BRANDS, so the gate admits
-   * only values whose original is already a trusted builder pattern; a
-   * stored no-entry-ref graph (no live original) keeps the legacy embedded
-   * copy (stored-pattern-rehydration.test.ts pins that path).
+   * CT-1812 (the keyless arm of main's `substituteOpPatternRefs`; the
+   * ref-HAVING arm is generalized into `unwrapOneLevelAndBindtoDoc`'s
+   * `$patternRef` binding): for the list builtins (`map`/`filter`/
+   * `flatMap`), a bound `op` that is still an embedded pattern graph but
+   * whose derivation original is a LIVE trusted builder pattern gets its
+   * keyless content-hash session identity minted here and rides a
+   * `$patternRef` to the pristine artifact. The embedded copy's
+   * immutable-cell JSON round-trip corrupts a nested sub-pattern's
+   * output-alias `defer` levels (the CT-1811 mechanism, reachable
+   * ref-lessly). Minting BRANDS, so only an op whose original is already a
+   * trusted builder pattern is minted; a stored no-entry-ref graph (no live
+   * original) stays embedded (stored-pattern-rehydration.test.ts pins that
+   * path). Deliberately scoped to the builtins' `op` key — the one
+   * pattern-valued input the builtins rehydrate (`resolveOpPattern`);
+   * minting every bound pattern value would hand `$patternRef` sentinels to
+   * consumers that read pattern fields structurally (e.g. the llm-dialog
+   * tool catalog reads `.pattern.argumentSchema`).
    */
-  private mintKeylessPatternRef = (
-    value: object,
-  ): { identity: string; symbol: string } | undefined => {
-    const original = resolveOriginal(value);
-    return isTrustedBuilderArtifact(original) && isPattern(original)
-      ? this.runtime.patternManager.ensureKeylessPatternIdentity(
+  private substituteOpKeylessPatternRef(
+    moduleRefName: string | undefined,
+    inputBindings: FabricValue,
+  ): void {
+    if (
+      moduleRefName !== "map" && moduleRefName !== "filter" &&
+      moduleRefName !== "flatMap"
+    ) {
+      return;
+    }
+    if (!isRecord(inputBindings)) return;
+    const op = (inputBindings as Record<string, unknown>).op;
+    // Already a sentinel (the ref-having path bound it) — nothing to do.
+    if (!isRecord(op) || "$patternRef" in op) return;
+    const original = resolveOriginal(op as unknown as object);
+    if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+      const ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
         original as unknown as Pattern,
-      )
-      : undefined;
-  };
+      );
+      (inputBindings as Record<string, unknown>).op = {
+        $patternRef: { identity: ref.identity, symbol: ref.symbol },
+      };
+    }
+  }
 
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
@@ -3959,10 +3974,7 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        mintKeylessPatternRef: this.mintKeylessPatternRef,
-      },
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -3970,6 +3982,17 @@ export class Runner {
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
+    );
+
+    // CT-1812: the keyless arm of the op-sentinel substitution — the
+    // ref-having arm already bound `op` as a `$patternRef` inside
+    // `unwrapOneLevelAndBindtoDoc`. A flag-on inline coordinator is a
+    // synthetic raw module with no ref name; it carries the builtin name as
+    // `ri2ListBuiltin` (a ref-less op must mint the same identity either way).
+    this.substituteOpKeylessPatternRef(
+      moduleRefName ??
+        (module as unknown as { ri2ListBuiltin?: string }).ri2ListBuiltin,
+      mappedInputBindings,
     );
 
     // CT-1623: a pattern-valued input (the list builtins' `op`, an inline
@@ -4288,10 +4311,7 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        mintKeylessPatternRef: this.mintKeylessPatternRef,
-      },
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -4337,10 +4357,7 @@ export class Runner {
       module.implementation,
       argumentCellLink,
       resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        mintKeylessPatternRef: this.mintKeylessPatternRef,
-      },
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const patternImpl = resolveStoredPattern(this.runtime, boundPatternImpl);
     if (!patternImpl) {
