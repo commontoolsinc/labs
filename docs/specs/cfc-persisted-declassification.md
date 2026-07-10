@@ -221,12 +221,23 @@ declassification event. Contract, if and when built:
 2. **Policy-guarded**: the acting principal's authority over the target
    clause verified exactly as a grant writer would (inv-7), plus §8.10.5.2 —
    a broader audience is a new release judgment with its own evidence.
-3. **A new monotonicity gate**: today no runtime `canUpdateStoreLabel` check
-   exists (declared entries evolve only via the schema-walk re-mint). The
-   event is the *sanctioned exception* to a gate that must first exist —
-   build the gate (reject non-monotone declared-component changes outside an
-   event) before the exception, or the "never an ordinary write" clause is
-   unenforced prose.
+3. **A new monotonicity gate**: the event is the *sanctioned exception* to a
+   gate that must exist first — reject non-monotone declared-component
+   changes outside an event, or the "never an ordinary write" clause is
+   unenforced prose. _Implementation note (2026-07-10): shipped in #4647 —
+   `cfc/declared-monotonicity.ts` hooked at the declared re-mint point,
+   witness = the A2/A3 clause kernel's subsumption (Lean `ClauseLe`) for
+   confidentiality and set-shrink for integrity, behind
+   `cfcDeclaredMonotonicity: off | observe | enforce` with the standard
+   anti-downgrade pin. Characterization found and pinned two pre-existing
+   gaps the gate closes: schema-route `addIntegrity` growth persisted
+   silently, and stored declared entries stronger than their schema were
+   silently weakened under `cfcFlowLabels: "persist"`. The exception seam
+   exists as `setCfcDeclaredWideningExemption` — trusted-builtin only,
+   write-once, exactly one `(doc, path, clauseDigest)` triple per
+   transaction, integrity never exemptable; `cfcCanonicalClauseDigest` is
+   the clause-identity helper §5 anticipated. No consumer of the seam is
+   built (the event itself stays superseded per §5)._
 4. **The event record**, adjacent to but not inside the `["cfc"]` envelope
    (SC-11 keeps envelopes churn-free and version-neutral): a **create-only
    document causal to the consumed intent's id** — the shipped receipt
