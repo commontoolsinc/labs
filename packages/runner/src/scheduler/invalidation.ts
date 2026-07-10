@@ -16,7 +16,7 @@ import type {
   TriggerTraceEntry,
 } from "./types.ts";
 
-export type SchedulerMode = "pull" | "push";
+export type SchedulerMode = "pull";
 
 export function hasRegisteredTriggers(
   state: TriggerIndexState,

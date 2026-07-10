@@ -7,7 +7,10 @@ import {
   space,
   toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
-import type { TransactionReactivityLog } from "../src/storage/interface.ts";
+import type {
+  IMemorySpaceAddress,
+  TransactionReactivityLog,
+} from "../src/storage/interface.ts";
 import {
   buildSchedulerActionObservation,
   isSchedulerActionObservation,
@@ -80,6 +83,13 @@ const writeAddress = {
   path: ["value", "output"],
 };
 
+const actualOnlyWriteAddress = {
+  space: "did:key:space" as const,
+  scope: "space" as const,
+  id: "of:dynamic-target" as const,
+  path: ["value", "output"],
+};
+
 const writeLink = {
   space: writeAddress.space,
   scope: writeAddress.scope,
@@ -149,6 +159,11 @@ const snapshotsByActionId = (
       },
     ]),
   );
+
+const currentSnapshotOracle = {
+  addressesCurrentAtOrBelow: () => true,
+  hasPendingWriteOverlapping: () => false,
+};
 
 const sameSchedulerAddress = (
   left: SchedulerActionObservation["reads"][number],
@@ -233,6 +248,7 @@ describe("persistent scheduler observations", () => {
       runtimeFingerprint: "runtime:test",
       observedAtSeq: 42,
       transactionKind: "action-run",
+      currentKnownWrites: [],
       transactionLog: {
         reads: [],
         shallowReads: [],
@@ -241,13 +257,33 @@ describe("persistent scheduler observations", () => {
       } satisfies TransactionReactivityLog,
     });
 
-    for (const key of ["actionKind", "transactionKind", "status"] as const) {
+    for (
+      const key of [
+        "actionKind",
+        "transactionKind",
+        "status",
+        "currentKnownWrites",
+      ] as const
+    ) {
       const candidate = { ...observation } as Partial<
         SchedulerActionObservation
       >;
       delete candidate[key];
       expect(isSchedulerActionObservation(candidate)).toBe(false);
     }
+
+    expect(isSchedulerActionObservation({
+      ...observation,
+      reads: [{ ...readAddress, path: [42] }],
+    })).toBe(false);
+    expect(isSchedulerActionObservation({
+      ...observation,
+      currentKnownWrites: [{ ...writeAddress, scope: "invalid" }],
+    })).toBe(false);
+    expect(isSchedulerActionObservation({
+      ...observation,
+      actionOptions: { throttleMs: Number.NaN },
+    })).toBe(false);
   });
 
   it("rehydrates clean scheduler observations without rerun pressure", async () => {
@@ -276,6 +312,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: "runtime:test",
             observedAtSeq: 5,
             transactionKind: "action-run",
+            currentKnownWrites: [writeAddress],
             transactionLog: {
               reads: [readAddress],
               shallowReads: [],
@@ -522,6 +559,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: "runtime:test",
             observedAtSeq: 5,
             transactionKind: "action-run",
+            currentKnownWrites: [],
             transactionLog: {
               reads: [readAddress],
               shallowReads: [],
@@ -564,6 +602,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: "runtime:test",
             observedAtSeq: 5,
             transactionKind: "action-run",
+            currentKnownWrites: [],
             transactionLog: {
               reads: [readAddress],
               shallowReads: [],
@@ -608,6 +647,7 @@ describe("persistent scheduler observations", () => {
       };
 
       const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
         actionId,
         actionKind: "computation",
         branch: "",
@@ -621,6 +661,7 @@ describe("persistent scheduler observations", () => {
         runtimeFingerprint: schedulerRuntimeFingerprint(),
         observedAtSeq: 5,
         transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
         transactionLog: {
           reads: [readAddress],
           shallowReads: [],
@@ -637,6 +678,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:preloaded-process",
           processGeneration: 1,
+          ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             actionId,
             { observation },
@@ -678,6 +720,7 @@ describe("persistent scheduler observations", () => {
           { writes: [writeLink] },
         );
         const observation = buildSchedulerActionObservation({
+          ownerSpace: space,
           actionId: name,
           actionKind: "effect",
           branch: "",
@@ -691,6 +734,7 @@ describe("persistent scheduler observations", () => {
           runtimeFingerprint: schedulerRuntimeFingerprint(),
           observedAtSeq: 5,
           transactionKind: "action-run",
+          currentKnownWrites: [writeAddress],
           transactionLog: {
             reads: [readAddress],
             shallowReads: [],
@@ -714,6 +758,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:always-run-process",
           processGeneration: 1,
+          ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             name,
             { observation: entry.observation },
@@ -763,6 +808,7 @@ describe("persistent scheduler observations", () => {
         );
         const snapshot: PersistedSchedulerObservationSnapshot = {
           observation: buildSchedulerActionObservation({
+            ownerSpace: space,
             actionId: name,
             actionKind: "computation",
             branch: "",
@@ -776,6 +822,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: schedulerRuntimeFingerprint(),
             observedAtSeq: 5,
             transactionKind: "action-run",
+            currentKnownWrites: [writeAddress],
             transactionLog: {
               reads: [readAddress],
               shallowReads: [],
@@ -796,12 +843,25 @@ describe("persistent scheduler observations", () => {
         reads: [],
         shallowReads: [],
         writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:coordinator-process",
+          processGeneration: 1,
+        },
       });
       scheduler.subscribe(coordinator.action, {
         reads: [],
         shallowReads: [],
         writes: [],
-      }, { resumeMode: "always-run" });
+      }, {
+        resumeMode: "always-run",
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:coordinator-process",
+          processGeneration: 1,
+        },
+      });
       await testRuntime.runtime.idle();
 
       // Permissive oracle: reads current, no pending local write — so the ONLY
@@ -817,6 +877,92 @@ describe("persistent scheduler observations", () => {
         .toBe(1);
       expect(scheduler.adoptRemoteObservations([coordinator.snapshot], oracle))
         .toBe(0);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("matches live adoption by full durable identity and verifies outputs", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const makeAction = () =>
+        Object.assign(function collidingAction() {}, { writes: [writeLink] });
+      const pieceOne = makeAction();
+      const pieceTwo = makeAction();
+
+      for (
+        const [action, pieceId] of [
+          [pieceOne, "space:piece-one"],
+          [pieceTwo, "space:piece-two"],
+        ] as const
+      ) {
+        scheduler.subscribe(action, {
+          reads: [],
+          shallowReads: [],
+          writes: [writeAddress],
+        }, {
+          rehydrateFromStorage: {
+            space,
+            pieceId,
+            processGeneration: 0,
+          },
+        });
+      }
+
+      const snapshot: PersistedSchedulerObservationSnapshot = {
+        observation: buildSchedulerActionObservation({
+          ownerSpace: space,
+          branch: "",
+          pieceId: "space:piece-one",
+          processGeneration: 0,
+          actionId: "collidingAction",
+          actionKind: "computation",
+          implementationFingerprint: schedulerImplementationFingerprint(
+            pieceOne,
+            "collidingAction",
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [actualOnlyWriteAddress],
+          },
+          currentKnownWrites: [writeAddress],
+        }),
+      };
+
+      let checkedAddresses: readonly IMemorySpaceAddress[] = [];
+      expect(scheduler.adoptRemoteObservations([snapshot], {
+        readsCurrentAtSeq: (addresses) => {
+          checkedAddresses = addresses;
+          return false;
+        },
+        hasPendingLocalWriteOverlapping: () => false,
+      })).toBe(0);
+      expect(
+        checkedAddresses.some((address) =>
+          sameSchedulerAddress(address, writeAddress)
+        ),
+      ).toBe(true);
+      expect(
+        checkedAddresses.some((address) =>
+          sameSchedulerAddress(address, actualOnlyWriteAddress)
+        ),
+      ).toBe(true);
+      expect(scheduler.isDirty(pieceOne)).toBe(true);
+      expect(scheduler.isDirty(pieceTwo)).toBe(true);
+
+      expect(scheduler.adoptRemoteObservations([snapshot], {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      })).toBe(1);
+      expect(scheduler.isDirty(pieceOne)).toBe(false);
+      // Same action id and fingerprint, different piece: must remain invalid.
+      expect(scheduler.isDirty(pieceTwo)).toBe(true);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -1283,6 +1429,7 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...currentSnapshotOracle,
               ...(preloaded !== undefined
                 ? { snapshotsByActionId: preloaded }
                 : {}),
@@ -1307,6 +1454,7 @@ describe("persistent scheduler observations", () => {
               space,
               pieceId: consumerPieceId,
               processGeneration: 0,
+              ...currentSnapshotOracle,
               ...(preloaded !== undefined
                 ? { snapshotsByActionId: preloaded }
                 : {}),
@@ -1525,6 +1673,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: schedulerRuntimeFingerprint(),
             observedAtSeq: 1,
             transactionKind: "action-run",
+            currentKnownWrites: [],
             transactionLog: {
               reads: [writeAddress],
               shallowReads: [],
@@ -1555,6 +1704,7 @@ describe("persistent scheduler observations", () => {
             runtimeFingerprint: schedulerRuntimeFingerprint(),
             observedAtSeq: 1,
             transactionKind: "action-run",
+            currentKnownWrites: [writeAddress],
             transactionLog: {
               reads: [],
               shallowReads: [],
@@ -1591,6 +1741,7 @@ describe("persistent scheduler observations", () => {
         runtimeFingerprint: schedulerRuntimeFingerprint(),
         observedAtSeq: 5,
         transactionKind: "action-run",
+        currentKnownWrites: [],
         transactionLog: {
           reads: [readAddress],
           shallowReads: [],
@@ -1608,6 +1759,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:stale-process",
           processGeneration: 1,
+          ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             "stalePersistedAction",
             { observation },
@@ -1643,6 +1795,7 @@ describe("persistent scheduler observations", () => {
           space,
           pieceId: "space:missing-process",
           processGeneration: 1,
+          ...currentSnapshotOracle,
           snapshotsByActionId: new Map(),
         },
       });

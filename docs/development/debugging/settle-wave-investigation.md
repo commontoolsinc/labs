@@ -254,12 +254,12 @@ body itself.
 
 Start with these locations when traces or logs point to worker churn:
 
-- `packages/runner/src/scheduler.ts` — execute orchestration, queueing, public
-  diagnosis API; `packages/runner/src/scheduler/` holds the mode-specific
-  settle loops (`pull-execution.ts`, `push-execution.ts`), event dispatch
-  (`events.ts`, `pull-events.ts`, `push-events.ts`), action execution and
-  resubscribe timing (`action-run.ts`), and trigger matching
-  (`trigger-index.ts`, `scheduling-writes.ts`, `dependency-graph.ts`)
+- `packages/runner/src/scheduler/facade.ts` — execute orchestration, queueing,
+  and the public diagnosis API; `packages/runner/src/scheduler/` holds the
+  settle loop (`settle.ts`, `execution.ts`, `work-oracle.ts`), event dispatch
+  (`events.ts`), action execution/resubscribe timing (`run.ts`), and trigger
+  matching (`invalidation.ts`, `trigger-index.ts`, `scheduling-writes.ts`,
+  `dependency-graph.ts`)
 - `packages/runtime-client/backends/web-worker/index.ts` — worker message
   entrypoint — and `runtime-processor.ts` — console-facing scheduler IPC
 - `packages/runner/src/storage/cache.ts` — socket event dispatch

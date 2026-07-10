@@ -71,6 +71,7 @@ export function navigateTo(
 
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
+      const navigateCallback = runtime.navigateCallback;
 
       const previousNavigated = navigated;
       const thisAttempt = ++navigationAttempt;
@@ -78,14 +79,37 @@ export function navigateTo(
       tx.addCommitCallback((_committedTx, commitResult) => {
         if (commitResult.error && navigationAttempt === thisAttempt) {
           navigated = previousNavigated;
-          return;
         }
-        if (navigationAttempt !== thisAttempt) return;
-        void Promise.resolve(runtime.navigateCallback!(resolvedTarget)).catch(
-          (error) => {
+      });
+      // Navigation is an external effect: release it only after a successful
+      // commit. The outbox promise is tracked explicitly so runtime.settled()
+      // cannot race async shell navigation.
+      const targetLink = resolvedTarget.getAsNormalizedFullLink();
+      tx.enqueuePostCommitEffect({
+        // The outbox deduplicates by id within a transaction. Encode the full
+        // normalized link as a tuple so scoped targets remain distinct and path
+        // segments containing separators cannot collide.
+        id: `navigateTo:${
+          JSON.stringify([
+            targetLink.space,
+            targetLink.scope,
+            targetLink.id,
+            targetLink.path,
+          ])
+        }`,
+        kind: "navigateTo",
+        flush: async () => {
+          if (navigationAttempt !== thisAttempt) return;
+          const work = Promise.resolve().then(() =>
+            navigateCallback(resolvedTarget)
+          );
+          runtime.trackAsyncWork(work);
+          try {
+            await work;
+          } catch (error) {
             console.error("navigateTo callback failed:", error);
-          },
-        );
+          }
+        },
       });
       resultCell.withTx(tx).set(true);
       runtime.scheduler.queueExecution();

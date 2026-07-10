@@ -35,6 +35,7 @@ const createObservation = (index: number) =>
     runtimeFingerprint: "runtime:bench",
     observedAtSeq: 1,
     transactionKind: "action-run",
+    currentKnownWrites: [],
     transactionLog: {
       reads: [sourceAddress(index)],
       shallowReads: [],

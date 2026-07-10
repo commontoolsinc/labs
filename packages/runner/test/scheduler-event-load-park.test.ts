@@ -67,6 +67,19 @@ describe("event dispatch parks on in-flight closure loads", () => {
     return resolve;
   }
 
+  function observeNextLoadPark(): Promise<void> {
+    const manager = env.storageManager as unknown as {
+      loadsSettled(keys: readonly string[]): Promise<void>;
+    };
+    const original = manager.loadsSettled.bind(manager);
+    const observed = Promise.withResolvers<void>();
+    manager.loadsSettled = (keys) => {
+      observed.resolve();
+      return original(keys);
+    };
+    return observed.promise;
+  }
+
   it("parks the head event until the closure's load completes, then dispatches once", async () => {
     const { runtime, tx } = env;
     // The cold document (never written — the load completes "absent"), the
@@ -118,13 +131,27 @@ describe("event dispatch parks on in-flight closure loads", () => {
     const release = holdSyncFor(coldDoc.getAsNormalizedFullLink().id);
     const loadInFlight = runtime.storageManager.syncCell(coldDoc)
       .catch(() => {});
+    const loadParkObserved = observeNextLoadPark();
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
 
-    // Let several settle passes drain. The preflight runs the (never-ran)
-    // computation as an invalid upstream dep; once it settles clean the ONLY
-    // thing standing between the event and dispatch is the in-flight load.
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // The preflight runs the never-ran computation first. On the following
+    // pass it registers the load park; observe that explicit barrier instead
+    // of assuming a fixed amount of wall-clock time is enough.
+    await Promise.race([
+      loadParkObserved,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `load park was not reached (computations=${computationRuns}, handlers=${handlerRuns})`,
+              ),
+            ),
+          2_000,
+        )
+      ),
+    ]);
     expect(computationRuns).toBeGreaterThanOrEqual(1);
     expect(handlerRuns, "handler must not dispatch while the load is in flight")
       .toBe(0);
@@ -137,6 +164,154 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(handlerRuns).toBe(1);
 
     // No residual re-dispatch.
+    await runtime.idle();
+    expect(handlerRuns).toBe(1);
+  });
+
+  it("drops once when a required load fails instead of dispatching fail-open", async () => {
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "load-park-failure-cold",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-failure-event",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    let callbackRuns = 0;
+    let callbackStatus: string | undefined;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => coldDoc.withTx(depTx).get(),
+    );
+
+    const link = coldDoc.getAsNormalizedFullLink();
+    const key = `${link.space}/${link.scope}/${link.id}`;
+    const load = Promise.withResolvers<void>();
+    const parkObserved = Promise.withResolvers<void>();
+    const manager = runtime.storageManager as unknown as {
+      pendingLoadAddresses(): readonly {
+        space: string;
+        scope: string;
+        id: string;
+      }[];
+      pendingLoadGeneration(key: string): number | undefined;
+      loadsSettled(keys: readonly string[]): Promise<void>;
+    };
+    manager.pendingLoadAddresses = () => [{
+      space: link.space,
+      scope: link.scope,
+      id: link.id,
+    }];
+    manager.pendingLoadGeneration = (candidate) =>
+      candidate === key ? 1 : undefined;
+    manager.loadsSettled = () => {
+      parkObserved.resolve();
+      return load.promise;
+    };
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      (commitTx) => {
+        callbackRuns++;
+        callbackStatus = commitTx.status().status;
+      },
+    );
+    await parkObserved.promise;
+    expect(handlerRuns).toBe(0);
+
+    load.reject(new Error("replica unavailable"));
+    await runtime.idle();
+    expect(handlerRuns).toBe(0);
+    expect(callbackRuns).toBe(1);
+    expect(callbackStatus).toBe("error");
+    await runtime.idle();
+    expect(callbackRuns).toBe(1);
+  });
+
+  it("re-parks the same event for a fresh load generation", async () => {
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "load-park-generation-cold",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-generation-event",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => coldDoc.withTx(depTx).get(),
+    );
+
+    const link = coldDoc.getAsNormalizedFullLink();
+    const key = `${link.space}/${link.scope}/${link.id}`;
+    let generation = 1;
+    let pending = true;
+    const waits = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    const parks = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    let parkCount = 0;
+    const manager = runtime.storageManager as unknown as {
+      pendingLoadAddresses(): readonly {
+        space: string;
+        scope: string;
+        id: string;
+      }[];
+      pendingLoadGeneration(key: string): number | undefined;
+      loadsSettled(keys: readonly string[]): Promise<void>;
+    };
+    manager.pendingLoadAddresses = () =>
+      pending ? [{ space: link.space, scope: link.scope, id: link.id }] : [];
+    manager.pendingLoadGeneration = (candidate) =>
+      pending && candidate === key ? generation : undefined;
+    manager.loadsSettled = () => {
+      const index = parkCount++;
+      parks[index]?.resolve();
+      return waits[index]!.promise;
+    };
+
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+    await parks[0].promise;
+    expect(handlerRuns).toBe(0);
+
+    // A distinct generation begins before the first park releases. The event
+    // history must compare generations, not permanently whitelist this key.
+    generation = 2;
+    waits[0].resolve();
+    await parks[1].promise;
+    expect(handlerRuns).toBe(0);
+    expect(parkCount).toBe(2);
+
+    pending = false;
+    waits[1].resolve();
     await runtime.idle();
     expect(handlerRuns).toBe(1);
   });

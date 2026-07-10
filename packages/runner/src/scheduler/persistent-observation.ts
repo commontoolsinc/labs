@@ -2,6 +2,7 @@ import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
+import { isCellScope } from "../scope.ts";
 
 export type SchedulerActionKind =
   | "computation"
@@ -34,7 +35,7 @@ export interface SchedulerActionObservation {
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
   actualChangedWrites: IMemorySpaceAddress[];
-  currentKnownWrites?: IMemorySpaceAddress[];
+  currentKnownWrites: IMemorySpaceAddress[];
   declaredWrites?: IMemorySpaceAddress[];
   materializerWriteEnvelopes: IMemorySpaceAddress[];
   ignoredSchedulingWrites?: IMemorySpaceAddress[];
@@ -63,7 +64,7 @@ export interface BuildSchedulerActionObservationOptions {
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   transactionLog: TransactionReactivityLog;
-  currentKnownWrites?: readonly IMemorySpaceAddress[];
+  currentKnownWrites: readonly IMemorySpaceAddress[];
   materializerWriteEnvelopes?: readonly IMemorySpaceAddress[];
   ignoredSchedulingWrites?: readonly IMemorySpaceAddress[];
   actionOptions?: SchedulerActionOptions;
@@ -97,7 +98,7 @@ export function buildSchedulerActionObservation(
     // Persist the live write surface (slim only `declaredWrites`): rehydration
     // restores annotation-less actions' surfaces from this field — the live
     // ReactivityLog that produced it is gone after a process restart.
-    currentKnownWrites: cloneAddresses(options.currentKnownWrites ?? []),
+    currentKnownWrites: cloneAddresses(options.currentKnownWrites),
     materializerWriteEnvelopes: cloneAddresses(
       options.materializerWriteEnvelopes ?? [],
     ),
@@ -130,27 +131,73 @@ export function isSchedulerActionObservation(
       typeof candidate.ownerSpace === "string") &&
     typeof candidate.branch === "string" &&
     typeof candidate.pieceId === "string" &&
-    typeof candidate.processGeneration === "number" &&
+    isNonNegativeInteger(candidate.processGeneration) &&
     typeof candidate.actionId === "string" &&
     isSchedulerActionKind(candidate.actionKind) &&
     typeof candidate.implementationFingerprint === "string" &&
     typeof candidate.runtimeFingerprint === "string" &&
-    typeof candidate.observedAtSeq === "number" &&
+    isNonNegativeInteger(candidate.observedAtSeq) &&
+    (candidate.observedAtLocalSeq === undefined ||
+      isNonNegativeInteger(candidate.observedAtLocalSeq)) &&
     isSchedulerObservationTransactionKind(candidate.transactionKind) &&
-    Array.isArray(candidate.reads) &&
-    Array.isArray(candidate.shallowReads) &&
-    Array.isArray(candidate.actualChangedWrites) &&
-    // v2 slimmed these to optional; v1 requires them. Absent ⇒ only valid for
-    // v2; present ⇒ must still be an address array (don't let malformed data
-    // through just because the payload is v2).
-    (candidate.currentKnownWrites === undefined
-      ? version === 2
-      : Array.isArray(candidate.currentKnownWrites)) &&
+    isAddressArray(candidate.reads) &&
+    isAddressArray(candidate.shallowReads) &&
+    isAddressArray(candidate.actualChangedWrites) &&
+    // The live write surface is required in both versions. Without it an
+    // annotation-less computation can be restored clean with no writer edge,
+    // permanently disconnecting its downstream readers.
+    isAddressArray(candidate.currentKnownWrites) &&
     (candidate.declaredWrites === undefined
       ? version === 2
-      : Array.isArray(candidate.declaredWrites)) &&
-    Array.isArray(candidate.materializerWriteEnvelopes) &&
-    isSchedulerObservationStatus(candidate.status);
+      : isAddressArray(candidate.declaredWrites)) &&
+    isAddressArray(candidate.materializerWriteEnvelopes) &&
+    (candidate.ignoredSchedulingWrites === undefined ||
+      isAddressArray(candidate.ignoredSchedulingWrites)) &&
+    (candidate.actionOptions === undefined ||
+      isSchedulerActionOptions(candidate.actionOptions)) &&
+    isSchedulerObservationStatus(candidate.status) &&
+    (candidate.errorFingerprint === undefined ||
+      typeof candidate.errorFingerprint === "string");
+}
+
+function isAddressArray(value: unknown): value is IMemorySpaceAddress[] {
+  return Array.isArray(value) && value.every(isMemorySpaceAddress);
+}
+
+function isMemorySpaceAddress(value: unknown): value is IMemorySpaceAddress {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<IMemorySpaceAddress>;
+  return typeof candidate.space === "string" &&
+    typeof candidate.id === "string" &&
+    (candidate.scope === undefined || isCellScope(candidate.scope)) &&
+    (candidate.type === undefined || typeof candidate.type === "string") &&
+    Array.isArray(candidate.path) &&
+    candidate.path.every((segment) => typeof segment === "string");
+}
+
+function isSchedulerActionOptions(
+  value: unknown,
+): value is SchedulerActionOptions {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<SchedulerActionOptions>;
+  return (candidate.debounceMs === undefined ||
+    isNonNegativeFiniteNumber(candidate.debounceMs)) &&
+    (candidate.noDebounce === undefined ||
+      typeof candidate.noDebounce === "boolean") &&
+    (candidate.throttleMs === undefined ||
+      isNonNegativeFiniteNumber(candidate.throttleMs));
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function cloneAddresses(

@@ -19,7 +19,10 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
+import {
+  CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+  PASS_RUN_BUDGET,
+} from "../src/scheduler/constants.ts";
 
 describe("bounded convergence", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -367,22 +370,19 @@ describe("bounded convergence", () => {
 
     await runtime.scheduler.idle();
 
-    expect(runCountA).toBeLessThanOrEqual(PASS_RUN_BUDGET);
-    expect(runCountB).toBeLessThanOrEqual(PASS_RUN_BUDGET);
+    expect(runCountA).toBeLessThanOrEqual(
+      PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+    );
+    expect(runCountB).toBeLessThanOrEqual(
+      PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+    );
     expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
-  it("materializes a discovered-dependency chain deeper than the pass budget within idle()", async () => {
-    // Regression for the pass-budget bystander backoff (calendar-event-manager
-    // assertion_1 / extractor-building-blocks assertion_2): a chain whose READS
-    // are discovered run-by-run (raw builtins, VNode link traversal) unrolls one
-    // level per settle iteration, so every downstream node legitimately re-runs
-    // once per level — first-run materialization, not cycling. With
-    // PASS_RUN_BUDGET below the chain depth, the downstream observer exhausted
-    // its budget mid-materialization and the pass-budget backoff (whole-registry
-    // candidates, requirePassRunBudget: false) gated the still-never-ran
-    // FRONTIER node — zero runs, zero evidence — deferring it past idle(), so
-    // callers sampled a half-materialized graph.
+  it("materializes a discovered-dependency chain within idle()", async () => {
+    // A chain whose reads are discovered by first runs (raw builtins and VNode
+    // traversal have this shape) must still materialize all the way to its
+    // demanded effect before idle resolves.
     const DEPTH = 8;
     const cells = Array.from(
       { length: DEPTH + 1 },

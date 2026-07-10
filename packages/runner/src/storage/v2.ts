@@ -65,6 +65,7 @@ import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
+  IMemorySpaceAddress,
   IMergedChanges,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
@@ -898,23 +899,33 @@ export class StorageManager implements IStorageManager {
   // — whether the load produced a value or found the document absent.
   #pendingLoads = new Map<string, {
     count: number;
+    generation: number;
     address: { space: MemorySpace; scope: CellScope; id: URI };
-    waiters: Set<() => void>;
+    failure: unknown;
+    waiters: Set<(failure: unknown) => void>;
   }>();
+  #nextPendingLoadGeneration = 1;
 
-  #registerPendingLoad(
+  private registerPendingLoad(
     address: { space: MemorySpace; scope: CellScope; id: URI },
-  ): () => void {
+  ): (failure?: unknown) => void {
     const key = `${address.space}/${address.scope}/${address.id}`;
     const entry = this.#pendingLoads.get(key) ??
-      { count: 0, address, waiters: new Set<() => void>() };
+      {
+        count: 0,
+        generation: this.#nextPendingLoadGeneration++,
+        address,
+        failure: undefined,
+        waiters: new Set<(failure: unknown) => void>(),
+      };
     entry.count++;
     this.#pendingLoads.set(key, entry);
-    return () => {
+    return (failure?: unknown) => {
+      entry.failure ??= failure;
       entry.count--;
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
-      for (const waiter of entry.waiters) waiter();
+      for (const waiter of entry.waiters) waiter(entry.failure);
       entry.waiters.clear();
     };
   }
@@ -927,6 +938,10 @@ export class StorageManager implements IStorageManager {
     return [...this.#pendingLoads.values()].map((entry) => entry.address);
   }
 
+  pendingLoadGeneration(key: string): number | undefined {
+    return this.#pendingLoads.get(key)?.generation;
+  }
+
   loadsSettled(keys: readonly string[]): Promise<void> {
     // Dedupe up front: `remaining` counts entries, but the shared onSettled is
     // added once per entry's waiter Set and fires once. A duplicated key would
@@ -935,11 +950,15 @@ export class StorageManager implements IStorageManager {
       this.#pendingLoads.has(key)
     );
     if (pending.length === 0) return Promise.resolve();
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       let remaining = pending.length;
-      const onSettled = () => {
+      let firstFailure: unknown;
+      const onSettled = (failure: unknown) => {
+        firstFailure ??= failure;
         remaining--;
-        if (remaining === 0) resolve();
+        if (remaining !== 0) return;
+        if (firstFailure !== undefined) reject(firstFailure);
+        else resolve();
       };
       for (const key of pending) {
         this.#pendingLoads.get(key)!.waiters.add(onSettled);
@@ -983,41 +1002,72 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
-    const releaseLoad = this.#registerPendingLoad({
+    const releaseLoad = this.registerPendingLoad({
       space,
       scope: normalizeCellScope(scope),
       id,
     });
+    let loadFailure: unknown;
     try {
-      await provider.sync(id, {
+      const result = await provider.sync(id, {
         path: cell.path.map((segment) => segment.toString()),
         schema: schema ?? false,
       }, scope);
+      loadFailure = result.error;
+      const schemaFailure = await this.syncCfcSchemaDocument(
+        space,
+        (provider as {
+          get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
+        }).get?.(id, scope),
+      );
+      loadFailure ??= schemaFailure;
+      return cell;
+    } catch (error) {
+      loadFailure = error;
+      throw error;
     } finally {
-      releaseLoad();
+      releaseLoad(loadFailure);
     }
-    await this.syncCfcSchemaDocument(
-      space,
-      (provider as {
-        get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
-      }).get?.(id, scope),
-    );
-    return cell;
   }
 
   private async syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
-  ): Promise<void> {
+  ): Promise<unknown> {
     const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-      return;
+      return undefined;
     }
-    await this.open(space).sync(`cid:${schemaHash}` as URI, {
+    const result = await this.open(space).sync(`cid:${schemaHash}` as URI, {
       path: [],
       schema: false,
     });
+    return result.error;
+  }
+
+  private trackPendingProviderSync(
+    address: { space: MemorySpace; scope: CellScope; id: URI },
+    start: () => Promise<Result<Unit, Error>>,
+  ): Promise<Result<Unit, Error>> {
+    const releaseLoad = this.registerPendingLoad(address);
+    let work: Promise<Result<Unit, Error>>;
+    try {
+      work = start();
+    } catch (error) {
+      releaseLoad(error);
+      throw error;
+    }
+    return work.then(
+      (result) => {
+        releaseLoad(result.error);
+        return result;
+      },
+      (error) => {
+        releaseLoad(error);
+        throw error;
+      },
+    );
   }
 
   private resolveCrossSpace(resolve: () => void): Promise<void> {
@@ -1126,11 +1176,19 @@ export class StorageManager implements IStorageManager {
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
       if (link.id && !link.id.startsWith("data:")) {
+        const space = link.space ?? base.space!;
+        const scope = normalizeCellScope(
+          link.scope as CellScope | undefined,
+        );
         promises.push(
-          this.open(link.space ?? base.space!).sync(link.id, {
-            path: link.path.map((segment) => segment.toString()),
-            schema: link.schema ?? schema ?? false,
-          }, normalizeCellScope(link.scope as CellScope | undefined)),
+          this.trackPendingProviderSync(
+            { space, scope, id: link.id },
+            () =>
+              this.open(space).sync(link.id!, {
+                path: link.path.map((segment) => segment.toString()),
+                schema: link.schema ?? schema ?? false,
+              }, scope),
+          ),
         );
       }
       return;
@@ -1226,6 +1284,19 @@ class Provider implements IStorageProviderWithReplica {
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
     return this.replica.listSchedulerActionSnapshots(query);
+  }
+
+  areSchedulerAddressesCurrentAtOrBelow(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean {
+    return this.replica.areSchedulerAddressesCurrentAtOrBelow(addresses, seq);
+  }
+
+  schedulerHasPendingWriteOverlapping(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean {
+    return this.replica.schedulerHasPendingWriteOverlapping(addresses);
   }
 
   sqliteQuery(
@@ -1484,6 +1555,36 @@ class SpaceReplica implements ISpaceReplica {
       return { serverSeq: 0, snapshots: [] };
     }
     return await session.listSchedulerActionSnapshots(query);
+  }
+
+  areSchedulerAddressesCurrentAtOrBelow(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean {
+    for (const address of addresses) {
+      if (address.space !== this.#space) return false;
+      const record = this.#docs.get(
+        docKey(address.id as URI, address.scope as CellScope | undefined),
+      );
+      // Missing/unconfirmed docs cannot prove either the observation's inputs
+      // or its committed output surface are present in this replica.
+      if (record === undefined || record.confirmed.seq === 0) return false;
+      if (record.confirmed.seq > seq) return false;
+    }
+    return true;
+  }
+
+  schedulerHasPendingWriteOverlapping(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean {
+    for (const address of addresses) {
+      if (address.space !== this.#space) continue;
+      const record = this.#docs.get(
+        docKey(address.id as URI, address.scope as CellScope | undefined),
+      );
+      if (record !== undefined && record.pending.length > 0) return true;
+    }
+    return false;
   }
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
@@ -2552,7 +2653,15 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
-    if (sync.upserts.length === 0 && sync.removes.length === 0) {
+    const hasAdoptionObservations = type === "integrate" &&
+      sync.observations !== undefined &&
+      sync.observations.length > 0 &&
+      getPersistentSchedulerStateConfig();
+    if (
+      sync.upserts.length === 0 &&
+      sync.removes.length === 0 &&
+      !hasAdoptionObservations
+    ) {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
@@ -2619,51 +2728,15 @@ class SpaceReplica implements ISpaceReplica {
     // integrate invalidation above (same synchronous turn, before the
     // deferred dispatch), so adoption clears exactly the dirt these writes
     // caused. See incremental-observation-adoption.md §4.
-    if (
-      type === "integrate" &&
-      sync.observations !== undefined &&
-      sync.observations.length > 0 &&
-      getPersistentSchedulerStateConfig()
-    ) {
+    if (hasAdoptionObservations) {
       this.#subscription.next({
         type: "scheduler-observations",
         space: this.#space,
-        observations: sync.observations,
-        seqCurrentAtOrBelow: (reads, seq) => {
-          for (const read of reads) {
-            // Cross-space reads cannot be verified against this replica:
-            // refuse adoption (conservative; cross-space adoption is out of
-            // scope).
-            if (read.space !== this.#space) return false;
-            const record = this.#docs.get(
-              docKey(read.id as URI, read.scope as CellScope | undefined),
-            );
-            // A doc this replica never loaded (or holds without a confirmed
-            // base) cannot be verified current. Worse, adopting would skip
-            // the very run that loads and subscribes it, so no later push
-            // would ever invalidate the action — a permanently stale
-            // receiver. Refuse; the local run establishes the subscription.
-            if (record === undefined || record.confirmed.seq === 0) {
-              return false;
-            }
-            if (record.confirmed.seq > seq) {
-              return false;
-            }
-          }
-          return true;
-        },
-        hasPendingWriteOverlapping: (reads) => {
-          for (const read of reads) {
-            if (read.space !== this.#space) continue;
-            const record = this.#docs.get(
-              docKey(read.id as URI, read.scope as CellScope | undefined),
-            );
-            if (record !== undefined && record.pending.length > 0) {
-              return true;
-            }
-          }
-          return false;
-        },
+        observations: sync.observations!,
+        seqCurrentAtOrBelow: (addresses, seq) =>
+          this.areSchedulerAddressesCurrentAtOrBelow(addresses, seq),
+        hasPendingWriteOverlapping: (addresses) =>
+          this.schedulerHasPendingWriteOverlapping(addresses),
       } as StorageNotification);
     }
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);

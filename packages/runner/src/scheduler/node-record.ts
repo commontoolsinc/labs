@@ -12,6 +12,8 @@ export interface SchedulerGateState {
   throttleReadyAt?: number;
   backoffUntil?: number;
   backoffStreak: number;
+  /** Backoff passes charged to the current idle-wait episode. */
+  convergenceHoldPasses: number;
 }
 
 export interface SchedulerNode {
@@ -88,7 +90,7 @@ export class NodeRegistry {
       invalidCauses: [],
       liveRefs: 0,
       provisionalDemand: false,
-      gate: { backoffStreak: 0 },
+      gate: { backoffStreak: 0, convergenceHoldPasses: 0 },
       passRuns: 0,
     };
     this.records.set(action, record);

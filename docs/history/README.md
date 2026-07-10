@@ -134,6 +134,8 @@ One line per archived document; each document's header carries the fuller
   scheduler-v2 work order: post-cutover phases 4, 5, 7.
 - [PROGRESS.md](specs/scheduler-v2/implementation/PROGRESS.md) — the
   scheduler-v2 implementation progress log.
+- [persistent-scheduler-state/implementation_notes.md](specs/persistent-scheduler-state/implementation_notes.md)
+  — implementation journal for the persistent scheduler-state rollout.
 - [sqlite-builtin/implementation-plan.md](specs/sqlite-builtin/implementation-plan.md)
   — the SQLite builtin workstreams, as built.
 - [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.

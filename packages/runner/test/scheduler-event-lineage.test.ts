@@ -183,7 +183,6 @@ describe("scheduler event lineage", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { experimental: { commitPreconditions: true } },
     ));
   });
 
@@ -342,6 +341,96 @@ describe("scheduler event lineage", () => {
 
     expect(originAttempts).toBe(1);
     expect(payloads.get()).toEqual([]);
+  });
+
+  it("drops a lineage event that is awaiting presync without dispatching it", async () => {
+    const streamA = runtime.getCell<unknown>(
+      space,
+      "lineage presync race stream a",
+      undefined,
+      tx,
+    );
+    const streamB = runtime.getCell<unknown>(
+      space,
+      "lineage presync race stream b",
+      undefined,
+      tx,
+    );
+    const originWrites = runtime.getCell<number>(
+      space,
+      "lineage presync race origin",
+      undefined,
+      tx,
+    );
+    streamA.set({ $stream: true });
+    streamB.set({ $stream: true });
+    originWrites.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const presyncStarted = Promise.withResolvers<void>();
+    const releasePresync = Promise.withResolvers<void>();
+    const descendantDropped = Promise.withResolvers<void>();
+    let handlerRuns = 0;
+    const finalStatuses: string[] = [];
+    const handlerA: EventHandler = (handlerTx) => {
+      originWrites.withTx(handlerTx).set(1);
+      runtime.scheduler.queueEvent(
+        streamB.getAsNormalizedFullLink(),
+        {},
+        false,
+        (eventTx) => {
+          finalStatuses.push(eventTx.status().status);
+          descendantDropped.resolve();
+        },
+        false,
+        { originTx: handlerTx },
+      );
+    };
+    const handlerB: EventHandler = () => {
+      handlerRuns++;
+    };
+    handlerB.presyncInputs = async () => {
+      presyncStarted.resolve();
+      await releasePresync.promise;
+    };
+    runtime.scheduler.addEventHandler(
+      handlerA,
+      streamA.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.addEventHandler(
+      handlerB,
+      streamB.getAsNormalizedFullLink(),
+    );
+
+    const gate = delayNextServerTransact(storageManager);
+    try {
+      runtime.scheduler.queueEvent(
+        streamA.getAsNormalizedFullLink(),
+        {},
+        false,
+      );
+      await waitForSignal(gate.started, "origin commit did not start");
+      await waitForSignal(
+        presyncStarted.promise,
+        "descendant presync did not start",
+      );
+
+      gate.fail();
+      await waitForSignal(
+        descendantDropped.promise,
+        "lineage failure did not drop the presyncing descendant",
+      );
+      releasePresync.resolve();
+      await runtime.idle();
+
+      expect(handlerRuns).toBe(0);
+      expect(finalStatuses).toEqual(["error"]);
+    } finally {
+      gate.fail();
+      releasePresync.resolve();
+      gate.restore();
+    }
   });
 
   it("keeps retried same-space follow-ups lineage-gated", async () => {
@@ -723,13 +812,22 @@ describe("scheduler event lineage", () => {
       stream.getAsNormalizedFullLink(),
     );
 
-    stream.withTx(originTx).send("dropped origin payload");
+    let dropCallbacks = 0;
+    let dropStatus: string | undefined;
+    stream.withTx(originTx).send("dropped origin payload", (commitTx) => {
+      dropCallbacks++;
+      dropStatus = commitTx.status().status;
+    });
     await waitForSignal(
       runtime.idle(),
       "already-failed origin event did not reach idle",
     );
 
     expect(payloads.get()).toEqual([]);
+    expect(dropCallbacks).toBe(1);
+    expect(dropStatus).toBe("error");
+    await runtime.idle();
+    expect(dropCallbacks).toBe(1);
   });
 
   it("stops handler-result pieces when the handler commit never converges", async () => {

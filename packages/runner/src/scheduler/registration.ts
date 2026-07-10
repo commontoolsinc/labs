@@ -1,5 +1,4 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { forEachOverlappingWriter } from "./scheduling-writes.ts";
 import type { Cancel } from "../cancel.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -9,6 +8,7 @@ import {
   type DependencyGraphState,
   isLive,
   notifyNodeLivenessChange,
+  recomputeLiveRefs,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
@@ -247,14 +247,13 @@ export function resubscribePullSchedulerAction(
     options,
   );
 
-  const { previousLog, reads, shallowReads, log: schedulingLog } =
-    setSchedulerDependencies(
-      state.dependencyUpdateState,
-      action,
-      log,
-    );
+  const { previousLog, log: schedulingLog } = setSchedulerDependencies(
+    state.dependencyUpdateState,
+    action,
+    log,
+  );
 
-  const actionIsEffect = updateSchedulerActionType(
+  updateSchedulerActionType(
     state.subscriptionState,
     action,
     isEffect,
@@ -281,81 +280,13 @@ export function resubscribePullSchedulerAction(
   logger.debug("schedule-resubscribe", () => [
     `Action: ${actionId}`,
     `Entities: ${triggerPathsByEntity.size}`,
-    `Reads: ${reads.length}`,
+    `Reads: ${schedulingLog.reads.length}`,
   ]);
 
   ensureCancelForActionTriggers(
     state.triggerSubscriptionState,
     action,
   );
-
-  markEffectDirtyIfStaleInputs(
-    state,
-    action,
-    actionIsEffect,
-    reads,
-    shallowReads,
-  );
-}
-
-export function markEffectDirtyIfStaleInputs(
-  state: SchedulerSubscribeActionState,
-  action: Action,
-  actionIsEffect: boolean,
-  reads: readonly IMemorySpaceAddress[],
-  shallowReads: readonly IMemorySpaceAddress[],
-): void {
-  // In pull mode: When an effect resubscribes, check if any non-throttled invalid
-  // computations write to what it reads. If so, mark the effect dirty so it can
-  // pull those computations and see fresh data.
-  // Skip delayed computations; their own wake path will re-open demand later.
-  // Use the returned action kind instead of active effects because
-  // unsubscribe() clears active membership before run().
-  if (!actionIsEffect) {
-    return;
-  }
-
-  const shouldMarkDirty = hasInvalidWriterForEffectReads(
-    state,
-    action,
-    reads,
-    shallowReads,
-  );
-
-  if (shouldMarkDirty && !state.isInvalid(action)) {
-    state.markInvalid(action);
-    state.queueExecution();
-  }
-}
-
-function hasInvalidWriterForEffectReads(
-  state: SchedulerSubscribeActionState,
-  action: Action,
-  effectReads: readonly IMemorySpaceAddress[],
-  effectShallowReads: readonly IMemorySpaceAddress[],
-): boolean {
-  let found = false;
-  forEachOverlappingWriter(
-    {
-      writersByEntity: state.writeIndex.writersByEntity,
-      getSchedulingWrites: (writer) => state.getSchedulingWrites(writer),
-    },
-    effectReads,
-    effectShallowReads,
-    () => {
-      found = true;
-      return true;
-    },
-    {
-      filter: (writer) =>
-        writer !== action &&
-        state.isInvalid(writer) &&
-        !state.effects.has(writer) && // only computations
-        !state.isThrottled(writer) &&
-        !state.isDebouncedComputationWaiting(writer),
-    },
-  );
-  return found;
 }
 
 export function updateSchedulerActionType(
@@ -517,19 +448,31 @@ function removeReverseDependencyEdges(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
+  let changed = false;
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
     for (const dependency of [...dependencies]) {
-      unregisterDependentEdge(state.dependencyGraphState, dependency, action);
+      changed = unregisterDependentEdge(
+        state.dependencyGraphState,
+        dependency,
+        action,
+        { recompute: false },
+      ) || changed;
     }
   }
 
   const dependents = state.dependents.get(action);
   if (dependents) {
     for (const dependent of [...dependents]) {
-      unregisterDependentEdge(state.dependencyGraphState, action, dependent);
+      changed = unregisterDependentEdge(
+        state.dependencyGraphState,
+        action,
+        dependent,
+        { recompute: false },
+      ) || changed;
     }
   }
+  if (changed) recomputeLiveRefs(state.dependencyGraphState);
 }
 
 function clearActionTypeTracking(

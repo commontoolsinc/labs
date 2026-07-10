@@ -1322,7 +1322,7 @@ describe("pull-based scheduling", () => {
     expect(schedulerInternal.isInvalid(effect)).toBe(false);
   });
 
-  it("should schedule a newly resubscribed shallow-read effect when its writer is invalid", async () => {
+  it("should keep a resubscribed shallow-read effect clean until its writer changes value", async () => {
     const source = runtime.getCell<number>(
       space,
       "pull-shallow-resubscribe-source",
@@ -1387,7 +1387,10 @@ describe("pull-based scheduling", () => {
       { isEffect: true },
     );
 
-    expect(runtime.scheduler.isDirty(effect)).toBe(true);
+    // Resubscription records the effect's completed read set. An invalid
+    // upstream writer is reachability evidence, not a value-bearing change;
+    // the effect becomes invalid only if that writer's commit changes output.
+    expect(runtime.scheduler.isDirty(effect)).toBe(false);
     await runtime.scheduler.idle();
 
     expect(computationRuns).toBe(1);

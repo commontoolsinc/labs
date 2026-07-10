@@ -111,8 +111,8 @@ Parallelizable start set: W0.1, W0.3, W0.4, W0.5, W0.7.
 ### W0.1 — Adopt & verify existing observation persistence (already built)
 
 **Already built (do not re-implement).** Observation persistence is
-present and functional on `main` (verified against the current tree) AND
-on #4288 today, behind the default-off flag. A fresh runtime on the same
+present and functional in the scheduler-v2 tree behind the default-off flag. A
+fresh runtime on the same
 store already skips re-running unchanged actions when the flag is on. Do
 not rebuild any of this; these anchors are the seams you verify/extend:
 
@@ -126,7 +126,7 @@ not rebuild any of this; these anchors are the seams you verify/extend:
   `packages/background-piece-service/src/{env.ts,main.ts}`.
 - **Durable transactional write:** the runner attaches the observation to
   the live commit tx — gate
-  `packages/runner/src/scheduler/action-run.ts:646`, build `:666`
+  `packages/runner/src/scheduler/run.ts`, build
   (`buildSchedulerActionObservation`), attach `:708`
   (`setSchedulerObservation`). Server strips it when the flag is off
   (`packages/memory/v2/server.ts:1620`). Persisted INSIDE the single
@@ -143,25 +143,18 @@ not rebuild any of this; these anchors are the seams you verify/extend:
   `listSchedulerActionSnapshots` (`packages/memory/v2/engine.ts:1717`);
   provider method `packages/runner/src/storage/v2.ts:1108`, optional on
   `interface.ts:272`. Cold start: flag-gated `schedulerRehydrationOptions`
-  in `packages/runner/src/runner.ts` → subscription `rehydrateFromStorage`
-  → `Scheduler.rehydrateActionFromStorage`
-  (`packages/runner/src/scheduler.ts:666`) → fingerprint check
-  `observationMatchesCurrentAction` (`:716`) →
-  `rehydrateActionFromObservation` (`:593`), which restores reads/writes
-  WITHOUT running (fail-open on miss).
+  in `packages/runner/src/runner.ts` space-lists and buckets one snapshot epoch;
+  subscription `rehydrateFromStorage` reaches `scheduler/facade.ts`, whose
+  fingerprint, full-identity, replica-currency, output-currency, and
+  pending-write checks gate `rehydrateActionFromObservation`. A valid row
+  restores reads/writes without running; a miss falls back conservatively.
 - **`graph-snapshot.ts` is NOT this.**
   `packages/runner/src/scheduler/graph-snapshot.ts` is in-memory
   diagnostics/telemetry only (no storage I/O). The durable snapshot is the
   `scheduler_action_snapshot` SQLite table — do not conflate them.
-- **`main` vs #4288 (structural only, NO capability delta):** #4288
-  replaces `scheduler.ts` with `export * from ./scheduler/facade.ts` and
-  DROPS `rehydrateActionFromStorage`, moving cold-start orchestration into
-  the runner (`loadSchedulerRehydrationSnapshots` +
-  `schedulerRehydrationOptions` passing `snapshotsByActionId` into the
-  subscription); the skip fires in `facade.ts`
-  (`rehydrateActionFromObservation` → `setStatus(action, "clean")` +
-  `pending.delete`). Flag, tables, provider method, and test names are
-  identical on both refs.
+- **Current orchestration:** `scheduler.ts` is the public facade export;
+  cold-start listing/lifecycle ownership lives in `runner.ts`, and synchronous
+  observation apply lives in `scheduler/facade.ts`.
 
 **Depends on:** nothing (substrate already in the tree).
 **Unblocks:** W0.2, W1.3.
@@ -176,7 +169,7 @@ field, or provider method — they exist.
 
 - The "Already built" anchors above.
 - `docs/specs/persistent-scheduler-state.md` +
-  `docs/specs/persistent-scheduler-state/implementation_notes.md` — the
+  `docs/history/specs/persistent-scheduler-state/implementation_notes.md` — the
   as-shipped design (normalized multi-table, transaction-coupled); it
   deviates from this plan's original single-`(space,branch,action_id)`
   sketch.
@@ -185,10 +178,9 @@ field, or provider method — they exist.
 - `packages/runner/test/reload-rehydration.test.ts` and
   `packages/memory/test/v2-scheduler-state-test.ts` — the two halves of
   the durability proof you compose into one test.
-- **If #4288 has landed:** cold-start is `runner.ts`
-  `loadSchedulerRehydrationSnapshots` + `scheduler/facade.ts`, NOT
-  `scheduler.ts:666` (that symbol is gone on #4288). Flag, tables,
-  provider method, and test names are unchanged.
+- Cold-start is `runner.ts` `loadSchedulerRehydrationSnapshots` plus
+  `scheduler/facade.ts`; there is no per-action storage lookup in
+  `scheduler.ts`.
 
 **Steps:**
 
@@ -232,8 +224,7 @@ substrate):**
       green code.
 - [ ] **Flag-on skip regression guard:** `reload-rehydration.test.ts`
       ("reload: resumed pattern rehydrates persisted observations") stays
-      green — `reload.ok > 0`, `reload.missNoSnapshot === 0`. On #4288
-      this is the same test name; verify green post-refactor.
+      green — `reload.ok > 0`, `reload.missNoSnapshot === 0`.
 - [ ] **Disk durability guard:** `v2-scheduler-state-test.ts`
       (close → reopen on-disk `openEngine`) stays green — reader index +
       `scheduler_action_state` survive reopen.
@@ -261,13 +252,13 @@ substrate):**
 - The new durability test must actually close the file: assert against a
   reopened on-disk DB (`Deno.makeTempFile` + `close()` + reopen), not a
   still-live `emulate()` server — otherwise it does not test the gap.
-- Rehydration must stay fail-open: the fingerprint check
-  (`observationMatchesCurrentAction`, `scheduler.ts:716`; the `facade.ts`
-  equivalent on #4288) gates every clean-restore path — never trust a
-  snapshot without `implementationFingerprint`/`runtimeFingerprint` match.
+- Rehydration must stay conservative: `scheduler/facade.ts` gates every
+  clean-restore path on full identity, implementation/runtime fingerprints,
+  replica currency for reads and outputs, and absence of overlapping pending
+  writes.
 - The invocation-counter fixture counts lift executions, not
   subscriptions.
-- If reviewing on #4288: confirm the skip fires via `facade.ts`
+- Confirm the skip fires via `facade.ts`
   `setStatus(action, "clean")` + `pending.delete`, and that `runner.ts`
   `loadSchedulerRehydrationSnapshots` early-returns when the flag is off.
 
@@ -354,7 +345,7 @@ document the transaction CREATES, as the doc-level `["source"]` field.
 - README §3.3–§3.3.1 (the design, including the two open details:
   cross-space and setup-tx anchoring — both have decided v1 behaviors
   below).
-- `packages/runner/src/scheduler/action-run.ts` ~307–348 — the existing
+- `packages/runner/src/scheduler/run.ts` — the existing
   stamp: `(tx.tx as …).debugActionId = actionId; tx.tx.sourceAction =
   action;`.
 - `docs/specs/memory-v2/01-data-model.md` (document envelope: `source` is
@@ -376,7 +367,7 @@ document the transaction CREATES, as the doc-level `["source"]` field.
    `{ source?: <short-link>, action?: { id: string, kind:
    "computation" | "effect" | "event-handler" }, observedAtSeq?: number }`.
 2. Populate at the two tx-open sites:
-   - action runs (`action-run.ts` — replace/extend the `sourceAction`
+   - action runs (`run.ts` — replace/extend the `sourceAction`
      stamp; keep the old field working until all readers migrate, then
      remove it in the same PR if the migration is complete);
    - event-handler dispatch (`packages/runner/src/scheduler/events.ts`).

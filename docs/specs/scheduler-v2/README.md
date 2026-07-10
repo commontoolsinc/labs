@@ -121,8 +121,12 @@ immediate `ReactivityLog` is also a declaration channel: when action
 annotations do not supply a write surface, the log's writes seed the same
 static surface, and later run logs never broaden it. What disappears is not
 side-writing — it is *write-set discovery*: nothing about what a node can write
-is learned from runs, so current-known/historical write tracking disappears
-and the writer index is a static map. The price of side-writing is the
+is learned from runs, so historical write tracking disappears and the writer
+index is a static map. The implementation retains the field name
+`currentKnownWrites` for this fixed registered surface and persists it because
+annotation-less actions can receive their surface only through the registration
+log; that log does not survive restart. The field is static-surface
+serialization, not run-learned state. The price of side-writing is the
 idempotency contract (§4.2), which the idempotency validator enforces in tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
@@ -289,10 +293,11 @@ writes X" is not answerable by the static output map, and they get three
 special rules, and only these:
 
 1. **Standing demand, idle priority.** A materializer is always live
-   (`liveRefs` includes a permanent self-reference): its consumers are
-   unknowable by construction, so invalidation must eventually cause a run.
-   But it runs at *idle priority* — after the primary work set of a pass is
-   empty — and its invalidations coalesce.
+   (it is an explicit standing demand root): its consumers are unknowable by
+   construction, so invalidation must eventually cause a run. `liveRefs`
+   remains the count of its reachable direct readers. But the materializer runs
+   at *idle priority* — after the primary work set of a pass is empty — and its
+   invalidations coalesce.
 2. **Promotion under demand.** If a pass's primary work (an effect or the
    head event's closure) reads inside a dirty materializer's envelope, the
    materializer is promoted into that pass and ordered before the reader.
@@ -302,9 +307,10 @@ special rules, and only these:
    change channel, P1/P2).
 
 This carries over v1's hard-won materializer semantics essentially unchanged;
-they were redesigned recently and are sound. What v2 removes is the parallel
-"current-known writes" generality for ordinary computations that materializers
-were entangled with.
+they were redesigned recently and are sound. What v2 removes is run-time
+write-surface discovery and historical expansion for ordinary computations;
+the persisted `currentKnownWrites` field is the fixed registered surface
+described by P4.
 
 ### 4.4 Registration and removal
 
@@ -356,16 +362,23 @@ live(N) ⇔ N is an effect (registered, not cancelled)
 
 ### 5.2 Maintenance
 
-Liveness is maintained as a reference count (`liveRefs`), updated only when
-node edges change — which is rare (a run whose read set changed, node
-register/unregister) — not per data change. Edge updates propagate refcount
-deltas downstream-to-upstream; cycles are guarded by a visited set, and a
-refcount transition to/from zero is what propagates further (standard
-observer-count maintenance, like signal libraries' subscriber counts).
+Liveness is stored as a reference count (`liveRefs`) and recomputed only after
+an **actual edge or demand-root change** — a run whose read set changed,
+register/unregister, or provisional-root transition — never per data change.
+Updates in one registration/resubscribe operation are batched. If its edge set
+is unchanged, no rebuild occurs.
 
-This replaces v1's per-query graph walks (`isDemandedPullComputation` walks
-dependents transitively on every check, including once per candidate node per
-pass) with O(Δedges) bookkeeping.
+The rebuild starts at explicit roots (effects, materializers, and provisional
+demand), walks reader→writer edges to form the root-reachable set, then counts
+each reachable node's live direct readers. This is cycle-safe (a rootless cycle
+cannot keep itself live) and diamond-accurate (both arms count; removing one arm
+does not strand the shared writer). A single visited-set delta walk cannot
+provide both properties because path deduplication undercounts diamonds.
+
+This replaces v1's per-query graph walks (`isDemandedPullComputation` walked
+dependents transitively on every candidate check) with O(V+E) work per changed
+edge/root batch and O(1) liveness queries; ordinary value changes pay zero
+liveness-maintenance cost.
 
 ### 5.3 Provisional demand
 
@@ -605,18 +618,26 @@ Per pass, for each lane's head event:
    demanded *by the event*, live or not). The invalid-upstream set is computed
    by **inverted reachability** from the maintained invalid-node set into the
    closure — not an upstream walk of the closure's cone, which is O(graph)
-   against a hub (decision 15). If any are ineligible (time-gated),
+   against a hub (decision 15). This transient demand lasts for the whole pass,
+   so a node re-invalidated by another closure member continues settling and is
+   subject to the same iteration/run budgets and convergence backoff as a
+   standing demand root. If any are ineligible (time-gated),
    park the lane's head with `notBefore = min eligibleAt` and set the wake
    gate; the lane stays FIFO. The gate also covers **replica staleness**
    (CT-1795): addresses in the closure with in-flight replica loads park the
    head, and load completion — a definitively absent document counts as
    complete — is the wake source (same shape as the lineage park's
-   origin-commit callback; a timeout backstop fail-opens). Computations need
+   origin-commit callback). An explicit load or transport failure drops the
+   event; elapsed wall-clock time never dispatches against provisional state.
+   Computations need
    no such gate (they self-heal through the one channel when the load
    lands); handlers are at-most-once. Because preflight itself kicks
-   fire-and-forget pulls on cold reads, a key that settled once while the
-   event was head never re-parks it — otherwise each pass would re-arm the
-   park on its own freshly kicked load, a livelock.
+   fire-and-forget pulls on cold reads, the scheduler snapshots in-flight
+   **load generations before preflight** and records the generations it has
+   settled. The same generation never re-parks the event. A changed generation
+   that was already in flight at the preflight snapshot re-parks; a generation
+   first kicked by that same preflight is history-suppressed, avoiding a
+   self-created park livelock.
 3. **Dispatch** once the closure is clean: presync handler inputs
    (`presyncInputs`, unchanged), run the handler in an immediate transaction
    stamped with the handler's id, commit optimistically (changes propagate
@@ -638,32 +659,23 @@ commit succeeds, and descendants of a failed attempt are never retried) and
 invariant I11 (events are handled at most once system-wide; the
 result-cell receipt is the witness — default-on, decision 14).
 
-Current state, for the record (verified in code, June 2026):
+Implemented behavior:
 
-- *Sent events* are queued at send time (`Cell.set` on a stream calls
-  `scheduler.queueEvent` immediately, `cell.ts:1167`), ungated on the
-  sender's commit. A handler whose commit is rejected and retried queues its
-  follow-up event once per attempt (duplication), and a follow-up queued by
-  a permanently failed attempt still dispatches — possibly with a payload
-  computed from rolled-back state. The storage layer's dependent-speculation
-  rejection does **not** close this: it rejects a follow-up only when its
-  handler *read* the parent's unconfirmed writes; a handler that consumes
-  only the event payload (computed during the parent's run, embedded in the
-  event value) has no read edge to the parent and escapes. This violates
-  I10 today.
-- *Handler-result pieces* are instantiated inline in the handler's
-  transaction (data atomic — good), but their scheduler registrations are
-  eager. The on-commit-error cleanup (cancel + stop) exists only in the dead
-  push-mode branch (`runner.ts:2724-2729`); the pull path ties teardown only
-  to the handler node's lifetime (`runner.ts:2735`). Convergence after a
-  failed commit relies on retry + cause-derived deterministic ids
-  (`{ resultFor: cause }` + `startCore`'s already-running check); a commit
-  that never lands (retry window elapsed, or a fast-dropped rejection)
-  leaves a registered piece running against rolled-back data. The
-  commit-gated mechanism already exists (`startAfterSuccessfulCommit`) but
-  is used only for `navigateTo` results.
-- *Exactly-once handling* does not exist at all: a re-delivered event
-  (cross-runtime or ingress retry) is handled again wherever it lands.
+- Sent events reserve their position in the global FIFO immediately, even when
+  their handler's piece must load asynchronously. The event and any
+  handler-result pieces are recorded under the sending transaction's
+  speculation lineage.
+- A failed origin cancels every undispatched descendant through one terminal
+  drop path, settles its internal commit callback exactly once, and stops
+  locally started descendant pieces. Same-space descendants additionally carry
+  the origin-committed precondition; cross-space descendants park until the
+  origin confirms.
+- Every handling derives a create-only result-cell receipt from the durable
+  event id. Redelivery therefore collides on the receipt and becomes a
+  permanent, non-retried rejection rather than a second handling.
+- Navigation uses the success-only post-commit outbox and its async callback is
+  tracked by `runtime.settled()`; a rejected commit resets the navigation
+  attempt instead of releasing the effect.
 
 The design rests on two shared pieces of infrastructure — durable event
 identity (§7.5) and a **rejection taxonomy**: commit rejections split into
@@ -716,8 +728,7 @@ correctness comes from cancellation, not staging:
 2. Client-side, the runtime keeps a lineage registry: origin tx →
    {queued events, started pieces}. When an origin's failure becomes known
    locally, undispatched descendant events (parked or queued) are cancelled
-   in place and descendant pieces are stopped (the compensating cancel+stop
-   that the pull path is missing today, now keyed off the same registry).
+   in place and descendant pieces are stopped, keyed off the same registry.
    This also improves the existing cross-space write protocol's accepted
    zombie: when the handler transaction fails *after* a successful
    child-space commit, the durable orphan data in the child space remains
@@ -805,8 +816,8 @@ retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 
-All of this is independent of the v2 cutover and can land against v1 (see
-migration plan, phase E).
+These semantics are part of the shipped v2 scheduler; the executed phase-E
+work order is archived with the migration records.
 
 ### 7.7 Convergence bounds
 
@@ -869,7 +880,17 @@ parked head event) has a future `eligibleAt`, set a single timer for the
 minimum. `idle()` resolves when: no run in flight, no background piece-start
 task, no tick queued, no runnable work now, and no parked event — i.e.
 exactly v1's contract with the special cases collapsed into the gate
-primitive. Dormant invalid computations (not live) never hold `idle()` open.
+primitive. Dormant invalid computations (not live) never hold `idle()` open,
+and a shared timer belonging only to dormant work does not delay current idle
+waiters.
+
+Convergence backoff has one bounded exception. An idle waiter stays open for a
+small number of backoff passes while an idle-relevant live wave may still
+converge, avoiding a mid-wave observation just because the frontier reached the
+per-pass cap. The hold is counted per deferred node and per idle episode. When
+the bound is exhausted, `idle()` resolves while retry wakes continue at their
+rate-limited cadence; every actual idle boundary resets the episode counters so
+a later, unrelated demand wave receives its own full convergence allowance.
 
 ---
 
@@ -915,10 +936,12 @@ registration — rather than per-action async lookups.
 
 ### 9.3 Observation payload (slimmed)
 
-Per node: identity, kind, `reads` (+depth), gate config, status
-(`success`/`failed` + error fingerprint), watermark seq. Dropped relative to
-v1: `currentKnownWrites`, `declaredWrites`, write-set history (outputs are
-static — derivable from the piece's process graph), and the mode fingerprint.
+Per node: identity, kind, `reads` (+depth), the fixed registered write surface
+(`currentKnownWrites`), gate config, status (`success`/`failed` + error
+fingerprint), and watermark seq. Dropped relative to v1: `declaredWrites`,
+write-set history, and the mode fingerprint. `currentKnownWrites` is required:
+annotation-less actions may receive their static surface from the registration
+log, which is unavailable after restart.
 `sideWriteEnvelope` is declared metadata and also needs no observation copy,
 but keeping it inline is acceptable as a denormalization if graph-snapshot
 lookup at rehydration time is not yet available.
@@ -974,7 +997,9 @@ values causes no scheduling activity at all.
 **I6 — Bounded non-convergence.** A pass executes at most
 `MAX_ITERS × |workSet| ` runs and at most `PASS_RUN_BUDGET` runs of any single
 node; non-converging subgraphs continue only behind escalating time gates and
-never starve events, other subgraphs, or `idle()` (which excludes gated work).
+never starve events or other subgraphs. They may hold `idle()` only for the
+bounded convergence window in §8.4; after its escape valve opens, gated retries
+continue without holding idle waiters.
 
 **I7 — Restart equivalence.** Resuming a piece whose observations validate
 yields the same set of future runs as a process that had stayed alive
@@ -1014,7 +1039,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `liveRefDelta` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `recomputeLiveRefs` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -1078,7 +1103,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); the incremental refcount is the spec'd escalation. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness rebuilds from explicit roots only when graph topology or demand roots change. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |

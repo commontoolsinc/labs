@@ -53,7 +53,7 @@ export class SchedulerGates {
     const record = this.state.nodes.get(action);
     if (!record?.gate?.backoffUntil) return;
     record.gate.backoffUntil = 0;
-    this.state.queueExecution();
+    this.recomputeWakeAfterClear();
   }
 
   adopt(action: Action): void {
@@ -69,8 +69,19 @@ export class SchedulerGates {
     if (ms <= 0) {
       delete gate.debounceMs;
       this.clearComputationDebounceState(action);
+      this.recomputeWakeAfterClear();
     } else {
+      const previousReadyAt = gate.debounceReadyAt;
       gate.debounceMs = ms;
+      if (previousReadyAt !== undefined) {
+        gate.debounceReadyAt = Math.min(
+          previousReadyAt,
+          performance.now() + ms,
+        );
+        if (gate.debounceReadyAt < previousReadyAt) {
+          this.recomputeWakeAfterClear();
+        }
+      }
     }
   }
 
@@ -252,12 +263,20 @@ export class SchedulerGates {
 
   setThrottle(action: Action, ms: number): void {
     const gate = this.mutableGate(action);
+    const previousReadyAt = gate.throttleReadyAt;
     if (ms <= 0) {
       delete gate.throttleMs;
       delete gate.throttleReadyAt;
+      this.recomputeWakeAfterClear();
     } else {
       gate.throttleMs = ms;
       this.armThrottleFromStats(action);
+      if (
+        previousReadyAt !== undefined &&
+        (gate.throttleReadyAt ?? 0) < previousReadyAt
+      ) {
+        this.recomputeWakeAfterClear();
+      }
     }
   }
 
@@ -270,6 +289,7 @@ export class SchedulerGates {
     if (!gate) return;
     delete gate.throttleMs;
     delete gate.throttleReadyAt;
+    this.recomputeWakeAfterClear();
   }
 
   isThrottled(action: Action, now = performance.now()): boolean {
@@ -363,9 +383,12 @@ export class SchedulerGates {
     this.state.queueExecution();
   }
 
-  clearBackoff(node: SchedulerNode): void {
+  clearBackoff(node: SchedulerNode): boolean {
+    const clearedDeadline = node.gate.backoffUntil !== undefined;
     delete node.gate.backoffUntil;
     node.gate.backoffStreak = 0;
+    node.gate.convergenceHoldPasses = 0;
+    return clearedDeadline;
   }
 
   private armComputationDebounce(
@@ -433,7 +456,7 @@ export class SchedulerGates {
 
     let gate = this.stagedGates.get(action);
     if (!gate) {
-      gate = { backoffStreak: 0 };
+      gate = { backoffStreak: 0, convergenceHoldPasses: 0 };
       this.stagedGates.set(action, gate);
     }
     return gate;

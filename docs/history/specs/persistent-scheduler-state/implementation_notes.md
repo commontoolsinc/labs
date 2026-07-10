@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-05-28
+archived: 2026-07-10
+reason: "Implementation journal for the persistent scheduler-state rollout; the live spec now describes the shipped system."
+superseded-by: docs/specs/persistent-scheduler-state.md
+---
+
 # Persistent Scheduler State Implementation Notes
 
 ## 2026-05-20 - Post-Observation Current Writes Alignment

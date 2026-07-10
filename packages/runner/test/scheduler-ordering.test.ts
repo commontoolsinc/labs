@@ -342,6 +342,29 @@ describe("push-triggered filtering", () => {
     expect(arrivalBA).toEqual(arrivalAB);
   });
 
+  it("should insert newly-ready nodes into the global registration order", () => {
+    const registry = new NodeRegistry();
+    const upstream: Action = () => {};
+    const newlyReady: Action = () => {};
+    const alreadyReady: Action = () => {};
+    registry.register(upstream, "computation");
+    registry.register(newlyReady, "computation");
+    registry.register(alreadyReady, "computation");
+
+    const dependents = new WeakMap<Action, Set<Action>>([
+      [upstream, new Set([newlyReady])],
+    ]);
+    const order = topologicalSort(
+      new Set([upstream, newlyReady, alreadyReady]),
+      new WeakMap(),
+      new WeakMap(),
+      registry,
+      dependents,
+    );
+
+    expect(order).toEqual([upstream, newlyReady, alreadyReady]);
+  });
+
   it("should not order materializer writes before readers in other scopes", () => {
     const materializer: Action = () => {};
     const reader: Action = () => {};

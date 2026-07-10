@@ -190,6 +190,7 @@ type NoteCreateTimingEntry = {
 
 type NoteCreateProfileEntry = {
   noteIndex: number;
+  missingRequiredTimingKeys: string[];
   focusTiming: Array<{
     logger: string;
     key: string;
@@ -482,7 +483,16 @@ describe("default-app flow test", () => {
       await waitFor(async () => {
         return await clickPieceLinkWithText(page, spaceName);
       });
-      await shell.waitForState({ view: { spaceName }, identity });
+      try {
+        await shell.waitForState({ view: { spaceName }, identity });
+      } catch (error) {
+        throw new Error(
+          `Space-link navigation did not reach ${spaceName}; current state: ${
+            JSON.stringify(await shell.state())
+          }`,
+          { cause: error },
+        );
+      }
       await waitForRuntimeIdle(page);
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
@@ -2441,6 +2451,10 @@ function compareNoteCreateProfiles(
       settleMaxIterations: entry.settle.maxIterations,
     })),
     focusTimingGrowth,
+    missingRequiredTimingKeys: series.map((entry) => ({
+      noteIndex: entry.noteIndex,
+      keys: entry.missingRequiredTimingKeys,
+    })),
     focusTimingAtMaxNoteCount: lastEntry?.focusTiming ?? [],
     topTimingAtMaxNoteCount: lastEntry?.topTiming ?? [],
     settleAtMaxNoteCount: lastEntry?.settle ?? null,
@@ -2606,25 +2620,27 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     };
 
     const { timing } = await api.getLoggerCounts();
-    const focusKeys = [
+    // These phases are the stable scheduler-v2 spine and must exist after a
+    // note-create run. Keep them separate from workload-dependent event and
+    // builtin phases so deleted/misspelled scheduler keys are reported rather
+    // than silently disappearing from the profile.
+    const requiredSchedulerKeys = [
       ["scheduler", "scheduler/execute"],
       ["scheduler", "scheduler/execute/settle"],
-      ["scheduler", "scheduler/execute/depCollect"],
+      ["scheduler", "scheduler/run"],
+      ["scheduler", "scheduler/run/action"],
+      ["scheduler", "scheduler/run/commit"],
+      ["scheduler", "scheduler/run/resubscribe"],
+    ] as const;
+    const focusKeys = [
+      ...requiredSchedulerKeys,
       ["scheduler", "scheduler/execute/event"],
       ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
       ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
       ["scheduler", "scheduler/execute/event/pullDepCommitStart"],
-      ["scheduler", "scheduler/execute/event/pullCollectDirtyDependencies"],
-      ["scheduler", "scheduler/execute/event/pullScheduleDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/pullCollectInvalidUpstream"],
+      ["scheduler", "scheduler/execute/event/pullScheduleInvalidUpstream"],
       ["scheduler", "scheduler/execute/event/handlerAction"],
-      ["scheduler", "scheduler/execute/buildPullWorkSet"],
-      ["scheduler", "scheduler/execute/collectDirtyDependencies"],
-      ["scheduler", "scheduler/execute/collectDirtyDependencies/writerLookup"],
-      ["scheduler", "scheduler/execute/topologicalSort"],
-      ["scheduler", "scheduler/scheduleAffectedEffects"],
-      ["scheduler", "scheduler/run"],
-      ["scheduler", "scheduler/run/action"],
-      ["scheduler", "scheduler/run/commit"],
       ["traverse", "traverse"],
       ["runner", "stream/readInputs"],
       ["runner", "stream/invokeJavaScriptImplementation"],
@@ -2632,7 +2648,6 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       ["runner", "action/readInputs"],
       ["runner", "action/invokeJavaScriptImplementation"],
       ["runner", "action/postRun"],
-      ["runner", "action/populateDependencies"],
       ["runner", "raw/run/wish"],
       ["runner.wish-flow", "wish/phase/action-total"],
       ["runner.wish-flow", "wish/phase/input-get"],
@@ -2661,8 +2676,11 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       ["runner", "raw/run/map"],
       ["runner", "raw/run/ifElse"],
       ["runner", "raw/run/when"],
-      ["runner", "raw/populateDependencies"],
     ] as const;
+
+    const missingRequiredTimingKeys = requiredSchedulerKeys
+      .filter(([loggerName, key]) => !(timing[loggerName] ?? {})[key])
+      .map(([loggerName, key]) => `${loggerName}:${key}`);
 
     const focusTiming = focusKeys
       .map(([loggerName, key]) => {
@@ -2768,6 +2786,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       focusTiming,
       topTiming,
       settle,
+      missingRequiredTimingKeys,
     };
   });
 }
@@ -3444,20 +3463,41 @@ async function clickPieceLinkWithText(
   searchText: string,
 ): Promise<boolean> {
   try {
-    const links = await page.$$(
-      "#header-space, #header-space-link, .header-space, a",
-      {
-        strategy: "pierce",
-      },
-    );
-    for (const link of links) {
-      const text = await link.innerText();
-      if (text?.trim().includes(searchText)) {
-        await link.click();
-        return true;
+    return await page.evaluate((searchText: string) => {
+      const roots: Array<Document | ShadowRoot> = [document];
+      for (let index = 0; index < roots.length; index++) {
+        for (const element of roots[index].querySelectorAll("*")) {
+          if ((element as HTMLElement).shadowRoot) {
+            roots.push((element as HTMLElement).shadowRoot!);
+          }
+        }
       }
-    }
-    return false;
+
+      // Prefer the shell breadcrumb before falling back to generic anchors.
+      // A combined selector is returned in document order, so an unrelated
+      // descendant <a> containing the space name can otherwise win the race.
+      for (
+        const selector of [
+          ".header-space",
+          "#header-space-link",
+          "#header-space",
+          "a",
+        ]
+      ) {
+        for (const root of roots) {
+          for (const link of root.querySelectorAll<HTMLElement>(selector)) {
+            if (link.innerText.trim().includes(searchText)) {
+              // Use the DOM activation behavior. Astral's coordinate click can
+              // hit a transient overlay even after resolving the right node.
+              link.click();
+              return true;
+            }
+          }
+        }
+      }
+
+      return false;
+    }, { args: [searchText] });
   } catch (_) {
     return false;
   }

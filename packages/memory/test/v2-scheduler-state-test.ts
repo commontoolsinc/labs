@@ -4,6 +4,7 @@ import { Database } from "@db/sqlite";
 import {
   applyCommit,
   close,
+  createBranch,
   type Engine,
   findSchedulerReadersForWrite,
   getLatestSchedulerActionSnapshot,
@@ -13,6 +14,7 @@ import {
   markSchedulerReadersDirtyForWrites,
   open as openEngine,
   type SchedulerActionObservation,
+  serverSeq,
   upsertSchedulerObservation,
 } from "../v2/engine.ts";
 import { connect, loopback } from "../v2/client.ts";
@@ -155,7 +157,7 @@ Deno.test("memory v2 stores no-op scheduler observations without semantic commit
   }
 });
 
-Deno.test("memory v2 accepts slim v2 scheduler observations", async () => {
+Deno.test("memory v2 rejects v2 scheduler observations without a write surface", async () => {
   const { engine, path } = await createEngine();
 
   try {
@@ -169,21 +171,13 @@ Deno.test("memory v2 accepts slim v2 scheduler observations", async () => {
       actionId: "pattern.tsx:computed:v2",
     };
 
-    upsertSchedulerObservation(engine, {
-      branch: "",
-      observedAtSeq: headSeq(engine),
-      observation: slimObservation,
-    });
-
-    const snapshot = getLatestSchedulerActionSnapshot(engine, {
-      branch: "",
-      pieceId: slimObservation.pieceId,
-      processGeneration: slimObservation.processGeneration,
-      actionId: slimObservation.actionId,
-    });
-    assertEquals(snapshot?.observation.version, 2);
-    assertEquals(snapshot?.observation.currentKnownWrites, undefined);
-    assertEquals(snapshot?.observation.declaredWrites, undefined);
+    assertThrows(() =>
+      upsertSchedulerObservation(engine, {
+        branch: "",
+        observedAtSeq: headSeq(engine),
+        observation: slimObservation as unknown as SchedulerActionObservation,
+      })
+    );
     assertEquals(countRows(engine, "scheduler_write_index"), 0);
   } finally {
     close(engine);
@@ -283,6 +277,7 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
     });
     assertEquals(snapshot?.observedAtSeq, beforeHead);
     assertEquals(snapshot?.observation.observedAtSeq, beforeHead);
+    assertEquals(snapshot?.commitSeq, beforeHead + 1);
 
     const replay = applyCommit(engine, {
       sessionId: "session:scheduler-observation",
@@ -293,6 +288,184 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 delivers first and changed no-op observations in the next commit window", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const initialHead = headSeq(engine);
+    for (
+      const [index, actionId] of ["no-op:first", "no-op:concurrent"].entries()
+    ) {
+      applyCommit(engine, {
+        sessionId: "session:no-op-writer",
+        space: sourceRead.space,
+        commit: {
+          localSeq: index + 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [],
+          schedulerObservation: observationForAction(actionId),
+        },
+      });
+    }
+
+    // Both first-ever rows reserve the same next real seq, but neither leaks
+    // into a window ending at the current head.
+    assertEquals(
+      listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: 0,
+        throughCommitSeq: initialHead,
+      }).snapshots,
+      [],
+    );
+
+    const carryingCommit = applyCommit(engine, {
+      sessionId: "session:data-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    assertEquals(carryingCommit.seq, initialHead + 1);
+    assertEquals(
+      listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: initialHead,
+        throughCommitSeq: carryingCommit.seq,
+      }).snapshots.map((row) => row.observation.actionId),
+      ["no-op:concurrent", "no-op:first"],
+    );
+
+    // A payload change at the new head reserves the following slot. It no
+    // longer appears in the earlier window, while the unrelated concurrent
+    // row keeps its original slot.
+    applyCommit(engine, {
+      sessionId: "session:no-op-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction("no-op:first", {
+          implementationFingerprint: "impl:v2",
+        }),
+      },
+    });
+    assertEquals(
+      listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: initialHead,
+        throughCommitSeq: carryingCommit.seq,
+      }).snapshots.map((row) => row.observation.actionId),
+      ["no-op:concurrent"],
+    );
+
+    const nextCarryingCommit = applyCommit(engine, {
+      sessionId: "session:data-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 2 } },
+        }],
+      },
+    });
+    const changed = listSchedulerActionSnapshots(engine, {
+      sinceCommitSeq: carryingCommit.seq,
+      throughCommitSeq: nextCarryingCommit.seq,
+    }).snapshots;
+    assertEquals(changed.map((row) => row.observation.actionId), [
+      "no-op:first",
+    ]);
+    assertEquals(
+      changed[0]?.observation.implementationFingerprint,
+      "impl:v2",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 reserves no-op delivery after the global sequence when another branch is ahead", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    createBranch(engine, "feature");
+    const featureCommit = applyCommit(engine, {
+      sessionId: "session:feature-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        branch: "feature",
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:feature-only",
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    assertEquals(headSeq(engine, ""), 0);
+    assertEquals(serverSeq(engine), featureCommit.seq);
+
+    applyCommit(engine, {
+      sessionId: "session:default-observation-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction("no-op:after-feature"),
+      },
+    });
+
+    const reserved = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace: sourceRead.space,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: "no-op:after-feature",
+    });
+    assertEquals(reserved?.observedAtSeq, 0);
+    assertEquals(reserved?.commitSeq, featureCommit.seq + 1);
+
+    const carryingCommit = applyCommit(engine, {
+      sessionId: "session:default-data-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 2 } },
+        }],
+      },
+    });
+    assertEquals(carryingCommit.seq, featureCommit.seq + 1);
+    assertEquals(
+      listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: featureCommit.seq,
+        throughCommitSeq: carryingCommit.seq,
+      }).snapshots.map((row) => row.observation.actionId),
+      ["no-op:after-feature"],
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -682,12 +855,10 @@ Deno.test("memory v2 scheduler observation row follows the latest writer session
 Deno.test("memory v2 identical observation-only coalesce keeps the row in the adoption window", async () => {
   // Regression guard for the writer-session refresh. A semantic commit (data +
   // observation bundled) sets the row's commit_seq; a later IDENTICAL
-  // observation-only re-run must not erase it. The adoption-window filter reads
-  // COALESCE(s.commit_seq, o.commit_seq), and observation-only commits null
-  // s.commit_seq — so o.commit_seq is the sole surviving carrier of the
-  // semantic seq. Clobbering it would drop the row from every
-  // sinceCommitSeq/throughCommitSeq window, i.e. from the live adoption
-  // fan-out (attachAdoptionObservations).
+  // observation-only re-run must not erase it or reserve a redundant future
+  // delivery. Identical refreshes retain the snapshot's existing semantic
+  // slot; first-ever and payload-changing no-ops are covered by the next-window
+  // regression above.
   const { engine, path } = await createEngine();
 
   try {
@@ -722,8 +893,8 @@ Deno.test("memory v2 identical observation-only coalesce keeps the row in the ad
       },
     });
     assertEquals(countRows(engine, "scheduler_observation"), 1);
-    // Still window-visible via the preserved o.commit_seq, AND re-attributed to
-    // the latest writer.
+    // Still window-visible via the preserved slot, AND re-attributed to the
+    // latest writer.
     const after = window();
     assertEquals(after.length, 1);
     assertEquals(after[0]?.writerSessionId, "session:writer-b:sess-b");
@@ -773,7 +944,7 @@ Deno.test("memory v2 rejects mismatched observation-only commit replay", async (
   }
 });
 
-Deno.test("memory v2 keeps actual changed writes out of durable dependency snapshots", async () => {
+Deno.test("memory v2 retains actual changed writes in durable adoption snapshots", async () => {
   const { engine, path } = await createEngine();
 
   try {
@@ -803,7 +974,7 @@ Deno.test("memory v2 keeps actual changed writes out of durable dependency snaps
     });
     assertEquals(snapshot?.observedAtSeq, 2);
     assertEquals(snapshot?.observation.observedAtSeq, 2);
-    assertEquals(snapshot?.observation.actualChangedWrites, []);
+    assertEquals(snapshot?.observation.actualChangedWrites, [targetWrite]);
   } finally {
     close(engine);
     await Deno.remove(path);

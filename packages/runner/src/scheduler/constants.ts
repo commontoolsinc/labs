@@ -19,11 +19,15 @@ export const BACKOFF_MAX_MS = 2000;
 // mid-flight (the F1 early-resolution bug). But a truly non-converging (cyclic)
 // subgraph never settles, so after this many backoff passes idle() resolves
 // regardless (scheduler.non-settling telemetry has already fired) to keep the
-// system responsive. The bound is an episode counter, NOT `backoffStreak`:
-// markActionInvalid resets `backoffStreak` on every clean->invalid oscillation,
-// so a streak-based bound never escalates for a true cycle. See
-// SettlingTracker.backoffEpisodeCount / isConvergenceHoldActive.
-export const CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES = 8;
+// system responsive. The bound is applied to each node's episode-local
+// `convergenceHoldPasses`, so a permanently non-settling subgraph cannot
+// release idle() for unrelated work. The hold count resets when that idle
+// episode ends; the separate delay streak remains rate-limited until the node
+// finishes genuinely clean. Three passes cover the known healthy >MAX_ITERS convergence case while
+// keeping a true cycle's idle escape below one second on the 250/500/1000ms
+// backoff curve. Longer convergence continues behind scheduled wakes, as I6
+// requires for gated work.
+export const CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES = 3;
 export const MAX_SETTLE_STATS_HISTORY = 20;
 export const MAX_TRIGGER_TRACE_HISTORY = 400;
 export const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
@@ -32,29 +36,11 @@ export const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 export const AUTO_DEBOUNCE_MIN_RUNS = 3;
 export const AUTO_DEBOUNCE_DELAY_MS = 100;
 
-// How long the head event may park waiting for in-flight document loads in
-// its read closure (CT-1795). Load completion — including "document absent" —
-// releases the park immediately; the timeout only bounds a wedged transport,
-// after which the event dispatches fail-open (today's behavior) with a
-// warning.
-//
-// TODO(scheduler-v2): a wall-clock timer is the wrong shape for "the socket is
-// dead." The correct fix is to release the park on the TRANSPORT's own
-// connection-failure signal (the network layer's built-in TCP timeouts), so a
-// wedged sync hard-fails deterministically and a live-but-slow one never trips
-// it. This 10s value is only a stopgap and is far too short for a real network
-// partition — e.g. a phone driving through a tunnel is alive but silent for far
-// longer, and would spuriously fail-open the at-most-once handler against a
-// stale/absent replica. Replace with transport-driven release; do not lengthen
-// this constant as a "fix" (that just trades a false fail-open for a longer
-// idle stall). Discussed w/ Hixie 2026-07-08.
-export const EVENT_LOAD_PARK_TIMEOUT_MS = 10_000;
-
 // How long a resumed action's initial run may be held while waiting for its
 // space to finish syncing (see runner.ts awaitSyncBeforeInitialRun). This hold
-// exists ONLY on the flag-off default: with persistent-scheduler-state
-// (flag-on) resume rehydrates from persisted observation snapshots and takes
-// no timed hold, so this path is retired as that flag promotes toward default.
+// covers the flag-off path and the flag-on fallback for a missing, stale, or
+// ineligible observation (including always-run coordinators). A successfully
+// rehydrated action needs no hold.
 // The sync completing releases the hold early; the
 // timeout only bounds a slow or never-quiescing sync. The hold is an
 // anti-churn OPTIMIZATION (avoid re-deriving against half-synced inputs), not

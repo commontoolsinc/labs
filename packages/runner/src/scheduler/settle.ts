@@ -48,6 +48,7 @@ function collectPrimaryPullIterationSeeds(
   workSet: Set<Action>,
 ): void {
   for (const action of state.pending) {
+    if (state.materializerIndex.isMaterializer(action)) continue;
     const record = state.nodes.get(action);
     if (
       record &&
@@ -62,6 +63,7 @@ function collectPrimaryPullIterationSeeds(
   // on isInvalidOrNeverRan), so the invalid-node index is exactly the
   // candidate set — iterate it instead of every registered node.
   for (const action of state.nodes.getInvalidNodes()) {
+    if (state.materializerIndex.isMaterializer(action)) continue;
     const record = state.nodes.get(action);
     if (record && isRunnableSchedulingSeed(state, record)) {
       workSet.add(action);
@@ -80,7 +82,9 @@ function collectIdleMaterializerSeeds(
     }
   }
 
-  for (const record of state.nodes.nodes()) {
+  for (const action of state.nodes.getInvalidNodes()) {
+    const record = state.nodes.get(action);
+    if (!record) continue;
     if (isIdleMaterializerRunnable(state, record)) {
       workSet.add(record.action);
     }
@@ -117,7 +121,14 @@ function buildPullIterationWorkSet(state: {
   const declaredReadPulledActions = new Set<Action>();
 
   for (const seed of state.initialSeeds) {
-    iterationSeeds.add(seed);
+    const record = state.nodes.get(seed);
+    // Event-preflight seeds are transient demand roots for the whole pass. A
+    // clean seed contributes no work, but if another node re-invalidates it in
+    // a later iteration it must re-enter the work set so convergence budgets
+    // and backoff apply exactly as they do for standing demand roots.
+    if (record && isInvalidOrNeverRan(record)) {
+      iterationSeeds.add(seed);
+    }
   }
 
   // Every iteration needs to consider newly created pending effects.
@@ -283,8 +294,8 @@ export async function runPullSchedulerSettleLoop(
   initialSeeds: ReadonlySet<Action>,
 ): Promise<SchedulerSettleResult> {
   // Pull mode settles demand roots plus the dirty computations they observe.
-  // First iteration processes initial seeds + their dirty deps.
-  // Subsequent iterations process new subscriptions and re-collect dirty deps.
+  // Event-preflight seeds remain transient roots throughout the pass; every
+  // iteration also processes new subscriptions and re-collects dirty deps.
   logger.timeStart("scheduler", "execute", "settle");
   const maxSettleIterations = MAX_ITERS;
   let lastWorkSet: Set<Action> = new Set();
@@ -293,6 +304,7 @@ export async function runPullSchedulerSettleLoop(
   let backoffActionCount = 0;
   let backoffUntil: number | undefined;
   const collectSettleStats = state.getCollectSettleStats();
+  const passScopedDemand = new Set(initialSeeds);
   const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
     ? []
     : undefined;
@@ -300,10 +312,11 @@ export async function runPullSchedulerSettleLoop(
 
   for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
     const iterStart = settleIterStats ? performance.now() : 0;
+    state.refreshPassScopedDemand?.(passScopedDemand);
 
     const iteration = preparePullSettleIteration(
       state,
-      initialSeeds,
+      passScopedDemand,
       settleIter,
     );
 
@@ -318,6 +331,7 @@ export async function runPullSchedulerSettleLoop(
       state,
       iteration.order,
       iteration.declaredReadPulledActions,
+      passScopedDemand,
     );
     if (didAnyActionHitPassRunBudget(state, iteration.order)) {
       // Gate only the actions that actually exhausted their budget (the
@@ -330,6 +344,7 @@ export async function runPullSchedulerSettleLoop(
         state,
         collectCurrentBackoffCandidates(state),
         "pass-budget",
+        passScopedDemand,
       );
       if (budgetBackoff.applied) {
         backoffApplied = true;
@@ -352,10 +367,20 @@ export async function runPullSchedulerSettleLoop(
   }
 
   if (!settledEarly && !backoffApplied && lastWorkSet.size > 0) {
+    // The last action may have shifted an event-only cycle's invalid frontier
+    // to a different closure member. Refresh once after the final iteration so
+    // iteration-cap backoff targets the CURRENT frontier, not the work set that
+    // was current before that action ran.
+    state.refreshPassScopedDemand?.(passScopedDemand);
+    const iterationCapCandidates = new Set([
+      ...lastWorkSet,
+      ...passScopedDemand,
+    ]);
     const iterationBackoff = maybeApplyBudgetBackoff(
       state,
-      lastWorkSet,
+      iterationCapCandidates,
       "iteration-cap",
+      passScopedDemand,
     );
     backoffApplied = iterationBackoff.applied;
     backoffActionCount += iterationBackoff.actionCount;
@@ -474,6 +499,7 @@ async function runPullSettleOrder(
   state: SchedulerSettleLoopState,
   order: readonly Action[],
   declaredReadPulledActions: ReadonlySet<Action>,
+  passScopedDemand: ReadonlySet<Action>,
 ): Promise<number> {
   let actionsRun = 0;
   for (const fn of order) {
@@ -481,6 +507,7 @@ async function runPullSettleOrder(
       state,
       fn,
       declaredReadPulledActions.has(fn),
+      passScopedDemand.has(fn),
     );
   }
   return actionsRun;
@@ -490,13 +517,21 @@ async function runPullSettleAction(
   state: SchedulerSettleLoopState,
   fn: Action,
   isDeclaredReadPulled: boolean,
+  isPassScopedDemanded: boolean,
 ): Promise<number> {
   // Check if action is still scheduled (not unsubscribed during this tick).
   // Running an action might unsubscribe other actions in the workSet.
   const isStillScheduled = state.computations.has(fn) || state.effects.has(fn);
   if (!isStillScheduled) return 0;
 
-  if (!isPullSettleActionStillRunnable(state, fn, isDeclaredReadPulled)) {
+  if (
+    !isPullSettleActionStillRunnable(
+      state,
+      fn,
+      isDeclaredReadPulled,
+      isPassScopedDemanded,
+    )
+  ) {
     return 0;
   }
   if (skipPullDelayedSettleAction(state, fn)) return 0;
@@ -519,6 +554,7 @@ function maybeApplyBudgetBackoff(
   state: SchedulerSettleLoopState,
   workSet: ReadonlySet<Action>,
   reason: "iteration-cap" | "pass-budget",
+  passScopedDemand: ReadonlySet<Action>,
 ): {
   applied: boolean;
   actionCount: number;
@@ -532,6 +568,7 @@ function maybeApplyBudgetBackoff(
     getNextEligibleRunTime: state.getNextEligibleRunTime,
     isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
     reason,
+    passScopedDemand,
   });
   if (plan.actions.length === 0) {
     return { applied: false, actionCount: 0 };
@@ -580,6 +617,7 @@ function isPullSettleActionStillRunnable(
   state: SchedulerSettleLoopState,
   fn: Action,
   isDeclaredReadPulled: boolean,
+  isPassScopedDemanded: boolean,
 ): boolean {
   const record = state.nodes.get(fn);
   return record !== undefined &&
@@ -587,7 +625,8 @@ function isPullSettleActionStillRunnable(
     (
       state.isLiveAction(fn) ||
       state.pending.has(fn) ||
-      isDeclaredReadPulled
+      isDeclaredReadPulled ||
+      isPassScopedDemanded
     ) &&
     record.passRuns < PASS_RUN_BUDGET;
 }

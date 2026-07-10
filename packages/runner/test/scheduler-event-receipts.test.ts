@@ -131,7 +131,6 @@ describe("scheduler event receipts", () => {
   beforeEach(() => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
-      { experimental: { commitPreconditions: true } },
     ));
   });
 

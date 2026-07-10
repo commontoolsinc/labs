@@ -245,9 +245,19 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   >[];
 
   /**
+   * Generation of the currently in-flight load for an entity key, or
+   * `undefined` when the key is not loading. A new generation is allocated
+   * after a prior load settles so event preflight can distinguish a genuinely
+   * new provisional snapshot from the load it already waited for.
+   */
+  pendingLoadGeneration?(key: string): number | undefined;
+
+  /**
    * Resolves when none of the given documents (keyed
    * `space/scope/id`, see the scheduler's `entityKey`) has an in-flight
-   * load. Resolves immediately when none do.
+   * load. Resolves immediately when none do. Rejects when any of the captured
+   * load generations fails, so an at-most-once event is not dispatched against
+   * a replica whose required load failed.
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
 
@@ -326,6 +336,21 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /**
+   * Conservative scheduler-snapshot currency oracle. Returns true only when
+   * every address belongs to this provider, has a confirmed local base, and
+   * that base is no newer than the observation sequence.
+   */
+  areSchedulerAddressesCurrentAtOrBelow?(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+
+  /** Whether an optimistic local write overlaps any supplied address. */
+  schedulerHasPendingWriteOverlapping?(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean;
 
   /** Run a server-side read-only SQLite query against a cell-derived db. */
   sqliteQuery?(

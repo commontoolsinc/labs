@@ -210,23 +210,33 @@ export function topologicalSort(
     result.push(current);
     visited.add(current);
 
-    // Collect newly-unlocked neighbors and append them in registration order,
-    // so the sub-ordering of a batch of ready nodes is deterministic rather
-    // than reflecting graph/arrival insertion order.
-    let unlocked: Action[] | undefined;
     for (const neighbor of graph.get(current) || []) {
       inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
       if (inDegree.get(neighbor) === 0) {
-        (unlocked ??= []).push(neighbor);
+        insertReadyAction(queue, neighbor, byRegistrationOrder);
       }
-    }
-    if (unlocked) {
-      if (unlocked.length > 1) unlocked.sort(byRegistrationOrder);
-      for (const neighbor of unlocked) queue.push(neighbor);
     }
   }
 
   return result;
+}
+
+function insertReadyAction(
+  queue: Action[],
+  action: Action,
+  compare: (a: Action, b: Action) => number,
+): void {
+  let low = 0;
+  let high = queue.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (compare(queue[mid], action) <= 0) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  queue.splice(low, 0, action);
 }
 
 function addAdditionalWriteEdges(state: {

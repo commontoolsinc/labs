@@ -29,7 +29,7 @@ was last checked against the code.
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
-| [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic-only — in the canonical env registry) | off | Bernhard Seefeld (#4090) | graduate with scheduler-v2 speculation lineage | implemented, off by default |
+| [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
@@ -54,8 +54,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default"; the built-in default is
-`false` for every one of them.
+`undefined`, which means "take the built-in default". `commitPreconditions`
+defaults on; the other flags in this category default off unless their section
+says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -134,26 +135,28 @@ propagate](#how-flags-propagate).
 - **Toggle via.** `RuntimeOptions.experimental.commitPreconditions` only. It has
   no environment variable today: it is mapped to `null` in the canonical
   `EXPERIMENTAL_ENV_VARS` registry, which puts "not env-reachable" on the record
-  as a deliberate choice rather than leaving it absent from one wiring. Wiring an
-  environment variable is a one-line change there. Until then it can be enabled
-  only by constructing a `Runtime` with the flag set, which is what its tests do.
+  as a deliberate choice rather than leaving it absent from one wiring. The
+  built-in behavior is enabled; an explicit `false` is a programmatic rollback
+  override while the flag remains.
   The ambient control point is `setCommitPreconditionsConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts).
 - **Added by.** Bernhard Seefeld, in "speculation lineage for event-launched
   work (scheduler-v2 E1)" (#4090, 2026-06-12).
 - **Purpose.** Attaches origin-committed preconditions to scheduler-v2 lineage
   commits, so that event-launched follow-up work commits only against the state
-  it was speculated from.
-- **Current default and planned end state.** Off by default. It is meant to
-  graduate together with the rest of scheduler-v2 speculation lineage.
-- **Status on 2026-07-08.** Implemented and plumbed through the runner and the
-  memory protocol, behind the flag. Off by default and reachable only
-  programmatically.
+  it was speculated from, and create-only preconditions to durable event result
+  receipts so competing runners cannot overwrite an existing terminal receipt.
+- **Current default and planned end state.** On by default as part of
+  scheduler-v2 speculation lineage. The planned end state is to remove the
+  rollback flag and make the behavior unconditional.
+- **Status on 2026-07-10.** Implemented for lineage commits and event-result
+  receipts and plumbed through the runner and memory protocol; on by default,
+  with explicit programmatic opt-out retained temporarily.
 - **Path to removal.** This exists to serve scheduler-v2 speculation lineage; it
-  can be deleted only when lineage tracking becomes part of the base scheduler
-  semantics. At that point remove the flag, the precondition attach and check in
-  the storage transaction path, and the server-side precondition check in the
-  memory engine.
+  can be deleted only when lineage tracking and durable event receipts become
+  part of the base scheduler semantics. At that point remove the flag, the
+  lineage and receipt precondition attachment, the storage transaction wiring,
+  and the server-side precondition check in the memory engine.
 
 ### `eagerSourceAnnotation`
 
@@ -597,7 +600,8 @@ design docs).
 
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
-`Runtime` constructor merges the provided flags with the defaults (all `false`),
+`Runtime` constructor merges the provided flags with the built-in defaults
+(`commitPreconditions` true, the other Category 1 flags false),
 propagates each one to its ambient control point, and then reads the effective
 state back so that `runtime.experimental.*` reflects what is actually in effect.
 
@@ -652,7 +656,7 @@ whose status header records the removal.
 ### `EXPERIMENTAL_MODERN_DATA_MODEL` (never implemented)
 
 Mentioned only in
-[`docs/specs/persistent-scheduler-state/implementation_notes.md`](../specs/persistent-scheduler-state/implementation_notes.md)
+[`docs/history/specs/persistent-scheduler-state/implementation_notes.md`](../history/specs/persistent-scheduler-state/implementation_notes.md)
 as an example of how to plumb a flag through the runtime, shell, toolshed, and
 CLI. It was never built; the persistent-scheduler-state flag was built instead,
 following the same plumbing pattern.

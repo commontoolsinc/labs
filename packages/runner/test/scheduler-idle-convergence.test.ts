@@ -32,6 +32,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { MAX_ITERS } from "../src/scheduler/constants.ts";
+import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 function addr(cell: { getAsNormalizedFullLink(): unknown }): ReturnType<
   typeof toMemorySpaceAddress
@@ -91,6 +92,14 @@ describe("idle convergence hold", () => {
     const TARGET = 25;
     const DEPTH = 3;
     expect(TARGET).toBeGreaterThan(2 * MAX_ITERS);
+    const nonSettlingMarkers: unknown[] = [];
+    const onTelemetry = (event: Event) => {
+      const marker = (event as RuntimeTelemetryEvent).marker;
+      if (marker.type === "scheduler.non-settling") {
+        nonSettlingMarkers.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", onTelemetry);
 
     const cells = Array.from(
       { length: DEPTH + 1 },
@@ -136,12 +145,14 @@ describe("idle convergence hold", () => {
     }, { isEffect: true });
 
     const r = await idleWithin(runtime, 5000);
+    runtime.telemetry.removeEventListener("telemetry", onTelemetry);
     step = TARGET; // belt-and-braces: stop churn before teardown
 
     // idle() must have waited for the wave to fully converge, not sampled a
     // mid-flight (pre-fix: observed === MAX_ITERS) value.
     expect(r.resolved).toBe(true);
     expect(observed).toBe(TARGET);
+    expect(nonSettlingMarkers.length).toBeGreaterThan(0);
   });
 
   it("still resolves idle() for a genuinely non-converging cycle (escape valve)", async () => {

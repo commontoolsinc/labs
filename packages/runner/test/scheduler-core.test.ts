@@ -1,4 +1,4 @@
-// Core scheduler tests: basic push-mode scheduling behavior.
+// Core scheduler tests: basic pull-scheduler behavior.
 
 import {
   afterEach,

@@ -15,6 +15,7 @@ export interface ExecuteContinuationState {
   readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;
+  readonly resetConvergenceHoldPasses: () => void;
   readonly setPendingQueueTaskTimer: (
     timer: ReturnType<typeof setTimeout> | null,
   ) => void;
@@ -37,18 +38,12 @@ export function applyQuiescentContinuation(
       !continuation.hasParkedHeadEvent &&
       !continuation.nextDirtyPullRunWaitsForIdle
     ) {
-      resolveIdlePromises(state.idlePromises);
+      finishIdleEpisode(state);
+      // Resolving idle ends this logical non-settling episode even though its
+      // rate-limited retry wake remains armed. A later unrelated wave must get
+      // fresh telemetry/diagnostic accounting.
     }
     markNotScheduled(state);
-    return;
-  }
-
-  if (state.hasWakeTimer()) {
-    markNotScheduled(state);
-
-    // Waiting on a future wake is quiescent from the scheduler's perspective,
-    // so reset the non-settling tracker.
-    state.resetSettlingTracker();
     return;
   }
 
@@ -56,16 +51,22 @@ export function applyQuiescentContinuation(
     markNotScheduled(state);
 
     // A lineage-parked head has no timer; the origin transaction's commit
-    // callback is the wake source.
+    // callback is the wake source. A time-parked event may share the gate wake.
     state.resetSettlingTracker();
     return;
   }
 
-  resolveIdlePromises(state.idlePromises);
-  markNotScheduled(state);
+  if (state.hasWakeTimer()) {
+    // The work oracle returned no nextDirtyPullRunAt and no event is parked, so
+    // this shared timer belongs only to dormant/non-idle-relevant work. Leave
+    // the harmless wake armed, but do not let it hold current idle waiters.
+    finishIdleEpisode(state);
+    markNotScheduled(state);
+    return;
+  }
 
-  // Reset settling tracker on idle.
-  state.resetSettlingTracker();
+  finishIdleEpisode(state);
+  markNotScheduled(state);
 }
 
 export function queueAnotherExecutionTick(
@@ -86,6 +87,12 @@ function markNotScheduled(state: ExecuteContinuationState): void {
 function resolveIdlePromises(promises: (() => void)[]): void {
   for (const resolve of promises) resolve();
   promises.length = 0;
+}
+
+function finishIdleEpisode(state: ExecuteContinuationState): void {
+  resolveIdlePromises(state.idlePromises);
+  state.resetConvergenceHoldPasses();
+  state.resetSettlingTracker();
 }
 
 export function applyPullExecuteContinuation(

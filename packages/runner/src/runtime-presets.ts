@@ -177,8 +177,8 @@ export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
-  // Scheduler-v2 lineage (#4090): no env exposure yet; set programmatically
-  // by its tests. Wire an env var here (one line) when rollout wants it.
+  // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
+  // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",

@@ -6,19 +6,15 @@ flag-off behavior is unchanged.
 Companions: `docs/specs/persistent-scheduler-state.md` (durable model),
 `README.md` §9 (v2 resume model). Follow-up CT from PR #4288.
 
-## 1. Problem
+## 1. Problem addressed
 
-Persistent scheduler state is restored by **root pieceId only**: `start()`
-lists snapshots for `pieceId = ${scope}:${id}` of the root result cell
-(`runner.ts loadSchedulerRehydrationSnapshots`) and hands the actionId-keyed
-map to the root's `startCore`. Every dynamically-instantiated descendant —
-sub-pattern nodes (`instantiatePatternNode`), map/filter/flatMap per-element
-runs — starts through `run()`/`startWithTx()`, whose `RunnerRunOptions` carry
-only the `awaitSyncBeforeInitialRun` boolean. The child's `startCore` then
-synthesizes `schedulerRehydrationOptions(childCell, undefined, awaitSync)` —
-snapshots hard-coded absent.
+The initial persistent-state implementation restored by **root pieceId only**.
+Every dynamically-instantiated descendant — sub-pattern nodes and
+map/filter/flatMap per-element runs — therefore registered without its own
+snapshot. The current implementation fixes that by loading one space-wide
+snapshot epoch and distributing per-doc buckets through the resumed tree.
 
-Three defect modes follow (all reproduced by
+Three defect modes motivated the design (all covered by
 `packages/runner/test/reload-rehydration-map-children.test.ts`, the
 two-manager loopback probe):
 
@@ -27,7 +23,7 @@ two-manager loopback probe):
   reaches `startCore` and registers fresh-invalid. Probe: all three row lifts
   re-ran on resume while their persisted snapshots — keyed by their own
   pieceIds, with byte-identical restart-stable actionIds — sat **clean** and
-  unused in the store. This is the racing/churn defect: first runs against
+  unused in the store. This was the racing/churn defect: first runs against
   possibly-cold data, optimistic instantiation commits, the picker-row
   alias-chain conflict.
 - **(b) Children lose even the flag-off sync hold.** Under flag-ON,
@@ -35,13 +31,11 @@ two-manager loopback probe):
   and **no** `awaitSyncBeforeInitialRun`; `register()`'s branch is an else-if
   (`snapshotsByActionId ? apply : awaitSyncBeforeInitialRun ? hold : nothing`),
   so the child gets **neither** the snapshot branch nor the hold. Flag-ON is
-  strictly worse for children than flag-off. (The comment in
-  `builtins/map.ts` claiming the resumed reconcile "is itself sync-gated" is
-  false in this world.)
+  strictly worse for children than flag-off.
 - **(c) Clean coordinators strand rows entirely.** If the coordinator's
   snapshot rehydrates clean, its reconcile never runs, so per-element child
   pieces are **never instantiated**: their actions are unregistered, their
-  reactivity is dead (an element-field write re-derives nothing) until some
+  reactivity was dead (an element-field write re-derived nothing) until some
   structural list write happens to dirty the coordinator. Rehydrating a
   child-starting action "clean" is semantically wrong: its durable outputs are
   valid, but its live closure side-effect — starting the children — has not
@@ -77,7 +71,7 @@ What must be tightened so the mapping is *reliable*:
 
 - **Persist only doc-keyed observations.** Actions registered without
   `rehydrateFromStorage` (the `cell.ts` pull effect, `wish.ts` hashtag
-  resolver, test sinks) currently persist under the
+  resolver, test sinks) previously persisted under the
   `patternName:moduleName` / `action:<actionId>` fallback
   (`schedulerObservationPieceId`). Those rows are unfindable by any doc-keyed
   restore and unrehydratable by construction (their registrations never carry
@@ -97,7 +91,7 @@ knows its own doc locally at registration time. A persisted parent edge
 `persistent-scheduler-state.md` §Action Identity) remains the future lever
 for subtree GC and demand-targeted rehydration, not a dependency of this fix.
 
-## 3. Design
+## 3. Current design
 
 Three legs. The guiding constraint is v2 §9.2: resume stays a phase that
 completes before scheduling — v1's per-action async lookup apparatus
@@ -124,6 +118,15 @@ map is retained on the runner as a per-space **boot rehydration cache**:
 - cleared on runner dispose,
 - never consulted outside resume intent (§3.2), so post-boot staleness is
   inert by construction.
+
+Every page in the cursor listing must report the same `serverSeq`; an epoch
+change discards the whole listing. After the final page, the provider syncs
+again to close the list/register gap. Registration still performs a per-action
+currency proof over reads **and outputs** (`reads`, `shallowReads`,
+`actualChangedWrites`, and `currentKnownWrites`) and refuses a snapshot when
+any local address is newer than its observation or an overlapping optimistic
+write is pending. Thus the cache is a candidate set, never authority to mark a
+newer local action clean.
 
 Listing failure keeps today's semantics: degrade the whole boot to
 resume-fresh (undefined map, no cache entry).
@@ -226,22 +229,19 @@ the designated future fix (subtree listing + subtree GC), tracked in
 `persistent-scheduler-state.md` open questions. Page size stays 500/1000;
 the boot load is paginated and off the hot path (parallel to the pre-sync).
 
-## 6. Spec deltas
+## 6. Integration with the governing specs
 
-- `persistent-scheduler-state.md` › Required Query Support: the bulk listing
-  is space-scoped ("optionally piece id"); add a "Child piece rehydration"
-  note under the Rehydration Algorithm: resume restores per **piece doc**,
-  parents re-attach children, child-starting coordinators never rehydrate
-  clean; persist requires doc-keyed identity (no fallback rows).
-- `README.md` §9.2: "resume is a piece-level phase" → the phase covers the
-  resumed piece **tree**: one space listing feeds every descendant's
-  registration; degraded nodes hold until synced instead of racing.
+- `persistent-scheduler-state.md` defines the space-scoped bulk listing and
+  synchronous per-piece-doc restore; parents re-attach children and
+  child-starting coordinators never rehydrate clean.
+- `README.md` §9.2 defines resume as a piece-tree phase: one space listing
+  feeds every descendant's registration, and degraded nodes hold until synced.
 
-## 7. Acceptance and tests
+## 7. Coverage and acceptance
 
 - `packages/runner/test/reload-rehydration-map-children.test.ts` (red-green,
   loopback two-manager harness so session 1 can be fully disposed):
-  - resume trace contains **zero** row-op runs (red today: 3 fresh lift runs)
+  - resume trace contains **zero** row-op runs
     while `rehydrate/ok` covers the rows (≥ 3);
   - post-resume element-field write re-derives exactly that row (liveness —
     guards against the stranded-rows mode (c));
@@ -264,9 +264,10 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   persisted read sets — an application of the incremental
   observation-adoption direction (see below), not of the boot listing.
 
-## 7.1 Where this goes next: incremental adoption in ongoing work
+## 7.1 Live counterpart: incremental adoption
 
-Reload is the degenerate case. The same per-doc observations, delivered
+Reload is the degenerate case. The implemented live-adoption companion
+delivers the same per-doc observations
 **incrementally with memory subscriptions**, let a live client skip work
 another client already did: when client A's action run commits (observation
 attached to the commit), every subscriber receiving those doc writes can
@@ -275,10 +276,10 @@ pieceId/actionId (restart- and runtime-stable, proven above), same
 fingerprints, deterministic computation over the same shared docs — instead
 of re-running it. Receivers keep running their local effects (rendering);
 they stop re-deriving computations the writer already derived. This is the
-recovery lever for the multi-user perf delta, and it is the direction the
+recovery lever for the multi-user perf delta, and the per-piece
 per-piece deriver-attribution rigor (P2) explicitly does NOT gate: the
 observation arrives WITH the doc write, so the client never needs to find
-the deriver. Design: `incremental-observation-adoption.md`.
+the deriver. See `incremental-observation-adoption.md`.
 
 ## 8. Alternatives rejected
 

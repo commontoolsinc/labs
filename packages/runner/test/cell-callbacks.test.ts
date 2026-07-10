@@ -1300,7 +1300,7 @@ describe("Cell commit callbacks", () => {
   });
 
   describe("pull()", () => {
-    it("should return the cell value in push mode", async () => {
+    it("should return the current cell value", async () => {
       const c = runtime.getCell<number>(space, "pull-test-1", undefined, tx);
       c.set(42);
       await tx.commit();
@@ -1310,7 +1310,7 @@ describe("Cell commit callbacks", () => {
       expect(value).toBe(42);
     });
 
-    it("should wait for dependent computations in push mode", async () => {
+    it("should wait for dependent computations", async () => {
       // Create a source cell
       const source = runtime.getCell<number>(
         space,

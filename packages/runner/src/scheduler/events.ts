@@ -57,7 +57,8 @@ export function isHeadEventParked(
   now: number = performance.now(),
 ): boolean {
   const headEvent = state.eventQueue[0];
-  return headEvent?.notBefore !== undefined && headEvent.notBefore > now;
+  return headEvent?.handlerLoadPending === true ||
+    (headEvent?.notBefore !== undefined && headEvent.notBefore > now);
 }
 
 export interface EventDependencyPreflightResult {
@@ -80,16 +81,16 @@ export interface SchedulerEventQueueState {
   readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
-  readonly queueExecution: () => void;
-  readonly queueEvent: (
+  readonly loadPieceForEvent?: (
+    runtime: Runtime,
     eventLink: NormalizedFullLink,
-    event: unknown,
-    retries: boolean,
-    onCommit: QueuedEvent["onCommit"] | undefined,
-    doNotLoadPieceIfNotRunning: boolean,
-    opts?: { eventId?: string; originTx?: IExtendedStorageTransaction },
-  ) => void;
+  ) => Promise<boolean>;
+  readonly queueExecution: () => void;
   readonly recordLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+  readonly releaseLineageEvent: (
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
@@ -127,6 +128,58 @@ function notifyEventDropped(
   }
 }
 
+/**
+ * Remove and settle a queued event that will never dispatch. All pre-dispatch
+ * cancellation paths use this chokepoint so lineage cancellation, piece-load
+ * failure, dependency-preflight failure, and load-gate failure cannot leave an
+ * onCommit waiter hanging or notify it twice.
+ */
+export function dropQueuedEvent(
+  state:
+    & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
+    & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
+  event: QueuedEvent,
+  reason: string,
+): void {
+  const index = state.eventQueue.indexOf(event);
+  if (index >= 0) state.eventQueue.splice(index, 1);
+  if (event.originTx !== undefined) {
+    state.releaseLineageEvent?.(event.originTx, event);
+  }
+  if (event.finalOutcomeNotified) return;
+  event.finalOutcomeNotified = true;
+  notifyEventDropped(state, event, reason);
+}
+
+function findEventHandler(
+  handlers: readonly [NormalizedFullLink, EventHandler][],
+  eventLink: NormalizedFullLink,
+): EventHandler | undefined {
+  return handlers.find(([link]) => areNormalizedLinksSame(link, eventLink))
+    ?.[1];
+}
+
+function readyQueuedEvent(args: {
+  readonly id: string;
+  readonly eventLink: NormalizedFullLink;
+  readonly event: unknown;
+  readonly handler: EventHandler;
+  readonly retries: boolean;
+  readonly onCommit?: QueuedEvent["onCommit"];
+  readonly originTx?: IExtendedStorageTransaction;
+}): QueuedEvent {
+  return {
+    id: args.id,
+    originTx: args.originTx,
+    eventLink: args.eventLink,
+    action: (tx) => args.handler(tx, args.event),
+    handler: args.handler,
+    event: args.event,
+    retry: args.retries,
+    onCommit: args.onCommit,
+  };
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -137,61 +190,84 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly originTx?: IExtendedStorageTransaction;
 }): void {
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
-  let handlerFound = false;
+  const handler = findEventHandler(state.eventHandlers, args.eventLink);
 
-  for (const [link, handler] of state.eventHandlers) {
-    if (areNormalizedLinksSame(link, args.eventLink)) {
-      handlerFound = true;
-      state.queueExecution();
-      const queuedEvent: QueuedEvent = {
-        id,
-        originTx: args.originTx,
-        eventLink: args.eventLink,
-        action: (tx) => handler(tx, args.event),
-        handler,
-        event: args.event,
-        retry: args.retries,
-        onCommit: args.onCommit,
-      };
-      state.eventQueue.push(queuedEvent);
-      if (args.originTx !== undefined) {
-        state.recordLineageEvent(args.originTx, queuedEvent);
-      }
-      // Exactly one handler per event (spec scheduler-v2 decision 12).
-      break;
+  if (handler) {
+    const queuedEvent = readyQueuedEvent({ ...args, id, handler });
+    state.eventQueue.push(queuedEvent);
+    if (args.originTx !== undefined) {
+      state.recordLineageEvent(args.originTx, queuedEvent);
     }
+    state.queueExecution();
+    return;
   }
 
   // If no handler was found, try to start the piece that should handle this event.
-  if (!handlerFound && !args.doNotLoadPieceIfNotRunning) {
+  if (!args.doNotLoadPieceIfNotRunning) {
+    // Reserve the FIFO position before starting asynchronous work. The
+    // placeholder is hydrated in place once the handler exists, so a later
+    // event with an already-registered handler cannot overtake this one.
+    const unavailableHandler: EventHandler = () => {
+      throw new Error(`Event ${id} dispatched before its handler loaded`);
+    };
+    const queuedEvent = readyQueuedEvent({
+      ...args,
+      id,
+      handler: unavailableHandler,
+    });
+    queuedEvent.handlerLoadPending = true;
+    state.eventQueue.push(queuedEvent);
+    if (args.originTx !== undefined) {
+      state.recordLineageEvent(args.originTx, queuedEvent);
+    }
+    state.queueExecution();
+
     const startTask = (async () => {
-      const started = await ensurePieceRunning(state.runtime, args.eventLink);
-      if (started) {
-        // Piece was started, re-queue the event. Don't trigger loading again
-        // if this didn't result in registering a handler, as trying again
-        // won't change this.
-        state.queueEvent(
+      try {
+        const started = await (state.loadPieceForEvent ?? ensurePieceRunning)(
+          state.runtime,
           args.eventLink,
-          args.event,
-          args.retries,
-          args.onCommit,
-          true,
-          { eventId: id, originTx: args.originTx },
         );
-      } else {
-        notifyEventDropped(
+        // The origin may have failed while the piece was loading.
+        if (
+          queuedEvent.finalOutcomeNotified ||
+          !state.eventQueue.includes(queuedEvent)
+        ) return;
+
+        const loadedHandler = findEventHandler(
+          state.eventHandlers,
+          args.eventLink,
+        );
+        if (loadedHandler) {
+          queuedEvent.handler = loadedHandler;
+          queuedEvent.action = (tx) => loadedHandler(tx, args.event);
+          delete queuedEvent.handlerLoadPending;
+        } else {
+          dropQueuedEvent(
+            state,
+            queuedEvent,
+            started
+              ? `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`
+              : `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+          );
+        }
+      } catch (error) {
+        dropQueuedEvent(
           state,
-          args,
-          `Event dropped: no handler registered for ${args.eventLink.id} ` +
-            `and its piece could not be started`,
+          queuedEvent,
+          `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
+      } finally {
+        state.queueExecution();
       }
     })();
     state.backgroundTasks.add(startTask);
     startTask.finally(() => {
       state.backgroundTasks.delete(startTask);
     });
-  } else if (!handlerFound) {
+  } else {
     // Second pass after a piece start that still registered no handler for
     // this stream (e.g. the piece "started" but its nodes failed to
     // instantiate). Trying again won't change this, so settle the event now.
@@ -244,6 +320,7 @@ export interface SchedulerEventExecutionState {
     event: QueuedEvent,
     deps: ReactivityLog,
   ) => string[];
+  readonly capturePendingLoadGenerations: () => void;
   readonly parkHeadEventForLoads: (
     event: QueuedEvent,
     keys: readonly string[],
@@ -269,6 +346,9 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  readonly setEventPassDemandRefresh: (
+    refresh: ((demand: Set<Action>) => void) | undefined,
+  ) => void;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
@@ -280,6 +360,7 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
+  readonly dropEvent: (event: QueuedEvent, reason: string) => void;
   readonly recordLineageEvent: (
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
@@ -320,6 +401,7 @@ export function preflightQueuedEventDependencies(state: {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleWake: (notBefore: number) => void;
+  readonly dropEvent: (event: QueuedEvent, reason: string) => void;
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
   const preflightStats = createEventPreflightTraceContext();
@@ -347,13 +429,11 @@ export function preflightQueuedEventDependencies(state: {
   try {
     handler.populateDependencies?.(depTx, eventValue);
   } catch (error) {
-    state.eventQueue.shift();
     state.handleError(error as Error, handler);
     // Dropping the event here is its final outcome — settle the commit
     // callback like the other drop paths instead of leaving callers that
     // await it hanging.
-    notifyEventDropped(
-      state,
+    state.dropEvent(
       queuedEvent,
       `Event dropped: populateDependencies threw during dependency ` +
         `preflight for ${queuedEvent.eventLink.id}`,
@@ -515,8 +595,10 @@ export async function processPullQueuedEventDuringExecute(
       queuedEvent.eventLink.space,
     ) !== undefined;
     if (originStatus === "failed") {
-      state.eventQueue.shift();
-      state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: lineage origin failed before ${queuedEvent.id} dispatched`,
+      );
       logger.debug("scheduler-lineage", () => [
         "Dropping event from failed lineage origin",
         { eventId: queuedEvent.id },
@@ -528,8 +610,12 @@ export async function processPullQueuedEventDuringExecute(
     }
   }
 
-  // Head is parked on in-flight closure loads; the loadsSettled callback (or
-  // the timeout backstop) re-queues execution.
+  // The head reserved its FIFO slot before its handler's piece loaded. Piece
+  // completion hydrates the same object and queues a fresh execution tick.
+  if (queuedEvent.handlerLoadPending) return;
+
+  // Head is parked on in-flight closure loads; loadsSettled re-queues after
+  // success or drops the event after an explicit load failure.
   if (state.isHeadEventLoadParked(queuedEvent)) {
     return;
   }
@@ -549,6 +635,11 @@ export async function processPullQueuedEventDuringExecute(
 
   let shouldSkipEvent = false;
   if (handler.populateDependencies) {
+    // Snapshot generations that were already in flight before preflight reads
+    // can kick their own fire-and-forget loads. A later generation that existed
+    // here is a genuine concurrent refresh and must re-park; one first created
+    // by this preflight is the self-kick that load history suppresses.
+    state.capturePendingLoadGenerations();
     const preflight = preflightQueuedEventDependencies({
       runtime: state.runtime,
       eventQueue: state.eventQueue,
@@ -574,8 +665,32 @@ export async function processPullQueuedEventDuringExecute(
       getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
       getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
       scheduleWake: (notBefore) => state.scheduleWake(notBefore),
+      dropEvent: (event, reason) => state.dropEvent(event, reason),
     }, queuedEvent);
     shouldSkipEvent = preflight.shouldSkipEvent;
+
+    if (eventBlockingDeps.size > 0) {
+      // The event closure is a transient demand root for the WHOLE settle pass.
+      // Re-run the same decision-15 inverted query each iteration so a clean
+      // intermediate that becomes invalid mid-pass joins the demand set. This
+      // avoids both a full upstream-cone walk and an alternating-cycle escape
+      // into unbounded execute/preflight ticks.
+      state.setEventPassDemandRefresh((demand) => {
+        demand.clear();
+        const invalidDeps = new Set<Action>();
+        if (!state.collectInvalidUpstreamForLog(preflight.deps, invalidDeps)) {
+          return;
+        }
+        const plan = planEventInvalidDependencyScheduling({
+          invalidDeps,
+          isDebouncedComputationWaiting: (dep) =>
+            state.isDebouncedComputationWaiting(dep),
+          getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+          getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+        });
+        for (const dep of plan.runnableDeps) demand.add(dep);
+      });
+    }
 
     if (state.eventPreflightTelemetryEnabled) {
       state.runtime.telemetry.submit({
@@ -659,7 +774,6 @@ export async function dispatchQueuedEvent(state: {
     handlerId,
     handlerInfo: state.getActionTelemetryInfo(handler),
   });
-  state.eventQueue.shift();
 
   // Ensure the handler's input docs are locally available before the body
   // runs (see EventHandler.presyncInputs). Fail open: a presync error should
@@ -675,6 +789,18 @@ export async function dispatchQueuedEvent(state: {
       );
     }
   }
+
+  // Lineage may fail while presync is awaiting I/O. Keep the event in its FIFO
+  // slot until that await completes so the lineage callback can still find and
+  // settle it. A failed origin removes the event through dropQueuedEvent; never
+  // continue into the handler or notify its final callback a second time.
+  if (
+    queuedEvent.finalOutcomeNotified ||
+    state.eventQueue[0] !== queuedEvent
+  ) {
+    return;
+  }
+  state.eventQueue.shift();
 
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;

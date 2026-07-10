@@ -42,6 +42,8 @@ const BOB = "did:key:z6Mk-adoption-attach-bob";
 
 const SHARED_DOC = "of:adoption-attach-shared";
 const UNTRACKED_DOC = "of:adoption-attach-untracked";
+const USER_OUT = "of:adoption-attach-user-out";
+const SESSION_OUT = "of:adoption-attach-session-out";
 
 const authFactoryFor = (principal: string): SessionOpenAuthFactory =>
 (
@@ -164,16 +166,43 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
       });
     };
     await write(0);
+    await writer.transact({
+      localSeq: ++writerSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: USER_OUT,
+        scope: "user",
+        value: { value: { ready: true } },
+      }, {
+        op: "set",
+        id: SESSION_OUT,
+        scope: "session",
+        value: { value: { ready: true } },
+      }],
+    });
 
     const watch = async (session: typeof alice) => {
       const view = await session.watchSet([{
         id: "root",
         kind: "graph",
         query: {
-          roots: [{
-            id: SHARED_DOC,
-            selector: { path: [], schema: false },
-          }],
+          roots: [
+            {
+              id: SHARED_DOC,
+              selector: { path: [], schema: false },
+            },
+            {
+              id: USER_OUT,
+              scope: "user",
+              selector: { path: [], schema: false },
+            },
+            {
+              id: SESSION_OUT,
+              scope: "session",
+              selector: { path: [], schema: false },
+            },
+          ],
         },
       }]);
       return view.subscribe();
@@ -209,15 +238,66 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
       }),
     );
 
+    // Outputs must be inside the receiver's watch too. Otherwise the receiver
+    // could adopt clean while still holding an older value for that output.
+    await step(
+      3,
+      observationFor("untracked-output", {
+        currentKnownWrites: [{
+          space: SPACE,
+          scope: "space",
+          id: UNTRACKED_DOC,
+          path: ["value"],
+        }],
+      }),
+    );
+
+    // The per-run changed-write surface is independently safety-relevant. A
+    // dynamic/runtime-mediated output may not be part of currentKnownWrites;
+    // it must survive persistence and receive the same watch/scope gates.
+    await step(
+      4,
+      observationFor("untracked-actual-output", {
+        actualChangedWrites: [{
+          space: SPACE,
+          scope: "space",
+          id: UNTRACKED_DOC,
+          path: ["value"],
+        }],
+      }),
+    );
+    await step(
+      5,
+      observationFor("user-scope-actual-write", {
+        actualChangedWrites: [{
+          space: SPACE,
+          scope: "user",
+          id: USER_OUT,
+          path: ["value"],
+        }],
+      }),
+    );
+    await step(
+      6,
+      observationFor("session-scope-actual-write", {
+        actualChangedWrites: [{
+          space: SPACE,
+          scope: "session",
+          id: SESSION_OUT,
+          path: ["value"],
+        }],
+      }),
+    );
+
     // User-scope write surface: per-principal data, so only the writer's
     // principal (alice) may adopt it.
     await step(
-      3,
+      7,
       observationFor("user-scope-write", {
         currentKnownWrites: [{
           space: SPACE,
           scope: "user",
-          id: "of:adoption-attach-user-out",
+          id: USER_OUT,
           path: ["value"],
         }],
       }),
@@ -225,12 +305,12 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
 
     // Session-scope surface: never crosses sessions.
     await step(
-      4,
+      8,
       observationFor("session-scope-write", {
         currentKnownWrites: [{
           space: SPACE,
           scope: "session",
-          id: "of:adoption-attach-session-out",
+          id: SESSION_OUT,
           path: ["value"],
         }],
       }),
@@ -250,6 +330,10 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
 
     assertEquals(aliceAttached.includes("untracked-read"), false);
     assertEquals(bobAttached.includes("untracked-read"), false);
+    assertEquals(aliceAttached.includes("untracked-output"), false);
+    assertEquals(bobAttached.includes("untracked-output"), false);
+    assertEquals(aliceAttached.includes("untracked-actual-output"), false);
+    assertEquals(bobAttached.includes("untracked-actual-output"), false);
 
     assert(
       aliceAttached.includes("user-scope-write"),
@@ -258,9 +342,13 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
       }`,
     );
     assertEquals(bobAttached.includes("user-scope-write"), false);
+    assert(aliceAttached.includes("user-scope-actual-write"));
+    assertEquals(bobAttached.includes("user-scope-actual-write"), false);
 
     assertEquals(aliceAttached.includes("session-scope-write"), false);
     assertEquals(bobAttached.includes("session-scope-write"), false);
+    assertEquals(aliceAttached.includes("session-scope-actual-write"), false);
+    assertEquals(bobAttached.includes("session-scope-actual-write"), false);
 
     // Boot-listing flavor of the reader gate: the snapshot store keeps one
     // row per actionId, so a user-scope row lists only for the writer's
@@ -287,15 +375,148 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
         JSON.stringify(aliceListed)
       }`,
     );
+    assert(aliceListed.includes("user-scope-actual-write"));
     assertEquals(aliceListed.includes("session-scope-write"), false);
+    assertEquals(aliceListed.includes("session-scope-actual-write"), false);
 
     assert(bobListed.includes("space-scope"));
     assertEquals(bobListed.includes("user-scope-write"), false);
+    assertEquals(bobListed.includes("user-scope-actual-write"), false);
     assertEquals(bobListed.includes("session-scope-write"), false);
+    assertEquals(bobListed.includes("session-scope-actual-write"), false);
   } finally {
     await writerClient.close().catch(() => {});
     await aliceClient.close().catch(() => {});
     await bobClient.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 carries first and changed observation-only rows on the next watched commit", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const server = new Server({
+    store: toFileUrl(`${storePath}/`),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const writerClient = await connect({ transport: loopback(server) });
+  const receiverSyncs: SessionSync[] = [];
+  const receiverClient = await connect({
+    transport: teeSyncs(loopback(server), receiverSyncs),
+  });
+
+  try {
+    const writer = await writerClient.mount(SPACE, {}, authFactoryFor(ALICE));
+    const receiver = await receiverClient.mount(
+      SPACE,
+      {},
+      authFactoryFor(ALICE),
+    );
+    let localSeq = 0;
+    await writer.transact({
+      localSeq: ++localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SHARED_DOC,
+        value: { value: { count: 0 } },
+      }],
+    });
+    const view = await receiver.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: SHARED_DOC,
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    const updates = view.subscribe();
+    const syncUpdates = view.subscribeSync();
+
+    const commitObservationOnly = async (
+      implementationFingerprint: string,
+    ) => {
+      await writer.transact({
+        localSeq: ++localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationFor("next-window", {
+          implementationFingerprint,
+        }),
+      });
+    };
+    const commitWatchedWrite = async (count: number) => {
+      const next = updates.next();
+      const nextSync = syncUpdates.next();
+      await writer.transact({
+        localSeq: ++localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: SHARED_DOC,
+          value: { value: { count } },
+        }],
+      });
+      await next;
+      await nextSync;
+    };
+
+    await commitObservationOnly("impl:first");
+    await commitWatchedWrite(1);
+    const first = receiverSyncs.flatMap((sync) => sync.observations ?? [])
+      .map((row) => row.observation as SchedulerActionObservation)
+      .find((row) => row.actionId === "next-window");
+    assertEquals(first?.implementationFingerprint, "impl:first");
+
+    receiverSyncs.length = 0;
+    await commitObservationOnly("impl:changed");
+    await commitWatchedWrite(2);
+    const changed = receiverSyncs.flatMap((sync) => sync.observations ?? [])
+      .map((row) => row.observation as SchedulerActionObservation)
+      .find((row) => row.actionId === "next-window");
+    assertEquals(changed?.implementationFingerprint, "impl:changed");
+
+    // A receiver can cross the reserved delivery sequence without a watched
+    // document diff — for example, by committing to an untracked document.
+    // That empty catch-up must still carry another session's observation;
+    // otherwise lastSyncedSeq advances past the row and it is lost forever.
+    receiverSyncs.length = 0;
+    await commitObservationOnly("impl:empty-catch-up");
+    const nextSync = syncUpdates.next();
+    await receiver.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: UNTRACKED_DOC,
+        value: { value: { count: 1 } },
+      }],
+    });
+    const emptyCatchUp = await nextSync;
+    assertEquals(emptyCatchUp.done, false);
+    assertEquals(emptyCatchUp.value.upserts, []);
+    assertEquals(emptyCatchUp.value.removes, []);
+    const carried = (emptyCatchUp.value.observations ?? [])
+      .map((row: SchedulerActionSnapshotResult) =>
+        row.observation as SchedulerActionObservation
+      )
+      .find((row: SchedulerActionObservation) =>
+        row.actionId === "next-window"
+      );
+    assertEquals(carried?.implementationFingerprint, "impl:empty-catch-up");
+  } finally {
+    await writerClient.close().catch(() => {});
+    await receiverClient.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
     resetPersistentSchedulerStateConfig();

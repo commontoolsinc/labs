@@ -58,6 +58,43 @@ describe("throttle - bounded freshness", () => {
     expect(runtime.scheduler.getThrottle(action)).toBeUndefined();
   });
 
+  it("should run dirty work promptly when throttle is cleared", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-clear-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let observed = 0;
+    const effect: Action = (actionTx) => {
+      observed = source.withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(effect, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await runtime.scheduler.idle();
+    expect(observed).toBe(1);
+
+    runtime.scheduler.setThrottle(effect, 30_000);
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    // Yield through the already-queued scheduler tick so it observes the dirty
+    // gated node and arms the shared wake before the clear.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed).toBe(1);
+
+    runtime.scheduler.clearThrottle(effect);
+    await runtime.scheduler.idle();
+    expect(observed).toBe(2);
+  });
+
   it("should apply throttle from subscribe options", () => {
     const action: Action = () => {};
 

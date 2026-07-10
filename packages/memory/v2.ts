@@ -656,7 +656,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
 let persistentSchedulerStateEnabled = false;
-let commitPreconditionsEnabled = false;
+let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 
 /**
@@ -681,7 +681,7 @@ export function resetPersistentSchedulerStateConfig(): void {
  * but the memory protocol needs the value during client/server handshakes.
  */
 export function setCommitPreconditionsConfig(enabled?: boolean): void {
-  commitPreconditionsEnabled = enabled ?? false;
+  commitPreconditionsEnabled = enabled ?? true;
 }
 
 export function getCommitPreconditionsConfig(): boolean {
@@ -689,7 +689,7 @@ export function getCommitPreconditionsConfig(): boolean {
 }
 
 export function resetCommitPreconditionsConfig(): void {
-  commitPreconditionsEnabled = false;
+  commitPreconditionsEnabled = true;
 }
 
 /**

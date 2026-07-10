@@ -1,7 +1,7 @@
 # Incremental observation adoption (subscription-carried scheduler state)
 
-Status: Design. Successor to `per-doc-rehydration.md` (reload is the
-degenerate case of this mechanism). Flag-on only (persistentSchedulerState).
+Status: Implemented. Successor to `per-doc-rehydration.md` (reload is the
+degenerate case of this mechanism). Flag-on only (`persistentSchedulerState`).
 Goal: with the flag on, multi-user flows get FASTER than main — clients use
 scheduler information to skip work in ongoing operation, not just on reload.
 
@@ -37,27 +37,30 @@ indistinguishable from having run X at `O.observedAtSeq` (I7 extended to
 live operation). X's outputs are already in the store; determinism over the
 read set does the rest. Adoption is allowed only when ALL hold:
 
-- **C1 — identity.** X matches O by actionId + implementationFingerprint +
-  runtimeFingerprint (the same `observationMatchesCurrentAction` checks the
-  reload path uses). Action ids fold the piece-scoped doc links, so ids are
+- **C1 — identity.** X matches O by implementation/runtime fingerprints and
+  the complete durable identity tuple `(ownerSpace, branch, pieceId,
+  processGeneration, actionId)` (the same `observationMatchesCurrentAction`
+  checks the reload path uses). Action ids fold the piece-scoped doc links, so ids are
   stable across runtimes for shared derivations — proven empirically by the
   reload work (byte-identical instance keys across two managers). Id
   folding self-limits adoption only for derivations whose isolation is in
   the doc *id* (per-user result docs of per-user pieces). It does NOT
   self-limit scope-addressed isolation — see C6.
-- **C2 — seq currency.** For every doc in `O.reads ∪ O.shallowReads`, the
+- **C2 — seq and output currency.** For every doc in `O.reads ∪
+  O.shallowReads ∪ O.actualChangedWrites ∪ O.currentKnownWrites`, the
   local replica holds a confirmed record for that doc and its newest
   committed seq is ≤ `O.observedAtSeq`. A newer local write means X is
   genuinely stale relative to state the writer did not observe → run
   normally. A doc with NO local record (or no confirmed base) is worse
-  than unverifiable: adoption would skip the very run that loads and
-  subscribes it, so no later push would ever invalidate X — a permanently
-  stale receiver. Refuse; the local run establishes the subscription.
+  than unverifiable: adoption would skip the very run that loads/subscribes
+  an input or receives an output, so the receiver could be permanently stale
+  while marked clean. Refuse; the local run establishes the missing
+  subscription/output.
   (Conservative per-doc check; the safe failure direction is refusing
   adoption.)
 - **C3 — no local divergence.** No locally-pending (uncommitted/optimistic)
-  write overlaps `O.reads`: the local view differs from the writer's basis,
-  so the local run is meaningful. Refuse adoption.
+  write overlaps the C2 validation surface: the local view differs from the
+  writer's basis or output, so the local run is meaningful. Refuse adoption.
 - **C4 — computations only.** Effects and event handlers never adopt.
   (Handlers only run at the origin already; effects are per-client.)
 - **C5 — mid-run races converge.** The scheduler has no per-action running
@@ -133,34 +136,35 @@ commits), flushes on a short timer, re-evaluates each session's watch set,
 and pushes `SessionEffectMessage{effect: SessionSync}` where `SessionSync =
 {fromSeq, toSeq, upserts: [{id, scope, seq, doc}], removes}` — per-doc
 snapshots with per-doc seqs, no operations, no per-commit boundaries.
-Observations currently exist only on the inbound path (extracted from
-commits in `applyCommit` and persisted); observation-only commits carry no
-operations, mark nothing dirty, and are invisible to the fan-out.
+Observations are extracted from commits in `applyCommit`, persisted, and
+attached to flag-on subscription sync windows. Observation-only commits carry
+no operations and mark no docs dirty, so they trigger no push themselves; their
+rows ride the next advancing sync window that covers the reserved delivery
+sequence, including an otherwise-empty catch-up.
 
 - **Server:** retain the client's `persistentSchedulerState` handshake flag
   per connection (mirroring the existing `#syncSchemaTable` negotiation —
   the precedent that push payloads may be flag-conditioned per connection).
-  When building a session's `SessionSync` with non-empty upserts and both
-  the connection flag and the global flag are on, query the snapshot store
-  for observation rows with `commit_seq` in the sync's `(fromSeq, toSeq]`
-  window (the store already denormalizes `commit_seq` and `observed_at_seq`
-  per row; the existing listing query gains a commit-seq window filter) and
-  attach them as a new optional `SessionSync.observations` field, decoded
-  the same way a boot-listing row is. Echo: the fan-out already skips the
-  writer's own doc revisions via `DirtyOrigin{sessionId, seq}`; skip
-  observation rows the same way (rows whose `commit_seq` matches an origin
-  seq from the receiving session). Sourcing from the store makes the push
-  idempotent and batching-agnostic: a re-pushed or coalesced window carries
-  the same rows.
+  When building any advancing `SessionSync` and both the connection flag and
+  the global flag are on, query the snapshot store for observation rows whose
+  delivery sequence is in the sync's `(fromSeq, toSeq]` window and attach them
+  as an optional `SessionSync.observations` field, decoded the same way a boot
+  listing row is. This includes otherwise-empty catch-up syncs: observation-
+  only commits have no document diff to carry them. Echo suppression compares
+  each row's persisted writer session key with the receiving session key; it
+  does not infer authorship from a commit-sequence collision. Sourcing from the
+  store makes the push idempotent and batching-agnostic: a re-pushed or
+  coalesced window carries the same rows.
 
   The window is then filtered to what THIS session may adopt, exactly as
   the doc diff is scoped (`v2-adoption-attach-test.ts` pins all three):
 
-  - **Watch-scoped:** a row ships only when every read in
-    `reads ∪ shallowReads` is inside the session's tracked doc set. A
-    receiver never gets pushes for untracked docs, so it could never
-    verify such a row current (C2) — and pre-filter, the row poisoned the
-    receiver into the C2 deadlock (the flag-ON multiUserTest stall).
+  - **Watch-scoped:** a row ships only when every address in `reads`,
+    `shallowReads`, `actualChangedWrites`, and `currentKnownWrites` is inside
+    the session's tracked doc set. A receiver never gets pushes for untracked
+    inputs or outputs, so it could never verify such a row current (C2) — and
+    pre-filter, the row poisoned the receiver into the C2 deadlock (the flag-ON
+    multiUserTest stall).
   - **Reader-scoped (C6):** rows touching session-scope addresses are
     dropped; rows touching user-scope addresses ship only when the row's
     persisted writer session key carries the receiving session's
@@ -189,8 +193,9 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   reload path, which owns marker handling.
 - **No-op runs:** an observation-only or no-op commit triggers no push
   itself (nothing became dirty), but because the attach step sources rows
-  from the store by seq window, such observations ride the NEXT push whose
-  window covers their commit seq. A cascade's later stages can therefore
+  from the store by sequence window, such observations ride the next advancing
+  sync — document-bearing or an otherwise-empty catch-up — whose window covers
+  their reserved delivery sequence. A cascade's later stages can therefore
   lag one window behind their data — the receiver may redundantly run a
   cheap laggard (measured: the map coordinator's reconcile) before its
   observation arrives; the per-element ops adopt in-window (§3's benign
@@ -232,20 +237,20 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   is what takes the flag-on reload churn gate from ≤1 to 0
   (per-doc-rehydration.md §7).
 
-## 6. Implementation slices
+## 6. Implemented slices
 
-1. **S1 — server push:** include commit observations in subscription
+1. **S1 — server push (complete):** include commit observations in subscription
    notifications to flag-on, non-writer sessions.
-2. **S2 — client + scheduler adoption:** plumb received observations
+2. **S2 — client + scheduler adoption (complete):** plumb received observations
    through the storage provider to a scheduler `adoptRemoteObservations`
    entry applying §2/§3 (reusing the reload validation + rehydrate
    primitive and the per-doc replica seqs for C2).
-3. **S3 — live-skip test:** loopback two-manager harness, both runtimes
+3. **S3 — live-skip test (complete):** loopback two-manager harness, both runtimes
    LIVE on the same piece; drive a write through runtime A; assert
    runtime B's derived values update with ZERO computation runs in B's
    action-run trace (and that a B-local write still runs B's actions —
    adoption must not deaden local reactivity).
-4. **S4 — group-chat A/B:** flag-ON vs main on the multi-user benchmark;
+4. **S4 — group-chat A/B (complete):** flag-ON vs main on the multi-user benchmark;
    the actions/wall deltas are the acceptance.
 
 ## 7. Non-goals / deferred
@@ -254,6 +259,5 @@ operations, mark nothing dirty, and are invisible to the fan-out.
   deriver — the observation arrives WITH the doc write.
 - Demand-targeted partial rehydration, snapshot GC, cross-space child
   restore: unchanged from per-doc-rehydration.md.
-- Server-side filtering of observations per subscription selector
-  (start with per-commit fan-out to flag-on sessions; refine if payload
-  volume warrants).
+- Additional payload-volume optimization beyond the implemented watch-set and
+  reader-scope filters.

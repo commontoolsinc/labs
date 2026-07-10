@@ -42,7 +42,7 @@ const resolvePrincipalSessionKey = (
 ): string =>
   `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
 
-const resolveCommitSessionKey = (
+export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
 ): string =>
@@ -825,7 +825,7 @@ export interface SchedulerActionObservation {
   reads: SchedulerObservationAddress[];
   shallowReads: SchedulerObservationAddress[];
   actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites?: SchedulerObservationAddress[];
+  currentKnownWrites: SchedulerObservationAddress[];
   declaredWrites?: SchedulerObservationAddress[];
   materializerWriteEnvelopes: SchedulerObservationAddress[];
   ignoredSchedulingWrites?: SchedulerObservationAddress[];
@@ -1579,6 +1579,10 @@ export interface UpsertSchedulerObservationOptions {
   branch?: BranchName;
   ownerSpace?: string;
   commitSeq?: number | null;
+  // Optional non-FK fan-out slot for metadata-only observations. Stored only
+  // on scheduler_action_snapshot; the observation row's commit_seq continues
+  // to reference a real semantic commit.
+  deliveryCommitSeq?: number | null;
   observedAtSeq: number;
   sessionId?: SessionId;
   localSeq?: number;
@@ -1648,13 +1652,9 @@ const upsertSchedulerObservationTransaction = (
     // not whoever created the row first — else a user-scope row is offered to
     // the wrong principal or withheld from the actual latest writer.
     //
-    // Deliberately does NOT touch commit_seq: the adoption-window filter reads
-    // COALESCE(s.commit_seq, o.commit_seq), and upsertSchedulerSnapshot nulls
-    // s.commit_seq on observation-only commits, so o.commit_seq is the ONLY
-    // surviving carrier of the original semantic commit seq. Overwriting it
-    // with this (null) observation-only seq would drop the row from every
-    // sinceCommitSeq/throughCommitSeq window — silently killing the adoption
-    // this metadata is here to enable.
+    // Deliberately does NOT touch the observation row's commit_seq. Snapshot
+    // commit_seq carries the latest delivery slot; preserving the observation
+    // row keeps the original semantic commit available to older snapshots.
     updateSchedulerObservationWriterSession(engine, {
       observationId,
       sessionId: options.sessionId ?? null,
@@ -1676,7 +1676,12 @@ const upsertSchedulerObservationTransaction = (
   upsertSchedulerSnapshot(engine, {
     branch,
     observationId,
-    commitSeq: options.commitSeq ?? null,
+    // An identical metadata-only refresh does not need a new delivery slot;
+    // preserve the existing semantic/future slot. First-ever and
+    // payload-changing rows use the caller's next-sync reservation.
+    commitSeq: !payloadChanged && latest?.commit_seq != null
+      ? latest.commit_seq
+      : options.deliveryCommitSeq ?? options.commitSeq ?? null,
     observedAtSeq: options.observedAtSeq,
     payload,
     observation,
@@ -2329,13 +2334,9 @@ function normalizeSchedulerObservation(
     actualChangedWrites: observation.actualChangedWrites.map(
       normalizeSchedulerAddress,
     ),
-    ...(observation.currentKnownWrites
-      ? {
-        currentKnownWrites: observation.currentKnownWrites.map(
-          normalizeSchedulerAddress,
-        ),
-      }
-      : {}),
+    currentKnownWrites: observation.currentKnownWrites.map(
+      normalizeSchedulerAddress,
+    ),
     ...(observation.declaredWrites
       ? {
         declaredWrites: observation.declaredWrites.map(
@@ -2386,7 +2387,6 @@ function encodeSchedulerDependencySnapshot(
     {
       ...stable,
       observedAtSeq: 0,
-      actualChangedWrites: [],
     } satisfies SchedulerActionObservation,
   );
 }
@@ -2398,7 +2398,6 @@ function decodeSchedulerSnapshotObservation(
   return {
     ...decodeSchedulerObservation(payload),
     observedAtSeq,
-    actualChangedWrites: [],
   };
 }
 
@@ -3988,6 +3987,13 @@ const applySchedulerObservationOnlyCommit = (
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
     ownerSpace: space ?? schedulerObservation.ownerSpace,
+    // An observation-only commit advances no semantic sequence, so reserve the
+    // next GLOBAL server sequence as its delivery slot. `observedAtSeq` is the
+    // selected branch's head and can lag the space-wide sync watermark after a
+    // different branch commits; branchHead + 1 may therefore already be in the
+    // past for every receiver. The next semantic commit, on any branch, gets
+    // exactly serverSeq + 1 and its advancing sync window can carry this row.
+    deliveryCommitSeq: serverSeq(engine) + 1,
     observedAtSeq,
     sessionId: sessionKey,
     localSeq,

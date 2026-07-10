@@ -159,11 +159,11 @@ notes residual gaps *within* that line; the consolidated register is §9.
 
 ### 3.1 Scheduler v2 (#4288, phases 3c–7)
 
-Already on main: durable event IDs (#4088), speculation lineage (#4090),
-static write surfaces (#4098), tx-carried source action for
-self-suppression (#4099), node records + liveness refcounts (#4101/#4102).
-In flight: gates unification, declared-reads (no dependency-collection
-prefetch), bounded settle (`PASS_RUN_BUDGET = 5`).
+Implemented by scheduler v2 (#4288): durable event IDs and receipts,
+speculation lineage, static write surfaces, tx-carried source action for
+self-suppression, node records and root-reachability liveness refcounts,
+unified gates, declared reads (no reactive-node dependency prefetch), and
+bounded settle (`PASS_RUN_BUDGET = 10`).
 
 Contribution: a scheduler whose per-node state is one record
 (status/liveRefs/reads/writes), whose demand is refcounted rather than
@@ -173,14 +173,14 @@ executor must hold for hundreds of spaces.
 
 ### 3.2 Persistent scheduler state (BUILT behind a flag)
 
-Already on main AND #4288, behind the default-off runtime option
+Implemented in the scheduler-v2 tree behind the default-off runtime option
 `persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`):
 the full durable stack, not just shapes. Per-action observations
-(`SchedulerActionObservation` — `pieceId`, `actionId`, `actionKind`,
-`implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
-`declaredWrites`, gate options, status —
-`packages/runner/src/scheduler/persistent-observation.ts:22`) are attached
-to the live commit tx (`action-run.ts:646/708`) and persisted **inside the
+(`SchedulerActionObservation` — full piece/action identity, action kind,
+implementation/runtime fingerprints, `observedAtSeq`, reads, the fixed
+`currentKnownWrites` surface, gate options, status —
+`packages/runner/src/scheduler/persistent-observation.ts`) are attached
+to the live commit tx (`scheduler/run.ts`) and persisted **inside the
 single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
 → `upsertSchedulerObservationTransaction` `:3285`) across five tables
 (`scheduler_observation`, `scheduler_action_snapshot` LWW,
@@ -188,11 +188,10 @@ single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
 DDL `engine.ts:206`+). Cold start reads them back
 (`listSchedulerActionSnapshots` `engine.ts:1717` via the provider seam
 `storage/interface.ts:272`) and rehydrates without re-running unchanged
-actions (`rehydrateActionFromStorage` `scheduler.ts:666`, fingerprint-gated,
-fail-open). Restart-skip is proven by `reload-rehydration.test.ts` +
-`v2-scheduler-state-test.ts` (executed, passing). On #4288 the capability
-is identical; only the cold-start orchestration moved from `scheduler.ts`
-into the runner + `scheduler/facade.ts` (see W0.1).
+actions (`scheduler/facade.ts`, fingerprint- and replica-currency-gated,
+conservative fallback). Restart-skip is proven by `reload-rehydration.test.ts` +
+`v2-scheduler-state-test.ts` (executed, passing). Cold-start orchestration lives
+in the runner plus `scheduler/facade.ts` (see W0.1).
 
 Still missing (G4), and the real Phase-0 work: durable dirty markers
 consumed as a **wake query** — the tree marks readers dirty *inline* during
@@ -270,7 +269,7 @@ Rather than auditing every write site into attaching `source` explicitly,
 source attaching becomes a property of the **cell write mechanism
 itself**. Every transaction is already associated with exactly one
 originating action (`tx.sourceAction` / `debugActionId`, stamped at run
-start — `packages/runner/src/scheduler/action-run.ts:347`, landed with
+start — `packages/runner/src/scheduler/run.ts`, landed with
 #4099 for scheduler self-suppression), and every action belongs to one
 piece. Generalize that stamp into a small **tx provenance envelope**,
 populated at tx open by the runner:
@@ -368,7 +367,7 @@ approach comparison honest.
   All writes (today) / source writes only (B) / no writes, events only (C).
   "Source write" is definable *today* by the originating action kind the
   scheduler already stamps on transactions (`tx.sourceAction`,
-  `packages/runner/src/scheduler/action-run.ts:348` → node kind:
+  `packages/runner/src/scheduler/run.ts` → node kind:
   `event-handler` vs `computation`/materializer-effect), plus
   setup/seed-materialization structural writes, plus direct `.set()` from
   UI bindings — everything else is derived.
@@ -456,7 +455,7 @@ computations downstream, never shipped, always discardable.
 #### B.1 Client write path
 
 The runner tags every transaction with its originating action
-(`tx.sourceAction`, `packages/runner/src/scheduler/action-run.ts:348`,
+(`tx.sourceAction`, `packages/runner/src/scheduler/run.ts`,
 landed with #4099) and the node kind is known at subscribe time. §3.3.1
 generalizes this tag into the tx provenance envelope that also stamps
 `source` onto created docs — one channel, both consumers. The storage

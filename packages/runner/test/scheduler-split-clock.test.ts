@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 import {
   applyPullExecuteContinuation,
+  applyQuiescentContinuation,
   type ExecuteContinuationState,
 } from "../src/scheduler/continuation.ts";
 import {
@@ -53,6 +54,7 @@ describe("split-clock readiness decisions", () => {
       hasWakeTimer: () => false,
       setScheduled: () => {},
       resetSettlingTracker: () => {},
+      resetConvergenceHoldPasses: () => {},
       setPendingQueueTaskTimer: () => {},
       execute: () => {},
     } satisfies ExecuteContinuationState;
@@ -63,6 +65,93 @@ describe("split-clock readiness decisions", () => {
     // stay open while the event is queued and undispatched.
     expect(idleResolved).toBe(false);
     expect(state.eventQueue.length).toBe(1);
+  });
+
+  it("starts a fresh convergence-hold episode after the idle escape", () => {
+    let idleResolved = false;
+    let holdResets = 0;
+    const state = {
+      pullScheduling: {} as PullSchedulingState,
+      eventQueue: [],
+      idlePromises: [() => {
+        idleResolved = true;
+      }],
+      consumeRerunAfterCurrentExecute: () => false,
+      hasPendingLineageHeadEvent: () => false,
+      hasLoadParkedHeadEvent: () => false,
+      scheduleWake: () => {},
+      hasWakeTimer: () => true,
+      setScheduled: () => {},
+      resetSettlingTracker: () => {},
+      resetConvergenceHoldPasses: () => holdResets++,
+      setPendingQueueTaskTimer: () => {},
+      execute: () => {},
+    } satisfies ExecuteContinuationState;
+
+    applyQuiescentContinuation(state, {
+      hasParkedHeadEvent: false,
+      nextDirtyPullRunAt: 1_000,
+      nextDirtyPullRunWaitsForIdle: false,
+    });
+
+    expect(idleResolved).toBe(true);
+    expect(holdResets).toBe(1);
+  });
+
+  it("does not let an irrelevant shared wake hold idle open", () => {
+    let idleResolved = false;
+    let holdResets = 0;
+    const state = {
+      pullScheduling: {} as PullSchedulingState,
+      eventQueue: [],
+      idlePromises: [() => {
+        idleResolved = true;
+      }],
+      consumeRerunAfterCurrentExecute: () => false,
+      hasPendingLineageHeadEvent: () => false,
+      hasLoadParkedHeadEvent: () => false,
+      scheduleWake: () => {},
+      // With no nextDirtyPullRunAt and no parked event, this timer belongs only
+      // to dormant/non-idle-relevant work.
+      hasWakeTimer: () => true,
+      setScheduled: () => {},
+      resetSettlingTracker: () => {},
+      resetConvergenceHoldPasses: () => holdResets++,
+      setPendingQueueTaskTimer: () => {},
+      execute: () => {},
+    } satisfies ExecuteContinuationState;
+
+    applyQuiescentContinuation(state, { hasParkedHeadEvent: false });
+
+    expect(idleResolved).toBe(true);
+    expect(holdResets).toBe(1);
+  });
+
+  it("resets convergence holds at an ordinary idle boundary", () => {
+    let idleResolved = false;
+    let holdResets = 0;
+    const state = {
+      pullScheduling: {} as PullSchedulingState,
+      eventQueue: [],
+      idlePromises: [() => {
+        idleResolved = true;
+      }],
+      consumeRerunAfterCurrentExecute: () => false,
+      hasPendingLineageHeadEvent: () => false,
+      hasLoadParkedHeadEvent: () => false,
+      scheduleWake: () => {},
+      hasWakeTimer: () => false,
+      setScheduled: () => {},
+      resetSettlingTracker: () => {},
+      resetConvergenceHoldPasses: () => holdResets++,
+      setPendingQueueTaskTimer: () => {},
+      execute: () => {},
+    } satisfies ExecuteContinuationState;
+
+    applyQuiescentContinuation(state, { hasParkedHeadEvent: false });
+
+    expect(idleResolved).toBe(true);
+    expect(holdResets).toBe(1);
   });
 
   it("isRunnableSchedulingSeed honors the passed clock instead of re-reading", () => {

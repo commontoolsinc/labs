@@ -137,9 +137,8 @@ export interface TriggerTraceValueSummary {
 export interface TriggerTraceActionRecord {
   actionId: string;
   actionType: "effect" | "computation";
-  mode: "pull" | "push";
+  mode: "pull";
   decision:
-    | "schedule-push"
     | "mark-invalid"
     | "already-invalid"
     | "skip-own-commit-source"
@@ -155,7 +154,7 @@ export interface TriggerTraceEntry {
   notificationType: string;
   changeIndex: number;
   matchedActionCount: number;
-  mode: "pull" | "push";
+  mode: "pull";
   writerActionId?: string;
   space: MemorySpace;
   entityId: URI;
@@ -174,6 +173,14 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
+  /**
+   * The FIFO slot was reserved before its handler's piece finished loading.
+   * A loading head parks the whole event queue so later, already-registered
+   * handlers cannot overtake it.
+   */
+  handlerLoadPending?: boolean;
+  /** Internal exactly-once guard for terminal pre-dispatch drops. */
+  finalOutcomeNotified?: boolean;
   /**
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets

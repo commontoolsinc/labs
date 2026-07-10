@@ -64,11 +64,10 @@ export interface PullSchedulingState {
   readonly isLiveAction: (action: Action) => boolean;
   readonly hasActiveDebounceTimer: (action: Action) => boolean;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
-  // True while a convergence-backoff-deferred idle-relevant node should still
-  // hold idle() open. Goes false once the current non-settling episode exhausts
-  // its backoff-pass budget, releasing idle() for a genuinely non-converging
-  // (cyclic) subgraph (the escape valve). See SettlingTracker.backoffEpisodeCount.
-  readonly isConvergenceHoldActive: () => boolean;
+  // Per-action escape valve for convergence-backoff-deferred work. Keeping the
+  // episode count on the gated node prevents one non-settling subgraph from
+  // releasing idle() for an unrelated future convergence wave.
+  readonly isConvergenceHoldActive: (action: Action) => boolean;
   // True iff the action is deferred by a CONVERGENCE-backoff wake specifically
   // (`gate.backoffUntil` in the future) — as opposed to a throttle/debounce
   // freshness window. Throttle/debounce deferred re-runs of an already-ran
@@ -168,7 +167,7 @@ export function assessPullWork(
     // (cyclic) subgraph still resolves idle() (the settle cap keeps the system
     // responsive; scheduler.non-settling telemetry has fired). This gate is the
     // reason the F1 hold below is cycle-safe.
-    if (!state.isConvergenceHoldActive()) return false;
+    if (!state.isConvergenceHoldActive(action)) return false;
     return state.effects.has(action) ||
       state.materializerIndex.isMaterializer(action) ||
       state.pendingPullRunnableState

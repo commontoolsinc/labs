@@ -85,7 +85,7 @@ async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
     await result.pull();
 
     result.key("openNote").send({});
-    await runtime.idle();
+    await runtime.settled();
     await result.pull();
 
     assert((result.key("menuOpen").get() as unknown) === false);
@@ -184,7 +184,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
     first.action(tx);
     second.action(tx);
     await tx.commit();
-    await runtime.idle();
+    await runtime.settled();
 
     assertEquals(navigations.length, 1);
     assertEquals(navigations[0], entityRefToString(targetOne.entityId));
@@ -253,14 +253,14 @@ Deno.test(
       builtin.action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
       assert(rejectedResult.error !== undefined);
-      await runtime.idle();
+      await runtime.settled();
       assertEquals(navigations.length, 0);
 
       const retryTx = runtime.edit();
       builtin.action(retryTx);
       const retryResult = await retryTx.commit();
       assert(retryResult.ok !== undefined);
-      await runtime.idle();
+      await runtime.settled();
 
       assertEquals(navigations.length, 1);
       assertEquals(navigations[0], entityRefToString(target.entityId));
@@ -270,3 +270,66 @@ Deno.test(
     }
   },
 );
+
+Deno.test("navigateTo async callback is tracked by runtime.settled", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  let callbackCompleted = false;
+  const callbackStart = Promise.withResolvers<void>();
+  let releaseNavigation!: () => void;
+  const navigationGate = new Promise<void>((resolve) => {
+    releaseNavigation = resolve;
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    navigateCallback: async () => {
+      callbackStart.resolve();
+      await navigationGate;
+      callbackCompleted = true;
+    },
+  });
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "tracked target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => navigateTo(Target({})),
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+
+    const setupTx: IExtendedStorageTransaction = runtime.edit();
+    const rootCell = runtime.getCell(
+      space,
+      "navigateTo tracked root",
+      undefined,
+      setupTx,
+    );
+    const root = runtime.run(setupTx, Root, {}, rootCell);
+    await setupTx.commit();
+    await root.pull();
+
+    root.key("openTarget").send({});
+    // Start the barrier before the scheduler has dispatched the handler. This
+    // pins the registration race: settled() must observe the eventual
+    // post-commit navigation work, not return in the gap before its flush.
+    let settledResolved = false;
+    const settled = runtime.settled().then(() => {
+      settledResolved = true;
+    });
+    await callbackStart.promise;
+    await Promise.resolve();
+    assertEquals(callbackCompleted, false);
+    assertEquals(settledResolved, false);
+
+    releaseNavigation();
+    await settled;
+    assertEquals(callbackCompleted, true);
+  } finally {
+    releaseNavigation();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

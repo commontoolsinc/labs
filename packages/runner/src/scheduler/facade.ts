@@ -28,7 +28,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import {
-  EVENT_LOAD_PARK_TIMEOUT_MS,
+  CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
@@ -81,11 +81,9 @@ import {
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
-  isConvergenceHoldActive,
   markExecuteStart,
   markNonSettlingEpisode,
   pushBoundedHistory,
-  recordBackoffEpisode,
   recordExecuteEnd,
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
@@ -132,6 +130,7 @@ import {
 import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import {
   addSchedulerEventHandler,
+  dropQueuedEvent,
   isHeadEventParked as isHeadEventParkedState,
   queueSchedulerEvent,
   type SchedulerEventExecutionState,
@@ -157,6 +156,7 @@ import type {
   TriggerTraceEntry,
 } from "./types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { entityKey } from "./keys.ts";
 
 ensureNotRenderThread();
 
@@ -174,6 +174,13 @@ type SchedulerStorageRehydrationOptions =
       string,
       PersistedSchedulerObservationSnapshot
     >;
+    addressesCurrentAtOrBelow?: (
+      addresses: readonly IMemorySpaceAddress[],
+      seq: number,
+    ) => boolean;
+    hasPendingWriteOverlapping?: (
+      addresses: readonly IMemorySpaceAddress[],
+    ) => boolean;
   };
 
 type SchedulerRegistrationInput = ReactivityLog;
@@ -227,6 +234,35 @@ function normalizeRegistrationArgs(
   };
 }
 
+function observationIdentityKey(
+  identity: {
+    ownerSpace?: string;
+    branch: string;
+    pieceId: string;
+    processGeneration: number;
+    actionId: string;
+  },
+): string {
+  return [
+    identity.ownerSpace ?? "",
+    identity.branch,
+    identity.pieceId,
+    String(identity.processGeneration),
+    identity.actionId,
+  ].join("\0");
+}
+
+function observationAdoptionAddresses(
+  observation: SchedulerActionObservation,
+): IMemorySpaceAddress[] {
+  return [
+    ...observation.reads,
+    ...observation.shallowReads,
+    ...observation.actualChangedWrites,
+    ...(observation.currentKnownWrites ?? []),
+  ];
+}
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 export type {
@@ -260,10 +296,7 @@ export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   readonly lineage = new SpeculationLineage({
-    removeQueuedEvent: (event) => {
-      const index = this.eventQueue.indexOf(event);
-      if (index >= 0) this.eventQueue.splice(index, 1);
-    },
+    dropQueuedEvent: (event, reason) => this.dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
     onError: (error) => logger.error("lineage", () => [error]),
   });
@@ -357,13 +390,15 @@ export class Scheduler {
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
   private eventPreflightTelemetryEnabled = false;
+  private eventPassDemandRefresh?: (demand: Set<Action>) => void;
   private storageNotificationState!: StorageNotificationState;
-  // Reverse action-id index for incremental observation adoption
+  // Full durable-identity index for incremental observation adoption
   // (docs/specs/scheduler-v2/incremental-observation-adoption.md): a remote
   // observation names its action by id; the nodes registry is a WeakMap, so
-  // adoption keeps this registration-scoped map. Ids fold the piece-scoped
-  // doc links (space-qualified), so they are unique within a runtime.
-  private actionsByActionId = new Map<string, Action>();
+  // adoption keeps this registration-scoped map. Action ids are only unique
+  // within a piece; owner space, branch and generation are part of the durable
+  // identity and must participate in lookup as well.
+  private actionsByObservationIdentity = new Map<string, Action>();
 
   // Actions registered with resumeMode "always-run" — the map/filter/flatMap
   // coordinators that must run their reconcile to (re)register per-element
@@ -394,12 +429,12 @@ export class Scheduler {
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
   // Head event parked on in-flight document loads (CT-1795). Keyed by event
-  // id; released by loadsSettled (or the timeout backstop), which re-queues
-  // execution.
+  // id; released by loadsSettled, which either re-queues execution on success
+  // or drops the at-most-once event on an explicit load failure.
   private headEventLoadPark: {
     eventId: string;
     keys: readonly string[];
-    timeout: ReturnType<typeof setTimeout>;
+    generations: ReadonlyMap<string, number>;
   } | null = null;
   // Keys whose loads already settled while this event was head. Preflight
   // itself kicks fire-and-forget pulls (populateDependencies cold reads), so
@@ -409,8 +444,12 @@ export class Scheduler {
   // update, not a provisional snapshot.
   private headEventLoadParkHistory: {
     eventId: string;
-    keys: Set<string>;
+    generations: Map<string, number>;
   } | null = null;
+  // Generations already pending before the current event preflight. Used to
+  // distinguish a genuine concurrent refresh from a load kicked by preflight
+  // itself (the latter must not re-arm the same event forever).
+  private preflightPendingLoadGenerations = new Map<string, number>();
   // Depth of the initial-rehydration apply window (the rehydration barrier reads
   // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
   // resume a synchronous snapshot apply at registration, so this is >0 only
@@ -521,10 +560,23 @@ export class Scheduler {
       maybeOptions,
     );
     const { rehydrateFromStorage } = options;
+    const previousObservationIdentityKey = this
+      .observationIdentityKeyForAction(action);
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
     }
-    this.actionsByActionId.set(this.getActionId(action), action);
+    const observationIdentityKey = this.observationIdentityKeyForAction(action);
+    if (
+      previousObservationIdentityKey !== undefined &&
+      previousObservationIdentityKey !== observationIdentityKey &&
+      this.actionsByObservationIdentity.get(previousObservationIdentityKey) ===
+        action
+    ) {
+      this.actionsByObservationIdentity.delete(previousObservationIdentityKey);
+    }
+    if (observationIdentityKey !== undefined) {
+      this.actionsByObservationIdentity.set(observationIdentityKey, action);
+    }
     if (options.resumeMode === "always-run") {
       this.alwaysRunActions.add(action);
     }
@@ -548,13 +600,15 @@ export class Scheduler {
     // NOT rehydrate. A snapshot miss thus degrades to the same synced-hold
     // fresh run the flag-off path gets, instead of racing the data.
     let rehydrated = false;
+    const snapshotsByActionId = rehydrateFromStorage?.snapshotsByActionId;
     if (
-      rehydrateFromStorage?.snapshotsByActionId &&
+      rehydrateFromStorage &&
+      snapshotsByActionId &&
       options.resumeMode !== "always-run"
     ) {
       rehydrated = this.applyPreloadedInitialActionRehydration(
         action,
-        rehydrateFromStorage.snapshotsByActionId,
+        { ...rehydrateFromStorage, snapshotsByActionId },
       );
     }
     if (!rehydrated && options.awaitSyncBeforeInitialRun) {
@@ -732,21 +786,33 @@ export class Scheduler {
   // leaves the action on the normal initial-run path.
   private applyPreloadedInitialActionRehydration(
     action: Action,
-    snapshotsByActionId: ReadonlyMap<
-      string,
-      PersistedSchedulerObservationSnapshot
-    >,
+    rehydration: SchedulerStorageRehydrationOptions & {
+      snapshotsByActionId: ReadonlyMap<
+        string,
+        PersistedSchedulerObservationSnapshot
+      >;
+    },
   ): boolean {
     // Engage the rehydration barrier for the duration of the apply: if
     // rehydrateActionFromObservation triggers a synchronous settle, no pull
     // seed may promote this resuming action before its status is restored.
     this.initialRehydrationInFlight++;
     try {
-      const snapshot = snapshotsByActionId.get(this.getActionId(action));
+      const snapshot = rehydration.snapshotsByActionId.get(
+        this.getActionId(action),
+      );
+      if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+        logger.debug("rehydrate/fallback-run/no-match", () => []);
+        return false;
+      }
+      const addresses = observationAdoptionAddresses(snapshot.observation);
       if (
-        snapshot &&
-        isSchedulerActionObservation(snapshot.observation) &&
         this.observationMatchesCurrentAction(action, snapshot.observation) &&
+        rehydration.addressesCurrentAtOrBelow?.(
+            addresses,
+            snapshot.observation.observedAtSeq,
+          ) === true &&
+        rehydration.hasPendingWriteOverlapping?.(addresses) !== true &&
         this.rehydrateActionFromObservation(action, snapshot)
       ) {
         logger.debug("rehydrate/ok", () => []);
@@ -808,7 +874,9 @@ export class Scheduler {
       // Computations only: effects render locally, and event handlers only
       // run at their origin.
       if (observation.actionKind !== "computation") continue;
-      const action = this.actionsByActionId.get(observation.actionId);
+      const action = this.actionsByObservationIdentity.get(
+        observationIdentityKey(observation),
+      );
       if (!action) continue;
       // Only live registrations adopt (the id index may hold entries whose
       // node was removed through a path that bypassed unsubscribe()).
@@ -824,12 +892,12 @@ export class Scheduler {
       if (!this.observationMatchesCurrentAction(action, observation)) {
         continue;
       }
-      const reads = [...observation.reads, ...observation.shallowReads];
-      if (!oracle.readsCurrentAtSeq(reads, observation.observedAtSeq)) {
+      const addresses = observationAdoptionAddresses(observation);
+      if (!oracle.readsCurrentAtSeq(addresses, observation.observedAtSeq)) {
         logger.debug("adopt/miss/stale-reads", () => [observation.actionId]);
         continue;
       }
-      if (oracle.hasPendingLocalWriteOverlapping(reads)) {
+      if (oracle.hasPendingLocalWriteOverlapping(addresses)) {
         logger.debug("adopt/miss/local-pending", () => [observation.actionId]);
         continue;
       }
@@ -858,6 +926,19 @@ export class Scheduler {
       return false;
     }
 
+    const identity = (action as Partial<TelemetryAnnotations>)
+      .schedulerObservationIdentity;
+    if (
+      identity === undefined ||
+      identity.ownerSpace !== observation.ownerSpace ||
+      (identity.branch ?? "") !== observation.branch ||
+      identity.pieceId !== observation.pieceId ||
+      (identity.processGeneration ?? 0) !== observation.processGeneration
+    ) {
+      logger.debug("rehydrate/miss/identity", () => []);
+      return false;
+    }
+
     const telemetry = getSchedulerActionTelemetryInfo(action);
     const matches = observation.implementationFingerprint ===
         schedulerImplementationFingerprint(action, actionId, telemetry) &&
@@ -880,6 +961,21 @@ export class Scheduler {
     };
   }
 
+  private observationIdentityKeyForAction(action: Action): string | undefined {
+    const identity = (action as Partial<TelemetryAnnotations>)
+      .schedulerObservationIdentity;
+    if (identity === undefined || identity.ownerSpace === undefined) {
+      return undefined;
+    }
+    return observationIdentityKey({
+      ownerSpace: identity.ownerSpace,
+      branch: identity.branch ?? "",
+      pieceId: identity.pieceId,
+      processGeneration: identity.processGeneration ?? 0,
+      actionId: this.getActionId(action),
+    });
+  }
+
   unsubscribe(
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
@@ -890,9 +986,12 @@ export class Scheduler {
     // (a re-registration may have overwritten it). Cancel paths that bypass
     // this method leave stale entries; the adoption path re-checks node
     // liveness before applying, so stale entries are inert.
-    const actionId = this.getActionId(action);
-    if (this.actionsByActionId.get(actionId) === action) {
-      this.actionsByActionId.delete(actionId);
+    const identityKey = this.observationIdentityKeyForAction(action);
+    if (
+      identityKey !== undefined &&
+      this.actionsByObservationIdentity.get(identityKey) === action
+    ) {
+      this.actionsByObservationIdentity.delete(identityKey);
     }
   }
 
@@ -962,9 +1061,9 @@ export class Scheduler {
         this.hasPendingLineageHeadEvent() || this.hasLoadParkedHeadEvent()
       ) {
         // A cross-space lineage head has no timer — its origin commit callback
-        // is the wake source; a load-parked head wakes on load completion (or
-        // its timeout backstop). Either way idle must stay open until the
-        // callback re-queues execution.
+        // is the wake source; a load-parked head wakes on load completion or
+        // drops on an explicit load failure. Either way idle must stay open
+        // until the callback re-queues execution.
         this.idlePromises.push(park);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
@@ -975,6 +1074,7 @@ export class Scheduler {
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
         // so we don't wait for them.
+        this.resetConvergenceHoldPasses();
         resolve();
       } else {
         // Execution is scheduled - wait for it to complete
@@ -1375,10 +1475,7 @@ export class Scheduler {
    * Should be called when the scheduler is being torn down.
    */
   dispose(): void {
-    if (this.headEventLoadPark) {
-      clearTimeout(this.headEventLoadPark.timeout);
-      this.headEventLoadPark = null;
-    }
+    this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     this.disposed = true;
     this.gates.cancelWake();
@@ -1442,6 +1539,7 @@ export class Scheduler {
   private async processExecuteEventPhase(): Promise<Set<Action>> {
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
+    this.eventPassDemandRefresh = undefined;
 
     logger.timeStart("scheduler", "execute", "event");
     try {
@@ -1458,7 +1556,7 @@ export class Scheduler {
   private buildInitialExecuteSeeds(
     eventBlockingDeps: Iterable<Action>,
   ): Set<Action> {
-    // Build initial seeds for pull mode (effects + special actions).
+    // Capture the head event's transient demand roots for this settle pass.
     return buildPullInitialSeeds({
       eventBlockingDeps,
     });
@@ -1496,11 +1594,6 @@ export class Scheduler {
     settleResult: SchedulerSettleResult,
   ): void {
     if (!settleResult.backoffApplied) return;
-    // Advance the non-settling episode's backoff-pass counter BEFORE the
-    // continuation reads isConvergenceHoldActive(): the count for this pass must
-    // be reflected when idle() decides whether to hold. Must precede the
-    // markNonSettlingEpisode early-return below (which fires once per episode).
-    recordBackoffEpisode(this.settlingTracker);
     const nonSettlingTelemetry = markNonSettlingEpisode(this.settlingTracker);
     if (!nonSettlingTelemetry) return;
 
@@ -1805,16 +1898,23 @@ export class Scheduler {
       // the event-driven piece-start task (events.ts), so gating on it would
       // pause all pull scheduling on every piece-start.
       hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
-      // Reads the CURRENT settlingTracker (reassigned on reset), so it tracks
-      // the live episode counter rather than capturing a stale tracker.
-      isConvergenceHoldActive: () => this.isConvergenceHoldActive(),
+      // Per-node convergence episode state prevents one exhausted subgraph
+      // from releasing idle for unrelated work.
+      isConvergenceHoldActive: (action) => this.isConvergenceHoldActive(action),
       isConvergenceBackoffDeferred: (action) =>
         this.isConvergenceBackoffDeferred(action),
     };
   }
 
-  private isConvergenceHoldActive(): boolean {
-    return isConvergenceHoldActive(this.settlingTracker);
+  private isConvergenceHoldActive(action: Action): boolean {
+    return (this.nodes.get(action)?.gate.convergenceHoldPasses ?? 0) <
+      CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES;
+  }
+
+  private resetConvergenceHoldPasses(): void {
+    for (const record of this.nodes.nodes()) {
+      record.gate.convergenceHoldPasses = 0;
+    }
   }
 
   // A node is convergence-backoff-deferred iff its `gate.backoffUntil` is in the
@@ -1914,6 +2014,9 @@ export class Scheduler {
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
+      refreshPassScopedDemand: (demand) => {
+        this.eventPassDemandRefresh?.(demand);
+      },
       getActionId: (action) => this.getActionId(action),
       isThrottled: (action) => this.gates.isThrottled(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
@@ -1946,6 +2049,9 @@ export class Scheduler {
       resetSettlingTracker: () => {
         this.settlingTracker = createSettlingTracker();
       },
+      resetConvergenceHoldPasses: () => {
+        this.resetConvergenceHoldPasses();
+      },
       setPendingQueueTaskTimer: (timer) => {
         this.pendingQueueTaskTimer = timer;
       },
@@ -1960,24 +2066,11 @@ export class Scheduler {
       eventQueue: this.eventQueue,
       backgroundTasks: this.backgroundTasks,
       queueExecution: () => this.queueExecution(),
-      queueEvent: (
-        targetEventLink,
-        targetEvent,
-        targetRetries,
-        targetOnCommit,
-        targetDoNotLoad,
-        targetOpts,
-      ) =>
-        this.queueEvent(
-          targetEventLink,
-          targetEvent,
-          targetRetries,
-          targetOnCommit,
-          targetDoNotLoad,
-          targetOpts,
-        ),
       recordLineageEvent: (originTx, queuedEvent) => {
         this.lineage.recordEvent(originTx, queuedEvent);
+      },
+      releaseLineageEvent: (originTx, queuedEvent) => {
+        this.lineage.release(originTx, queuedEvent);
       },
     };
   }
@@ -1991,6 +2084,7 @@ export class Scheduler {
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.collectPendingLoadParkKeys(event, deps),
+      capturePendingLoadGenerations: () => this.capturePendingLoadGenerations(),
       parkHeadEventForLoads: (event, keys) =>
         this.parkHeadEventForLoads(event, keys),
       isHeadEventLoadParked: (event) => this.isHeadEventLoadParked(event),
@@ -2015,6 +2109,9 @@ export class Scheduler {
           deps,
           invalidDeps,
         ),
+      setEventPassDemandRefresh: (refresh) => {
+        this.eventPassDemandRefresh = refresh;
+      },
       isDebouncedComputationWaiting: (target) =>
         this.isDebouncedComputationWaiting(target),
       getNextDebounceRunTime: (target) => this.getNextDebounceRunTime(target),
@@ -2023,6 +2120,9 @@ export class Scheduler {
       lineageStatus: (originTx) => this.lineage.originStatus(originTx),
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);
+      },
+      dropEvent: (queuedEvent, reason) => {
+        this.dropEvent(queuedEvent, reason);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.lineage.recordEvent(originTx, queuedEvent);
@@ -2173,9 +2273,6 @@ export class Scheduler {
   ): void {
     const record = this.nodes.get(action);
     if (!record) return;
-    if (record.status === "clean") {
-      this.clearNodeBackoff(record);
-    }
     markInvalidRecord(this.nodes, action, cause);
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
@@ -2197,7 +2294,6 @@ export class Scheduler {
       this.nodes.setStatus(action, "clean");
     }
     record.invalidCauses = [];
-    this.clearNodeBackoff(record);
   }
 
   private markAndScheduleInvalidAction(
@@ -2244,7 +2340,29 @@ export class Scheduler {
     if (keys.length === 0) return keys;
     const history = this.headEventLoadParkHistory;
     if (!history || history.eventId !== event.id) return keys;
-    return keys.filter((key) => !history.keys.has(key));
+    return keys.filter((key) => {
+      const currentGeneration =
+        this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0;
+      const settledGeneration = history.generations.get(key);
+      if (settledGeneration === undefined) return true;
+      if (settledGeneration === currentGeneration) return false;
+      return this.preflightPendingLoadGenerations.get(key) ===
+        currentGeneration;
+    });
+  }
+
+  private capturePendingLoadGenerations(): void {
+    this.preflightPendingLoadGenerations.clear();
+    for (
+      const address of this.runtime.storageManager.pendingLoadAddresses?.() ??
+        []
+    ) {
+      const key = entityKey(address);
+      this.preflightPendingLoadGenerations.set(
+        key,
+        this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0,
+      );
+    }
   }
 
   private parkHeadEventForLoads(
@@ -2252,35 +2370,63 @@ export class Scheduler {
     keys: readonly string[],
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) return;
-    if (this.headEventLoadPark) {
-      clearTimeout(this.headEventLoadPark.timeout);
-    }
-    // TODO(scheduler-v2): release on the transport's connection-failure signal
-    // instead of this wall-clock backstop — see EVENT_LOAD_PARK_TIMEOUT_MS.
-    const timeout = setTimeout(() => {
-      logger.warn("scheduler-load-park", () => [
-        "Event load park timed out; dispatching fail-open",
-        { eventId: event.id, keys },
-      ]);
-      this.releaseHeadEventLoadPark(event.id);
-    }, EVENT_LOAD_PARK_TIMEOUT_MS);
-    this.headEventLoadPark = { eventId: event.id, keys, timeout };
+    const generations = new Map(
+      keys.map((key) => [
+        key,
+        this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0,
+      ]),
+    );
+    this.headEventLoadPark = { eventId: event.id, keys, generations };
     const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
       Promise.resolve();
-    settled.then(() => this.releaseHeadEventLoadPark(event.id));
+    settled.then(
+      () => this.releaseHeadEventLoadPark(event.id),
+      (error) => this.failHeadEventLoadPark(event, error),
+    );
   }
 
   private releaseHeadEventLoadPark(eventId: string): void {
     if (this.headEventLoadPark?.eventId !== eventId) return;
-    clearTimeout(this.headEventLoadPark.timeout);
     if (this.headEventLoadParkHistory?.eventId !== eventId) {
-      this.headEventLoadParkHistory = { eventId, keys: new Set() };
+      this.headEventLoadParkHistory = { eventId, generations: new Map() };
     }
-    for (const key of this.headEventLoadPark.keys) {
-      this.headEventLoadParkHistory.keys.add(key);
+    for (const [key, generation] of this.headEventLoadPark.generations) {
+      this.headEventLoadParkHistory.generations.set(key, generation);
     }
     this.headEventLoadPark = null;
     this.queueExecution();
+  }
+
+  private failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
+    if (this.headEventLoadPark?.eventId !== event.id) return;
+    this.headEventLoadPark = null;
+    this.headEventLoadParkHistory = null;
+    const detail = error instanceof Error ? error.message : String(error);
+    this.dropEvent(
+      event,
+      `Event dropped: required replica load failed before dispatch (${detail})`,
+    );
+    this.queueExecution();
+  }
+
+  private dropEvent(event: QueuedEvent, reason: string): void {
+    if (this.headEventLoadPark?.eventId === event.id) {
+      this.headEventLoadPark = null;
+    }
+    if (this.headEventLoadParkHistory?.eventId === event.id) {
+      this.headEventLoadParkHistory = null;
+    }
+    dropQueuedEvent(
+      {
+        runtime: this.runtime,
+        eventQueue: this.eventQueue,
+        releaseLineageEvent: (originTx, queuedEvent) => {
+          this.lineage.release(originTx, queuedEvent);
+        },
+      },
+      event,
+      reason,
+    );
   }
 
   private isHeadEventLoadParked(event: QueuedEvent): boolean {
@@ -2311,15 +2457,17 @@ export class Scheduler {
   }
 
   private clearBackoffForCleanNodes(): void {
+    let clearedDeadline = false;
     for (const record of this.nodes.nodes()) {
       if (record.status === "clean") {
-        this.clearNodeBackoff(record);
+        clearedDeadline = this.clearNodeBackoff(record) || clearedDeadline;
       }
     }
+    if (clearedDeadline) this.gates.recomputeWakeAfterClear();
   }
 
-  private clearNodeBackoff(record: SchedulerNode): void {
-    this.gates.clearBackoff(record);
+  private clearNodeBackoff(record: SchedulerNode): boolean {
+    return this.gates.clearBackoff(record);
   }
 
   private hasPendingLineageHeadEvent(): boolean {

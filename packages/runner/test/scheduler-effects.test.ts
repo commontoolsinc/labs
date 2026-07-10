@@ -707,8 +707,16 @@ describe("effect/computation tracking", () => {
       .flatMap((entry) =>
         entry.stats.iterations.filter((iteration) => iteration.actionsRun > 0)
       );
-    expect(nonEmptyIterations.length).toBe(1);
-    expect(nonEmptyIterations[0]?.actionsRun).toBe(3);
+    // The unrelated ordinary effect runs first. With no primary work left,
+    // the standing-demand materializer runs at idle priority and its changed
+    // output invalidates/runs the output effect in the following iteration.
+    expect(nonEmptyIterations.length).toBe(2);
+    expect(
+      nonEmptyIterations.reduce(
+        (total, iteration) => total + iteration.actionsRun,
+        0,
+      ),
+    ).toBe(3);
     expect(runOrder.indexOf("materializer")).toBeLessThan(
       runOrder.indexOf("output-effect"),
     );
@@ -1059,7 +1067,7 @@ describe("effect/computation tracking", () => {
     expect(computationRuns).toBe(1);
   });
 
-  it("should keep push mode eager for materializer-annotated computations", async () => {
+  it("should keep materializer-annotated computations eager", async () => {
     const source = runtime.getCell<number>(
       space,
       "materializer-push-source",

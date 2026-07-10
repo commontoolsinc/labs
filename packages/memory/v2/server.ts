@@ -169,19 +169,73 @@ const schedulerObservationFromValue = (
   if (
     !isRecord(observation) ||
     (observation.version !== 1 && observation.version !== 2) ||
+    (observation.ownerSpace !== undefined &&
+      typeof observation.ownerSpace !== "string") ||
+    typeof observation.branch !== "string" ||
     typeof observation.pieceId !== "string" ||
     typeof observation.actionId !== "string" ||
-    typeof observation.processGeneration !== "number" ||
-    !Array.isArray(observation.reads) ||
-    !Array.isArray(observation.shallowReads) ||
-    (observation.version === 1 &&
-      (!Array.isArray(observation.currentKnownWrites) ||
-        !Array.isArray(observation.declaredWrites)))
+    !isNonNegativeInteger(observation.processGeneration) ||
+    !isSchedulerActionKind(observation.actionKind) ||
+    typeof observation.implementationFingerprint !== "string" ||
+    typeof observation.runtimeFingerprint !== "string" ||
+    !isNonNegativeInteger(observation.observedAtSeq) ||
+    (observation.observedAtLocalSeq !== undefined &&
+      !isNonNegativeInteger(observation.observedAtLocalSeq)) ||
+    !isSchedulerObservationTransactionKind(observation.transactionKind) ||
+    !isSchedulerAddressArray(observation.reads) ||
+    !isSchedulerAddressArray(observation.shallowReads) ||
+    !isSchedulerAddressArray(observation.actualChangedWrites) ||
+    !isSchedulerAddressArray(observation.currentKnownWrites) ||
+    (observation.declaredWrites === undefined
+      ? observation.version === 1
+      : !isSchedulerAddressArray(observation.declaredWrites)) ||
+    !isSchedulerAddressArray(observation.materializerWriteEnvelopes) ||
+    (observation.ignoredSchedulingWrites !== undefined &&
+      !isSchedulerAddressArray(observation.ignoredSchedulingWrites)) ||
+    (observation.actionOptions !== undefined &&
+      !isSchedulerActionOptions(observation.actionOptions)) ||
+    (observation.status !== "success" && observation.status !== "failed") ||
+    (observation.errorFingerprint !== undefined &&
+      typeof observation.errorFingerprint !== "string")
   ) {
     return undefined;
   }
   return observation as unknown as Engine.SchedulerActionObservation;
 };
+
+const isSchedulerAddressArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((address) =>
+    isRecord(address) &&
+    typeof address.space === "string" &&
+    typeof address.id === "string" &&
+    (address.scope === undefined ||
+      address.scope === "space" ||
+      address.scope === "user" ||
+      address.scope === "session") &&
+    Array.isArray(address.path) &&
+    address.path.every((segment) => typeof segment === "string")
+  );
+
+const isSchedulerActionKind = (value: unknown): boolean =>
+  value === "computation" || value === "effect" || value === "event-handler";
+
+const isSchedulerObservationTransactionKind = (value: unknown): boolean =>
+  value === "dependency-collection" || value === "action-run" ||
+  value === "event-preflight";
+
+const isSchedulerActionOptions = (value: unknown): boolean =>
+  isRecord(value) &&
+  (value.debounceMs === undefined ||
+    isNonNegativeFiniteNumber(value.debounceMs)) &&
+  (value.noDebounce === undefined || typeof value.noDebounce === "boolean") &&
+  (value.throttleMs === undefined ||
+    isNonNegativeFiniteNumber(value.throttleMs));
+
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const isNonNegativeFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 type CommitSchedulerObservation = {
   localSeq: number;
@@ -2284,7 +2338,6 @@ export class Server {
               space,
               sessionId,
               sync,
-              dirtyOrigins,
               options,
             );
             return {
@@ -2298,19 +2351,34 @@ export class Server {
             fromSeq = session.lastSyncedSeq,
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
-            if (!hasPendingCatchUp) {
-              return null;
-            }
             const serverSeq = toSeq ??
               Engine.serverSeq(await this.openEngine(space));
+            const mayCarryAdoption = options?.adoptionObservations === true &&
+              session.watches.length > 0 &&
+              serverSeq > fromSeq;
+            if (!hasPendingCatchUp && !mayCarryAdoption) {
+              return null;
+            }
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
-            return await finishCatchUp({
+            const sync: SessionSync = {
               type: "sync",
               fromSeq,
               toSeq: serverSeq,
               upserts: [],
               removes: [],
-            });
+            };
+            const message = await finishCatchUp(sync);
+            // Do not manufacture an empty push solely to probe the adoption
+            // window. When a row is present, however, the sync must cross the
+            // wire even without a document diff or the session watermark can
+            // advance past that row forever.
+            if (
+              !hasPendingCatchUp &&
+              (sync.observations?.length ?? 0) === 0
+            ) {
+              return null;
+            }
+            return message;
           };
           if (session.watches.length === 0) {
             return await emptyCatchUp();
@@ -2489,22 +2557,20 @@ export class Server {
   // Attach the sync window's scheduler observation rows so the receiving
   // client can ADOPT other clients' committed action runs instead of
   // re-running them (incremental-observation-adoption.md §4). Only for
-  // connections that negotiated persistentSchedulerState, only when the sync
-  // carries doc changes, echo-suppressed like the doc upserts (rows whose
-  // carrying commit originated from the receiving session are skipped).
+  // connections that negotiated persistentSchedulerState, on any advancing
+  // sync window (including an empty catch-up), and echo-suppressed by the
+  // observation writer session.
   // Adoption is an optimization: a failed observation query must never fail
   // the sync push.
   private async attachAdoptionObservations(
     space: string,
     sessionId: string,
     sync: SessionSync,
-    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
     options?: { adoptionObservations?: boolean },
   ): Promise<void> {
     if (
       options?.adoptionObservations !== true ||
       !getPersistentSchedulerStateConfig() ||
-      sync.upserts.length === 0 ||
       sync.toSeq <= sync.fromSeq
     ) {
       return;
@@ -2520,34 +2586,31 @@ export class Server {
       const session = this.#sessions.get(space, sessionId);
       if (session === null) return;
       const trackedIds = session.trackedIds;
-      const readsTracked = (
+      const adoptionSurfaceTracked = (
         observation: Engine.SchedulerActionObservation,
       ): boolean =>
         [
           ...(observation.reads ?? []),
           ...(observation.shallowReads ?? []),
-        ].every((read) =>
-          read.space === space &&
-          trackedIds.has(toDirtyKey(read.id, declaredScope(read.scope)))
+          ...(observation.actualChangedWrites ?? []),
+          ...(observation.currentKnownWrites ?? []),
+        ].every((address) =>
+          address.space === space &&
+          trackedIds.has(toDirtyKey(address.id, declaredScope(address.scope)))
         );
       const engine = await this.openEngine(space);
       const page = Engine.listSchedulerActionSnapshots(engine, {
         sinceCommitSeq: sync.fromSeq,
         throughCommitSeq: sync.toSeq,
       });
-      let ownCommitSeqs: Set<number> | undefined;
-      if (dirtyOrigins !== undefined) {
-        for (const origin of dirtyOrigins.values()) {
-          if (origin.sessionId === sessionId) {
-            (ownCommitSeqs ??= new Set()).add(origin.seq);
-          }
-        }
-      }
+      const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
+        sessionId,
+        session.principal,
+      );
       const observations = page.snapshots
         .filter((snapshot) =>
-          (snapshot.commitSeq === null ||
-            !ownCommitSeqs?.has(snapshot.commitSeq)) &&
-          readsTracked(snapshot.observation) &&
+          snapshot.writerSessionId !== receiverWriterSessionKey &&
+          adoptionSurfaceTracked(snapshot.observation) &&
           this.#observationScopeAdoptable(
             snapshot.observation,
             snapshot.writerSessionId,
