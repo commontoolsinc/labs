@@ -18,6 +18,7 @@ import type { Runtime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
 import { navigateTo } from "./navigate-to.ts";
+import { inspectConfLabel } from "./inspect-conf-label.ts";
 import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";
 import type {
@@ -85,6 +86,10 @@ export function registerBuiltins(runtime: Runtime) {
     "navigateTo",
     raw(navigateTo),
   );
+  // inv-12 Stage 2 (spec §4.6.4.1): the bounded label-introspection surface.
+  // Pure read/derive/write — not an effect; reactivity comes from its
+  // journaled input + envelope reads.
+  moduleRegistry.addModuleByRef("inspectConfLabel", raw(inspectConfLabel));
   moduleRegistry.addModuleByRef(
     "wish",
     raw(wish, { debounce: WISH_DEBOUNCE_MS }),

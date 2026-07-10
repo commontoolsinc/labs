@@ -42,6 +42,7 @@ import type {
   LLMDialogFunction,
   LLMFunction,
   Module,
+  InspectConfLabelFunction,
   NavigateToFunction,
   NonPrivateRandomFunction,
   Pattern,
@@ -345,6 +346,7 @@ export interface BuilderFunctionsAndConstants {
   cfLink: SqliteCfLinkFunction;
   cfSqlite: CfSqliteHelpers;
   navigateTo: NavigateToFunction;
+  inspectConfLabel: InspectConfLabelFunction;
   wish: WishFunction;
 
   // Cell creation

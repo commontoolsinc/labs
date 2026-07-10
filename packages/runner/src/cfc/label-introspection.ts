@@ -1,5 +1,8 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { parsePointer } from "../../../memory/v2/path.ts";
+import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
+import { normalizeCellScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives } from "./clause.ts";
 import { classifyAtomField } from "./label-field-classification.ts";
@@ -7,7 +10,7 @@ import {
   commitmentAwareEquals,
   isCfcFieldCommitment,
 } from "./label-representation.ts";
-import { encodePointer } from "../../../memory/v2/path.ts";
+import { readStoredCfcMetadata } from "./metadata.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import type { CfcMetadata, LabelMapEntry } from "./types.ts";
 
@@ -407,4 +410,94 @@ export const evaluateConfLabelQuery = (
     result: { status: "ok", atoms },
     consumedConfidentiality: uniqueCfcAtoms(consumed),
   };
+};
+
+
+/**
+ * The full introspection step for one target, consuming on the transaction —
+ * everything above the input plumbing the `inspectConfLabel` builtin owns:
+ *
+ * 1. Parse the payload pointer (a `/cfc/...` pointer — labels-of-labels — is
+ *    refused: notAvailable).
+ * 2. Read the resolved target's stored envelope through the SAME
+ *    runtime-internal verifier seam prepare uses (`readStoredCfcMetadata`,
+ *    INTERNAL_VERIFIER_META): the raw `["cfc"]` journal read stays excluded
+ *    from flow/consumed derivations exactly as before (SC-6) — while still
+ *    journaled, so reactivity re-runs the builtin when the envelope changes.
+ *    A read ERROR is an unobservable target: notAvailable. Consumption
+ *    happens through the explicit observation record below, never the raw
+ *    read.
+ * 3. Evaluate the §4.6.4.1 query (`evaluateConfLabelQuery`).
+ * 4. The fail-closed dial rule (design §3 item 2; decision documented on the
+ *    Stage 2 PR): a result whose evaluation consumed PROTECTED metadata
+ *    observations is returned only when the transaction can carry the joined
+ *    label onto the result — `cfcFlowLabels: "persist"` under a non-disabled
+ *    enforcement mode, the one configuration where the derived component
+ *    actually lands on the written result doc. Anywhere else the result
+ *    would commit as an UNLABELED copy of protected label metadata, so it
+ *    degrades to the same notAvailable as every hidden arm (indistinguishable
+ *    by construction). Purely public results (empty consumed join) flow under
+ *    every dial.
+ * 5. Record the consumed observation (`recordCfcLabelMetadataObservation`):
+ *    it joins the flow derivation (labeling the result through the normal
+ *    per-tx J), the egress consumed set, the per-write input gate, and the
+ *    prepared digest.
+ */
+export const inspectStoredConfLabel = (
+  tx: IExtendedStorageTransaction,
+  target: NormalizedFullLink,
+  targetPath: string,
+  query: ConfLabelQuery,
+): InspectConfLabelResult => {
+  const parsed = parseConfLabelTargetPath(targetPath);
+  if (parsed === undefined) {
+    return CONF_LABEL_NOT_AVAILABLE;
+  }
+  let metadata: CfcMetadata | undefined;
+  try {
+    metadata = readStoredCfcMetadata(tx, {
+      space: target.space,
+      id: target.id,
+      scope: target.scope,
+    });
+  } catch {
+    // Unobservable target — same constant as missing metadata below.
+    return CONF_LABEL_NOT_AVAILABLE;
+  }
+  const payloadPath = [
+    ...canonicalizeLogicalPath(target.path),
+    ...parsed,
+  ];
+  const { result, consumedConfidentiality } = evaluateConfLabelQuery(
+    metadata,
+    payloadPath,
+    query,
+  );
+  if (result.status !== "ok" || consumedConfidentiality.length === 0) {
+    return result;
+  }
+  const state = tx.getCfcState();
+  const carries = state.flowLabelsMode === "persist" &&
+    state.enforcementMode !== "disabled";
+  if (!carries) {
+    tx.noteCfcDiagnostic(
+      "label-introspection: protected metadata result withheld " +
+        `(flowLabelsMode=${state.flowLabelsMode}, ` +
+        `enforcementMode=${state.enforcementMode})`,
+    );
+    return CONF_LABEL_NOT_AVAILABLE;
+  }
+  tx.recordCfcLabelMetadataObservation({
+    target: {
+      space: target.space,
+      id: target.id,
+      scope: normalizeCellScope(target.scope),
+      // The first-layer metadata subtree the observation is about
+      // (§4.6.4.1): /cfc/labels/value/<payload path>.
+      path: ["cfc", "labels", "value", ...payloadPath],
+    },
+    observes: "labelMetadata",
+    confidentiality: [...consumedConfidentiality],
+  });
+  return result;
 };

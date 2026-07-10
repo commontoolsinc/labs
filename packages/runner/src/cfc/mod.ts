@@ -76,6 +76,7 @@ export {
 export {
   CONF_LABEL_NOT_AVAILABLE,
   evaluateConfLabelQuery,
+  inspectStoredConfLabel,
   parseConfLabelTargetPath,
 } from "./label-introspection.ts";
 export type {
