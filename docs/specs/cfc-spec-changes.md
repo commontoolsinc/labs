@@ -444,8 +444,34 @@ without evaluation (export/publish). Unconflate the §13 table row.
 2b contract (including the create-only intent-causal record shape) and the
 §13 summary-table row unconflated. Runner-side: grants build-order items 1–3
 shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
-consulted-grant digest binding); the rewrite event stays unscheduled per
-`cfc-persisted-declassification.md` §5.
+consulted-grant digest binding); the rewrite event is **superseded** per
+`cfc-persisted-declassification.md` §5 (owner decision 2026-07-10: in-fabric
+federation trust comes from remote attestation, so trust-free release buys
+nothing; out-of-fabric irrevocability is served by egress records, SC-27).
+
+**SC-27 [normative] Egress records at send sinks — §8.10.5.2 follow-up.**
+Out-of-fabric egress is irrevocable; modeling it with the same revocable
+artifact as internal sharing invites the un-sending confusion (revoking the
+record of a send is not un-sending). Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)
+§6): the permanent **sent** record is minted by the successful post-commit
+send path (the transaction commits before the outbox flush, and the release
+can still be refused during the flush — a commit-time record would assert
+disclosures that never happened): a create-only record causal to the outbox
+idempotency key — `{valueDigest, destination, boundaryContext,
+releasedAudienceEvidence, at, intentId}`, destination per the §8.10.5.2
+destination/audience binding (discharging the audit's open
+"destination-binding follow-up"), written record-then-clear against the
+outbox entry so the record can understate but never overstate; an optional
+commit-time attempt marker MUST NOT display as sent. Spec this together
+with the audit's open "post-commit outbox + sink-release re-verification
+contract" item (§8.10 is entirely pre-commit today).
+The record is permanent (create-only, never deleted, no revocation surface)
+and has **no enforcement role**: it never feeds a future release decision —
+labels keep governing what the fabric serves; the record exists for honesty,
+audit, and deriving "who could have this" (current grants ∪ past egress).
+State the shared-vs-sent vocabulary distinction normatively so UIs cannot
+present an egress as revocable. `open`.
 
 **SC-27 [normative] Attested deployment config is a federation-sound policy
 store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The

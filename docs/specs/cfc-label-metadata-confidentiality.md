@@ -228,7 +228,19 @@ consumes inbound views, redacting the outbound copies is safe.
 - **Stage 3 (strong form):** `reference`-form carried labels + per-reader
   materialization; entry criteria: a concrete deployment whose threat model
   includes targeted DID probing, and cross-space resolution latency measured
-  acceptable on the shared-profile / group-chat flows.
+  acceptable on the shared-profile / group-chat flows. **Federation
+  constraint (owner decision 2026-07-10):** the federation design rule is
+  *evidence replicates with the data; evaluation is local* (attested
+  runtimes enforce locally — reads must never phone the origin to be
+  authorized). The `reference` form is origin-coupled by construction —
+  label readability rides the source's read authority — so in a federated
+  deployment the default stays `commitment`; `reference` is admissible only
+  with per-reader materialization proven on realistic flows, and only for
+  the highest-sensitivity fields. Grants and `commitment`-form labels
+  satisfy the rule as-is; B2a's deployment-config policy source does not
+  (federated instances with different `cfcPolicyRecords` silently fire
+  different rules — B2b's space-hosted, replicating policy docs are the
+  federation-correct source).
 
 Dependencies: none on Epics B/D/E remainder; Stage 2's full population
 profile co-builds with the SC-4/SC-8 envelope design. The D4 value-level

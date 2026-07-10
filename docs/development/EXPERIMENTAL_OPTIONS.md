@@ -36,6 +36,7 @@ was last checked against the code.
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating) | `RuntimeOptions.cfcTriggerReadGating` | `false` | Bernhard Seefeld (#4488) | move toward `true` | implemented, staged rollout |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation) | `RuntimeOptions.cfcPolicyEvaluation` | `off` | Bernhard Seefeld (#4566) | move toward `enforce` | implemented, staged rollout |
+| [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity) | `RuntimeOptions.cfcDeclaredMonotonicity` | `off` | Bernhard Seefeld (#4647) | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships) | implemented, off by default |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
@@ -325,6 +326,33 @@ the per-epic implementation notes).
 - **Status on 2026-07-08.** Implemented and in staged rollout.
 - **Path to removal.** Once policy evaluation is the norm, the dial could settle
   on `enforce` and be retired.
+
+### `cfcDeclaredMonotonicity`
+
+- **Toggle via.** `RuntimeOptions.cfcDeclaredMonotonicity`.
+- **Added by.** Bernhard Seefeld, in "declared-component monotonicity gate
+  (WP5, spec §8.12.1/§8.12.8)" (#4647, 2026-07-09).
+- **Purpose.** Guards the one point where a persisted path's declared
+  (store-policy) label component can change — the schema-walk re-mint at the
+  commit boundary — with §8.12.1's `canUpdateStoreLabel` rule: confidentiality
+  may only add clauses or remove alternatives, and the declared integrity
+  claim may only remove atoms. Values are `off`, `observe`, and `enforce`.
+  `observe` emits a structured diagnostic on a non-monotone re-mint while
+  persisting today's bytes; `enforce` records a fail-closed prepare reason
+  (rejecting the commit under the enforcing enforcement modes). The gate
+  governs only the `declared` component; derived/link/structure components
+  keep their §8.12.8 replace disciplines. The per-transaction privileged
+  widening exemption (`setCfcDeclaredWideningExemption`, trusted-builtin
+  only) is the seam for the future §8.12.7 route 2b declassification event.
+- **Current default and planned end state.** `off` by default. The target is
+  `observe`, then `enforce` after soak — the route 2b rewrite event must not
+  ship before this gate is enforced
+  (`docs/specs/cfc-persisted-declassification.md` §4–§5).
+- **Status on 2026-07-09.** Implemented, off by default.
+- **Path to removal.** Not planned for removal: monotonicity is a permanent
+  store invariant. Once `enforce` has soaked, the dial could settle there and
+  the `off`/`observe` rungs remain for diagnostics, mirroring the enforcement
+  ladder.
 
 ### `cfcPrefixProvenanceStats`
 

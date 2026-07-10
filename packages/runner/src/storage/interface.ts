@@ -41,6 +41,8 @@ import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
+  CfcDeclaredMonotonicityMode,
+  CfcDeclaredWideningExemption,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -921,6 +923,21 @@ export interface IExtendedStorageTransaction
    */
   setCfcLabelMetadataProtectionMode(
     mode: CfcLabelMetadataProtectionMode,
+  ): void;
+  /**
+   * Set the declared-component monotonicity gate dial (WP5, §8.12.1).
+   * Anti-downgrade pinned: once `enforce`, weakening throws.
+   */
+  setCfcDeclaredMonotonicityMode(mode: CfcDeclaredMonotonicityMode): void;
+  /**
+   * Exempt exactly one (doc, path, clauseDigest) triple from the
+   * declared-monotonicity gate for this transaction — the §8.12.7 route 2b
+   * declassification-event seam. Requires a trusted builtin implementation
+   * identity (the writeCfcGrant discipline); fails closed on malformed or
+   * over-broad markers; write-once per transaction.
+   */
+  setCfcDeclaredWideningExemption(
+    exemption: CfcDeclaredWideningExemption,
   ): void;
   /**
    * Record the addresses whose invalidating writes scheduled this run
