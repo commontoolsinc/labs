@@ -55,24 +55,26 @@ async function listChunks(scriptsDir: string): Promise<string[]> {
   return chunks.sort();
 }
 
+function fixtureConfig(metafile?: string): Config {
+  return {
+    entries: [
+      { in: "plain-entry.ts", out: "scripts/plain" },
+      { in: "split-entry.ts", out: "scripts/split", splitting: true },
+    ],
+    outDir: "dist",
+    esbuild: {
+      chunkNames: "scripts/chunk-[hash]",
+      metafile,
+      tsconfigRaw: {},
+    },
+  };
+}
+
 Deno.test("Builder: a split entry peels its dynamic import into a co-located chunk; a plain entry inlines it", async () => {
   const root = await Deno.makeTempDir({ prefix: "felt-split-test-" });
   try {
     await writeFixture(root);
-
-    const config: Config = {
-      entries: [
-        { in: "plain-entry.ts", out: "scripts/plain" },
-        { in: "split-entry.ts", out: "scripts/split", splitting: true },
-      ],
-      outDir: "dist",
-      esbuild: {
-        chunkNames: "scripts/chunk-[hash]",
-        tsconfigRaw: {},
-      },
-    };
-
-    await new Builder(new ResolvedConfig(config, root)).build();
+    await new Builder(new ResolvedConfig(fixtureConfig(), root)).build();
 
     const scriptsDir = join(root, "dist", "scripts");
     const plainJs = await Deno.readTextFile(join(scriptsDir, "plain.js"));
@@ -122,6 +124,68 @@ Deno.test("Builder: a split entry peels its dynamic import into a co-located chu
     assertEquals(
       Object.keys(manifest).sort(),
       ["scripts/plain.js", "scripts/split.js"],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("Builder: metafiles from plain and split passes are merged", async () => {
+  const root = await Deno.makeTempDir({ prefix: "felt-metafile-test-" });
+  try {
+    await writeFixture(root);
+    await new Builder(
+      new ResolvedConfig(fixtureConfig("meta.json"), root),
+    ).build();
+
+    const metafile = JSON.parse(
+      await Deno.readTextFile(join(root, "meta.json")),
+    ) as { outputs: Record<string, { entryPoint?: string }> };
+    const entryPoints = Object.values(metafile.outputs)
+      .flatMap((output) => output.entryPoint ? [output.entryPoint] : []);
+
+    assert(
+      entryPoints.some((entry) => entry.endsWith("plain-entry.ts")),
+      "combined metafile must include the plain-pass entry",
+    );
+    assert(
+      entryPoints.some((entry) => entry.endsWith("split-entry.ts")),
+      "combined metafile must include the split-pass entry",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("Builder: repeated builds prune superseded split chunks", async () => {
+  const root = await Deno.makeTempDir({ prefix: "felt-split-prune-test-" });
+  try {
+    await writeFixture(root);
+    const builder = new Builder(new ResolvedConfig(fixtureConfig(), root));
+    await builder.build();
+
+    const scriptsDir = join(root, "dist", "scripts");
+    const firstChunks = await listChunks(scriptsDir);
+    assertEquals(firstChunks.length, 1);
+
+    const rebuiltMarker = `${SPLIT_MARKER}_REBUILT`;
+    await Deno.writeTextFile(
+      join(root, "split-lazy.ts"),
+      `export const marker = ${JSON.stringify(rebuiltMarker)};\n`,
+    );
+    await builder.build();
+
+    const rebuiltChunks = await listChunks(scriptsDir);
+    assertEquals(rebuiltChunks.length, 1);
+    assert(
+      rebuiltChunks[0] !== firstChunks[0],
+      "changed split content must produce a new content-hashed chunk",
+    );
+    assert(
+      (await Deno.readTextFile(join(scriptsDir, rebuiltChunks[0]!))).includes(
+        rebuiltMarker,
+      ),
+      "the retained chunk must contain the rebuilt split module",
     );
   } finally {
     await Deno.remove(root, { recursive: true });

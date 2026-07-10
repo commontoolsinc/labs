@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  type ErrorNotification,
+  NotificationType,
+  RuntimeErrorCode,
+} from "@commonfabric/runtime-client";
 
 // XRootView is a Lit element; load and exercise it under a minimal browser
 // shim, mirroring login-view.test.ts. Constructing it runs its field
@@ -123,6 +128,45 @@ describe("XRootView", () => {
       expect(templateStrings(banner)).toContain("Reload");
     } finally {
       console.warn = origWarn;
+      restore();
+    }
+  });
+
+  it("replaces the current worker after a compiler chunk load failure", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const runs: unknown[] = [];
+      const internals = view as unknown as {
+        _rt: { run(args: unknown): void };
+        _runtimeGeneration: number;
+      };
+      internals._rt = { run: (args) => runs.push(args) };
+      const failedGeneration = internals._runtimeGeneration;
+      const event: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "Failed to load the compiler stack",
+        code: RuntimeErrorCode.CompilerStackLoadFailed,
+      };
+
+      view._handleRuntimeError(event, failedGeneration);
+      expect(runs).toEqual([[view.app]]);
+
+      // A second signal from the worker being replaced is stale and ignored.
+      view._handleRuntimeError(event, failedGeneration);
+      expect(runs).toHaveLength(1);
+
+      // Ordinary runtime errors remain diagnostics, not lifecycle events.
+      view._handleRuntimeError({
+        type: NotificationType.ErrorReport,
+        message: "ordinary runtime error",
+      });
+      expect(runs).toHaveLength(1);
+    } finally {
+      console.error = originalError;
       restore();
     }
   });

@@ -41,8 +41,9 @@ const config: Config = {
     minify: PRODUCTION,
     // Emit split chunks under scripts/ (next to worker-runtime.js) with a
     // content hash in the name. Co-location keeps a chunk reachable by the same
-    // /scripts/* route as the worker and, being content-addressed, immutably
-    // cacheable — the worker's own hash-named import is the cache-bust.
+    // /scripts/* route as the worker. Production serves the complete graph from
+    // an immutable /builds/<sha>/ namespace; hashes also make repeated local
+    // watch outputs safe to cache and distinguish.
     chunkNames: "scripts/chunk-[hash]",
     external: [
       "source-map-support",

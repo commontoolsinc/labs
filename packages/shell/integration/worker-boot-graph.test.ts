@@ -1,5 +1,5 @@
 import { assert } from "@std/assert";
-import { fromFileUrl } from "@std/path";
+import { fromFileUrl, relative, resolve } from "@std/path";
 import { build } from "@commonfabric/felt";
 import shellConfig from "../felt.config.ts";
 
@@ -65,6 +65,19 @@ Deno.test("worker boot graph: the TypeScript compiler is reachable only via the 
         inputs: Record<string, unknown>;
       }
     >;
+
+    // Every emitted module must remain under dist/scripts. In particular this
+    // pins felt.config's chunkNames: without it, esbuild emits chunks at the
+    // outDir root, where the felt dev server's SPA fallback returns index.html
+    // instead of JavaScript.
+    const outsideScripts = Object.keys(outputs)
+      .map((key) => relative(outDir, resolve(key)).replaceAll("\\", "/"))
+      .filter((route) => !route.startsWith("scripts/"));
+    assert(
+      outsideScripts.length === 0,
+      "worker outputs must all be served from /scripts; found:\n  " +
+        outsideScripts.join("\n  "),
+    );
 
     // Find the worker entry's output bundle.
     const entryKey = Object.keys(outputs).find((k) =>
