@@ -949,6 +949,58 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       }
     });
 
+    it("skips non-record alternatives while locating the home clause", () => {
+      // Legacy string atoms are valid clause alternatives; selection walks
+      // past them (they cannot be refs). Clause 0 holds only the string, so
+      // the walk must scan and skip it before finding the ref in clause 1 —
+      // and the firing stays on clause 1 (the string clause is not a home).
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [
+            "legacy-string-atom",
+            { anyOf: [spaceX, shareRef] },
+          ],
+          integrity: [roleAliceX],
+        },
+        shareSnapshot,
+      );
+      expect(result.firings.length).toBe(1);
+      expect(result.firings[0].clauseIndex).toBe(1);
+      expect(clauseSetsEqual(result.label.confidentiality!, [
+        "legacy-string-atom",
+        { anyOf: [spaceX, shareRef, userAlice] },
+      ])).toBe(true);
+    });
+
+    it("never selects a hand-built record with an empty digest (§4.4.2 belt)", () => {
+      // buildCfcPolicySnapshot always digests, so this only arises through a
+      // hand-built snapshot — an empty digest must not become selectable via
+      // a ref that also carries an empty hash.
+      const handmade = {
+        records: [{
+          id: "handmade",
+          digest: "",
+          rules: [spaceReaderRule],
+          selection: "referenced" as const,
+        }],
+        digest: "",
+      };
+      const emptyHashRef = {
+        type: CFC_ATOM_TYPE.Policy,
+        name: "handmade",
+        subject: ALICE,
+        hash: "",
+      };
+      const result = evaluateExchangeRules(
+        {
+          confidentiality: [{ anyOf: [spaceX, emptyHashRef] }],
+          integrity: [roleAliceX],
+        },
+        handmade,
+      );
+      expect(result.firings).toEqual([]);
+    });
+
     it("brings a rule-added ref into scope for the next batch (§4.4.5 recompute)", () => {
       // An ambient rule ADDS the hash-bound ref as an alternative; the
       // referenced record's rule must then fire on that clause in the SAME
