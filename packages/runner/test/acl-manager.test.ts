@@ -17,6 +17,7 @@ const createHarness = (
     },
 ) => {
   let written: ACL | undefined;
+  let requestedId: string | undefined;
   const txCell = {
     get: () => initial,
     set: (value: ACL) => {
@@ -30,7 +31,10 @@ const createHarness = (
   };
   const runtime = {
     storageManager: { synced: () => Promise.resolve() },
-    getCellFromLink: () => cell,
+    getCellFromLink: (link: { id: string }) => {
+      requestedId = link.id;
+      return cell;
+    },
     editWithRetry: (fn: (tx: unknown) => void) => {
       fn({});
       return Promise.resolve(commitResult);
@@ -40,8 +44,15 @@ const createHarness = (
   return {
     manager: new ACLManager(runtime, SPACE),
     written: () => written,
+    requestedId: () => requestedId,
   };
 };
+
+Deno.test("ACLManager addresses the server's canonical ACL document", async () => {
+  const { manager, requestedId } = createHarness({ [ALICE]: "OWNER" });
+  await manager.get();
+  assertEquals(requestedId(), `of:${SPACE}`);
+});
 
 Deno.test("ACLManager returns null for a missing ACL", async () => {
   const { manager } = createHarness(undefined);

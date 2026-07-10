@@ -6,7 +6,7 @@ import {
   isACL,
   isCapable,
 } from "@commonfabric/memory/acl";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
@@ -100,10 +100,10 @@ export interface SpaceMembershipProvider {
 }
 
 /**
- * The space-DID cell whose value is the space's ACL document — entity id
- * `of:${space}` == the space DID, read in-space (mirrors `ACLManager` and the
- * server's `aclDocId`). One Cell per space, reused across `readerRole` reads
- * and `subscribe` so both observe the same reactive state.
+ * The cell whose value is the space's ACL document — entity id `of:${space}`,
+ * read in-space (mirrors `ACLManager` and the server's `aclDocId`). One Cell
+ * per space, reused across `readerRole` reads and `subscribe` so both observe
+ * the same reactive state.
  */
 const aclCellFor = (
   runtime: Pick<Runtime, "getCellFromLink">,
@@ -112,10 +112,10 @@ const aclCellFor = (
 ): Cell<unknown> => {
   let cell = cache.get(space);
   if (cell === undefined) {
-    // The ACL doc's entity id IS the space DID (`aclDocId(space)` server-side),
-    // read in-space — the same link `ACLManager` uses.
+    // The ACL doc uses the `of:${space}` entity id (`aclDocId(space)`
+    // server-side), read in-space — the same link `ACLManager` uses.
     cell = runtime.getCellFromLink<unknown>({
-      id: space as MemorySpace,
+      id: `of:${space}` as URI,
       path: [],
       space: space as MemorySpace,
     });

@@ -5,7 +5,7 @@ import {
   hasConcreteOwner,
   isACL,
 } from "@commonfabric/memory/acl";
-import type { Capability } from "@commonfabric/memory/interface";
+import type { Capability, URI } from "@commonfabric/memory/interface";
 import {
   cloneIfNecessary,
   type FabricValue,
@@ -90,7 +90,7 @@ export class ACLManager {
 
   #getCell(): Cell<unknown> {
     return this.#runtime.getCellFromLink({
-      id: this.#spaceDid,
+      id: `of:${this.#spaceDid}` as URI,
       path: [],
       space: this.#spaceDid,
     });

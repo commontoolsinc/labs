@@ -1920,6 +1920,17 @@ export class Server {
         }
         try {
           const engine = await this.openEngine(message.space);
+          // The session may be revoked or replaced while openEngine awaits.
+          // Re-check the exact registry object before using the captured
+          // principal so an old connection cannot commit after takeover.
+          if (
+            this.#sessions.get(message.space, message.sessionId) !== session
+          ) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              toError("SessionError", "Unknown or replaced session for space"),
+            );
+          }
           const invalid = this.#validateAclCommit(
             engine,
             message.space,

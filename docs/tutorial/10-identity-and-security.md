@@ -85,8 +85,9 @@ current (v2) protocol, authorization happens at **session open**
    identity, enforced in the storage engine.
 
 Beyond authentication, per-space **ACLs** are now wired into the v2 server
-itself. A space can carry an ACL document (its entity id is the space DID;
-types in `packages/memory/acl.ts`, managed by the runner's `ACLManager`
+itself. A space can carry an ACL document (addressed by the wire entity id
+`of:<space DID>`; types in `packages/memory/acl.ts`, managed by the runner's
+`ACLManager`
 and surfaced as `cf acl ...`) granting READ/WRITE/OWNER capabilities. The
 server evaluates them per message — session-open, queries, and watches need
 READ; `transact` needs WRITE; writing the ACL itself needs OWNER. A fresh space

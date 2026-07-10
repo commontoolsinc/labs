@@ -530,7 +530,7 @@ Opening a previously unused space may initialize empty backing storage, but
 `session.open` is not itself a logical write or claim.
 
 When ACL policy is active, the authenticated principal is evaluated against
-the space ACL document (`id == space DID`) for every command:
+the space ACL document (wire entity id `of:<space DID>`) for every command:
 
 | Stored ACL state | Effective access |
 | --- | --- |

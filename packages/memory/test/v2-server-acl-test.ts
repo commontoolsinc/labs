@@ -9,6 +9,7 @@ import {
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
+  type SessionDescriptor,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
 } from "../v2.ts";
@@ -84,12 +85,13 @@ const openSession = async (
   { connection, messages, sessionOpen }: Harness,
   space: string,
   principal: string,
+  session: SessionDescriptor = {},
 ): Promise<ResponseMessage<SessionOpenResult>> => {
   await connection.receive(encodeMemoryBoundary({
     type: "session.open",
     requestId: nextRequestId("open"),
     space,
-    session: {},
+    session,
     invocation: {
       iss: principal,
       aud: sessionOpen.audience,
@@ -630,7 +632,78 @@ Deno.test("acl enforce: revocation during resumed catch-up fails the open", asyn
   }
 });
 
-Deno.test("acl enforce: a concurrent post-revocation write is re-authorized", async () => {
+Deno.test("acl enforce: a taken-over session cannot finish an in-flight transaction", async () => {
+  const server = createAclServer("memory://acl-enforce-transact-takeover", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-transact-takeover";
+  const first = await connect(server);
+  const second = await connect(server);
+  const openEngineStarted = Promise.withResolvers<void>();
+  const releaseOpenEngine = Promise.withResolvers<void>();
+  const mutableServer = server as unknown as {
+    openEngine: (space: string) => Promise<unknown>;
+  };
+  const originalOpenEngine = mutableServer.openEngine.bind(server);
+  try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    const opened = await openSession(first, space, ALICE);
+    assertExists(opened.ok);
+
+    let pauseNextOpen = true;
+    mutableServer.openEngine = async (requestedSpace: string) => {
+      if (pauseNextOpen) {
+        pauseNextOpen = false;
+        openEngineStarted.resolve();
+        await releaseOpenEngine.promise;
+      }
+      return await originalOpenEngine(requestedSpace);
+    };
+
+    const staleWrite = server.transact({
+      type: "transact",
+      requestId: nextRequestId("transact-takeover-stale"),
+      space,
+      sessionId: opened.ok.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:stale-takeover",
+          value: { value: { stale: true } },
+        }],
+      },
+    });
+    await openEngineStarted.promise;
+
+    const replacement = await openSession(second, space, ALICE, {
+      sessionId: opened.ok.sessionId,
+      sessionToken: opened.ok.sessionToken,
+    });
+    assertExists(replacement.ok);
+    assertEquals(shiftMessage(first.messages), {
+      type: "session/revoked",
+      space,
+      sessionId: opened.ok.sessionId,
+      reason: "taken-over",
+    });
+
+    releaseOpenEngine.resolve();
+    const rejected = await staleWrite;
+    assertEquals(rejected.error?.name, "SessionError");
+    assertEquals(
+      await server.readDocument(space, "of:doc:stale-takeover"),
+      null,
+    );
+  } finally {
+    releaseOpenEngine.resolve();
+    mutableServer.openEngine = originalOpenEngine;
+    await server.close();
+  }
+});
+
+Deno.test("acl enforce: a concurrent post-revocation write is rejected", async () => {
   const server = createAclServer("memory://acl-enforce-revoke-race", {
     mode: "enforce",
   });
@@ -648,8 +721,9 @@ Deno.test("acl enforce: a concurrent post-revocation write is re-authorized", as
     assertExists(bobSession.ok);
 
     // Starting the revoke first deterministically queues both transactions at
-    // the old ACL. Authorization must be checked synchronously beside apply:
-    // once Alice's ACL commit lands, Bob's already-started request is denied.
+    // the old ACL. Session validity and authorization are checked beside
+    // apply: once Alice's ACL commit lands and revokes Bob, Bob's
+    // already-started request is denied before it can commit.
     const [revoke, write] = await Promise.all([
       server.transact({
         type: "transact",
@@ -683,7 +757,7 @@ Deno.test("acl enforce: a concurrent post-revocation write is re-authorized", as
       }),
     ]);
     assertExists(revoke.ok);
-    assertEquals(write.error?.name, "AuthorizationError");
+    assertEquals(write.error?.name, "SessionError");
     assertEquals(await server.readDocument(space, "of:doc:bob-race"), null);
   } finally {
     await server.close();

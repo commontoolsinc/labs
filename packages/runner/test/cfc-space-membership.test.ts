@@ -118,7 +118,7 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
     },
   } as unknown as Runtime;
   const fire = (space: string) => {
-    for (const cb of sinks.get(space) ?? []) cb();
+    for (const cb of sinks.get(`of:${space}`) ?? []) cb();
   };
   return { runtime, getCalls, fire, sinks };
 };
@@ -126,13 +126,13 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
 describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
   it("reads a granted ACL synchronously and returns the reader role", () => {
     const { runtime, getCalls } = fakeRuntime({
-      [SPACE_TEAM]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
     });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBe("reader");
     // The ACL doc for the queried space was read (a Cell.get() sync read that
     // also kicks a background sync when unsynced).
-    expect(getCalls).toContain(SPACE_TEAM);
+    expect(getCalls).toContain(`of:${SPACE_TEAM}`);
   });
 
   it("fails closed when the ACL doc is absent (residency is not authority)", () => {
@@ -148,11 +148,11 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(ALICE)).toBe("owner");
     // Own-space is implicit OWNER — no ACL doc read needed.
-    expect(getCalls).not.toContain(ALICE);
+    expect(getCalls).not.toContain(`of:${ALICE}`);
   });
 
   it("fails closed on a malformed ACL value", () => {
-    const { runtime } = fakeRuntime({ [SPACE_TEAM]: "not-an-acl" });
+    const { runtime } = fakeRuntime({ [`of:${SPACE_TEAM}`]: "not-an-acl" });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBeNull();
   });
@@ -160,18 +160,18 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
   it("reflects the latest replica across reads (no stale memo on revoke)", () => {
     // Soundness under revoke: a later read must see the ACL as it now stands.
     const acl: Record<string, unknown> = {
-      [SPACE_TEAM]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
     };
     const { runtime } = fakeRuntime(acl);
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBe("reader");
-    delete acl[SPACE_TEAM]; // ACL revoked / doc dropped
+    delete acl[`of:${SPACE_TEAM}`]; // ACL revoked / doc dropped
     expect(provider.readerRole(SPACE_TEAM)).toBeNull();
   });
 
   it("subscribe fires onChange on CHANGE only (skips the at-subscribe fire), and cancels cleanly", () => {
     const { runtime, fire, sinks } = fakeRuntime({
-      [SPACE_TEAM]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
     });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     let changes = 0;
@@ -184,7 +184,7 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
     cancel();
     fire(SPACE_TEAM);
     expect(changes).toBe(1); // no further callbacks after cancel
-    expect(sinks.get(SPACE_TEAM)?.size ?? 0).toBe(0);
+    expect(sinks.get(`of:${SPACE_TEAM}`)?.size ?? 0).toBe(0);
   });
 
   it("honors service DIDs for implicit OWNER", () => {
