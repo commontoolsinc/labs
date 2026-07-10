@@ -526,6 +526,10 @@ this proposal onto persistent-scheduler-state:
 - Deferred tooling gap: `SchedulerGraphView.extractEntityId` (shell) groups
   graph nodes by scheme-stripped entity id, so an `of:` doc and a
   `computed:` doc minted from the same cause would be conflated into one
-  group in the debug graph. Cosmetic (display grouping only, no identity
-  flows out of it), but the view should eventually carry the scheme through
-  its grouping keys and labels.
+  group in the debug graph. This is more than cosmetic debt: the scheduler
+  treats computed cells differently (ack-and-drop instead of conflict
+  retry, recompute-on-sync convergence), so the kind is a scheduling-
+  relevant property the graph view should surface as a first-class visual
+  dimension — distinct grouping keys at minimum, and eventually a distinct
+  color/badge for computed nodes so drop-and-recompute behavior is legible
+  when debugging settle waves.
