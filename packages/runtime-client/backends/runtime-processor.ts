@@ -150,6 +150,10 @@ import {
 } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
+import {
+  postContextualRuntimeError,
+  postRuntimeError,
+} from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -613,19 +617,7 @@ export class RuntimeProcessor {
         });
       },
 
-      errorHandlers: [
-        (error) => {
-          self.postMessage({
-            type: NotificationType.ErrorReport,
-            message: error.message,
-            pageId: error.pieceId,
-            space: error.space,
-            patternId: error.patternId,
-            spellId: error.spellId,
-            stackTrace: error.stack,
-          });
-        },
-      ],
+      errorHandlers: [postContextualRuntimeError],
       onVersionSkew: postVersionSkew,
     }));
 
@@ -1750,13 +1742,7 @@ export class RuntimeProcessor {
         });
         return batchId;
       },
-      onError: (error: Error) => {
-        self.postMessage({
-          type: NotificationType.ErrorReport,
-          message: error.message,
-          stackTrace: error.stack,
-        });
-      },
+      onError: postRuntimeError,
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops

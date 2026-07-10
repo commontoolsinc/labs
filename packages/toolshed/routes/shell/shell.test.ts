@@ -26,6 +26,7 @@ let sentinelPath: string;
 
 // A static router mounted directly, used for the serving-behavior assertions.
 let staticApp: ReturnType<typeof createApp>;
+let versionedStaticApp: ReturnType<typeof createApp>;
 // The static router behind the same CORS middleware the shell wires up, mounted
 // on a fully composed app, used to assert middleware applies to a 200 document.
 let composedApp: ReturnType<typeof createApp>;
@@ -44,6 +45,10 @@ beforeAll(async () => {
   await Deno.writeTextFile(sentinelPath, SENTINEL);
 
   staticApp = createApp().route("/", createShellStaticRouter(tempDir));
+  versionedStaticApp = createApp().route(
+    "/",
+    createShellStaticRouter(tempDir, { immutableBuildId: "commit-123" }),
+  );
 
   const corsRouter = createRouter();
   corsRouter.use(
@@ -188,6 +193,23 @@ describe("createShellStaticRouter", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/css");
     expect(await response.text()).toBe(APP_CSS);
+  });
+
+  it("serves the embedded graph through its exact immutable build namespace", async () => {
+    const response = await versionedStaticApp.request(
+      "/builds/commit-123/app.js",
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript");
+    expect(await response.text()).toBe(APP_JS);
+  });
+
+  it("does not alias a different build identifier", async () => {
+    const response = await versionedStaticApp.request(
+      "/builds/another-commit/app.js",
+    );
+    expect(response.headers.get("Content-Type")).toBe("text/html");
+    expect(await response.text()).toBe(INDEX_HTML);
   });
 
   it("returns 304 with empty body and the same ETag for If-None-Match", async () => {

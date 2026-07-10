@@ -30,4 +30,18 @@ describe("deferred compiler stack", () => {
     expect(typeof stack.TypeScriptCompiler).toBe("function");
     expect(typeof stack.collectImportSpecifiers).toBe("function");
   });
+
+  it("identifies a compiler-stack load failure for worker recovery", async () => {
+    const fresh = await import(
+      "../src/harness/deferred-compiler-stack.ts?load-failure"
+    );
+    const cause = new TypeError("simulated compiler chunk fetch failure");
+    const failure = fresh.ensureCompilerStack(() => Promise.reject(cause))
+      .catch((error) => error);
+
+    const error = await failure;
+    expect(error).toBeInstanceOf(fresh.CompilerStackLoadError);
+    expect(error.message).toBe("Failed to load the compiler stack");
+    expect(error.cause).toBe(cause);
+  });
 });
