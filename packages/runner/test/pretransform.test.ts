@@ -98,6 +98,27 @@ Deno.test("transformInjectHelperModule warns only on an indented (ignored) cf-di
   assertEquals(columnZero.warnings.length, 0);
 });
 
+Deno.test("transformInjectHelperModule passes .d.ts files through untouched", () => {
+  const declarations = "export declare const value: number;\n";
+  const transformed = transformInjectHelperModule({
+    main: "/main.tsx",
+    files: [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/types.d.ts", contents: declarations },
+    ],
+  });
+
+  const main = transformed.files.find((file) => file.name === "/main.tsx")!;
+  const types = transformed.files.find((file) => file.name === "/types.d.ts")!;
+
+  // A declaration file is types-only, so it bypasses the transform entirely:
+  // injecting the `__cfHelpers` value import would be invalid in a .d.ts. It is
+  // passed through byte-identical, while an ordinary source still gets helpers.
+  assertMatch(main.contents, /import \{ __cfHelpers \} from "commonfabric";/);
+  assertEquals(types.contents, declarations);
+  assertNotMatch(types.contents, /__cfHelpers/);
+});
+
 Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js sources", () => {
   const program: RuntimeProgram = {
     main: "/main.tsx",
