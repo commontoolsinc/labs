@@ -401,6 +401,7 @@ export interface NewPieceDependencies {
     manager: PieceManager,
     entry: EntryConfig,
   ) => Promise<RuntimeProgram>;
+  assignSlug?: typeof assignSlug;
 }
 
 // Creates a new piece from source code and optional input.
@@ -489,18 +490,58 @@ export async function newPiece(
     );
   });
 
-  if (slug !== undefined) {
+  const directUrl = `${config.apiUrl.replace(/\/+$/, "")}/` +
+    `${config.space}/${piece.id}`;
+
+  // Registration is the supported durability/discovery path. Do it before
+  // optional slug assignment so a slug write failure never leaves behind an
+  // otherwise-successful piece that is absent from the space's piece list.
+  try {
     await timeCliPhase(
-      "newPiece.assignSlug",
-      () => assignSlug(manager, piece.getCell(), slug),
+      "newPiece.addToDefaultPattern",
+      () => manager.add([piece.getCell()]),
+    );
+  } catch (error) {
+    throw new Error(
+      `The piece was created as ${piece.id}, but registration failed: ${
+        error instanceof Error ? error.message : String(error)
+      }\n` +
+        `The piece was not registered in the space's piece list.\n` +
+        `It remains addressable by ID at ${directUrl}`,
+      { cause: error },
     );
   }
 
-  // Explicitly add the piece to the space's allPieces list.
-  await timeCliPhase(
-    "newPiece.addToDefaultPattern",
-    () => manager.add([piece.getCell()]),
-  );
+  if (slug !== undefined) {
+    try {
+      await timeCliPhase(
+        "newPiece.assignSlug",
+        () => (deps.assignSlug ?? assignSlug)(manager, piece.getCell(), slug),
+      );
+    } catch (error) {
+      const recoveryCommand = cliCommand([
+        "piece",
+        "set-slug",
+        "--identity",
+        config.identity,
+        "--api-url",
+        config.apiUrl,
+        "--space",
+        config.space,
+        slug,
+        piece.id,
+      ]);
+      throw new Error(
+        `The piece was created and registered as ${piece.id}, but assigning ` +
+          `slug "${slug}" failed: ${
+            error instanceof Error ? error.message : String(error)
+          }\n` +
+          `The piece remains registered and addressable by ID at ${directUrl}\n` +
+          `Retry slug assignment with:\n  ${recoveryCommand}`,
+        { cause: error },
+      );
+    }
+  }
 
   return piece.id;
 }

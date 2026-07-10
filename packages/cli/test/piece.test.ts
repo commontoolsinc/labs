@@ -10,8 +10,15 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { PieceManager, SlugResolutionError } from "@commonfabric/piece";
+import {
+  PieceManager,
+  resolvePieceAddress,
+  SlugResolutionError,
+} from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   normalizeApiUrl,
   parseLink,
@@ -483,6 +490,277 @@ describe("cli piece parsing", () => {
       deps,
     )).rejects.toThrow(/lowercase letters, numbers/);
     expect(managerLoaded).toBe(false);
+  });
+
+  it("registers a new piece before assigning its optional slug", async () => {
+    const calls: string[] = [];
+    const pieceCell = {};
+    const manager = {
+      getSpace: () => "did:key:z6Mktest-space",
+      runtime: { userIdentityDID: "did:key:z6Mktest-home" },
+      assertCanAddPieces: () => {
+        calls.push("preflight");
+        return Promise.resolve();
+      },
+      add: () => {
+        calls.push("register");
+        return Promise.resolve();
+      },
+    } as unknown as PieceManager;
+    const controller = {
+      ensureDefaultPattern: () => {
+        calls.push("ensure-root");
+        return Promise.resolve({});
+      },
+      create: () => {
+        calls.push("create");
+        return Promise.resolve({
+          id: "fid1:created-piece",
+          getCell: () => pieceCell,
+        });
+      },
+    } as unknown as PiecesController;
+
+    const id = await newPiece(
+      { apiUrl: API_URL, space: "named-space", identity: "/tmp/test.key" },
+      { mainPath: "/tmp/pattern.tsx" },
+      { slug: "demo" },
+      {
+        loadManager: () => {
+          calls.push("load-manager");
+          return Promise.resolve(manager);
+        },
+        createController: () => controller,
+        getProgram: () => {
+          calls.push("resolve-program");
+          return Promise.resolve({} as RuntimeProgram);
+        },
+        assignSlug: (_manager, cell, slug) => {
+          expect(cell).toBe(pieceCell);
+          expect(slug).toBe("demo");
+          calls.push("assign-slug");
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(id).toBe("fid1:created-piece");
+    expect(calls).toEqual([
+      "load-manager",
+      "ensure-root",
+      "preflight",
+      "resolve-program",
+      "create",
+      "register",
+      "assign-slug",
+    ]);
+  });
+
+  it("reports the durable piece address when registration fails", async () => {
+    const calls: string[] = [];
+    const manager = {
+      getSpace: () => "did:key:z6Mktest-space",
+      runtime: { userIdentityDID: "did:key:z6Mktest-home" },
+      assertCanAddPieces: () => Promise.resolve(),
+      add: () => {
+        calls.push("register");
+        return Promise.reject(new Error("transaction exhausted"));
+      },
+    } as unknown as PieceManager;
+    const controller = {
+      ensureDefaultPattern: () => Promise.resolve({}),
+      create: () =>
+        Promise.resolve({
+          id: "fid1:created-but-unregistered",
+          getCell: () => ({}),
+        }),
+    } as unknown as PiecesController;
+
+    let message = "";
+    try {
+      await newPiece(
+        { apiUrl: API_URL, space: "named-space", identity: "/tmp/test.key" },
+        { mainPath: "/tmp/pattern.tsx" },
+        { slug: "demo" },
+        {
+          loadManager: () => Promise.resolve(manager),
+          createController: () => controller,
+          getProgram: () => Promise.resolve({} as RuntimeProgram),
+          assignSlug: () => {
+            calls.push("assign-slug");
+            return Promise.resolve();
+          },
+        },
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(calls).toEqual(["register"]);
+    expect(message).toContain("fid1:created-but-unregistered");
+    expect(message).toContain("transaction exhausted");
+    expect(message).toContain("was not registered");
+    expect(message).toContain(
+      `${API_URL}/named-space/fid1:created-but-unregistered`,
+    );
+  });
+
+  it("reports exact slug recovery after the piece is registered", async () => {
+    const calls: string[] = [];
+    const manager = {
+      getSpace: () => "did:key:z6Mktest-space",
+      runtime: { userIdentityDID: "did:key:z6Mktest-home" },
+      assertCanAddPieces: () => Promise.resolve(),
+      add: () => {
+        calls.push("register");
+        return Promise.resolve();
+      },
+    } as unknown as PieceManager;
+    const controller = {
+      ensureDefaultPattern: () => Promise.resolve({}),
+      create: () =>
+        Promise.resolve({
+          id: "fid1:registered-without-slug",
+          getCell: () => ({}),
+        }),
+    } as unknown as PiecesController;
+
+    let message = "";
+    try {
+      await newPiece(
+        { apiUrl: API_URL, space: "named-space", identity: "/tmp/test.key" },
+        { mainPath: "/tmp/pattern.tsx" },
+        { slug: "demo" },
+        {
+          loadManager: () => Promise.resolve(manager),
+          createController: () => controller,
+          getProgram: () => Promise.resolve({} as RuntimeProgram),
+          assignSlug: () => {
+            calls.push("assign-slug");
+            return Promise.reject(new Error("slug storage unavailable"));
+          },
+        },
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(calls).toEqual(["register", "assign-slug"]);
+    expect(message).toContain("fid1:registered-without-slug");
+    expect(message).toContain("slug storage unavailable");
+    expect(message).toContain("remains registered");
+    expect(message).toContain(
+      `${API_URL}/named-space/fid1:registered-without-slug`,
+    );
+    expect(message).toContain(
+      "cf piece set-slug --identity /tmp/test.key " +
+        `--api-url ${API_URL} --space named-space demo ` +
+        "fid1:registered-without-slug",
+    );
+  });
+
+  it("registers and cold-loads a slugged piece in a named space", async () => {
+    const identity = await Identity.fromPassphrase(
+      "cli registered named-space piece cold persistence",
+    );
+    const storageManager = StorageManager.emulate({ as: identity });
+    const firstRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    let freshRuntime: Runtime | undefined;
+    const spaceName = `registered-piece-${crypto.randomUUID()}`;
+    const slug = "cold-registered-piece";
+    const defaultPatternProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "/// <cf-disable-transform />",
+          "import { handler, pattern } from 'commonfabric';",
+          "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
+          "  ({ piece }, { allPieces }) => { allPieces.push(piece); },",
+          "  { proxy: true },",
+          ");",
+          "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
+          "  allPieces,",
+          "  addPiece: addPiece({ allPieces }),",
+          "}));",
+        ].join("\n"),
+      }],
+    };
+    const pieceProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "/// <cf-disable-transform />",
+          "import { pattern } from 'commonfabric';",
+          "export default pattern(() => ({ marker: 'persisted' }));",
+        ].join("\n"),
+      }],
+    };
+
+    try {
+      const firstSession = await createSession({ identity, spaceName });
+      const firstManager = new PieceManager(firstSession, firstRuntime);
+      await firstManager.synced();
+      expect(firstManager.getSpace()).not.toBe(firstRuntime.userIdentityDID);
+
+      const compiledDefaultPattern = await firstRuntime.patternManager
+        .compilePattern(defaultPatternProgram, {
+          space: firstManager.getSpace(),
+        });
+      const defaultPatternPiece = await firstManager.runPersistent(
+        compiledDefaultPattern,
+        { allPieces: [] },
+        "registered-piece-default-pattern",
+      );
+      await firstManager.linkDefaultPattern(defaultPatternPiece);
+      await firstRuntime.idle();
+      await firstManager.synced();
+
+      const id = await newPiece(
+        {
+          apiUrl: "http://toolshed.test",
+          space: firstManager.getSpace(),
+          identity: "/unused/test.key",
+        },
+        { mainPath: "/unused/main.tsx" },
+        { slug },
+        {
+          loadManager: () => Promise.resolve(firstManager),
+          getProgram: () => Promise.resolve(pieceProgram),
+        },
+      );
+
+      const firstPieces = new PiecesController(firstManager);
+      expect((await firstPieces.getAllPieces()).map((piece) => piece.id))
+        .toContain(id);
+      expect(await resolvePieceAddress(firstManager, slug)).toBe(id);
+      await firstManager.synced();
+      await firstManager.stopPiece(id);
+
+      const freshSession = await createSession({ identity, spaceName });
+      freshRuntime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      const freshManager = new PieceManager(freshSession, freshRuntime);
+      await freshManager.synced();
+
+      const freshPieces = new PiecesController(freshManager);
+      expect((await freshPieces.getAllPieces()).map((piece) => piece.id))
+        .toContain(id);
+      const resolvedId = await resolvePieceAddress(freshManager, slug);
+      expect(resolvedId).toBe(id);
+      const freshPiece = await freshPieces.get(resolvedId, true);
+      expect(await freshPiece.result.get()).toEqual({ marker: "persisted" });
+    } finally {
+      await freshRuntime?.dispose();
+      await firstRuntime.dispose();
+      await storageManager.close();
+    }
   });
 
   it("retains root repair guidance for non-home initialization failure", async () => {
