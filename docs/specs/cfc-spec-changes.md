@@ -73,7 +73,17 @@ evaluation as a no-op. Also specify the read-exclusion mirror: runtime-internal
 reads (verifier reads, label metadata at `["cfc"]`, program/source text,
 content-addressed schema docs) do not enter the consumed set or PC — and note
 this is a profile decision that must be revisited when label-metadata
-confidentiality (invariant 12) is implemented.
+confidentiality (invariant 12) is implemented. (Revisit discharged 2026-07-09
+by inv-12 Stage 2: label metadata now has exactly one APPLICATION read
+surface — the `inspectConfLabel` introspection builtin — and that surface
+CONSUMES: its metadata observations enter the consumed set and the flow
+derivation as an explicit `labelMetadata` observation class carrying §4.6.4.2
+population-rule labels (runner `cfc/label-introspection.ts`,
+`recordCfcLabelMetadataObservation`). Runtime-internal verifier reads —
+including the raw `["cfc"]` reads the introspection evaluator itself issues
+underneath — stay excluded from the consumed set and PC exactly as this entry
+specifies; the exclusion is now a statement about VERIFIER reads only, no
+longer about label metadata as such.)
 
 **SC-7 [clarify] Pointwise precision by transaction decomposition — §8.9.1 and
 §8.5.** §8.9.1's flow-precision claims assume one boundary observes the whole
@@ -420,7 +430,11 @@ and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
 stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
 redaction, classification table), stage 1 as labs#4638
 (`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
-commitment-aware matching); stages 2–3 remain per the design doc.
+commitment-aware matching), stage 2 in reduced form 2026-07-09
+(`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
+`labelMetadata` observation channel — the SC-6 revisit discharged; the full
+per-field `PathLabelTemplate` population profile co-builds with SC-4/SC-8);
+stage 3 remains per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
 event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
