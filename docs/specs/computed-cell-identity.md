@@ -180,24 +180,24 @@ no kind, which callers must treat as strict/authoritative — never relaxed.
 
 Rules:
 
-- **The kind is also salted into the hash preimage.** `createRef` wraps a
-  kinded preimage in an `{ entityKind, inner }` envelope; an unkinded
-  preimage always carries a top-level `causal` key, so the two shapes can
-  never collide bytes-for-bytes. Since the redesign moved the visible form
-  to the URI scheme, this salt is the byte-distinctness BACKSTOP — it is
-  what makes any code path that compares `hashString` or raw bytes (rather
-  than the full URI) unable to alias a computed cell with a state cell, and
-  it must be kept even though the tag no longer varies.
-- **The URI string is the identity.** `fromURI` strips the scheme, so a
-  round-trip through the bare hash would silently rename a computed entity
-  to its `of:` sibling. Never rebuild a computed cell's URI from its bare
-  hash. `toURI(value, kind)` throws when handed a kind alongside an
-  already-schemed string — an existing identity is never re-schemed.
+- **The hash preimage is kind-free.** A computed cell and a state cell
+  minted from the same cause share hash bytes; the URI scheme is the ONLY
+  representation of the kind and the sole distinguisher. This is a
+  deliberate relaxation: under the fail-open classifier the kind is a
+  conflict-policy hint, not a purity guarantee, so hash-level separation
+  buys nothing — but it makes the next rule load-bearing rather than
+  advisory, and any keying done on stripped or bare hashes is unsound.
+- **The URI string is the identity.** `fromURI` strips the scheme, and the
+  bare hash no longer carries the kind, so a round-trip through the bare
+  hash ALIASES the computed entity with its `of:` sibling of the same
+  cause. Never rebuild a computed cell's URI from its bare hash, and never
+  key subscriptions or caches on scheme-stripped ids. `toURI(value, kind)`
+  throws when handed a kind alongside an already-schemed string — an
+  existing identity is never re-schemed.
 - **One mint site.** `getDerivedInternalCellLink`
-  (`packages/runner/src/link-utils.ts`) passes `descriptor.kind` to BOTH
-  `createRef` (preimage) and `toURI` (scheme) from the same argument, so
-  the two representations cannot diverge and a kind change necessarily
-  names a different entity (different scheme AND different bytes).
+  (`packages/runner/src/link-utils.ts`) applies `descriptor.kind` as the
+  URI scheme via `toURI`; a kind change names a different entity because
+  the URI string differs, even though the hash bytes do not.
 - **Absence means strict.** Unkinded ids — every existing entity — keep
   authoritative conflict semantics. There is no migration; only newly
   minted computed cells get the new scheme, and the server's conservative
@@ -209,18 +209,6 @@ routing), so computed docs flow as ordinary documents. The scheme is learned
 only by the URI codecs (`uri-utils.ts`, `fabric-import-specifier.ts`,
 `fabric-ref-resolution.ts`) and read by the engine's drop policy via
 `entityKindOfIdString`.
-
-Superseded alternative: the first implementation carried the kind inside
-the `FabricHash` format tag — a bumped format-version tag with the kind as
-a middle segment (`<v2-tag>:computed:<hash>`, last-colon parsing, so
-tag-v1-only parsers fail loudly). It was retired in the redesign with no
-back-compat readers: the flag never shipped, so no such ids exist. The
-scheme form won because it keeps the hash tag a pure format discriminator,
-needs zero changes below the URI layer, and degrades the right way across
-versions: an old server sees an unknown scheme and stays strict, whereas an
-unknown hash tag would have to fail at parse time. (The even earlier idea
-of folding the kind into the tag with a non-colon separator,
-`fid1+computed:<hash>`, was rejected for overloading `fid1`.)
 
 ### Builder-side classification
 
@@ -391,8 +379,8 @@ unconditionally. The skew hazard is one-directional:
 ### Kind flips across pattern versions
 
 A cell whose kind changes between pattern versions (e.g. a `computed(...)`
-refactored into handler-managed state) mints a different id — different
-scheme and, via the preimage salt, different hash bytes. This is
+refactored into handler-managed state) mints a different id — same hash
+bytes, different URI scheme, distinct identity. This is
 semantically correct, not a migration problem: in the computed→state
 direction the orphaned value was derived garbage; in the state→computed
 direction the old value is superseded by derivation. Either way the old
@@ -417,8 +405,7 @@ executing code. What the design guarantees instead:
   operation, no migration case, and no surface where a buggy or malicious
   client demotes an existing state cell to computed to get its writes
   stale-dropped: changing the scheme necessarily changes the id, i.e. names
-  a different entity (and the preimage salt keeps even the hash bytes
-  apart).
+  a different entity.
 - **Blast-radius containment.** A client that mints a computed-schemed id
   and writes non-derived data through it only relaxes conflict semantics
   for entities it created itself. It gains no ability to affect the
@@ -472,9 +459,9 @@ this proposal onto persistent-scheduler-state:
 
 ## Phased Plan
 
-1. **Minting** (implemented, redesigned). Kind threaded through
-   `createRef` (preimage salt) and `toURI` (scheme) from the single mint
-   site; computed-by-default classifier with the exhaustive disqualifier
+1. **Minting** (implemented, redesigned). Kind applied as the URI scheme
+   by `toURI` at the single mint site (the hash preimage is kind-free);
+   computed-by-default classifier with the exhaustive disqualifier
    list and the name registry; kind-aware descriptor/manifest matching.
    Gated behind `EXPERIMENTAL_COMPUTED_CELL_IDS`: the flag controls id
    creation only, and readers accept both forms unconditionally from the
@@ -495,9 +482,9 @@ this proposal onto persistent-scheduler-state:
 - Unit: scheme-based kind parsing (`computed:fid1:H` ⇒ computed; `of:`,
   bare, `data:`, and unknown `future:fid1:H` forms ⇒ no kind);
   `toURI`/`fromURI` round-trips, including the kind-plus-schemed-string
-  throw; `createRef` kinded ids keep tag `fid1` while differing in bytes
-  from their unkinded siblings (the preimage salt); import-specifier
-  round-trip of computed refs.
+  throw; the kind-free preimage (same cause ⇒ same hash bytes; the scheme
+  is the sole distinguisher); import-specifier round-trip of computed
+  refs.
 - Builder: positive battery for the fail-open rule (capture-writes lift,
   handle-bearing lift without provenance, sync-builtin writers, read-only
   handler captures, result-surface exposure) and negative battery for every

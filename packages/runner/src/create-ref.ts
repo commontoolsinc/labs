@@ -1,7 +1,6 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   BaseFabricPrimitive,
-  type EntityKind,
   FabricHash,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
@@ -40,21 +39,6 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 }
 
 /**
- * Options for {@link createRef}.
- */
-export type CreateRefOptions = {
-  /**
-   * Entity kind salted into the hash preimage. The kind's VISIBLE form is
-   * the URI scheme (`computed:fid1:<hash>`), applied by `toURI` at the same
-   * mint site from the same argument; the preimage salt here guarantees the
-   * bytes also differ, so a kind change necessarily names a different entity
-   * even for code paths that compare bare hashes. See
-   * `docs/specs/computed-cell-identity.md`.
-   */
-  kind?: EntityKind;
-};
-
-/**
  * Generates an entity ID.
  *
  * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
@@ -64,7 +48,6 @@ export type CreateRefOptions = {
  *
  * @param source - The source object.
  * @param cause - Optional causal source. If omitted, a random id is minted.
- * @param options - Optional kind; see {@link CreateRefOptions}.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
@@ -75,7 +58,6 @@ export function createRef(
     );
     return crypto.randomUUID();
   })(),
-  options?: CreateRefOptions,
 ): EntityId {
   const seen = new Set<any>();
 
@@ -158,18 +140,12 @@ export function createRef(
     else return obj;
   }
 
-  const kind = options?.kind;
-  // The kind changes the preimage SHAPE, not just a key: an unkinded preimage
-  // always carries a top-level `causal` key, while the kind envelope never
-  // does, so no unkinded id can collide bytes-for-bytes with a kinded one.
-  // This salt is the byte-distinctness BACKSTOP: the kind's visible form is
-  // the URI scheme (applied by `toURI`, not here — the hash tag stays
-  // `fid1`), so this guards code paths that compare `hashString`/bytes
-  // instead of the full URI.
-  const preimage = kind === undefined
-    ? { ...source, causal: cause }
-    : { entityKind: kind, inner: { ...source, causal: cause } };
-  return entityIdFrom(hashOf(traverse(preimage)));
+  // The entity kind deliberately does NOT enter the preimage: a computed
+  // cell and a state cell minted from the same cause share hash bytes and
+  // differ only in their URI scheme (`computed:` vs `of:`, applied by
+  // `toURI`). The full URI string is the identity; nothing may rebuild a
+  // computed cell's URI from its bare hash.
+  return entityIdFrom(hashOf(traverse({ ...source, causal: cause })));
 }
 
 /**

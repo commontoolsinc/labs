@@ -71,7 +71,7 @@ describe("computed-cell ack-and-drop (storage client)", () => {
     const computedLink = {
       space,
       id: toURI(
-        createRef({}, "computed-drop-out", { kind: "computed" }),
+        createRef({}, "computed-drop-out"),
         "computed",
       ),
       path: [],

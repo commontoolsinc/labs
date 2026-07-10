@@ -96,9 +96,11 @@ export class CellHandle<T = unknown> {
   }
 
   id(): string {
-    // Display/lookup form: entity URI scheme (`of:` / `computed:`) stripped.
+    // Legacy display form strips `of:`. A `computed:` scheme stays visible:
+    // the hash preimage is kind-free, so the scheme is the only thing
+    // distinguishing a computed doc from a state sibling of the same cause.
     const id = this.#ref.id;
-    return id ? id.replace(/^(of|computed):/, "") : id;
+    return id ? id.replace(/^of:/, "") : id;
   }
 
   /**

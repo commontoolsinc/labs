@@ -253,7 +253,7 @@ describe("fabric import specifiers", () => {
 
   it("round-trips real computed: URIs produced by createRef and toURI", () => {
     const uri = toURI(
-      createRef({ x: 1 }, "fabric import canary", { kind: "computed" }),
+      createRef({ x: 1 }, "fabric import canary"),
       "computed",
     );
     const match = /^computed:fid1:([A-Za-z0-9_-]{43})$/.exec(uri);

@@ -229,7 +229,7 @@ describe("CellHandle CFC label IPC", () => {
     expect(cellRefToKey(first)).not.toEqual(cellRefToKey(second));
   });
 
-  it("strips the entity URI scheme (of:/computed:) in keys and id()", () => {
+  it("keys on the full schemed id; id() strips of: only", () => {
     const runtime = {
       [$conn]: () => ({
         request: () => Promise.resolve({}),
@@ -244,21 +244,22 @@ describe("CellHandle CFC label IPC", () => {
       path: [],
     });
 
-    // Schemed and bare forms of the SAME id normalize to one key…
-    expect(cellRefToKey(refFor("of:fid1:abc"))).toEqual(
+    // Keys carry the FULL schemed id: the hash preimage is kind-free, so
+    // of:fid1:H and computed:fid1:H can be two distinct docs for one cause —
+    // their subscriptions must not conflate.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey(refFor("computed:fid1:abc")),
+    );
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
       cellRefToKey(refFor("fid1:abc")),
     );
-    expect(cellRefToKey(refFor("computed:fid1:abc"))).toEqual(
-      cellRefToKey(refFor("fid1:abc")),
-    );
-    // …which is collision-safe only because the computed kind is salted into
-    // the hash preimage: a real `computed:` id never shares hash bytes with
-    // an `of:` id.
 
+    // id(): legacy of:-stripping stays; the computed: scheme is
+    // identity-bearing and stays visible.
     expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
       .toBe("fid1:abc");
     expect(new CellHandle(runtime, refFor("computed:fid1:abc")).id())
-      .toBe("fid1:abc");
+      .toBe("computed:fid1:abc");
     expect(new CellHandle(runtime, refFor("fid1:abc")).id()).toBe("fid1:abc");
   });
 

@@ -358,10 +358,14 @@ function formatValueForSummary(value: unknown): string {
  * Shorten an ID for display
  */
 function shortenId(id: string): string {
-  // Entity URI schemes (`of:fid1:<hash>`, `computed:fid1:<hash>`): drop the
-  // scheme and show the head of the tagged hash. Safe to conflate — the kind
-  // is salted into the hash preimage, so the bodies never collide.
-  const body = id.replace(/^(of|computed):/, "");
+  // Entity URI schemes: `of:` drops for brevity; `computed:` stays visible —
+  // the hash preimage is kind-free, so the scheme is the only difference
+  // from a state sibling of the same cause.
+  if (id.startsWith("computed:")) {
+    return "computed:" +
+      id.slice("computed:".length).substring(0, 12) + "...";
+  }
+  const body = id.replace(/^of:/, "");
   if (body !== id) {
     return body.substring(0, 12) + "...";
   }

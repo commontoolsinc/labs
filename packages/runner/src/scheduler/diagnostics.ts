@@ -207,9 +207,12 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
         : undefined);
   result.space = resultCell.space;
   // TODO(@ubik2): This should really just be sourceURI, but I'd need
-  // to update all the consumers. For now, strip the URI scheme
-  // ('of:' — or 'computed:', defensively; piece roots are minted unkinded).
-  result.pieceId = resultCell.sourceURI.replace(/^(of|computed):/, "");
+  // to update all the consumers. Strip `of:` ONLY: bare ids are re-prefixed
+  // with `of:` downstream (e.g. shell debug-utils), so a stripped computed:
+  // id would silently alias its of: sibling. Piece roots are minted
+  // unkinded, so a computed: sourceURI here would be a bug — keep its
+  // scheme visible rather than laundering it into the bare-id world.
+  result.pieceId = resultCell.sourceURI.replace(/^of:/, "");
   return result;
 }
 

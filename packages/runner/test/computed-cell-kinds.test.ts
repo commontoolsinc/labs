@@ -10,6 +10,7 @@ import {
 } from "../src/builder/builtin-replayability.ts";
 import { registerBuiltins } from "../src/builtins/index.ts";
 import { createRef } from "../src/create-ref.ts";
+import { toURI } from "../src/uri-utils.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -53,25 +54,22 @@ describe("computed cell kinds", () => {
     await runtime?.dispose();
   });
 
-  describe("createRef kind option", () => {
-    it("mints a kind-salted id with distinct bytes", () => {
+  describe("createRef and the computed scheme", () => {
+    it("keeps the hash preimage kind-free", () => {
       const cause = { the: "cause" };
-      const untagged = createRef({}, cause);
-      const kinded = createRef({}, cause, { kind: "computed" });
-      // The kind's visible form is the URI scheme (`computed:fid1:<hash>`,
-      // applied by toURI at the mint site) — the FabricHash tag stays fid1.
-      expect(kinded.tag).toBe("fid1");
-      expect(untagged.tag).toBe("fid1");
-      // The kind is salted into the hash preimage, so even the bytes differ —
-      // code comparing bare hashStrings can never alias the two. This is the
-      // byte-distinctness backstop now that the tag no longer carries it.
-      expect(kinded.hashString).not.toBe(untagged.hashString);
+      const hash = createRef({}, cause);
+      expect(hash.tag).toBe("fid1");
+      // The kind does NOT enter the preimage: the same cause yields the same
+      // bytes, and the URI scheme applied by toURI is the ONLY thing
+      // distinguishing a computed id from its state sibling.
+      expect(toURI(hash, "computed")).toBe(`computed:${hash.toString()}`);
+      expect(toURI(hash)).toBe(`of:${hash.toString()}`);
     });
 
     it("mints deterministically", () => {
       const cause = { the: "cause" };
-      expect(createRef({}, cause, { kind: "computed" }).toString()).toBe(
-        createRef({}, cause, { kind: "computed" }).toString(),
+      expect(createRef({}, cause).toString()).toBe(
+        createRef({}, cause).toString(),
       );
     });
   });
@@ -423,9 +421,9 @@ describe("computed cell kinds", () => {
       });
       expect(kinded.id.startsWith("computed:fid1:")).toBe(true);
       expect(untagged.id.startsWith("of:fid1:")).toBe(true);
-      // The kind-salted preimage keeps even the hash part distinct — the
-      // computed id is never the of: id with a different scheme glued on.
-      expect(kinded.id.slice("computed:".length)).not.toBe(
+      // The hash preimage is kind-free: same partialCause, same hash part —
+      // the scheme is the whole difference, and the whole identity.
+      expect(kinded.id.slice("computed:".length)).toBe(
         untagged.id.slice("of:".length),
       );
     });

@@ -761,9 +761,9 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    // The kind flows to BOTH createRef (hash-preimage salt) and toURI (URI
-    // scheme) from this one argument, so the two representations of the kind
-    // cannot diverge.
+    // The kind's ONLY representation is the URI scheme applied here by
+    // toURI; the hash preimage is kind-free, so this mint site is the single
+    // place a computed identity is established.
     id: toURI(
       createRef(
         {},
@@ -772,7 +772,6 @@ export function getDerivedInternalCellLink(
           type: "internal",
           cause: descriptor.partialCause,
         },
-        descriptor.kind !== undefined ? { kind: descriptor.kind } : undefined,
       ),
       descriptor.kind,
     ),
