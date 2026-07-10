@@ -482,6 +482,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cell.set({ out: "v1" });
         tx.prepareCfc();
         expect(tx.getCfcState().prepare.status).toBe("prepared");
+        // A no-op re-set of the same mode does not invalidate.
+        tx.setCfcDeclaredMonotonicityMode("off");
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
         tx.setCfcDeclaredMonotonicityMode("enforce");
         const prepare = tx.getCfcState().prepare;
         expect(prepare.status).toBe("invalidated");
