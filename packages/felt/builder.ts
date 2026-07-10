@@ -24,7 +24,7 @@ function formatFileSize(bytes: number): string {
 }
 
 export class Builder extends EventTarget {
-  private splitPassAuxiliaryOutputs = new Set<string>();
+  private splitPassAuxiliaryOutputGenerations: Set<string>[] = [];
 
   constructor(public manifest: ResolvedConfig) {
     super();
@@ -164,7 +164,7 @@ export class Builder extends EventTarget {
     return result.metafile;
   }
 
-  /** Remove hash-named split outputs superseded by a later build. */
+  /** Retain the current and previous split outputs, pruning anything older. */
   private async pruneStaleSplitOutputs(
     metafile: esbuild.Metafile,
     entries: ResolvedEntryPoint[],
@@ -184,8 +184,22 @@ export class Builder extends EventTarget {
         .map(([outputPath]) => resolvePath(outputPath)),
     );
 
-    for (const stalePath of this.splitPassAuxiliaryOutputs) {
-      if (nextOutputs.has(stalePath)) continue;
+    this.splitPassAuxiliaryOutputGenerations.push(nextOutputs);
+    if (
+      this.splitPassAuxiliaryOutputGenerations.length <=
+        RETAINED_SPLIT_OUTPUT_GENERATIONS
+    ) {
+      return;
+    }
+
+    const staleOutputs = this.splitPassAuxiliaryOutputGenerations.shift()!;
+    const retainedOutputs = new Set(
+      this.splitPassAuxiliaryOutputGenerations.flatMap((
+        generation,
+      ) => [...generation]),
+    );
+    for (const stalePath of staleOutputs) {
+      if (retainedOutputs.has(stalePath)) continue;
 
       // Metafile paths originate from esbuild, but keep deletion explicitly
       // confined to felt's output directory.
@@ -205,8 +219,6 @@ export class Builder extends EventTarget {
         if (!(error instanceof Deno.errors.NotFound)) throw error;
       }
     }
-
-    this.splitPassAuxiliaryOutputs = nextOutputs;
   }
 
   /**
@@ -244,6 +256,7 @@ export class Builder extends EventTarget {
 }
 
 const pathSeparator = Deno.build.os === "windows" ? "\\" : "/";
+const RETAINED_SPLIT_OUTPUT_GENERATIONS = 2;
 
 function mergeMetafiles(metafiles: esbuild.Metafile[]): esbuild.Metafile {
   const inputs: esbuild.Metafile["inputs"] = {};

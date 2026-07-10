@@ -152,10 +152,11 @@ doesn't affect compilation), but the cost is just one recompilation pass —
 equivalent to today's behavior with no cache. The benefit is zero risk of stale
 output.
 
-**Browser**: Felt injects a compiler-input fingerprint into the runtime worker
-at build time. The worker boot bundle and its lazily loaded compiler chunk share
-that fingerprint, so compiler-affecting changes invalidate cached output even
-though the compiler stack is code-split off the boot path.
+**Browser**: The runtime worker is bundled by Felt/esbuild into a single JS file
+that includes all dependencies. If any source file changes, the bundle changes.
+Felt computes SHA-256 of each output file and writes a manifest
+(`dist/build-manifest.json`). The shell reads this at startup and passes the
+worker bundle hash to the worker as the fingerprint.
 
 **Server**: `computeGitFingerprint()` computes a fingerprint with this priority:
 

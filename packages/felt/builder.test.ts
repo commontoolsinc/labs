@@ -157,7 +157,7 @@ Deno.test("Builder: metafiles from plain and split passes are merged", async () 
   }
 });
 
-Deno.test("Builder: repeated builds prune superseded split chunks", async () => {
+Deno.test("Builder: repeated builds retain one prior split generation and prune older chunks", async () => {
   const root = await Deno.makeTempDir({ prefix: "felt-split-prune-test-" });
   try {
     await writeFixture(root);
@@ -176,16 +176,50 @@ Deno.test("Builder: repeated builds prune superseded split chunks", async () => 
     await builder.build();
 
     const rebuiltChunks = await listChunks(scriptsDir);
-    assertEquals(rebuiltChunks.length, 1);
+    assertEquals(rebuiltChunks.length, 2);
     assert(
-      rebuiltChunks[0] !== firstChunks[0],
+      rebuiltChunks.includes(firstChunks[0]!),
+      "the immediately previous chunk generation must remain available",
+    );
+    const rebuiltChunk = rebuiltChunks.find((chunk) =>
+      chunk !== firstChunks[0]
+    )!;
+    assert(
+      rebuiltChunk !== firstChunks[0],
       "changed split content must produce a new content-hashed chunk",
     );
     assert(
-      (await Deno.readTextFile(join(scriptsDir, rebuiltChunks[0]!))).includes(
+      (await Deno.readTextFile(join(scriptsDir, rebuiltChunk))).includes(
         rebuiltMarker,
       ),
-      "the retained chunk must contain the rebuilt split module",
+      "the current chunk must contain the rebuilt split module",
+    );
+
+    const twiceRebuiltMarker = `${SPLIT_MARKER}_TWICE_REBUILT`;
+    await Deno.writeTextFile(
+      join(root, "split-lazy.ts"),
+      `export const marker = ${JSON.stringify(twiceRebuiltMarker)};\n`,
+    );
+    await builder.build();
+
+    const twiceRebuiltChunks = await listChunks(scriptsDir);
+    assertEquals(twiceRebuiltChunks.length, 2);
+    assert(
+      !twiceRebuiltChunks.includes(firstChunks[0]!),
+      "the oldest chunk generation must be pruned",
+    );
+    assert(
+      twiceRebuiltChunks.includes(rebuiltChunk),
+      "the immediately previous chunk generation must still be retained",
+    );
+    const retainedContents = await Promise.all(
+      twiceRebuiltChunks.map((chunk) =>
+        Deno.readTextFile(join(scriptsDir, chunk))
+      ),
+    );
+    assert(
+      retainedContents.some((content) => content.includes(twiceRebuiltMarker)),
+      "the retained generations must include the twice-rebuilt module",
     );
   } finally {
     await Deno.remove(root, { recursive: true });

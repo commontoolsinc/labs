@@ -1,5 +1,7 @@
 import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { Identity } from "@commonfabric/identity";
+import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 const { FRONTEND_URL } = env;
@@ -52,5 +54,23 @@ describe("shell worker runtime", () => {
     if (message.data !== "READY") {
       throw new Error(`Expected READY, got ${JSON.stringify(message.data)}`);
     }
+  });
+
+  it("starts the default worker through RootView and RuntimeInternals", async () => {
+    const page = shell.page();
+    await page.goto(FRONTEND_URL);
+    await page.applyConsoleFormatter();
+
+    const identity = await Identity.generate({ implementation: "noble" });
+    await shell.login(identity);
+
+    const runtimeIdentity = await page.evaluate(() => ({
+      hasRuntime: !!globalThis.commonfabric?.rt,
+      identityDid: globalThis.app.state().identity?.did(),
+    }));
+    assertEquals(runtimeIdentity, {
+      hasRuntime: true,
+      identityDid: identity.did(),
+    });
   });
 });
