@@ -1695,6 +1695,12 @@ export class Server {
           // nothing to broadcast to other sessions, and its scheduler
           // observation was deliberately not persisted, so there are no side
           // effects to run.
+          if (commit.droppedComputed !== undefined) {
+            // Telemetry parity with ct.conflict: drops must be visible in
+            // traces, or a misclassified cell (state writes silently
+            // dropped) is undiagnosable from the server side.
+            span.setAttribute("ct.droppedComputed", true);
+          }
           if (commit.droppedComputed === undefined) {
             await this.runPostCommitSchedulerSideEffects(
               message.space,
