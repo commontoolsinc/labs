@@ -523,3 +523,9 @@ this proposal onto persistent-scheduler-state:
   re-reading against ack-and-drop.
 - Whether CFC flow-label derivation needs to observe dropped writes, or is
   indifferent to them.
+- Deferred tooling gap: `SchedulerGraphView.extractEntityId` (shell) groups
+  graph nodes by scheme-stripped entity id, so an `of:` doc and a
+  `computed:` doc minted from the same cause would be conflated into one
+  group in the debug graph. Cosmetic (display grouping only, no identity
+  flows out of it), but the view should eventually carry the scheme through
+  its grouping keys and labels.

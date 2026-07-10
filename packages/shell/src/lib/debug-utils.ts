@@ -189,9 +189,11 @@ function getDefaultDid(): string {
 function normalizeEntityId(
   options?: Pick<DebugCellOptions, "did" | "id">,
 ): string {
-  // Bare ids get the default `of:` scheme; already-schemed ids (`of:` or
-  // `computed:`) pass through — never double-prefix, the scheme is part of
-  // the identity.
+  // Full schemed ids are canonical and pass through untouched — the scheme
+  // is part of the identity, and everything programmatic (diagnostics
+  // pieceId, error strings) now emits full ids. Adding `of:` to a BARE id is
+  // a human-input convenience only (ids typed or copied from URL paths,
+  // which are piece roots and therefore always of:).
   const withScheme = (value: string): string =>
     /^(of|computed):/.test(value) ? value : `of:${value}`;
   const id = options?.id;
