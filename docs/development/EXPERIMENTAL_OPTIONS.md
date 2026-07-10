@@ -144,17 +144,29 @@ propagate](#how-flags-propagate).
   work (scheduler-v2 E1)" (#4090, 2026-06-12).
 - **Purpose.** Attaches origin-committed preconditions to scheduler-v2 lineage
   commits, so that event-launched follow-up work commits only against the state
-  it was speculated from.
+  it was speculated from. Since #4649 it is also the exactly-once substrate for
+  **single-use CFC grant consumption**
+  (`docs/specs/cfc-persisted-declassification.md` §2.2): the releasing
+  transaction claims a create-only consumption receipt, and the storage commit
+  emits that entity-absent precondition only under this flag.
 - **Current default and planned end state.** Off by default. It is meant to
   graduate together with the rest of scheduler-v2 speculation lineage.
 - **Status on 2026-07-08.** Implemented and plumbed through the runner and the
   memory protocol, behind the flag. Off by default and reachable only
   programmatically.
-- **Path to removal.** This exists to serve scheduler-v2 speculation lineage; it
-  can be deleted only when lineage tracking becomes part of the base scheduler
-  semantics. At that point remove the flag, the precondition attach and check in
-  the storage transaction path, and the server-side precondition check in the
-  memory engine.
+- **Status on 2026-07-10.** Single-use CFC grants (#4649) depend on it: with
+  the flag OFF (the default), a `singleUse` grant is unsatisfiable at every
+  evaluation site — fail closed, never silently multi-use — with a diagnostic
+  naming this flag. Standing grants are unaffected. Operators enabling CFC
+  grant-based sharing that needs single-use releases must turn this flag on.
+- **Path to removal.** This exists to serve scheduler-v2 speculation lineage
+  and (since #4649) single-use CFC grant consumption; it can be deleted only
+  when lineage tracking becomes part of the base scheduler semantics AND the
+  create-only receipt discipline is unconditionally on. At that point remove
+  the flag, the precondition attach and check in the storage transaction path,
+  and the server-side precondition check in the memory engine — the single-use
+  grant path then drops its availability check (`cfcGrantReceiptsAvailable` in
+  `packages/runner/src/cfc/grants.ts`) rather than the receipts themselves.
 
 ### `eagerSourceAnnotation`
 
