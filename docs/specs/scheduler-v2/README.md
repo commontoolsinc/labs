@@ -1,7 +1,8 @@
 # Scheduler v2 — Demand-Driven Transactional Reactive Scheduling
 
-> **Status**: Proposal (design spec, not yet implemented)
-> **Replaces (once implemented)**: the behavior described in
+> **Status**: Implemented (shipped as the scheduler in PR #4288); this spec
+> governs the current behavior and is updated with it.
+> **Replaces**: the behavior described in
 > `docs/history/specs/pull-based-scheduler/README.md`
 > **Companion records** (archived point-in-time documents):
 > [`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md)
