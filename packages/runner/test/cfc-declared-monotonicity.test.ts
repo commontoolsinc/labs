@@ -10,6 +10,7 @@ import {
   type CfcDeclaredMonotonicityMode,
 } from "../src/cfc/mod.ts";
 import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
 
@@ -566,6 +567,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         });
         const attempt = (marker: unknown) => () =>
           tx.setCfcDeclaredWideningExemption(marker as never);
+        expect(attempt(null)).toThrow(/malformed/);
         expect(attempt({ ...EXEMPTION(), space: "" })).toThrow(/malformed/);
         expect(attempt({ ...EXEMPTION(), id: "" })).toThrow(/malformed/);
         expect(attempt({ ...EXEMPTION(), clauseDigest: "" })).toThrow(
@@ -603,6 +605,36 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
             clauseDigest: "another-digest",
           })
         ).toThrow(/already set/);
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("delegates through TransactionWrapper to the wrapped transaction", async () => {
+      // The wrapper forwards every dial setter and the seam; both must
+      // reach the wrapped tx (and its pin/validation) identically.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const tx = runtime.edit();
+        const wrapper = new TransactionWrapper(tx);
+        wrapper.setCfcDeclaredMonotonicityMode("enforce");
+        expect(tx.getCfcState().declaredMonotonicityMode).toBe("enforce");
+        expect(() => wrapper.setCfcDeclaredMonotonicityMode("off")).toThrow(
+          /cannot be weakened/,
+        );
+        expect(() => wrapper.setCfcDeclaredWideningExemption(EXEMPTION()))
+          .toThrow(/builtin/);
+        tx.setCfcImplementationIdentity({
+          kind: "builtin",
+          builtinId: "cfc-declassification-event-writer",
+        });
+        wrapper.setCfcDeclaredWideningExemption(EXEMPTION());
+        expect(tx.getCfcState().declaredWideningExemption?.id).toBe(
+          "of:some-doc",
+        );
         tx.abort();
       } finally {
         await runtime.dispose();
