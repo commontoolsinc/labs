@@ -274,7 +274,7 @@ minted into the same entries, not the mechanism.
   them (upgrading WP7's computed-in-hand labels to persisted templates),
   per-field tests from the §4.6.4.2 example, SC-25 tail updated.
 
-  **Implementation note (Stage B landed, 2026-07-10).** Shipped in
+  **Implementation note (Stage B landed, 2026-07-10, #4660).** Shipped in
   `packages/runner/src/cfc/label-metadata-population.ts` (mint derivation +
   wildcard resolver) wired into the `prepare.ts` persist seam and the
   `label-introspection.ts` consumption, tests in

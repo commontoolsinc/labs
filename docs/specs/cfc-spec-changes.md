@@ -452,7 +452,7 @@ redaction, classification table), stage 1 as labs#4638
 commitment-aware matching), stage 2 as labs#4657
 (`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
 `labelMetadata` observation channel — the SC-6 revisit discharged)
-completed by template-population Stage B (2026-07-10): the full per-field
+completed by template-population Stage B (labs#4660): the full per-field
 §4.6.4.2 profile persists as multi-`*` templates under `/cfc/labels/...`
 (`origin:"label-metadata"`, `observes:"labelMetadata"` — no payload read
 class consumes them), minted at the persist seam from each source-bearing
