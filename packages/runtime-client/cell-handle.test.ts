@@ -254,10 +254,10 @@ describe("CellHandle CFC label IPC", () => {
       cellRefToKey(refFor("fid1:abc")),
     );
 
-    // id(): legacy of:-stripping stays; the computed: scheme is
-    // identity-bearing and stays visible.
+    // CellHandle.id() is the FULL schemed id — a true identity accessor.
+    // The routing/display strip lives on PageHandle.id().
     expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
-      .toBe("fid1:abc");
+      .toBe("of:fid1:abc");
     expect(new CellHandle(runtime, refFor("computed:fid1:abc")).id())
       .toBe("computed:fid1:abc");
     expect(new CellHandle(runtime, refFor("fid1:abc")).id()).toBe("fid1:abc");

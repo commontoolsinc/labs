@@ -570,8 +570,13 @@ export class XHeaderView extends BaseView {
       return this._localIsFavorite;
     }
     if (!this.pieceId) return false;
+    // CellHandle.id() is the full schemed id; the routing pieceId is bare
+    // (piece roots are always of:). Normalize the bare side for equality.
+    const pieceUri = /^(of|computed):/.test(this.pieceId)
+      ? this.pieceId
+      : `of:${this.pieceId}`;
     return this._serverFavorites.some(
-      (f) => (f.cell as unknown as CellHandle<unknown>).id() === this.pieceId,
+      (f) => (f.cell as unknown as CellHandle<unknown>).id() === pieceUri,
     );
   }
 

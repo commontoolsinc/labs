@@ -95,12 +95,16 @@ export class CellHandle<T = unknown> {
     return this.#ref.space;
   }
 
+  /**
+   * The FULL schemed id — identical to `ref().id` and safe to use as
+   * identity (keys, equality, round-trips). The hash preimage is kind-free,
+   * so the URI scheme is the only thing distinguishing a computed doc from
+   * a state sibling of the same cause; this accessor never strips it. For
+   * the piece-root routing/display form (bare, `of:`-stripped), use
+   * `PageHandle.id()` — see docs/specs/computed-cell-identity.md.
+   */
   id(): string {
-    // Legacy display form strips `of:`. A `computed:` scheme stays visible:
-    // the hash preimage is kind-free, so the scheme is the only thing
-    // distinguishing a computed doc from a state sibling of the same cause.
-    const id = this.#ref.id;
-    return id ? id.replace(/^of:/, "") : id;
+    return this.#ref.id;
   }
 
   /**
