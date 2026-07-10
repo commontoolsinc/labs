@@ -22,12 +22,32 @@
 
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
+import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import type {
   RuntimeDiagnosticsSnapshot,
   TrustedUiDescriptor,
   WorkerRequest,
   WorkerResponse,
 } from "./multi-runtime-worker.ts";
+
+// The self-hosted storage server lives in THIS realm, while every runtime
+// lives in a worker realm whose Runtime constructor propagates the
+// EXPERIMENTAL_* env flags into the memory module's ambient config. No
+// Runtime is ever constructed in the harness realm, so a flag-ON test run
+// would otherwise leave the SERVER side of the flag off — a client/server
+// capability skew the harness does not intend to model (skewed peers now
+// degrade gracefully, so the suite would silently test flag-off semantics).
+// Mirror toolshed (whose in-process Runtime sets the ambient flag for its
+// memory route) by propagating the canonical env mapping. Re-asserted per
+// harness creation: any Runtime constructed later in this realm re-derives
+// the ambient flag from ITS options and would stomp a load-time value.
+function propagateExperimentalEnvToServerRealm(): void {
+  const experimental = experimentalOptionsFromEnv(Deno.env.get);
+  if (experimental.persistentSchedulerState !== undefined) {
+    setPersistentSchedulerStateConfig(experimental.persistentSchedulerState);
+  }
+}
 
 export type { TrustedUiDescriptor };
 export type { RuntimeDiagnosticsSnapshot };
@@ -308,6 +328,7 @@ export class MultiRuntimeHarness {
     if (options.sessions.length === 0) {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
+    propagateExperimentalEnvToServerRealm();
     const spaceName = options.spaceName ?? crypto.randomUUID();
     const server = options.apiUrl ? undefined : StandaloneMemoryServer.start();
     const apiUrl = (options.apiUrl ?? server!.url).href;

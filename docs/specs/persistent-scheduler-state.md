@@ -878,11 +878,23 @@ The implemented snapshot lookup surface is:
 - engine API `Engine.listSchedulerActionSnapshots()`
 - runner storage-provider method `listSchedulerActionSnapshots()`
 
-The query filters by branch, piece id, process generation, and optionally action
-id. Bulk listing is cursor-paginated in deterministic owner-space, piece,
-generation, action order. The protocol result intentionally carries
+The query filters by branch and process generation, and optionally by piece id
+and action id. Bulk listing is cursor-paginated in deterministic owner-space,
+piece, generation, action order. The protocol result intentionally carries
 `observation` as `unknown`; the runner owns validation and casting to
 `SchedulerActionObservationV1`.
+
+The resume load is **space-scoped**: a resumed boot issues one listing for the
+whole space (no piece-id filter) and buckets the rows per piece id, so every
+descendant piece — sub-pattern nodes, map/filter/flatMap per-element runs —
+registers against its own bucket from the same listing. Restore is keyed per
+piece **doc** (`pieceId` is the `scope:id` of the doc the piece derives; each
+doc has exactly one deriving piece), and only doc-keyed observations are
+persisted — an action registered without rehydration identity (session-scoped
+effects such as sinks or `pull`) writes no rows. Builtins whose run starts
+child runs (map/filter/flatMap) never rehydrate clean: their reconcile
+re-attaches the children, which then rehydrate individually. See
+`docs/specs/scheduler-v2/per-doc-rehydration.md` for the full design.
 
 Subscription-time storage rehydration is bounded. If the snapshot request does
 not resolve before the rehydration timeout, the scheduler drops that pending

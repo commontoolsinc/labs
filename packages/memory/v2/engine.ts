@@ -48,6 +48,21 @@ const resolveCommitSessionKey = (
 ): string =>
   principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
 
+// Principal segment of a stored commit/observation session key
+// (`session:<principal>:<sessionId>` per resolvePrincipalSessionKey).
+// Principal-less sessions store the bare session id — no principal. The
+// segments are encodeURIComponent-encoded, so splitting on ":" is exact.
+export const principalOfSessionKey = (key: string): string | undefined => {
+  if (!key.startsWith("session:")) return undefined;
+  const parts = key.split(":");
+  if (parts.length !== 3) return undefined;
+  try {
+    return decodeURIComponent(parts[1]);
+  } catch {
+    return undefined;
+  }
+};
+
 export const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
@@ -835,6 +850,9 @@ export interface SchedulerObservationSnapshotWithState
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
+  // Session that persisted the observation — the adoption fan-out needs it
+  // to gate reader-isolated (user/session-scope) rows by writer principal.
+  writerSessionId?: string;
 }
 
 export interface SchedulerObservationSnapshotPage {
@@ -1609,6 +1627,7 @@ const upsertSchedulerObservationTransaction = (
       branch,
       commitSeq: options.commitSeq ?? null,
       observedAtSeq: options.observedAtSeq,
+      sessionId: options.sessionId ?? null,
       observation,
       payload,
     });
@@ -1617,8 +1636,28 @@ const upsertSchedulerObservationTransaction = (
       observationId,
       commitSeq: options.commitSeq ?? null,
       observedAtSeq: options.observedAtSeq,
+      sessionId: options.sessionId ?? null,
       observation,
       payload,
+    });
+  } else if (latest) {
+    // Identical-payload coalesce (a later re-run of the same observation, and
+    // possibly from a DIFFERENT writer): refresh ONLY the writer session key.
+    // That key gates reader-isolated adoption (C6,
+    // incremental-observation-adoption.md), so it must name the LATEST writer,
+    // not whoever created the row first — else a user-scope row is offered to
+    // the wrong principal or withheld from the actual latest writer.
+    //
+    // Deliberately does NOT touch commit_seq: the adoption-window filter reads
+    // COALESCE(s.commit_seq, o.commit_seq), and upsertSchedulerSnapshot nulls
+    // s.commit_seq on observation-only commits, so o.commit_seq is the ONLY
+    // surviving carrier of the original semantic commit seq. Overwriting it
+    // with this (null) observation-only seq would drop the row from every
+    // sinceCommitSeq/throughCommitSeq window — silently killing the adoption
+    // this metadata is here to enable.
+    updateSchedulerObservationWriterSession(engine, {
+      observationId,
+      sessionId: options.sessionId ?? null,
     });
   }
 
@@ -1722,6 +1761,11 @@ export const listSchedulerActionSnapshots = (
     pieceId?: string;
     processGeneration?: number;
     actionId?: string;
+    // Commit-seq window (exclusive since, inclusive through) for the
+    // incremental-adoption fan-out; rows with a NULL commit seq never
+    // match a window filter.
+    sinceCommitSeq?: number;
+    throughCommitSeq?: number;
     limit?: number;
     cursor?: SchedulerActionSnapshotCursor;
   } = {},
@@ -1740,6 +1784,7 @@ export const listSchedulerActionSnapshots = (
       COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
       s.observed_at_seq AS observed_at_seq,
       s.payload,
+      o.session_id AS writer_session_id,
       a.direct_dirty_seq,
       a.stale_seq,
       a.unknown_reason
@@ -1760,6 +1805,14 @@ export const listSchedulerActionSnapshots = (
         s.process_generation = :process_generation
       )
       AND (:action_id IS NULL OR s.action_id = :action_id)
+      AND (
+        :since_commit_seq IS NULL OR
+        COALESCE(s.commit_seq, o.commit_seq) > :since_commit_seq
+      )
+      AND (
+        :through_commit_seq IS NULL OR
+        COALESCE(s.commit_seq, o.commit_seq) <= :through_commit_seq
+      )
       AND (
         :cursor_owner_space IS NULL OR
         s.owner_space > :cursor_owner_space OR
@@ -1789,6 +1842,8 @@ export const listSchedulerActionSnapshots = (
     piece_id: options.pieceId ?? null,
     process_generation: options.processGeneration ?? null,
     action_id: options.actionId ?? null,
+    since_commit_seq: options.sinceCommitSeq ?? null,
+    through_commit_seq: options.throughCommitSeq ?? null,
     cursor_owner_space: cursorOwnerSpace,
     cursor_piece_id: options.cursor?.pieceId ?? null,
     cursor_process_generation: options.cursor?.processGeneration ?? null,
@@ -1803,6 +1858,7 @@ export const listSchedulerActionSnapshots = (
     commit_seq: number | null;
     observed_at_seq: number;
     payload: string;
+    writer_session_id: string | null;
     direct_dirty_seq: number | null;
     stale_seq: number | null;
     unknown_reason: string | null;
@@ -1817,6 +1873,9 @@ export const listSchedulerActionSnapshots = (
       row.payload,
       row.observed_at_seq,
     ),
+    ...(row.writer_session_id !== null
+      ? { writerSessionId: row.writer_session_id }
+      : {}),
     ...(row.direct_dirty_seq !== null
       ? { directDirtySeq: row.direct_dirty_seq }
       : {}),
@@ -2417,6 +2476,9 @@ function insertSchedulerObservationRow(
     branch: BranchName;
     commitSeq: number | null;
     observedAtSeq: number;
+    // Commit session key of the writer (resolveCommitSessionKey) — the
+    // adoption fan-out gates reader-isolated rows by its principal segment.
+    sessionId: string | null;
     observation: SchedulerActionObservation;
     payload: string;
   },
@@ -2449,7 +2511,7 @@ function insertSchedulerObservationRow(
       branch: options.branch,
       commit_seq: options.commitSeq,
       observed_at_seq: options.observedAtSeq,
-      session_id: null,
+      session_id: options.sessionId,
       local_seq: null,
       piece_id: options.observation.pieceId,
       action_id: options.observation.actionId,
@@ -2468,6 +2530,9 @@ function updateSchedulerObservationRow(
     observationId: number;
     commitSeq: number | null;
     observedAtSeq: number;
+    // See insertSchedulerObservationRow — kept current so the row always
+    // names the writer whose run the stored payload came from.
+    sessionId: string | null;
     observation: SchedulerActionObservation;
     payload: string;
   },
@@ -2478,6 +2543,7 @@ function updateSchedulerObservationRow(
       SET
         commit_seq = :commit_seq,
         observed_at_seq = :observed_at_seq,
+        session_id = :session_id,
         piece_id = :piece_id,
         action_id = :action_id,
         process_generation = :process_generation,
@@ -2487,10 +2553,34 @@ function updateSchedulerObservationRow(
       observation_id: options.observationId ?? null,
       commit_seq: options.commitSeq,
       observed_at_seq: options.observedAtSeq,
+      session_id: options.sessionId,
       piece_id: options.observation.pieceId,
       action_id: options.observation.actionId,
       process_generation: options.observation.processGeneration,
       payload: options.payload,
+    });
+  });
+}
+
+// Refresh ONLY the writer session key of an existing observation row. Used on
+// the identical-payload coalesce path so the C6 adoption gate names the latest
+// writer WITHOUT disturbing commit_seq (the adoption-window carrier — see the
+// coalesce branch in upsertSchedulerObservationTransaction).
+function updateSchedulerObservationWriterSession(
+  engine: Engine,
+  options: {
+    observationId: number;
+    sessionId: string | null;
+  },
+): void {
+  runSchedulerObservationStatement("update observation writer session", () => {
+    engine.database.prepare(`
+      UPDATE scheduler_observation
+      SET session_id = :session_id
+      WHERE observation_id = :observation_id
+    `).run({
+      observation_id: options.observationId,
+      session_id: options.sessionId,
     });
   });
 }

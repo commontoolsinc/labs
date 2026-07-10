@@ -186,8 +186,14 @@ type SchedulerRegisterOptions = {
   rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
   // Hold the action's initial run until its space finishes syncing (bounded by
   // timeoutMs), so a resumed re-derivation reads confirmed-loaded inputs
-  // instead of racing the data. The flag-off resume path; see runner.ts.
+  // instead of racing the data. Applies whenever the action did NOT rehydrate
+  // from a snapshot: the flag-off resume path, and the flag-on degrade path
+  // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
+  // "always-run": never rehydrate this action clean on resume — its run has
+  // instantiation side effects (starting child runs) that a clean skip would
+  // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  resumeMode?: "always-run";
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -352,6 +358,22 @@ export class Scheduler {
   private triggerTrace: TriggerTraceEntry[] = [];
   private eventPreflightTelemetryEnabled = false;
   private storageNotificationState!: StorageNotificationState;
+  // Reverse action-id index for incremental observation adoption
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): a remote
+  // observation names its action by id; the nodes registry is a WeakMap, so
+  // adoption keeps this registration-scoped map. Ids fold the piece-scoped
+  // doc links (space-qualified), so they are unique within a runtime.
+  private actionsByActionId = new Map<string, Action>();
+
+  // Actions registered with resumeMode "always-run" — the map/filter/flatMap
+  // coordinators that must run their reconcile to (re)register per-element
+  // children. Live adoption must exclude them for the SAME reason register()
+  // excludes them on reload: adopting one clean skips the reconcile, so a
+  // remotely-appended row's child action is never registered and that row's
+  // reactivity is dead. Object-keyed (once a coordinator, always a
+  // coordinator) and the only failure direction is refusing a safe adoption,
+  // so a stale membership just runs the action locally — never incorrect.
+  private alwaysRunActions = new WeakSet<Action>();
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -502,6 +524,10 @@ export class Scheduler {
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
     }
+    this.actionsByActionId.set(this.getActionId(action), action);
+    if (options.resumeMode === "always-run") {
+      this.alwaysRunActions.add(action);
+    }
     const subscribeOptions = {
       isEffect: options.isEffect,
       debounce: options.debounce,
@@ -516,12 +542,22 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    if (rehydrateFromStorage?.snapshotsByActionId) {
-      this.applyPreloadedInitialActionRehydration(
+    // Rehydration and the synced-hold are independent: apply the snapshot when
+    // one is preloaded for this action (unless the action declares it must
+    // always run on resume), and hold the initial run of any action that did
+    // NOT rehydrate. A snapshot miss thus degrades to the same synced-hold
+    // fresh run the flag-off path gets, instead of racing the data.
+    let rehydrated = false;
+    if (
+      rehydrateFromStorage?.snapshotsByActionId &&
+      options.resumeMode !== "always-run"
+    ) {
+      rehydrated = this.applyPreloadedInitialActionRehydration(
         action,
         rehydrateFromStorage.snapshotsByActionId,
       );
-    } else if (options.awaitSyncBeforeInitialRun) {
+    }
+    if (!rehydrated && options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
     return cancel;
@@ -691,13 +727,16 @@ export class Scheduler {
     return true;
   }
 
+  // Returns whether the action actually rehydrated from its snapshot; a miss
+  // (no snapshot for this actionId, fingerprint mismatch, malformed payload)
+  // leaves the action on the normal initial-run path.
   private applyPreloadedInitialActionRehydration(
     action: Action,
     snapshotsByActionId: ReadonlyMap<
       string,
       PersistedSchedulerObservationSnapshot
     >,
-  ): void {
+  ): boolean {
     // Engage the rehydration barrier for the duration of the apply: if
     // rehydrateActionFromObservation triggers a synchronous settle, no pull
     // seed may promote this resuming action before its status is restored.
@@ -711,13 +750,102 @@ export class Scheduler {
         this.rehydrateActionFromObservation(action, snapshot)
       ) {
         logger.debug("rehydrate/ok", () => []);
-        return;
+        return true;
       }
 
       logger.debug("rehydrate/fallback-run/no-match", () => []);
+      return false;
     } finally {
       this.initialRehydrationInFlight--;
     }
+  }
+
+  // Incremental observation adoption
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): apply
+  // another client's committed action observations to the local equivalent
+  // actions instead of re-running them. Called by the storage layer after a
+  // subscription push's writes have been applied (and their readers marked
+  // dirty), before the next scheduling pass dispatches — adoption clears
+  // exactly the dirt those writes caused for actions the writer already ran.
+  //
+  // The caller supplies the storage-side checks: `readsCurrentAtSeq` (no doc
+  // in the read set has a local commit newer than the observation — else the
+  // action is genuinely stale relative to state the writer did not observe)
+  // and `hasPendingLocalWriteOverlapping` (a local uncommitted write makes
+  // the local view diverge from the writer's basis — run normally).
+  //
+  // An adoption that races a mid-flight local run is harmless: the run's
+  // completion resubscribes from its own log and re-sets clean, an
+  // equivalent view (deterministic action over the same committed reads).
+  // Returns the number of actions adopted.
+  adoptRemoteObservations(
+    snapshots: readonly PersistedSchedulerObservationSnapshot[],
+    oracle: {
+      readsCurrentAtSeq(
+        reads: readonly IMemorySpaceAddress[],
+        seq: number,
+      ): boolean;
+      hasPendingLocalWriteOverlapping(
+        reads: readonly IMemorySpaceAddress[],
+      ): boolean;
+    },
+  ): number {
+    let adopted = 0;
+    for (const snapshot of snapshots) {
+      const observation = snapshot.observation;
+      if (!isSchedulerActionObservation(observation)) continue;
+      // Live adoption applies only clean successful runs: a dirty or failed
+      // row must not wake or re-run work on receivers (marker semantics
+      // belong to the reload path).
+      if (
+        observation.status !== "success" ||
+        snapshot.directDirtySeq !== undefined ||
+        snapshot.staleSeq !== undefined ||
+        snapshot.unknownReason !== undefined
+      ) {
+        continue;
+      }
+      // Computations only: effects render locally, and event handlers only
+      // run at their origin.
+      if (observation.actionKind !== "computation") continue;
+      const action = this.actionsByActionId.get(observation.actionId);
+      if (!action) continue;
+      // Only live registrations adopt (the id index may hold entries whose
+      // node was removed through a path that bypassed unsubscribe()).
+      if (!this.nodes.get(action)) continue;
+      if (this.nodes.isKnownEffect(action)) continue;
+      // Never adopt a child-starting coordinator clean: its reconcile is what
+      // (re)registers per-element children, so skipping it strands a remotely
+      // appended row unregistered — the reload path's always-run guard, live.
+      if (this.alwaysRunActions.has(action)) {
+        logger.debug("adopt/miss/always-run", () => [observation.actionId]);
+        continue;
+      }
+      if (!this.observationMatchesCurrentAction(action, observation)) {
+        continue;
+      }
+      const reads = [...observation.reads, ...observation.shallowReads];
+      if (!oracle.readsCurrentAtSeq(reads, observation.observedAtSeq)) {
+        logger.debug("adopt/miss/stale-reads", () => [observation.actionId]);
+        continue;
+      }
+      if (oracle.hasPendingLocalWriteOverlapping(reads)) {
+        logger.debug("adopt/miss/local-pending", () => [observation.actionId]);
+        continue;
+      }
+      // Same barrier as registration-time rehydration: no pull seed may
+      // promote the action while its status is being restored.
+      this.initialRehydrationInFlight++;
+      try {
+        if (this.rehydrateActionFromObservation(action, snapshot)) {
+          adopted++;
+          logger.debug("adopt/ok", () => [observation.actionId]);
+        }
+      } finally {
+        this.initialRehydrationInFlight--;
+      }
+    }
+    return adopted;
   }
 
   private observationMatchesCurrentAction(
@@ -758,6 +886,14 @@ export class Scheduler {
   ): void {
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
+    // Drop the adoption index entry only if it still points at this action
+    // (a re-registration may have overwritten it). Cancel paths that bypass
+    // this method leave stale entries; the adoption path re-checks node
+    // liveness before applying, so stale entries are inert.
+    const actionId = this.getActionId(action);
+    if (this.actionsByActionId.get(actionId) === action) {
+      this.actionsByActionId.delete(actionId);
+    }
   }
 
   async run(action: Action): Promise<any> {
@@ -1592,6 +1728,31 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
+    if (notification.type === "scheduler-observations") {
+      // Subscription-carried observations arrive AFTER their sync's
+      // integrate notification (same synchronous turn): the writes have been
+      // applied and their readers marked dirty; adoption now clears the dirt
+      // the writer already resolved, before the deferred dispatch runs.
+      // Payload validation happens inside adoptRemoteObservations.
+      this.adoptRemoteObservations(
+        notification.observations.map((row) => ({
+          observation: row.observation as SchedulerActionObservation,
+          ...(row.directDirtySeq !== undefined
+            ? { directDirtySeq: row.directDirtySeq }
+            : {}),
+          ...(row.staleSeq !== undefined ? { staleSeq: row.staleSeq } : {}),
+          ...(row.unknownReason !== undefined
+            ? { unknownReason: row.unknownReason }
+            : {}),
+        })),
+        {
+          readsCurrentAtSeq: notification.seqCurrentAtOrBelow,
+          hasPendingLocalWriteOverlapping:
+            notification.hasPendingWriteOverlapping,
+        },
+      );
+      return;
+    }
     processStorageNotification(
       this.storageNotificationState,
       notification,

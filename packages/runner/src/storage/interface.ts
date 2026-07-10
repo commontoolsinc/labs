@@ -439,6 +439,7 @@ export type StorageNotification =
   | ILoadNotification
   | IPullNotification
   | IIntegrateNotification
+  | ISchedulerObservationsNotification
   | IResetNotification;
 
 /**
@@ -528,6 +529,37 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
+}
+
+/**
+ * Broadcast after an integrate whose subscription push carried scheduler
+ * observation rows for the sync window: other clients' committed action runs
+ * that this runtime's scheduler may ADOPT instead of re-running
+ * (docs/specs/scheduler-v2/incremental-observation-adoption.md). Fired after
+ * the corresponding {@link IIntegrateNotification} in the same synchronous
+ * turn, so adoption clears the dirt those writes caused before dispatch.
+ * `observations` entries are protocol-shaped (observation payload is
+ * `unknown`); the scheduler owns validation. `seqCurrentAtOrBelow` and
+ * `hasPendingWriteOverlapping` are the storage-side adoption oracles
+ * (per-doc replica seq currency; local uncommitted-write overlap).
+ */
+export interface ISchedulerObservationsNotification {
+  type: "scheduler-observations";
+  space: MemorySpace;
+  observations: readonly {
+    observedAtSeq: number;
+    observation: unknown;
+    directDirtySeq?: number;
+    staleSeq?: number;
+    unknownReason?: string;
+  }[];
+  seqCurrentAtOrBelow(
+    reads: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+  hasPendingWriteOverlapping(
+    reads: readonly IMemorySpaceAddress[],
+  ): boolean;
 }
 
 /**

@@ -1474,7 +1474,15 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return { serverSeq: 0, snapshots: [] };
     }
-    const { session } = await this.sessionHandle();
+    const { client, session } = await this.sessionHandle();
+    // Optional capability, negotiated at hello: a server that did not
+    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
+    // older build may not know the message at all) — treat as "no snapshots"
+    // so the resume path degrades to running fresh, instead of depending on
+    // a capability-specific RPC the server never offered.
+    if (client.serverFlags?.persistentSchedulerState !== true) {
+      return { serverSeq: 0, snapshots: [] };
+    }
     return await session.listSchedulerActionSnapshots(query);
   }
 
@@ -1974,6 +1982,17 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return Promise.resolve({ ok: {} });
     }
+    // Known-unsupported server (hello already negotiated): drop the
+    // observation without batching. The flush-time gate below is the
+    // authoritative check; this just spares every action commit the
+    // batch/flush round once the session has established that scheduler
+    // payloads have nowhere to go.
+    if (
+      this.#sessionClient !== undefined &&
+      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
+    ) {
+      return Promise.resolve({ ok: {} });
+    }
     const localSeq = this.#nextLocalSeq++;
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
@@ -2039,7 +2058,27 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = this.pushCommit(localSeq, [], commit, undefined)
+    const promise = (async (): Promise<
+      Result<Unit, StorageTransactionRejected>
+    > => {
+      // Persistent scheduler state is an OPTIONAL capability negotiated at
+      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
+      // different scheduler flags must still share memory data. A server that
+      // did not advertise it strips scheduler payloads at `transact`, so this
+      // observation-only commit would arrive as zero operations and be
+      // TERMINALLY rejected ("memory v2 commit requires at least one
+      // operation") — and the flush-before-semantic-commit ordering in
+      // pushCommit would then spread that rejection to every subsequent
+      // semantic commit (event handlers drop their writes without retry;
+      // the whole session's writes starve). Fail closed instead: drop the
+      // observations — the feature degrades to flag-off semantics (resumes
+      // re-run fresh) while semantic traffic proceeds untouched.
+      const { client } = await this.sessionHandle();
+      if (client.serverFlags?.persistentSchedulerState !== true) {
+        return { ok: {} };
+      }
+      return await this.pushCommit(localSeq, [], commit, undefined);
+    })()
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -2574,6 +2613,58 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
+    }
+    // Subscription-carried scheduler observations — other clients' committed
+    // action runs for this sync window. Handed to the scheduler AFTER the
+    // integrate invalidation above (same synchronous turn, before the
+    // deferred dispatch), so adoption clears exactly the dirt these writes
+    // caused. See incremental-observation-adoption.md §4.
+    if (
+      type === "integrate" &&
+      sync.observations !== undefined &&
+      sync.observations.length > 0 &&
+      getPersistentSchedulerStateConfig()
+    ) {
+      this.#subscription.next({
+        type: "scheduler-observations",
+        space: this.#space,
+        observations: sync.observations,
+        seqCurrentAtOrBelow: (reads, seq) => {
+          for (const read of reads) {
+            // Cross-space reads cannot be verified against this replica:
+            // refuse adoption (conservative; cross-space adoption is out of
+            // scope).
+            if (read.space !== this.#space) return false;
+            const record = this.#docs.get(
+              docKey(read.id as URI, read.scope as CellScope | undefined),
+            );
+            // A doc this replica never loaded (or holds without a confirmed
+            // base) cannot be verified current. Worse, adopting would skip
+            // the very run that loads and subscribes it, so no later push
+            // would ever invalidate the action — a permanently stale
+            // receiver. Refuse; the local run establishes the subscription.
+            if (record === undefined || record.confirmed.seq === 0) {
+              return false;
+            }
+            if (record.confirmed.seq > seq) {
+              return false;
+            }
+          }
+          return true;
+        },
+        hasPendingWriteOverlapping: (reads) => {
+          for (const read of reads) {
+            if (read.space !== this.#space) continue;
+            const record = this.#docs.get(
+              docKey(read.id as URI, read.scope as CellScope | undefined),
+            );
+            if (record !== undefined && record.pending.length > 0) {
+              return true;
+            }
+          }
+          return false;
+        },
+      } as StorageNotification);
     }
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
