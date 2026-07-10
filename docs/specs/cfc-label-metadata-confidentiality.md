@@ -226,7 +226,9 @@ consumes inbound views, redacting the outbound copies is safe.
 - **Stage 2 (observation):** `inspectConfLabel` + interim population rule +
   the label-metadata observation channel (SC-6 revisit). _Implementation note
   (2026-07-09): shipped (reduced form — §3 items 2–4; the full per-field
-  `PathLabelTemplate` profile stays with the SC-4/SC-8 co-build). The
+  `PathLabelTemplate` profile stays with the SC-4/SC-8 co-build, designed in
+  [`cfc-template-population.md`](./cfc-template-population.md) — its Stage B
+  upgrades this stage's computed-in-hand labels to persisted templates). The
   §4.6.4.1 evaluator + §4.6.4.2 interim population rule live in
   `runner/src/cfc/label-introspection.ts`: equality predicates over the six
   query fields; first-layer only (a `/cfc/...` target path refuses — payload
