@@ -988,7 +988,7 @@ export function evaluateTimingMetric(
 
   const baseline = computeBaseline(
     samples.map((s) => s.durationSeconds),
-    metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
+    MIN_ABSOLUTE_DELTA,
   );
 
   const stats = baseline && {
@@ -1892,7 +1892,7 @@ export async function main() {
     "\n::group::All collected metrics:" +
       `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
         MIN_REGRESSION_PCT * 100
-      }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+      }% (whichever is higher); timing metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
   console.log(
     "Coverage debt metrics use a latest-main ratchet for changed source groups.",
@@ -1929,8 +1929,6 @@ export async function main() {
         return "Test files";
       case "subtest":
         return "Subtests";
-      case "bench":
-        return "Benchmarks";
       case "coverage-debt":
         return "Coverage Debt";
       default:
@@ -1942,7 +1940,6 @@ export async function main() {
     "Steps",
     "Test files",
     "Subtests",
-    "Benchmarks",
     "Coverage Debt",
   ];
   // Sort order within each kind: most at-risk of failing the check first.
