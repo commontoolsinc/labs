@@ -69,6 +69,7 @@ export type UpdateOutcome =
   | "updated"
   | "current"
   | "skipped-skew"
+  | "skipped-unknown-build"
   | "skipped-disabled";
 
 // This module can load outside Deno (browser-safe storage import above), so
@@ -580,6 +581,16 @@ export class PiecesController<T = unknown> {
       // 4. Version gate: the light ?identity is only comparable within a build.
       const toolshedVersion = await runtime.toolshedGitSha(host);
       if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
+        // An unknown sha on either side (dev/source servers carry none)
+        // proves nothing — skip silently. The skew signal raises the shell's
+        // "reload to update" banner, which must only claim what is proven:
+        // both builds known and different. Signalling on unknown would show
+        // the banner on every space open in local dev, where no reload helps.
+        if (
+          runtime.clientVersion === undefined || toolshedVersion === undefined
+        ) {
+          return "skipped-unknown-build";
+        }
         runtime.reportVersionSkew({
           space,
           clientVersion: runtime.clientVersion,

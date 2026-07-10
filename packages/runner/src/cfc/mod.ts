@@ -37,9 +37,12 @@ export {
 export type {
   AttemptedWrite,
   CfcAddress,
+  CfcDeclaredMonotonicityMode,
+  CfcDeclaredWideningExemption,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
@@ -67,9 +70,28 @@ export type {
   WritePolicyInput,
 } from "./types.ts";
 export {
+  cfcCanonicalClauseDigest,
+  collectDeclaredMonotonicityViolations,
+} from "./declared-monotonicity.ts";
+export {
+  CONF_LABEL_NOT_AVAILABLE,
+  evaluateConfLabelQuery,
+  inspectStoredConfLabel,
+  parseConfLabelTargetPath,
+} from "./label-introspection.ts";
+export type {
+  ConfLabelQuery,
+  ConfLabelQueryEvaluation,
+  InspectConfLabelResult,
+  LabelAtomProjection,
+} from "./label-introspection.ts";
+export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
+export type { LabelMetadataObservationClass } from "./observation-classes.ts";
+export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
+  DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
   DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
@@ -133,6 +155,7 @@ export {
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
 export type {
+  CfcGrantConsumptionContext,
   CfcGrantResolver,
   CfcGrantResolverQuery,
   ExchangeEvalContext,
@@ -145,17 +168,20 @@ export {
 } from "./exchange-eval.ts";
 export type {
   CfcGrant,
+  CfcGrantConsumptionReceipt,
   CfcGrantIdentity,
   CfcGrantWriteInput,
 } from "./grants.ts";
 export {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
+  cfcGrantConsumedReceiptId,
   cfcGrantDocId,
   cfcGrantIsLive,
   createTxCfcGrantResolver,
   disallowedGrantAudienceEntryReason,
   expandCfcGrantFacts,
+  flushCfcGrantConsumptionClaims,
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "./grants.ts";

@@ -5,14 +5,20 @@ import type { AtomPattern } from "./atom-pattern.ts";
 
 /**
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of
- * docs/plans/cfc-future-work-implementation.md §3).
+ * docs/history/plans/cfc-future-work-implementation.md §3).
  *
- * This is stage B2a: a deployment-configured, frozen policy set supplied via
- * `RuntimeOptions.cfcPolicyRecords` — the degenerate single-policy-root case
- * of spec §4.4.1's content-addressed policy storage. Rule scoping happens
- * through each rule's explicit `appliesTo` pattern rather than through
- * label-carried `Policy(...)` principals; space-hosted, hash-bound policy
- * docs (B2b) arrive later and reuse these record shapes verbatim.
+ * A deployment-configured, frozen policy set supplied via
+ * `RuntimeOptions.cfcPolicyRecords` — and, per the revised B2b decision,
+ * the ENDURING record store: remote attestation covers deployment config
+ * for security-sensitive inputs like this one, so attested federated peers
+ * provably evaluate the same record set and the originally planned
+ * space-hosted policy documents are not needed for federation soundness
+ * (owner decision 2026-07-10; docs/specs/cfc-spec-changes.md SC-28). Rule
+ * scoping is per record: `ambient` records apply through their rules'
+ * `appliesTo` patterns to every label (spec §4.4.1's deployment/system
+ * policy root as a discovery source); `referenced` records are selected by
+ * label-carried, hash-bound `Policy(...)`/`Context(...)` principals and
+ * rewrite only their home clauses (CT-1874; `exchange-eval.ts`).
  */
 
 /**
@@ -72,15 +78,31 @@ export type ExchangeRule = {
 };
 
 /**
+ * How a record enters evaluation scope (B2b label-carried selection):
+ *
+ * - `ambient` (default, the B2a posture): in scope for every evaluated label
+ *   — the operator-vetted standard profiles (B6 sanitizer, display), spec
+ *   §4.4.1's deployment/system policy root as a discovery source.
+ * - `referenced`: in scope ONLY where a label clause carries a policy-ref
+ *   atom (`Policy(...)`/`Context(...)`, spec §4.4.2) whose `name` matches the
+ *   record id AND whose `hash` matches the record digest — and its rules may
+ *   rewrite only that atom's home clause(s) (CT-1874 / invariant 11: a policy
+ *   admitted as one clause's alternative must not widen sibling clauses).
+ */
+export type CfcPolicySelection = "ambient" | "referenced";
+
+/**
  * A named, digest-bound set of exchange rules (spec §4.3.1, reduced to the
- * B2a surface: `id` + `rules`). `digest` is COMPUTED content-addressing over
- * the canonical record content — never trusted from input (a supplied digest
- * is verified and mismatch fails closed, §4.4.3 discipline).
+ * B2a surface: `id` + `rules` + `selection`). `digest` is COMPUTED
+ * content-addressing over the canonical record content — never trusted from
+ * input (a supplied digest is verified and mismatch fails closed, §4.4.3
+ * discipline).
  */
 export type PolicyRecord = {
   readonly id: string;
   readonly digest: string;
   readonly rules: readonly ExchangeRule[];
+  readonly selection: CfcPolicySelection;
 };
 
 /**
@@ -102,9 +124,11 @@ export type CfcPolicyRecordInput = {
   readonly id: string;
   readonly rules: readonly ExchangeRule[];
   readonly digest?: string;
+  /** Scope mode (see {@link CfcPolicySelection}); defaults to `ambient`. */
+  readonly selection?: CfcPolicySelection;
 };
 
-const RECORD_INPUT_KEYS = new Set(["id", "rules", "digest"]);
+const RECORD_INPUT_KEYS = new Set(["id", "rules", "digest", "selection"]);
 const RULE_KEYS = new Set([
   "id",
   "appliesTo",
@@ -309,16 +333,22 @@ const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
 const policyRecordDigest = (
   id: string,
   rules: readonly ExchangeRule[],
+  selection: CfcPolicySelection,
 ): string =>
   hashStringOf({
-    // Version 2: the digestible projection gained `policyState` (§8.12.7
-    // route 2a guards). The bump changes every record digest — safe today
-    // because policy digests never persist beyond one process (they are
-    // computed at boot and folded into in-memory prepared digests), and it
-    // keeps the projection canonical: absent == [] by construction, with no
-    // conditional key inclusion.
-    version: 2,
+    // Version 3: the digestible projection gained `selection` (B2b
+    // label-carried scope; absent == "ambient" by construction, no
+    // conditional key inclusion). Version 2 added `policyState` (§8.12.7
+    // route 2a guards). Each bump changes every record digest — safe while
+    // digests only feed in-memory prepared digests, and REQUIRED here: a
+    // selection flip re-scopes every rule, so it must invalidate. NOTE:
+    // from B2b on, label-carried policy-ref atoms persist record digests as
+    // their `hash` binding — a future projection change strands those refs
+    // (they stop matching and fail CLOSED, the §4.4.3/§4.4.4 version-
+    // mismatch posture) until labels re-mint against the new digests.
+    version: 3,
     id,
+    selection,
     rules: rules.map((rule) => ({
       id: rule.id,
       appliesTo: rule.appliesTo,
@@ -360,10 +390,11 @@ export const buildCfcPolicySnapshot = (
       throw new Error("cfcPolicyRecords: each record must be an object");
     }
     rejectUnknownKeys(input, RECORD_INPUT_KEYS, "policy record");
-    const { id, rules, digest } = input as {
+    const { id, rules, digest, selection } = input as {
       id?: unknown;
       rules?: unknown;
       digest?: unknown;
+      selection?: unknown;
     };
     if (typeof id !== "string" || id.length === 0) {
       throw new Error(
@@ -374,6 +405,14 @@ export const buildCfcPolicySnapshot = (
       throw new Error(`cfcPolicyRecords: duplicate record id "${id}"`);
     }
     recordIds.add(id);
+    if (
+      selection !== undefined && selection !== "ambient" &&
+      selection !== "referenced"
+    ) {
+      throw new Error(
+        `cfcPolicyRecords: record "${id}" selection must be "ambient" or "referenced"`,
+      );
+    }
     if (!Array.isArray(rules)) {
       throw new Error(`cfcPolicyRecords: record "${id}" needs a rules array`);
     }
@@ -388,13 +427,23 @@ export const buildCfcPolicySnapshot = (
       ruleIds.add(validated.id);
       return validated;
     });
-    const computedDigest = policyRecordDigest(id, validatedRules);
+    const recordSelection: CfcPolicySelection = selection ?? "ambient";
+    const computedDigest = policyRecordDigest(
+      id,
+      validatedRules,
+      recordSelection,
+    );
     if (digest !== undefined && digest !== computedDigest) {
       throw new Error(
         `cfcPolicyRecords: record "${id}" digest mismatch (expected ${computedDigest})`,
       );
     }
-    records.push({ id, digest: computedDigest, rules: validatedRules });
+    records.push({
+      id,
+      digest: computedDigest,
+      rules: validatedRules,
+      selection: recordSelection,
+    });
   }
   const snapshot: PolicySnapshot = {
     records,

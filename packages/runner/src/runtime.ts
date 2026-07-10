@@ -71,6 +71,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
+  type CfcDeclaredMonotonicityMode,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
   type CfcLabelMetadataProtectionMode,
@@ -355,6 +356,18 @@ export interface RuntimeOptions {
    */
   cfcLabelMetadataProtection?: CfcLabelMetadataProtectionMode;
   /**
+   * Declared-component monotonicity gate dial (WP5, spec §8.12.1/§8.12.8;
+   * docs/specs/cfc-persisted-declassification.md §4 item 3). Defaults to
+   * `off` (the declared re-mint persists exactly what it does today).
+   * `observe` compares each re-minted declared labelMap entry against the
+   * stored declared entry at the same path and emits a structured diagnostic
+   * on a non-monotone re-mint while persisting today's bytes; `enforce`
+   * records a fail-closed prepare reason (rejecting the commit under the
+   * enforcing enforcement modes). Governs ONLY the `declared` component —
+   * derived/link/structure components keep their §8.12.8 disciplines.
+   */
+  cfcDeclaredMonotonicity?: CfcDeclaredMonotonicityMode;
+  /**
    * Per-prepare D4 write-prefix precision counters (value-level provenance
    * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
    * to `false`: the prepare gate then skips all measurement, paying a single
@@ -554,6 +567,7 @@ export class Runtime {
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
+  readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
@@ -723,6 +737,7 @@ export class Runtime {
     this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
     this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
       "off";
+    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
     this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
@@ -1004,6 +1019,7 @@ export class Runtime {
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
+    wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);

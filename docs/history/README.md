@@ -101,6 +101,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [cfc-future-work-implementation.md](plans/cfc-future-work-implementation.md)
+  — the CFC future-work epics (clause core, exchange rules/policy,
+  observation classes, integrity floors, sqlite row-set, deployment flips),
+  executed 2026-07.
 - [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
   — the cutover to standard decorators.
 - [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
@@ -109,6 +113,9 @@ One line per archived document; each document's header carries the fuller
   — the ESM module-record loader rollout.
 - [pattern-id-retirement.md](specs/pattern-id-retirement.md) — retiring
   pattern ids (work orders W0–W4).
+- [system-pattern-updates-implementation-plan.md](specs/pattern-imports/system-pattern-updates-implementation-plan.md)
+  — system-pattern auto-update (M0 toolshed `?identity`, M1 version gate, M2
+  `patternSource`, M3 in-place swap, M4 flag rollout), shipped 2026-07.
 - [sqlite-builtin/implementation-plan.md](specs/sqlite-builtin/implementation-plan.md)
   — the SQLite builtin workstreams, as built.
 - [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.

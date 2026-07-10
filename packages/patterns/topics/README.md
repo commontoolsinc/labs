@@ -1,0 +1,42 @@
+# Topics
+
+A multi-user tracker over **#topic** pieces — durable units of shared attention.
+A topic is a title, a **living body document** (durable conclusions get folded
+up into the body; the thread holds the deliberation), a flat chronological
+comment thread, and typed links out to other core objects (PRs, agent sessions,
+other topics — URLs in v0).
+
+Deliberately absent until reached for: statuses (not even open/closed), labels,
+assignees, attachments, nesting. What a topic grows next is part of the
+experiment.
+
+This is the first wedge of Common Fabric's internal dogfooding program — the
+team's own issue-tracker replacement, built on the platform it tracks. The
+project's live design record is the "Build Topics v0" topic itself (bootstrap
+lineage: Linear CT-1878, which this pattern exists to absorb).
+
+## Design commitments
+
+- **Wish-free handlers.** Nothing gates event dispatch on a `wish()` binding
+  (unresolved wish bindings drop events silently — CT-1879). Authorship is a
+  fallback chain: `myName` snapshot at write → identity → profile enrichment
+  later, when the cross-host profile story lands.
+- **Mergeable writes everywhere users collide**: comments, links, and topics are
+  `push` appends; concurrent writers all land. The body is a large string
+  (whole-value conflict semantics), so body edits go through an explicit
+  Edit→Save toggle rather than a live-bound textarea.
+- **`myName` is `PerUser` on the shared piece** — one tracker, one name per
+  authenticated identity, shared with every topic the tracker creates.
+- Verified by `multi-user.test.tsx` (two isolated runtimes, one shared board).
+
+## Headless / agent use
+
+Agents are first-class participants. Against a deployed board piece:
+
+```bash
+cf piece call --piece <board> setMyName '{"name":"Fable"}'
+cf piece call --piece <board> addTopic '{"title":"..."}'
+cf piece get  --piece <board> topics --input      # then address a topic piece
+cf piece call --piece <topic> addComment '{"body":"..."}'
+cf piece step --piece <...>                       # after mutations
+```

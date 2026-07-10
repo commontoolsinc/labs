@@ -52,7 +52,12 @@ Until the `shape`/`value`/`iterate` observation classes are implemented, one
 label covers all observation kinds at a path; replacing a derived label on
 overwrite then also shrinks the _existence_ label, leaving "this path was once
 written" as a public bit. Document as a known residual of the phase profile,
-fixed by PathLabelTemplate observation classes.
+fixed by PathLabelTemplate observation classes. (Closed in two steps: the C2/C3
+persist split gave existence its own frozen `observes:"shape"` entry, and
+template-population Stage A closed the per-child half — a `*`-path `shape`
+template on declared list-coordinator containers makes a per-child existence
+probe consume the membership `J`; see
+[`cfc-template-population.md`](./cfc-template-population.md) §6.)
 
 **SC-5 [normative] Bless the prepare/digest factoring — §8.10.1.** The runner
 implements the per-attempt verify loop as verify-at-prepare + a canonical-digest
@@ -73,7 +78,17 @@ evaluation as a no-op. Also specify the read-exclusion mirror: runtime-internal
 reads (verifier reads, label metadata at `["cfc"]`, program/source text,
 content-addressed schema docs) do not enter the consumed set or PC — and note
 this is a profile decision that must be revisited when label-metadata
-confidentiality (invariant 12) is implemented.
+confidentiality (invariant 12) is implemented. (Revisit discharged 2026-07-09
+by inv-12 Stage 2: label metadata now has exactly one APPLICATION read
+surface — the `inspectConfLabel` introspection builtin — and that surface
+CONSUMES: its metadata observations enter the consumed set and the flow
+derivation as an explicit `labelMetadata` observation class carrying §4.6.4.2
+population-rule labels (runner `cfc/label-introspection.ts`,
+`recordCfcLabelMetadataObservation`). Runtime-internal verifier reads —
+including the raw `["cfc"]` reads the introspection evaluator itself issues
+underneath — stay excluded from the consumed set and PC exactly as this entry
+specifies; the exclusion is now a statement about VERIFIER reads only, no
+longer about label metadata as such.)
 
 **SC-7 [clarify] Pointwise precision by transaction decomposition — §8.9.1 and
 §8.5.** §8.9.1's flow-precision claims assume one boundary observes the whole
@@ -96,7 +111,10 @@ carry the writing tx's J as exact-path shape labels — joined by reads at the
 container path and by recursive ancestor reads, never by reads strictly below —
 so the §8.5.6.1 membership/length channel is labeled while per-slot pointer
 handling stays clean. Pointer identity at a slot, i.e. WHICH element sits
-there observed without dereferencing, remains an SC-4/SC-8 residual.)
+there observed without dereferencing, was an SC-4/SC-8 residual until
+template-population Stage A: on declared list-coordinator containers a
+standalone slot observation now consumes the assignment `J` through the
+`*`-path `followRef` template — see the SC-8 note below for what remains.)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/ `followRef`,
@@ -112,10 +130,21 @@ container-anchored structure stamp is an undefined compaction with a known
 under-taint — a static per-child existence probe ("is `/items/3` present?")
 is a `shape` read at the child (§8.10.1.1) and does not consume the
 exact-path container stamp. The spec-conforming fix is per-slot shape
-entries, at the per-row entry-count cost (#3998); recorded here until an
-implementation decides to pay it. Existence-entry update discipline settled
-as freeze-at-creation — spec §8.12.8 amendment on branch
-`cfc/existence-freeze-at-creation`.)
+entries, at the per-row entry-count cost (#3998). **Closed by
+template-population Stage A for declared list-coordinator containers** (the
+actual §8.5.6.1 membership subjects): runtime-minted `*`-path per-class
+entries — O(1) per container where per-slot entries were O(n) — make the
+per-child probe, the raw slot materialization, and the standalone
+slot-pointer observation consume the membership/assignment `J`
+([`cfc-template-population.md`](./cfc-template-population.md) §6 Stage A,
+including the frozen-vs-membership join rule and two machinery boundaries).
+The remaining slice: generic pure-link value writes (non-declared
+containers) keep the container-anchored compaction — extending the mints
+there needs a machinery-read marker first, because the runner's
+op-instantiation scaffolding reads plumbing containers' child paths with no
+distinguishing journal shape (measured re-smear on the phase-B pointwise
+suite). Existence-entry update discipline settled as freeze-at-creation —
+spec §8.12.8 amendment on branch `cfc/existence-freeze-at-creation`.)
 
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
@@ -360,7 +389,10 @@ the D3 write floor's check (§8.12.4.1) under its staged dial — an
 unconditional read-side rejection would duplicate it under `enforce` and
 break the pinned dial-off/observe byte-compat. If the spec wants the read
 gate itself to reject empty-input floored writes independent of the floor
-dial, that needs its own normative text + rollout dial.
+dial, that needs its own normative text + rollout dial. _Spec home landed:
+specs#14 added §8.9.1.1 (journal-order structural precision — the prefix,
+its bounds, trigger reads, digest binding), discharging the owed home; the
+interpretation recorded here is now normative text._
 
 **SC-24 [normative] Journal-order precision blessed; span-attributed
 provenance profiled — §8.9.1.** SC-23's interpretation still has no spec home:
@@ -384,7 +416,12 @@ opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
 remains only for semantic claims beyond runtime structure. States that the
 egress ceiling / flow join / floor credit MAY upgrade from transaction-global
 where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
-deliberate to staged). `open`.
+deliberate to staged). `applied` — specs#14 (2026-07-09): part (1) as
+§8.9.1.1, part (2) as the §8.9.1.2 span-attributed provenance profile
+(executor classes incl. the instance rule, late-error framing, digest
+discipline, predictions-never-narrow). Runner-side stage 0 (precision
+counters) shipped as labs#4623; span machinery remains behind the
+entry criteria in `cfc-value-level-provenance.md`.
 
 **SC-25 [normative] Cross-space label-metadata representation classes —
 §4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
@@ -405,7 +442,25 @@ effective confidentiality — sound because the §8.9.2 conservative join
 contains each influencing source's confidentiality; else fail closed —
 computable without new persisted metadata), and SC-6's "revisit when
 invariant 12 is implemented" note is discharged by the introspection-surface
-observation channel. `open`.
+observation channel. `applied` — specs#14 (2026-07-09): the §4.6.4.1
+known-exposure paragraph upgraded to the normative representation rule
+(public/commitment/reference, same-form matching, `notAvailable` collapse)
+and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
+stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
+redaction, classification table), stage 1 as labs#4638
+(`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
+commitment-aware matching), stage 2 as labs#4657
+(`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
+`labelMetadata` observation channel — the SC-6 revisit discharged)
+completed by template-population Stage B (labs#4660): the full per-field
+§4.6.4.2 profile persists as multi-`*` templates under `/cfc/labels/...`
+(`origin:"label-metadata"`, `observes:"labelMetadata"` — no payload read
+class consumes them), minted at the persist seam from each source-bearing
+derived-containment payload entry, resolved by `inspectConfLabel` at
+concrete clause/alternative metadata paths with the interim rule staying
+the label source and the in-hand computation the fallback on template-less
+envelopes ([`cfc-template-population.md`](./cfc-template-population.md)
+§5/§6 Stage B note); stage 3 remains per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
 event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
@@ -424,7 +479,74 @@ causal to the consumed intent's id — the shipped `commitPreconditions`
 receipt discipline — with canonical clause-digest identity, outside the
 churn-free envelope). Guidance refines to:
 2a when revocable or policy-derived; 2b only when the widening must survive
-without evaluation (export/publish). Unconflate the §13 table row. `open`.
+without evaluation (export/publish). Unconflate the §13 table row.
+`applied` — specs#14 (2026-07-09): §8.12.7 route 2 split into 2a/2b with the
+2b contract (including the create-only intent-causal record shape) and the
+§13 summary-table row unconflated. Runner-side: grants build-order items 1–3
+shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
+consulted-grant digest binding); the rewrite event is **superseded** per
+`cfc-persisted-declassification.md` §5 (owner decision 2026-07-10: in-fabric
+federation trust comes from remote attestation, so trust-free release buys
+nothing; out-of-fabric irrevocability is served by egress records, SC-27).
+
+**SC-27 [normative] Egress records at send sinks — §8.10.5.2 follow-up.**
+Out-of-fabric egress is irrevocable; modeling it with the same revocable
+artifact as internal sharing invites the un-sending confusion (revoking the
+record of a send is not un-sending). Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)
+§6): the permanent **sent** record is minted by the successful post-commit
+send path (the transaction commits before the outbox flush, and the release
+can still be refused during the flush — a commit-time record would assert
+disclosures that never happened): a create-only record causal to the outbox
+idempotency key — `{valueDigest, destination, boundaryContext,
+releasedAudienceEvidence, at, intentId}`, destination per the §8.10.5.2
+destination/audience binding (discharging the audit's open
+"destination-binding follow-up"), written record-then-clear against the
+outbox entry so the record can understate but never overstate; an optional
+commit-time attempt marker MUST NOT display as sent. Spec this together
+with the audit's open "post-commit outbox + sink-release re-verification
+contract" item (§8.10 is entirely pre-commit today).
+The record is permanent (create-only, never deleted, no revocation surface)
+and has **no enforcement role**: it never feeds a future release decision —
+labels keep governing what the fabric serves; the record exists for honesty,
+audit, and deriving "who could have this" (current grants ∪ past egress).
+State the shared-vs-sent vocabulary distinction normatively so UIs cannot
+present an egress as revocable. `open`.
+
+**SC-28 [normative] Attested deployment config is a federation-sound policy
+store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The
+archived B2b plan (`docs/history/plans/cfc-future-work-implementation.md`
+§3, decision 2) treated `RuntimeOptions.cfcPolicyRecords` as an interim
+source because two federated instances with different deployment config
+would silently fire different exchange rules, and scheduled space-hosted
+policy docs as the federation-correct form — restated as recently as the
+SC-14 Stage-3 federation constraint ("B2a's deployment-config policy source
+is federation-hostile"). Revised owner decision (2026-07-10, extending the
+same day's federation resolution — SC-26's superseded note, SC-27): remote
+attestation covers deployment config for security-sensitive inputs like
+`cfcPolicyRecords` — the §5.7.2 runtime-environment claims extend to the
+enforcement configuration the runtime boots with (measured image identity
+covers it) — so attested federated peers provably evaluate the same record
+set, and space-hosted policy documents are not needed for federation
+soundness (the Stage-3 note's conclusion is superseded in place; its
+*evidence replicates, evaluation is local* rule stands — config rides the
+attested evaluator, not the data). Proposed edit:
+§4.4.1's storage-location list gains the attested deployment/system policy
+root as a sanctioned primary store (space-hosted discovery stays optional,
+never required for federation); §4.4.5 adds the CT-1874/SP-1 constraint —
+rules a label-carried `Policy(...)`/`Context(...)` principal brings into
+scope may rewrite ONLY that principal's home clause(s), the mechanical form
+of §5.3.3's clause-local declassification authority (§4.4.5's informative
+pseudocode selects target clauses purely by pattern match and would
+otherwise let a policy referenced in clause k widen sibling clause j: a
+cross-principal implicit release, invariant 11/§3.1.8(3)). Runner-side,
+labs#4652: the surviving non-storage half of B2b
+shipped against the deployment snapshot — `PolicyRecord.selection:
+"ambient" | "referenced"` (`policy.ts`, digest projection v3), hash-bound
+fail-closed ref matching per §4.4.2/§4.4.3, the home-clause gate with
+per-batch recomputation (`exchange-eval.ts`), and inv-12 representation
+rows for the ref atom's fields (name/hash public, subject commitment);
+grants (labs#4627) remain the one space-hosted policy state. `open`.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
@@ -480,4 +602,12 @@ this file is the single tracking place:
 - §8.12.8 already documents the observation-class residuals (existence
   channel; pointer-identity-at-a-slot) as profile residuals with
   `PathLabelTemplate` named as the fix; the open part of that build is the
-  envelope persistence/population design, tracked with SC-4/SC-8.
+  envelope persistence/population design, tracked with SC-4/SC-8 — **design
+  settled 2026-07-10 in
+  [`cfc-template-population.md`](./cfc-template-population.md)**:
+  runtime-minted `*`-path per-class entries (the existing declared-`*`
+  entry form; no new wire shape), closing both SC-8 under-taints in Stage
+  A and carrying Stage-2 full metadata population in Stage B. **Stage A
+  landed** (declared list-coordinator containers; the generic
+  pure-link-write slice stays open pending a machinery-read marker — see
+  the SC-8 note and the design's §6 implementation note).

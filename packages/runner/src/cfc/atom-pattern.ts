@@ -9,7 +9,7 @@ import {
 
 /**
  * Atom pattern matching for the exchange-rule calculus (spec §4.3.3/§4.4.5,
- * Epic B1 of docs/plans/cfc-future-work-implementation.md).
+ * Epic B1 of docs/history/plans/cfc-future-work-implementation.md).
  *
  * An `AtomPattern` is one of:
  * - a **concrete scalar/array** — matches by structural equality;

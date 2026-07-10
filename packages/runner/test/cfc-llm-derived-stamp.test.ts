@@ -19,7 +19,7 @@ import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-llm-derived-stamp");
 
-// Epic D1 (docs/plans/cfc-future-work-implementation.md): model output must
+// Epic D1 (docs/history/plans/cfc-future-work-implementation.md): model output must
 // carry an explicit LlmDerived provenance stamp instead of representing
 // untrust as mere absence of integrity. This file starts with the stamping
 // MECHANISM kernel: a builtin-identity write through an item schema carrying

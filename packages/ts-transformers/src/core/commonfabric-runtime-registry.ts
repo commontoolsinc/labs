@@ -187,6 +187,17 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     callKind: "runtime-call",
     reactiveOrigin: true,
   },
+  // inspectConfLabel(target, targetPath, query) — the inv-12 Stage 2 bounded
+  // label-introspection builtin (CFC spec §4.6.4.1). A plain node-factory
+  // call returning a Reactive result, like navigateTo: no dedicated
+  // CallKind, no schema injection (its argument schema is fixed on the
+  // factory).
+  {
+    exportName: "inspectConfLabel",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
   // SQLite builtins. `sqliteQuery` additionally gets dedicated type-argument
   // schema injection in schema-injection.ts (lowering `sqliteQuery<Row>` to an
   // injected `rowSchema`); the others are registered so the factory-injected

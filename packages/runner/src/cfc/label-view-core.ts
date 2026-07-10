@@ -20,6 +20,22 @@ export type LabelObservationClass =
   | "enumerate"
   | "followRef";
 
+/**
+ * The label-METADATA observation class (inv-12 Stage 2, spec §4.6.4.1;
+ * docs/specs/cfc-label-metadata-confidentiality.md §3), beside the payload
+ * classes above: an observation of the first-layer label metadata subtree
+ * (`/cfc/labels/<target-envelope-path>/...`) rather than of payload content.
+ * Deliberately NOT a member of {@link LabelObservationClass} — no persisted
+ * labelMap entry carries it and no payload read consumes it. Its observations
+ * are recorded explicitly (`CfcTxState.labelMetadataObservations`, via
+ * `recordCfcLabelMetadataObservation`) carrying their §4.6.4.2
+ * population-rule labels, and the flow/consumed-set derivations fold them in
+ * beside the journal-classified payload observations (see
+ * `observation-classes.ts` for how it sits next to
+ * `value`/`shape`/`followRef`).
+ */
+export type LabelMetadataObservationClass = "labelMetadata";
+
 export type CfcLabelViewEntry = {
   path: readonly string[];
   label: IFCLabel;

@@ -20,8 +20,10 @@ import type {
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  ConfLabelQuery,
   FetchBinaryResult,
   FetchOptions,
+  InspectConfLabelResult,
   PatternToolFunction,
   PatternToolResult,
   SqliteDatabaseFunction,
@@ -372,6 +374,68 @@ export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
 }) as (cell: Reactive<unknown>) => Reactive<boolean>;
+
+// inv-12 Stage 2 (spec §4.6.4.1): the bounded label-introspection surface.
+// `target` rides the node input `asCell` so the builtin receives the
+// REFERENCE — inspecting a label never reads the labeled payload value.
+const INSPECT_CONF_LABEL_ARGUMENT_SCHEMA = internSchema({
+  type: "object",
+  properties: {
+    target: { type: "object", properties: {}, asCell: ["cell"] },
+    path: { type: "string" },
+    query: {
+      type: "object",
+      properties: {
+        atomType: { type: "string" },
+        caveatKind: { type: "string" },
+        source: { type: "unknown" },
+        resourceClass: { type: "string" },
+        policyName: { type: "string" },
+        originUri: { type: "string" },
+      },
+    },
+  },
+});
+
+const INSPECT_CONF_LABEL_RESULT_SCHEMA = internSchema({
+  type: "object",
+  properties: {
+    status: { type: "string" },
+    atoms: { type: "array", items: { type: "object" } },
+  },
+});
+
+/**
+ * inspectConfLabel(target, targetPath, query) — first-layer introspection of
+ * the confidentiality label stored at `target`'s payload path (§4.6.4.1's
+ * signature, node-factory form). See the api-level
+ * `InspectConfLabelFunction` docs for semantics.
+ */
+export function inspectConfLabel(
+  target: FactoryInput<unknown>,
+  targetPath: FactoryInput<string>,
+  query: FactoryInput<ConfLabelQuery>,
+): Reactive<InspectConfLabelResult> {
+  inspectConfLabelFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "inspectConfLabel",
+    argumentSchema: INSPECT_CONF_LABEL_ARGUMENT_SCHEMA,
+    resultSchema: INSPECT_CONF_LABEL_RESULT_SCHEMA,
+  });
+  return inspectConfLabelFactory({
+    target,
+    path: targetPath,
+    query,
+  }) as Reactive<InspectConfLabelResult>;
+}
+
+let inspectConfLabelFactory:
+  | NodeFactory<{
+    target: unknown;
+    path: unknown;
+    query: unknown;
+  }, any>
+  | undefined;
 
 export function wish<T = unknown>(
   target: FactoryInput<WishParams>,

@@ -59,9 +59,13 @@ export class XRootView extends BaseView {
       width: 100%;
     }
 
+    /* Anchored to the BOTTOM edge: an overlay pinned to the top covers the
+      header breadcrumbs and steals their (hit-tested) clicks, breaking
+      space navigation until dismissed. Nothing interactive is shell-owned
+      at the bottom edge. */
     #version-skew-banner {
       position: fixed;
-      inset-block-start: 0;
+      inset-block-end: 0;
       inset-inline: 0;
       z-index: 2000;
       display: flex;
@@ -72,7 +76,7 @@ export class XRootView extends BaseView {
       font: 500 14px/1.4 system-ui, sans-serif;
       color: #1a1a1a;
       background: #ffe8a3;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.2);
     }
 
     #version-skew-banner button {
