@@ -159,6 +159,7 @@ export class CFHelpers {
 export {
   findFirstContentLineIndex,
   sourceDisablesCfTransform,
+  sourceHasIgnoredDisableDirective,
 } from "./runtime-contract.ts";
 import {
   findFirstContentLineIndex,

@@ -232,5 +232,6 @@ export {
   injectCfDataHelper,
   injectCfHelpers,
   sourceDisablesCfTransform,
+  sourceHasIgnoredDisableDirective,
   transformCfDirective,
 } from "./cf-helpers.ts";
