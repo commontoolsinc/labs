@@ -189,6 +189,51 @@ addPiece.send({ piece: ann });
 
 ---
 
+## `topics/main.tsx`
+
+**Topics — a multi-user tracker over #topic pieces** (durable units of shared
+attention; CT-1878): title, living body document, flat chronological comment
+thread, typed links out. Deliberately minimal — no statuses, labels, or
+assignees. Demonstrates: reading-list-style piece-in-list composition, `PerUser`
+display-name on a shared piece, mergeable comment appends, session-scoped
+drafts, `multiUserTest` coverage.
+
+**Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
+PerUser, mergeable
+
+### Input Schema
+
+```ts
+interface TopicsInput {
+  topics?: Writable<TopicPiece[] | Default<[]>>;
+  myName?: PerUser<Writable<string | Default<"">>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface TopicsOutput {
+  topics: TopicPiece[];
+  mentionable: TopicPiece[];
+  topicCount: number;
+  myName: string;
+  addTopic: Stream<{ title: string }>;
+  setMyName: Stream<{ name: string }>;
+}
+```
+
+## `topics/topic.tsx`
+
+A single #topic piece: the durable object the tracker's list holds. Body edits
+go through an explicit Edit→Save toggle (one whole-value `set` per save keeps
+the concurrent-edit window small); comments and links are mergeable appends. Use
+from `topics/main.tsx` via `navigateTo()`, or standalone.
+
+**Keywords:** topic, detail, thread, comment, links, body, navigateTo
+
+---
+
 ## `agent/agent.tsx`
 
 An agent piece — autonomous worker with directive, learned state, and run
