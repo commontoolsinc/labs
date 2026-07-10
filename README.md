@@ -96,8 +96,10 @@ through `/.agents/skills/`, while Claude compatibility preserves the existing
 **Recommended Integrations**:
 
 - [GitHub CLI](https://github.com/cli/cli) - For PR and issue workflows
+- Browser automation for pattern testing uses the bundled `agent-browser` skill
+  (no MCP setup required)
 - Claude Code MCP integrations (run `/deps` in Claude Code for setup):
-  - Playwright MCP for browser-based pattern testing
+  - Playwright MCP — optional fallback browser driver for the `/tour` command
 
 ### Development Practices
 

@@ -9,14 +9,16 @@ import {
 import { env, waitFor } from "@commonfabric/integration";
 import { defer } from "@commonfabric/utils/defer";
 import {
+  $conn,
   CellHandle,
   type JSONSchema,
+  RequestType,
   RuntimeClient,
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { Program } from "@commonfabric/js-compiler";
 import { render } from "@commonfabric/html/client";
@@ -1271,6 +1273,105 @@ export default pattern<Record<string, never>>(() => {
       } finally {
         cancel();
       }
+    });
+  });
+
+  describe("CFC label-metadata seam (inv-12 Stage 0)", () => {
+    it('fails closed on the raw meta:"cfc" cell/get seam over real IPC', async () => {
+      // The retired seam returned the raw ["cfc"] envelope (unredacted
+      // Caveat.source et al.) via getMetaRaw. "cfc" is no longer a MetaField,
+      // but the wire is untyped JSON — a client that still sends it must get
+      // an error response, never raw label metadata. This drives the REAL
+      // worker IPC path (request -> handleCellGet guard -> error response ->
+      // rejected promise), not a mocked processor.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const cell = await rt.getCell<{ note: string }>(
+        session.space,
+        "cfc-raw-meta-seam-" + crypto.randomUUID(),
+        {
+          type: "object",
+          properties: { note: { type: "string" } },
+        } as const satisfies JSONSchema,
+      );
+      await cell.set({ note: "labelled" });
+      await rt.idle();
+
+      await assertRejects(
+        () =>
+          rt[$conn]().request<RequestType.CellGet>({
+            type: RequestType.CellGet,
+            cell: cell.ref(),
+            meta: "cfc" as never,
+          }),
+        Error,
+        "cfc",
+      );
+    });
+
+    it("drops label views from raw sigil links in inbound write values", async () => {
+      // A hand-crafted sigil link with a cfcLabelView riding a write value —
+      // the raw-link ingress that bypasses the CellRef path (CellHandle
+      // serialized into CustomEvent.detail has the same shape). The write
+      // must succeed with the link intact; the main-thread view is display
+      // freight the worker discards at ingress, so it must not surface as
+      // label state on the linked read.
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const nonce = crypto.randomUUID();
+      const target = await rt.getCell<{ note: string }>(
+        session.space,
+        "cfc-raw-link-target-" + nonce,
+        {
+          type: "object",
+          properties: { note: { type: "string" } },
+        } as const satisfies JSONSchema,
+      );
+      await target.set({ note: "linked" });
+      await rt.idle();
+      const targetRef = target.ref();
+
+      const holder = await rt.getCell<{ item: unknown }>(
+        session.space,
+        "cfc-raw-link-holder-" + nonce,
+        {
+          type: "object",
+          properties: { item: { type: "object", additionalProperties: true } },
+        } as const satisfies JSONSchema,
+      );
+      await holder.set({
+        item: {
+          "/": {
+            "link@1": {
+              id: targetRef.id,
+              space: targetRef.space,
+              path: [],
+              cfcLabelView: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: { confidentiality: ["main-thread-claim"] },
+                }],
+              },
+            },
+          },
+        },
+      });
+      await rt.idle();
+
+      // The link survives the strip and still resolves to the target value.
+      const synced = await holder.sync() as
+        | { item: { note?: string } }
+        | undefined;
+      assertEquals(synced?.item?.note, "linked");
+      // And the fabricated main-thread view never became the target's label.
+      const label = await target.getCfcLabel();
+      assertEquals(
+        JSON.stringify(label ?? {}).includes("main-thread-claim"),
+        false,
+      );
     });
   });
 });

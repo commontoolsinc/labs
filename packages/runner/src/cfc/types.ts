@@ -362,6 +362,20 @@ export type WritePolicyInput =
     readonly value: FabricValue;
   };
 
+/**
+ * One grant document a boundary evaluation consulted (§8.12.7 route 2a):
+ * its address plus the content digest of what the lookup resolved —
+ * `CFC_GRANT_ABSENT_DIGEST` when the point query found no document (binding
+ * "looked, found nothing" so a grant APPEARING between prepare and commit
+ * invalidates too). Recorded by the runner-side grant resolver
+ * (`createTxCfcGrantResolver`), folded into `PreparedDigestInput` below.
+ */
+export type ConsultedGrant = {
+  readonly space: MemorySpace;
+  readonly id: string;
+  readonly digest: string;
+};
+
 export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
@@ -386,6 +400,12 @@ export type PreparedDigestInput = {
   // digest, so a decision made under one rule set cannot be committed under
   // another (same discipline as trustSnapshot).
   readonly policySnapshot?: { readonly digest: string };
+  // Grant documents consulted by policyState-guarded evaluation (§8.12.7
+  // route 2a), each bound by content digest — the same invalidation
+  // discipline as policySnapshot: a decision that consumed one grant state
+  // cannot commit under another. Absent when no grants were consulted, so
+  // pre-existing digests are unchanged; canonicalized address-sorted.
+  readonly consultedGrants?: readonly ConsultedGrant[];
 };
 
 export type PostCommitSideEffect = {
@@ -454,6 +474,23 @@ export type CfcPolicyEvaluationMode = "off" | "observe" | "enforce";
 export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
   "off";
 
+/**
+ * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
+ * docs/specs/cfc-label-metadata-confidentiality.md §2/§5; spec §4.6.4.1),
+ * orthogonal to the enforcement ladder: `off` = persisted label bytes are
+ * identical to before this dial existed; `observe` = compute the
+ * classification-governed transformed form for cross-space entries and emit a
+ * structured diagnostic when it differs from the verbatim form (the
+ * divergence count is the rollout metric), but persist VERBATIM; `enforce` =
+ * persist the transformed form (commitment-class atom fields replaced by
+ * their canonical digest markers `{digestOf: <hash>}`). The transform never
+ * rejects — representation only.
+ */
+export type CfcLabelMetadataProtectionMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
+  CfcLabelMetadataProtectionMode = "off";
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
@@ -461,6 +498,7 @@ export type CfcTxState = {
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
   policyEvaluationMode: CfcPolicyEvaluationMode;
+  labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Result containers a list coordinator (filter/flatMap) declares each
@@ -528,6 +566,12 @@ export type CfcTxState = {
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything
   // that does is forging metadata that drives derivation for other writes, so
-  // prepareBoundaryCommit turns each into a fail-closed reason.
+  // prepareBoundaryCommit turns each into a fail-closed reason. Writes to
+  // reserved `grant:cfc:` documents outside the trusted policy-writer path
+  // (`writeCfcGrant`) are recorded here too — same S18 class, same reasons.
   unprivilegedSystemWrites: string[];
+  // Grant documents consulted by policyState-guarded boundary evaluation in
+  // this transaction (§8.12.7 route 2a), recorded by the runner-side grant
+  // resolver, deduplicated by address. Folded into PreparedDigestInput.
+  consultedGrants: ConsultedGrant[];
 };

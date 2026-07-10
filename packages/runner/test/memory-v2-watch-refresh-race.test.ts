@@ -1,33 +1,22 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { URI } from "@commonfabric/memory/interface";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
   type EntityDocument,
-  getMemoryProtocolFlags,
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
+  ScriptedSessionTransport,
+  type ScriptedTransportMessage,
   SingleSessionFactory,
-  TEST_HELLO_SESSION_OPEN,
-  testSessionOpenAuthMetadata,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
-const HELLO_OK = {
-  type: "hello.ok",
-  protocol: "memory",
-  flags: getMemoryProtocolFlags(),
-  sessionOpen: TEST_HELLO_SESSION_OPEN,
-} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -37,71 +26,25 @@ type TestProvider = IStorageProviderWithReplica & {
   ): Promise<unknown>;
 };
 
-class CountingWatchSetTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
+class CountingWatchSetTransport extends ScriptedSessionTransport {
   watchSetCount = 0;
   watchAddCount = 0;
   rootCounts: number[] = [];
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
 
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+  constructor() {
+    super({
+      name: "watch-refresh-batch",
+      sessionId: "session:watch-refresh-batch",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override ackServerSeq(): number {
+    return 3;
   }
 
-  send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      invocation?: { aud?: unknown; challenge?: unknown };
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "watch-refresh-batch-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return Promise.resolve();
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `watch-refresh-batch-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:watch-refresh-batch",
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return Promise.resolve();
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 3,
-          },
-        });
-        return Promise.resolve();
       case "session.watch.set":
       case "session.watch.add": {
         const roots =
@@ -116,7 +59,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
         }
         this.rootCounts.push(roots.length);
 
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -129,91 +72,36 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
             ),
           },
         });
-        return Promise.resolve();
+        return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
   }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
-  }
 }
 
-class DelayedWatchAddTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
+class DelayedWatchAddTransport extends ScriptedSessionTransport {
   readonly firstWatchAddSent = Promise.withResolvers<void>();
   readonly releaseFirstWatchAdd = Promise.withResolvers<
     SessionSyncUpsert["doc"]
   >();
   watchAddCount = 0;
   rootCounts: number[] = [];
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
 
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+  constructor() {
+    super({
+      name: "delayed-watch-add",
+      sessionId: "session:delayed-watch-add",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override ackServerSeq(): number {
+    return 10;
   }
 
-  send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      invocation?: { aud?: unknown; challenge?: unknown };
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "delayed-watch-add-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return Promise.resolve();
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `delayed-watch-add-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: "session:delayed-watch-add",
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return Promise.resolve();
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 10,
-          },
-        });
-        return Promise.resolve();
       case "session.watch.add": {
         this.watchAddCount += 1;
         const roots =
@@ -225,7 +113,7 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
         if (this.watchAddCount === 1) {
           this.firstWatchAddSent.resolve();
           void this.releaseFirstWatchAdd.promise.then((docValue) => {
-            this.#respond({
+            this.respond({
               type: "response",
               requestId: message.requestId!,
               ok: {
@@ -234,10 +122,10 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
               },
             });
           });
-          return Promise.resolve();
+          return;
         }
 
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -250,97 +138,37 @@ class DelayedWatchAddTransport implements MemoryV2Client.Transport {
             ),
           },
         });
-        return Promise.resolve();
+        return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
   }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
-  }
 }
 
-class IncrementalEffectTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  readonly #sessionId = "session:incremental-effect";
-  readonly #space = space;
-  #sessionOpen = TEST_HELLO_SESSION_OPEN;
-  #sessionOpenCount = 0;
-
+class IncrementalEffectTransport extends ScriptedSessionTransport {
   constructor(
     private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
-  ) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
+  ) {
+    super({
+      name: "incremental-effect",
+      sessionId: "session:incremental-effect",
+      space,
+    });
   }
 
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
+  protected override ackServerSeq(): number {
+    return 10;
   }
 
-  send(payload: string): Promise<void> {
-    const message = decodeMemoryBoundary(payload) as {
-      type: string;
-      requestId?: string;
-      invocation?: { aud?: unknown; challenge?: unknown };
-      watches?: Array<{
-        query?: { roots?: Array<{ id: string }> };
-      }>;
-    };
-
+  protected override handle(message: ScriptedTransportMessage): void {
     switch (message.type) {
-      case "hello":
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          "incremental-effect-hello",
-        );
-        this.#respond({
-          ...HELLO_OK,
-          sessionOpen: this.#sessionOpen,
-        });
-        return Promise.resolve();
-      case "session.open":
-        assertEquals(message.invocation?.aud, this.#sessionOpen.audience);
-        assertEquals(
-          message.invocation?.challenge,
-          this.#sessionOpen.challenge.value,
-        );
-        this.#sessionOpen = testSessionOpenAuthMetadata(
-          `incremental-effect-open-${++this.#sessionOpenCount}`,
-        );
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            sessionId: this.#sessionId,
-            serverSeq: 0,
-            sessionOpen: this.#sessionOpen,
-          },
-        });
-        return Promise.resolve();
-      case "session.ack":
-        this.#respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: 10,
-          },
-        });
-        return Promise.resolve();
       case "session.watch.add": {
         const roots =
           message.watches?.flatMap((watch) =>
             watch.query?.roots?.map((root) => root.id as URI) ?? []
           ) ?? [];
-        this.#respond({
+        this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -351,29 +179,11 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
             ),
           },
         });
-        return Promise.resolve();
+        return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
-  }
-
-  close(): Promise<void> {
-    this.#closeReceiver();
-    return Promise.resolve();
-  }
-
-  emitSync(sync: SessionSync): void {
-    this.#respond({
-      type: "session/effect",
-      space: this.#space,
-      sessionId: this.#sessionId,
-      effect: sync,
-    });
-  }
-
-  #respond(message: FabricValue): void {
-    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 

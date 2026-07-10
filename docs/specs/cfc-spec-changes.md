@@ -362,6 +362,70 @@ break the pinned dial-off/observe byte-compat. If the spec wants the read
 gate itself to reject empty-input floored writes independent of the floor
 dial, that needs its own normative text + rollout dial.
 
+**SC-24 [normative] Journal-order precision blessed; span-attributed
+provenance profiled — §8.9.1.** SC-23's interpretation still has no spec home:
+§8.9.1 names decomposition and trusted claims only, and nothing in the spec
+mentions journal-order bounds. Proposed edit, two parts
+([`cfc-value-level-provenance.md`](./cfc-value-level-provenance.md)): (1) a
+normative paragraph sanctioning per-write gating over the last-overlapping-
+write read prefix as structural precision (both prefix directions, trigger
+reads at −∞, read|write interleaving digest-bound per §8.10.1) — the shipped
+D4 mechanism; (2) a MAY profile for span-attributed provenance: runtime-
+bracketed span tags on the activity record, per-write feeds-closure over
+observed span edges, sound only where the executor structurally enforces span
+non-interference — interpreter-class executors under §18.7-style obligations
+(specs#11); sandboxed executors under the **instance rule** (the span is the
+executor instance: executions sharing a live user-code instance share one
+span; per-run instantiation recovers per-run spans) plus SES-closed
+cross-instance channels and a commit-time observed-vs-attributed consistency
+check — **no trusted static analysis assumed anywhere**; violations surface
+as late errors (prefix fallback / commit rejection), never unsoundness. Bare
+opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
+remains only for semantic claims beyond runtime structure. States that the
+egress ceiling / flow join / floor credit MAY upgrade from transaction-global
+where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
+deliberate to staged). `open`.
+
+**SC-25 [normative] Cross-space label-metadata representation classes —
+§4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
+known-exposure paragraph is posture ("MUST treat persisted label metadata as
+visible … SHOULD prefer atom forms"); the enforcement design
+([`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md))
+needs it normative: cross-space persistence of source-bearing atom fields
+follows a classification-governed representation — `public` / `commitment`
+(canonical digest, equality-preserving, honestly probe-able) / `reference`
+(source-space back-reference; resolution rides the source's read authority;
+failure collapses to `notAvailable`) — applied identically to envelope
+entries and sigil-carried label views, with same-form matching semantics.
+Initial-assignment exception to record: `Space.id` in confidentiality clauses
+stays `public` because §4.9.3's ACL point query must dereference it. Also:
+§4.6.4.2 gains the interim population rule (source-identity confidentiality
+when known; else, for **derived-component** entries only, the entry's own
+effective confidentiality — sound because the §8.9.2 conservative join
+contains each influencing source's confidentiality; else fail closed —
+computable without new persisted metadata), and SC-6's "revisit when
+invariant 12 is implemented" note is discharged by the introspection-surface
+observation channel. `open`.
+
+**SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
+event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
+ShareGrant consulted at access time — a durable *input* to route-1 evaluation
+— while route 2's text describes an in-place store-label rewrite (durable
+*output*); the §13 summary table says "persistent policy state / label
+rewrite" as if one thing. Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)):
+split into 2a (grant records: reserved-path, trusted-writer,
+content-addressed, fail-closed point-query resolution per §4.9.3, consumed
+via a `policyState` exchange-rule guard kind, revocable, digest-bound into
+the evaluation) and 2b (the rewrite event proper: intent-gated per §6.5 +
+§3.8.4, authority-verified per §8.10.5.2, requires a declared-component
+monotonicity gate to exist first, event record = a create-only document
+causal to the consumed intent's id — the shipped `commitPreconditions`
+receipt discipline — with canonical clause-digest identity, outside the
+churn-free envelope). Guidance refines to:
+2a when revocable or policy-derived; 2b only when the widening must survive
+without evaluation (export/publish). Unconflate the §13 table row. `open`.
+
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
 

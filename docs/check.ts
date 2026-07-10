@@ -391,7 +391,7 @@ const PARSE_ABORT =
 
 async function denoCheck(paths: string[]): Promise<{ code: number; out: string }> {
   const { code, stdout, stderr } = await new Deno.Command("deno", {
-    args: ["check", "--no-lock", ...paths],
+    args: ["check", "--frozen", ...paths],
     cwd: dirname(DOCS_DIR),
     stdout: "piped",
     stderr: "piped",
@@ -456,6 +456,9 @@ async function run(tmpDir: string): Promise<number> {
   const blocks: Block[] = [];
   for await (const entry of walk(root, { exts: [".md"], includeDirs: false })) {
     if (entry.path.includes("/.doccheck")) continue;
+    // docs/history holds archived point-in-time documents; their snippets
+    // reflect the API of their era and are not kept compiling.
+    if (entry.path.includes("/history/")) continue;
     blocks.push(...extractBlocks(entry.path, Deno.readTextFileSync(entry.path)));
   }
 

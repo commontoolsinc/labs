@@ -88,7 +88,11 @@ import {
 } from "./cfc/types.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  isTrustedBuilderArtifact,
+  resolveOriginal,
+} from "./builder/pattern-metadata.ts";
 import {
   isPatternRefSentinel,
   type PatternRefSentinel,
@@ -2273,7 +2277,10 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        mintKeylessPatternRef: this.mintKeylessPatternRef,
+      },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -3898,6 +3905,32 @@ export class Runner {
     return runInActionExecution(invoke);
   }
 
+  /**
+   * CT-1812 (ported from main's `substituteOpPatternRefs`, which the
+   * `$patternRef` binding generalization replaced): the trust gate for
+   * minting a KEYLESS pattern's content-hash session identity at bind time.
+   * A pattern value with no content-addressed entry ref but a LIVE trusted
+   * original — hand-built through the in-process builder DSL, or evaluated
+   * through the bare non-registering `Engine.compileAndEvaluateModules` —
+   * rides a `$patternRef` to the pristine artifact instead of taking the
+   * structural-copy path, whose immutable-cell JSON round-trip corrupts a
+   * nested sub-pattern's output-alias `defer` levels (the CT-1811
+   * mechanism, reachable ref-lessly). Minting BRANDS, so the gate admits
+   * only values whose original is already a trusted builder pattern; a
+   * stored no-entry-ref graph (no live original) keeps the legacy embedded
+   * copy (stored-pattern-rehydration.test.ts pins that path).
+   */
+  private mintKeylessPatternRef = (
+    value: object,
+  ): { identity: string; symbol: string } | undefined => {
+    const original = resolveOriginal(value);
+    return isTrustedBuilderArtifact(original) && isPattern(original)
+      ? this.runtime.patternManager.ensureKeylessPatternIdentity(
+        original as unknown as Pattern,
+      )
+      : undefined;
+  };
+
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -3926,7 +3959,10 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        mintKeylessPatternRef: this.mintKeylessPatternRef,
+      },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -4252,7 +4288,10 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        mintKeylessPatternRef: this.mintKeylessPatternRef,
+      },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -4298,7 +4337,10 @@ export class Runner {
       module.implementation,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        mintKeylessPatternRef: this.mintKeylessPatternRef,
+      },
     );
     const patternImpl = resolveStoredPattern(this.runtime, boundPatternImpl);
     if (!patternImpl) {

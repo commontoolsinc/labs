@@ -6,6 +6,12 @@ made and later reversed, and the cross-cutting lessons that recur. Reading it is
 optional — the spec stands alone. It exists so that a future change doesn't
 re-litigate a settled question or re-learn a paid-for lesson.
 
+This is **live documentation** (a decision record whose decisions still
+govern, per [`../README.md`](../README.md)): changes to the interpreter
+append or amend entries here in the same commit. Archive it to
+`docs/history/` only if the interpreter itself is removed or the record is
+superseded wholesale.
+
 Entries are roughly chronological. Each is a decision (`D-`) or a lesson (`L-`),
 with what was decided, why, and — where it applies — how it later changed.
 

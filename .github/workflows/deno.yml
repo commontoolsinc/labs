@@ -17,6 +17,10 @@ concurrency:
 env:
   BINARIES: "toolshed bg-piece-service cf"
 
+# Every step name must begin with a phase-marker emoji (setup / work / shutdown).
+# scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
+# "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
+# vocabulary and which emoji belongs to which phase.
 jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
@@ -254,12 +258,21 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: ♻️ Restore/save generated pattern compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: generated-patterns
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -348,7 +361,7 @@ jobs:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         env:
           TOOLSHED_PORT: 8000
         run: |
@@ -449,7 +462,7 @@ jobs:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
@@ -570,6 +583,7 @@ jobs:
       # rolls the key while `restore-keys` still seeds from the most recent prior
       # cache.
       - name: ♻️ Restore/save compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
@@ -577,13 +591,21 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: pattern-integration
+          shard: ${{ matrix.shard }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
         with:
           name: common-binaries
           path: common-binaries
 
-      - name: 🚀 Start Toolshed server for testing
+      - name: 🔌 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
           CFTS_AI_GATEWAY_URL="" \
@@ -721,12 +743,21 @@ jobs:
         run: deno task initialize-db
 
       - name: ♻️ Restore/save pattern unit compile byte cache
+        id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
+
+      - name: 🧾 Record compile cache state for the Performance Check
+        uses: ./.github/actions/record-compile-cache-state
+        with:
+          family: pattern-unit
+          shard: ${{ matrix.chunk }}
+          cache-file: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
+          exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v8
@@ -991,7 +1022,7 @@ jobs:
             ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
-      - name: 🔍 Verify binary attestations
+      - name: 🔎 Verify binary attestations
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1047,7 +1078,7 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: 🚀 Upload artifacts to Google Cloud Storage
+      - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
           gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/

@@ -48,8 +48,18 @@ export function isPatternRefSentinel(
  *   same way when its module evaluated this session; a ref from a module that
  *   never evaluated here throws — loud, since a sync Action cannot await the
  *   storage-backed `loadPatternByIdentity`.
- * - Otherwise (no entry ref known at instantiation), `op` is the embedded
- *   pattern graph itself, used as-is.
+ * - Otherwise `op` is an embedded pattern graph, used as-is. Post-CT-1812
+ *   this is ONLY the stored-keyless remnant: a live op whose original is a
+ *   trusted builder pattern gets a `keyless:` identity minted at bind time
+ *   (`unwrapOneLevelAndBindtoDoc` via `Runner.mintKeylessPatternRef`) and
+ *   arrives here as a sentinel; what still arrives embedded is a graph
+ *   deserialized from a
+ *   stored no-entry-ref pattern VALUE (the live keyless writer path pinned
+ *   by stored-pattern-rehydration.test.ts), for which no pristine artifact
+ *   exists to resolve instead. CT-1812 residual: for THAT form, a nested
+ *   grandchild's derived-internal output aliases remain defer-corrupted by
+ *   the immutable-cell round-trip — re-rooting a bare stored graph without
+ *   binding is the open surgery recorded on the ticket.
  */
 export function resolveOpPattern(
   runtime: Runtime,

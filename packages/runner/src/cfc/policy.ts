@@ -38,12 +38,17 @@ export type ExchangeRule = {
    * integrity evidence (invariant 3: exchange requires explicit integrity
    * guards); `boundary` match against boundary-context atoms minted per
    * evaluation (`BoundaryContext` — the generic form of the spec's
-   * `allowedSink` applicability metadata).
+   * `allowedSink` applicability metadata); `policyState` match against
+   * durable grant records resolved through `ExchangeEvalContext.grantResolver`
+   * (spec §8.12.7 route 2a / §13.4.4 — each pattern is a record with a
+   * CONCRETE string `kind` plus field patterns; variables bind from the
+   * resolved grant's fields exactly as atom patterns bind).
    */
   readonly preCondition?: {
     readonly confidentiality?: readonly AtomPattern[];
     readonly integrity?: readonly AtomPattern[];
     readonly boundary?: readonly AtomPattern[];
+    readonly policyState?: readonly AtomPattern[];
   };
   /**
    * Scope for the non-target confidentiality side conditions. Default
@@ -111,6 +116,7 @@ const PRE_CONDITION_KEYS = new Set([
   "confidentiality",
   "integrity",
   "boundary",
+  "policyState",
 ]);
 const POST_KEYS = new Set(["addAlternatives", "dropClause"]);
 
@@ -164,6 +170,46 @@ const validatePatternArray = (
   return value as readonly AtomPattern[];
 };
 
+/**
+ * `policyState` guard validation (§8.12.7 route 2a): each entry is a grant
+ * pattern — a PLAIN record whose `kind` field is a CONCRETE non-empty string
+ * (the resolver point-queries by kind; a variable or pattern-valued kind
+ * would require enumeration, which the §4.9.3 discipline forbids). Remaining
+ * fields are ordinary atom patterns. An EMPTY array is rejected: a
+ * policyState guard that names no grant pattern gates nothing — an authoring
+ * error a policy author must see, not a vacuously-satisfied guard.
+ */
+const validatePolicyStateGuards = (value: unknown, where: string): void => {
+  if (!Array.isArray(value)) {
+    throw new Error(`cfcPolicyRecords: ${where} must be an array`);
+  }
+  if (value.length === 0) {
+    throw new Error(
+      `cfcPolicyRecords: ${where} must name at least one grant pattern`,
+    );
+  }
+  for (const pattern of value) {
+    if (!isPlainRecord(pattern)) {
+      throw new Error(
+        `cfcPolicyRecords: ${where} entries must be grant-pattern records`,
+      );
+    }
+    // Own property required: the digest projection and atom-pattern matching
+    // consider own fields only, so an inherited `kind` must not satisfy boot
+    // validation (cubic P2 on #4627; isPlainRecord already confines this to
+    // Object.prototype, where a `kind` would be global pollution — belt).
+    const kind = Object.hasOwn(pattern, "kind")
+      ? (pattern as { kind: unknown }).kind
+      : undefined;
+    if (typeof kind !== "string" || kind.length === 0) {
+      throw new Error(
+        `cfcPolicyRecords: ${where} entries need a concrete non-empty ` +
+          `string kind (grant resolution is a point query by kind)`,
+      );
+    }
+  }
+};
+
 const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
   if (!isPlainRecord(rule)) {
     throw new Error(`cfcPolicyRecords: ${where} must be a rule object`);
@@ -201,6 +247,13 @@ const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
       if (patterns !== undefined) {
         validatePatternArray(patterns, `${ruleWhere} preCondition.${guard}`);
       }
+    }
+    const policyState = (preCondition as Record<string, unknown>).policyState;
+    if (policyState !== undefined) {
+      validatePolicyStateGuards(
+        policyState,
+        `${ruleWhere} preCondition.policyState`,
+      );
     }
   }
   if (
@@ -258,7 +311,13 @@ const policyRecordDigest = (
   rules: readonly ExchangeRule[],
 ): string =>
   hashStringOf({
-    version: 1,
+    // Version 2: the digestible projection gained `policyState` (§8.12.7
+    // route 2a guards). The bump changes every record digest — safe today
+    // because policy digests never persist beyond one process (they are
+    // computed at boot and folded into in-memory prepared digests), and it
+    // keeps the projection canonical: absent == [] by construction, with no
+    // conditional key inclusion.
+    version: 2,
     id,
     rules: rules.map((rule) => ({
       id: rule.id,
@@ -267,6 +326,7 @@ const policyRecordDigest = (
         confidentiality: rule.preCondition?.confidentiality ?? [],
         integrity: rule.preCondition?.integrity ?? [],
         boundary: rule.preCondition?.boundary ?? [],
+        policyState: rule.preCondition?.policyState ?? [],
       },
       preConfScope: rule.preConfScope ?? "targetClause",
       post: {

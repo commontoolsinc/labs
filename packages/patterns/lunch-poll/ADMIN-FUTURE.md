@@ -97,6 +97,6 @@ actual security boundary moves to CFC labels on the write paths, with the
   verified that the per-user-pointer-into-per-space-directory idiom works; this
   is the structural baseline that PR #3358's chat demo also uses (just with
   CFC-typed value wrappers).
-- [`docs/development/scoped-cells-field-notes.md`](../../../docs/development/scoped-cells-field-notes.md)
+- [`docs/history/development/scoped-cells-field-notes.md`](../../../docs/history/development/scoped-cells-field-notes.md)
   — session notes from the original lunch-poll build, including the OCC + retry
   guarantees the current admin-claim flow relies on.

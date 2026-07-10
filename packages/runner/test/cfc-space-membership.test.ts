@@ -9,7 +9,7 @@ import type { Cancel } from "../src/cancel.ts";
 import type { Runtime } from "../src/runtime.ts";
 
 // §4.9.3 render membership lookup — the client-side capability resolver
-// (design: docs/specs/cfc-render-membership-lookup.md §3.1). `spaceReaderRole`
+// (design: docs/history/specs/cfc-render-membership-lookup.md §3.1). `spaceReaderRole`
 // mirrors the server's `#resolveCapability` (packages/memory/v2/server.ts) so
 // the render gate's authority decision cannot drift from the server's.
 
