@@ -25,9 +25,10 @@ toylike even when it's functionally correct.
    outcomes.
 
 4. **Protect what you've gained.** Every improvement should be defended by an
-   existing benchmark. The per-PR Performance Check gate already fails CI when
-   timing metrics regress — lean on it rather than building new
-   infrastructure.
+   existing benchmark or test. The per-PR Performance Check gate fails CI when
+   job, step, or per-test timings regress. Benchmark results are not gated:
+   when touching code a benchmark covers, re-run that benchmark by hand and
+   compare.
 
 5. **Balance direct wins with leverage.** We're a tiny team, so we can't
    afford to spend a month on infrastructure before delivering improvements.
@@ -54,8 +55,9 @@ step, and we'll ratchet targets down as we improve.
 ## What We Know (and Don't Know)
 
 **What exists today:**
-- 14 micro-benchmark files across runner, memory, utils, run locally with
-  `deno bench` (there is no scheduled CI benchmark run)
+- Micro-benchmark files across runner, memory, utils, and other packages, run
+  locally with `deno bench` (set `CF_LOG_LEVEL=silent` to keep `--json` output
+  parseable; there is no scheduled CI benchmark run)
 - Per-PR Performance Check gate (median + 3σ or +50% over recent main runs)
   that fails CI when job, step, or per-test timings regress
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
@@ -66,6 +68,8 @@ step, and we'll ratchet targets down as we improve.
 - No breakdown of "pattern load takes Xms: Y% compilation, Z% traversal, ..."
 - No profiling data from real production usage (the profiles below are from
   the integration test flow on a dev stack)
+- No post-merge monitoring of main: timing regressions are gated per-PR, and
+  benchmark regressions are only caught by someone running the benchmarks
 
 **First flow profiled:** steady-state note creation in the default-app shell
 integration test — see
@@ -161,16 +165,16 @@ debating when the timing is right.
 | # | Project | Benefit | Cost | Summary |
 |---|---------|---------|------|---------|
 | INFRA-1 | Performance marks at key boundaries | High | S | Add `performance.mark()` / `performance.measure()` at compilation start/end, first traversal, first render, storage read/write. ~20 lines across 4-5 files. Zero-cost when not observed. Shows up as labeled spans in Chrome DevTools traces. Makes every future profiling session start with structure instead of anonymous function calls. Consider adding as part of existing `logger.time` and `logger.timeEnd` calls. |
-| INFRA-2 | Local benchmark comparison | High | S | `deno task bench` wrapper that saves `bench-baseline.json` and diffs against it. See results in seconds instead of waiting for CI. Every optimization project gets faster. |
+| INFRA-2 | Local benchmark comparison | High | S | `deno task bench` wrapper that saves `bench-baseline.json` and diffs against it. Every optimization project gets faster. |
 | INFRA-3 | Selective benchmark filtering | Medium | S | Verify and document `deno bench --filter` for subsystem-specific runs. Faster inner loop when working on a specific area. |
 | INFRA-4 | Single "pattern load" benchmark | High | M | One representative pattern that compiles, loads, receives data, and renders. The top-level number that tells you whether an optimization actually moved the user-visible needle. Without this you're optimizing components without knowing if they're the bottleneck. (Partly done in [#3133](https://github.com/commontoolsinc/labs/pull/3133)) |
-| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages that runs `deno bench` on the PR and on main and posts a before/after comment. The benchmark suite and the baseline-comparison logic in `perf-lib.ts` already exist. The Performance Check job (added in [#3125](https://github.com/commontoolsinc/labs/pull/3125)) gates CI timing metrics but does not run benchmarks. |
+| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages that runs `deno bench` on the PR and on main and posts a before/after comment. The benchmark suite and the generic baseline statistics in `perf-lib.ts` exist; the deno-bench JSON ingestion was removed with the scheduled Benchmarks workflow and would have to be rebuilt. The Performance Check job (added in [#3125](https://github.com/commontoolsinc/labs/pull/3125)) gates CI timing metrics but does not run benchmarks. |
 | INFRA-6 | Benchmark trend visualization | Medium | M | Script that runs the benchmarks across a range of commits and produces charts or CSVs. The scheduled CI benchmark runs that used to accumulate JSON artifacts were removed, so the data would have to be regenerated. Spots gradual drift that per-PR gating misses. |
 | INFRA-7 | Automated budget enforcement | High | L | Hard budgets on critical metrics, CI fails if exceeded. Performance becomes a contract. Requires careful calibration for CI-vs-local variance and a warmup period as warnings-only. Risk of false positives creating CI noise. |
 | INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Note that the pattern unit tests integration test is the closest we have to that. It also run the backend in-memory, so it happens to measure both client and server in one go.) |
 | INFRA-9 | Ratcheting | Medium | L | When a metric improves, automatically lower the budget to lock in the gain. Requires budget enforcement as prerequisite. Compound improvement without discipline overhead. Risk: lucky fast runs ratcheting to unreproducible levels. |
 | INFRA-10 | Runtime profiling infrastructure | High | L | Structured traces from running toolshed/shell, queryable programmatically. "Show me the 10 slowest reactive cycles." Transforms profiling from squinting at flame charts to querying data. Significant design work to make it zero-cost when inactive. (Note: `cf test --verbose ...` is useful here) |
-| INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Replaces "download artifact, parse JSON, squint." Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. |
+| INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Needs a source of benchmark runs (CI does not run benchmarks today). Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. |
 
 ## Optimization Backlog
 
