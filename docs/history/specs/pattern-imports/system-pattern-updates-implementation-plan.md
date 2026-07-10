@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-08
+archived: 2026-07-10
+reason: "Executed plan; system-pattern auto-update M0–M4 shipped (#4611, #4619, #4621, #4653). Live design is pattern-updates.md."
+superseded-by: docs/specs/pattern-imports/pattern-updates.md
+---
+
 # System-Pattern Auto-Update — Implementation Plan
 
 Implements `docs/specs/pattern-imports/pattern-updates.md`, **scoped to system

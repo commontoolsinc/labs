@@ -8,11 +8,12 @@ later phase) on demand for **published** patterns. Companion to `README.md`
 
 ## Status
 
-Phase 1 implemented behind the default-off `systemPatternAutoUpdate` flag
-(non-home default-app root). See
-`system-pattern-updates-implementation-plan.md` for the milestone map and the
-corrections found during implementation. Home root and published-pattern
-updates remain design (Phases 2–4).
+Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for
+non-home default-app roots (`systemPatternAutoUpdateHome` stays off pending the
+home.tsx stable-addressing audit). The executed milestone map and the
+corrections found during implementation are archived at
+[`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
+Home root and published-pattern updates remain design (Phases 2–4).
 
 ## Last Updated
 
