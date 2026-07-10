@@ -35,7 +35,7 @@ export type MarkdownVariant = "default" | "inverse";
  * @cssprop [--cf-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
  * @cssprop [--cf-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
  * @cssprop [--cf-markdown-inverse-accent=rgba(255,255,255,0.6)] - Accent color for inverse (blockquote border)
- * @cssprop [--cf-markdown-table-col-min-width=10rem] - Minimum width per table column before the table scrolls horizontally
+ * @cssprop [--cf-markdown-table-col-min-width=8rem] - Minimum width per table column before the table scrolls horizontally
  *
  * @example
  * <cf-markdown content="# Hello World\n\nThis is **bold** text."></cf-markdown>
@@ -358,7 +358,7 @@ export class CFMarkdown extends BaseElement {
         /* Keep columns readable; below this they'd collapse into the cramped
         * grid this fix exists to prevent. Content still wraps within a
         * column. Tunable per context via --cf-markdown-table-col-min-width. */
-        min-width: var(--cf-markdown-table-col-min-width, 10rem);
+        min-width: var(--cf-markdown-table-col-min-width, 8rem);
       }
 
       .markdown-content th {
