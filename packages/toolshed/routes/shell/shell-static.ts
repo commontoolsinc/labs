@@ -16,6 +16,15 @@ export interface ShellStaticDeps {
   generateETag: (content: Uint8Array) => Promise<string>;
 }
 
+export interface ShellStaticOptions {
+  deps?: ShellStaticDeps;
+  /**
+   * Build identifier embedded in a compiled toolshed binary. Its immutable
+   * `/builds/<id>/` URL namespace aliases the binary's single static graph.
+   */
+  immutableBuildId?: string | null;
+}
+
 const defaultDeps: ShellStaticDeps = {
   readFile: Deno.readFile,
   generateETag,
@@ -85,13 +94,24 @@ export class StaticResponse {
  */
 export function createShellStaticRouter(
   staticRoot: string,
-  deps: ShellStaticDeps = defaultDeps,
+  options: ShellStaticOptions = {},
 ) {
+  const deps = options.deps ?? defaultDeps;
+  const immutableBuildPrefix = options.immutableBuildId
+    ? `builds/${encodeURIComponent(options.immutableBuildId)}/`
+    : undefined;
   const router = createRouter();
   const cache = new Map<string, StaticResponse>();
 
   router.get("/*", async (c) => {
     let reqPath = c.req.path.slice(1); // Remove leading slash
+
+    // GCS retains a physical copy of every deployed graph under this URL.
+    // A compiled toolshed contains exactly one graph, so expose that same
+    // contract as an exact-build alias without embedding the bytes twice.
+    if (immutableBuildPrefix && reqPath.startsWith(immutableBuildPrefix)) {
+      reqPath = reqPath.slice(immutableBuildPrefix.length);
+    }
 
     // Default to index.html for root path
     if (!reqPath) {

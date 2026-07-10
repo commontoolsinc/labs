@@ -1188,7 +1188,7 @@ jobs:
 
       - name: 📤 Upload shell assets to Staging GCS
         run: |
-          # Upload to SHA-specific directory for versioning
+          # Retain the complete immutable module graph for long-lived pages.
           gsutil -m rsync -r packages/shell/dist gs://staging-commontools-dev/builds/${{ github.sha }}/
 
           # Upload to bucket root as "latest" (-d removes orphaned files)

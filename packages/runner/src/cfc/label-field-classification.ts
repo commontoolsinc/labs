@@ -81,6 +81,20 @@ export const LABEL_FIELD_CLASSIFICATION:
     // `reference` when cross-space resolution ships." (The SC-25 recorded
     // initial-assignment exception.)
     entry({ type: CFC_ATOM_TYPE.Space }, ["id"], "public"),
+    // Policy/Context refs (B2b label-carried selection): `name`/`hash` →
+    // public — selection must DEREFERENCE them against the deployment
+    // snapshot at the destination (the Space.id argument); both identify a
+    // deployment policy profile, not a person, and `hash` is already a
+    // content digest. `subject` → commitment — a DID, equality-consumed at
+    // selection (same posture as User.subject); rules binding a variable
+    // FROM a commitment-form subject fail closed at the destination, which
+    // is the narrow direction.
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["name"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["hash"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["subject"], "commitment"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["name"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["hash"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["subject"], "commitment"),
     // "LinkReference.source/target → commitment — display/provenance only;
     // nothing dereferences the persisted copy."
     entry({ type: CFC_ATOM_TYPE.LinkReference }, ["source"], "commitment"),

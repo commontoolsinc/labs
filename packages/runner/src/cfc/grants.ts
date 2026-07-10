@@ -1,6 +1,8 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isRecord } from "@commonfabric/utils/types";
+import type { FabricValue } from "@commonfabric/api";
 import type { URI } from "@commonfabric/memory/interface";
+import { getCommitPreconditionsConfig } from "@commonfabric/memory/v2";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -59,13 +61,16 @@ import type {
  *   does not hash to the address it sits at (a forgery/corruption), before
  *   any lifecycle or audience check. Fail closed throughout.
  *
- * The GOVERNING SPACE for this PR is the owner's identity space
- * (`space === owner`): only the owner (and their runtime) holds write
- * authority there, so a verified document at the derived address carries the
- * owner's release authority implicitly — the same way the space ACL document
- * is owner-gated by living in the space it governs. Grants hosted in shared
- * spaces (a team space's policy root) need per-document write-attribution
- * verification and arrive with the B2b space-hosted policy work.
+ * The GOVERNING SPACE is the owner's identity space (`space === owner`):
+ * only the owner (and their runtime) holds write authority there, so a
+ * verified document at the derived address carries the owner's release
+ * authority implicitly — the same way the space ACL document is owner-gated
+ * by living in the space it governs. Grants hosted in shared spaces (a team
+ * space's policy root) need per-document write-attribution verification —
+ * future work on its own track: the B2b space-hosted policy-doc plan this
+ * was once coupled to is descoped (SC-28: attestation covers deployment
+ * config; policy records stay in `RuntimeOptions.cfcPolicyRecords`), which
+ * leaves grants as the one space-hosted policy state.
  */
 
 /** Reserved id scheme for grant documents. The whole document is policy
@@ -104,6 +109,19 @@ export type CfcGrant = CfcGrantIdentity & {
   /** §6 intent attribution once the intent substrate exists. */
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };
+  /**
+   * Single-use release (design §2.2 "Single-use releases", spec §6.5.1-.2):
+   * the grant satisfies a `policyState` guard only while its consumption
+   * receipt (`cfcGrantConsumedReceiptId`) does not exist, and only in a
+   * CONSUMING evaluation context — the releasing transaction claims the
+   * receipt atomically with the release. Exactly boolean-true or absent:
+   * "standing" has one spelling (absent), validated at write AND on read, so
+   * a present-but-false marker can never be read as a third state. Lives in
+   * the document VALUE like audience/lifecycle — the address (identity =
+   * release scope) is unchanged, so converting a standing grant to
+   * single-use is an in-place update of the same durable decision.
+   */
+  readonly singleUse?: true;
 };
 
 /** Authoring input for the trusted policy-writer path. */
@@ -119,6 +137,8 @@ export type CfcGrantWriteInput = {
   readonly expiresAt?: number;
   readonly sourceIntentId?: string;
   readonly revoked?: { readonly at: number; readonly by: string };
+  /** See {@link CfcGrant.singleUse}: boolean-true or absent, else refused. */
+  readonly singleUse?: true;
 };
 
 /** The derived grant-document id for a release scope (module doc). */
@@ -134,6 +154,181 @@ export const cfcGrantDocId = (identity: CfcGrantIdentity): URI =>
       },
     })
   }` as URI;
+
+/**
+ * The consumption-receipt document id for a single-use grant (design §2.2;
+ * spec §6.5.1 `consumedCellId`).
+ *
+ * ## Derivation decision
+ *
+ * Spec §6.5.1 derives an intent's consumption cell as
+ * `refer({ intentConsumed: { intentOnceId } })`; the runner's shipped event
+ * receipts derive theirs as `runtime.getCell(space, { resultFor: cause })` —
+ * `createRef` over the cause record, minting an ordinary `of:` entity id.
+ * This receipt instead follows the §6.5.1 SHAPE (`{ grantConsumed:
+ * { grantId } }`, one receipt per grant id) realized with the #4627 ADDRESS
+ * IDIOM (the reserved `grant:cfc:` URI scheme + a versioned `hashStringOf`
+ * wrapper, exactly like `cfcGrantDocId`) rather than `createRef`, because:
+ *
+ * - **The receipt is policy state and must live in the reserved namespace.**
+ *   `noteSystemWrite` records ANY unprivileged write at ANY path under a
+ *   `grant:cfc:` id as an S18-class violation. An `of:` receipt would sit
+ *   outside that gate: forging one is merely fail-closed (a denied live
+ *   grant), but unprivileged DELETION/overwrite of a spent receipt would
+ *   RE-ARM a consumed single-use grant — fail open. The reserved scheme
+ *   covers both directions with the gate that already exists.
+ * - **Point-derivable from the grant id alone** (the §4.9.3 discipline): the
+ *   resolver computes the one candidate receipt address from the grant it
+ *   just verified — no enumeration, no cell machinery, readable under
+ *   `internalVerifierRead` like every other policy lookup.
+ * - **Same space as the grant**: the receipt is part of the grant's
+ *   lifecycle state and rides the owner-space write authority the v1
+ *   governing-space posture already establishes (module doc).
+ *
+ * Enforcement reads PRESENCE only: any document at this address — even a
+ * malformed one — means the grant is consumed (a receipt cannot be forged
+ * into absence; fail closed). The stored {@link CfcGrantConsumptionReceipt}
+ * value is audit content, not the enforcement signal.
+ */
+export const cfcGrantConsumedReceiptId = (grantId: string): URI =>
+  `${CFC_GRANT_ID_PREFIX}${
+    hashStringOf({
+      cfcGrantConsumed: {
+        version: CFC_GRANT_VERSION,
+        grantConsumed: { grantId },
+      },
+    })
+  }` as URI;
+
+/** The audit value a consuming release writes at the receipt address. */
+export type CfcGrantConsumptionReceipt = {
+  readonly version: typeof CFC_GRANT_VERSION;
+  readonly grantConsumed: { readonly grantId: string };
+  /** Governing space (== the grant's space; the receipt lives beside it). */
+  readonly space: string;
+  /** Runner clock at claim time — captured once per transaction so repeated
+   * prepares of the same tx stage a byte-identical receipt. */
+  readonly consumedAt: number;
+};
+
+/** One consumption claim staged by boundary evaluation in a transaction. */
+type PendingGrantConsumptionClaim = {
+  readonly space: string;
+  readonly receiptId: URI;
+  readonly grantId: string;
+  readonly consumedAt: number;
+};
+
+/**
+ * Pending single-use consumption claims, keyed by transaction and receipt id.
+ *
+ * Deliberately a module-private WeakMap rather than a field on `CfcTxState`
+ * or a method on the transaction interface: a claim staged here is written
+ * into the reserved `grant:cfc:` namespace INSIDE the privileged scope by
+ * `flushCfcGrantConsumptionClaims` (called from `prepareBoundaryCommit`), so
+ * a registration surface reachable from handler code via `(cell.tx as any)`
+ * would launder unprivileged receipt forgeries — spending any grant the
+ * caller can name — through the runtime's own privileged flush, bypassing
+ * the S18 gate that blocks direct writes. Module privacy keeps the ONLY
+ * writers the resolver below (which registers a claim exclusively for a
+ * verified, live, receipt-absent grant it just resolved in a consuming
+ * context) and the flush (which stages exactly what was registered).
+ *
+ * The registry is PER-TRANSACTION and survives re-prepares on purpose: it is
+ * how a re-evaluation recognizes the receipt now sitting in its own journal
+ * as "claimed by this transaction" (the same consumption, not a competing
+ * one) — see the own-claim arm in the resolver.
+ */
+const pendingGrantConsumptionClaims = new WeakMap<
+  IExtendedStorageTransaction,
+  Map<string, PendingGrantConsumptionClaim>
+>();
+
+const claimsFor = (
+  tx: IExtendedStorageTransaction,
+): Map<string, PendingGrantConsumptionClaim> => {
+  let claims = pendingGrantConsumptionClaims.get(tx);
+  if (claims === undefined) {
+    claims = new Map();
+    pendingGrantConsumptionClaims.set(tx, claims);
+  }
+  return claims;
+};
+
+/**
+ * Receipts are available only when the exactly-once substrate is on: the
+ * ambient `experimental.commitPreconditions` flag (set by the Runtime at
+ * construction) gates whether the storage commit EMITS entity-absent
+ * preconditions at all — without it a `markCreateOnly` mark is silently
+ * dropped at commit and the create-only race protection vanishes, so a
+ * single-use grant MUST be unsatisfiable everywhere (never silently
+ * multi-use, design §2.2 / spec §6.5.2 fail-closed posture).
+ */
+const cfcGrantReceiptsAvailable = (): boolean =>
+  getCommitPreconditionsConfig() === true;
+
+/**
+ * Stages every consumption claim this transaction's boundary evaluation
+ * registered: writes the receipt document and marks it create-only, so
+ * consumption commits ATOMICALLY with the release it justifies —
+ * no-consume-on-failure (spec §6.5.2) holds because the receipt write rides
+ * the same transaction as the released write/egress decision, and a racing
+ * second release loses the create-only race (`receipt-exists`, a permanent
+ * rejection the scheduler never retries).
+ *
+ * Called at the END of `prepareBoundaryCommit` — inside the privileged
+ * system-write scope `prepareCfc` wraps it in, after every gate has run (so
+ * all resolutions are registered) — and idempotent across re-prepares (the
+ * re-write is byte-identical; the create-only mark is a set). Returns
+ * fail-closed reasons for claims that could not be staged (a read-only
+ * transaction, a receipt space outside this transaction's write space —
+ * cross-space consumption arrives with B2b): an unstageable claim means the
+ * release's exactly-once witness cannot commit, so the release must not.
+ */
+export const flushCfcGrantConsumptionClaims = (
+  tx: IExtendedStorageTransaction,
+): string[] => {
+  const claims = pendingGrantConsumptionClaims.get(tx);
+  if (claims === undefined || claims.size === 0) return [];
+  const reasons: string[] = [];
+  for (const claim of claims.values()) {
+    try {
+      // The exactly-once witness FIRST: without the mark two racing releases
+      // would both commit (last write wins on the receipt document), so the
+      // optional method is a hard requirement — fail closed if absent — and
+      // marking before writing means a refused mark (unsupported storage,
+      // cross-space write isolation, read-only) never leaves an unguarded
+      // receipt value in the journal.
+      if (typeof tx.markCreateOnly !== "function") {
+        throw new Error("storage transaction does not support markCreateOnly");
+      }
+      tx.markCreateOnly({
+        space: claim.space as MemorySpace,
+        id: claim.receiptId,
+      });
+      const receipt: CfcGrantConsumptionReceipt = {
+        version: CFC_GRANT_VERSION,
+        grantConsumed: { grantId: claim.grantId },
+        space: claim.space,
+        consumedAt: claim.consumedAt,
+      };
+      tx.writeOrThrow({
+        space: claim.space as MemorySpace,
+        id: claim.receiptId,
+        type: "application/json",
+        path: ["value"],
+      }, receipt as unknown as FabricValue);
+    } catch (error) {
+      reasons.push(
+        `cfc-grant: staging consumption receipt for single-use grant ` +
+          `${claim.grantId} failed (${
+            error instanceof Error ? error.message : String(error)
+          })`,
+      );
+    }
+  }
+  return reasons;
+};
 
 const isDid = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("did:");
@@ -216,10 +411,12 @@ export const prepareCfcGrantWrite = (
   const space = input.space ?? owner;
   if (space !== owner) {
     // v1 governing-space posture (module doc): grants live in the owner's
-    // identity space. Shared-space policy roots arrive with B2b.
+    // identity space. Shared-space grant roots need per-document
+    // write-attribution verification (future work; no longer coupled to the
+    // descoped B2b policy-doc storage — SC-28).
     throw new Error(
       "cfc-grant: space must equal owner (grants live in the owner's " +
-        "identity space until B2b space-hosted policy roots)",
+        "identity space; shared-space grant roots are future work)",
     );
   }
   if (
@@ -267,6 +464,14 @@ export const prepareCfcGrantWrite = (
       );
     }
   }
+  if (input.singleUse !== undefined && input.singleUse !== true) {
+    // Exactly boolean-true or absent (CfcGrant.singleUse): a `false`/truthy
+    // spelling is refused so "standing" keeps its single spelling and no
+    // consumer can ever read a present-but-non-true marker as a third state.
+    throw new Error(
+      "cfc-grant: singleUse must be boolean true or absent",
+    );
+  }
   const value: CfcGrant = {
     version: CFC_GRANT_VERSION,
     space,
@@ -282,6 +487,7 @@ export const prepareCfcGrantWrite = (
     ...(input.revoked !== undefined
       ? { revoked: { at: input.revoked.at, by: input.revoked.by } }
       : {}),
+    ...(input.singleUse === true ? { singleUse: true as const } : {}),
   };
   return {
     space: space as MemorySpace,
@@ -291,7 +497,7 @@ export const prepareCfcGrantWrite = (
 };
 
 /**
- * Verify-on-read (B2b storage discipline): a stored value is a grant only if
+ * Verify-on-read (the grants storage discipline): a stored value is a grant only if
  * it is shape-valid AND its identity fields re-derive the exact address it
  * was read from AND its audience passes the §3.1.8 principal-like validation
  * (defense in depth — a document written by a client that skipped the write
@@ -342,6 +548,12 @@ export const verifyCfcGrantDocument = (
       return undefined;
     }
   }
+  // Boolean-true or absent (CfcGrant.singleUse) — defense in depth against a
+  // document written past the writer gate: a malformed marker must fail the
+  // WHOLE grant closed, never degrade to standing (silently multi-use).
+  if (candidate.singleUse !== undefined && candidate.singleUse !== true) {
+    return undefined;
+  }
   // The content-address check: identity fields must re-derive the address.
   if (
     cfcGrantDocId({
@@ -384,9 +596,114 @@ export const expandCfcGrantFacts = (grant: CfcGrant): readonly unknown[] =>
     ...(grant.sourceIntentId !== undefined
       ? { sourceIntentId: grant.sourceIntentId }
       : {}),
+    // Conditional spread keeps standing-grant facts byte-identical to #4627;
+    // a guard pattern MAY bind on `singleUse: true` if a rule wants to scope
+    // itself to single-use releases.
+    ...(grant.singleUse === true ? { singleUse: true as const } : {}),
   }));
 
 const INTERNAL_VERIFIER_META = { ...internalVerifierRead };
+
+/**
+ * Resolves a verified, live, SINGLE-USE grant (design §2.2; spec §6.5.1-.2):
+ * facts only in a consuming context, with receipts available, while the
+ * consumption receipt does not exist — and registers the atomic claim.
+ *
+ * - **Observing context → unsatisfiable.** A single-use grant consumed by a
+ *   read-path evaluation (render ceiling, observe-dial diagnostics) would be
+ *   spent by looking at it; and resolving WITHOUT consuming there would make
+ *   "single use" advisory. So it resolves ONLY where resolution is
+ *   atomically coupled to the receipt claim — the consuming boundary gates.
+ *   (Consequence, stated for the observe dial: its diagnostics never show a
+ *   would-be single-use release, because observe decides on the raw label
+ *   and must not spend the grant.)
+ * - **Receipts unavailable → unsatisfiable everywhere** (never silently
+ *   multi-use): see `cfcGrantReceiptsAvailable`.
+ * - **Receipt present → does not resolve** (guard unsatisfied, fail closed,
+ *   exactly like revoked/expired). PRESENCE is the signal — malformed
+ *   content still counts as consumed. The receipt's resolution-time state
+ *   joins `consultedGrants` (present → content digest, absent →
+ *   `CFC_GRANT_ABSENT_DIGEST`), so it binds into the prepared digest with
+ *   the same invalidation discipline as the grant itself.
+ * - **Own claim → resolves.** The registry remembers receipts THIS
+ *   transaction claimed, so a re-prepare that finds its own staged receipt
+ *   in the journal recognizes the same consumption instead of failing
+ *   itself. If another release committed a receipt in between, this
+ *   transaction's create-only mark still dies at commit (`receipt-exists`)
+ *   — the race backstop makes the shortcut safe.
+ *
+ * Consumption attaches at RESOLUTION: the grant's facts entered the
+ * decision basis of a consuming gate. Whether a specific rule firing then
+ * used them — or changed the final decision — is not reconstructable at
+ * staging time, and erring toward consumption is the fail-closed direction
+ * (a spent grant releases nothing; an unspent-but-used grant would be a
+ * replay). A resolved-but-rejected commit still consumes nothing: the
+ * receipt rides the rejected transaction.
+ */
+const resolveSingleUseGrant = (
+  tx: IExtendedStorageTransaction,
+  grant: CfcGrant,
+  grantId: URI,
+  consumption: CfcGrantResolverQuery["consumption"],
+  now: () => number,
+): readonly unknown[] => {
+  if (consumption !== "consuming") return [];
+  if (!cfcGrantReceiptsAvailable()) {
+    tx.noteCfcDiagnostic(
+      `cfc-grant: single-use grant ${grantId} requires ` +
+        `experimental.commitPreconditions (receipts unavailable; fail closed)`,
+    );
+    return [];
+  }
+  const receiptId = cfcGrantConsumedReceiptId(grantId);
+  const claims = claimsFor(tx);
+  const own = claims.get(receiptId);
+  if (own === undefined) {
+    // Read the document ROOT, not the ["value"] subpath: presence of the
+    // receipt DOCUMENT is the consumption signal, and a Memory v2 document
+    // can exist with no value (a metadata-only write). A value-subpath read
+    // would report `undefined` for such a document and re-arm the grant at
+    // evaluation time (cubic P1 on #4649) — the create-only backstop would
+    // still kill the release at commit (any prior set on the entity fails
+    // the entity-absent precondition), but resolution must already fail
+    // closed. Grant documents keep their ["value"] reads: there ABSENCE is
+    // the fail-closed direction (a value-less grant doc must not resolve).
+    const receiptDoc = tx.readOrThrow({
+      space: grant.space as MemorySpace,
+      id: receiptId,
+      type: "application/json",
+      path: [],
+    }, { meta: INTERNAL_VERIFIER_META });
+    tx.recordCfcConsultedGrant({
+      space: grant.space as MemorySpace,
+      id: receiptId,
+      digest: receiptDoc === undefined
+        ? CFC_GRANT_ABSENT_DIGEST
+        : hashStringOf(receiptDoc),
+    });
+    if (receiptDoc !== undefined) {
+      // Consumed (or unreadable garbage at the receipt address — same
+      // outcome): the durable decision was already spent.
+      return [];
+    }
+    claims.set(receiptId, {
+      space: grant.space,
+      receiptId,
+      grantId,
+      consumedAt: now(),
+    });
+  } else {
+    // Re-evaluation within the claiming transaction: the durable state the
+    // decision consumes is still "receipt absent" (our own staged write is
+    // not durable), so re-record exactly that — the recorder dedups it.
+    tx.recordCfcConsultedGrant({
+      space: grant.space as MemorySpace,
+      id: receiptId,
+      digest: CFC_GRANT_ABSENT_DIGEST,
+    });
+  }
+  return expandCfcGrantFacts(grant);
+};
 
 /**
  * The runner-side grant resolver for boundary evaluation sites that hold a
@@ -440,7 +757,13 @@ export const createTxCfcGrantResolver = (
       // evaluator's own catch is the backstop, but the resolver stays
       // self-contained — cubic P2 on #4627).
       const id = cfcGrantDocId({ space, kind: query.kind, owner, resource });
-      const memoKey = `${space}\0${id}`;
+      // Consumption context in the key: a single-use grant resolves in a
+      // consuming query but not an observing one, so a mixed-context resolver
+      // (hand-built; the prepare gates are single-context per instance) must
+      // never serve a consuming resolution to an observing query.
+      const memoKey = `${space}\0${id}\0${
+        query.consumption === "consuming" ? "consuming" : "observing"
+      }`;
       const memoized = memo.get(memoKey);
       if (memoized !== undefined) return memoized;
       const value = tx.readOrThrow({
@@ -463,7 +786,9 @@ export const createTxCfcGrantResolver = (
             `cfc-grant: malformed grant document at ${id} (fail closed)`,
           );
         } else if (cfcGrantIsLive(grant, now())) {
-          facts = expandCfcGrantFacts(grant);
+          facts = grant.singleUse === true
+            ? resolveSingleUseGrant(tx, grant, id, query.consumption, now)
+            : expandCfcGrantFacts(grant);
         }
       }
       memo.set(memoKey, facts);

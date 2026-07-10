@@ -32,11 +32,21 @@ hand-rolled Enter-key submit, index-based selection state, and hand-rolled
 badge/field/empty-state markup. Those emit as `[WARN]` and count toward the
 Warnings summary line, never Failed.
 
+- **Dead-string identity (multi-user):** flag a person rendered as a bare name
+  or `<img>` (render every participant with `cf-profile-badge` bound to their
+  stored profile cell; `cf-avatar` + snapshot only as an offline fallback), a
+  typed-name field used as the current viewer (resolve `#profile`), and roster
+  dedup / "is this me?" by display-name instead of `equals()` on a cell
+  reference. See
+  `docs/common/patterns/multi-user-patterns.md#presenting-identity`
+  (critique-guide category 16).
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
 - `docs/common/components/COMPONENTS.md`
+- `docs/common/patterns/multi-user-patterns.md`
 - `docs/common/patterns/ui-cookbook.md`
 - `docs/common/capabilities/llm.md` - LLM integration
 - `docs/common/capabilities/fetch.md` - fetch builtins

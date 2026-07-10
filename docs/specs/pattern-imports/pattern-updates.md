@@ -8,11 +8,12 @@ later phase) on demand for **published** patterns. Companion to `README.md`
 
 ## Status
 
-Phase 1 implemented behind the default-off `systemPatternAutoUpdate` flag
-(non-home default-app root). See
-`system-pattern-updates-implementation-plan.md` for the milestone map and the
-corrections found during implementation. Home root and published-pattern
-updates remain design (Phases 2–4).
+Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for
+non-home default-app roots (`systemPatternAutoUpdateHome` stays off pending the
+home.tsx stable-addressing audit). The executed milestone map and the
+corrections found during implementation are archived at
+[`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
+Home root and published-pattern updates remain design (Phases 2–4).
 
 ## Last Updated
 
@@ -191,7 +192,8 @@ and `home.tsx`:
    `pieces-controller.ts:274` — it must resolve against the space's host, which
    also fixes a latent cross-host bug where a foreign-homed space fetches the
    wrong toolshed's default-app.)*
-2. **Version gate** (§ below). Skew → skip, signal the shell, done.
+2. **Version gate** (§ below). Not the same known build → skip; signal the
+   shell only on a proven mismatch (both shas known).
 3. `currentId` = **cached** `GET {host}{url}?identity` (cache keyed by
    `(host, url)`; cleared on socket reset — the identity is fixed for the
    toolshed's lifetime, and a socket reset is the proxy for "maybe a restarted
@@ -211,11 +213,16 @@ literally the same function). So gate on it:
   cached per host).
 - **Match** → direct compare against the running `patternIdentity` is valid;
   **no sidecar id is stored.**
-- **Mismatch** → touch nothing; emit an IPC signal to the shell
+- **Proven mismatch** (both shas known, different) → touch nothing; emit an
+  IPC signal to the shell
   (`versionSkew: { space, clientVersion, toolshedVersion }`). The shell
   visualizes it and may restart/reload the worker to pick up a matching client
   build (a page reload / cache-bust is what actually swaps the client bundle;
   the shell owns that UX).
+- **Unknown build on either side** (dev/source servers carry no sha) → touch
+  nothing and skip **silently** (`skipped-unknown-build`). Nothing is provably
+  newer, so there is nothing to tell the user — signalling here would raise
+  the reload banner on every space open in local dev, where no reload helps.
 
 **The gate is exactly what makes the light `?identity` sound** — the only
 failure mode of the light computation is cross-build drift, and we now never

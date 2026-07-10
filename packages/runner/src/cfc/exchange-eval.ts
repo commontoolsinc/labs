@@ -9,6 +9,7 @@ import {
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
 import { isRecord } from "@commonfabric/utils/types";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
   clauseAlternatives,
@@ -16,12 +17,13 @@ import {
   normalizeClause,
 } from "./clause.ts";
 import type { IFCLabel } from "./label-view-core.ts";
-import type { ExchangeRule, PolicySnapshot } from "./policy.ts";
+import { isCfcFieldCommitment } from "./label-representation.ts";
+import type { ExchangeRule, PolicyRecord, PolicySnapshot } from "./policy.ts";
 import type { TrustResolver } from "./trust.ts";
 
 /**
  * The guarded-rewrite evaluator (spec §4.4.5, Epic B4 of
- * docs/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
+ * docs/history/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
  * exchange rules over one label to a fuelled fixpoint. The ONLY things a
  * firing may do:
  *
@@ -37,10 +39,20 @@ import type { TrustResolver } from "./trust.ts";
  * (B2a rules carry no integrity postcondition). Evaluation is evaluation-
  * time only — rewritten labels are never persisted (design decision 1).
  *
- * B2a rule scoping: every record in the snapshot is in scope for every label
- * (the degenerate single-policy-root case) — each rule is still gated by its
- * own `appliesTo` + guards. Label-carried `Policy(...)` principals selecting
- * records arrive with B2b.
+ * Rule scoping (B2b, label-carried selection): `ambient` records are in
+ * scope for every label (the B2a posture — operator-vetted standard
+ * profiles; spec §4.4.1's deployment/system policy root), each rule still
+ * gated by its own `appliesTo` + guards. `referenced` records are in scope
+ * only where the CURRENT label carries a matching hash-bound
+ * `Policy(...)`/`Context(...)` ref atom (§4.4.2/§4.4.3, fail-closed on
+ * mismatch or absence), and their rules may rewrite ONLY the ref's home
+ * clause(s) — the CT-1874 constraint; see `matchRule`. Records live in the
+ * deployment snapshot in both modes: the owner decision (2026-07-10,
+ * revising the earlier space-hosted-docs plan) is that remote attestation
+ * covers deployment config for security-sensitive inputs like
+ * `cfcPolicyRecords`, so attested federated peers provably evaluate the
+ * same record set and space-hosted policy documents are not needed for
+ * federation soundness (docs/specs/cfc-spec-changes.md SC-28).
  *
  * Termination (spec §4.4.5): add-only rule sets converge by monotonicity;
  * add+drop sets can cycle, so the evaluator is fuelled and FAILS CLOSED on
@@ -66,6 +78,21 @@ export type RuleFiring = {
 };
 
 /**
+ * Whether a `policyState` evaluation site is a CONSUMING context (design
+ * §2.2 single-use releases). Consuming sites are exactly the boundary gates
+ * whose evaluation outcome changes a persisted or egress decision inside a
+ * writing transaction's prepare — the sink-request egress ceiling and the
+ * input-requirement gate on gated writes, and only under the `enforce`
+ * policy-evaluation dial (under `observe` the decision is made on the raw
+ * label, so the evaluation is diagnostics-only). Everything else — the
+ * render ceiling, observe-dial evaluation, any read-path resolution — is
+ * OBSERVING: a single-use grant is unsatisfiable there, fail closed, because
+ * a grant consumed by looking at it would be spent by rendering. Standing
+ * grants ignore this axis entirely.
+ */
+export type CfcGrantConsumptionContext = "consuming" | "observing";
+
+/**
  * The point-query a `policyState` guard sends to the grant resolver: the
  * guard's concrete `kind` plus every guard field that is concrete under the
  * current binding environment (a literal value, or a pattern whose variables
@@ -75,6 +102,13 @@ export type RuleFiring = {
 export type CfcGrantResolverQuery = {
   readonly kind: string;
   readonly fields: Readonly<Record<string, unknown>>;
+  /**
+   * The evaluation site's consumption context, stamped from
+   * {@link ExchangeEvalContext.grantConsumption}. ABSENT means observing
+   * (fail closed): a hand-built query that never states its context cannot
+   * resolve a single-use grant.
+   */
+  readonly consumption?: CfcGrantConsumptionContext;
 };
 
 /**
@@ -112,6 +146,14 @@ export type ExchangeEvalContext = {
    * policyState guard is unsatisfied and its rule never fires (fail closed).
    */
   readonly grantResolver?: CfcGrantResolver;
+  /**
+   * Consuming vs observing evaluation site (single-use releases, design
+   * §2.2) — stamped onto every resolver query. Absent = observing (fail
+   * closed): only the writing-transaction boundary gates in prepare.ts pass
+   * `"consuming"`, coupled to the claim staging that flushes at the end of
+   * the same prepare pass. See {@link CfcGrantConsumptionContext}.
+   */
+  readonly grantConsumption?: CfcGrantConsumptionContext;
 };
 
 export type ExchangeEvalResult = {
@@ -150,6 +192,63 @@ type RuleMatch = {
   readonly bindings: AtomPatternBindings;
 };
 
+/** The two policy-principal families a label may select records by
+ * (spec §4.1.2 `PolicyRefAtom`; §4.4.5 `collectPolicyPrincipals`). */
+const POLICY_REF_ATOM_TYPES: ReadonlySet<string> = new Set([
+  CFC_ATOM_TYPE.Policy,
+  CFC_ATOM_TYPE.Context,
+]);
+
+/**
+ * Clause indices whose alternatives carry a well-formed policy-ref atom
+ * selecting `record`: type `Policy`/`Context`, `name` === record id, `hash`
+ * === record digest (both non-empty strings), and a non-empty string
+ * `subject`. Anything less — an unbound name atom (no hash, §4.4.2 requires
+ * it in runtime labels), a name/hash mismatch or cross-wiring, a malformed
+ * shape — selects NOTHING (the §4.4.3 fail-closed lookup posture; the
+ * intended widening simply does not happen, which is strictly narrower).
+ *
+ * Computed fresh against the CURRENT confidentiality for every rule batch:
+ * drop firings splice clauses and shift indices, so a set computed at pass
+ * start could admit whatever clause shifted into a stale home index; and
+ * rules may ADD policy refs as alternatives, which must be in scope for the
+ * very next batch (spec §4.4.5 recomputes policy principals per pass).
+ */
+const policyRefHomeClauses = (
+  record: PolicyRecord,
+  confidentiality: readonly CfcConfClause[],
+): ReadonlySet<number> => {
+  const homes = new Set<number>();
+  if (record.digest.length === 0) return homes;
+  for (let index = 0; index < confidentiality.length; index++) {
+    for (const alternative of clauseAlternatives(confidentiality[index])) {
+      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      const atom = alternative as {
+        type?: unknown;
+        name?: unknown;
+        subject?: unknown;
+        hash?: unknown;
+      };
+      if (
+        typeof atom.type === "string" &&
+        POLICY_REF_ATOM_TYPES.has(atom.type) &&
+        atom.name === record.id && atom.hash === record.digest &&
+        // Selection keys on name+hash; `subject` is only checked
+        // well-formed. It is DID-bearing, so the inv-12 cross-space
+        // transform persists it commitment-form ({digestOf}) — a ref that
+        // crossed spaces must still select (name/hash are classified
+        // public exactly so this dereference keeps working).
+        ((typeof atom.subject === "string" && atom.subject.length > 0) ||
+          isCfcFieldCommitment(atom.subject))
+      ) {
+        homes.add(index);
+        break;
+      }
+    }
+  }
+  return homes;
+};
+
 /**
  * Builds the {@link CfcGrantResolverQuery} for one `policyState` guard
  * pattern under one binding environment, or `undefined` when the pattern is
@@ -166,6 +265,7 @@ type RuleMatch = {
 const grantGuardQuery = (
   pattern: unknown,
   bindings: AtomPatternBindings,
+  consumption: CfcGrantConsumptionContext,
 ): CfcGrantResolverQuery | undefined => {
   if (
     !isRecord(pattern) || Array.isArray(pattern) ||
@@ -185,7 +285,7 @@ const grantGuardQuery = (
       fields[key] = instantiated.value;
     }
   }
-  return { kind, fields };
+  return { kind, fields, consumption };
 };
 
 /**
@@ -201,11 +301,12 @@ const extendThroughGrantGuard = (
   environments: readonly AtomPatternBindings[],
   pattern: unknown,
   resolver: CfcGrantResolver | undefined,
+  consumption: CfcGrantConsumptionContext,
 ): AtomPatternBindings[] => {
   if (resolver === undefined) return [];
   const next: AtomPatternBindings[] = [];
   for (const environment of environments) {
-    const query = grantGuardQuery(pattern, environment);
+    const query = grantGuardQuery(pattern, environment, consumption);
     if (query === undefined) continue;
     let facts: readonly unknown[];
     try {
@@ -239,12 +340,24 @@ const extendThroughGrantGuard = (
  * clause/alternative; remaining guards must all be satisfiable under one
  * shared environment. Every consistent environment is its own match — the
  * §4.3.4 disjunction of all valid bindings.
+ *
+ * `homeClauses` (label-carried selection, CT-1874/SP-1) restricts which
+ * clauses may be the REWRITE TARGET: a rule brought into scope by a policy
+ * ref may only rewrite the clause(s) carrying that ref — the clause whose
+ * author admitted the policy as an alternative. Without the tie, a policy
+ * referenced in clause 0 could add alternatives to an independent sibling
+ * clause 1: a cross-principal implicit release (invariant 11, spec
+ * §3.1.8(3)/§5.3.3). Guards are deliberately NOT restricted: side conditions
+ * under an explicit `preConfScope: "anywhere"` may still READ sibling
+ * clauses — observation feeding a home-clause-local widening stays within
+ * the authority the home clause's author granted.
  */
 const matchRule = (
   rule: ExchangeRule,
   confidentiality: readonly CfcConfClause[],
   availableIntegrity: readonly unknown[],
   ctx: ExchangeEvalContext,
+  homeClauses?: ReadonlySet<number>,
 ): RuleMatch[] => {
   const matches: RuleMatch[] = [];
   const anywhereAlternatives = rule.preConfScope === "anywhere"
@@ -256,6 +369,7 @@ const matchRule = (
     clauseIndex < confidentiality.length;
     clauseIndex++
   ) {
+    if (homeClauses !== undefined && !homeClauses.has(clauseIndex)) continue;
     const alternatives = clauseAlternatives(confidentiality[clauseIndex]);
     for (const alternative of alternatives) {
       const target = matchAtomPattern(rule.appliesTo, alternative);
@@ -333,6 +447,9 @@ const matchRule = (
             environments,
             pattern,
             ctx.grantResolver,
+            // Absent = observing, fail closed: a context that never states
+            // it is a consuming site cannot resolve single-use grants.
+            ctx.grantConsumption ?? "observing",
           );
           if (environments.length === 0) break;
         }
@@ -434,7 +551,7 @@ export const evaluateExchangeRules = (
   ctx: ExchangeEvalContext = {},
   fuel: number = DEFAULT_EXCHANGE_FUEL,
 ): ExchangeEvalResult => {
-  const rules: Array<{ recordId: string; rule: ExchangeRule }> = [];
+  const rules: Array<{ record: PolicyRecord; rule: ExchangeRule }> = [];
   if (snapshot !== undefined) {
     // Canonical UTF-8 code-point order (not JS `<`, which orders UTF-16 code
     // UNITS and disagrees on astral ids) so evaluation and diagnostic order
@@ -447,7 +564,7 @@ export const evaluateExchangeRules = (
       for (
         const rule of [...record.rules].sort((a, b) => utf8Compare(a.id, b.id))
       ) {
-        rules.push({ recordId: record.id, rule });
+        rules.push({ record, rule });
       }
     }
   }
@@ -472,8 +589,25 @@ export const evaluateExchangeRules = (
 
   while (changed) {
     changed = false;
-    for (const { recordId, rule } of rules) {
-      const matches = matchRule(rule, confidentiality, availableIntegrity, ctx);
+    for (const { record, rule } of rules) {
+      // B2b selection scope: ambient records match every clause; anything
+      // else is label-carried — in scope only where the CURRENT label
+      // references it. The non-"ambient" (rather than === "referenced") arm
+      // keeps a hand-built snapshot with a missing/garbled selection on the
+      // NARROW path — degrading it to ambient would fire rules its author
+      // scoped to references (the guard-degradation posture, cubic P1 on
+      // #4627).
+      const homeClauses = record.selection === "ambient"
+        ? undefined
+        : policyRefHomeClauses(record, confidentiality);
+      if (homeClauses !== undefined && homeClauses.size === 0) continue;
+      const matches = matchRule(
+        rule,
+        confidentiality,
+        availableIntegrity,
+        ctx,
+        homeClauses,
+      );
       // Index discipline (spec §4.4.5): adds never shift clause indices, so
       // add-matches apply in order; drop-matches apply back-to-front. A
       // match whose target was consumed by an earlier application in this
@@ -507,7 +641,11 @@ export const evaluateExchangeRules = (
         }
         remainingFuel -= 1;
         confidentiality = applied.confidentiality;
-        firings.push({ recordId, ruleId: rule.id, ...applied.firing! });
+        firings.push({
+          recordId: record.id,
+          ruleId: rule.id,
+          ...applied.firing!,
+        });
         changed = true;
       }
     }

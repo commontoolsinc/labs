@@ -1,7 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getLogger } from "@commonfabric/utils/logger";
-import { ClientNotificationType, RequestType } from "../protocol/mod.ts";
+import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
+import {
+  ClientNotificationType,
+  RequestType,
+  RuntimeErrorCode,
+} from "../protocol/mod.ts";
 import { RuntimeProcessor } from "./mod.ts";
 
 // The worker entry (`backends/web-worker/index.ts`) installs a `message`
@@ -213,6 +218,10 @@ describe("web worker request ledger and timing", () => {
           case RequestType.PageGetSlug:
             // Intentionally a non-Error rejection: the entry must stringify it.
             return Promise.reject("string-boom");
+          case RequestType.PageStart:
+            return Promise.reject(
+              new CompilerStackLoadError(new TypeError("chunk fetch failed")),
+            );
           default:
             return Promise.resolve(undefined);
         }
@@ -332,6 +341,16 @@ describe("web worker request ledger and timing", () => {
       posted.length = 0;
       await dispatch({ msgId: 105, data: { type: RequestType.PageGetSlug } });
       expect(posted).toEqual([{ msgId: 105, error: "string-boom" }]);
+
+      // Compiler chunk load failures carry a lifecycle code so the shell can
+      // replace the worker and its poisoned module map.
+      posted.length = 0;
+      await dispatch({ msgId: 107, data: { type: RequestType.PageStart } });
+      expect(posted).toEqual([{
+        msgId: 107,
+        error: "Failed to load the compiler stack",
+        code: RuntimeErrorCode.CompilerStackLoadFailed,
+      }]);
 
       // A failed response post: the success counter must NOT tick (the reply
       // never left), the catch posts an error reply and counts that instead.

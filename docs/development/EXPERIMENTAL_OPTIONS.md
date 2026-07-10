@@ -31,12 +31,16 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
+| [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating) | `RuntimeOptions.cfcTriggerReadGating` | `false` | Bernhard Seefeld (#4488) | move toward `true` | implemented, staged rollout |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation) | `RuntimeOptions.cfcPolicyEvaluation` | `off` | Bernhard Seefeld (#4566) | move toward `enforce` | implemented, staged rollout |
+| [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity) | `RuntimeOptions.cfcDeclaredMonotonicity` | `off` | Bernhard Seefeld (#4647) | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships) | implemented, off by default |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
+| [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
@@ -64,9 +68,11 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Three flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`); `commitPreconditions` is deliberately mapped to `null`
-there, which records "not env-reachable" as a decision rather than an omission.
+Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
+`systemPatternAutoUpdateHome`); `commitPreconditions` is deliberately mapped to
+`null` there, which records "not env-reachable" as a decision rather than an
+omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
 propagate](#how-flags-propagate).
@@ -144,19 +150,27 @@ propagate](#how-flags-propagate).
   work (scheduler-v2 E1)" (#4090, 2026-06-12).
 - **Purpose.** Attaches origin-committed preconditions to scheduler-v2 lineage
   commits, so that event-launched follow-up work commits only against the state
-  it was speculated from, and create-only preconditions to durable event result
-  receipts so competing runners cannot overwrite an existing terminal receipt.
+  it was speculated from; create-only preconditions to durable event result
+  receipts so competing runners cannot overwrite an existing terminal receipt;
+  and, since #4649, create-only consumption receipts for **single-use CFC
+  grants** (`docs/specs/cfc-persisted-declassification.md` §2.2).
 - **Current default and planned end state.** On by default as part of
-  scheduler-v2 speculation lineage. The planned end state is to remove the
-  rollback flag and make the behavior unconditional.
+  scheduler-v2 speculation lineage and receipt enforcement. An explicit
+  programmatic `false` remains a rollback override; under that override,
+  single-use grants fail closed rather than silently becoming multi-use. The
+  planned end state is to remove the rollback flag and make the behavior
+  unconditional.
 - **Status on 2026-07-10.** Implemented for lineage commits and event-result
-  receipts and plumbed through the runner and memory protocol; on by default,
-  with explicit programmatic opt-out retained temporarily.
-- **Path to removal.** This exists to serve scheduler-v2 speculation lineage; it
-  can be deleted only when lineage tracking and durable event receipts become
-  part of the base scheduler semantics. At that point remove the flag, the
-  lineage and receipt precondition attachment, the storage transaction wiring,
-  and the server-side precondition check in the memory engine.
+  receipts, single-use grant consumption, and the memory protocol; on by
+  default, with explicit programmatic opt-out retained temporarily.
+- **Path to removal.** This exists to serve scheduler-v2 speculation lineage,
+  durable event receipts, and single-use CFC grant consumption. It can be
+  deleted only when lineage and create-only receipt enforcement are
+  unconditional base semantics. At that point remove the flag, the lineage and
+  receipt precondition attachment, the storage transaction wiring, and the
+  server-side precondition check in the memory engine. The single-use grant path
+  then drops its availability check (`cfcGrantReceiptsAvailable` in
+  `packages/runner/src/cfc/grants.ts`), not the receipts themselves.
 
 ### `eagerSourceAnnotation`
 
@@ -164,8 +178,8 @@ propagate](#how-flags-propagate).
   `RuntimeOptions.experimental.eagerSourceAnnotation`. The ambient control point
   is `setEagerSourceAnnotation` in
   [`packages/runner/src/builder/module.ts`](../../packages/runner/src/builder/module.ts).
-  Unlike the other three, the runtime propagates this one only when it is set
-  explicitly, because the ambient flag is also a test seam.
+  Unlike the other env-backed flags, the runtime propagates this one only when
+  it is set explicitly, because the ambient flag is also a test seam.
 - **Added by.** gideon, in "make fn.src lazy/debug-only — re-root identity off
   .src" (#4458, 2026-07-06).
 - **Purpose.** Resolves the per-primitive debug source annotation (`fn.src`)
@@ -189,6 +203,57 @@ propagate](#how-flags-propagate).
 - **Path to removal.** There is no planned removal. It would only be deleted if
   the debug source-annotation mechanism itself were removed, which is unlikely
   because `.src` is a public debugging surface.
+
+### `systemPatternAutoUpdate`
+
+- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` environment variable
+  (through the canonical mapping) server-side, the shell build define of the
+  same name (injected by
+  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) via
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts))
+  browser-side, or `RuntimeOptions.experimental.systemPatternAutoUpdate`.
+- **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
+  rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
+  #4619 (2026-07-09).
+- **Purpose.** At space open, rolls a space's **non-home** root system pattern
+  (default-app) forward in place when its toolshed serves a newer content
+  identity: version gate (client vs toolshed build sha) → cached `?identity`
+  compare → in-place `patternIdentity` swap, re-instantiated by the existing
+  pattern watcher onto the same result cell. Best-effort and non-blocking: no
+  failure of the check may break space open. When either build sha is unknown
+  (dev/source servers carry none) the check skips silently; the `versionSkew`
+  IPC signal — which raises the shell's reload banner — fires only on a proven
+  mismatch (both shas known and different). See
+  [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+- **Current default and planned end state.** The runner built-in default is off
+  like every flag in this category; the shell build injects `true` unless the
+  define is set to `"false"`, so the deployed product (and local shell dev
+  builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
+  background piece service) leave it off unless the env var is set. End state:
+  graduate to always-on for system roots once golden-replay coverage has soaked
+  and the home audit lands, then delete both auto-update flags.
+- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
+  off elsewhere.
+- **Path to removal.** Graduate the home root (below), make the check
+  unconditional, and remove both flags together.
+
+### `systemPatternAutoUpdateHome`
+
+- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` environment
+  variable, the shell build define of the same name, or
+  `RuntimeOptions.experimental.systemPatternAutoUpdateHome`.
+- **Added by.** Bernhard Seefeld, in #4611 (2026-07-08).
+- **Purpose.** Second gate holding the **home** root (home.tsx) out of
+  [`systemPatternAutoUpdate`](#systempatternautoupdate): the home root carries
+  real user data (favorites, journal, the spaces list) and stays pinned until
+  the stable-addressing audit verifies an in-place swap preserves that state.
+  Both flags must be on for a home root to auto-update.
+- **Current default and planned end state.** Off everywhere (no shell-side
+  default-on). End state: flip on after the home.tsx stable-addressing audit,
+  then remove together with `systemPatternAutoUpdate`.
+- **Status on 2026-07-09.** Implemented, off by default.
+- **Path to removal.** Complete the audit, default the home root on, and delete
+  both flags when the check becomes unconditional.
 
 ---
 
@@ -329,6 +394,33 @@ the per-epic implementation notes).
 - **Path to removal.** Once policy evaluation is the norm, the dial could settle
   on `enforce` and be retired.
 
+### `cfcDeclaredMonotonicity`
+
+- **Toggle via.** `RuntimeOptions.cfcDeclaredMonotonicity`.
+- **Added by.** Bernhard Seefeld, in "declared-component monotonicity gate
+  (WP5, spec §8.12.1/§8.12.8)" (#4647, 2026-07-09).
+- **Purpose.** Guards the one point where a persisted path's declared
+  (store-policy) label component can change — the schema-walk re-mint at the
+  commit boundary — with §8.12.1's `canUpdateStoreLabel` rule: confidentiality
+  may only add clauses or remove alternatives, and the declared integrity
+  claim may only remove atoms. Values are `off`, `observe`, and `enforce`.
+  `observe` emits a structured diagnostic on a non-monotone re-mint while
+  persisting today's bytes; `enforce` records a fail-closed prepare reason
+  (rejecting the commit under the enforcing enforcement modes). The gate
+  governs only the `declared` component; derived/link/structure components
+  keep their §8.12.8 replace disciplines. The per-transaction privileged
+  widening exemption (`setCfcDeclaredWideningExemption`, trusted-builtin
+  only) is the seam for the future §8.12.7 route 2b declassification event.
+- **Current default and planned end state.** `off` by default. The target is
+  `observe`, then `enforce` after soak — the route 2b rewrite event must not
+  ship before this gate is enforced
+  (`docs/specs/cfc-persisted-declassification.md` §4–§5).
+- **Status on 2026-07-09.** Implemented, off by default.
+- **Path to removal.** Not planned for removal: monotonicity is a permanent
+  store invariant. Once `enforce` has soaked, the dial could settle there and
+  the `off`/`observe` rungs remain for diagnostics, mirroring the enforcement
+  ladder.
+
 ### `cfcPrefixProvenanceStats`
 
 - **Toggle via.** `RuntimeOptions.cfcPrefixProvenanceStats` (a plain boolean),
@@ -359,6 +451,34 @@ the per-epic implementation notes).
   criteria are deliberately unscheduled in the spec's §8), the counters either
   fold into that feature or are removed. Because enforcement is unaffected,
   retiring it is low-risk.
+
+### `cfcLabelMetadataProtection`
+
+- **Toggle via.** `RuntimeOptions.cfcLabelMetadataProtection`.
+- **Added by.** Bernhard Seefeld, in "inv-12 stage 1 — cross-space
+  label-metadata representation transform" (#4638, 2026-07-09).
+- **Purpose.** Applies the invariant-12 representation classes at the
+  cross-space persist seam: source-bearing atom fields of label entries whose
+  observations originate outside the destination space are persisted as
+  `{digestOf: …}` commitment forms (or verbatim where the classification
+  table says `public`), identically at the `["cfc"]` envelope and the
+  sigil-carried label views, so a destination space's replicas stop
+  disclosing source-space principal identities (`Caveat.source`, clause
+  DIDs, `LinkReference` addresses). Values are `off`, `observe`, and
+  `enforce`: `observe` computes the transformed form and emits a structured
+  divergence diagnostic while persisting today's bytes (the rollout
+  metric); `enforce` persists the transformed form. Enforcement matching is
+  commitment-aware in both directions (read gating digests the candidate;
+  exchange patterns digest-match concrete values and refuse to bind
+  variables over committed fields). Same-space-only labels always persist
+  verbatim.
+- **Current default and planned end state.** `off` by default. Target is
+  `observe` to count divergences, then `enforce`
+  (`docs/specs/cfc-label-metadata-confidentiality.md` §5, SC-25).
+- **Status on 2026-07-09.** Implemented, staged rollout.
+- **Path to removal.** Not planned for removal: the representation rule is a
+  permanent inv-12 obligation; once `enforce` soaks the dial settles there
+  with the lower rungs kept for diagnostics, like the other CFC ladders.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
 > `cfcPolicyRecords`, and `cfcTrustConfig` are CFC *configuration inputs* (the
@@ -470,10 +590,12 @@ the per-epic implementation notes).
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
-`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`)
-reach the runtime through the deployed processes. The runtime-only flags
-(`commitPreconditions`, the CFC dials) reach it only through the `RuntimeOptions`
-passed to `new Runtime(...)`.
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
+`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME`) reach the runtime through the
+deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
+dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 
 All first-party processes build their `RuntimeOptions` through a construction
 preset in

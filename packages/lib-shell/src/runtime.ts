@@ -53,7 +53,7 @@ export type RuntimeRenderConfidentialityCeiling = NonNullable<
 
 /**
  * The §8.10.6 initial display-sink release ceiling (Epic H3a/H3b,
- * docs/plans/cfc-future-work-implementation.md): what a display surface
+ * docs/history/plans/cfc-future-work-implementation.md): what a display surface
  * admits when no authored policy covers it. The audience of a display sink
  * is the acting user, so the identity/personal-space principal forms naming
  * exactly that audience are admissible by construction. Shared `Space(...)`
@@ -158,8 +158,13 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * Off by default.
    */
   forwardWorkerConsole?: boolean;
-  getBuildHash?: () => Promise<string | undefined>;
+  /**
+   * Override the runtime worker URL. By default, deployed builds use the
+   * immutable `/builds/<clientVersion>/` asset namespace while local builds
+   * fall back to `/scripts/worker-runtime.js`.
+   */
   workerUrl?: URL;
+  getBuildHash?: () => Promise<string | undefined>;
   /**
    * Optional telemetry sink (browser OTel bridge). Purely additive and gated by
    * the embedder: when omitted, no telemetry work happens.
@@ -182,8 +187,10 @@ function defaultNavigate(command: RuntimeNavigationTarget) {
 }
 
 /**
- * Fetch the worker bundle hash from the build manifest, used to cache-bust the
- * worker URL (`?v=<hash>`) so a deploy always loads the fresh worker bundle.
+ * Fetch the worker bundle hash from the build manifest. This cache-busts the
+ * mutable root worker URL used by local/legacy builds. Deployed shell builds
+ * use their immutable `/builds/<sha>/` namespace instead.
+ *
  * Cached at module level — the hash doesn't change within a page session.
  */
 let buildHashPromise: Promise<string | undefined> | undefined;
@@ -215,7 +222,7 @@ export function createRuntimeClientOptions({
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
-  // Epic H2 (docs/plans/cfc-future-work-implementation.md): shell hosts run the
+  // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This
   // activates inv-9 (flow-path confidentiality) in real shell deployments:
@@ -663,14 +670,26 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    // Fetch the build manifest first so the worker URL is cache-busted with
-    // the deployed bundle's hash (a deploy always loads the fresh worker).
-    const buildHash = await getBuildHash();
+    // Production deploys retain each complete module graph under its commit
+    // SHA. Keeping the entry and all of its relative split chunks in that same
+    // immutable namespace prevents a later root deployment from deleting a
+    // chunk that a long-lived page still needs. Local/legacy builds have no
+    // clientVersion, so retain the root URL and its manifest cache-buster.
+    const immutableBuildId = workerUrl === undefined && clientVersion
+      ? clientVersion
+      : undefined;
     const resolvedWorkerUrl = workerUrl ?? new URL(
-      "/scripts/worker-runtime.js",
+      immutableBuildId
+        ? `/builds/${
+          encodeURIComponent(immutableBuildId)
+        }/scripts/worker-runtime.js`
+        : "/scripts/worker-runtime.js",
       globalThis.location.origin,
     );
-    if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
+    if (!immutableBuildId) {
+      const buildHash = await getBuildHash();
+      if (buildHash) resolvedWorkerUrl.searchParams.set("v", buildHash);
+    }
     const transport = await WebWorkerRuntimeTransport.connect({
       workerUrl: resolvedWorkerUrl,
     });

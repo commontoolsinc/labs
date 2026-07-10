@@ -49,6 +49,7 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
 import {
   atomsOutsideCeiling,
@@ -57,9 +58,19 @@ import {
   cfcIntegritySatisfiesFloorCoherently,
   uniqueCfcAtoms,
 } from "./observation.ts";
-import { evaluateExchangeRules } from "./exchange-eval.ts";
-import { createTxCfcGrantResolver } from "./grants.ts";
+import {
+  type CfcGrantConsumptionContext,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
+import {
+  createTxCfcGrantResolver,
+  flushCfcGrantConsumptionClaims,
+} from "./grants.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
+import {
+  deriveLabelMetadataTemplateEntries,
+  isLabelMetadataTemplateEntry,
+} from "./label-metadata-population.ts";
 import {
   commitmentAwareEquals,
   containsCfcFieldCommitment,
@@ -111,6 +122,18 @@ const labelAtPath = (
     ? undefined
     : labelForEntriesAtPath(metadata.labelMap.entries, path);
 
+// A runtime-minted `*`-path class template (template-population §3.1): the
+// membership/slot twins minted beside the container-anchored structure
+// stamps (and any future derived-origin population entries of the same
+// form). Declared `*` entries (items/additionalProperties schemas) are NOT
+// templates in this sense — they keep the declared component's resolution
+// untouched.
+const isRuntimeMintedTemplate = (
+  entry: Pick<LabelMapEntry, "path" | "origin">,
+): boolean =>
+  (entry.origin === "structure" || entry.origin === "derived") &&
+  entry.path.includes("*");
+
 const labelForEntriesAtPath = (
   entries: readonly LabelMapEntry[],
   path: readonly string[],
@@ -129,23 +152,44 @@ const labelForEntriesAtPath = (
     if (!isPrefix(entry.path, path)) {
       continue;
     }
-    // Structure entries label the container's SHAPE: they apply when the
-    // container node itself is observed (read at exactly the entry path),
-    // not to reads strictly below it — slot pointer reads and dereferences
-    // are pointer handling, and tainting them with shape would re-smear
-    // the pointwise split the structure component exists to preserve.
-    if (entry.origin === "structure" && entry.path.length !== path.length) {
+    const template = isRuntimeMintedTemplate(entry);
+    // CONCRETE structure entries label the container's SHAPE: they apply
+    // when the container node itself is observed (read at exactly the
+    // entry path), not to reads strictly below it — slot pointer reads and
+    // dereferences are pointer handling, and tainting them with shape
+    // would re-smear the pointwise split the structure component exists to
+    // preserve. `*`-path templates are the opposite by construction
+    // (template-population §3.2): their whole point is consumption at
+    // matching child paths, so the exact-path rule does not apply to them.
+    if (
+      entry.origin === "structure" && !template &&
+      entry.path.length !== path.length
+    ) {
       continue;
     }
     const component = entry.origin ?? "legacy";
-    const match = matches.get(component);
+    // Frozen-existence vs membership-template join (template-population
+    // §3.2.1): a frozen concrete `shape` entry records departed HISTORY;
+    // the `*` membership template records CURRENT shape. They answer
+    // different questions under one class, so where both cover a read
+    // their labels JOIN rather than compete in replace-down — replacing
+    // would let a stale frozen label mask current membership taint or
+    // vice versa. Scoped to structure/derived-origin shape-class
+    // templates (a separate resolution bucket per component); everything
+    // else keeps replace-down.
+    const bucket = template && entry.observes === "shape"
+      ? `${component}\u0000shape-template`
+      : component;
+    const match = matches.get(bucket);
     if (match === undefined || match.path.length < entry.path.length) {
-      matches.set(component, entry);
+      matches.set(bucket, entry);
     } else if (match.path.length === entry.path.length) {
       // Two equally specific prefixes of one queried path are the same
-      // path; duplicate (path, origin) entries shouldn't survive
-      // coalescing, but join defensively rather than drop one.
-      matches.set(component, {
+      // path — or, with wildcard segments, a concrete entry and a `*`
+      // template covering the same slot; duplicate (path, origin) entries
+      // shouldn't survive coalescing, but join defensively (fail-toward-
+      // taint) rather than drop one.
+      matches.set(bucket, {
         path: match.path,
         label: mergeLabels(match.label, entry.label),
       });
@@ -190,17 +234,34 @@ const effectiveReadLabel = (
   read: {
     nonRecursive: boolean | undefined;
     consumes: ReadClassSelection;
+    /**
+     * Entries excluded from this read's consumption on top of class
+     * selection. Sole current user is `deriveFlowJoin`'s pair of template
+     * machinery boundaries: the §8.12.8 replace-from-criteria readback
+     * exclusion (a transaction re-deriving a container's membership stamps
+     * must not consume the very entries it replaces — see
+     * `ownRestampContainerPaths`) and the C0 §6.1 row-4 rule extended to
+     * plain reads (trace-covered resolution machinery skips `*`
+     * templates). Absent on every other call site (notably the
+     * `"all"`-selection write gate, which stays over-inclusive by design).
+     */
+    excludeEntry?: (entry: LabelMapEntry) => boolean;
   },
 ): IFCLabel | undefined => {
-  const view = read.consumes === "all" || metadata === undefined ? metadata : {
-    ...metadata,
-    labelMap: {
-      ...metadata.labelMap,
-      entries: metadata.labelMap.entries.filter((entry) =>
-        readConsumesEntry(read.consumes, entry)
-      ),
-    },
-  };
+  const view = (read.consumes === "all" && read.excludeEntry === undefined) ||
+      metadata === undefined
+    ? metadata
+    : {
+      ...metadata,
+      labelMap: {
+        ...metadata.labelMap,
+        entries: metadata.labelMap.entries.filter((entry) =>
+          (read.consumes === "all" ||
+            readConsumesEntry(read.consumes, entry)) &&
+          read.excludeEntry?.(entry) !== true
+        ),
+      },
+    };
   const base = labelAtPath(view, path);
   if (read.nonRecursive === true || view === undefined) {
     return base;
@@ -1309,6 +1370,13 @@ const forEachFlowObservation = (
     observation: {
       shape: ReadObservationShape;
       nonRecursive: boolean | undefined;
+      // True when a same-tx dereference-trace source covers this read
+      // at-or-above (the C0 §6.1 row-4 machinery predicate). Probe reads
+      // never arrive covered (they are skipped outright); a covered PLAIN
+      // read is the resolution machinery's ordinary journal shape at a
+      // followed slot, and is excluded from `*`-template consumption in
+      // `deriveFlowJoin`.
+      coveredByTrace: boolean;
     },
   ) => boolean,
 ): boolean => {
@@ -1375,9 +1443,15 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
+    const coveredByTrace = probeBelongsToDereference(
+      space,
+      id,
+      scope,
+      logicalPath,
+    );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (probeBelongsToDereference(space, id, scope, logicalPath)) {
+      if (coveredByTrace) {
         continue;
       }
       shape = "followRef";
@@ -1391,7 +1465,14 @@ const forEachFlowObservation = (
         scope,
         (read.type ?? "application/json") as MediaType,
         logicalPath,
-        { shape, nonRecursive: read.nonRecursive },
+        // `coveredByTrace` extends the C0 §6.1 row-3/row-4 boundary to
+        // PLAIN reads for the one entry kind whose consumption at slot
+        // paths is new (the `*`-path class templates): resolution
+        // machinery journals ordinary reads at followed slots and inside
+        // their link sigils, and those must stay pointer HANDLING, not
+        // pointer observation — see the template exclusion in
+        // `deriveFlowJoin`.
+        { shape, nonRecursive: read.nonRecursive, coveredByTrace },
       )
     ) {
       return true;
@@ -1430,13 +1511,85 @@ const forEachFlowObservation = (
         normalizeCellScope(trigger.scope),
         "application/json",
         trigger.path,
-        { shape: "value", nonRecursive: false },
+        { shape: "value", nonRecursive: false, coveredByTrace: false },
       )
     ) {
       return true;
     }
   }
   return false;
+};
+
+// The containers whose membership stamps THIS transaction re-derives this
+// attempt — the §8.12.8 replace-from-criteria readback exclusion set
+// (template-population §3.1). Two re-stamp routes, mirroring the persist
+// region: containers a list coordinator DECLARED this reconcile
+// (`recordCfcStructureContainer`), and container nodes of pure-link-structure
+// value writes. A reconciling coordinator reads its own previous output as
+// diff/identity scaffolding; with the `*`-child class templates persisted,
+// those readback reads would resolve the very entries this attempt drops and
+// re-mints — joining J_prev into J on every reconcile and turning the
+// normative replace-from-criteria into the accumulate-forever §8.12.8
+// rejects. So the writer's own flow join skips exactly the REPLACED entries
+// (the enumerate stamp and the `*`-child templates of its own re-stamped
+// containers); the frozen existence entry is not replaced and not excluded.
+// Foreign readers — and this transaction's reads of every OTHER container —
+// consume templates in full, which is what closes the SC-4/SC-8 residuals.
+const ownRestampContainerPaths = (
+  tx: IExtendedStorageTransaction,
+): Map<string, Set<string>> => {
+  const result = new Map<string, Set<string>>();
+  const add = (key: string, containerPath: readonly string[]) => {
+    let paths = result.get(key);
+    if (paths === undefined) {
+      paths = new Set();
+      result.set(key, paths);
+    }
+    paths.add(pathKey(containerPath));
+  };
+  for (const addr of tx.getCfcState().structureContainers) {
+    add(
+      targetKey({
+        space: addr.space,
+        id: addr.id as URI,
+        scope: normalizeCellScope(addr.scope),
+      }),
+      canonicalizeLogicalPath(addr.path),
+    );
+  }
+  for (const [key, target] of valueWriteTargets(tx)) {
+    for (const path of target.paths) {
+      const written = target.valuesByPath.get(pathKey(path));
+      if (written === undefined || !isPureLinkStructure(written)) {
+        continue;
+      }
+      const containers: (readonly string[])[] = [];
+      pureLinkContainerPaths(written, path, containers);
+      for (const container of containers) {
+        add(key, container);
+      }
+    }
+  }
+  return result;
+};
+
+// Whether `entry` is one of the membership entries a re-stamp of the given
+// container paths replaces: the container-anchored enumerate stamp, or a
+// `*`-child class template of one of the containers.
+const isReplacedMembershipEntry = (
+  entry: LabelMapEntry,
+  containers: ReadonlySet<string>,
+): boolean => {
+  if (entry.origin !== "structure") {
+    return false;
+  }
+  const entryPath = canonicalizeLogicalPath(entry.path);
+  if (entry.observes === "enumerate") {
+    return containers.has(pathKey(entryPath));
+  }
+  return entryPath.length > 0 &&
+    entryPath[entryPath.length - 1] === "*" &&
+    containers.has(pathKey(entryPath.slice(0, -1)));
 };
 
 // Exported for tests: the trigger-read cid: guard above defends
@@ -1476,6 +1629,8 @@ export const deriveFlowJoin = (
     ? new Set<MemorySpace>()
     : undefined;
   const metadataByDoc = new Map<string, CfcMetadata | undefined>();
+  // §8.12.8 readback exclusion: see `ownRestampContainerPaths`.
+  const ownRestamps = ownRestampContainerPaths(tx);
   forEachFlowObservation(
     tx,
     (space, id, scope, type, logicalPath, observation) => {
@@ -1483,12 +1638,38 @@ export const deriveFlowJoin = (
       if (!metadataByDoc.has(key)) {
         metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
       }
+      const ownedContainers = ownRestamps.get(key);
+      // `*`-template consumption keeps the C0 §6.1 row-3/row-4 boundary the
+      // probe channel already has, extended to PLAIN reads: resolution
+      // machinery journals ordinary reads at followed slots (the slot
+      // scalar, the sigil interior) on its way to the target, and those
+      // must not consume the slot templates — the follow's taint arrives
+      // via the target's own reads (row 4), while STANDALONE slot
+      // observations (no covering trace) consume in full (row 3, the SC-8
+      // closures). Without this, every traversal hop through a stamped
+      // container smears the container's J onto whatever the transaction
+      // writes — re-importing the pointwise smear the S16 substrate
+      // removed (measured: the phase-B pointwise map suite).
+      const excludesTemplates = observation.coveredByTrace ||
+        ownedContainers !== undefined;
       const label = effectiveReadLabel(
         metadataByDoc.get(key),
         logicalPath,
         {
           nonRecursive: observation.nonRecursive,
           consumes: observation.shape,
+          ...(excludesTemplates
+            ? {
+              excludeEntry: (entry: LabelMapEntry) =>
+                (observation.coveredByTrace &&
+                  isRuntimeMintedTemplate({
+                    origin: entry.origin,
+                    path: canonicalizeLogicalPath(entry.path),
+                  })) ||
+                (ownedContainers !== undefined &&
+                  isReplacedMembershipEntry(entry, ownedContainers)),
+            }
+            : {}),
         },
       );
       // Any observation with label CONTENT marks its space as a label
@@ -1528,6 +1709,20 @@ export const deriveFlowJoin = (
       return false;
     },
   );
+  // Label-metadata observations (inv-12 Stage 2, the SC-6 revisit): the
+  // introspection surface's explicit records join the derivation with their
+  // §4.6.4.2 population-rule labels. Confidentiality only, like followRef
+  // observations above: observing label METADATA is not consuming content,
+  // so it must neither seed nor empty the hereditary integrity meet. The
+  // observation's space counts as a label contributor for the Stage 1
+  // cross-space predicate — a foreign doc's metadata observed here makes the
+  // stamped entry representation-eligible, same posture as a foreign labeled
+  // read.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    if (observation.confidentiality.length === 0) continue;
+    labeledSpaces?.add(observation.target.space);
+    atoms.push(...observation.confidentiality);
+  }
   const confidentiality = uniqueCfcAtoms(atoms);
   const integrity: unknown[] = [...(hereditaryMeet ?? [])];
   // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
@@ -1741,6 +1936,34 @@ const walkIfcSchema = (
     }
     if (typeof resolved.items === "object" && resolved.items !== null) {
       walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, active);
+    }
+    // Record-only `additionalProperties` descends as the same `*` segment
+    // arrays get from `items` (template-population §4) — RESTRICTED to
+    // record-only objects (no NAMED property). The restriction is
+    // load-bearing: `isPrefix`'s `*` matches ANY segment, but
+    // `additionalProperties` semantically covers only keys NOT listed under
+    // `properties` (schemaAtPath consults it only on a properties miss), so
+    // an unrestricted `*` entry from a mixed schema would over-taint the
+    // named fields. Mixed fixed-plus-record-tail schemas therefore mint no
+    // `*` entry (expressing them needs exclusion semantics §3.3 forbids).
+    // An EMPTY `properties` object is still record-only — it names no key,
+    // so every key is a properties miss and `additionalProperties` covers
+    // all of them; schema helpers routinely emit that wrapper shape, and
+    // skipping it would silently drop the declared map label (codex/cubic
+    // review on this PR).
+    if (
+      (resolved.properties === undefined ||
+        Object.keys(resolved.properties).length === 0) &&
+      typeof resolved.additionalProperties === "object" &&
+      resolved.additionalProperties !== null
+    ) {
+      walkIfcSchema(
+        resolved.additionalProperties,
+        [...path, "*"],
+        entries,
+        childRoot,
+        active,
+      );
     }
     return entries;
   } finally {
@@ -2919,6 +3142,25 @@ const verifyInputRequirements = (
     // membership.
     hasLabelValues(read.label)
   );
+  // Label-metadata observations (inv-12 Stage 2) join the gate with their
+  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have no
+  // journal position, so they sit at -Infinity and join EVERY protected
+  // write's prefix — the conservative direction for a screen, and only new
+  // introspection-using code ever records one (no existing flow regresses).
+  // Confidentiality-only records: never provenance-only, never a floor
+  // witness.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    gatedReads.push({
+      space: observation.target.space,
+      id: observation.target.id as URI,
+      scope: normalizeCellScope(observation.target.scope),
+      path: canonicalizeLogicalPath(observation.target.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: { confidentiality: [...observation.confidentiality] },
+    });
+  }
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
@@ -3110,12 +3352,16 @@ const verifyInputRequirements = (
         const confidentiality = read.label?.confidentiality ?? [];
         if (mode === "off") return fitsLegacy(confidentiality);
         // Evaluate the consumed label to fixpoint (Epic B5). No boundary
-        // atoms: this is a write-target input gate, not a sink.
+        // atoms: this is a write-target input gate, not a sink. A gated
+        // WRITE is a consuming site for single-use grants — the ceiling
+        // decision persists with the written value — but only under the
+        // enforce dial, where this evaluation's outcome IS the decision.
         const outcome = evaluateGatedConfidentiality(
           tx,
           confidentiality,
           read.label?.integrity ?? [],
           [],
+          mode === "enforce" ? "consuming" : "observing",
         );
         if (mode === "enforce") {
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
@@ -3745,11 +3991,16 @@ const collectConsumedLabel = (
     // false-reject valid commits (review round 2 on #3993).
     for (const entry of metadata.labelMap.entries) {
       const entryPath = canonicalizeLogicalPath(entry.path);
-      // Structure entries label only the container node's shape: an
-      // ancestor structure entry does not apply to a read strictly below
-      // it (same exact-path rule as `labelAtPath`); as a descendant of a
-      // recursive read it does apply (the read materializes the shape).
-      const overlapsRead = entry.origin === "structure"
+      // CONCRETE structure entries label only the container node's shape:
+      // an ancestor structure entry does not apply to a read strictly
+      // below it (same exact-path rule as `labelAtPath`); as a descendant
+      // of a recursive read it does apply (the read materializes the
+      // shape). `*`-path templates (template-population §3.2) exist to be
+      // consumed at matching child paths, so they take the generic
+      // ancestor-or-equal arm — this collector stays additive; templates
+      // just participate.
+      const overlapsRead = entry.origin === "structure" &&
+          !isRuntimeMintedTemplate({ origin: entry.origin, path: entryPath })
         ? (entryPath.length === path.length
           ? isPrefix(entryPath, path)
           : read.nonRecursive !== true && isPrefix(path, entryPath))
@@ -3759,6 +4010,16 @@ const collectConsumedLabel = (
       atoms.push(...(entry.label.confidentiality ?? []));
       integrityAtoms.push(...(entry.label.integrity ?? []));
     }
+  }
+  // Label-metadata observations (inv-12 Stage 2): the introspection
+  // surface's records enter the egress consumed set with their §4.6.4.2
+  // population-rule labels — a request assembled after inspecting protected
+  // label metadata is gated exactly like one assembled after reading the
+  // protected value. Confidentiality only: a metadata observation carries no
+  // evidence, so it contributes nothing to the exchange evaluator's guard
+  // pool.
+  for (const observation of tx.getCfcState().labelMetadataObservations) {
+    atoms.push(...observation.confidentiality);
   }
   // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
   return {
@@ -3775,12 +4036,27 @@ const collectConsumedLabel = (
  * `exhausted` flag with the ORIGINAL confidentiality (never a partial
  * rewrite) — the caller decides whether that fails closed (enforce) or is a
  * diagnostic (observe).
+ *
+ * `consumption` is the single-use-grant seam (design §2.2): the two callers
+ * — the sink-request egress ceiling and the input-requirement gate on gated
+ * writes — are exactly the sites where an evaluation outcome changes a
+ * persisted/egress decision inside a writing transaction's prepare, so they
+ * pass `"consuming"` when (and only when) the policy-evaluation dial is
+ * `enforce` (the rewritten label IS the decision there; under `observe` the
+ * decision is the raw label and the evaluation is diagnostics-only, which
+ * must never spend a grant). Every other evaluation site (the render
+ * ceiling's display boundary, hand-built contexts) never states a consuming
+ * context, so single-use grants are unsatisfiable there — fail closed.
+ * Claims registered by a consuming resolution are staged into receipt
+ * writes at the end of `prepareBoundaryCommit` (the same pass), so
+ * consumption commits atomically with the release.
  */
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
   confidentiality: readonly unknown[],
   integrity: readonly unknown[],
   boundary: readonly unknown[],
+  consumption: CfcGrantConsumptionContext,
 ): {
   confidentiality: readonly unknown[];
   exhausted: boolean;
@@ -3802,6 +4078,7 @@ const evaluateGatedConfidentiality = (
       // digest binding. Rides the same cfcPolicyEvaluation dial as the rest
       // of this evaluation — this function only runs when the dial is on.
       grantResolver: createTxCfcGrantResolver(tx),
+      grantConsumption: consumption,
     },
   );
   return {
@@ -3850,11 +4127,16 @@ const verifySinkRequestCeilings = (
         cfcAtom.boundaryContext("sink", sink),
         cfcAtom.boundaryContext("sinkClass", "network"),
       ];
+      // The sink egress gate is a consuming site for single-use grants
+      // (design §2.2) under the enforce dial — the rewritten label decides
+      // whether the request flushes past the ceiling. Observe evaluates for
+      // diagnostics only and must never spend a grant.
       const outcome = evaluateGatedConfidentiality(
         tx,
         consumed.confidentiality,
         consumed.integrity,
         boundary,
+        mode === "enforce" ? "consuming" : "observing",
       );
       if (mode === "enforce") {
         if (outcome.exhausted) {
@@ -4320,12 +4602,23 @@ export const prepareBoundaryCommit = (
         target.scope,
         target.type,
       );
+      const existingEntries = existingMeta?.labelMap.entries ?? [];
       if (
-        existingMeta?.labelMap.entries.some((entry) =>
+        existingEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "link" ||
             entry.origin === "structure") &&
           target.paths.some((written) => isPrefix(written, entry.path))
-        )
+        ) ||
+        // Stage B healing, the template-ONLY arm (cubic P2 on the Stage B
+        // PR): an envelope whose entries are ALL label-metadata templates
+        // has no payload entry a written path could cover, so it would
+        // never re-enter this loop — and its templates describe entries
+        // that no longer exist. Admit it so the re-derivation writes the
+        // healed (empty) label map. Envelopes with any payload entry heal
+        // through the ordinary covering-write arm above (the re-derivation
+        // rebuilds templates whenever payload entries are re-persisted).
+        (existingEntries.length > 0 &&
+          existingEntries.every((entry) => isLabelMetadataTemplateEntry(entry)))
       ) {
         targetKeys.add(key);
       }
@@ -4585,6 +4878,44 @@ export const prepareBoundaryCommit = (
             }]
             : [];
         });
+    // WP5 (§8.12.1/§8.12.8; docs/specs/cfc-persisted-declassification.md §4
+    // item 3): the declared-component monotonicity gate. Each declared entry
+    // this walk is about to persist replaces the stored declared entry at
+    // the same path (the carry-forward below skips replaced paths), so this
+    // is the ONE point where the store policy can change — compare against
+    // the stored entries per canUpdateStoreLabel before it does. The stored
+    // metadata was read above under the internal-verifier meta
+    // (storedMetadataFor), so the gate consumes no additional reads. Under
+    // `enforce` a violation records fail-closed reasons and skips persisting
+    // this target's labels (mirroring requirementFailure — the stored,
+    // stronger entries stay in place under non-rejecting enforcement modes;
+    // an ingest target keeps only the runtime's mark); under `observe` it
+    // diagnoses and persists today's bytes; `off` runs nothing.
+    if (state.declaredMonotonicityMode !== "off" && existing !== undefined) {
+      const monotonicityViolations = collectDeclaredMonotonicityViolations({
+        space,
+        docId: id,
+        storedEntries: existing.labelMap.entries,
+        proposedEntries: persistedLabelEntries,
+        exemption: state.declaredWideningExemption,
+      });
+      if (monotonicityViolations.length > 0) {
+        if (state.declaredMonotonicityMode === "enforce") {
+          reasons.push(...monotonicityViolations);
+          if (!isIngestTarget) continue;
+          // Mirror ingestVerificationFailed above: the runtime's ingest mark
+          // (appended below) still persists in non-rejecting modes, but the
+          // non-monotone declared claims must not.
+          persistedLabelEntries.length = 0;
+        } else {
+          for (const violation of monotonicityViolations) {
+            tx.noteCfcDiagnostic(
+              `declared-monotonicity(observe): ${violation}`,
+            );
+          }
+        }
+      }
+    }
     const persistedLabelEntryKeys = new Set(
       persistedLabelEntries.map((entry) => pathKey(entry.path)),
     );
@@ -4592,6 +4923,15 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     let flowCleared = false;
+    // Stage B: stored label-metadata templates this persist drops (they are
+    // re-derived from the FINAL payload entry set below). Tracked so a
+    // TEMPLATE-ONLY stale envelope — a mixed-version writer cleared the
+    // payload entries while carrying the unknown-origin templates forward —
+    // heals: dropping them counts as a clear, so an empty final label map
+    // is WRITTEN rather than short-circuited into keeping the stale bytes
+    // (cubic P2 on the Stage B PR). When the final entries are non-empty
+    // the flag is inert — the SC-11 canonical comparison decides as usual.
+    let droppedLabelMetadataTemplates = false;
     // SC-4 (C3, disciplines settled with the spec 2026-07-06 — freeze-at-
     // creation, specs branch cfc/existence-freeze-at-creation): existence
     // never shrinks, but it does not grow either. When a clear drops a
@@ -4623,6 +4963,18 @@ export const prepareBoundaryCommit = (
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
+      // Label-metadata population templates (template-population Stage B,
+      // spec §4.6.4.2) are a pure function of the payload entries in this
+      // same envelope: never carried forward — re-derived below from the
+      // FINAL payload entry set, so they replace on overwrite and clear
+      // with the entries they describe by construction (and a stale
+      // template left by a mixed-version writer heals on the next persist
+      // here — see `droppedLabelMetadataTemplates` for the template-only
+      // arm).
+      if (isLabelMetadataTemplateEntry(entry)) {
+        droppedLabelMetadataTemplates = true;
+        continue;
+      }
       // RUNTIME-MINTED shape-class (existence) entries survive every
       // overwrite of a still-existing path (freeze-at-creation): not the
       // flow-clear, not a link write replacing the slot, not a declared
@@ -4630,13 +4982,19 @@ export const prepareBoundaryCommit = (
       // observes:"shape" entry is policy, not measurement — it keeps the
       // declared component's own discipline (grow-only re-mint through
       // the schema walk) and must not be captured by the freeze carry
-      // (review on this PR). Known residual: deletion leaves the frozen
-      // entry in place (over-taint) and re-creation keeps it instead of
-      // re-minting at the re-creating join — re-mint-on-recreation needs
-      // per-path previousValue plumbing.
+      // (review on this PR). `*`-path TEMPLATES are excluded too: the
+      // shape-class membership template records CURRENT shape under
+      // replace-from-criteria (template-population §3.1/§3.2.1), so
+      // freezing it here would both unhinge it from the criteria and
+      // accumulate stale J forever through the coalesce join. Known
+      // residual: deletion leaves the frozen entry in place (over-taint)
+      // and re-creation keeps it instead of re-minting at the re-creating
+      // join — re-mint-on-recreation needs per-path previousValue
+      // plumbing.
       if (
         (entry.origin === "derived" || entry.origin === "structure") &&
-        entry.observes === "shape"
+        entry.observes === "shape" &&
+        !isRuntimeMintedTemplate({ origin: entry.origin, path: entryPath })
       ) {
         persistedLabelEntries.push({
           path: entryPath,
@@ -4677,11 +5035,27 @@ export const prepareBoundaryCommit = (
       // under any written path are dropped (fresh ones for this tx are
       // appended below / by the link machinery). Declared and legacy
       // entries are never cleared here.
+      //
+      // `*`-path templates clear only under a write that covers their
+      // CONTAINER (template-population §3.1 "cleared on covering writes"):
+      // `isPrefix`'s bidirectional wildcard would let a bare SLOT write
+      // (["1"]) "cover" the ["*"] template — but a slot write replaces one
+      // child, not the membership, and clearing there (with no re-mint;
+      // slot writes stamp nothing) would open an unlabeled window until
+      // the next declared reconcile. The container-anchored enumerate
+      // stamp survives slot writes for exactly the same reason (exact-path
+      // never matches a deeper write), so the twins match its discipline.
+      const clearProbePath = isRuntimeMintedTemplate({
+          origin: entry.origin,
+          path: entryPath,
+        }) && entryPath[entryPath.length - 1] === "*"
+        ? entryPath.slice(0, -1)
+        : entryPath;
       if (
         flowPersist &&
         (entry.origin === "derived" || entry.origin === "link" ||
           entry.origin === "structure") &&
-        flowWrittenPaths.some((written) => isPrefix(written, entryPath))
+        flowWrittenPaths.some((written) => isPrefix(written, clearProbePath))
       ) {
         flowCleared = true;
         if (
@@ -4948,20 +5322,29 @@ export const prepareBoundaryCommit = (
       // stamp (origin structure, observes enumerate — replace-from-criteria,
       // §8.12.8-normative per #4546) from J this reconcile even with no value
       // write: drop the carried-forward enumerate entry at the exact container
-      // path and re-stamp it below with the current J. The frozen existence
-      // entry (observes shape) and legacy covering entries are left in place —
-      // deleting the frozen entry would make the stamp loop re-mint it from
-      // the CURRENT join, silently unfreezing it; legacy entries await the
-      // write-path migration absorb.
+      // path and re-stamp it below with the current J. The `*`-child class
+      // templates minted beside it (template-population §3.1) follow the same
+      // replace-from-criteria discipline, so the carried template twins at
+      // [...container, "*"] are dropped and re-minted too — leaving them would
+      // coalesce-JOIN with the fresh mints and accumulate stale J forever.
+      // The frozen existence entry (observes shape, concrete path) and legacy
+      // covering entries are left in place — deleting the frozen entry would
+      // make the stamp loop re-mint it from the CURRENT join, silently
+      // unfreezing it; legacy entries await the write-path migration absorb.
       const structureContainerPath = structureContainerPaths.get(key);
       if (structureContainerPath !== undefined) {
         const containerPathKey = pathKey(structureContainerPath);
+        const containerTemplateKey = pathKey([
+          ...structureContainerPath,
+          "*",
+        ]);
         for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
           const candidateEntry = persistedLabelEntries[i];
           if (
             candidateEntry.origin === "structure" &&
-            candidateEntry.observes === "enumerate" &&
-            pathKey(candidateEntry.path) === containerPathKey
+            ((candidateEntry.observes === "enumerate" &&
+              pathKey(candidateEntry.path) === containerPathKey) ||
+              pathKey(candidateEntry.path) === containerTemplateKey)
           ) {
             persistedLabelEntries.splice(i, 1);
           }
@@ -5084,8 +5467,7 @@ export const prepareBoundaryCommit = (
         // normative for it, so it carries the current J only, never the
         // pool. Labs-axis mapping note: the `observes` axis is read-op
         // shaped, so "enumerate" here approximates the spec's container-
-        // level `iterate.{order,count}` classes; the spec's per-child
-        // shape encoding of membership remains a recorded residual.
+        // level `iterate.{order,count}` classes.
         if (flowHasLabels && flowConfidentiality.length > 0) {
           persistedLabelEntries.push(markFlowStampEntry({
             path,
@@ -5093,6 +5475,55 @@ export const prepareBoundaryCommit = (
             origin: "structure",
             observes: "enumerate",
           }));
+        }
+        // `*`-child CLASS TEMPLATES (template-population §3.1, closing the
+        // SC-4/SC-8 residuals): the same J, minted once per class at
+        // [...container, "*"] — O(1) in the container's size where the
+        // spec's per-child `shape` encoding (§8.5.6.1) needed O(n).
+        //  - `shape`: a per-child existence probe ("is /items/3
+        //    present?", §8.10.1.1) consumes the membership decision;
+        //  - `value`: materializing the reference scalar at a slot
+        //    (§4.6.3 ref-container rule) consumes it too;
+        //  - `followRef`: a slot-pointer probe/deref consumes the
+        //    assignment J — WHICH element the reader resolves through
+        //    was decided by it (inv-9) — while `shape`/`value` templates
+        //    stay out of probes (readConsumesEntry), keeping blind
+        //    pass-through clean of content taint. All three carry ONLY
+        //    the membership J (confidentiality-only, like every
+        //    structure stamp), never the container's content label.
+        // Same replace-from-criteria discipline as the enumerate stamp:
+        // dropped + re-minted from the current J each reconcile, cleared
+        // (never pooled — `poolsExistence` requires a class-less entry)
+        // on covering writes.
+        //
+        // DECLARED-CONTAINER ROUTE ONLY — a measured deviation from the
+        // design's §3.1 "both routes" (documented in
+        // cfc-template-population.md §6 Stage A). Minting templates on
+        // EVERY pure-link-structure value write puts them on the runtime's
+        // own builder/coordination plumbing (alias shells, internal
+        // arrays), and the op-instantiation machinery reads those docs'
+        // child paths (slot scalars, length) as scaffolding with NO
+        // distinguishing journal marker — neither probe-classified nor
+        // trace-covered — so each reconcile's J smears into the next
+        // (measured: the phase-B pointwise map suite). The declared
+        // list-coordinator containers (filter/flatMap results — the actual
+        // §8.5.6.1/SC-7 membership subjects) are where the membership
+        // decision lives; their templates close the SC-4/SC-8 residuals,
+        // and the generic value-write route keeps today's
+        // container-anchored stamps until machinery reads carry a marker.
+        if (
+          flowHasLabels && flowConfidentiality.length > 0 &&
+          structureContainerPath !== undefined &&
+          pathKey(structureContainerPath) === pathKey(path)
+        ) {
+          for (const observes of ["shape", "value", "followRef"] as const) {
+            persistedLabelEntries.push(markFlowStampEntry({
+              path: [...path, "*"],
+              label: { confidentiality: [...flowConfidentiality] },
+              origin: "structure",
+              observes,
+            }));
+          }
         }
         // FROZEN existence entry (freeze-at-creation, spec branch
         // cfc/existence-freeze-at-creation): minted once — at the first
@@ -5213,9 +5644,29 @@ export const prepareBoundaryCommit = (
       }
     }
 
+    // Stage B (template-population §5/§6; spec §4.6.4.2): derive the
+    // label-metadata population templates from the FINAL payload entries —
+    // after every clear/carry/mint AND after the Stage-1 representation
+    // transform above, so template label content is byte-identical to the
+    // payload labels it describes (the transform applies to templates by
+    // construction: they copy post-transform bytes — one transform, both
+    // sinks). Deterministic per payload-entry set, so the SC-11 canonical
+    // comparison below still skips unchanged recomputes; coalescing next
+    // joins the per-entry population labels of same-path payload entries
+    // (the C2 value/shape split) into one per-path template, which is what
+    // the per-path §4.6.4.1 metadata addressing requires. No new dial: the
+    // templates describe whatever payload entries the existing dials
+    // persisted.
+    persistedLabelEntries.push(
+      ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
+    );
+
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 
-    if (coalescedLabelEntries.length === 0 && !flowCleared) {
+    if (
+      coalescedLabelEntries.length === 0 && !flowCleared &&
+      !droppedLabelMetadataTemplates
+    ) {
       continue;
     }
 
@@ -5275,6 +5726,17 @@ export const prepareBoundaryCommit = (
     }, metadata as unknown as FabricValue);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
+  // Single-use grant consumption (design §2.2): stage every claim the
+  // consuming gates above registered — the receipt write plus its
+  // create-only mark — into THIS transaction, inside the privileged scope
+  // prepareCfc wraps this whole pass in (the receipt is reserved-namespace
+  // policy state; the unprivileged arm is the S18 gate). After every gate so
+  // all resolutions are registered; before the return so a claim that cannot
+  // stage fails closed as a prepare reason. The staged write rides the
+  // releasing commit: consumption is atomic with the release, a failed
+  // commit consumes nothing (spec §6.5.2 no-consume-on-failure), and the
+  // create-only race loser dies as a permanent `receipt-exists` rejection.
+  reasons.push(...flushCfcGrantConsumptionClaims(tx));
   // Stage-0 summary: at most once per prepare, and only when a protected
   // write was measured — a prepare that gated nothing has no precision to
   // report.

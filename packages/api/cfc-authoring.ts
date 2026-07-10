@@ -21,6 +21,7 @@ export type {
   CfcJsonArray,
   CfcJsonValue,
   CfcPersonalSpaceAtom,
+  CfcPolicyRefAtom,
   CfcPromptSlotBoundAtom,
   CfcPromptSlotInfluenceAtom,
   CfcPromptSlotRunManifest,

@@ -15,6 +15,7 @@ export {
   PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   sourceDisablesCfTransform,
+  sourceHasIgnoredDisableDirective,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";

@@ -10,12 +10,14 @@ import {
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "./cfc-browser-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
+import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -387,7 +389,8 @@ describe("default-app flow test", () => {
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
-      await clickButtonWithText(page, "Notes");
+      await clickButtonWithExactText(page, "Notes ▾");
+      await awaitViewSettled(page);
 
       const noteCreateStartedAt = performance.now();
       console.log(`Click 'New Note' (note ${noteIndex})...`);
@@ -667,6 +670,10 @@ describe("default-app flow test", () => {
   it("should persist and reload every rapidly created notebook note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
+    const notebookSpaceDid = await resolveSpaceDid(
+      identity,
+      notebookSpaceName,
+    );
 
     const page = shell.page();
     await disposeBrowserRuntime(page);
@@ -676,11 +683,25 @@ describe("default-app flow test", () => {
       identity,
     });
 
+    // shell.goto() waits for URL state and login, while RootView resolves the
+    // named view space independently. Do not interact with the previous
+    // space's still-rendered root while that resolution is in flight.
+    await waitForActiveSpaceRoot(page, notebookSpaceDid);
+
     console.log("Await runtime idle for notebook regression...");
     await waitForRuntimeIdle(page);
+    // Runtime idle can precede the page renderer's Lit update. Wait for the
+    // freshly navigated default-app view to bind its menu handlers before the
+    // first trusted click, just as the notebook toolbar does below.
+    await waitForCondition(
+      page,
+      () => typeof globalThis.commonfabric?.viewSettled === "function",
+    );
+    await awaitViewSettled(page);
 
     try {
-      await clickButtonWithText(page, "Notes");
+      await clickButtonWithExactText(page, "Notes ▾");
+      await awaitViewSettled(page);
       await clickButtonWithText(page, "New Notebook");
       try {
         await waitForCondition(page, async () => {
@@ -3196,6 +3217,7 @@ const markNoteButton = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
+  if (!clickTarget.isConnected || !isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
   return true;
 };
@@ -3228,11 +3250,15 @@ async function settleAndClickNoteButton(
   match: "includes" | "exact" | "title",
   needle: string,
 ): Promise<void> {
-  const token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
+  const markTarget = async (token: string) => {
     await waitForCondition(page, markNoteButton, {
       args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
     });
+  };
+
+  let token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
+    await markTarget(token);
   } catch (cause) {
     throw new Error(
       `Unable to find a ${
@@ -3241,15 +3267,35 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-  try {
-    const clickTarget = await page.waitForSelector(
-      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await clickTarget.click();
-  } finally {
-    await clearNoteButtonMark(page, token);
+
+  let lastCause: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const clickTarget = await page.waitForSelector(
+        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+        { strategy: "pierce" },
+      );
+      await clickTarget.click();
+      return;
+    } catch (cause) {
+      lastCause = cause;
+      const retryable = cause instanceof Error &&
+        cause.message.includes("stable box model");
+      if (!retryable || attempt === 2) break;
+    } finally {
+      await clearNoteButtonMark(page, token);
+    }
+
+    // A root-pattern hot swap can replace the marked button after discovery
+    // but before Astral resolves its box. Re-mark the current rendered node and
+    // retry the coordinate click; only the successful attempt dispatches.
+    token = `cfc-note-button-${crypto.randomUUID()}`;
+    await markTarget(token);
   }
+
+  throw new Error(`Unable to click the stable "${needle}" button`, {
+    cause: lastCause,
+  });
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw
@@ -3432,11 +3478,22 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       ? await commonfabric?.readCell?.({ id: pieceId })
       : undefined;
     const buttonTexts: string[] = [];
+    const renderedButtonTexts: string[] = [];
 
     function collectButtonTexts(root: Document | ShadowRoot): void {
       for (const el of root.querySelectorAll("cf-button, button, a")) {
         const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-        if (text) buttonTexts.push(text);
+        if (text) {
+          buttonTexts.push(text);
+          const style = getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          if (
+            style.display !== "none" && style.visibility !== "hidden" &&
+            rect.width > 0 && rect.height > 0
+          ) {
+            renderedButtonTexts.push(text);
+          }
+        }
         if ((el as HTMLElement).shadowRoot) {
           collectButtonTexts((el as HTMLElement).shadowRoot!);
         }
@@ -3453,7 +3510,9 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       currentKeys: current && typeof current === "object"
         ? Object.keys(current).slice(0, 30)
         : [],
+      runtimeSpace: globalThis.app.element().getRuntimeSpaceDID(),
       buttonTexts: buttonTexts.slice(0, 40),
+      renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };
   });
 }

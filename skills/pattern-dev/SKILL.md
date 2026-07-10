@@ -87,6 +87,15 @@ scope is known. Do not directly stack scope wrappers on the same value, such as
 `PerUser<PerSession<T>>`; put the inner scoped declaration on the field or cell
 that actually has that scope.
 
+**Identity (multi-user):** Scope decides _where_ state lives; identity decides
+_who_ it belongs to. Resolve the viewer via `wish({ query: "#profile" })` (never
+a typed-name field), store each participant's live `#profile` cell in the shared
+`PerSpace` roster on join, render **every** participant with `cf-profile-badge`
+bound to that cell (`cf-avatar` + snapshot only as an offline fallback), and
+identify people by `equals()` on a cell reference, not display name. See
+`docs/common/patterns/multi-user-patterns.md#presenting-identity` and
+`docs/common/components/COMPONENTS.md#identity-components`.
+
 When working in a Pattern Factory Build workspace, also read:
 
 - `docs/common/ai/pattern-factory-build-guide.md`
