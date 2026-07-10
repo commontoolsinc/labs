@@ -290,6 +290,19 @@ export const flushCfcGrantConsumptionClaims = (
   const reasons: string[] = [];
   for (const claim of claims.values()) {
     try {
+      // The exactly-once witness FIRST: without the mark two racing releases
+      // would both commit (last write wins on the receipt document), so the
+      // optional method is a hard requirement — fail closed if absent — and
+      // marking before writing means a refused mark (unsupported storage,
+      // cross-space write isolation, read-only) never leaves an unguarded
+      // receipt value in the journal.
+      if (typeof tx.markCreateOnly !== "function") {
+        throw new Error("storage transaction does not support markCreateOnly");
+      }
+      tx.markCreateOnly({
+        space: claim.space as MemorySpace,
+        id: claim.receiptId,
+      });
       const receipt: CfcGrantConsumptionReceipt = {
         version: CFC_GRANT_VERSION,
         grantConsumed: { grantId: claim.grantId },
@@ -302,16 +315,6 @@ export const flushCfcGrantConsumptionClaims = (
         type: "application/json",
         path: ["value"],
       }, receipt as unknown as FabricValue);
-      // The exactly-once witness: without the mark two racing releases would
-      // both commit (last write wins on the receipt document). The optional
-      // method is a hard requirement here — fail closed if absent.
-      if (typeof tx.markCreateOnly !== "function") {
-        throw new Error("storage transaction does not support markCreateOnly");
-      }
-      tx.markCreateOnly({
-        space: claim.space as MemorySpace,
-        id: claim.receiptId,
-      });
     } catch (error) {
       reasons.push(
         `cfc-grant: staging consumption receipt for single-use grant ` +
