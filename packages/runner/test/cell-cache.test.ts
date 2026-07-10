@@ -22,6 +22,7 @@ import {
   loadSourceClosure,
   loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
+  type SourceDoc,
   sourceDocKey,
   verifySourceDocs,
   writeCompiledDocs,
@@ -275,6 +276,136 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const utilEntry = { ...PROGRAM, main: "/util.ts" };
     const viaUtil = computeModuleHashes(utilEntry).get("/util.ts")!;
     expect(viaUtil).toBe(viaMain);
+  });
+
+  it("accepts a closure holding two generations of one ambient filename (2026-07-10 board outage)", () => {
+    // Seal 1 (older runtime): a leaf pattern plus that runtime's injected
+    // ambient helper. The ambient has no import edge, so buildSourceDocs
+    // root-links it from the seal's entry — the leaf document.
+    const ambientModule = (source: string): CacheableModule => ({
+      identity: computeModuleHashes({
+        main: "/cfc.ts",
+        files: [{ name: "/cfc.ts", contents: source }],
+      }).get("/cfc.ts")!,
+      filename: "/cfc.ts",
+      source,
+      js: "/* ambient */",
+      imports: [],
+    });
+    const oldAmbient = ambientModule("export const gen = 'old';");
+    const leafProgram = {
+      main: "/leaf.tsx",
+      files: [{ name: "/leaf.tsx", contents: "export const leaf = 1;" }],
+    };
+    const { modules: leafModules, entryIdentity: leafIdentity } = toModules(
+      leafProgram,
+    );
+    const sealOne = buildSourceDocs(
+      [...leafModules, oldAmbient],
+      leafIdentity,
+    );
+    expect(
+      sealOne.get(leafIdentity)!.imports.map((i) => i.specifier),
+    ).toContain(`${ROOT_LINK_SPECIFIER}${oldAmbient.identity}`);
+
+    // Seal 2 (newer runtime): an entry importing the same leaf module, plus the
+    // newer helper generation at the SAME ambient path. The leaf's identity is
+    // entry-point independent, so both seals share the `pattern:<leaf>` doc.
+    const newAmbient = ambientModule("export const gen = 'new';");
+    const boardProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents:
+            `import { leaf } from "./leaf.tsx";\nexport const n = leaf;`,
+        },
+        ...leafProgram.files,
+      ],
+    };
+    const { modules: boardModules, entryIdentity: boardIdentity } = toModules(
+      boardProgram,
+    );
+    expect(computeModuleHashes(boardProgram).get("/leaf.tsx")).toBe(
+      leafIdentity,
+    );
+    const sealTwo = buildSourceDocs(
+      [...boardModules, newAmbient],
+      boardIdentity,
+    );
+
+    // The stored state after both seals: the shared leaf doc carries seal 1's
+    // root link (last write of that cell), so the board's link walk reaches
+    // BOTH helper generations — two byte-intact docs at /cfc.ts.
+    const merged = new Map(sealTwo);
+    merged.set(leafIdentity, sealOne.get(leafIdentity)!);
+    merged.set(oldAmbient.identity, sealOne.get(oldAmbient.identity)!);
+    expect(
+      [...merged.values()].filter((d) => d.filename === "/cfc.ts").length,
+    ).toBe(2);
+
+    // Regression: filename-keyed recomputation could never verify both
+    // generations (one always shadowed → mismatch → pattern bricked on every
+    // cold recompile). Per-view verification accepts the closure.
+    const v = verifySourceDocs(boardIdentity, merged);
+    expect(v.mismatches).toEqual([]);
+    expect(v.missing).toEqual([]);
+    expect(v.ok).toBe(true);
+  });
+
+  it("still rejects a view whose authored imports reach two files at one path", () => {
+    // Rewired/corrupt closure: the entry's authored edges point at two
+    // documents that both claim /dup.ts. No single emission can produce that
+    // view, so the entry must not verify — but each intact dependency still
+    // verifies standalone in its own view.
+    const depA: CacheableModule = {
+      identity: "",
+      filename: "/dup.ts",
+      source: "export const a = 1;",
+      js: "",
+      imports: [],
+    };
+    const depB: CacheableModule = {
+      identity: "",
+      filename: "/dup.ts",
+      source: "export const b = 2;",
+      js: "",
+      imports: [],
+    };
+    const idOfSingle = (m: CacheableModule) =>
+      computeModuleHashes({
+        main: m.filename,
+        files: [{ name: m.filename, contents: m.source }],
+      }).get(m.filename)!;
+    const a = { ...depA, identity: idOfSingle(depA) };
+    const b = { ...depB, identity: idOfSingle(depB) };
+    const entrySource = `import { a } from "./dup.ts";\nexport const n = a;`;
+    const entryIdentity = "corrupt-entry";
+    const docs = new Map<string, SourceDoc>(
+      [a, b].map((m) => [m.identity, {
+        kind: "source",
+        code: m.source,
+        filename: m.filename,
+        imports: [],
+      }]),
+    );
+    docs.set(entryIdentity, {
+      kind: "source",
+      code: entrySource,
+      filename: "/main.tsx",
+      imports: [
+        { specifier: "./dup.ts", identity: a.identity },
+        { specifier: "./also-dup.ts", identity: b.identity },
+      ],
+    });
+
+    const v = verifySourceDocs(entryIdentity, docs);
+    expect(v.ok).toBe(false);
+    expect(v.mismatches).toContain(entryIdentity);
+    // The intact same-filename dependencies are not condemned by the corrupt
+    // root's view.
+    expect(v.mismatches).not.toContain(a.identity);
+    expect(v.mismatches).not.toContain(b.identity);
   });
 
   it("ignores non-normative annotations (W4): annotated and unannotated docs verify identically", () => {
