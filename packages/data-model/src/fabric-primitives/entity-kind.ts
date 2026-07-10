@@ -1,11 +1,11 @@
 /**
  * Entity kinds version an entity id's URI SCHEME: `computed:fid1:<hash>`
- * names an entity whose contents are a pure function of its pattern's
- * inputs, re-derivable by any runtime holding the same inputs. The kind
- * participates in identity — it is salted into the hash preimage (see
- * `createRef`) AND selects the URI scheme from the same argument, so the two
- * representations cannot diverge and a kind change necessarily names a
- * different entity.
+ * names an entity whose contents are re-derivable by the runtime that
+ * minted it. The kind's ONLY representation is the URI scheme: the hash
+ * preimage is kind-free (see `createRef`), so a computed cell and a state
+ * cell minted from the same cause share hash bytes and differ solely in
+ * scheme — which is why the full URI string, scheme included, is the
+ * identity, and a kind change still names a different entity.
  *
  * `of:fid1:<hash>` remains the unkinded form with strict, authoritative
  * semantics. The kind rides the scheme, NOT the `FabricHash` format tag: the
