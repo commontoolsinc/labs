@@ -32,7 +32,7 @@ describe("runtime error notifications", () => {
         type: NotificationType.ErrorReport,
         message: "Failed to load the compiler stack",
         code: RuntimeErrorCode.CompilerStackLoadFailed,
-        pageId: "piece-1",
+        pieceId: "piece-1",
         space: "did:key:space-1",
         patternId: "pattern-1",
         spellId: "spell-1",

@@ -34,7 +34,7 @@ export function postContextualRuntimeError(
     type: NotificationType.ErrorReport,
     message: error.message,
     ...(code ? { code } : {}),
-    pageId: error.pieceId,
+    pieceId: error.pieceId,
     space: error.space,
     patternId: error.patternId,
     spellId: error.spellId,
