@@ -174,7 +174,9 @@ have none — `walkIfcSchema` does not descend `additionalProperties` at
 all, so "every child of this map" is inexpressible even as a declared
 label. This design extends the schema walk: `additionalProperties`
 (schema-object form) descends as the same `*` segment — **restricted to
-record-only objects (no `properties` present)**. The restriction is
+record-only objects (no named property; an empty `properties: {}` names
+no key, so every key is a properties miss and it stays record-only —
+settled on the Stage-A PR review)**. The restriction is
 load-bearing: `isPrefix`'s `*` matches *any* segment, but
 `additionalProperties` semantically covers only keys *not* listed under
 `properties` (the runner's own `schemaAtPath` traversal consults

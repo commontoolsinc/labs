@@ -880,6 +880,31 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
     ).toBe(true);
   });
 
+  // `properties: {}` is still record-only: no key is named, so EVERY key is
+  // a properties miss and schemaAtPath consults additionalProperties for
+  // all of them — and existing schema helpers produce exactly this
+  // empty-properties wrapper shape, which must not silently lose the
+  // declared map label. The §4 restriction excludes only schemas with ≥1
+  // NAMED property (codex/cubic review on this PR).
+  it("empty-object properties + additionalProperties still mints the `*` entry", async () => {
+    const rt = makeRuntime();
+    const id = await persistThroughSchema(rt, "tp-ap-empty-props", {
+      type: "object",
+      properties: {},
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["map-member"] },
+      },
+    } as JSONSchema, { anyKey: "v" });
+
+    const declared = entriesOf(id).filter((e) => e.origin === "declared");
+    expect(declared).toEqual([{
+      path: ["*"],
+      label: { confidentiality: ["map-member"] },
+      origin: "declared",
+    }]);
+  });
+
   it("boolean additionalProperties never descends", async () => {
     const rt = makeRuntime();
     const id = await persistThroughSchema(rt, "tp-ap-bool", {

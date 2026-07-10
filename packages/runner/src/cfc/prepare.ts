@@ -1935,15 +1935,21 @@ const walkIfcSchema = (
     }
     // Record-only `additionalProperties` descends as the same `*` segment
     // arrays get from `items` (template-population §4) — RESTRICTED to
-    // record-only objects (no `properties` key). The restriction is
+    // record-only objects (no NAMED property). The restriction is
     // load-bearing: `isPrefix`'s `*` matches ANY segment, but
     // `additionalProperties` semantically covers only keys NOT listed under
     // `properties` (schemaAtPath consults it only on a properties miss), so
     // an unrestricted `*` entry from a mixed schema would over-taint the
     // named fields. Mixed fixed-plus-record-tail schemas therefore mint no
     // `*` entry (expressing them needs exclusion semantics §3.3 forbids).
+    // An EMPTY `properties` object is still record-only — it names no key,
+    // so every key is a properties miss and `additionalProperties` covers
+    // all of them; schema helpers routinely emit that wrapper shape, and
+    // skipping it would silently drop the declared map label (codex/cubic
+    // review on this PR).
     if (
-      resolved.properties === undefined &&
+      (resolved.properties === undefined ||
+        Object.keys(resolved.properties).length === 0) &&
       typeof resolved.additionalProperties === "object" &&
       resolved.additionalProperties !== null
     ) {
