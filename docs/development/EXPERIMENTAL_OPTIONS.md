@@ -36,6 +36,7 @@ was last checked against the code.
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating) | `RuntimeOptions.cfcTriggerReadGating` | `false` | Bernhard Seefeld (#4488) | move toward `true` | implemented, staged rollout |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation) | `RuntimeOptions.cfcPolicyEvaluation` | `off` | Bernhard Seefeld (#4566) | move toward `enforce` | implemented, staged rollout |
+| [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` first, then `enforce` | implemented, off by default |
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity) | `RuntimeOptions.cfcDeclaredMonotonicity` | `off` | Bernhard Seefeld (#4647) | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships) | implemented, off by default |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
@@ -326,6 +327,32 @@ the per-epic implementation notes).
 - **Status on 2026-07-08.** Implemented and in staged rollout.
 - **Path to removal.** Once policy evaluation is the norm, the dial could settle
   on `enforce` and be retired.
+
+### `cfcLabelMetadataProtection`
+
+- **Toggle via.** `RuntimeOptions.cfcLabelMetadataProtection`.
+- **Added by.** Bernhard Seefeld, in "inv-12 stage 1 — cross-space
+  label-metadata representation transform (SC-25, spec §4.6.4.1)" (#4638,
+  2026-07-09).
+- **Purpose.** Controls how a label's metadata is represented when the label
+  crosses a space boundary and is persisted. Values are `off`, `observe`, and
+  `enforce`. `off` persists the label bytes byte-identical to before the dial
+  existed. `observe` computes the classification-governed transformed form for
+  cross-space entries and emits a structured diagnostic when it differs from the
+  verbatim form (the divergence count is the rollout metric), but still persists
+  the verbatim bytes. `enforce` persists the transformed form, with
+  commitment-class atom fields replaced by their canonical digest markers
+  (`{digestOf: <hash>}`). The transform is representation-only — it never rejects
+  a commit.
+- **Current default and planned end state.** `off` by default. The target is
+  `observe`, then `enforce` once the divergence metric confirms the transform is
+  stable across cross-space traffic
+  (`docs/specs/cfc-label-metadata-confidentiality.md` §2/§5).
+- **Status on 2026-07-09.** Implemented, off by default.
+- **Path to removal.** Not planned for removal: the confidential representation
+  of cross-space label metadata is a permanent store property. Once `enforce`
+  has soaked, the dial could settle there and the `off`/`observe` rungs remain
+  for diagnostics, mirroring the enforcement ladder.
 
 ### `cfcDeclaredMonotonicity`
 
