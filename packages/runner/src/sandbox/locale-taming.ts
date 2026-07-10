@@ -65,36 +65,63 @@ export const pinLocales = (locales: Locales): unknown[] | string => {
   return [...Array.from(locales as ArrayLike<unknown>), DEFAULT_LOCALE];
 };
 
-// An omitted `options.timeZone` becomes UTC — never the host timezone. That
-// is the ONLY path to the host zone: unlike locale resolution (which silently
-// falls back, see pinLocales), ECMA-402 throws RangeError on any invalid
-// timeZone value rather than falling back. So explicit values — including
-// null, which natively throws — pass through untouched; only `undefined`
-// (omitted) is pinned.
+const dataDescriptor = (value: unknown): PropertyDescriptor => ({
+  value,
+  enumerable: true,
+  writable: true,
+  configurable: true,
+});
+
+// Pin the Date `timeZone` so formatting can never fall through to the host
+// zone. Fail closed: only two shapes are accepted — `undefined` (omitted), and
+// a plain object whose `timeZone` is either absent or a plain OWN data
+// property. Everything else throws, because every other shape is a host-zone
+// leak or a read-inconsistency hazard, and no legitimate caller needs it:
+//
+//   - primitives / functions: V8 coerces them to an object with no `timeZone`
+//     (functions are objects; `ToObject` boxes primitives), so native formats
+//     in the host zone. We reject rather than box.
+//   - null: native throws `TypeError`; we reject consistently.
+//   - a `timeZone` accessor (`{ get timeZone() {…} }`): a stateful getter can
+//     return a real zone when we validate and `undefined` (→ host zone) on
+//     native's read.
+//   - an inherited `timeZone`: not a plain own property; treated the same as
+//     an accessor for simplicity.
+//
+// Unlike locale resolution (which silently falls back — see pinLocales),
+// ECMA-402 throws on an invalid *explicit* timeZone string, so a plain own
+// value is safe to forward: `"Not/AZone"` / `null` still throw `RangeError`
+// from native, and `undefined` (== omitted) is pinned to UTC.
 const pinDateOptions = (
   options: Intl.DateTimeFormatOptions | undefined,
 ): unknown => {
-  // Omitted → native leaves timeZone unset and formats in the host zone. Pin.
   if (options === undefined) return { timeZone: DEFAULT_TIME_ZONE };
-  // Non-object (null, primitives): native's GetOptionsObject throws. Forward
-  // as-is so it still throws rather than being silently coerced to a valid
-  // `{ timeZone: "UTC" }` (which a `{ ...options }` spread of null would do).
-  if (typeof options !== "object" || options === null) return options;
-  // Read the security-sensitive timeZone EXACTLY ONCE (via a normal get, so
-  // an inherited value is honored like native does), then hand native a
-  // stable own data property. Three separate reads (spread + `=== undefined`
-  // check + forward) let a stateful/adversarial getter pass the check with a
-  // real zone yet forward `undefined`, re-opening the host-zone leak. Other
-  // options keep their normal (incl. inherited) lookup through the prototype
-  // chain — only timeZone must be stabilized.
-  const timeZone = options.timeZone;
+  if (typeof options !== "object" || options === null) {
+    throw new TypeError(
+      "sanitized Intl: Date options must be a plain object or undefined",
+    );
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(options, "timeZone");
+  if (descriptor !== undefined && !("value" in descriptor)) {
+    throw new TypeError(
+      "sanitized Intl: options.timeZone must be a plain value, not a getter",
+    );
+  }
+  if (descriptor === undefined && "timeZone" in options) {
+    throw new TypeError(
+      "sanitized Intl: options.timeZone must be an own property",
+    );
+  }
+  // `descriptor.value` is the reflected data value — reading it invokes no
+  // getter (accessors were rejected above). Absent or explicit-undefined → UTC;
+  // any other value is forwarded for native to honor or reject. Built on
+  // Object.create so the caller's object is untouched and its other options
+  // resolve through the prototype chain.
+  const timeZone = descriptor?.value;
   return Object.create(options, {
-    timeZone: {
-      value: timeZone === undefined ? DEFAULT_TIME_ZONE : timeZone,
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    },
+    timeZone: dataDescriptor(
+      timeZone === undefined ? DEFAULT_TIME_ZONE : timeZone,
+    ),
   });
 };
 

@@ -162,7 +162,7 @@ describe("sanitized locale methods under SES lockdown", () => {
     });
   });
 
-  describe("faithful argument handling (no leak, no lost behavior)", () => {
+  describe("locale argument handling (no leak, no lost behavior)", () => {
     it("honors an array-LIKE locale list, not just real arrays", () => {
       // ECMA-402 CanonicalizeLocaleList accepts array-likes; treating one as a
       // single tag would ToString it to "[object Object]" and throw.
@@ -170,33 +170,61 @@ describe("sanitized locale methods under SES lockdown", () => {
         inSES(`(1234.5).toLocaleString({ 0: "de-DE", length: 1 })`),
       ).toBe("1.234,5");
     });
+  });
 
-    it("reads a stateful timeZone getter exactly once (no re-read leak)", () => {
-      // An adversarial getter that returned a real zone on the check-read and
-      // undefined on the forward-read would re-open the host-zone leak. The
-      // wrapper reads once and hands native a stable data property, so the
-      // format matches the explicit-NY result regardless of later reads.
-      const viaGetter = inSES(`(() => {
-        let n = 0;
-        const opts = { get timeZone() { n++; return n === 1 ? "America/New_York" : undefined; } };
-        return new Date(${T}).toLocaleDateString("en-US", opts);
-      })()`);
-      expect(viaGetter).toBe("7/10/2025"); // NY: 2025-07-11T00:00Z is 7/10 local
+  describe("Date options fail closed on non-plain shapes (host-zone leak defense)", () => {
+    // T2 straddles a day boundary: 2025-07-10T23:30:00Z is 7/10 in UTC but
+    // 7/11 in Europe/Berlin — so a host-zone leak (Berlin) would show as a
+    // different DATE than the pinned UTC. Under native semantics every rejected
+    // shape below formats in the host zone (V8 boxes primitives and accepts
+    // functions / objects with an absent timeZone), so the wrapper throws.
+    const T2 = 1752190200000;
+
+    it("throws on a primitive options value (native would box it → host zone)", () => {
+      expect(() => inSES(`new Date(${T2}).toLocaleDateString("en-US", 42)`))
+        .toThrow(TypeError);
+      expect(() => inSES(`new Date(${T2}).toLocaleDateString("en-US", "x")`))
+        .toThrow(TypeError);
     });
 
-    it("honors an inherited timeZone (a spread would have dropped it → UTC)", () => {
+    it("throws on a function options value (a function is an object → host zone)", () => {
+      expect(() =>
+        inSES(`new Date(${T2}).toLocaleDateString("en-US", () => {})`)
+      ).toThrow(TypeError);
+    });
+
+    it("throws on null options (native throws too; kept consistent)", () => {
+      expect(() => inSES(`new Date(${T2}).toLocaleDateString("en-US", null)`))
+        .toThrow(TypeError);
+    });
+
+    it("throws on a timeZone getter rather than reading it", () => {
+      expect(() =>
+        inSES(
+          `new Date(${T2}).toLocaleDateString("en-US", { get timeZone() { return "America/New_York"; } })`,
+        )
+      ).toThrow(TypeError);
+    });
+
+    it("throws on an inherited (non-own) timeZone", () => {
+      expect(() =>
+        inSES(
+          `new Date(${T2}).toLocaleDateString("en-US", Object.create({ timeZone: "America/New_York" }))`,
+        )
+      ).toThrow(TypeError);
+    });
+
+    it("still accepts a plain object with an own data timeZone (or none)", () => {
+      // Regression guard: the fail-closed checks must not reject the ONLY
+      // options shape real patterns use.
       expect(
         inSES(
-          `new Date(${T}).toLocaleDateString("en-US", Object.create({ timeZone: "America/New_York" }))`,
+          `new Date(${T2}).toLocaleDateString("en-US", { timeZone: "America/New_York" })`,
         ),
       ).toBe("7/10/2025");
-    });
-
-    it("lets native reject invalid options instead of coercing them valid", () => {
-      // `{ ...null }` would have become `{ timeZone: "UTC" }` and succeeded;
-      // native throws TypeError on null options, and the wrapper preserves that.
-      expect(() => inSES(`new Date(${T}).toLocaleDateString("en-US", null)`))
-        .toThrow(TypeError);
+      expect(inSES(`new Date(${T2}).toLocaleDateString("en-US", {})`)).toBe(
+        "7/10/2025", // no timeZone → pinned UTC → 7/10
+      );
     });
   });
 
