@@ -54,7 +54,8 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       // there would be introspecting labels OF labels (§4.6.4.1 first-layer
       // rule). The parse rejects so the evaluator's caller collapses to
       // notAvailable.
-      expect(parseConfLabelTargetPath("/cfc/labels/value/body")).toBeUndefined();
+      expect(parseConfLabelTargetPath("/cfc/labels/value/body"))
+        .toBeUndefined();
       expect(parseConfLabelTargetPath("/cfc")).toBeUndefined();
     });
 

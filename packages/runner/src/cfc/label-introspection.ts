@@ -412,7 +412,6 @@ export const evaluateConfLabelQuery = (
   };
 };
 
-
 /**
  * The full introspection step for one target, consuming on the transaction —
  * everything above the input plumbing the `inspectConfLabel` builtin owns:

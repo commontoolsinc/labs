@@ -28,18 +28,19 @@ const observationFor = (
   id: string,
   confidentiality: unknown[],
   targetSpace: string = space,
-): CfcLabelMetadataObservation => ({
-  target: {
-    space: targetSpace as CfcLabelMetadataObservation["target"]["space"],
-    id,
-    scope: "space",
-    // The first-layer metadata subtree address (§4.6.4.1): observations
-    // address /cfc/labels/<target-envelope-path>, never payload paths.
-    path: ["cfc", "labels", "value", "body"],
-  },
-  observes: "labelMetadata",
-  confidentiality,
-}) as CfcLabelMetadataObservation;
+): CfcLabelMetadataObservation =>
+  ({
+    target: {
+      space: targetSpace as CfcLabelMetadataObservation["target"]["space"],
+      id,
+      scope: "space",
+      // The first-layer metadata subtree address (§4.6.4.1): observations
+      // address /cfc/labels/<target-envelope-path>, never payload paths.
+      path: ["cfc", "labels", "value", "body"],
+    },
+    observes: "labelMetadata",
+    confidentiality,
+  }) as CfcLabelMetadataObservation;
 
 const seedLabeledDoc = async (
   runtime: Runtime,
@@ -86,12 +87,14 @@ const makeRuntime = (options: {
   cfcSinkMaxConfidentiality?: Record<string, unknown[]>;
 } = {}) => {
   const storageManager = StorageManager.emulate({ as: signer });
-  const runtime = new Runtime({
-    apiUrl: new URL("https://example.com"),
-    storageManager,
-    cfcEnforcementMode: "enforce-explicit",
-    ...options,
-  } as ConstructorParameters<typeof Runtime>[0]);
+  const runtime = new Runtime(
+    {
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      ...options,
+    } as ConstructorParameters<typeof Runtime>[0],
+  );
   return { storageManager, runtime };
 };
 
@@ -248,7 +251,12 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
 
       // And end-to-end: the doc written by the verifier-reading transaction
       // stays unlabeled (no derived component minted from the raw read).
-      const outA = runtime.getCell(space, "channel-verifier-out", undefined, txA);
+      const outA = runtime.getCell(
+        space,
+        "channel-verifier-out",
+        undefined,
+        txA,
+      );
       outA.set({ copied: "no-taint" });
       txA.prepareCfc();
       expect((await txA.commit()).ok).toBeDefined();
