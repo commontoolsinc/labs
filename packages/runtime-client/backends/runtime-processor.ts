@@ -47,7 +47,6 @@ import {
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
-import { CompilerStackLoadError } from "../../runner/src/harness/deferred-compiler-stack.ts";
 import {
   getMetaLink,
   KeepAsCell,
@@ -104,7 +103,6 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
-  RuntimeErrorCode,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
@@ -152,15 +150,13 @@ import {
 } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
+import {
+  postContextualRuntimeError,
+  postRuntimeError,
+} from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
-
-function runtimeErrorCode(error: Error): RuntimeErrorCode | undefined {
-  return error instanceof CompilerStackLoadError
-    ? RuntimeErrorCode.CompilerStackLoadFailed
-    : undefined;
-}
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -621,21 +617,7 @@ export class RuntimeProcessor {
         });
       },
 
-      errorHandlers: [
-        (error) => {
-          const code = runtimeErrorCode(error);
-          self.postMessage({
-            type: NotificationType.ErrorReport,
-            message: error.message,
-            ...(code ? { code } : {}),
-            pageId: error.pieceId,
-            space: error.space,
-            patternId: error.patternId,
-            spellId: error.spellId,
-            stackTrace: error.stack,
-          });
-        },
-      ],
+      errorHandlers: [postContextualRuntimeError],
       onVersionSkew: postVersionSkew,
     }));
 
@@ -1760,15 +1742,7 @@ export class RuntimeProcessor {
         });
         return batchId;
       },
-      onError: (error: Error) => {
-        const code = runtimeErrorCode(error);
-        self.postMessage({
-          type: NotificationType.ErrorReport,
-          message: error.message,
-          ...(code ? { code } : {}),
-          stackTrace: error.stack,
-        });
-      },
+      onError: postRuntimeError,
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops

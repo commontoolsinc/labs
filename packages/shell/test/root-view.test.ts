@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
 import {
   type ErrorNotification,
   NotificationType,
@@ -167,6 +168,57 @@ describe("XRootView", () => {
       expect(runs).toHaveLength(1);
     } finally {
       console.error = originalError;
+      restore();
+    }
+  });
+
+  it("passes a generation-bound error callback to RuntimeInternals", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => errors.push(args);
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const originalCreate = RuntimeInternals.create;
+    let capturedOnError: ((event: ErrorNotification) => void) | undefined;
+    const fakeRuntime = {};
+    RuntimeInternals.create = ((options) => {
+      capturedOnError = options.onError;
+      return Promise.resolve({
+        runtime: () => fakeRuntime,
+        dispose: () => Promise.resolve(),
+      } as unknown as Awaited<ReturnType<typeof RuntimeInternals.create>>);
+    }) as typeof RuntimeInternals.create;
+
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      view.app = {
+        ...view.app,
+        identity: await Identity.fromPassphrase(
+          "root-view-runtime-error-callback-test",
+        ),
+      };
+      const task = (view as unknown as {
+        _rt: {
+          run(args: [typeof view.app]): void;
+          taskComplete: Promise<unknown>;
+        };
+      })._rt;
+
+      task.run([view.app]);
+      await task.taskComplete;
+      expect(capturedOnError).toBeDefined();
+
+      const event: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "ordinary runtime error",
+      };
+      capturedOnError!(event);
+      expect(errors).toContainEqual(["[RuntimeClient Error]", event]);
+    } finally {
+      RuntimeInternals.create = originalCreate;
+      console.error = originalError;
+      delete (globalThis as { commonfabric?: unknown }).commonfabric;
       restore();
     }
   });
