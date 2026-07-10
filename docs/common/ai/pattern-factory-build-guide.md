@@ -26,6 +26,14 @@ configured build skills that apply to the current work. At minimum this means:
 - type/schema docs for `Default<>`, `Writable<>`, and pattern Input/Output
 - action/handler docs when the pattern has interactions or local state changes
 - UI/component docs when implementing the visual design
+- for any pattern with multiple people or a "current user":
+  `docs/common/components/COMPONENTS.md` (Identity components) and
+  `docs/common/patterns/multi-user-patterns.md` (Presenting Identity) — resolve
+  the viewer via `#profile`, store each participant's live profile cell in the
+  shared `PerSpace` roster on join, render **every** participant with
+  `cf-profile-badge` bound to that cell (`cf-avatar` + snapshot only as an offline
+  fallback), key membership by cell reference with `equals()`, and never use a
+  typed-name field as identity
 - debugging docs after any compile, test, or runtime failure that is not
   immediately obvious
 
