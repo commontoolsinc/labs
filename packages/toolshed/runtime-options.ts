@@ -56,22 +56,43 @@ export function createToolshedRuntime(
   return runtime;
 }
 
+// The one live bridge detach (toolshed runs a single Runtime); invoked from
+// shutdownOpenTelemetry so in-flight storage spans are ended before the final
+// flush instead of being dropped with the process.
+let activeOtelBridgeDetach: (() => void) | undefined;
+
+/** Idempotent; returns whether a bridge was attached. */
+export function detachRuntimeOtelBridgeIfAttached(): boolean {
+  const detach = activeOtelBridgeDetach;
+  activeOtelBridgeDetach = undefined;
+  detach?.();
+  return detach !== undefined;
+}
+
 /**
  * Exported for tests; production reaches it through createToolshedRuntime.
  * Structural param so failure paths can be exercised with a stub.
+ *
+ * Metrics caveat: toolshed's own OTel setup (lib/otel.ts) registers a tracer
+ * provider only, so with OTEL_ENABLED alone the bridge's ct.* instruments are
+ * API no-ops. On the VMs the process also runs under Deno native OTel
+ * (OTEL_DENO + --unstable-otel), whose global MeterProvider makes them real —
+ * spans work either way. Deliberate: a second SDK MeterProvider here would
+ * duplicate what Deno native already exports.
  */
 export async function attachRuntimeOtelBridge(
   runtime: Pick<Runtime, "telemetry" | "scheduler">,
   config: OtelEnv,
 ): Promise<boolean> {
   if (!config.OTEL_ENABLED) return false;
+  let detach: (() => void) | undefined;
   try {
     const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
       await Promise.all([
         import("@commonfabric/runner/telemetry-otel-bridge"),
         import("@opentelemetry/api"),
       ]);
-    attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
+    detach = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
       tracer: trace.getTracer("ct-runner-bridge"),
       meter: metrics.getMeter("ct-runner-bridge"),
       attributes: { "ct.runtime": "server" },
@@ -83,8 +104,12 @@ export async function attachRuntimeOtelBridge(
     // Preflight markers are gated; without the flip the event-admission
     // spans/histograms never fire.
     runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+    // Registered only after full success so a failed attach never leaves a
+    // half-wired bridge behind for shutdown to detach.
+    activeOtelBridgeDetach = detach;
     return true;
   } catch (error) {
+    detach?.();
     console.warn("Runtime OTel bridge attach failed:", error);
     return false;
   }

@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   attachRuntimeOtelBridge,
   createToolshedRuntime,
+  detachRuntimeOtelBridgeIfAttached,
   toolshedRuntimeOptions,
 } from "@/runtime-options.ts";
 
@@ -72,6 +73,11 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
     await runtime.dispose();
     await storageManager.close();
   }
+
+  // A successful attach registers the shutdown detach; detaching is
+  // idempotent and reports whether a bridge was live.
+  assertEquals(detachRuntimeOtelBridgeIfAttached(), true);
+  assertEquals(detachRuntimeOtelBridgeIfAttached(), false);
 
   // Attach failures are logged, never fatal: a runtime whose preflight gate
   // throws must resolve false, not reject.
