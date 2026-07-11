@@ -121,6 +121,154 @@ describe("CFC projection claims", () => {
     }
   });
 
+  it("carries a root-source projection: exact source-path entry unscoped, unscopeable scopes dropped", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-root-source",
+        {
+          type: "object",
+          properties: {
+            measurement: {
+              type: "object",
+              properties: {
+                lat: {
+                  type: "number",
+                  // An entry AT the projected source location: the target is
+                  // an exact copy of this value, so its atoms carry unscoped
+                  // (§8.3.4's interop note: no `projection: "/"`), including
+                  // string atoms.
+                  ifc: {
+                    confidentiality: ["lat-secret"],
+                    integrity: ["lat-verified", { type: "LatReading" }],
+                  },
+                },
+                long: { type: "number" },
+              },
+              ifc: {
+                confidentiality: ["secret"],
+                integrity: [
+                  // An existing record scope is preserved and extended.
+                  {
+                    type: "GPSMeasurement",
+                    scope: { valueRef: "measurement-1" },
+                  },
+                  // A non-record scope cannot be extended — dropped.
+                  { type: "OddlyScoped", scope: "not-a-record" },
+                ],
+              },
+            },
+            latitude: {
+              type: "number",
+              // `from: "/"` — the ProjectionOf lowering: source is the doc
+              // root, the pointer walks to the projected field.
+              ifc: { projection: { from: "/", path: "/measurement/lat" } },
+            },
+          },
+          required: ["measurement", "latitude"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      cell.set({
+        measurement: { lat: 37.77, long: -122.41 },
+        latitude: 37.77,
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = readPersistedEntries(storageManager, persistedId);
+      const entry = entries?.find((e) =>
+        e.path.length === 1 && e.path[0] === "latitude"
+      );
+      expect(entry).toBeDefined();
+      // Confidentiality inherited from every source-prefix entry.
+      expect(entry?.label.confidentiality).toEqual(["secret", "lat-secret"]);
+      expect(entry?.label.integrity).toEqual([
+        {
+          type: "GPSMeasurement",
+          scope: { valueRef: "measurement-1", projection: "/lat" },
+        },
+        // OddlyScoped dropped (non-record scope); the source-path entry's
+        // atoms carry unscoped.
+        "lat-verified",
+        { type: "LatReading" },
+      ]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("ignores a projection claim whose target path was not written", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-untouched",
+        gpsSchema,
+        tx,
+      );
+
+      // Only the source struct is written (root-schema update touching just
+      // /measurement); the claimed target path stays untouched, so the claim
+      // must not be verified (or its label carried) for this transaction.
+      cell.update({ measurement: { lat: 37.77, long: -122.41 } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = readPersistedEntries(storageManager, persistedId);
+      expect(
+        entries?.find((e) => e.path.length === 1 && e.path[0] === "latitude"),
+      ).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects a non-record projection claim as malformed", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-non-record",
+        {
+          type: "object",
+          properties: {
+            latitude: {
+              type: "number",
+              ifc: { projection: true },
+            },
+          },
+          required: ["latitude"],
+        } as unknown as JSONSchema,
+        tx,
+      );
+
+      cell.set({ latitude: 37.77 });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "malformed projection claim at /latitude",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects a projection claim when the projected value diverges", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

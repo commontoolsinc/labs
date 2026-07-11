@@ -2146,10 +2146,10 @@ const parseCanonicalPointer = (
 const projectionClaimSpec = (
   schema: JSONSchema,
 ): ProjectionClaim | "malformed" | undefined => {
-  if (!isRecord(schema) || !isRecord(schema.ifc)) {
-    return undefined;
-  }
-  const claim = (schema.ifc as { projection?: unknown }).projection;
+  const ifc = isRecord(schema) && isRecord(schema.ifc)
+    ? schema.ifc as { projection?: unknown }
+    : undefined;
+  const claim = ifc?.projection;
   if (claim === undefined) {
     return undefined;
   }
@@ -4940,24 +4940,20 @@ export const prepareBoundaryCommit = (
       ingestVerificationFailed = true;
     }
 
+    // Copy-claim verification: exactCopyOf and its §8.3 sub-path
+    // generalization share one failure branch — both are "the written value
+    // must equal a claimed source value" checks.
     const exactCopyFailure = verifyExactCopyRequirements(
+      tx,
+      target,
+      verificationSchema,
+    ) ?? verifyProjectionRequirements(
       tx,
       target,
       verificationSchema,
     );
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
-      if (!isIngestTarget) continue;
-      ingestVerificationFailed = true;
-    }
-
-    const projectionFailure = verifyProjectionRequirements(
-      tx,
-      target,
-      verificationSchema,
-    );
-    if (projectionFailure) {
-      reasons.push(projectionFailure);
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
