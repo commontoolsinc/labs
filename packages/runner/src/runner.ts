@@ -2975,7 +2975,10 @@ export class Runner {
 
     for (const node of pattern.nodes) {
       const module = node.module;
-      if (module.type !== "pattern" || !isPattern(module.implementation)) {
+      if (
+        !isModule(module) || module.type !== "pattern" ||
+        !isPattern(module.implementation)
+      ) {
         continue;
       }
       const childPattern = module.implementation;
@@ -3176,7 +3179,7 @@ export class Runner {
 
   private instantiateNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
+    module: Module | FabricValue,
     inputBindings: FabricValue,
     outputBindings: FabricValue,
     resultCell: Cell<any>,
@@ -4237,7 +4240,8 @@ export class Runner {
     pattern: Pattern,
   ): boolean {
     return pattern.nodes.some(({ module }) =>
-      module.type === "ref" && module.implementation === "navigateTo"
+      isModule(module) && module.type === "ref" &&
+      module.implementation === "navigateTo"
     );
   }
 
@@ -4285,7 +4289,10 @@ export class Runner {
       return false;
     }
     return pattern.nodes.some(({ module }) => {
-      if (module.type !== "ref" || typeof module.implementation !== "string") {
+      if (
+        !isModule(module) || module.type !== "ref" ||
+        typeof module.implementation !== "string"
+      ) {
         return false;
       }
       return EAGER_RESULT_BUILTIN_REFS.has(module.implementation);

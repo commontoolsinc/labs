@@ -700,11 +700,11 @@ symbolic and scheduled/direct factory calls.
 
 ### WP2.4 — Build the internal dynamic factory node
 
-- [ ] Implement `invokeFactory` in the runner builder layer so it records a
+- [x] Implement `invokeFactory` in the runner builder layer so it records a
   dynamic node whose module input is the symbolic factory binding and whose
   call input and expected kind/public schemas are explicit. Never snapshot the
   selected factory ref into the serialized node or its cause.
-- [ ] Extend `NodeRef.module`/serialized node typing only as narrowly as needed;
+- [x] Extend `NodeRef.module`/serialized node typing only as narrowly as needed;
   do not add another public factory wrapper.
 - [ ] Complete the dynamic-module arm currently marked `TODO` in
   `packages/runner/src/runner.ts`.

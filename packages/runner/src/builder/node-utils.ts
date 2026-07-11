@@ -54,13 +54,36 @@ export function connectInputAndOutputs(node: NodeRef) {
     return undefined;
   }
 
+  // A symbolic factory occupies the module slot as a cell/link. Static module
+  // records are metadata and must not be traversed as graph input.
+  if (
+    isReactive(node.module) || isCellResultForDereferencing(node.module) ||
+    isCell(node.module)
+  ) {
+    node.module = connect(node.module) ?? node.module;
+  }
+
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
   // We will also apply ifc tags from inputs to outputs, unless the module has
   // precise built-in flow handling for its result.
   if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
-    applyInputIfcToOutput(node.inputs, node.outputs);
+    applyInputIfcToOutput(
+      node.expectedFactory === undefined
+        ? node.inputs
+        : { factory: node.module, input: node.inputs },
+      node.outputs,
+    );
+  }
+
+  // Handler factories route their output through the event stream, which is
+  // conventionally stored at `$event` rather than in `node.outputs`.
+  if (
+    node.expectedFactory?.kind === "handler" && isRecord(node.inputs) &&
+    "$event" in node.inputs
+  ) {
+    applyInputIfcToOutput(node.module, node.inputs.$event);
   }
 }
 

@@ -19,23 +19,9 @@ import type {
 } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { MemorySpace } from "./storage/interface.ts";
+import type { FactoryContract } from "./factory-contract.ts";
 
-export type FactoryContract =
-  | Readonly<{
-    kind: "pattern";
-    argumentSchema: JSONSchema;
-    resultSchema: JSONSchema;
-  }>
-  | Readonly<{
-    kind: "module";
-    argumentSchema?: JSONSchema;
-    resultSchema?: JSONSchema;
-  }>
-  | Readonly<{
-    kind: "handler";
-    contextSchema?: JSONSchema;
-    eventSchema?: JSONSchema;
-  }>;
+export type { FactoryContract } from "./factory-contract.ts";
 
 /**
  * The owning consumer's state at the instant an async preparation starts.

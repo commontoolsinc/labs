@@ -27,6 +27,7 @@ import {
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
+import { invokeFactory } from "./invoke-factory.ts";
 import {
   action,
   assert,
@@ -252,6 +253,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Utility
     byRef,
+    invokeFactory,
 
     // Environment
     getPatternEnvironment,

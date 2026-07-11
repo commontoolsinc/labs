@@ -278,6 +278,11 @@ function factoryFromPattern<T, R>(
         nodes.forEach((node: NodeRef) => {
           if (!allNodes.has(node)) {
             allNodes.add(node);
+            if (isReactive(node.module)) {
+              node.module = collectCellsAndNodes(
+                node.module as FactoryInput<unknown>,
+              );
+            }
             node.inputs = collectCellsAndNodes(node.inputs);
             node.outputs = collectCellsAndNodes(node.outputs);
           }
@@ -574,7 +579,14 @@ function factoryFromPattern<T, R>(
     // WP1.5's later graph-payload audit widens Node/Pattern fields to admit
     // first-class factories. Keep that static type change separate; the
     // visitor already preserves the callable value at runtime.
-    return { module, inputs, outputs } satisfies Node;
+    return {
+      module,
+      inputs,
+      outputs,
+      ...(node.expectedFactory === undefined
+        ? {}
+        : { expectedFactory: node.expectedFactory }),
+    } satisfies Node;
   });
 
   const pattern: Pattern & toJSON = {

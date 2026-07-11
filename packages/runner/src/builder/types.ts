@@ -76,6 +76,7 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type Runtime } from "../runtime.ts";
+import type { FactoryContract } from "../factory-contract.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -186,6 +187,8 @@ export type NodeRef = {
   inputs: FactoryInput<any>;
   outputs: Reactive<any>;
   frame: Frame | undefined;
+  /** Compiler-emitted contract for a symbolic Factory@1 call. */
+  expectedFactory?: FactoryContract;
 };
 
 export type StreamValue = {
@@ -250,9 +253,12 @@ export function isModule(value: unknown): value is Module {
 
 export type Node = {
   description?: string;
-  module: Module; // TODO(seefeld): Add `Alias` here once supported
+  /** Static module metadata or the serialized link for a dynamic factory. */
+  module: Module | GraphValue;
   inputs: GraphValue;
   outputs: GraphValue;
+  /** Trusted call-site contract; never sourced from the selected factory. */
+  expectedFactory?: FactoryContract;
 };
 
 /** Serialized pattern graph data, including admitted callable factories. */
@@ -409,6 +415,11 @@ export interface BuilderFunctionsAndConstants {
 
   // Utility
   byRef: ByRefFunction;
+  invokeFactory: (
+    factory: unknown,
+    input: unknown,
+    expected: FactoryContract,
+  ) => Reactive<unknown>;
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
