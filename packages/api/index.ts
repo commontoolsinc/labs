@@ -159,8 +159,11 @@ export declare const FabricBytes: FabricBytesConstructor;
 declare const FABRIC_FACTORY_TYPE: unique symbol;
 
 /** A branded pattern, module, or handler factory callable. */
-export interface FabricFactory {
-  (...args: unknown[]): unknown;
+export interface FabricFactory<
+  Args extends unknown[] = [never],
+  Result = unknown,
+> {
+  (...args: Args): Result;
   readonly [FABRIC_FACTORY_TYPE]: true;
 }
 
@@ -1489,7 +1492,7 @@ export type Handler<T = any, R = any> = Module & {
 
 export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
-  & FabricFactory
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1498,7 +1501,7 @@ export type NodeFactory<T, R> =
 
 export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
-  & FabricFactory
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & Pattern
   & toJSON
   & {
@@ -1508,7 +1511,7 @@ export type PatternFactory<T, R> =
 
 export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
-  & FabricFactory
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & Module
   & toJSON
   & {
@@ -1517,7 +1520,7 @@ export type ModuleFactory<T, R> =
 
 export type HandlerFactory<T, R> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
-  & FabricFactory
+  & FabricFactory<[FactoryInput<StripCell<T>>], Stream<R>>
   & Handler<T, R>
   & toJSON;
 

@@ -1,5 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type {
+  FabricFactory as ApiFabricFactory,
+  ModuleFactory,
+} from "@commonfabric/api";
 
 import {
   factoryStateOf,
@@ -9,6 +13,29 @@ import {
   tryFactoryState,
 } from "@/fabric-factory.ts";
 import type { FabricFactory, FabricValue } from "@/interface.ts";
+
+// Compile-time contract: the dependency-free API mirror and data-model arm are
+// mutually assignable, while specializing a public factory retains its exact
+// one-argument call signature.
+if (false) {
+  const apiFactory = null as unknown as ApiFabricFactory<[string], number>;
+  const dataModelFactory: FabricFactory<[string], number> = apiFactory;
+  const roundTrippedApiFactory: ApiFabricFactory<[string], number> =
+    dataModelFactory;
+  void roundTrippedApiFactory;
+
+  const moduleFactory = null as unknown as ModuleFactory<
+    { value: string },
+    string
+  >;
+  moduleFactory({ value: "valid" });
+  // @ts-expect-error A factory cannot be called without its public input.
+  moduleFactory();
+  // @ts-expect-error A factory cannot accept the wrong public input shape.
+  moduleFactory({ wrong: 1 });
+  // @ts-expect-error A factory takes exactly one public input argument.
+  moduleFactory({ value: "valid" }, "extra");
+}
 
 describe("FabricFactory protocol", () => {
   it("admits only registered callables and keeps protocol properties hidden", () => {

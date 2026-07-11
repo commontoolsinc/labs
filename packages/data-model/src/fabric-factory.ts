@@ -110,7 +110,7 @@ const factoryStates = new WeakMap<Callable, FactoryStateAccessor>();
 export function registerFabricFactory<T extends Callable>(
   value: T,
   state: FactoryStateView | FactoryStateAccessor,
-): T & FabricFactory {
+): T & FabricFactory<Parameters<T>, ReturnType<T>> {
   if (factoryStates.has(value)) {
     throw new TypeError("Callable is already an admitted FabricFactory");
   }
@@ -141,7 +141,7 @@ export function registerFabricFactory<T extends Callable>(
     },
   });
   factoryStates.set(value, stateAccessor);
-  return value as T & FabricFactory;
+  return value as T & FabricFactory<Parameters<T>, ReturnType<T>>;
 }
 
 /** Return admitted factory state, or `undefined` for every other value. */

@@ -10,6 +10,8 @@
  * corresponding declarations there.
  */
 
+import type { FabricFactory as ApiFabricFactory } from "@commonfabric/api";
+
 //
 // `FabricSpecialObject`
 //
@@ -109,18 +111,16 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * prevents an arbitrary JavaScript function from satisfying the protocol by
  * structural typing alone.
  */
-declare const FABRIC_FACTORY_TYPE: unique symbol;
-
 /**
  * A callable admitted to the Fabric factory protocol.
  *
  * The callable itself is the Fabric value. Pattern, module, and handler
  * factories specialize this interface; ordinary JavaScript functions do not.
  */
-export interface FabricFactory {
-  (...args: unknown[]): unknown;
-  readonly [FABRIC_FACTORY_TYPE]: true;
-}
+export interface FabricFactory<
+  Args extends unknown[] = [never],
+  Result = unknown,
+> extends ApiFabricFactory<Args, Result> {}
 
 /**
  * The full set of values that the fabric storage layer can represent. This
