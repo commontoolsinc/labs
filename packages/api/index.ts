@@ -1662,8 +1662,13 @@ export type JSONSchemaObj = {
         };
       };
     readonly exactCopyOf?: readonly string[];
-    readonly projection?: readonly string[];
-    readonly collection?: readonly string[];
+    // §8.3 projection claim (the lowered form of `Projection` /
+    // `ProjectionOf` / `ProjectionPath`): this value is the field at JSON
+    // pointer `path` inside the structured value at logical path `from`.
+    readonly projection?: {
+      readonly from: string;
+      readonly path: string;
+    };
     // Observation class of the declared label (Epic C, C5): which read
     // observations consume it. Absent or invalid = covering (consumed by
     // every content read class — over-taint, fail-safe).

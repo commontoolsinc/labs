@@ -104,23 +104,32 @@ Two different meanings, two different behaviors:
 
 ## 5. Gaps in the authoring surface
 
-- **`projection` (§8.3) and `passThrough` (§8.2) `ifc` annotations are
-  unimplemented and fail closed** — a write through a schema declaring either is
-  rejected with `unsupported trust-sensitive claim <key>` (`prepare.ts`
+- **`projection` (§8.3) is implemented** _(landed 2026-07-10, after this
+  document was first written)_ — a write through a schema declaring
+  `ifc.projection = { from, path }` is verified at commit (the target value
+  must equal the source field at `from + path`, same document) and carries the
+  source's label: confidentiality in full (§8.3.1), integrity **scoped** to the
+  projected pointer via `scope.projection` (§8.3.2), so a projected field can
+  never claim whole-object integrity. Malformed and array-wildcard claims fail
+  closed. The `Projection` / `ProjectionOf` / `ProjectionPath` helpers in
+  `packages/api/cfc.ts` are safe to reach for; full behavior is pinned by
+  `packages/runner/test/cfc-projection.test.ts` (and scenario 3a′ in this
+  document's test file). Checked recomposition (`recomposeProjections`) remains
+  unimplemented and fails closed.
+- **`passThrough` (§8.2) remains unimplemented and fails closed** — a write
+  through a schema declaring it is rejected with
+  `unsupported trust-sensitive claim <key>` (`prepare.ts`
   `unsupportedTrustSensitiveReason`; also `collection`, `opaque`,
   `recomposeProjections`, `combinedFrom`, `transformation`, `addedIntegrity`).
-  The behaviors are reachable today via per-path labels and links (§2, §4), but
-  the ergonomic "declare this field is a scoped projection / a reference" syntax
-  is missing.
-- **Authoring surface / runtime mismatch (tracked).** `packages/api/cfc.ts`
-  exports helper types that lower to the unimplemented keys above — `Projection`
-  / `ProjectionOf` / `ProjectionPath` (→ `projection`), `SubsetOf` /
-  `FilteredFrom` / `LengthPreservedFrom` / `PermutationOf` (→ `collection`),
-  `OpaqueInput` (→ `opaque`) — so reaching for `Projection<>` in a pattern
-  compiles but fails closed at commit. This is being reconciled (implement the
-  transition or remove the helper); until then prefer `ExactCopy`,
-  `Integrity`/`AddIntegrity`, `Confidential`, `RequiresIntegrity`,
-  `WriteAuthorizedBy`, and plain `Cell<T>` links.
+  Reference behaviors stay reachable via per-path labels and links (§2, §4).
+- **Authoring surface / runtime mismatch — reconciled** _(2026-07-10)_. The
+  helper types that lowered to still-unimplemented keys were **removed** —
+  `SubsetOf` / `FilteredFrom` / `LengthPreservedFrom` / `PermutationOf`
+  (→ `collection`) and `OpaqueInput` (→ `opaque`) — so the authoring surface
+  now only advertises what the runtime enforces. Reintroduce them together
+  with the runner enforcement for §8.5 / §8.13. For collection-shaped needs
+  meanwhile, prefer `ExactCopy`, `Integrity`/`AddIntegrity`, `Confidential`,
+  `RequiresIntegrity`, `WriteAuthorizedBy`, and plain `Cell<T>` links.
 - **No cross-space verbatim byte-copy carry.** By design (§1): carry the
   reference. Flagged here so future work does not mistake it for a missing
   feature to bolt on to `exactCopyOf`.

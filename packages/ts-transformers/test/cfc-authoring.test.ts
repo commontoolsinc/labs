@@ -186,7 +186,6 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
-    "OpaqueInput",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",
     "TrustedActionWrite",
@@ -195,10 +194,6 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "ProjectionPath",
     "ProjectionOf",
     "Projection",
-    "LengthPreservedFrom",
-    "FilteredFrom",
-    "SubsetOf",
-    "PermutationOf",
   ]);
 });
 
