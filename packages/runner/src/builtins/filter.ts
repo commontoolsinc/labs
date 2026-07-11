@@ -39,7 +39,10 @@ import {
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -132,7 +135,7 @@ export function filter(
               list === undefined || (Array.isArray(list) && list.length === 0)
             ) {
               settleTx.runWithAmbientReadMeta(
-                linkResolutionProbe,
+                { ...linkResolutionProbe, ...machineryRead },
                 () =>
                   result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx)
                     .set([]),
@@ -252,8 +255,13 @@ export function filter(
     // content read of every prior element, smearing element taint into the
     // coordinator's per-tx join. The predicate read below stays unprobed: filter
     // membership genuinely depends on it (D4: "predicate results it read carry").
+    // machineryRead rides along (template-population §6, SC-8): scaffolding
+    // must not consume `*`-path membership templates on plumbing containers.
     const probeScoped = <T>(fn: () => T): T =>
-      tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
+      tx.runWithAmbientReadMeta(
+        { ...linkResolutionProbe, ...machineryRead },
+        fn,
+      );
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),

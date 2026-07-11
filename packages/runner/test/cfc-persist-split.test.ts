@@ -177,8 +177,21 @@ describe("CFC observation classes (C2 persist split)", () => {
     const listId = list.getAsNormalizedFullLink().id;
     const structure = entriesOf(listId).filter((e) => e.origin === "structure");
     expect(structure.length).toBeGreaterThan(0);
-    const classes = [...new Set(structure.map((e) => e.observes))].sort();
-    expect(classes).toEqual(["enumerate", "shape"]);
+    // Container-anchored split: enumerate membership + frozen shape
+    // existence at the container path. The `*`-child class templates
+    // (template-population §3.1, generic route) sit beside them at
+    // [...container, "*"] with the three per-child classes.
+    const containerClasses = [
+      ...new Set(
+        structure.filter((e) => e.path.length === 0).map((e) => e.observes),
+      ),
+    ].sort();
+    expect(containerClasses).toEqual(["enumerate", "shape"]);
+    const templateClasses = structure
+      .filter((e) => e.path.length === 1 && e.path[0] === "*")
+      .map((e) => e.observes)
+      .sort();
+    expect(templateClasses).toEqual(["followRef", "shape", "value"]);
     for (const entry of structure) {
       expect(entry.label.confidentiality).toEqual(["alice"]);
     }

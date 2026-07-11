@@ -254,6 +254,33 @@ minted into the same entries, not the mechanism.
      today's container-anchored stamps; extending mints to it needs a
      machinery-read marker first (recorded as the remaining slice of the
      SC-8 residual in `cfc-spec-changes.md`).
+
+     **Update (SC-8 remainder closed).** The generic route now mints too —
+     §3.1's "both routes" holds as designed. The enabling piece is the
+     `machineryRead` marker (`reactivity-log.ts`, the
+     `schedulerDependencyRead` family): the op-instantiation/wiring
+     machinery's reads — node-IO binding's write-redirect walk, static
+     redirect-target collection, dependency seeding's input/output
+     materialization, `sendValueToBinding` result plumbing, and the list
+     coordinators' container scaffolding (the `probeScoped` scopes,
+     `exposedResultCell`'s identity reads) — carry the marker via ambient
+     read-meta scopes and are excluded from `*`-template consumption in
+     `deriveFlowJoin` ONLY: marked reads keep their ordinary consumption
+     (link-origin pointer labels, concrete structure/derived entries), so
+     their flow contribution is byte-identical to pre-template behavior
+     and the exclusion cannot under-taint relative to before. The
+     seam placement mirrors `schedulerDependencyRead` (flow derivation
+     only; the egress/observation-gate consumed sets stay deliberately
+     over-inclusive — screens keep the fail-safe direction). Stamp
+     discipline: only scopes whose every read the machinery itself issues
+     are marked — pattern/handler code never runs inside a marked scope
+     (over-marking an application observation would under-taint, the
+     forbidden direction; a missed machinery read merely leaves residual
+     over-taint). The re-smear scenario is pinned green by the
+     `cfc-flow-pointwise` map test running with the generic route on;
+     the non-coordinator closures and the marked-reads-consume-nothing
+     asymmetry are pinned in `cfc-template-population.test.ts` ("SC-8
+     remainder" block).
   2. **Two machinery boundaries on template consumption**, both
      inherited-from-existing disciplines rather than new semantics: a
      transaction re-deriving a container's membership stamps does not
