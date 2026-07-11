@@ -716,7 +716,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
-  #spaceIdentity?: Signer;
+  #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
@@ -747,7 +747,9 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
-    this.#spaceIdentity = options.spaceIdentity;
+    if (options.spaceIdentity) {
+      this.registerSpaceIdentity(options.spaceIdentity);
+    }
     // Snapshot + freeze: the resolver snapshotted its own copy at
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
@@ -788,6 +790,15 @@ export class StorageManager implements IStorageManager {
     }
     this.#dynamicHosts.set(space, host);
     return true;
+  }
+
+  /**
+   * Retain a derived space key solely as the authority for that space's first
+   * ACL commit. Providers continue to authenticate all ordinary replica work
+   * as `this.as`.
+   */
+  registerSpaceIdentity(identity: Signer): void {
+    this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
   }
 
   open(space: MemorySpace): IStorageProviderWithReplica {
@@ -837,9 +848,7 @@ export class StorageManager implements IStorageManager {
     const isHomeSpace = signer.did() === space;
     const spaceIdentity = isHomeSpace
       ? signer
-      : this.#spaceIdentity?.did() === space
-      ? this.#spaceIdentity
-      : undefined;
+      : this.#spaceIdentities.get(space);
     if (spaceIdentity === undefined) return normal;
 
     const openedServerSeq = normal.session.serverSeq;

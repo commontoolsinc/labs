@@ -264,6 +264,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<NameSchema>(this, response.page);
   }
 
+  async resolveSpaceName(name: string): Promise<DID> {
+    const response = await this.#conn.request<RequestType.ResolveSpaceName>({
+      type: RequestType.ResolveSpaceName,
+      name,
+    });
+    return response.space;
+  }
+
   async recreateSpaceRootPattern(
     space: DID,
   ): Promise<PageHandle<NameSchema>> {

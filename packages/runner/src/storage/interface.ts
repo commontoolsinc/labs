@@ -149,6 +149,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
   /**
+   * Register a derived space identity for fresh-space ACL genesis. Optional:
+   * storage managers without ACL bootstrap support may ignore this capability.
+   * The identity is never used as the principal for ordinary storage work.
+   */
+  registerSpaceIdentity?(identity: Signer): void;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;

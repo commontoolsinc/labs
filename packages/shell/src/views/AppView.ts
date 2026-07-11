@@ -82,13 +82,14 @@ export class XAppView extends BaseView {
 
   _spaceRootPattern = new Task(this, {
     task: async (
-      [rt, space],
+      [app, rt, space],
     ): Promise<
       | PageHandle<NameSchema>
       | undefined
     > => {
       if (!rt || !space) return;
       try {
+        await this.#prepareNamedSpace(app, rt, space);
         return await rt.getSpaceRootPattern(space);
       } catch (err) {
         if (!rt.signal.aborted) {
@@ -97,7 +98,7 @@ export class XAppView extends BaseView {
         throw err;
       }
     },
-    args: () => [this.rt, this.space],
+    args: () => [this.app, this.rt, this.space],
   });
 
   _selectedPattern = new Task(this, {
@@ -110,6 +111,7 @@ export class XAppView extends BaseView {
     > => {
       if (!rt || !space) return;
       this._patternError = undefined;
+      await this.#prepareNamedSpace(app, rt, space);
       if ("pieceSlug" in app.view && app.view.pieceSlug) {
         try {
           const pieceId = slugIdForSpace(space, app.view.pieceSlug);
@@ -145,6 +147,20 @@ export class XAppView extends BaseView {
     // destructured args.
     args: () => [this.app, this.rt, this.space, this._slugRevision],
   });
+
+  async #prepareNamedSpace(
+    app: typeof this.app,
+    rt: RuntimeInternals,
+    space: DID,
+  ): Promise<void> {
+    if (!("spaceName" in app.view)) return;
+    const resolved = await rt.resolveSpaceName(app.view.spaceName);
+    if (resolved !== space) {
+      throw new Error(
+        `Named space ${app.view.spaceName} resolved inconsistently: ${resolved} != ${space}`,
+      );
+    }
+  }
 
   // This derives a space root pattern as well as an "active" (main)
   // pattern for use in child views.
