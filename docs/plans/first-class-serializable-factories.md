@@ -201,24 +201,24 @@ Tests to port or extend:
 
 ### WP1.1 — Define the dependency-light factory protocol
 
-- [ ] Add the `FabricFactory` callable arm to
+- [x] Add the `FabricFactory` callable arm to
   `packages/data-model/src/interface.ts` and mirror it in
   `packages/api/index.ts`.
-- [ ] Define the `FactoryStateV1` discriminated union with exactly the fields in
+- [x] Define the `FactoryStateV1` discriminated union with exactly the fields in
   the specification: shared `ref`; pattern schemas/params/scope/space selector;
   module schemas/scope; and handler context/event schemas.
-- [ ] Add internal live-state support with a stable root token and an optional,
+- [x] Add internal live-state support with a stable root token and an optional,
   not-yet-sealed ref. Keep live state out of the public wire type.
-- [ ] Add one module-private admission/state table and shared
+- [x] Add one module-private admission/state table and shared
   `tryFactoryState()` / `factoryStateOf()` access path. A copied symbol property
   must not pass admission.
-- [ ] Provide an internal registration API for trusted builder constructors and
+- [x] Provide an internal registration API for trusted builder constructors and
   codec-created shells without granting runner execution trust.
-- [ ] Keep all properties used for branding/state access non-enumerable and do
+- [x] Keep all properties used for branding/state access non-enumerable and do
   not modify `Function` or `Function.prototype`.
-- [ ] Export only the minimum protocol surface needed by the runner and codec;
+- [x] Export only the minimum protocol surface needed by the runner and codec;
   do not expose `.curry` or state mutation to pattern authors.
-- [ ] Re-export the runner-facing protocol through
+- [x] Re-export the runner-facing protocol through
   `packages/data-model/src/fabric-value.ts` without creating a dependency from
   the data model back into the runner.
 

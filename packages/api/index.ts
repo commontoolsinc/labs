@@ -153,6 +153,18 @@ export interface FabricBytesConstructor {
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * Type-only brand for the narrow callable arm of `FabricValue`. Runtime
+ * admission is owned by the data-model factory protocol.
+ */
+declare const FABRIC_FACTORY_TYPE: unique symbol;
+
+/** A branded pattern, module, or handler factory callable. */
+export interface FabricFactory {
+  (...args: unknown[]): unknown;
+  readonly [FABRIC_FACTORY_TYPE]: true;
+}
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
@@ -161,6 +173,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | FabricFactory
   | FabricSpecialObject
   | FabricArray
   | FabricPlainObject
@@ -1476,6 +1489,7 @@ export type Handler<T = any, R = any> = Module & {
 
 export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1484,6 +1498,7 @@ export type NodeFactory<T, R> =
 
 export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory
   & Pattern
   & toJSON
   & {
@@ -1493,6 +1508,7 @@ export type PatternFactory<T, R> =
 
 export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory
   & Module
   & toJSON
   & {
@@ -1501,6 +1517,7 @@ export type ModuleFactory<T, R> =
 
 export type HandlerFactory<T, R> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
+  & FabricFactory
   & Handler<T, R>
   & toJSON;
 

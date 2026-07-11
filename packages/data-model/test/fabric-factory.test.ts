@@ -1,0 +1,125 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import {
+  factoryStateOf,
+  type FactoryStateV1,
+  type LiveFactoryState,
+  registerFabricFactory,
+  tryFactoryState,
+} from "@/fabric-factory.ts";
+import type { FabricFactory, FabricValue } from "@/interface.ts";
+
+describe("FabricFactory protocol", () => {
+  it("admits only registered callables and keeps protocol properties hidden", () => {
+    const rootToken = {};
+    const state: LiveFactoryState = {
+      kind: "pattern",
+      rootToken,
+      argumentSchema: true,
+      resultSchema: false,
+    };
+    const original = (input: unknown) => input;
+    const factory = registerFabricFactory(original, () => state);
+
+    const acceptsFabricValue = (_value: FabricValue) => undefined;
+    acceptsFabricValue(factory);
+
+    const acceptsFabricFactory = (_value: FabricFactory) => undefined;
+    acceptsFabricFactory(factory);
+
+    expect(tryFactoryState(factory)).toBe(state);
+    expect(factoryStateOf(factory)).toBe(state);
+    const observedState = factoryStateOf(factory);
+    expect("rootToken" in observedState).toBe(true);
+    if ("rootToken" in observedState) {
+      expect(observedState.rootToken).toBe(rootToken);
+    }
+    expect(Object.keys(factory)).toEqual([]);
+    const functionPrototypeKeys = Reflect.ownKeys(Function.prototype).map(
+      String,
+    );
+    expect(functionPrototypeKeys).not.toContain(
+      "Symbol(common.fabricFactory)",
+    );
+    expect(functionPrototypeKeys).not.toContain("Symbol(common.factoryState)");
+
+    const plainFunction = () => undefined;
+    expect(tryFactoryState(plainFunction)).toBeUndefined();
+    expect(() => factoryStateOf(plainFunction)).toThrow(
+      "Value is not an admitted FabricFactory",
+    );
+
+    // The hidden properties are descriptive, not the admission authority.
+    for (const key of Reflect.ownKeys(factory)) {
+      if (typeof key !== "symbol") continue;
+      const descriptor = Object.getOwnPropertyDescriptor(factory, key);
+      Object.defineProperty(plainFunction, key, descriptor!);
+    }
+    expect(tryFactoryState(plainFunction)).toBeUndefined();
+  });
+
+  it("supports live pending refs and canonical state for every factory kind", () => {
+    const rootToken = {};
+    let ref: { identity: string; symbol: string } | undefined;
+    const liveFactory = registerFabricFactory(
+      () => undefined,
+      (): LiveFactoryState => ({
+        kind: "module",
+        rootToken,
+        ref,
+        argumentSchema: true,
+        resultSchema: false,
+        defaultScope: "session",
+      }),
+    );
+
+    expect(factoryStateOf(liveFactory).ref).toBeUndefined();
+    ref = { identity: "artifact", symbol: "lift" };
+    expect(factoryStateOf(liveFactory).ref).toEqual(ref);
+    const observedState = factoryStateOf(liveFactory);
+    expect("rootToken" in observedState).toBe(true);
+    if ("rootToken" in observedState) {
+      expect(observedState.rootToken).toBe(rootToken);
+    }
+
+    const states: FactoryStateV1[] = [
+      {
+        kind: "pattern",
+        ref,
+        argumentSchema: true,
+        resultSchema: false,
+        paramsSchema: true,
+        params: { prefix: "hello" },
+        defaultScope: "space",
+        spaceSelector: "did:key:example",
+      },
+      {
+        kind: "module",
+        ref,
+        argumentSchema: true,
+        resultSchema: false,
+        defaultScope: "user",
+      },
+      {
+        kind: "handler",
+        ref,
+        contextSchema: true,
+        eventSchema: false,
+      },
+    ];
+
+    for (const state of states) {
+      const shell = registerFabricFactory(
+        () => {
+          throw new Error("factory requires runner materialization");
+        },
+        state,
+      );
+      expect(factoryStateOf(shell)).toBe(state);
+      expect(() => shell()).toThrow(
+        "factory requires runner materialization",
+      );
+    }
+  });
+});

@@ -34,6 +34,7 @@
     "./deep-freeze": "./src/deep-freeze.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
+    "./fabric-factory": "./src/fabric-factory.ts",
     "./fabric-value": "./src/fabric-value.ts",
     "./value-clone": "./src/value-clone.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
