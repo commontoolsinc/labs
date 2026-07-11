@@ -680,6 +680,11 @@ raising to an unconfigured concept resolves the substrate-shipped kernel
 owner-only until granted. This discharges the open questions recorded in
 `notes/WORKING_GOVERNANCE_EXAMPLES.md` (how "Alice's medical policy at the
 time" is represented; what changes automatically for future vs existing data).
+Runtime prerequisites already shipped: grant records with `policyState`
+guards, reserved-path storage and single-use commit-precondition receipts
+(`packages/runner/src/cfc/grants.ts`, #4627/#4649), and label-carried
+`referenced` record selection with home-clause locality (CT-1874, #4652) —
+SC-30 is the spec-side profile plus the reserved grant kind.
 
 **SC-31 [registry] `ConsumerIntent` integrity atom — §15.** Runtime-minted
 evidence that a consuming pattern's module statically declares an intent for

@@ -11,6 +11,15 @@ are SC-29..SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md); companion
 syntax sketches for the remaining surfaces are in
 [`cfc-exchange-rules-authoring-extensions.md`](./cfc-exchange-rules-authoring-extensions.md).
 
+The evaluator half already shipped: `packages/runner/src/cfc/exchange-eval.ts`
+(fuelled-fixpoint guarded rewrites, clause-local), label-carried `referenced`
+policy records with home-clause locality (CT-1874, #4652), and §4.3.5 grant
+records — `policyState` guards, reserved-path storage, single-use
+commit-precondition receipts (`grants.ts`, #4627 / #4649). But policy records
+enter evaluation only through deployment configuration
+(`RuntimeOptions.cfcPolicyRecords`, `policy.ts`); this design is the missing
+authoring half — pattern modules declaring rules, and labels referencing them.
+
 ## Last Updated
 
 2026-07-11
@@ -77,14 +86,15 @@ evaluates rules; trusted boundaries do.
 ### 1. Declaring rules
 
 ```ts
+// Shown for illustration only.
 import { cfcAtom, exchangeRule, exchangeRules, SELF, v } from "commonfabric";
 
 // "The owner may release a drift flag to an audience they picked in the
 //  trusted share surface." Endorsed intent is the guard (spec §3.8.4);
 //  the audience variable binds from the intent evidence (§4.3.3).
 export const releaseFlagToChosenAudience = exchangeRule({
+  appliesTo: SELF, // target: the clause this rule set governs
   pre: {
-    confidentiality: [SELF], // target: the clause this rule set governs
     integrity: [{
       type: "https://commonfabric.org/cfc/atom/EndorsedIntent",
       action: "share-drift-flag",
@@ -92,10 +102,7 @@ export const releaseFlagToChosenAudience = exchangeRule({
       audience: v("A"),
     }],
   },
-  post: {
-    confidentiality: [cfcAtom.user(v("A"))],
-    integrity: [],
-  },
+  post: { addAlternatives: [cfcAtom.user(v("A"))] },
 });
 
 export const driftFlagRules = exchangeRules([
@@ -113,18 +120,30 @@ export const driftFlagRules = exchangeRules([
   pattern-upgrade story).
 - `SELF` is the placeholder for the policy principal being defined, which
   cannot be named before the module is hashed. It always occupies the
-  target-pattern position; `preConfScope` defaults to `"targetClause"`.
+  `appliesTo` (target-pattern) position.
 - `v("X")` is the `{ var: "X" }` placeholder of spec §4.3.3.
-- The full §4.3.2 surface is available (`preConfScope`, `allowedSink` /
-  `allowedPaths`, `guard.policyState`), all optional. Lowering rejects a rule
-  carrying none of the three guard forms — a `pre.integrity` pattern, a
-  `guard.policyState`, or sink+path scoping (§5.2.1's structural
-  authorization) — since a wholly unguarded rewrite is a standing leak
-  (invariant 3).
+- Field names follow the **shipped evaluator dialect**
+  (`packages/runner/src/cfc/policy.ts`, which documents its mapping to spec
+  §4.3.2): `appliesTo` is the spec's target pattern
+  (`preCondition.confidentiality[0]`); `pre` holds the remaining side
+  conditions — `confidentiality`, `integrity`, `boundary` (patterns over
+  `BoundaryContext` atoms, the shipped generalization of `allowedSink` /
+  `allowedPaths`), and `policyState` (grants); `post` is exactly one of
+  `addAlternatives` / `dropClause`. `preConfScope` defaults to
+  `"targetClause"`.
+- Lowering rejects a rule with no guard at all. Admissible guard forms: a
+  `pre.integrity` pattern, a `pre.policyState` grant guard, `pre.boundary`
+  sink/path scoping (§5.2.1's structural authorization), or the
+  **owner-self binding** — the target's subject constrained to the acting
+  principal with release only to that same principal (the §5.4.2
+  `$actingUser` shape; safe by construction, since it can only ever hand the
+  clause's own subject their own access). A rule with none of these is a
+  standing leak (invariant 3).
 
 ### 2a. Raising, direct
 
 ```ts
+// Shown for illustration only.
 import type { Confidential, PolicyOf } from "commonfabric";
 
 type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
@@ -136,7 +155,10 @@ space> }`. Because the pair is content-derived, the hash binding that spec
 §4.4.2 requires is inherent in the reference; there is no separate
 name→hash discovery step for pattern-declared rules (SC-29). At deploy the
 runtime registers the derived policy record content-addressed; at label
-creation the principal is bound.
+creation the principal is bound. The record lands as a
+`selection: "referenced"` policy record — the shipped label-carried,
+home-clause-local selection mode (CT-1874) — with the `{ identity, symbol }`
+pair extending the shipped `{ id, digest }` reference form (SC-29).
 
 Semantics, all inherited rather than invented:
 
@@ -156,6 +178,7 @@ concept-kernel rule can rewrite is a compile-time violation.
 ### 2b. Raising, indirect — concept references
 
 ```ts
+// Shown for illustration only.
 import { concept } from "commonfabric";
 import type { ConceptOf, Confidential } from "commonfabric";
 
@@ -189,31 +212,40 @@ rules are generic and grant-guarded, and the user's editable defaults are
 **grant records** (spec §4.3.5) consulted at evaluation time:
 
 ```jsonc
-// 1. Owner access — the concept never locks out its owner.
-{ "pre":  { "confidentiality": [{ "var": "C", "type": ".../atom/Context",
-             "constraints": { "concept": HEALTH, "subject": { "var": "O" } } }],
-            "integrity": [] },
-  "post": { "confidentiality": [{ "type": ".../atom/User",
-             "subject": { "var": "O" } }], "integrity": [] } }
+// 1. Owner access — the concept never locks out its owner. Guarded by the
+//    owner-self binding: the target matches only when the clause's own
+//    subject IS the acting principal (the §5.4.2 $actingUser shape), and
+//    the rule releases only to that same principal — self-scoped by
+//    construction, never a release to anyone else.
+{ "id": "concept-owner-access",
+  "appliesTo": { "type": ".../atom/Context",
+    "concept": HEALTH, "subject": "$actingUser" },
+  "post": { "addAlternatives": [
+    { "type": ".../atom/User", "subject": "$actingUser" }] } }
 
 // 2. Standing default — one rule serves every user-edited default.
-{ "pre":  { "confidentiality": [ /* as above */ ],
-            "integrity": [{ "type": ".../atom/ConsumerIntent",
-              "intent": { "var": "I" }, "surface": { "var": "S" } }] },
-  "guard": { "policyState": [{ "kind": "ConceptGrant", "concept": HEALTH,
-              "owner": { "var": "O" }, "audience": { "var": "A" },
-              "requiredIntent": { "var": "I" } }] },
-  "post": { "confidentiality": [{ "type": ".../atom/User",
-             "subject": { "var": "A" } }], "integrity": [] } }
+{ "id": "concept-standing-grant",
+  "appliesTo": { "type": ".../atom/Context",
+    "concept": HEALTH, "subject": { "var": "O" } },
+  "pre": {
+    "integrity": [{ "type": ".../atom/ConsumerIntent",
+      "intent": { "var": "I" }, "surface": { "var": "S" } }],
+    "policyState": [{ "kind": "ConceptGrant", "concept": HEALTH,
+      "owner": { "var": "O" }, "audience": { "var": "A" },
+      "requiredIntent": { "var": "I" } }] },
+  "post": { "addAlternatives": [
+    { "type": ".../atom/User", "subject": { "var": "A" } }] } }
 
 // 3. One-shot release — same shape, grant marked single-use (§4.3.5),
-//    consumed atomically at the releasing commit.
+//    consumed atomically at the releasing commit (shipped as
+//    commit-precondition receipts, grants.ts / #4649).
 ```
 
 Consequences, inherited from §4.3.5: default edits are grant CRUD — effective
 at next evaluation, no label migration; revocation is grant deletion; one-shot
 declassification rides single-use grants with receipt linearity already proved
-in `formal/Cfc/GrantConsumption.lean`. This resolves the open question the
+in `formal/Cfc/GrantConsumption.lean` and shipped as commit-precondition
+receipts (`packages/runner/src/cfc/grants.ts`). This resolves the open question the
 spec records in `notes/WORKING_GOVERNANCE_EXAMPLES.md` ("How is Alice's
 medical policy at the time represented? What changes automatically for future
 data?").
@@ -237,6 +269,7 @@ Conjunctive by default — two clauses, two independent gates, ordinary CNF
 join:
 
 ```ts
+// Shown for illustration only.
 type CareFlag = Confidential<Flag, [
   ConceptOf<typeof health>,             // owner's defaults govern, AND
   PolicyOf<typeof driftFlagRules>,      // the pattern's own constraint
@@ -248,6 +281,7 @@ narrow what the concept alone would allow. The disjunctive form is an explicit
 opt-in via the authored-OR surface (spec §3.1.8):
 
 ```ts
+// Shown for illustration only.
 type EitherPath = Confidential<Flag, [
   AnyOf<[ConceptOf<typeof health>, PolicyOf<typeof driftFlagRules>]>,
 ]>;

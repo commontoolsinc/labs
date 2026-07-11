@@ -28,11 +28,12 @@ spec-change items: SC-36, SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md
 the dependency classification.
 
 ```ts
+// Shown for illustration only.
 // Strip the gateway token only where it lawfully appears; the sink gate
 // fires this during boundary execution and emits AuthorizedRequest (§5.2.1).
 export const stripGatewayToken = exchangeRule({
-  pre: { confidentiality: [SELF], integrity: [] },
-  post: { confidentiality: [], integrity: [] }, // drop the matched alternative
+  appliesTo: SELF,
+  post: { dropClause: true }, // spec's empty-postcondition removal form
   sink: "fetchData",
   paths: [["options", "headers", "Authorization"]],
 });
@@ -45,13 +46,17 @@ interface GatewayInput {
 }
 ```
 
+- `sink:` / `paths:` are sugar: they lower to `pre.boundary` patterns over
+  the `BoundaryContext` atoms the evaluator mints per boundary evaluation —
+  the shipped generalization of the spec's `allowedSink` / `allowedPaths`
+  metadata (`packages/runner/src/cfc/policy.ts`).
 - `AuthorityOnly<T>` is classification, not magic: the response drops the
   token's taint only because the sink-scoped rule fires at the permitted
   path — "not a global exemption such as 'tokens never taint'" (§5.3.1). A
   token that leaks into the request body has no matching rule and taints.
-- The core doc's lint ("no unguarded rewrites") admits three guard forms: a
-  `pre.integrity` pattern, a `guard.policyState`, or sink+path scoping. A rule
-  with none of the three is rejected.
+- The core doc's lint ("no unguarded rewrites") is satisfied here by the
+  boundary scoping — §5.2.1's structural authorization is one of its
+  admissible guard forms.
 
 Spec owes: nothing — this is §5.2/§5.3 verbatim with a typed carrier.
 
@@ -62,6 +67,7 @@ inherit full input confidentiality unless a rule fires, and §5.4.7 says every
 request-authorizing policy *should* carry error rules.
 
 ```ts
+// Shown for illustration only.
 // A sanitizer is itself an { identity, symbol } artifact (§5.4.4 shape).
 export const gatewayErrorSanitizer = errorSanitizer({
   redact: [
@@ -98,6 +104,7 @@ clause-local rules), §14.1 (prompt-injection caveats; meaning lives in caveat
 `kind` URIs + policy rules), §4.8.9 (concept guards via trust closure).
 
 ```ts
+// Shown for illustration only.
 export const dischargeUnscreenedRisk = caveatDischargeRule({
   kind: CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
   evidence: [
@@ -124,16 +131,17 @@ ordinary exchange rules guarded by compatible consent evidence from every
 required participant."
 
 ```ts
+// Shown for illustration only.
 export const participantConsent = exchangeRule({
+  appliesTo: cfcAtom.user(v("P")),                      // each participant clause
   pre: {
-    confidentiality: [cfcAtom.user(v("P"))],            // each participant clause
     integrity: [consentEvidence({
       participant: v("P"),
       scope: "calendar-intersection",
       audience: v("A"),
     })],
   },
-  post: { confidentiality: [cfcAtom.user(v("A"))], integrity: [] },
+  post: { addAlternatives: [cfcAtom.user(v("A"))] },
 });
 ```
 
@@ -155,6 +163,7 @@ under policy P (patterns don't request certification); downstream patterns may
 require it; propagation is hereditary weakest-link (§5.5.3, §15.1.1).
 
 ```ts
+// Shown for illustration only.
 // Require: inputs must have been processed under the named policy.
 type CertifiedAnalysis = RequiresIntegrity<Analysis, [
   PolicyCertifiedBy<typeof approvedModels>,
@@ -180,6 +189,7 @@ a verifier; users delegate to verifiers (§4.8.3). None of that is pattern
 code. The pattern-side piece is the discoverable **claim**:
 
 ```ts
+// Shown for illustration only.
 export const screenInjection = lift(/* ... */);
 
 export const screeningClaim = claimsConcept(
@@ -205,6 +215,7 @@ distinguishing claims from statements would help ecosystem tooling.
 `Expires` at label creation; both are ordinary conjuncts.
 
 ```ts
+// Shown for illustration only.
 type Ephemeral = Confidential<Note, [
   ConceptOf<typeof health>,
   ttl(86_400), // conjunct clause; lowers to TTL → Expires at label creation
@@ -223,6 +234,7 @@ of all contributors, including withheld ones), the disjunctive proposal §6
 declared existence release; aggregates never skip).
 
 ```ts
+// Shown for illustration only.
 const inbox = collectionRead(messages, {
   ceiling: [cfcAtom.user(currentUser())], // result store label, bound at prepare
   onExceed: "skip",                       // declared existence release; default "fail"
