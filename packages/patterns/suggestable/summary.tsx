@@ -3,8 +3,10 @@ import {
   Default,
   generateText,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
 } from "commonfabric";
@@ -39,12 +41,13 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
   });
 
   // Generate the summary
-  const response = generateText({
+  const responseRequest = generateText({
     system:
       "You are a helpful assistant that creates clear, concise summaries. Focus on the key points and structure your response in a readable way.",
     prompt,
     context,
   });
+  const response = resultOf(responseRequest);
 
   return {
     [NAME]: computed(() => (topic ? `Summary: ${topic}` : "Summary")),
@@ -58,20 +61,20 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
 
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
-            response.pending,
+            isPending(responseRequest),
             <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating summary...
             </div>,
             <div style="line-height: 1.6; white-space: pre-wrap;">
-              {response.result}
+              {response}
             </div>,
           )}
         </cf-vstack>
       </cf-screen>
     ),
     topic,
-    summary: computed(() => response.result || ""),
-    pending: response.pending,
+    summary: computed(() => response || ""),
+    pending: isPending(responseRequest),
   };
 });
 

@@ -5,9 +5,11 @@ import {
   generateText,
   handler,
   ifElse,
+  isPending,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   UI,
   Writable,
 } from "commonfabric";
@@ -84,16 +86,16 @@ ${template}
 Generate ONLY the TypeScript code, no explanations or markdown.`;
 
   // Step 1: Generate pattern source code from prompt
-  const generated = generateText({
+  const generatedRequest = generateText({
     system: systemPrompt,
     prompt,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const generated = resultOf(generatedRequest);
 
   const processedResult = computed(() => {
-    const result = generated?.result ?? "";
     // Remove wrapping ```typescript``` if it exists
-    return result.replace(/^```typescript\n?/, "").replace(/\n?```$/, "");
+    return generated.replace(/^```typescript\n?/, "").replace(/\n?```$/, "");
   });
 
   // Step 2: Compile the generated code when ready
@@ -107,8 +109,8 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
   const compiled = compileAndRun(compileParams);
 
   // Compute states
-  const isGenerating = generated.pending;
-  const hasCode = computed(() => !!generated.result);
+  const isGenerating = isPending(generatedRequest);
+  const hasCode = computed(() => !!generated);
   const hasError = computed(() => !!compiled.error);
   const isReady = computed(() =>
     !compiled.pending && !!compiled.result && !compiled.error
@@ -185,11 +187,11 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
 
         {ifElse(
           hasCode,
-          <cf-cell-context $cell={generated} label="Generated Code">
+          <cf-cell-context $cell={generatedRequest} label="Generated Code">
             <div>
               <h3>Generated Code</h3>
               <cf-code-editor
-                value={generated.result}
+                value={generated}
                 language="text/x.typescript"
                 readonly
               />
@@ -200,7 +202,7 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
       </div>
     ),
     prompt,
-    generatedCode: generated.result,
+    generatedCode: generated,
     compiledPiece: compiled.result,
     error: compiled.error,
   };

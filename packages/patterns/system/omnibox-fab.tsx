@@ -6,6 +6,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  resultOf,
   Stream,
   UI,
   when,
@@ -136,9 +137,10 @@ export default pattern<OmniboxFABInput>(
       }
     });
 
-    const { result: patternIndex } = fetchText({
+    const patternIndexRequest = fetchText({
       url: resolvedPatternUrl,
     });
+    const patternIndex = resultOf(patternIndexRequest);
 
     const profileContext = computed(() => {
       const profileText = profile.result;

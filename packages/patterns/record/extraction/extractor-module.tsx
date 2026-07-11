@@ -20,10 +20,13 @@ import {
   generateObject,
   generateText,
   handler,
+  hasError,
   ifElse,
   type ImageData,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   safeDateNow,
   toCompactDebugString,
   UI,
@@ -1777,14 +1780,26 @@ export const ExtractorModule = pattern<
         ];
       });
 
-      return {
-        index: photo.index,
-        ocr: generateText({
-          system: OCR_SYSTEM_PROMPT,
-          prompt: prompt as any,
-          model: "anthropic:claude-sonnet-4-5",
-        }),
-      };
+      const request = generateText({
+        system: OCR_SYSTEM_PROMPT,
+        prompt: prompt as any,
+        model: "anthropic:claude-sonnet-4-5",
+      });
+      const result = resultOf(request);
+      const ocr = computed(() => {
+        if (isPending(request)) {
+          return { pending: true, result: undefined, error: undefined };
+        }
+        if (hasError(request)) {
+          return {
+            pending: false,
+            result: undefined,
+            error: request.error.message,
+          };
+        }
+        return { pending: false, result, error: undefined };
+      });
+      return { index: photo.index, ocr };
     });
 
     // Check if any OCR is pending
@@ -1792,10 +1807,7 @@ export const ExtractorModule = pattern<
       // ocrCalls auto-dereferences inside computed()
       const calls = ocrCalls;
       if (!calls || calls.length === 0) return false;
-      return calls.some(
-        (call: { index: number; ocr?: { pending?: boolean } }) =>
-          call.ocr?.pending,
-      );
+      return calls.some((call) => call.ocr.pending);
     });
 
     // Get OCR results as a map (index -> text)
@@ -1806,8 +1818,8 @@ export const ExtractorModule = pattern<
       if (!calls || calls.length === 0) return results;
 
       for (const call of calls) {
-        if (call.ocr?.result) {
-          results[call.index] = call.ocr.result as string;
+        if (call.ocr.result) {
+          results[call.index] = call.ocr.result;
         }
       }
       return results;
@@ -1820,7 +1832,7 @@ export const ExtractorModule = pattern<
       if (!calls || calls.length === 0) return errors;
 
       for (const call of calls) {
-        const errorText = getOcrErrorText(call.ocr?.error);
+        const errorText = getOcrErrorText(call.ocr.error);
         if (errorText) {
           errors[call.index] = errorText;
         }
@@ -1891,15 +1903,29 @@ export const ExtractorModule = pattern<
     });
 
     // Single extraction call for all sources combined
-    const singleExtraction = generateObject({
+    const singleExtractionRequest = generateObject<RecommendationsResult>({
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: combinedExtractionPrompt as any,
       schema: RECOMMENDATIONS_SCHEMA,
       model: "anthropic:claude-haiku-4-5",
     });
+    const singleExtraction = resultOf(singleExtractionRequest);
+    const singleExtractionState = computed(() => {
+      if (isPending(singleExtractionRequest)) {
+        return { pending: true, result: undefined, error: undefined };
+      }
+      if (hasError(singleExtractionRequest)) {
+        return {
+          pending: false,
+          result: undefined,
+          error: singleExtractionRequest.error.message,
+        };
+      }
+      return { pending: false, result: singleExtraction, error: undefined };
+    });
 
-    // Build a synthetic perSourceExtractions array for compatibility with existing code
-    // This wraps the single extraction result as if it came from multiple sources
+    // Build a synthetic per-source array for compatibility with existing code.
+    // Every entry observes the same request/result pair below.
     // NOTE: Use for loop instead of .map() to avoid transformer issues inside computed()
     const perSourceExtractions = computed(() => {
       const sources = selectedSourcesForExtraction;
@@ -1910,7 +1936,6 @@ export const ExtractorModule = pattern<
         sourceIndex: number;
         sourceType: "notes" | "text-import" | "photo";
         sourceLabel: string;
-        extraction: typeof singleExtraction;
       }> = [];
 
       for (const source of sources) {
@@ -1918,7 +1943,6 @@ export const ExtractorModule = pattern<
           sourceIndex: source.index,
           sourceType: source.type,
           sourceLabel: source.label,
-          extraction: singleExtraction,
         });
       }
 
@@ -1927,15 +1951,15 @@ export const ExtractorModule = pattern<
 
     // ===== EXTRACTION STATE TRACKING =====
     // Access reactive properties directly inside computed() to establish proper subscriptions.
-    // This follows the same pattern as ocrPending and ocrResults which access call.ocr?.pending
-    // and call.ocr?.result directly inside computed().
+    // This follows the same pattern as the OCR computations, which guard each
+    // request and read its success-only result alias inside computed().
     //
     // IMPORTANT: Do NOT use intermediate .map() arrays outside computed() - they create
     // non-reactive plain arrays that don't update when the underlying reactive properties change.
 
     // Build SourceExtraction array with status from per-source calls
     // Also collect field metadata (confidence, explanation) for preview
-    // Access extraction.pending, extraction.result, extraction.error directly to establish subscriptions
+    // Guard the request and read the result alias directly to establish subscriptions.
     const sourceExtractionsWithMetadata = computed((): {
       extractions: SourceExtraction[];
       allFieldMetadata: Record<
@@ -1962,30 +1986,24 @@ export const ExtractorModule = pattern<
         let error: string | undefined;
         let fieldCount = 0;
 
-        // Access extraction state directly from the call object (reactive)
-        // This establishes proper reactive subscriptions, just like ocrPending/ocrResults do
-        const isPending = call.extraction?.pending;
-        const extractionResult = call.extraction?.result;
-        const extractionError = call.extraction?.error;
+        const extractionPending = singleExtractionState.pending;
+        const extractionError = singleExtractionState.error;
+        const extractionResult = singleExtractionState.result;
 
         // Determine status based on extraction state
-        if (isPending === undefined && !extractionResult && !extractionError) {
-          // Extraction not initialized yet
-          status = "pending";
-        } else if (isPending) {
+        if (extractionPending) {
           status = "extracting";
         } else if (extractionError) {
           status = "error";
-          const errorObj = extractionError as { message?: string };
-          error = String(errorObj.message || extractionError);
+          error = extractionError;
         } else if (
-          !isPending && !extractionResult && !extractionError
+          !extractionResult
         ) {
           // No pending, no result, no error = extraction hasn't started (prompt undefined)
           // This happens when waiting for OCR or content is empty
           // Mark as pending so UI shows loading state
           status = "pending";
-        } else if (extractionResult) {
+        } else {
           status = "complete";
           const result = extractionResult;
 
@@ -2087,9 +2105,7 @@ export const ExtractorModule = pattern<
       return errorSource?.error || null;
     });
 
-    // Computed to dereference extraction result for passing to handlers
-    // extraction.result is a reactive property that doesn't auto-dereference when passed directly
-    // This ensures the handler receives the actual value, not a reactive proxy
+    // Computed to materialize the merged extraction result for handlers.
     const extractionResultValue = computed(
       (): Record<string, unknown> | null => {
         const result = mergedExtractionResult;

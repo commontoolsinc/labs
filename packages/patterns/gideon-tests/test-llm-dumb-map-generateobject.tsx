@@ -34,9 +34,12 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   NAME,
   nonPrivateRandom,
   pattern,
+  resultOf,
   safeDateNow,
   UI,
   Writable,
@@ -87,24 +90,24 @@ const removeItem = handler<
 export default pattern<Input>(({ items }) => {
   // THE "DUMB MAP APPROACH" - just map directly over items
   // Framework caches each call via hash(prompt + schema + model + system)
-  const sentimentAnalyses = items.map((item) => ({
-    itemId: item.id,
-    content: item.content,
-    analysis: generateObject<Sentiment>({
+  const sentimentAnalyses = items.map((item) => {
+    const request = generateObject<Sentiment>({
       system:
         "Analyze the sentiment of the following text. Return positive, neutral, or negative sentiment with confidence 0-1 and relevant keywords.",
       prompt: item.content,
       model: "anthropic:claude-sonnet-4-5",
-    }),
-  }));
+    });
+    const result = resultOf(request);
+    return { itemId: item.id, content: item.content, request, result };
+  });
 
   const pendingCount = computed(() =>
-    sentimentAnalyses.map((s) => s.analysis.pending).filter((p) => p).length
+    sentimentAnalyses.filter((item) => isPending(item.request)).length
   );
 
   const completedCount = computed(() =>
-    sentimentAnalyses.map((s) => s.analysis.result).filter((r) =>
-      r !== undefined
+    sentimentAnalyses.filter((item) =>
+      !isPending(item.request) && !hasError(item.request) && item.result
     ).length
   );
 
@@ -160,9 +163,7 @@ export default pattern<Input>(({ items }) => {
               </div>
 
               {computed(() => {
-                const pending = item.analysis.pending;
-                const result = item.analysis.result;
-                const error = item.analysis.error;
+                const pending = isPending(item.request);
                 if (pending) {
                   return (
                     <div
@@ -184,7 +185,7 @@ export default pattern<Input>(({ items }) => {
                     </div>
                   );
                 }
-                if (error) {
+                if (hasError(item.request)) {
                   return (
                     <div
                       style={{
@@ -194,11 +195,11 @@ export default pattern<Input>(({ items }) => {
                         borderRadius: "4px",
                       }}
                     >
-                      <strong>Error:</strong> {String(error)}
+                      <strong>Error:</strong> {item.request.error.message}
                     </div>
                   );
                 }
-                const sentimentResult = result as Sentiment | undefined;
+                const sentimentResult = item.result;
                 if (sentimentResult) {
                   return (
                     <div

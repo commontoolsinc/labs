@@ -1,4 +1,10 @@
-import { generateObject, JSONSchema, pattern, Reactive } from "commonfabric";
+import {
+  generateObject,
+  JSONSchema,
+  pattern,
+  Reactive,
+  resultOf,
+} from "commonfabric";
 
 interface Email {
   id: string;
@@ -12,17 +18,18 @@ interface ExtractedData {
 // Generic building block - T is a type parameter
 function BuildingBlock<T>(emails: Reactive<Email[]>, schema: JSONSchema) {
   // This is the problematic case: generateObject<T> where T is a type parameter
-  // The result is Reactive<T | undefined> where T is unresolved
+  // resultOf preserves the unresolved T while filtering unavailable states.
   const analyses = emails.map((email: Email) => {
-    const analysis = generateObject<T>({
+    const request = generateObject<T>({
       prompt: email.content,
       schema,
     });
+    const result = resultOf(request);
 
     return {
       email,
-      analysis,
-      result: analysis.result, // Reactive<T | undefined> - T is a type parameter!
+      request,
+      result,
     };
   });
 

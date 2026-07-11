@@ -9,6 +9,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   type Stream,
   toSchema,
   UI,
@@ -140,9 +141,10 @@ export default pattern<
     }
   });
 
-  const { result: patternIndex } = fetchText({
+  const patternIndexRequest = fetchText({
     url: resolvedPatternUrl,
   });
+  const patternIndex = resultOf(patternIndexRequest);
 
   const profileContext = computed(() => {
     const profileText = profile.result;

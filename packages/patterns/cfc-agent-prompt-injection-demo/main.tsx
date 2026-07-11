@@ -8,6 +8,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   safeDateNow,
   toIndentedDebugString,
   UI,
@@ -335,9 +336,10 @@ export default pattern<Record<string, never>>(() => {
     SUB_AGENT_BRIEFING_MESSAGES,
     SUB_AGENT_BRIEFING_MESSAGES_SCHEMA,
   );
-  const { result: modelDirectory } = fetchJsonUnchecked({
+  const modelDirectoryRequest = fetchJsonUnchecked({
     url: "/api/ai/llm/models",
   });
+  const modelDirectory = resultOf(modelDirectoryRequest);
   const modelItems = computed(() => {
     if (!modelDirectory) return FALLBACK_MODEL_ITEMS;
 

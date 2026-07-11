@@ -21,10 +21,13 @@ import {
   //compileAndRun,
   computed,
   fetchJson,
+  hasError,
   //fetchProgram,
+  isPending,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   TILE_UI,
   toIndentedDebugString,
   UI,
@@ -146,9 +149,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     url: "/api/patterns/google/extractors/email-pattern-registry.json",
   });
 
-  const registry = computed<RegistryEntry[]>(() => registryFetch.result || []);
-  const registryError = computed(() => registryFetch.error);
-  const registryLoading = computed(() => registryFetch.pending);
+  const registry = resultOf(registryFetch);
+  const registryError = computed(() =>
+    hasError(registryFetch) ? registryFetch.error.message : undefined
+  );
+  const registryLoading = computed(() => isPending(registryFetch));
 
   // ==========================================================================
   // BUILD GMAIL QUERY AND FETCH EMAILS
@@ -235,17 +240,17 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const url = computed(() => `/api/patterns/${matchInfo.patternUri}`);
 
     // Fetch the pattern program
-    const programFetch = fetchProgram({ url });
+    const programRequest = fetchProgram({ url });
+    const program = resultOf(programRequest);
 
-    // Use computed to safely handle when program is undefined/pending
     // Filter out undefined elements to handle race condition where array proxy
     // pre-allocates with undefined before populating elements
     const compileParams = computed(() => ({
       // Note: Type predicate removed - doesn't work with OpaqueCell types after transformation
-      files: (programFetch.result?.files ?? []).filter(
+      files: program.files.filter(
         (f) => f !== undefined && f !== null && typeof f.name === "string",
       ),
-      main: programFetch.result?.main ?? "",
+      main: program.main,
       input: { overrideAuth },
     }));
 
@@ -268,11 +273,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       entry: matchInfo.entry,
       matchedEmails: matchInfo.matchedEmails,
       pending: false, /*computed(
-        () => programFetch.pending || compiled.pending,
+        () => isPending(programRequest) || compiled.pending,
       ),*/
       error: null,
       /* error: computed(
-        () => programFetch.error || compiled.error,
+        () => hasError(programRequest)
+          ? programRequest.error.message
+          : compiled.error,
       ),*/
       result,
     } satisfies LaunchedPatternInfo;

@@ -5,13 +5,16 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
   ImageData,
+  isPending,
   NAME,
   nonPrivateRandom,
   pattern,
   type PerSpace,
   type PerUser,
   type RequiresIntegrity,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -550,7 +553,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // Runs reactively when a photo is captured. Uses the draft's inline `data`
     // (that's why `includeData` stays on the capture input) — transient, the
     // saved Sighting keeps only the blob url.
-    const extraction = generateObject<PlateExtraction>({
+    const extractionRequest = generateObject<PlateExtraction>({
       system:
         "You are reading a photo of a parked car to log a parking violation. " +
         "Extract the vehicle description (color + make + model in plain words), " +
@@ -596,6 +599,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       },
       model: "anthropic:claude-sonnet-4-5",
     });
+    const extraction = resultOf(extractionRequest);
 
     // ---- Actions ----
 
@@ -693,15 +697,16 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // the wizard.
     const setDraftSpot = action<{ spot: string }>(({ spot }) => {
       draftSpot.set(spot);
-      const r = extraction.result;
-      if (r?.description && !draftDescription.get()) {
-        draftDescription.set(r.description);
-      }
-      if (r?.plateNumber && !draftPlateNumber.get()) {
-        draftPlateNumber.set(r.plateNumber);
-      }
-      if (r?.plateState && !draftPlateState.get()) {
-        draftPlateState.set(r.plateState);
+      if (!isPending(extractionRequest) && !hasError(extractionRequest)) {
+        if (extraction.description && !draftDescription.get()) {
+          draftDescription.set(extraction.description);
+        }
+        if (extraction.plateNumber && !draftPlateNumber.get()) {
+          draftPlateNumber.set(extraction.plateNumber);
+        }
+        if (extraction.plateState && !draftPlateState.get()) {
+          draftPlateState.set(extraction.plateState);
+        }
       }
       captureStep.set("review");
     });
@@ -720,15 +725,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       reporterName.set(name);
     });
 
-    // Phase 2: copy the LLM extraction into the editable draft fields. The
-    // extracted values are read in JSX (where `extraction.result` is reactive)
-    // and passed in as plain args — an action can't read a generateObject
-    // result directly. The user can then review/correct before saving.
+    // Phase 2: copy the success-only LLM result into the editable draft fields.
+    // The guards keep this action callable while the request is unavailable.
     const applyExtraction = action(() => {
-      const r = extraction.result;
-      if (r?.description) draftDescription.set(r.description);
-      if (r?.plateNumber) draftPlateNumber.set(r.plateNumber);
-      if (r?.plateState) draftPlateState.set(r.plateState);
+      if (isPending(extractionRequest) || hasError(extractionRequest)) return;
+      if (extraction.description) draftDescription.set(extraction.description);
+      if (extraction.plateNumber) draftPlateNumber.set(extraction.plateNumber);
+      if (extraction.plateState) draftPlateState.set(extraction.plateState);
     });
 
     const captureSighting = action<{
@@ -1693,13 +1696,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               <span style="font-weight: 600; font-size: 0.875rem;">
                                 ✨ AI extracted
                               </span>
-                              {extraction.pending
+                              {isPending(extractionRequest)
                                 ? (
                                   <span style="font-size: 0.875rem; color: var(--cf-colors-gray-500);">
                                     Reading the plate…
                                   </span>
                                 )
-                                : extraction.error
+                                : hasError(extractionRequest)
                                 ? (
                                   <span style="font-size: 0.875rem; color: #991b1b;">
                                     Couldn't read the plate — fill it in
@@ -1709,15 +1712,14 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                 : (
                                   <cf-vstack gap="0">
                                     <span style="font-size: 0.875rem;">
-                                      {extraction.result?.description}
+                                      {extraction.description}
                                     </span>
                                     <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
-                                      {extraction.result?.plateNumber}{" "}
-                                      {extraction.result?.plateState}
+                                      {extraction.plateNumber}{" "}
+                                      {extraction.plateState}
                                     </span>
                                     <span style="font-size: 0.7rem; color: var(--cf-colors-gray-500);">
-                                      confidence:{" "}
-                                      {extraction.result?.confidence}
+                                      confidence: {extraction.confidence}
                                     </span>
                                     <cf-button
                                       variant="secondary"

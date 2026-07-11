@@ -20,9 +20,12 @@ import {
   computed,
   generateObject,
   handler,
+  hasError,
+  isPending,
   JSONSchema,
   NAME,
   pattern,
+  resultOf,
   safeDateNow,
   UI,
   type VNode,
@@ -233,22 +236,25 @@ ${snippets}
 Extract the writing style patterns from these emails.`;
     });
 
-    const styleResult = generateObject<EmailStyle>({
+    const styleRequest = generateObject<EmailStyle>({
       prompt: analysisPrompt as any,
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
       model: "anthropic:claude-sonnet-4-5",
     });
+    const styleResult = resultOf(styleRequest);
 
     // Auto-save LLM result to persistent Writable
     const _autoSaveStyle = computed(() => {
-      const result = styleResult.result;
-      const isPending = styleResult.pending;
+      const pending = isPending(styleRequest);
       const currentSavedStyle = savedStyle.get();
 
-      if (!isPending && result && result !== currentSavedStyle) {
-        savedStyle.set(result as EmailStyle);
+      if (
+        !pending && !hasError(styleRequest) &&
+        styleResult !== currentSavedStyle
+      ) {
+        savedStyle.set(styleResult);
         const now = new Date(safeDateNow()).toISOString();
         lastAnalyzedAt.set(now);
         const emails = allEmails || [];
@@ -258,7 +264,7 @@ Extract the writing style patterns from these emails.`;
       return null;
     });
 
-    const isAnalyzing = !!styleResult.pending;
+    const isAnalyzing = isPending(styleRequest);
 
     // Whether a style has been extracted yet
     const hasStyle = !!savedStyle.get();

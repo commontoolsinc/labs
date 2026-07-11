@@ -1,11 +1,14 @@
 import {
   computed,
   type Default,
-  generateText,
+  generateTextStream,
   handler,
+  hasError,
+  isPending,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -364,11 +367,12 @@ const ChatNote = pattern<Input, Output>(
     const llmMessages = new Writable<LLMMessage[]>([]);
 
     // LLM call - reactive based on llmMessages
-    const llmResponse = generateText({
+    const llmResponse = generateTextStream({
       system: llmSystem,
       messages: llmMessages,
       model: model,
     });
+    const llmResult = resultOf(llmResponse.result);
 
     // Track content before AI insertion point for streaming display
     const beforeAIInsert = new Writable<string>("");
@@ -389,10 +393,12 @@ const ChatNote = pattern<Input, Output>(
     // Side-effect-only reactive computation; reactive reads tracked automatically.
     computed(() => {
       const generating = isGenerating.get();
-      const pending = llmResponse.pending;
-      const result = llmResponse.result;
+      const pending = isPending(llmResponse.result);
+      const result = llmResult;
       // When complete, finalize with result and closing separator
-      if (!pending && result && generating) {
+      if (
+        !pending && !hasError(llmResponse.result) && result && generating
+      ) {
         const prefix = beforeAIInsert.get();
         if (prefix) {
           content.set(prefix + result + "\n---\n");
@@ -419,7 +425,7 @@ const ChatNote = pattern<Input, Output>(
     });
 
     // Generation state display (reactive expression auto-wraps at use sites)
-    const showGenerating = isGenerating.get() && llmResponse.pending;
+    const showGenerating = isGenerating.get() && isPending(llmResponse.result);
 
     // Can generate when there's content and not already generating
     // Optimized to avoid splitting entire content on every keystroke

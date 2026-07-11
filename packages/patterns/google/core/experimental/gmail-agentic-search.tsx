@@ -28,11 +28,13 @@ import {
   Default,
   generateObject,
   handler,
+  isPending,
   type JSONSchema,
   NAME,
   navigateTo,
   nonPrivateRandom,
   pattern,
+  resultOf,
   safeDateNow,
   Stream,
   toIndentedDebugString,
@@ -138,6 +140,16 @@ export interface PendingSubmission {
   userApproved: boolean; // Has user approved submission
   submittedAt?: number; // When submitted (if submitted)
 }
+
+type PiiScreeningResult = {
+  hasPII: boolean;
+  piiFound: string[];
+  isGeneralizable: boolean;
+  generalizabilityIssues: string[];
+  sanitizedQuery: string;
+  confidence: number;
+  recommendation: "share" | "share_with_edits" | "do_not_share";
+};
 
 // ============================================================================
 // INPUT/OUTPUT TYPES
@@ -1381,7 +1393,7 @@ When you're done searching, STOP calling tools and produce your final structured
     });
 
     // Create the agent
-    const agent = generateObject({
+    const agentRequest = generateObject<Record<string, any>>({
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
@@ -1405,8 +1417,8 @@ When you're done searching, STOP calling tools and produce your final structured
         };
       }),
     });
-
-    const { result: agentResult, pending: agentPending } = agent;
+    const agentResult = resultOf(agentRequest);
+    const agentPending = isPending(agentRequest);
 
     // Detect when agent completes
     const scanCompleted = isScanning && !agentPending && !!agentResult;
@@ -2315,13 +2327,11 @@ Return a sanitized version that:
     });
 
     // Only run PII screening when there's a prompt
-    const piiScreeningResult = computed(() => {
-      if (!piiScreeningPrompt) return null;
-      return generateObject({
-        prompt: piiScreeningPrompt,
-        schema: piiScreeningSchema,
-        system:
-          `You are a privacy analyst and query curator for a community knowledge base.
+    const piiScreeningRequest = generateObject<PiiScreeningResult>({
+      prompt: piiScreeningPrompt as any,
+      schema: piiScreeningSchema,
+      system:
+        `You are a privacy analyst and query curator for a community knowledge base.
 
 Your job is to evaluate Gmail search queries for:
 1. PRIVACY: Detect and remove/sanitize PII (emails, names, specific identifiers)
@@ -2332,24 +2342,13 @@ Major hotel chains, airlines, common retailers, and widespread services are good
 Personal domains, local businesses, and hyper-specific searches should not be shared.
 
 Be conservative: when in doubt, recommend "do_not_share".`,
-      });
     });
+    const piiScreeningResult = resultOf(piiScreeningRequest);
 
     // Update pending submissions with screening results
     // This is a side effect that runs when screening completes
     computed(() => {
-      const result = piiScreeningResult as any;
-      if (!result || !result.result) return;
-
-      const screeningData = result.result as {
-        hasPII: boolean;
-        piiFound: string[];
-        isGeneralizable: boolean;
-        generalizabilityIssues: string[];
-        sanitizedQuery: string;
-        confidence: number;
-        recommendation: "share" | "share_with_edits" | "do_not_share";
-      };
+      const screeningData = piiScreeningResult;
 
       const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((

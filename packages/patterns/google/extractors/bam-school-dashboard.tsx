@@ -21,10 +21,13 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   JSONSchema,
   NAME,
   pattern,
   type PatternFactory,
+  resultOf,
   safeDateNow,
   TILE_UI,
   UI,
@@ -153,7 +156,7 @@ type ReactiveArray<T> = T[] & {
 const analyzeSchoolEmail = pattern<Email, SchoolEmailAnalysis>((email) => {
   const sourceType = computed(() => classifySource(email.from || ""));
 
-  const analysis = generateObject<SchoolEventResult>({
+  const analysisRequest = generateObject<SchoolEventResult>({
     prompt: computed((): string | undefined => {
       if (!email.markdownContent) {
         return undefined;
@@ -188,6 +191,20 @@ Extract:
     schema: SCHOOL_EVENT_SCHEMA,
     model: "anthropic:claude-haiku-4-5",
   });
+  const analysisResult = resultOf(analysisRequest);
+  const analysis = computed(() => {
+    if (isPending(analysisRequest)) {
+      return { pending: true, error: undefined, result: undefined };
+    }
+    if (hasError(analysisRequest)) {
+      return {
+        pending: false,
+        error: analysisRequest.error.message,
+        result: undefined,
+      };
+    }
+    return { pending: false, error: undefined, result: analysisResult };
+  });
 
   const emailDate = computed(() => email.date || "");
 
@@ -197,9 +214,9 @@ Extract:
     emailDate,
     sourceType,
     analysis,
-    pending: analysis.pending,
-    error: analysis.error,
-    result: analysis.result,
+    pending: computed(() => analysis.pending),
+    error: computed(() => analysis.error),
+    result: computed(() => analysis.result),
   };
 });
 

@@ -7,10 +7,12 @@ import {
   fetchText,
   type FrameworkProvided,
   handler,
+  hasError,
   ifElse,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   wish,
   Writable,
 } from "commonfabric";
@@ -214,7 +216,7 @@ export const searchWeb = pattern<
   SearchQuery,
   SearchWebResult | { error: string }
 >(({ query }) => {
-  const { result, error } = fetchJson<SearchWebResult>({
+  const request = fetchJson<SearchWebResult>({
     url: "/api/agent-tools/web-search",
     options: {
       method: "POST",
@@ -227,11 +229,14 @@ export const searchWeb = pattern<
       },
     },
   });
+  const result = resultOf(request);
 
   // TODO(seefeld): Should we instead return { result, error }? Or allocate a
   // special [ERROR] for errors? Ideally this isn't specific to using patterns as
   // tools but a general pattern.
-  return ifElse(error, { error }, result);
+  return computed(() =>
+    hasError(request) ? { error: request.error.message } : result
+  );
 });
 
 /** Read and extract content from a specific webpage URL. */
@@ -254,7 +259,7 @@ export const readWebpage = pattern<
   ReadWebRequest,
   ReadWebResult | { error: string }
 >(({ url }) => {
-  const { result, error } = fetchJson<ReadWebResult>({
+  const request = fetchJson<ReadWebResult>({
     url: "/api/agent-tools/web-read",
     options: {
       method: "POST",
@@ -268,8 +273,11 @@ export const readWebpage = pattern<
       },
     },
   });
+  const result = resultOf(request);
 
-  return ifElse(error, { error }, result);
+  return computed(() =>
+    hasError(request) ? { error: request.error.message } : result
+  );
 });
 
 /**
@@ -309,7 +317,7 @@ export const bash = pattern<BashRequest, BashResult | { error: string }>(
         ...(environment !== undefined && { environment }),
       };
     });
-    const { result, error } = fetchJson<BashResult>({
+    const request = fetchJson<BashResult>({
       url: "/api/sandbox/exec",
       options: {
         method: "POST",
@@ -317,7 +325,10 @@ export const bash = pattern<BashRequest, BashResult | { error: string }>(
         body,
       },
     });
-    return ifElse(error, { error }, result);
+    const result = resultOf(request);
+    return computed(() =>
+      hasError(request) ? { error: request.error.message } : result
+    );
   },
 );
 
@@ -361,18 +372,17 @@ type FetchAndRunPatternInput = {
 
 export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
   ({ url, args }) => {
-    const { pending: _fetchPending, result: program, error: _fetchError } =
-      fetchProgram({ url });
+    const fetchRequest = fetchProgram({ url });
+    const program = resultOf(fetchRequest);
 
-    // Use computed to safely handle when program is undefined/pending
     // Filter out undefined elements to handle race condition where array proxy
     // pre-allocates with undefined before populating elements
     const compileParams = computed(() => ({
       // Note: Type predicate removed - doesn't work with OpaqueCell types after transformation
-      files: (program?.files ?? []).filter(
+      files: program.files.filter(
         (f) => f !== undefined && f !== null && typeof f.name === "string",
       ),
-      main: program?.main ?? "",
+      main: program.main,
       input: args,
     }));
 
@@ -428,10 +438,11 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
       }
     });
 
-    const { pending, result } = fetchText({
+    const request = fetchText({
       url: resolvedUrl,
     });
-    return ifElse(computed(() => pending || !result), undefined, { result });
+    const result = resultOf(request);
+    return { result };
   },
 );
 

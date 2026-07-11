@@ -244,71 +244,105 @@ export function wish<T>({ query }: { query: string }): WishState<T> {
 
 export function fetchJson<T>(
   _params: Record<string, unknown>,
-): { pending: false; result: T; error: undefined } {
+): T {
+  // A GitHub-repo-shaped stub: covers both `stargazers_count` readers and
+  // patterns that walk further into the response (owner, name, etc.).
   return {
-    pending: false,
-    // A GitHub-repo-shaped stub: covers both `stargazers_count` readers and
-    // patterns that walk further into the response (owner, name, etc.).
-    result: {
-      name: "stub-repo",
-      owner: { login: "stub-owner" },
-      description: "stub description",
-      stargazers_count: 123,
-      forks_count: 0,
-      language: "TypeScript",
-      html_url: "https://example.com/stub-repo",
-    } as T,
-    error: undefined,
-  };
+    name: "stub-repo",
+    owner: { login: "stub-owner" },
+    description: "stub description",
+    stargazers_count: 123,
+    forks_count: 0,
+    language: "TypeScript",
+    html_url: "https://example.com/stub-repo",
+  } as T;
 }
 
 export function fetchJsonUnchecked(
   _params: Record<string, unknown>,
-): { pending: false; result: unknown; error: undefined } {
-  return {
-    pending: false,
-    result: { stargazers_count: 123 },
-    error: undefined,
-  };
+): unknown {
+  return { stargazers_count: 123 };
 }
 
 export function fetchText(
   _params: Record<string, unknown>,
-): { pending: false; result: string; error: undefined } {
-  return {
-    pending: false,
-    result: "stub text",
-    error: undefined,
-  };
+): string {
+  return "stub text";
 }
 
 export function fetchBinary(
   _params: Record<string, unknown>,
-): {
-  pending: false;
-  result: { bytes: Uint8Array; mediaType: string };
-  error: undefined;
-} {
-  return {
-    pending: false,
-    result: { bytes: new Uint8Array(), mediaType: "application/octet-stream" },
-    error: undefined,
-  };
+): { bytes: Uint8Array; mediaType: string } {
+  return { bytes: new Uint8Array(), mediaType: "application/octet-stream" };
+}
+
+type PendingResult = { pending: true };
+type ErrorResult = { error: Error };
+type UnavailableResult = PendingResult | ErrorResult;
+
+function currentGenerateTextValue(): string | UnavailableResult {
+  if (generateTextResult.pending) return { pending: true };
+  if (generateTextResult.error) {
+    return {
+      error: generateTextResult.error instanceof Error
+        ? generateTextResult.error
+        : new Error(String(generateTextResult.error)),
+    };
+  }
+  return typeof generateTextResult.result === "string"
+    ? generateTextResult.result
+    : "";
+}
+
+export function resultOf<T>(value: T): Exclude<T, UnavailableResult> {
+  return value as Exclude<T, UnavailableResult>;
+}
+
+export function isPending(value: unknown): value is PendingResult {
+  return typeof value === "object" && value !== null &&
+    (value as { pending?: unknown }).pending === true;
+}
+
+export function hasError(value: unknown): value is ErrorResult {
+  return typeof value === "object" && value !== null &&
+    (value as { error?: unknown }).error instanceof Error;
 }
 
 export function generateObject<T>(
   _params: Record<string, unknown>,
-): { pending: false; result: T; error: undefined } {
-  return { pending: false, result: {} as T, error: undefined };
+): T | UnavailableResult {
+  return {} as T;
 }
 
-export function generateText<T>(
+export function generateText(
   _params: Record<string, unknown>,
-): { pending: boolean; result?: T; error?: unknown } {
-  return generateTextResult as {
-    pending: boolean;
-    result?: T;
-    error?: unknown;
+): string | UnavailableResult {
+  return currentGenerateTextValue();
+}
+
+export function generateObjectStream<T>(
+  _params: Record<string, unknown>,
+): { pending: boolean; result: T | UnavailableResult; error?: string } {
+  return { pending: false, result: {} as T };
+}
+
+export function generateTextStream(
+  _params: Record<string, unknown>,
+): {
+  pending: boolean;
+  result: string | UnavailableResult;
+  partial?: string;
+  error?: string;
+} {
+  return {
+    pending: generateTextResult.pending,
+    result: currentGenerateTextValue(),
+    partial: typeof generateTextResult.result === "string"
+      ? generateTextResult.result
+      : undefined,
+    error: generateTextResult.error
+      ? String(generateTextResult.error)
+      : undefined,
   };
 }
 
@@ -382,8 +416,8 @@ export function compileAndRun(): { pending: false; result: undefined } {
   return { pending: false, result: undefined };
 }
 
-export function fetchProgram(): { pending: false; result: undefined } {
-  return { pending: false, result: undefined };
+export function fetchProgram(): { files: never[]; main: string } {
+  return { files: [], main: "" };
 }
 
 export function streamData(): { pending: false; result: undefined } {

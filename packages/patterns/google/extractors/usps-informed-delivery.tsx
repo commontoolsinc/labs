@@ -21,10 +21,13 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   JSONSchema,
   NAME,
   pattern,
   type PatternFactory,
+  resultOf,
   TILE_UI,
   UI,
   Writable,
@@ -262,7 +265,7 @@ const analyzeMailPiece = pattern<
   MailPieceImageInfo,
   MailPieceAnalysisItem
 >((imageInfo) => {
-  const analysis = generateObject<MailAnalysis>({
+  const analysisRequest = generateObject<MailAnalysis>({
     prompt: computed(() => {
       if (!imageInfo.imageUrl) {
         if (DEBUG_USPS) {
@@ -324,14 +327,28 @@ If you cannot read the image clearly, make your best guess based on what you can
     schema: MAIL_ANALYSIS_SCHEMA,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const analysisResult = resultOf(analysisRequest);
+  const analysis = computed(() => {
+    if (isPending(analysisRequest)) {
+      return { pending: true, error: undefined, result: undefined };
+    }
+    if (hasError(analysisRequest)) {
+      return {
+        pending: false,
+        error: analysisRequest.error.message,
+        result: undefined,
+      };
+    }
+    return { pending: false, error: undefined, result: analysisResult };
+  });
 
   return {
     imageInfo,
     imageUrl: imageInfo.imageUrl,
     analysis,
-    pending: analysis.pending,
-    error: analysis.error,
-    result: analysis.result,
+    pending: computed(() => analysis.pending),
+    error: computed(() => analysis.error),
+    result: computed(() => analysis.result),
   };
 });
 

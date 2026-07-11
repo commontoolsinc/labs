@@ -5,9 +5,12 @@ import {
   fetchJsonUnchecked,
   generateObject,
   handler,
+  hasError,
+  isPending,
   llmDialog,
   NAME,
   pattern,
+  resultOf,
   Stream,
   UI,
   VNode,
@@ -123,7 +126,7 @@ export const TitleGenerator = pattern<
     return JSON.stringify(firstMessage);
   });
 
-  const { result } = generateObject({
+  const titleRequest = generateObject<{ title: string }>({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
     prompt: previewMessage,
@@ -139,8 +142,12 @@ export const TitleGenerator = pattern<
       required: ["title"],
     },
   });
+  const result = resultOf(titleRequest);
 
   const title = computed(() => {
+    if (isPending(titleRequest) || hasError(titleRequest)) {
+      return "Untitled Chat";
+    }
     return result?.title || "Untitled Chat";
   });
 
@@ -180,13 +187,14 @@ export default pattern<ChatInput, ChatOutput>(
       },
     );
 
-    const { result } = fetchJsonUnchecked({
+    const modelDirectoryRequest = fetchJsonUnchecked({
       url: "/api/ai/llm/models",
     });
+    const modelDirectory = resultOf(modelDirectoryRequest);
 
     const items = computed(() => {
-      if (!result) return [];
-      const items = Object.keys(result as any).map((key) => ({
+      if (!modelDirectory) return [];
+      const items = Object.keys(modelDirectory as any).map((key) => ({
         label: key,
         value: key,
       }));

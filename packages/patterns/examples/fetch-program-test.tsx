@@ -2,8 +2,11 @@ import {
   compileAndRun,
   computed,
   fetchProgram,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   toIndentedDebugString,
   UI,
   Writable,
@@ -20,14 +23,18 @@ export default pattern(() => {
   );
 
   // Step 1: Fetch the program from URL
-  const { pending: fetchPending, result: program, error: fetchError } =
-    fetchProgram({ url });
+  const fetchRequest = fetchProgram({ url });
+  const program = resultOf(fetchRequest);
+  const fetchPending = computed(() => isPending(fetchRequest));
+  const fetchError = computed(() =>
+    hasError(fetchRequest) ? fetchRequest.error.message : undefined
+  );
 
   // Step 2: Compile and run the fetched program
   // Explicitly map program fields to compileAndRun params
   const compileParams = computed(() => ({
-    files: program?.files ?? [],
-    main: program?.main ?? "",
+    files: program.files,
+    main: program.main,
     input: { value: 10 },
   }));
   const { pending: compilePending, result, error: compileError } =

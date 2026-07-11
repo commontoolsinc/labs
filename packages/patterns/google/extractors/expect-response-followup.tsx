@@ -23,8 +23,11 @@ import {
   computed,
   generateText,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   safeDateNow,
   UI,
   wish,
@@ -740,7 +743,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${emailStylePrompt}`
     : "You are a helpful assistant that drafts professional follow-up emails.";
 
-  const draftLlmResult = generateText({
+  const draftRequest = generateText({
     prompt: computed((): string | undefined => {
       const threadId = generatingDraftFor.get();
       if (!threadId) return undefined; // No thread selected, skip generation
@@ -795,22 +798,22 @@ Write only the email body, no subject line or greeting line (the greeting will b
     system: draftSystemPrompt,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const generatedDraft = resultOf(draftRequest);
 
   // Auto-save LLM draft to drafts Writable when generation completes
   // This ensures the draft is available for the send handler
   const _autoSaveLlmDraft = computed(() => {
     const threadId = generatingDraftFor.get();
-    const result = draftLlmResult.result;
-    const isPending = draftLlmResult.pending;
+    const pending = isPending(draftRequest);
 
     // Only save when generation completes with a result
-    if (!isPending && result && threadId) {
+    if (!pending && !hasError(draftRequest) && generatedDraft && threadId) {
       const current = drafts.get();
       // Idempotent check: only mutate if value changed
-      if (current[threadId] !== result) {
+      if (current[threadId] !== generatedDraft) {
         drafts.set({
           ...current,
-          [threadId]: result,
+          [threadId]: generatedDraft,
         });
       }
     }
@@ -1038,7 +1041,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
                     );
                     const isGenerating = computed(() =>
                       generatingDraftFor.get() === uiThreadId &&
-                      draftLlmResult.pending
+                      isPending(draftRequest)
                     );
                     const hasDraft = computed(() => {
                       const d = drafts.get();
@@ -1046,8 +1049,9 @@ Write only the email body, no subject line or greeting line (the greeting will b
                       const genFor = generatingDraftFor.get();
                       if (
                         genFor === uiThreadId &&
-                        !draftLlmResult.pending &&
-                        draftLlmResult.result
+                        !isPending(draftRequest) &&
+                        !hasError(draftRequest) &&
+                        generatedDraft
                       ) {
                         return true;
                       }
@@ -1058,9 +1062,10 @@ Write only the email body, no subject line or greeting line (the greeting will b
                       if (d[uiThreadId]) return String(d[uiThreadId]);
                       const genFor = generatingDraftFor.get();
                       if (genFor === uiThreadId) {
-                        const result = draftLlmResult.result;
-                        const error = draftLlmResult.error;
-                        return String(result || error || "");
+                        if (hasError(draftRequest)) {
+                          return draftRequest.error.message;
+                        }
+                        return String(generatedDraft || "");
                       }
                       return "";
                     });

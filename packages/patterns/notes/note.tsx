@@ -8,11 +8,14 @@ import {
   type FsProjection,
   generateText,
   handler,
+  hasError,
+  isPending,
   NAME,
   navigateTo,
   pattern,
   patternTool,
   type PatternToolResult,
+  resultOf,
   SELF,
   type Stream,
   TILE_UI,
@@ -126,15 +129,16 @@ const translatePattern = pattern<
   { language: string; content: string },
   string | undefined
 >(({ language, content }) => {
-  const genResult = generateText({
+  const translationRequest = generateText({
     system: computed(() => `Translate the content to ${language}.`),
     prompt: computed(() => `<to_translate>${content}</to_translate>`),
   });
+  const translation = resultOf(translationRequest);
 
   return computed(() => {
-    if (genResult.pending !== false) return undefined;
-    if (genResult.result == null) return "Error occurred";
-    return genResult.result;
+    if (isPending(translationRequest)) return undefined;
+    if (hasError(translationRequest)) return "Error occurred";
+    return translation;
   });
 });
 

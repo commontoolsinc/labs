@@ -41,6 +41,8 @@ import {
   Default,
   fetchJson,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
   safeDateNow,
@@ -145,18 +147,15 @@ export default pattern<PatternState>((state) => {
   });
 
   const fetchStatus = computed(() => {
-    if (fetchJsonResult.pending) return "Fetching...";
-    if (fetchJsonResult.error) return "Error";
+    if (isPending(fetchJsonResult)) return "Fetching...";
+    if (hasError(fetchJsonResult)) return "Error";
     if (state.fetchTrigger) return "Completed";
     return "Ready";
   });
 
   const fetchResultText = computed(() => {
-    if (fetchJsonResult.error) return String(fetchJsonResult.error);
-    if (fetchJsonResult.result) {
-      return `Fetched successfully (${state.fetchCount} triggers)`;
-    }
-    return "(none)";
+    if (hasError(fetchJsonResult)) return fetchJsonResult.error.message;
+    return `Fetched successfully (${state.fetchCount} triggers)`;
   });
 
   return {

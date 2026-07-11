@@ -22,8 +22,11 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   safeDateNow,
   schema,
   Stream,
@@ -545,7 +548,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Analyze each task email with LLM
   const analyses = taskEmails.map((email: TaskEmail) => {
-    const llmAnalysis = generateObject<SuggestionResult>({
+    const analysisRequest = generateObject<SuggestionResult>({
       prompt: computed(() => {
         // Build notes context directly from availableNotes
         const notes = availableNotes || [];
@@ -584,14 +587,21 @@ Respond with the most appropriate action.`;
       schema: SUGGESTION_SCHEMA,
       model: "anthropic:claude-sonnet-4-5",
     });
+    const analysisResult = resultOf(analysisRequest);
+    const result = computed(() => {
+      if (isPending(analysisRequest) || hasError(analysisRequest)) {
+        return undefined;
+      }
+      return analysisResult;
+    });
 
-    // Return the cells directly without wrapping in computed;
-    // reactive reads unwrap them at the consuming sites.
     return {
       email,
-      pending: llmAnalysis.pending,
-      result: llmAnalysis.result,
-      error: llmAnalysis.error,
+      pending: isPending(analysisRequest),
+      result,
+      error: hasError(analysisRequest)
+        ? analysisRequest.error.message
+        : undefined,
     };
   });
 
