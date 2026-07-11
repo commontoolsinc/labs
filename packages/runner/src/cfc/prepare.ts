@@ -5009,6 +5009,35 @@ export const prepareBoundaryCommit = (
     // overwrite that still omits the path leaves it deleted, which is the
     // deletion arm (the frozen entry stays, over-tainting until a
     // re-creation).
+    //
+    // Presence is distinct from value (the storage patch layer's contract:
+    // a slot HOLDING `undefined` is present), so the probes walk own-key
+    // presence rather than compare values to `undefined` — treating an
+    // undefined-valued slot as absent would misread an ordinary overwrite
+    // of it as a re-creation and REPLACE the frozen entry at the
+    // overwriting join, an under-taint (cubic/codex review on this PR).
+    // At the recorded path itself (empty relative path) presence collapses
+    // to value-definedness: `TransactionWriteDetail` carries optional
+    // value/previousValue with no presence flags — the same detail-level
+    // collapse the seed-materialization and same-tx-child-doc gates
+    // already live with.
+    const presentAtPath = (
+      base: unknown,
+      path: readonly string[],
+    ): boolean => {
+      let current: unknown = base;
+      for (const key of path) {
+        if (
+          (Array.isArray(current) || isRecord(current)) &&
+          Object.hasOwn(current as object, key)
+        ) {
+          current = (current as Record<string, unknown>)[key];
+        } else {
+          return false;
+        }
+      }
+      return path.length > 0 || current !== undefined;
+    };
     const recreatedExistencePaths: (readonly string[])[] = [];
     const recreatedAt = (entryPath: readonly string[]): boolean =>
       flowWrittenPaths.some((written) => {
@@ -5017,14 +5046,10 @@ export const prepareBoundaryCommit = (
         }
         const rel = entryPath.slice(written.length);
         const writtenKey = pathKey(written);
-        if (
-          getValueAtPath(flowPreviousValues?.get(writtenKey), rel) !==
-            undefined
-        ) {
+        if (presentAtPath(flowPreviousValues?.get(writtenKey), rel)) {
           return false;
         }
-        return getValueAtPath(flowWrittenValues?.get(writtenKey), rel) !==
-          undefined;
+        return presentAtPath(flowWrittenValues?.get(writtenKey), rel);
       });
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);

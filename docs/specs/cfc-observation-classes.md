@@ -170,8 +170,11 @@ against the spec (§8.12.8 as amended on specs branch
   spec forbids. The carry in `prepare.ts` refuses a frozen entry whose
   path shows the per-path transition absent-before → present-after against
   the recorded writes' pre-transaction snapshots (`previousValue`, probed
-  relative to each write's materialization point), and a replacement mints
-  at the entry's own path with the current join — empty join mints nothing
+  relative to each write's materialization point; the probes walk own-key
+  PRESENCE — a slot holding `undefined` is present, per the storage patch
+  layer — collapsing to value-definedness only at the recorded path
+  itself, where `TransactionWriteDetail` carries no presence flag), and a
+  replacement mints at the entry's own path with the current join — empty join mints nothing
   (a cleanly re-created path's existence is public; pre-deletion
   observations stay protected by their journaled reads). Remaining
   residual: deletion alone leaves the frozen entry in place until a
