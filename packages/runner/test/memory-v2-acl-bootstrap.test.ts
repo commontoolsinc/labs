@@ -122,6 +122,39 @@ Deno.test("storage ACL bootstrap uses the named-space identity then returns to t
   }
 });
 
+Deno.test("storage ACL bootstrap accepts multiple runtime-derived space identities", async () => {
+  const user = await Identity.fromPassphrase("acl bootstrap multi user");
+  const first = await Identity.fromPassphrase("acl bootstrap multi first");
+  const second = await Identity.fromPassphrase("acl bootstrap multi second");
+  const server = createServer("runner-acl-bootstrap-multi");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer({ as: user }, factory);
+  manager.registerSpaceIdentity(first);
+  manager.registerSpaceIdentity(second);
+  try {
+    for (const identity of [first, second]) {
+      const space = identity.did();
+      const sync = await manager.open(space).sync(`of:${space}` as URI);
+      assert(!sync.error, sync.error?.message);
+      assertEquals(
+        (await server.readDocument(space, `of:${space}`))?.value,
+        { [user.did()]: "OWNER", "*": "WRITE" },
+      );
+    }
+    assertEquals(factory.principals, [
+      user.did(),
+      first.did(),
+      user.did(),
+      user.did(),
+      second.did(),
+      user.did(),
+    ]);
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
 Deno.test("concurrent named-space bootstrap has one owner and both sessions succeed", async () => {
   const alice = await Identity.fromPassphrase("acl bootstrap race alice");
   const bob = await Identity.fromPassphrase("acl bootstrap race bob");
