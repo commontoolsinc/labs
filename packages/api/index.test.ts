@@ -2,8 +2,25 @@ import { expect } from "@std/expect";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
   type FabricBytes,
+  type FabricValue,
   type FetchBinaryResult,
+  type HandlerFactory,
+  type ModuleFactory,
+  type PatternFactory,
 } from "@commonfabric/api";
+
+type MustBeTrue<T extends true> = T;
+type AssertAssignable<T, U> = [T] extends [U] ? true : false;
+
+const _patternFactoryIsFabric: MustBeTrue<
+  AssertAssignable<PatternFactory<unknown, unknown>, FabricValue>
+> = true;
+const _moduleFactoryIsFabric: MustBeTrue<
+  AssertAssignable<ModuleFactory<unknown, unknown>, FabricValue>
+> = true;
+const _handlerFactoryIsFabric: MustBeTrue<
+  AssertAssignable<HandlerFactory<unknown, unknown>, FabricValue>
+> = true;
 
 // The api package is the public type surface for `commonfabric`. Most of it is
 // ambient type and `declare const` material with no runtime footprint, but the
@@ -27,4 +44,9 @@ Deno.test("FetchBinaryResult describes bytes plus a media type", () => {
   };
   expect(sample.mediaType).toBe("image/png");
   expect(sample.bytes.length).toBe(3);
+  expect([
+    _patternFactoryIsFabric,
+    _moduleFactoryIsFabric,
+    _handlerFactoryIsFabric,
+  ]).toEqual([true, true, true]);
 });

@@ -1,10 +1,13 @@
 import { assertEquals } from "@std/assert";
 import "@commonfabric/api/schema";
 import type {
+  Cell,
   Default,
+  FabricValue,
   FactoryInput,
   HandlerFactory,
   JSONSchema,
+  ModuleFactory,
   PatternFactory,
   PatternFunction,
   Reactive,
@@ -18,8 +21,10 @@ import type {
 import type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 type MustBeTrue<T extends true> = T;
+type MustBeFalse<T extends false> = T;
 type AssertAssignable<T, U> = [T] extends [U] ? true : never;
 type AssertNotAssignable<T, U> = [T] extends [U] ? never : true;
+type IsAny<T> = 0 extends (1 & T) ? true : false;
 
 interface Ship {
   name: string;
@@ -116,6 +121,116 @@ const _schemaWishOverload: MustBeTrue<
   SchemaWishOverloadAcceptsFactoryInput
 > = true;
 
+const PATTERN_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: { $ref: "#/$defs/PatternInput" },
+    resultSchema: { $ref: "#/$defs/PatternResult" },
+  },
+  $defs: {
+    PatternInput: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+    PatternResult: {
+      type: "object",
+      properties: { count: { type: "number" } },
+      required: ["count"],
+    },
+  },
+} as const satisfies JSONSchema;
+
+const MODULE_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "module",
+    argumentSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+    resultSchema: { type: "string" },
+  },
+} as const satisfies JSONSchema;
+
+const HANDLER_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "handler",
+    contextSchema: {
+      type: "object",
+      properties: { prefix: { type: "string" } },
+      required: ["prefix"],
+    },
+    eventSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+  },
+} as const satisfies JSONSchema;
+
+const NESTED_AND_CELL_FACTORY_SCHEMA = {
+  type: "object",
+  $defs: PATTERN_FACTORY_SCHEMA.$defs,
+  properties: {
+    direct: { asFactory: PATTERN_FACTORY_SCHEMA.asFactory },
+    boxed: {
+      asFactory: PATTERN_FACTORY_SCHEMA.asFactory,
+      asCell: ["cell"],
+    },
+  },
+  required: ["direct", "boxed"],
+} as const satisfies JSONSchema;
+
+type InferredPatternFactory = Schema<typeof PATTERN_FACTORY_SCHEMA>;
+type InferredModuleFactory = SchemaWithoutCell<typeof MODULE_FACTORY_SCHEMA>;
+type InferredHandlerFactory = Schema<typeof HANDLER_FACTORY_SCHEMA>;
+type InferredNestedFactories = Schema<typeof NESTED_AND_CELL_FACTORY_SCHEMA>;
+
+const _patternFactoryInference: MustBeTrue<
+  AssertAssignable<
+    InferredPatternFactory,
+    PatternFactory<{ query: string }, { count: number }>
+  >
+> = true;
+const _moduleFactoryInference: MustBeTrue<
+  AssertAssignable<
+    InferredModuleFactory,
+    ModuleFactory<{ value: number }, string>
+  >
+> = true;
+const _handlerFactoryInference: MustBeTrue<
+  AssertAssignable<
+    InferredHandlerFactory,
+    HandlerFactory<{ prefix: string }, { value: number }>
+  >
+> = true;
+const _factoryInferenceIsNotAny: MustBeFalse<IsAny<InferredPatternFactory>> =
+  false;
+const _factoryIsFabricValue: MustBeTrue<
+  AssertAssignable<InferredPatternFactory, FabricValue>
+> = true;
+const _nestedDirectFactory: MustBeTrue<
+  AssertAssignable<
+    InferredNestedFactories["direct"],
+    PatternFactory<{ query: string }, { count: number }>
+  >
+> = true;
+const _explicitCellFactory: MustBeTrue<
+  AssertAssignable<
+    InferredNestedFactories["boxed"],
+    Cell<PatternFactory<{ query: string }, { count: number }>>
+  >
+> = true;
+
+function assertFactoryCallBoundaries(factory: InferredPatternFactory) {
+  factory({ query: "weather" });
+  // @ts-expect-error PatternFactory input generics must reject the wrong type.
+  factory({ query: 42 });
+  // @ts-expect-error .curry is transformer-only and absent from the public API.
+  factory.curry({});
+}
+
 Deno.test("FactoryInput accepts reactive cell handles in factory bindings", async () => {
   const schemaModule = await import("@commonfabric/api/schema");
 
@@ -129,7 +244,32 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       _wrongRoomBinding,
       _schemaPatternOverload,
       _schemaWishOverload,
+      _patternFactoryInference,
+      _moduleFactoryInference,
+      _handlerFactoryInference,
+      _factoryInferenceIsNotAny,
+      _factoryIsFabricValue,
+      _nestedDirectFactory,
+      _explicitCellFactory,
+      typeof assertFactoryCallBoundaries,
     ],
-    ["object", true, true, true, true, true, true, true],
+    [
+      "object",
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      "function",
+    ],
   );
 });

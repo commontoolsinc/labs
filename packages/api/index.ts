@@ -1582,6 +1582,30 @@ export type JSONSchemaTypes =
 // to a subset
 export type AsCellType = AsCellEntry;
 
+/**
+ * Describes the public call contract carried by a first-class factory value.
+ *
+ * A factory schema has one type meaning but two runtime exposures: eager
+ * pattern construction receives a symbolic binding, while scheduled lift and
+ * handler callbacks receive a runner-materialized callable.
+ */
+export type AsFactoryType =
+  | {
+    readonly kind: "pattern";
+    readonly argumentSchema: JSONSchema;
+    readonly resultSchema: JSONSchema;
+  }
+  | {
+    readonly kind: "module";
+    readonly argumentSchema: JSONSchema;
+    readonly resultSchema: JSONSchema;
+  }
+  | {
+    readonly kind: "handler";
+    readonly contextSchema: JSONSchema;
+    readonly eventSchema: JSONSchema;
+  };
+
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
@@ -1668,6 +1692,8 @@ export type JSONSchemaObj = {
   readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
+  // Describes a first-class pattern, module, or handler factory callable.
+  readonly asFactory?: AsFactoryType;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly confidentiality?: readonly ImmutableJSONValue[];

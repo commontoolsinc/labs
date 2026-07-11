@@ -536,9 +536,9 @@ Expected files and tests:
 
 ### WP2.1 — Add `asFactory` to the public schema vocabulary
 
-- [ ] Extend `JSONSchemaObj` in `packages/api/index.ts` with a discriminated
+- [x] Extend `JSONSchemaObj` in `packages/api/index.ts` with a discriminated
   `asFactory` definition for `pattern`, `module`, and `handler`.
-- [ ] Use `argumentSchema`/`resultSchema` for pattern and module kinds and
+- [x] Use `argumentSchema`/`resultSchema` for pattern and module kinds and
   `contextSchema`/`eventSchema` for handler kind.
 - [ ] Document and test the two execution-context exposures of the one schema
   form: an eager pattern root produces a symbolic binding, while a scheduled
@@ -548,12 +548,12 @@ Expected files and tests:
   comparisons; version 1 requires equality, not variance.
 - [ ] Update schema validation/resolution utilities that copy, merge, sanitize,
   or format Common Fabric extensions so `asFactory` is preserved.
-- [ ] Teach `Schema<T>` / `SchemaWithoutCell<T>` in
+- [x] Teach `Schema<T>` / `SchemaWithoutCell<T>` in
   `packages/api/schema.ts` to materialize `asFactory` as the matching generic
   `PatternFactory`, `ModuleFactory`, or `HandlerFactory`.
-- [ ] Ensure `asFactory` composes correctly with refs/definitions and does not
+- [x] Ensure `asFactory` composes correctly with refs/definitions and does not
   silently become `asCell`.
-- [ ] Add public type assertions in `packages/api/test/factory-input-types.test.ts`
+- [x] Add public type assertions in `packages/api/test/factory-input-types.test.ts`
   and `packages/api/index.test.ts` proving factories are Fabric values, schema
   inference preserves their generics, and `.curry` is unavailable.
 

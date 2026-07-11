@@ -155,6 +155,36 @@ type SchemaArrayItems<
   ? Array<SchemaInner<Items, Root, DecrementDepth<Depth>, WrapCells>>
   : unknown[];
 
+type SchemaFactory<
+  Factory,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+> = Factory extends {
+  kind: "pattern";
+  argumentSchema: infer Argument extends JSONSchema;
+  resultSchema: infer Result extends JSONSchema;
+} ? PatternFactory<
+    SchemaInner<Argument, Root, DecrementDepth<Depth>, false>,
+    SchemaInner<Result, Root, DecrementDepth<Depth>, true>
+  >
+  : Factory extends {
+    kind: "module";
+    argumentSchema: infer Argument extends JSONSchema;
+    resultSchema: infer Result extends JSONSchema;
+  } ? ModuleFactory<
+      SchemaInner<Argument, Root, DecrementDepth<Depth>, false>,
+      SchemaInner<Result, Root, DecrementDepth<Depth>, true>
+    >
+  : Factory extends {
+    kind: "handler";
+    contextSchema: infer Context extends JSONSchema;
+    eventSchema: infer Event extends JSONSchema;
+  } ? HandlerFactory<
+      SchemaInner<Context, Root, DecrementDepth<Depth>, false>,
+      SchemaInner<Event, Root, DecrementDepth<Depth>, false>
+    >
+  : never;
+
 type SchemaCore<
   T extends JSONSchema,
   Root extends JSONSchema,
@@ -177,6 +207,7 @@ type SchemaCore<
   : T extends { enum: infer E extends readonly any[] } ? E[number]
   : T extends { anyOf: infer U extends readonly JSONSchema[] }
     ? SchemaAnyOf<U, Root, Depth, WrapCells>
+  : T extends { asFactory: infer Factory } ? SchemaFactory<Factory, Root, Depth>
   : T extends { type: "string" } ? string
   : T extends { type: "number" | "integer" } ? number
   : T extends { type: "boolean" } ? boolean
