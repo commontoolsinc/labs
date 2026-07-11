@@ -42,6 +42,7 @@ const appliedCommitFor = (ids: URI[]): AppliedCommit => ({
   branch: "",
   revisions: ids.map((id, index) => ({
     id,
+    scopeKey: "space",
     branch: "",
     seq: 1,
     opIndex: index,
