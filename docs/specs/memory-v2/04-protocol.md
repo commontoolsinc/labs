@@ -23,6 +23,8 @@ rewrite. In particular:
   invocation whose subject, challenge, audience, and session descriptor match
   the current request
 - the server ACL policy gates session opens and commands when enabled
+- fresh spaces require a space-identity- or service-authorized ACL genesis
+  transaction before ordinary writes
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
@@ -526,6 +528,41 @@ On memory WebSocket routes, `session.open` itself is authenticated:
 
 Opening a previously unused space may initialize empty backing storage, but
 `session.open` is not itself a logical write or claim.
+
+When ACL policy is active, the authenticated principal is evaluated against
+the space ACL document (wire entity id `of:<space DID>`) for every command:
+
+| Stored ACL state | Effective access |
+| --- | --- |
+| valid ACL with a concrete OWNER | Explicit principal grant, then `"*"`; normal READ < WRITE < OWNER ordering |
+| never-created ACL, server sequence 0 | Authenticated READ only; the first write must be a valid ACL-only genesis by the space identity or a service DID |
+| never-created ACL, server sequence greater than 0 | Temporary pre-launch compatibility: authenticated READ and WRITE, never OWNER |
+| malformed, ownerless, or retracted ACL | No ordinary access (fail closed) |
+
+The exact space DID and configured service DIDs retain implicit OWNER so they
+can initialize or repair ACL state. A valid ACL mutation is a whole-document,
+space-scoped replacement on the default branch and must retain at least one
+concrete (non-`"*"`) OWNER. Patch, deletion, mixed ACL/data commits, and
+last-owner removal are rejected. These shape and genesis rules are hard
+storage invariants in both `observe` and `enforce`; `observe` relaxes only
+ordinary capability shortfalls on an already valid ACL.
+
+Genesis remains an explicit transaction. For a fresh named space, the storage
+manager briefly authenticates as the derived space identity, writes
+`{ [activeUser]: "OWNER", "*": "WRITE" }` against a confirmed absent ACL,
+closes that bootstrap session, and mounts the durable session as the active
+user. The wildcard grant is the rollout default until ACL management has a UI;
+the active user remains the concrete owner who can later narrow it. This
+preserves user/session-scoped partitioning. When the active identity already is
+the space DID (the home space), the same flow instead writes
+`{ [space]: "OWNER" }`; that narrow path also privatizes a populated legacy
+home with no ACL. Populated named spaces with no ACL remain public under the
+compatibility row above.
+
+The server's unauthenticated `writeDocument` operator path cannot create a
+fresh space or mutate the ACL document while ACL policy is active. Its access
+to ordinary documents in an already-created space remains a known deferred
+blob-authorization issue.
 
 The challenge protects against replay of a captured signed `session.open` after
 the original WebSocket handshake has moved on.

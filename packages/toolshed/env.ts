@@ -220,9 +220,9 @@ export const EnvSchema = z.object({
   IDENTITY: z.string().default(""),
 
   // Space ACL enforcement on the memory v2 server: off | observe | enforce.
-  // `observe` evaluates the policy and counts/logs would-denies without
-  // blocking (the rollout signal); `enforce` denies. See the `acl` option in
-  // packages/memory/v2/server.ts for the policy.
+  // `observe` evaluates ordinary access and counts/logs would-denies; invalid
+  // ACL state and fresh-space genesis violations still block. `enforce` also
+  // denies access shortfalls. See packages/memory/v2/server.ts.
   MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
 
   // Comma-separated DIDs with implicit OWNER on every space (e.g. the

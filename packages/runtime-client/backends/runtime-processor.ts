@@ -103,6 +103,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
+  type ResolveSpaceNameRequest,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
@@ -114,6 +115,7 @@ import {
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type SlugResponse,
+  type SpaceResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -1316,6 +1318,12 @@ export class RuntimeProcessor {
     };
   }
 
+  async handleResolveSpaceName(
+    request: ResolveSpaceNameRequest,
+  ): Promise<SpaceResponse> {
+    return { space: await this.runtime.resolveSpaceName(request.name) };
+  }
+
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
@@ -1611,6 +1619,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
         return await this.handleRuntimeSynced();
+      case RequestType.ResolveSpaceName:
+        return await this.handleResolveSpaceName(request);
       case RequestType.RegisterSpaceHost:
         return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:

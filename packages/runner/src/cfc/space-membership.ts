@@ -2,10 +2,11 @@ import {
   type ACL,
   ANYONE_USER,
   type Capability,
+  hasConcreteOwner,
   isACL,
   isCapable,
 } from "@commonfabric/memory/acl";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
@@ -30,19 +31,20 @@ const capToRole: Record<Capability, SpaceRole> = {
 
 /**
  * A principal's reader-or-higher role in a space, or `null` when it holds
- * none. A client-side mirror of the server's `#resolveCapability`
- * (packages/memory/v2/server.ts `#resolveCapability`), so the render gate's
- * authority decision cannot drift from the server's — the two consult the
- * SAME `@commonfabric/memory/acl` helpers (`isACL`, `isCapable`, `ANYONE_USER`).
+ * none. This uses the same valid-ACL resolution as the memory server, but is
+ * deliberately stricter for an absent ACL: the synchronous render path cannot
+ * distinguish "confirmed absent" from "not synced yet", so absence supplies no
+ * positive membership evidence even though the transport temporarily treats a
+ * populated ACL-less space as public.
  *
- * Resolution order (mirrors the server exactly):
+ * Resolution order:
  *  1. Implicit `OWNER` when `principal === space` (a principal owns its own
  *     identity space) or `principal` is a configured service DID — these hold
  *     regardless of ACL contents or deployment ACL mode.
  *  2. Otherwise the ACL document decides: `acl[principal] ?? acl["*"]`. A
- *     missing/malformed ACL, an unlisted principal with no `"*"` grant, or a
- *     capability short of READ all yield `null` (fail closed). The implicit
- *     owners above are unaffected by an absent ACL.
+ *     missing/malformed/ownerless ACL, an unlisted principal with no `"*"`
+ *     grant, or a capability short of READ all yield `null` (fail closed). The
+ *     implicit owners above are unaffected by an absent ACL.
  *
  * `acl` is the space's ACL doc value (`undefined` = not yet read / absent):
  * both `undefined` and a malformed value fail closed. A returned role is
@@ -58,8 +60,8 @@ export const spaceReaderRole = (
 ): SpaceRole | null => {
   // Implicit OWNER: you own your own identity space; service principals.
   if (principal === space || serviceDids.includes(principal)) return "owner";
-  // Missing or malformed ACL document grants nothing (fail closed).
-  if (!isACL(acl)) return null;
+  // Missing, malformed, or ownerless ACL grants no membership evidence.
+  if (!isACL(acl) || !hasConcreteOwner(acl)) return null;
   const byPrincipal = acl as Record<string, Capability | undefined>;
   const cap = byPrincipal[principal] ?? byPrincipal[ANYONE_USER];
   // `undefined` = principal not listed and no `"*"` grant. The `isCapable`
@@ -98,10 +100,10 @@ export interface SpaceMembershipProvider {
 }
 
 /**
- * The space-DID cell whose value is the space's ACL document — entity id
- * `of:${space}` == the space DID, read in-space (mirrors `ACLManager` and the
- * server's `aclDocId`). One Cell per space, reused across `readerRole` reads
- * and `subscribe` so both observe the same reactive state.
+ * The cell whose value is the space's ACL document — entity id `of:${space}`,
+ * read in-space (mirrors `ACLManager` and the server's `aclDocId`). One Cell
+ * per space, reused across `readerRole` reads and `subscribe` so both observe
+ * the same reactive state.
  */
 const aclCellFor = (
   runtime: Pick<Runtime, "getCellFromLink">,
@@ -110,10 +112,10 @@ const aclCellFor = (
 ): Cell<unknown> => {
   let cell = cache.get(space);
   if (cell === undefined) {
-    // The ACL doc's entity id IS the space DID (`aclDocId(space)` server-side),
-    // read in-space — the same link `ACLManager` uses.
+    // The ACL doc uses the `of:${space}` entity id (`aclDocId(space)`
+    // server-side), read in-space — the same link `ACLManager` uses.
     cell = runtime.getCellFromLink<unknown>({
-      id: space as MemorySpace,
+      id: `of:${space}` as URI,
       path: [],
       space: space as MemorySpace,
     });

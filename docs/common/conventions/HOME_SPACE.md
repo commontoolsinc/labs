@@ -138,6 +138,12 @@ The home space DID equals the user's identity DID. This means **the CLI identity
 must match the browser identity** for `set-home` to affect what the browser
 displays.
 
+That equality is also the ACL bootstrap authority. When remote storage finds no
+ACL for the home space, it opens a temporary session with the same identity and
+writes `{ [homeSpaceDid]: "OWNER" }` before returning the normal session. This
+also privatizes a populated ACL-less legacy home; named legacy spaces remain
+public under the temporary compatibility rule.
+
 For local development, prefer one shared PKCS8/PEM key imported into the browser
 and exported through `CF_IDENTITY` for CLI commands. The browser login screen has
 an `Import CLI Key` option for this workflow. See
