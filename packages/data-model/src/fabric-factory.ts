@@ -103,6 +103,46 @@ export type LiveFactoryState =
 /** State visible to the runner and codec protocol. */
 export type FactoryStateView = LiveFactoryState | FactoryStateV1;
 
+/** Hidden pattern-state fields whose values participate in Fabric traversal. */
+export type FactoryStateValueField = "params" | "spaceSelector";
+
+/**
+ * Map the value-bearing portion of factory state without interpreting runner
+ * values or sealing live state.
+ *
+ * Schemas, kind, scopes, artifact refs, and the runner-private root token are
+ * metadata and pass through by identity. Only a pattern's hidden closure
+ * params and raw execution-space selector are graph values. Recursion and
+ * callable reconstruction remain with the caller so the data model does not
+ * depend on Cells, Reactives, or runner execution trust.
+ */
+export function mapFactoryStateValues<T extends FactoryStateView>(
+  state: T,
+  mapper: (value: unknown, field: FactoryStateValueField) => unknown,
+): T {
+  if (state.kind !== "pattern") return state;
+
+  const hasParams = Object.hasOwn(state, "params");
+  const hasSpaceSelector = Object.hasOwn(state, "spaceSelector");
+  const mappedParams = hasParams ? mapper(state.params, "params") : undefined;
+  const mappedSpaceSelector = hasSpaceSelector
+    ? mapper(state.spaceSelector, "spaceSelector")
+    : undefined;
+
+  if (
+    (!hasParams || Object.is(mappedParams, state.params)) &&
+    (!hasSpaceSelector || Object.is(mappedSpaceSelector, state.spaceSelector))
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    ...(hasParams ? { params: mappedParams } : {}),
+    ...(hasSpaceSelector ? { spaceSelector: mappedSpaceSelector } : {}),
+  } as T;
+}
+
 type Callable = (...args: never[]) => unknown;
 type FactoryStateAccessor = () => FactoryStateView;
 type FactoryKind = FactoryStateV1["kind"];

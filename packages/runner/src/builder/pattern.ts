@@ -10,6 +10,7 @@ import {
   type Frame,
   type ICell,
   isModule,
+  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -34,6 +35,7 @@ import {
   brandTrustedPattern,
   getDurableArtifactRefForRootToken,
   noteDerivedCopy,
+  registerFactoryStateDeriver,
 } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
@@ -44,6 +46,7 @@ import {
   type CellAliasResolver,
   moduleToJSON,
   patternToJSON,
+  serializePatternGraph,
   toJSONWithAliasBindings,
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -239,6 +242,19 @@ export function assertNoReservedCauseKeys(cause: unknown): void {
         `help: "$generated" marks system-generated cell causes; rename the key`,
     );
   }
+}
+
+const LEGACY_LIST_PATTERN_OPS = new Set(["map", "filter", "flatMap"]);
+
+/**
+ * The three legacy list builtins still read an embedded pattern graph from the
+ * top-level `op` input. Stage 4 replaces this writer with a bound Factory@1;
+ * until then keep this fallback named and restricted to the exact ref modules.
+ */
+function usesLegacyListPatternOp(module: NodeRef["module"]): boolean {
+  return isRecord(module) && module.type === "ref" &&
+    typeof module.implementation === "string" &&
+    LEGACY_LIST_PATTERN_OPS.has(module.implementation);
 }
 
 function factoryFromPattern<T, R>(
@@ -528,7 +544,7 @@ function factoryFromPattern<T, R>(
     outputs ?? {},
     resolveCellAlias,
     true,
-  )!;
+  )! as unknown as JSONValue;
 
   // Pattern modules are evaluated under a runtime-carrying builder frame.
   // Read the flag from that runtime so constructing or disposing another
@@ -552,16 +568,26 @@ function factoryFromPattern<T, R>(
       resolveCellAlias,
       false,
     ) as unknown as Module;
+    const inputsForSerialization = usesLegacyListPatternOp(node.module) &&
+        isRecord(node.inputs) && isPattern(node.inputs.op)
+      ? {
+        ...node.inputs,
+        op: serializePatternGraph(node.inputs.op),
+      }
+      : node.inputs;
     const inputs = toJSONWithAliasBindings(
-      node.inputs,
+      inputsForSerialization,
       resolveCellAlias,
       false,
-    )!;
+    )! as unknown as JSONValue;
     const outputs = toJSONWithAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
-    )!;
+    )! as unknown as JSONValue;
+    // WP1.5's later graph-payload audit widens Node/Pattern fields to admit
+    // first-class factories. Keep that static type change separate; the
+    // visitor already preserves the callable value at runtime.
     return { module, inputs, outputs } satisfies Node;
   });
 
@@ -578,12 +604,28 @@ function factoryFromPattern<T, R>(
 
   const factoryRootToken = {};
 
+  type PatternFactoryOptions = {
+    defaultScope?: CellScope;
+    spaceSelector?: unknown;
+    paramsSchema?: JSONSchema;
+    params?: unknown;
+  };
+
   const makePatternFactory = (
-    defaultScope?: CellScope,
-    defaultSpace?: string | unknown,
+    options: PatternFactoryOptions = {},
   ): PatternFactory<T, R> => {
+    const { defaultScope, spaceSelector, paramsSchema, params } = options;
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
+        // Stage 1 can carry and traverse closure params, but only Stage 3's
+        // callback-argument-1 binding makes them executable. Never silently
+        // run a bound factory while ignoring its captured environment.
+        if (
+          Object.hasOwn(options, "paramsSchema") ||
+          Object.hasOwn(options, "params")
+        ) {
+          throw new Error("Bound pattern params require callback binding");
+        }
         const module: Module & toJSON = {
           type: "pattern",
           implementation: factory,
@@ -595,8 +637,8 @@ function factoryFromPattern<T, R>(
 
         const outputs = reactive<R>();
         const frame = getTopFrame();
-        if (defaultSpace !== undefined) {
-          const targetSpace = resolveInSpaceTargetSpace(defaultSpace, frame);
+        if (spaceSelector !== undefined) {
+          const targetSpace = resolveInSpaceTargetSpace(spaceSelector, frame);
           if (targetSpace !== undefined) {
             setCellUnlinkedSpace(outputs, targetSpace);
             module.targetSpace = targetSpace;
@@ -627,12 +669,15 @@ function factoryFromPattern<T, R>(
     // lets an `inSpace(...)` child piece carry `patternIdentity` meta and have
     // its closures replicated into its own space (CT-1687).
     factory.asScope = (scope: CellScope) => {
-      const derived = makePatternFactory(scope, defaultSpace);
+      const derived = makePatternFactory({ ...options, defaultScope: scope });
       noteDerivedCopy(derived, factory);
       return derived;
     };
     factory.inSpace = (space?: string | unknown) => {
-      const derived = makePatternFactory(defaultScope, space ?? "");
+      const derived = makePatternFactory({
+        ...options,
+        spaceSelector: space ?? "",
+      });
       noteDerivedCopy(derived, factory);
       return derived;
     };
@@ -649,9 +694,31 @@ function factoryFromPattern<T, R>(
         ...(ref === undefined ? {} : { ref }),
         argumentSchema: pattern.argumentSchema,
         resultSchema: pattern.resultSchema,
+        ...(Object.hasOwn(options, "paramsSchema") ? { paramsSchema } : {}),
+        ...(Object.hasOwn(options, "params") ? { params } : {}),
         ...(defaultScope === undefined ? {} : { defaultScope }),
-        ...(defaultSpace === undefined ? {} : { spaceSelector: defaultSpace }),
+        ...(Object.hasOwn(options, "spaceSelector") ? { spaceSelector } : {}),
       };
+    });
+    registerFactoryStateDeriver(factory, (state) => {
+      if (state.kind !== "pattern") {
+        throw new Error("Pattern factory state deriver received another kind");
+      }
+      if ("rootToken" in state && state.rootToken !== factoryRootToken) {
+        throw new Error("Factory derivation cannot change its root token");
+      }
+      return makePatternFactory({
+        ...(Object.hasOwn(state, "paramsSchema")
+          ? { paramsSchema: state.paramsSchema }
+          : {}),
+        ...(Object.hasOwn(state, "params") ? { params: state.params } : {}),
+        ...(Object.hasOwn(state, "defaultScope")
+          ? { defaultScope: state.defaultScope }
+          : {}),
+        ...(Object.hasOwn(state, "spaceSelector")
+          ? { spaceSelector: state.spaceSelector }
+          : {}),
+      });
     });
     return factory;
   };

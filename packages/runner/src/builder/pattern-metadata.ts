@@ -1,4 +1,5 @@
 import type { RuntimeProgram } from "../harness/types.ts";
+import type { FactoryStateView } from "@commonfabric/data-model/fabric-factory";
 import { isPattern, type Pattern } from "./types.ts";
 
 /**
@@ -130,6 +131,20 @@ function durableRefsByRootToken(): WeakMap<object, ArtifactEntryRef> {
   return (self.map ??= new WeakMap<object, ArtifactEntryRef>());
 }
 
+type FactoryStateDeriver = (state: FactoryStateView) => unknown;
+
+// Builder factories are callable objects whose behavior cannot be recreated by
+// enumerating or cloning own properties. Each trusted builder constructor
+// therefore registers the exact reconstruction closure for the callable it
+// minted. Keep this table lazy for the same module-initialization reason as the
+// other node-factory side tables above.
+function factoryStateDerivers(): WeakMap<object, FactoryStateDeriver> {
+  const self = factoryStateDerivers as {
+    map?: WeakMap<object, FactoryStateDeriver>;
+  };
+  return (self.map ??= new WeakMap<object, FactoryStateDeriver>());
+}
+
 /**
  * Resolve a (possibly derived) value to its root original. Identity for
  * values that were never copied. Bounded: the chain is a tree toward the
@@ -178,6 +193,46 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   }
   const rootToken = factoryRootTokens().get(root);
   if (rootToken) factoryRootTokens().set(c, rootToken);
+}
+
+/** Register the runner-owned reconstruction path for a live builder callable. */
+export function registerFactoryStateDeriver(
+  value: unknown,
+  deriver: FactoryStateDeriver,
+): void {
+  if (typeof value !== "function") {
+    throw new TypeError("Factory state derivers require a callable key");
+  }
+  factoryStateDerivers().set(value, deriver);
+}
+
+/**
+ * Rebuild a live builder callable with mapped hidden state.
+ *
+ * This is deliberately runner-private: codec shells are inert and must be
+ * copied by their codec constructor, while only a builder constructor may
+ * recreate executable invocation behavior.
+ */
+export function deriveFactoryStateCopy<T>(
+  value: T,
+  state: FactoryStateView,
+): T {
+  if (typeof value !== "function") {
+    throw new TypeError("Cannot derive factory state for a non-callable");
+  }
+  const key = value as object;
+  const root = resolveOriginal(key) as object;
+  const deriver = factoryStateDerivers().get(key) ??
+    factoryStateDerivers().get(root);
+  if (!deriver) {
+    throw new Error("Factory callable has no runner-owned state deriver");
+  }
+  const copy = deriver(state);
+  if (typeof copy !== "function") {
+    throw new Error("Factory state deriver did not return a callable");
+  }
+  noteDerivedCopy(copy, value);
+  return copy as T;
 }
 
 /**

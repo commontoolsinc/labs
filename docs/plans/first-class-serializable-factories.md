@@ -358,20 +358,20 @@ Focused tests:
 
 ### WP1.5 — Traverse hidden factory state during graph construction
 
-- [ ] Adapt the shared visitor/accessor from
+- [x] Adapt the shared visitor/accessor from
   `packages/data-model/src/fabric-factory.ts` for builder traversal; runner code
   supplies alias mapping and derived-callable construction but does not define
   a second state view.
-- [ ] Integrate it into `packages/runner/src/builder/traverse-utils.ts` and
+- [x] Integrate it into `packages/runner/src/builder/traverse-utils.ts` and
   `packages/runner/src/builder/json-utils.ts` before generic function handling.
-- [ ] Preserve live, pre-ref factory state during internal graph serialization;
+- [x] Preserve live, pre-ref factory state during internal graph serialization;
   sealing belongs at a later durable Fabric boundary, after artifact indexing.
-- [ ] Convert captured Cells/Reactives to aliases inside factory state.
-- [ ] Descend into nested factories without exposing enumerable `curried` or
+- [x] Convert captured Cells/Reactives to aliases inside factory state.
+- [x] Descend into nested factories without exposing enumerable `curried` or
   state fields.
 - [ ] Keep CFC inspection and alias traversal on the same logical state view as
   serialization, hashing, and equality.
-- [ ] Verify two references to the same factory do not cause false cycle errors,
+- [x] Verify two references to the same factory do not cause false cycle errors,
   while an actual cycle through params is rejected.
 - [ ] Review graph payload fields in `packages/runner/src/builder/types.ts` and
   static-data walks in `packages/runner/src/cell.ts` so hidden factory state is
@@ -384,6 +384,11 @@ Focused tests:
   factory-valued binding from Stage 0's `$patternRef` sentinel to `Factory@1`.
   Constrain `$patternRef` emission to explicitly legacy/internal graph fallback
   paths and add a test that new durable factory writes cannot choose it.
+  Until that switch, explicit root pattern graph serialization remains an
+  internal helper; within node payload serialization, the named fallbacks are
+  a pattern node's `module.implementation` and the top-level `op` input of the
+  legacy `map`/`filter`/`flatMap` ref modules. Stage 4 removes the list writer
+  fallback; arbitrary factory-valued graph data already stays callable.
 
 ### WP1.6 — Add runner-owned factory materialization and generic resolution
 

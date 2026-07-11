@@ -9,6 +9,7 @@ import {
   factoryStateOf,
   type FactoryStateV1,
   type LiveFactoryState,
+  mapFactoryStateValues,
   registerFabricFactory,
   tryFactoryState,
 } from "@/fabric-factory.ts";
@@ -39,6 +40,87 @@ if (false) {
 }
 
 describe("FabricFactory protocol", () => {
+  it("maps only hidden pattern values while preserving live and canonical metadata", () => {
+    const rootToken = {};
+    const params = { capture: "before" };
+    const spaceSelector = { target: "before" };
+    const liveState: LiveFactoryState = {
+      kind: "pattern",
+      rootToken,
+      argumentSchema: { type: "object" },
+      resultSchema: { type: "object" },
+      paramsSchema: { type: "object" },
+      params,
+      defaultScope: "user",
+      spaceSelector,
+    };
+    const replacements = new Map<unknown, unknown>([
+      [params, { capture: "after" }],
+      [spaceSelector, { target: "after" }],
+    ]);
+    const visited: string[] = [];
+
+    const mappedLive = mapFactoryStateValues(
+      liveState,
+      (value, field) => {
+        visited.push(field);
+        return replacements.get(value) ?? value;
+      },
+    );
+
+    expect(visited).toEqual(["params", "spaceSelector"]);
+    expect(mappedLive).not.toBe(liveState);
+    expect(mappedLive).toMatchObject({
+      kind: "pattern",
+      rootToken,
+      argumentSchema: liveState.argumentSchema,
+      resultSchema: liveState.resultSchema,
+      paramsSchema: liveState.paramsSchema,
+      params: { capture: "after" },
+      defaultScope: "user",
+      spaceSelector: { target: "after" },
+    });
+    expect(liveState.params).toBe(params);
+    expect(liveState.spaceSelector).toBe(spaceSelector);
+
+    const ref = {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "factory",
+    };
+    const canonical: FactoryStateV1 = {
+      kind: "pattern",
+      ref,
+      argumentSchema: true,
+      resultSchema: false,
+      paramsSchema: true,
+      params: { nested: "before" },
+      spaceSelector: "before",
+    };
+    const mappedCanonical = mapFactoryStateValues(
+      canonical,
+      (value) => value === "before" ? "after" : value,
+    );
+    expect(mappedCanonical).toMatchObject({
+      ...canonical,
+      ref,
+      params: { nested: "before" },
+      spaceSelector: "after",
+    });
+    expect(mappedCanonical.ref).toBe(ref);
+
+    const moduleState: FactoryStateV1 = {
+      kind: "module",
+      ref,
+      argumentSchema: true,
+      resultSchema: false,
+    };
+    expect(
+      mapFactoryStateValues(moduleState, () => {
+        throw new Error("module state has no traversable hidden values");
+      }),
+    ).toBe(moduleState);
+  });
+
   it("admits only registered callables and keeps protocol properties hidden", () => {
     const rootToken = {};
     const state: LiveFactoryState = {

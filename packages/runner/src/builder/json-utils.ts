@@ -6,9 +6,12 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import type { FabricFactory } from "@commonfabric/data-model/fabric-value";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FactoryInput,
+  isModule,
   isPattern,
   type JSONSchema,
   type JSONValue,
@@ -31,6 +34,11 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./factory-traversal.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -44,9 +52,20 @@ export function toJSONWithAliasBindings(
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): JSONValue | undefined {
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  insideFactoryState = false,
+): JSONValue | FabricFactory | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
+
+  if (
+    insideFactoryState && typeof value === "function" &&
+    !isAdmittedFabricFactory(value)
+  ) {
+    throw new TypeError(
+      "Arbitrary functions are not valid factory state values",
+    );
+  }
 
   // Convert regular cells and results from Cell.get() to opaque refs
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -108,13 +127,54 @@ export function toJSONWithAliasBindings(
     }
   }
 
+  // Factory values are callable, so their serializable captures live in the
+  // hidden Factory@1 state rather than in enumerable function properties.
+  if (isAdmittedFabricFactory(value)) {
+    // This helper's root-pattern form is the explicit legacy INTERNAL graph
+    // serializer. Durable Fabric boundaries encode the callable directly as
+    // Factory@1; only this root form retains the embedded graph fallback.
+    if (path.length === 0 && isPattern(value)) {
+      return toJSONWithAliasBindings(
+        serializePatternGraph(value),
+        resolveCellAlias,
+        ignoreSelfAliases,
+        path,
+        seen,
+        factoryContext,
+        insideFactoryState,
+      );
+    }
+    return mapFactoryForTraversal(
+      value,
+      (nested, field) =>
+        toJSONWithAliasBindings(
+          nested as FactoryInput<any>,
+          resolveCellAlias,
+          ignoreSelfAliases,
+          [...path, field],
+          seen,
+          factoryContext,
+          true,
+        ),
+      factoryContext,
+    );
+  }
+
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      toJSONWithAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
-        ...path,
-        i,
-      ], seen)
+      toJSONWithAliasBindings(
+        v,
+        resolveCellAlias,
+        ignoreSelfAliases,
+        [
+          ...path,
+          i,
+        ],
+        seen,
+        factoryContext,
+        insideFactoryState,
+      )
     );
   }
 
@@ -156,12 +216,24 @@ export function toJSONWithAliasBindings(
     // won't do correctly. This site will need attention once FabricInstances see
     // real use.
     for (const key in valueToProcess as any) {
+      const nestedValue = valueToProcess[key];
+      // A pattern node's module implementation is the other explicit legacy
+      // INTERNAL graph fallback. The current runner instantiates this graph;
+      // ordinary pattern factories carried as data stay callable Factory@1
+      // values and take the factory-first branch above.
+      const valueForTraversal = key === "implementation" &&
+          isModule(valueToProcess) && valueToProcess.type === "pattern" &&
+          isPattern(nestedValue)
+        ? serializePatternGraph(nestedValue)
+        : nestedValue;
       const jsonValue = toJSONWithAliasBindings(
-        valueToProcess[key],
+        valueForTraversal,
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
+        factoryContext,
+        insideFactoryState,
       );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
@@ -379,7 +451,7 @@ export function moduleToJSON(module: Module) {
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
     implementation = toJSONWithAliasBindings(
-      implementation as unknown as FactoryInput<any>,
+      serializePatternGraph(implementation),
     ) as unknown as Pattern;
     return {
       ...rest,
