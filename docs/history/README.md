@@ -156,9 +156,10 @@ One line per archived document; each document's header carries the fuller
 
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
-- [default-app-note-create.md](development/performance/default-app-note-create.md)
+- [default-app-note-create.md](development/performance/default-app-note-create.md),
+  [two-browsers-cold-start.md](development/performance/two-browsers-cold-start.md),
   and
-  [two-browsers-cold-start.md](development/performance/two-browsers-cold-start.md)
+  [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.

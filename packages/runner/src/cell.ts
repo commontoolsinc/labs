@@ -1956,6 +1956,20 @@ export class CellImpl<T extends FabricValue>
     }
   }
 
+  /**
+   * Load this cell's backing doc, returning a promise that resolves once the
+   * doc is confirmed: either its value has arrived or it is confirmed absent.
+   * The return is always a promise (`syncCell` is async), so awaiting it is the
+   * only way it reports pending. `sync() instanceof Promise` is constant-true,
+   * and a present-but-undefined read cannot tell a still-loading cell from a
+   * settled-empty one, so neither works as a synchronous pending check.
+   *
+   * A deferred `sync().then(...)` chain is invisible to `Cell.pull()` and the
+   * scheduler's `idle()` until it is registered, so a convergence waiter can
+   * return before the chain settles and read held, not-yet-loaded state. Wrap
+   * such a chain in `storageManager.trackUntilSettled` to have those waiters
+   * await it.
+   */
   sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);

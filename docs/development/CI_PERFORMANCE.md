@@ -51,6 +51,11 @@ failure by itself.
 Good CI optimization PRs should reduce critical-path wall time without making
 the workflow harder to reason about.
 
+For the pattern-integration job specifically, the time is dominated by
+per-pattern CFC compile, not by storage or sync — see
+[the profiling snapshot](../history/development/performance/pattern-integration-compile-bound.md)
+before optimizing there.
+
 ## Pulling Timing Data
 
 The labs repository is public, so the GitHub Actions REST API returns run, job,
