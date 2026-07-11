@@ -1,6 +1,10 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 
 import type {
   FabricFactory,
@@ -404,6 +408,24 @@ function canonicalRef(
       "expected a 43-character base64url content identity",
     );
   }
+  let identityBytes: Uint8Array;
+  try {
+    identityBytes = fromBase64url(identity);
+  } catch {
+    validationError(
+      `${path}.identity`,
+      "expected a canonical 32-byte base64url content identity",
+    );
+  }
+  if (
+    identityBytes.length !== 32 ||
+    toUnpaddedBase64url(identityBytes) !== identity
+  ) {
+    validationError(
+      `${path}.identity`,
+      "expected a canonical 32-byte base64url content identity",
+    );
+  }
   if (typeof symbol !== "string" || symbol.length === 0) {
     validationError(`${path}.symbol`, "expected a non-empty string");
   }
@@ -600,6 +622,43 @@ function canonicalFactoryState(
 }
 
 /**
+ * Convert trusted live builder state into the canonical codec view. The
+ * runner-only root token is deliberately omitted, but only after the complete
+ * content-addressed artifact ref is available.
+ */
+function canonicalFactoryStateView(
+  value: unknown,
+  visiting: Set<object>,
+): FactoryStateV1 {
+  if (!isPlainObject(value)) {
+    validationError("state", "expected a plain object");
+  }
+  const state = value as Record<string, unknown>;
+  if (!Object.hasOwn(state, "rootToken")) {
+    return canonicalFactoryState(value, visiting);
+  }
+  if (
+    state.rootToken === null || typeof state.rootToken !== "object"
+  ) {
+    validationError("state.rootToken", "expected a runner root token object");
+  }
+  if (!Object.hasOwn(state, "ref") || state.ref === undefined) {
+    validationError("state.ref", "artifact ref is not available");
+  }
+
+  const finish = beginVisit(value as object, "state", visiting);
+  try {
+    const entries: [string, unknown][] = [];
+    for (const key of ownEnumerableStringKeys(value as object, "state")) {
+      if (key !== "rootToken") entries.push([key, state[key]]);
+    }
+    return canonicalFactoryState(Object.fromEntries(entries), visiting);
+  } finally {
+    finish();
+  }
+}
+
+/**
  * Admit a callable created by a trusted builder constructor or the factory
  * codec. This protocol admission does not make a decoded shell executable.
  *
@@ -642,11 +701,27 @@ export function registerFabricFactory<T extends Callable>(
   return value as T & FabricFactory<Parameters<T>, ReturnType<T>>;
 }
 
+/** Return whether a callable was admitted by the trusted factory protocol. */
+export function isAdmittedFabricFactory(
+  value: unknown,
+): value is FabricFactory {
+  return typeof value === "function" &&
+    factoryAdmissions.has(value as Callable);
+}
+
 /** Return admitted factory state, or `undefined` for every other value. */
 export function tryFactoryState(value: unknown): FactoryStateView | undefined {
   if (typeof value !== "function") return undefined;
   const admission = factoryAdmissions.get(value as Callable);
   return admission?.canonicalState ?? admission?.stateAccessor();
+}
+
+/** Return already-sealed canonical state without reading a live accessor. */
+export function trySealedFactoryState(
+  value: unknown,
+): FactoryStateV1 | undefined {
+  if (typeof value !== "function") return undefined;
+  return factoryAdmissions.get(value as Callable)?.canonicalState;
 }
 
 /** Return admitted factory state, failing closed for arbitrary callables. */
@@ -681,7 +756,7 @@ function canonicalFactoryStateOf(
 
   const finish = beginVisit(callable, "factory", visiting);
   try {
-    const canonical = canonicalFactoryState(
+    const canonical = canonicalFactoryStateView(
       admission.stateAccessor(),
       visiting,
     );

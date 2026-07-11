@@ -7,6 +7,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`
@@ -52,7 +53,10 @@ export function isFabricValueLayer(
       return Symbol.keyFor(value) !== undefined;
     }
 
-    case "function":
+    case "function": {
+      return isAdmittedFabricFactory(value);
+    }
+
     default: {
       return false;
     }

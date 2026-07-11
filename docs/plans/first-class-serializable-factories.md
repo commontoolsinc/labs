@@ -266,13 +266,14 @@ Expected implementation and test files:
 
 ### WP1.3 — Make every Fabric operation see the same factory state
 
-- [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
-  factories are recognized through `tryFactoryState()` before legacy function
-  `toJSON()` and unbranded functions remain invalid. Codec dispatch remains the
-  serialization layer's job.
-- [ ] Update `packages/data-model/src/type-check.ts` and compatibility guards so
+- [x] Update `packages/data-model/src/native-conversion.ts` so admitted
+  factories are recognized before legacy function `toJSON()` and unbranded
+  functions remain invalid. Classification uses the admission-only predicate
+  rather than `tryFactoryState()` so it cannot execute a live state accessor;
+  codec dispatch remains the serialization layer's job.
+- [x] Update `packages/data-model/src/type-check.ts` and compatibility guards so
   `FabricFactory` is the only valid function-shaped Fabric value.
-- [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
+- [x] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
   shortcut that treats functions as already frozen.
 - [ ] Update `packages/data-model/src/value-clone.ts` so canonical factories are
@@ -283,11 +284,15 @@ Expected implementation and test files:
   could accidentally admit an arbitrary function.
 - [ ] Update `packages/data-model/src/value-hash.ts` to hash the `Factory@1` tag
   and recursively hashed canonical state.
-- [ ] Ensure all of these paths call the shared state/codec visitor rather than
-  independently enumerating hidden fields.
-- [ ] Make encode, hash, equality, and Fabric deep-freeze fail before a live
-  factory's artifact ref can be sealed.
-- [ ] Verify sealing memoizes one immutable state and a stable hash.
+- [x] Ensure the native conversion, type/compatibility, codec, and deep-freeze
+  paths use shared admission/state helpers rather than independently
+  enumerating hidden fields.
+- [ ] Extend that shared-helper invariant to clone, equality, and hash.
+- [x] Make encode and Fabric deep-freeze fail before a live factory's artifact
+  ref can be sealed.
+- [ ] Make hash and equality fail before that artifact ref can be sealed.
+- [x] Verify sealing memoizes one immutable canonical state.
+- [ ] Verify the canonical state produces a stable hash.
 
 Focused tests:
 

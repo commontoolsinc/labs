@@ -119,14 +119,22 @@ describe("FactoryCodec", () => {
     expect(factoryStateOf(factory)).toBe(sealed);
   });
 
-  it("does not encode live root-token state in the codec stage", () => {
+  it("seals live state once its artifact ref exists and rejects it before then", () => {
     const factory = registerFabricFactory(() => undefined, {
       kind: "module",
       rootToken: {},
       ref: REF,
     });
-    expect(() => new FactoryCodec().encode(factory)).toThrow(
-      "live factory state is not encodable",
+    const codec = new FactoryCodec();
+    expect(codec.encode(factory)).toEqual({ kind: "module", ref: REF });
+    expect(Object.hasOwn(factoryStateOf(factory), "rootToken")).toBe(false);
+
+    const preRef = registerFabricFactory(() => undefined, {
+      kind: "module",
+      rootToken: {},
+    });
+    expect(() => codec.encode(preRef)).toThrow(
+      "artifact ref is not available",
     );
   });
 
@@ -146,6 +154,17 @@ describe("FactoryCodec", () => {
         "pseudo ref",
         { kind: "module", ref: { identity: "host:1", symbol: "lift" } },
         "43-character base64url",
+      ],
+      [
+        "noncanonical identity alias",
+        {
+          kind: "module",
+          ref: {
+            identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB",
+            symbol: "lift",
+          },
+        },
+        "canonical 32-byte base64url",
       ],
       [
         "empty symbol",

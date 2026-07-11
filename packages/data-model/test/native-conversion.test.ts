@@ -28,7 +28,13 @@ import {
   SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-instances/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
 import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -76,6 +82,31 @@ describe("native-conversion", () => {
       expect(result.name).toBe("test");
       expect(result.count).toBe(42n);
       expect(result.missing).toBe(undefined);
+    });
+
+    it("passes through and hardens an admitted factory before legacy `toJSON()`", () => {
+      let toJSONCalls = 0;
+      const callable = Object.assign(() => undefined, {
+        toJSON() {
+          toJSONCalls++;
+          return "legacy";
+        },
+      });
+      const factory = registerFabricFactory(callable, {
+        kind: "module",
+        rootToken: {},
+        ref: FACTORY_REF,
+      });
+
+      expect(nativeFromFabricValue(factory, false)).toBe(factory);
+      expect(Object.isFrozen(factory)).toBe(true);
+      expect(toJSONCalls).toBe(0);
+    });
+
+    it("rejects an arbitrary function presented as a Fabric value", () => {
+      expect(() =>
+        nativeFromFabricValue((() => undefined) as unknown as FabricValue)
+      ).toThrow("arbitrary function");
     });
 
     it("unwraps a `FabricError` back to a native `Error`", () => {
@@ -669,6 +700,36 @@ describe("native-conversion", () => {
         );
         expect(shallowFabricFromNativeValue(fe)).toBe(fe);
       });
+
+      it("recognizes an admitted factory before legacy function `toJSON()`", () => {
+        let toJSONCalls = 0;
+        const callable = Object.assign(() => undefined, {
+          toJSON() {
+            toJSONCalls++;
+            return "legacy";
+          },
+        });
+        const factory = registerFabricFactory(callable, {
+          kind: "module",
+          ref: FACTORY_REF,
+        });
+
+        expect(shallowFabricFromNativeValue(factory)).toBe(factory);
+        expect(Object.isFrozen(factory)).toBe(true);
+        expect(toJSONCalls).toBe(0);
+      });
+
+      it("fails direct conversion before a live factory has an artifact ref", () => {
+        const factory = registerFabricFactory(() => undefined, {
+          kind: "module",
+          rootToken: {},
+        });
+
+        expect(() => shallowFabricFromNativeValue(factory, false)).toThrow(
+          "artifact ref is not available",
+        );
+        expect(Object.isFrozen(factory)).toBe(false);
+      });
     });
 
     describe("converts via `toJSON()` when available", () => {
@@ -1057,6 +1118,31 @@ describe("native-conversion", () => {
         // feeding that back in is an identity passthrough.
         const fe = fabricFromNativeValue(new Error("test"));
         expect(fabricFromNativeValue(fe)).toBe(fe);
+      });
+
+      it("deep-freezes an admitted factory through its canonical state", () => {
+        const factory = registerFabricFactory(() => undefined, {
+          kind: "handler",
+          rootToken: {},
+          ref: FACTORY_REF,
+          contextSchema: { type: "object" },
+        });
+
+        expect(fabricFromNativeValue(factory, false)).toBe(factory);
+        expect(Object.isFrozen(factory)).toBe(true);
+        expect(isDeepFrozen(factory)).toBe(true);
+      });
+
+      it("fails nested conversion before a live factory has an artifact ref", () => {
+        const factory = registerFabricFactory(() => undefined, {
+          kind: "handler",
+          rootToken: {},
+        });
+
+        expect(() => fabricFromNativeValue({ factory }, false)).toThrow(
+          "artifact ref is not available",
+        );
+        expect(Object.isFrozen(factory)).toBe(false);
       });
     });
 
@@ -1752,6 +1838,23 @@ describe("native-conversion", () => {
 
     it("rejects functions without `toJSON()`", () => {
       expect(isFabricCompatible(() => 42)).toBe(false);
+    });
+
+    it("accepts an admitted factory before consulting legacy `toJSON()`", () => {
+      let toJSONCalls = 0;
+      const callable = Object.assign(() => undefined, {
+        toJSON() {
+          toJSONCalls++;
+          return Symbol("not fabric");
+        },
+      });
+      const factory = registerFabricFactory(callable, {
+        kind: "module",
+        ref: FACTORY_REF,
+      });
+
+      expect(isFabricCompatible(factory)).toBe(true);
+      expect(toJSONCalls).toBe(0);
     });
 
     // -- FabricNativeObject types (would be wrapped) --

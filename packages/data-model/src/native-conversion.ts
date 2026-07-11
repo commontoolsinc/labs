@@ -19,7 +19,8 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
@@ -84,12 +85,19 @@ export function errorClassFromType(type: string): ErrorConstructor {
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
  *   object or array. When `false`, wrapping and validation still occur but
- *   the result is left mutable.
+ *   the result is left mutable. Factory atoms are always sealed and frozen.
  */
 export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
+  // Admitted callable factories are already Fabric values. This check must
+  // precede native function dispatch so a legacy `toJSON()` property cannot
+  // replace their canonical FactoryCodec representation.
+  if (isAdmittedFabricFactory(value)) {
+    return deepFreeze(value);
+  }
+
   // Top-level type dispatch via `tagFromNativeValue()` -- O(1) constructor
   // switch with fallbacks for exotic `Error` subclasses, cross-realm arrays,
   // and null-prototype objects. Returns `Primitive` for non-objects.
@@ -286,7 +294,7 @@ const PROCESSING = Symbol("PROCESSING");
  * @param value - The value to convert.
  * @param freeze - When `true` (default), deep-freezes the result tree.
  *   When `false`, wrapping and validation still occur but the result is
- *   left mutable.
+ *   left mutable, except that factory atoms are always sealed and frozen.
  */
 export function fabricFromNativeValue(
   value: unknown,
@@ -500,6 +508,7 @@ function isFabricCompatibleInternal(
     }
 
     case "function": {
+      if (isAdmittedFabricFactory(value)) return true;
       // Functions are only fabric-compatible if they have toJSON().
       if (hasToJSONMethod(value)) {
         const converted = value.toJSON();
@@ -575,13 +584,22 @@ function isFabricCompatibleInternal(
  * `FabricInstance` values (e.g., `UnknownValue`) pass through as-is.
  *
  * The freeze-state contract: the output's freeze state matches `frozen`, except
- * that instances of classes that are defined to always be frozen are in fact
- * returned as frozen, no matter the value of `frozen`.
+ * that instances of classes that are defined to always be frozen and admitted
+ * factory atoms are returned frozen, no matter the value of `frozen`.
  */
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricValue | FabricNativeObject {
+  if (typeof value === "function") {
+    if (!isAdmittedFabricFactory(value)) {
+      throw new TypeError(
+        "Cannot convert arbitrary function presented as a Fabric value",
+      );
+    }
+    return deepFreeze(value);
+  }
+
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }
