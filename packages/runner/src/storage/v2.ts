@@ -705,6 +705,11 @@ export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
 
+  // One authenticated session identity is shared by every space opened during
+  // a manager lifecycle. close() invalidates those server sessions, so a later
+  // sequential Runtime reusing this manager must start a fresh identity rather
+  // than attempting to resurrect an invalidated token.
+  #sessionId: string;
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
@@ -745,6 +750,7 @@ export class StorageManager implements IStorageManager {
     sessionFactory: SessionFactory,
   ) {
     this.id = options.id ?? crypto.randomUUID();
+    this.#sessionId = this.id;
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
@@ -818,7 +824,7 @@ export class StorageManager implements IStorageManager {
           ? () => this.#createInitializedSession(space, signer)
           : () =>
             this.#sessionFactory.create(space, signer, {
-              sessionId: this.id,
+              sessionId: this.#sessionId,
             }),
       });
       this.#providers.set(space, provider);
@@ -848,7 +854,7 @@ export class StorageManager implements IStorageManager {
     session: MemoryV2Client.SpaceSession;
   }> {
     const normal = await this.#sessionFactory.create(space, signer, {
-      sessionId: this.id,
+      sessionId: this.#sessionId,
     });
     if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
     const isHomeSpace = signer.did() === space;
@@ -886,7 +892,7 @@ export class StorageManager implements IStorageManager {
     };
     await normal.client.close();
     let bootstrapSessionId = crypto.randomUUID();
-    while (bootstrapSessionId === this.id) {
+    while (bootstrapSessionId === this.#sessionId) {
       bootstrapSessionId = crypto.randomUUID();
     }
     const bootstrap = await this.#sessionFactory.create(
@@ -953,6 +959,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.#sessionId = crypto.randomUUID();
   }
 
   async closeNow(): Promise<void> {
@@ -963,6 +970,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.#sessionId = crypto.randomUUID();
   }
 
   edit(): IStorageTransaction {

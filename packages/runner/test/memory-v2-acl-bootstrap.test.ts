@@ -127,6 +127,24 @@ Deno.test("storage manager uses one session id across spaces and isolates manage
       requested: { sessionId: bobManager.id },
       actualSessionId: bobManager.id,
     }]);
+
+    await aliceManager.close();
+    for (const targetSpace of [firstSpace, secondSpace]) {
+      const sync = await aliceManager.open(targetSpace).sync(
+        "of:manager-session-reopen-probe" as URI,
+      );
+      assert(!sync.error, sync.error?.message);
+    }
+    const reopenedSessions = aliceFactory.sessions.slice(2);
+    assertEquals(reopenedSessions.length, 2);
+    assert(
+      reopenedSessions[0].actualSessionId !== aliceManager.id,
+      "a closed manager lifecycle must not reuse its invalidated session id",
+    );
+    assertEquals(
+      reopenedSessions[1].actualSessionId,
+      reopenedSessions[0].actualSessionId,
+    );
   } finally {
     await aliceManager.close();
     await bobManager.close();
