@@ -2,7 +2,7 @@ import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
-  applyCommit,
+  applyCommit as applyCommitEngine,
   close,
   createBranch,
   type Engine,
@@ -17,7 +17,8 @@ import {
   resolveCommitSessionKey,
   type SchedulerActionObservation,
   serverSeq,
-  upsertSchedulerObservation,
+  upsertSchedulerObservation as upsertSchedulerObservationEngine,
+  type UpsertSchedulerObservationOptions,
 } from "../v2/engine.ts";
 import {
   connect,
@@ -36,6 +37,28 @@ import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
+
+const DIRECT_TEST_SCOPE_CONTEXT = {
+  principal: "did:key:scheduler-direct-test",
+  sessionId: "scheduler-direct-test",
+} as const;
+
+const applyCommit: typeof applyCommitEngine = (engine, options) =>
+  applyCommitEngine(engine, {
+    ...options,
+    principal: options.principal ?? DIRECT_TEST_SCOPE_CONTEXT.principal,
+  });
+
+const upsertSchedulerObservation = (
+  engine: Engine,
+  options:
+    & Omit<UpsertSchedulerObservationOptions, "scopeContext">
+    & Partial<Pick<UpsertSchedulerObservationOptions, "scopeContext">>,
+) =>
+  upsertSchedulerObservationEngine(engine, {
+    ...options,
+    scopeContext: options.scopeContext ?? DIRECT_TEST_SCOPE_CONTEXT,
+  });
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -122,6 +145,60 @@ Deno.test("memory v2 parses only well-formed principal session keys", () => {
     ]
   ) {
     assertEquals(principalOfSessionKey(malformed), undefined);
+  }
+});
+
+Deno.test("memory v2 does not broadly share fallback action fingerprints", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:fallback-fingerprint-space";
+  const piece = {
+    space: ownerSpace,
+    id: "of:piece",
+    scope: "space" as const,
+    path: [],
+  };
+  const address = {
+    space: ownerSpace,
+    id: "of:value",
+    scope: "space" as const,
+    path: ["value"],
+  };
+  const fallbackObservation = {
+    ...observation,
+    version: 2 as const,
+    ownerSpace,
+    pieceId: "space:of:piece",
+    implementationFingerprint: "action:fallback",
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint: "action:fallback",
+      runtimeFingerprint: observation.runtimeFingerprint,
+      piece,
+      reads: [address],
+      writes: [address],
+      materializerWriteEnvelopes: [],
+      directOutputs: [address],
+    },
+    reads: [address],
+    currentKnownWrites: [address],
+  } satisfies SchedulerActionObservation;
+
+  try {
+    const result = upsertSchedulerObservation(engine, {
+      ownerSpace,
+      observedAtSeq: 0,
+      observation: fallbackObservation,
+    });
+    assertEquals(
+      result.executionContextKey,
+      `session:${encodeURIComponent(DIRECT_TEST_SCOPE_CONTEXT.principal)}:${
+        encodeURIComponent(DIRECT_TEST_SCOPE_CONTEXT.sessionId)
+      }`,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
   }
 });
 
@@ -1048,13 +1125,7 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
   }
 });
 
-Deno.test("memory v2 scheduler observation row follows the latest writer session", async () => {
-  // The writer's commit session key gates reader-isolated adoption (C6,
-  // incremental-observation-adoption.md): a user-scope row is offered only to
-  // sessions of the writer's principal. When a second writer commits the
-  // IDENTICAL observation (same actionId + payload → coalesces onto the one
-  // row), the row must name the LATEST writer — otherwise adoption/reload is
-  // offered to the wrong principal or withheld from the actual latest writer.
+Deno.test("memory v2 keeps writer provenance per execution context", async () => {
   const { engine, path } = await createEngine();
 
   try {
@@ -1067,15 +1138,20 @@ Deno.test("memory v2 scheduler observation row follows the latest writer session
         schedulerObservation: observation,
       },
     });
-    const listWriter = () =>
+    const listWriters = () =>
       listSchedulerActionSnapshots(engine, {
         pieceId: observation.pieceId,
         processGeneration: observation.processGeneration,
         actionId: observation.actionId,
-      }).snapshots[0]?.writerSessionId;
-    assertEquals(listWriter(), "session:writer-a:sess-a");
+      }).snapshots.map((snapshot) => snapshot.writerSessionId).toSorted();
+    const writerA = resolveCommitSessionKey(
+      "session:writer-a:sess-a",
+      DIRECT_TEST_SCOPE_CONTEXT.principal,
+    );
+    assertEquals(listWriters(), [writerA]);
 
-    // Different writer, identical observation payload → coalesces (one row).
+    // An incomplete observation is session-keyed, so a different session keeps
+    // an independent row even when the payload is identical.
     applyCommit(engine, {
       sessionId: "session:writer-b:sess-b",
       commit: {
@@ -1085,8 +1161,12 @@ Deno.test("memory v2 scheduler observation row follows the latest writer session
         schedulerObservation: { ...observation, observedAtLocalSeq: 2 },
       },
     });
-    assertEquals(countRows(engine, "scheduler_observation"), 1);
-    assertEquals(listWriter(), "session:writer-b:sess-b");
+    const writerB = resolveCommitSessionKey(
+      "session:writer-b:sess-b",
+      DIRECT_TEST_SCOPE_CONTEXT.principal,
+    );
+    assertEquals(countRows(engine, "scheduler_observation"), 2);
+    assertEquals(listWriters(), [writerA, writerB].toSorted());
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1123,22 +1203,27 @@ Deno.test("memory v2 identical observation-only coalesce keeps the row in the ad
       }).snapshots;
     assertEquals(window().length, 1);
 
-    // Identical observation-only re-run from a different writer → coalesces.
+    // Identical observation-only re-run in the same execution context coalesces.
     applyCommit(engine, {
-      sessionId: "session:writer-b:sess-b",
+      sessionId: "session:writer-a:sess-a",
       commit: {
-        localSeq: 1,
+        localSeq: 2,
         reads: { confirmed: [], pending: [] },
         operations: [],
         schedulerObservation: { ...observation, observedAtLocalSeq: 2 },
       },
     });
     assertEquals(countRows(engine, "scheduler_observation"), 1);
-    // Still window-visible via the preserved slot, AND re-attributed to the
-    // latest writer.
+    // Still window-visible via the preserved slot and writer provenance.
     const after = window();
     assertEquals(after.length, 1);
-    assertEquals(after[0]?.writerSessionId, "session:writer-b:sess-b");
+    assertEquals(
+      after[0]?.writerSessionId,
+      resolveCommitSessionKey(
+        "session:writer-a:sess-a",
+        DIRECT_TEST_SCOPE_CONTEXT.principal,
+      ),
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1495,6 +1580,38 @@ Deno.test("memory v2 keeps scheduler state for two user contexts", async () => {
     });
     assertEquals(aliceSnapshots.snapshots.length, 1);
     assertEquals(bobSnapshots.snapshots.length, 1);
+
+    const stored = await openEngine({
+      url: resolveSpaceStoreUrl(store, ownerSpace),
+    });
+    try {
+      for (
+        const table of [
+          "scheduler_action_snapshot",
+          "scheduler_action_state",
+          "scheduler_read_index",
+          "scheduler_write_index",
+        ]
+      ) {
+        assertEquals(countRows(stored, table), 2, table);
+      }
+      const contexts = stored.database.prepare(`
+        SELECT execution_context_key
+        FROM scheduler_action_snapshot
+        ORDER BY execution_context_key
+      `).all() as Array<{ execution_context_key: string }>;
+      assertEquals(
+        contexts.map((row) => row.execution_context_key),
+        [
+          "session:did%3Akey%3Ascheduler-alice:" +
+          encodeURIComponent(alice.sessionId),
+          "session:did%3Akey%3Ascheduler-bob:" +
+          encodeURIComponent(bob.sessionId),
+        ].toSorted(),
+      );
+    } finally {
+      close(stored);
+    }
   } finally {
     await aliceClient.close().catch(() => {});
     await bobClient.close().catch(() => {});
@@ -1549,8 +1666,7 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
       processGeneration: observation.processGeneration,
       actionId: observation.actionId,
     });
-    assertEquals(listed.snapshots.length, 1);
-    assertEquals(listed.snapshots[0]?.directDirtySeq, 1);
+    assertEquals(listed.snapshots, []);
 
     await client.close();
     await server.close();
@@ -1559,6 +1675,16 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
       url: resolveSpaceStoreUrl(store, readSpace),
     });
     try {
+      const snapshots = listSchedulerActionSnapshots(readEngine, {
+        actionId: observation.actionId,
+      });
+      assertEquals(snapshots.snapshots.length, 1);
+      assertEquals(snapshots.snapshots[0]?.directDirtySeq, 1);
+      assertEquals(
+        snapshots.snapshots[0]?.executionContextKey,
+        `session:${encodeURIComponent("did:key:test-principal")}:` +
+          encodeURIComponent(owner.sessionId),
+      );
       const readers = findSchedulerReadersForWrite(readEngine, {
         branch: "",
         write: mirroredRead,
@@ -1725,12 +1851,27 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
       pieceId: observation.pieceId,
       processGeneration: observation.processGeneration,
     });
-    assertEquals(listed.snapshots.length, 1);
-    assertEquals(
-      (listed.snapshots[0]?.observation as SchedulerActionObservation).actionId,
-      keptActionId,
-    );
-    assertEquals(listed.snapshots[0]?.directDirtySeq, 1);
+    assertEquals(listed.snapshots, []);
+
+    await client.close();
+    await server.close();
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const raw = listSchedulerActionSnapshots(readEngine, {
+        actionId: keptActionId,
+      });
+      assertEquals(raw.snapshots.length, 1);
+      assertEquals(raw.snapshots[0]?.directDirtySeq, 1);
+      assertEquals(
+        raw.snapshots[0]?.executionContextKey,
+        `session:${encodeURIComponent("did:key:test-principal")}:` +
+          encodeURIComponent(owner.sessionId),
+      );
+    } finally {
+      close(readEngine);
+    }
   } finally {
     await client.close().catch(() => {});
     await server.close().catch(() => {});
@@ -1739,7 +1880,7 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
   }
 });
 
-Deno.test("memory v2 server fails closed for a user-scoped mirror without writer identity", async () => {
+Deno.test("memory v2 server preserves scoped mirror context and provenance", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
@@ -1781,7 +1922,18 @@ Deno.test("memory v2 server fails closed for a user-scoped mirror without writer
     try {
       const raw = listSchedulerActionSnapshots(readEngine, { actionId });
       assertEquals(raw.snapshots.length, 1);
-      assertEquals(raw.snapshots[0]?.writerSessionId, undefined);
+      assertEquals(
+        raw.snapshots[0]?.writerSessionId,
+        resolveCommitSessionKey(
+          owner.sessionId,
+          "did:key:test-principal",
+        ),
+      );
+      assertEquals(
+        raw.snapshots[0]?.executionContextKey,
+        `session:${encodeURIComponent("did:key:test-principal")}:` +
+          encodeURIComponent(owner.sessionId),
+      );
       assertEquals(raw.snapshots[0]?.observation.reads, [userRead]);
     } finally {
       close(readEngine);
