@@ -398,6 +398,8 @@ export class PatternContextValidationTransformer
 
         if (
           ts.isCallExpression(node) &&
+          detectCallKind(node, context.checker)?.kind !==
+            "availability-guard" &&
           isOpaqueSourceExpression(
             node,
             EMPTY_OPAQUE_ROOTS,

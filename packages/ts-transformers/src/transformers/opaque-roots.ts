@@ -214,8 +214,8 @@ export function isOpaqueSourceExpression(
   }
 
   // Property/element access chains that bottom out on an opaque-origin
-  // call (`wish(...).result`, `fetchJson(...).result.items`, etc.) are
-  // also opaque sources — the chain navigates through reactive cells
+  // call (`wish(...).result`, `resultOf(fetchJson<Items>(...)).items`, etc.)
+  // are also opaque sources — the chain navigates through reactive cells
   // before being read. The body-lowering pre-pass rewrites these into
   // destructure form, but consumers that examine the source AST before
   // that rewrite (e.g. `buildPatternScope` in pattern-callback-lowering)
@@ -279,6 +279,11 @@ export function collectLocalOpaqueRootSymbols(
     if (
       ts.isVariableDeclaration(node) &&
       node.initializer &&
+      !isPureAvailabilityGuardOverExternalCapture(
+        node.initializer,
+        localOpaqueRootSymbols,
+        context,
+      ) &&
       isOpaqueSourceExpression(
         node.initializer,
         new Set(),
@@ -298,4 +303,30 @@ export function collectLocalOpaqueRootSymbols(
 
   scan(body);
   return localOpaqueRootSymbols;
+}
+
+/**
+ * Availability guards are ordinary predicates once an existing compute/lift
+ * callback is executing. They only remain a local reactive origin when their
+ * operand itself creates (or aliases) a reactive value in that same callback.
+ */
+function isPureAvailabilityGuardOverExternalCapture(
+  expression: ts.Expression,
+  localOpaqueRootSymbols: ReadonlySet<ts.Symbol>,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(expression);
+  if (
+    !ts.isCallExpression(target) ||
+    detectCallKind(target, context.checker)?.kind !== "availability-guard"
+  ) {
+    return false;
+  }
+  const operand = target.arguments[0];
+  return !operand || !isOpaqueSourceExpression(
+    operand,
+    new Set(),
+    localOpaqueRootSymbols,
+    context,
+  );
 }

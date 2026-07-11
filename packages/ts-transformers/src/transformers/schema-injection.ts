@@ -50,6 +50,11 @@ import {
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
+import {
+  collectExplicitAvailabilityGuardCaptures,
+  createUnavailableInputPolicyOptions,
+  mapGuardCapturesToCallbackInput,
+} from "../availability/captures.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -829,6 +834,43 @@ function inferSchemaContextualType(
   return checker.getContextualType(node) ?? inferContextualType(node, checker);
 }
 
+/**
+ * Infer the result item type `T` from a contextual `WishState<T>`.
+ *
+ * `wish()`'s injected schema is both the lookup schema and the runtime schema
+ * of each candidate, so injecting the enclosing WishState would recursively
+ * turn its output into `WishState<WishState<T>>`. The state exposes `T` as its
+ * `result` property plus `undefined`; remove only that availability sentinel
+ * (preserving an authored `null` or other union members).
+ */
+function inferWishResultContextualType(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const contextualType = inferSchemaContextualType(node, checker);
+  if (!contextualType) return undefined;
+
+  const resultProperty = checker.getPropertyOfType(contextualType, "result");
+  if (!resultProperty) return contextualType;
+
+  const resultType = checker.getTypeOfSymbolAtLocation(resultProperty, node);
+  if (!resultType.isUnion()) {
+    return (resultType.flags & ts.TypeFlags.Undefined) !== 0
+      ? undefined
+      : resultType;
+  }
+
+  const availableMembers = resultType.types.filter(
+    (member) => (member.flags & ts.TypeFlags.Undefined) === 0,
+  );
+  if (availableMembers.length === 0) return undefined;
+  if (availableMembers.length === 1) return availableMembers[0];
+
+  return (checker as ts.TypeChecker & {
+    getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+  }).getUnionType?.(availableMembers);
+}
+
 function scopedFactoryContextualScope(
   node: ts.Expression,
   checker: ts.TypeChecker,
@@ -1056,7 +1098,9 @@ function resolveInjectableSchemaType(
  * @returns CallExpression for toSchema() with TypeRegistry entry transferred
  */
 function createSchemaCallWithRegistryTransfer(
-  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
+  context:
+    & Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">
+    & Partial<Pick<TransformationContext, "lookupAvailabilityVariantType">>,
   typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
@@ -1067,6 +1111,11 @@ function createSchemaCallWithRegistryTransfer(
     typeNode,
     checker,
     context.factory,
+    typeRegistry,
+  );
+  registerAvailabilityVariantTypeNodes(
+    emittedTypeNode,
+    context,
     typeRegistry,
   );
   const schemaCall = createToSchemaCall(context, emittedTypeNode, options);
@@ -1098,6 +1147,41 @@ function createSchemaCallWithRegistryTransfer(
   }
 
   return schemaCall;
+}
+
+const AVAILABILITY_VARIANT_TYPE_NAMES = new Set([
+  "IsPending",
+  "HasError",
+  "IsSyncing",
+  "HasSchemaMismatch",
+]);
+
+function registerAvailabilityVariantTypeNodes(
+  root: ts.TypeNode,
+  context: Partial<
+    Pick<TransformationContext, "lookupAvailabilityVariantType">
+  >,
+  typeRegistry?: TypeRegistry,
+): void {
+  if (!typeRegistry) return;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isTypeReferenceNode(node) &&
+      ts.isQualifiedName(node.typeName) &&
+      ts.isIdentifier(node.typeName.left) &&
+      node.typeName.left.text === "__cfHelpers"
+    ) {
+      const name = node.typeName.right.text;
+      if (AVAILABILITY_VARIANT_TYPE_NAMES.has(name)) {
+        const type = context.lookupAvailabilityVariantType?.(name);
+        if (type) {
+          typeRegistry.set(node, type);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
 }
 
 function applyIdentityArrayItemSchemaHints(
@@ -1417,6 +1501,7 @@ function visitInjectedDualSchemaBuilderCall(
   transformation: ts.TransformationContext,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
+  schedulerOptions?: ts.ObjectLiteralExpression,
 ): ts.Node {
   const updated = prependSchemaArguments(
     context,
@@ -1427,6 +1512,7 @@ function visitInjectedDualSchemaBuilderCall(
     resultTypeValue,
     typeRegistry,
     checker,
+    schedulerOptions,
   );
   registerInjectedCallResultType(
     node,
@@ -1443,6 +1529,18 @@ function visitInjectedDualSchemaBuilderCall(
   // callback is visited.
   context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
+}
+
+function availabilitySchedulerOptionsForCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression | undefined,
+  context: TransformationContext,
+): ts.ObjectLiteralExpression | undefined {
+  if (!callback) return undefined;
+  const entries = mapGuardCapturesToCallbackInput(
+    collectExplicitAvailabilityGuardCaptures(callback.body, context),
+    callback,
+  );
+  return createUnavailableInputPolicyOptions(entries, context.factory);
 }
 
 function createRegisteredWidenedSchemaCall(
@@ -2328,6 +2426,7 @@ function prependSchemaArguments(
   resultType: ts.Type | undefined,
   typeRegistry?: TypeRegistry,
   checker?: ts.TypeChecker,
+  schedulerOptions?: ts.ObjectLiteralExpression,
 ): ts.CallExpression {
   const argSchemaCall = checker
     ? createSchemaCallWithRegistryTransfer(
@@ -2368,6 +2467,9 @@ function prependSchemaArguments(
   if (innerLiftCall) {
     const [innerCallback, ...trailingInnerArgs] = innerLiftCall.arguments;
     const calleeArgs = innerCallback ? [innerCallback] : [];
+    const trailingOptions = trailingInnerArgs.length > 0
+      ? trailingInnerArgs
+      : (schedulerOptions ? [schedulerOptions] : []);
     // No-input case: a single empty object literal `{}` as the outer input
     // means a genuinely zero-capture computation (computed-origin). By this
     // stage ClosureTransformer has already reified any captures into the
@@ -2379,7 +2481,7 @@ function prependSchemaArguments(
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,
-        [...calleeArgs, context.factory.createFalse(), ...trailingInnerArgs],
+        [...calleeArgs, context.factory.createFalse(), ...trailingOptions],
       );
       // The inner lift is fully schema-injected now; mark it so the re-descent
       // (which re-enters the rebuilt tree to reach the callback body) self-skips
@@ -2395,7 +2497,7 @@ function prependSchemaArguments(
     const rebuiltInner = context.factory.createCallExpression(
       innerLiftCall.expression,
       innerLiftCall.typeArguments,
-      [...calleeArgs, argSchemaCall, resSchemaCall, ...trailingInnerArgs],
+      [...calleeArgs, argSchemaCall, resSchemaCall, ...trailingOptions],
     );
     // The inner lift is fully schema-injected now; mark it so the re-descent
     // does not re-enter the builder-lift branch and inject a second pair.
@@ -2410,7 +2512,12 @@ function prependSchemaArguments(
   return context.factory.createCallExpression(
     node.expression,
     undefined,
-    [...node.arguments, argSchemaCall, resSchemaCall],
+    [
+      ...node.arguments,
+      argSchemaCall,
+      resSchemaCall,
+      ...(schedulerOptions ? [schedulerOptions] : []),
+    ],
   );
 }
 
@@ -2459,11 +2566,11 @@ function resolveLiftAppliedInputAndCallback(
   if (!innerCall) {
     return undefined;
   }
-  const callbackIndex = innerCall.arguments.length - 1;
-  const callbackExpression = innerCall.arguments[callbackIndex];
-  const callback = callbackExpression
-    ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
-    : undefined;
+  const callback = innerCall.arguments
+    .map((argument) =>
+      resolveFunctionLikeExpression(argument, checker, sourceFile)
+    )
+    .find((candidate) => candidate !== undefined);
   if (!callback) {
     return undefined;
   }
@@ -3367,6 +3474,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             transformation,
             checker,
             typeRegistry,
+            availabilitySchedulerOptionsForCallback(
+              liftAppliedArgs?.callback,
+              context,
+            ),
           );
         }
 
@@ -3448,6 +3559,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             transformation,
             checker,
             typeRegistry,
+            availabilitySchedulerOptionsForCallback(callback, context),
           );
         }
       }
@@ -3569,6 +3681,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             transformation,
             checker,
             typeRegistry,
+            availabilitySchedulerOptionsForCallback(liftCallback, context),
           );
         }
 
@@ -3619,6 +3732,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             transformation,
             checker,
             typeRegistry,
+            availabilitySchedulerOptionsForCallback(liftCallback, context),
           );
         }
 
@@ -3663,6 +3777,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             transformation,
             checker,
             typeRegistry,
+            availabilitySchedulerOptionsForCallback(callback, context),
           );
         }
       }
@@ -3804,7 +3919,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           sourceFile,
           factory,
           typeRegistry,
-          () => inferSchemaContextualType(node, checker),
+          () => inferWishResultContextualType(node, checker),
         );
 
         const schemaCall = createRegisteredSchemaCallFromResolvedType(

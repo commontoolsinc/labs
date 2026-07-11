@@ -1,6 +1,23 @@
 import ts from "typescript";
 import { isRecord } from "@commonfabric/utils/types";
 
+const SYNTHETIC_AVAILABILITY_TYPE_NAMES = new Set([
+  "DataUnavailable",
+  "IsPending",
+  "HasError",
+  "IsSyncing",
+  "HasSchemaMismatch",
+]);
+
+function isSyntheticAvailabilityTypeReference(
+  node: ts.TypeReferenceNode,
+): boolean {
+  return ts.isQualifiedName(node.typeName) &&
+    ts.isIdentifier(node.typeName.left) &&
+    node.typeName.left.text === "__cfHelpers" &&
+    SYNTHETIC_AVAILABILITY_TYPE_NAMES.has(node.typeName.right.text);
+}
+
 import type {
   JSONSchemaMutable,
   JSONSchemaObjMutable,
@@ -13,7 +30,10 @@ import type {
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
-import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
+import {
+  CommonFabricFormatter,
+  isCommonFabricAvailabilityType,
+} from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
@@ -385,7 +405,19 @@ export class SchemaGenerator implements ISchemaGenerator {
     );
     const isWrapperContext = wrapperKind !== undefined;
 
-    let namedKey = getNamedTypeKey(type, context.typeNode);
+    // Availability controls deliberately format inline. Hoisting a public
+    // variant such as commonfabric HasError into `$defs/HasError` can collide
+    // with an unrelated authored type of the same name and make that local
+    // property's schema point at the marker arm. Exact-path runner policy is
+    // the identity check; the JSON Schema arm only needs to remain a
+    // non-absorbing object schema.
+    const isAvailabilityControl = isCommonFabricAvailabilityType(
+      type,
+      context.typeNode,
+    );
+    let namedKey = isAvailabilityControl
+      ? undefined
+      : getNamedTypeKey(type, context.typeNode);
 
     if (!namedKey && !isWrapperContext) {
       // Only use synthetic names if we're not processing a wrapper type
@@ -899,6 +931,37 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Resolve by name from source scope as a fallback (e.g., PieceEntry in
     // Cell<PieceEntry[]>).
     if (ts.isTypeReferenceNode(typeNode)) {
+      if (isSyntheticAvailabilityTypeReference(typeNode)) {
+        // Availability variants are branded FabricInstance control values.
+        // Their exact brand/reason is enforced by runner policy before schema
+        // traversal; keeping a non-absorbing object arm here prevents
+        // `T | __cfHelpers.HasError` from collapsing to `true` even if a
+        // rebuilt synthetic TypeReference lost its registry identity.
+        return { type: "object" };
+      }
+
+      // Transformer-created qualified references such as
+      // `__cfHelpers.HasError` have no symbol in the authored Program, but the
+      // transformer records their real semantic Type in typeRegistry. Consult
+      // that channel before syntactic wrapper/scope recovery. Otherwise the
+      // checker reports `any`, this branch falls through to `true`, and a
+      // synthetic `T | __cfHelpers.HasError` schema collapses to `true`.
+      const originalTypeNode = ts.getOriginalNode(typeNode);
+      const registeredType = typeRegistry?.get(typeNode) ??
+        (originalTypeNode !== typeNode
+          ? typeRegistry?.get(originalTypeNode)
+          : undefined);
+      if (
+        registeredType &&
+        (registeredType.flags & ts.TypeFlags.Any) === 0
+      ) {
+        return this.formatChildType(
+          registeredType,
+          context,
+          typeNode,
+        );
+      }
+
       if (detectWrapperViaNode(typeNode, checker)) {
         const wrapperType = typeRegistry?.get(typeNode) ??
           checker.getTypeFromTypeNode(typeNode);

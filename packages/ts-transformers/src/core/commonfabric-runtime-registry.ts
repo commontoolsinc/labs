@@ -18,7 +18,25 @@ export type CommonFabricRuntimeExportSpec =
       | "generate-text"
       | "generate-object"
       | "pattern-tool"
-      | "runtime-call";
+      | "runtime-call"
+      | "availability-result"
+      | "availability-observer";
+    reactiveOrigin: boolean;
+  }
+  | {
+    exportName: string;
+    category: "call";
+    callKind: "availability-guard";
+    availabilityReason:
+      | "pending"
+      | "error"
+      | "syncing"
+      | "schema-mismatch";
+    variantTypeName:
+      | "IsPending"
+      | "HasError"
+      | "IsSyncing"
+      | "HasSchemaMismatch";
     reactiveOrigin: boolean;
   }
   | {
@@ -107,6 +125,21 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
   },
   {
     exportName: "generateObject",
+    category: "call",
+    callKind: "generate-object",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "generateTextStream",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  // The advanced object stream takes the same result type parameter and
+  // options-level `schema` as generateObject, so it deliberately shares the
+  // dedicated call kind and schema-injection path.
+  {
+    exportName: "generateObjectStream",
     category: "call",
     callKind: "generate-object",
     reactiveOrigin: true,
@@ -222,6 +255,50 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     exportName: "uiVariant",
     category: "ignored",
     reactiveOrigin: false,
+  },
+  {
+    exportName: "isPending",
+    category: "call",
+    callKind: "availability-guard",
+    availabilityReason: "pending",
+    variantTypeName: "IsPending",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "hasError",
+    category: "call",
+    callKind: "availability-guard",
+    availabilityReason: "error",
+    variantTypeName: "HasError",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "isSyncing",
+    category: "call",
+    callKind: "availability-guard",
+    availabilityReason: "syncing",
+    variantTypeName: "IsSyncing",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "hasSchemaMismatch",
+    category: "call",
+    callKind: "availability-guard",
+    availabilityReason: "schema-mismatch",
+    variantTypeName: "HasSchemaMismatch",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "resultOf",
+    category: "call",
+    callKind: "availability-result",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "observeAvailability",
+    category: "call",
+    callKind: "availability-observer",
+    reactiveOrigin: true,
   },
 ] as const satisfies readonly CommonFabricRuntimeExportSpec[];
 

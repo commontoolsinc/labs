@@ -549,6 +549,21 @@ export function createDataFlowAnalyzer(
       };
     }
 
+    // Availability aliases are runtime identities. In pattern context they
+    // preserve the underlying reactive proxy directly rather than synthesizing
+    // a computation node. observeAvailability attaches policy provenance;
+    // resultOf changes only the static usable view and attaches no policy.
+    if (
+      callKind?.kind === "availability-observer" ||
+      callKind?.kind === "availability-result"
+    ) {
+      return {
+        ...merged,
+        requiresRewrite: false,
+        rewriteHint,
+      };
+    }
+
     // Array-map calls preserve requiresRewrite from the callee
     // to handle cases like state.items.filter(...).map(...)
     if (isArrayMethodFamily) {

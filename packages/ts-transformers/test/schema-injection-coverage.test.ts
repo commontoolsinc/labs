@@ -311,6 +311,30 @@ Deno.test("generateObject<T>({...}) injects a schema property into the existing 
   assertStringIncludes(output, "schema:");
 });
 
+Deno.test("aliased generateObjectStream<T> injects the structured result schema", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { generateObjectStream as objectStream } from "commonfabric";',
+    'const r = objectStream<{ title: string }>({ prompt: "hi" });',
+  ].join("\n");
+  const output = await t(source);
+  const [schema] = emittedSchemas(parseModule(output));
+  assertEquals((schema.properties as Obj).title.type, "string");
+  assertStringIncludes(output, "schema:");
+});
+
+Deno.test("namespace generateObjectStream<T> injects the structured result schema", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import * as cf from "commonfabric";',
+    'const r = cf.generateObjectStream<{ score: number }>({ prompt: "hi" });',
+  ].join("\n");
+  const output = await t(source);
+  const [schema] = emittedSchemas(parseModule(output));
+  assertEquals((schema.properties as Obj).score.type, "number");
+  assertStringIncludes(output, "schema:");
+});
+
 // ---------------------------------------------------------------------------
 // sqliteQuery — rowSchema injected
 // ---------------------------------------------------------------------------

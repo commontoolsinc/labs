@@ -207,8 +207,20 @@ export type CallKind =
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-text"; symbol?: ts.Symbol }
-  | { kind: "generate-object"; symbol?: ts.Symbol }
+  | { kind: "generate-object"; symbol?: ts.Symbol; exportName: string }
   | { kind: "pattern-tool"; symbol?: ts.Symbol }
+  | {
+    kind: "availability-guard";
+    symbol?: ts.Symbol;
+    reason: "pending" | "error" | "syncing" | "schema-mismatch";
+    variantTypeName:
+      | "IsPending"
+      | "HasError"
+      | "IsSyncing"
+      | "HasSchemaMismatch";
+  }
+  | { kind: "availability-result"; symbol?: ts.Symbol }
+  | { kind: "availability-observer"; symbol?: ts.Symbol }
   | {
     kind: "runtime-call";
     symbol?: ts.Symbol;
@@ -417,7 +429,9 @@ export function getCapabilitySummaryCallbackArgument(
     // lift call (the outer call's callee is always that inner CallExpression).
     const innerCallee = stripWrappers(call.expression);
     if (ts.isCallExpression(innerCallee)) {
-      callbackArg = innerCallee.arguments[innerCallee.arguments.length - 1];
+      callbackArg = innerCallee.arguments.find((argument) =>
+        resolveCallbackFunctionExpression(argument, checker) !== undefined
+      );
     }
   } else if (
     callKind.kind === "builder" &&
@@ -518,17 +532,17 @@ export function getLiftAppliedInputAndCallback(
   // call's callee as a CallExpression (the inner `lift(...)` factory). That is
   // the only way detectCallKind produces kind:"lift-applied" — see its
   // recognition in resolveExpressionKind (requires ts.isCallExpression(target)).
-  // The callback is the last arg of the inner lift call; the input is the first
-  // arg of the outer applied call.
+  // The callback is the first function-valued arg of the inner lift call; the
+  // input is the first arg of the outer applied call. Schema and scheduler
+  // options may trail the callback, so positional "last arg" lookup is not
+  // robust once either has been injected.
   const innerCallee = stripWrappers(call.expression);
   if (!ts.isCallExpression(innerCallee)) {
     return undefined;
   }
-  const callbackIndex = innerCallee.arguments.length - 1;
-  const callbackArg = innerCallee.arguments[callbackIndex];
-  const callback = callbackArg
-    ? resolveCallbackFunctionExpression(callbackArg, checker)
-    : undefined;
+  const callback = innerCallee.arguments
+    .map((argument) => resolveCallbackFunctionExpression(argument, checker))
+    .find((candidate) => candidate !== undefined);
   if (!callback) {
     return undefined;
   }
@@ -918,6 +932,10 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
       );
     case "runtime-call":
       return callKind.reactiveOrigin;
+    case "availability-guard":
+    case "availability-result":
+    case "availability-observer":
+      return true;
     default:
       return false;
   }
@@ -2013,12 +2031,33 @@ function createNamedCallKind(
         : { kind: "generate-text" };
     case "generate-object":
       return symbol
-        ? { kind: "generate-object", symbol }
-        : { kind: "generate-object" };
+        ? { kind: "generate-object", symbol, exportName: name }
+        : { kind: "generate-object", exportName: name };
     case "pattern-tool":
       return symbol
         ? { kind: "pattern-tool", symbol }
         : { kind: "pattern-tool" };
+    case "availability-guard":
+      return symbol
+        ? {
+          kind: "availability-guard",
+          symbol,
+          reason: spec.availabilityReason,
+          variantTypeName: spec.variantTypeName,
+        }
+        : {
+          kind: "availability-guard",
+          reason: spec.availabilityReason,
+          variantTypeName: spec.variantTypeName,
+        };
+    case "availability-observer":
+      return symbol
+        ? { kind: "availability-observer", symbol }
+        : { kind: "availability-observer" };
+    case "availability-result":
+      return symbol
+        ? { kind: "availability-result", symbol }
+        : { kind: "availability-result" };
     case "runtime-call":
       return symbol
         ? {

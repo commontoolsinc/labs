@@ -215,6 +215,60 @@ type CalculatorRequest = {
       ]);
     });
 
+    it("uses a registered type for a qualified synthetic union member", async () => {
+      const generator = new SchemaGenerator();
+      const { checker, type: registeredVariant } = await getTypeFromCode(
+        `interface RegisteredVariant {
+          reason: "error";
+          error: { message: string };
+        }`,
+        "RegisteredVariant",
+      );
+      const registeredMember = ts.factory.createTypeReferenceNode(
+        ts.factory.createQualifiedName(
+          ts.factory.createIdentifier("__cfHelpers"),
+          ts.factory.createIdentifier("HasError"),
+        ),
+        undefined,
+      );
+      const unionNode = ts.factory.createUnionTypeNode([
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        registeredMember,
+      ]);
+      const typeRegistry = new WeakMap<ts.Node, ts.Type>();
+      typeRegistry.set(registeredMember, registeredVariant);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        unionNode,
+        checker,
+        typeRegistry,
+      ) as Record<string, unknown>;
+
+      expect(schema).not.toBe(true);
+      expect(Array.isArray(schema.anyOf)).toBe(true);
+      expect(schema.anyOf as unknown[]).not.toContain(true);
+    });
+
+    it("does not treat a local same-named type as an availability variant", async () => {
+      const generator = new SchemaGenerator();
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `type HasError = { local: string };`,
+        "HasError",
+      );
+
+      const schema = generator.generateSchema(
+        type,
+        checker,
+        typeNode,
+      ) as Record<string, unknown>;
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: { local: { type: "string" } },
+        required: ["local"],
+      });
+    });
+
     it("preserves computed Common Fabric UI keys in synthetic type literals", async () => {
       const generator = new SchemaGenerator();
       const code = `

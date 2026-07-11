@@ -80,8 +80,9 @@ To lower `myBuiltin<Row>(args)` into
   `schema-injection.ts` (the `createToSchemaCall` definition and its call
   sites). The runtime stub that throws when the transformer didn't run is in
   [`packages/runner/src/builder/factory.ts`](../../runner/src/builder/factory.ts).
-- **`generateObject` / `generate-object`** — injects a _result_ schema from a
-  type argument; the closest analog to "result row" lowering. See the
+- **`generateObject` / `generateObjectStream` / `generate-object`** — both
+  public forms share the dedicated call kind which injects a _result_ schema
+  from a type argument; the closest analog to "result row" lowering. See the
   function-first argument-order handling
   (`[function, inputSchema, resultSchema]`) in `schema-injection.ts`.
 - **`lift` / `lift-applied`** — input + result schema injection from two type

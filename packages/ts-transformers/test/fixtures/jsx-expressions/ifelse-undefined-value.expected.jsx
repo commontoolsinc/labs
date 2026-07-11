@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { computed, fetchText, ifElse, pattern, UI } from "commonfabric";
+import { computed, generateTextStream, ifElse, pattern, UI, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     pending: boolean;
-    result: string;
+    result: string | __cfHelpers.IsPending | __cfHelpers.HasError | __cfHelpers.IsSyncing | __cfHelpers.HasSchemaMismatch;
 }, boolean>(({ pending, result }) => pending || !result, {
     type: "object",
     properties: {
@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             type: "boolean"
         },
         result: {
-            type: "string"
+            type: ["object", "string"]
         }
     },
     required: ["pending", "result"]
@@ -29,12 +29,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
-    result: string;
+    result: string | __cfHelpers.IsPending | __cfHelpers.HasError | __cfHelpers.IsSyncing | __cfHelpers.HasSchemaMismatch;
 }, boolean>(({ result }) => !!result, {
     type: "object",
     properties: {
         result: {
-            type: "string"
+            type: ["object", "string"]
         }
     },
     required: ["result"]
@@ -50,8 +50,8 @@ const __cfLift_2 = __cfHelpers.lift<{
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
-    const __cf_destructure_1 = fetchText({
-        url: "/api/data",
+    const __cf_destructure_1 = generateTextStream({
+        prompt: "load data",
     }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({
@@ -62,7 +62,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             result: {
-                type: "string"
+                type: ["object", "string"]
             }
         },
         required: ["result"]
@@ -73,7 +73,7 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     result: {
-                        type: "string"
+                        type: ["object", "string"]
                     }
                 },
                 required: ["result"]
@@ -89,7 +89,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             data: {
-                type: "string"
+                type: ["object", "string"]
             }
         },
         required: ["data"]
@@ -102,7 +102,7 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     data: {
-                        type: "string"
+                        type: ["object", "string"]
                     }
                 },
                 required: ["data"]

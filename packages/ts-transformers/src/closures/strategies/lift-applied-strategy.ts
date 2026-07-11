@@ -18,7 +18,10 @@ import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/cell-type.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
+import {
+  buildCapturePropertyAssignments,
+  groupCapturesByRoot,
+} from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
   normalizeBindingName,
@@ -26,6 +29,20 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import {
+  type AvailabilityCaptureOverride,
+  availabilityOverridesByPath,
+  collectExplicitAvailabilityGuardCaptures,
+  collectObservedAvailabilityCaptures,
+  collectObservedAvailabilityInputPaths,
+  createUnavailableInputPolicyOptions,
+  mergeAvailabilityCaptureOverrides,
+  renameAvailabilityCapturePaths,
+} from "../../availability/captures.ts";
+import {
+  canonicalizeResultOfCaptures,
+  rewriteResultOfAliasReferences,
+} from "../../availability/analysis.ts";
 
 /**
  * Pre-register unwrapped types for captured identifiers in a callback body.
@@ -140,25 +157,33 @@ function getFirstParameterCapabilitySummary(
 
 function createDeriveSchedulerOptions(
   inputParamSummary: CapabilityParamSummary | undefined,
+  availabilityEntries: readonly AvailabilityCaptureOverride[],
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression | undefined {
   const writePaths = inputParamSummary?.writePaths ?? [];
-  if (writePaths.length === 0) return undefined;
-
-  return factory.createObjectLiteralExpression([
-    factory.createPropertyAssignment(
-      "materializerWriteInputPaths",
-      factory.createArrayLiteralExpression(
-        writePaths.map((path) =>
-          factory.createArrayLiteralExpression(
-            path.map((segment) => factory.createStringLiteral(segment)),
-            false,
-          )
+  const additionalProperties: ts.ObjectLiteralElementLike[] = [];
+  if (writePaths.length > 0) {
+    additionalProperties.push(
+      factory.createPropertyAssignment(
+        "materializerWriteInputPaths",
+        factory.createArrayLiteralExpression(
+          writePaths.map((path) =>
+            factory.createArrayLiteralExpression(
+              path.map((segment) => factory.createStringLiteral(segment)),
+              false,
+            )
+          ),
+          false,
         ),
-        false,
       ),
-    ),
-  ], false);
+    );
+  }
+
+  return createUnavailableInputPolicyOptions(
+    availabilityEntries,
+    factory,
+    additionalProperties,
+  );
 }
 
 /**
@@ -379,10 +404,37 @@ export function transformLiftAppliedCall(
 
   // Collect captures
   const collector = new CaptureCollector(checker);
-  const { captures: captureExpressions, captureTree } = collector.analyze(
+  const { captures: authoredCaptureExpressions } = collector.analyze(
     callback,
   );
-  if (captureExpressions.size === 0) {
+  const canonicalCaptures = canonicalizeResultOfCaptures(
+    authoredCaptureExpressions,
+    context,
+  );
+  const captureExpressions = canonicalCaptures.captures;
+  const captureTree = groupCapturesByRoot(captureExpressions);
+  const canonicalCallbackBody = rewriteResultOfAliasReferences(
+    callback.body,
+    canonicalCaptures.aliases,
+    context,
+    context.tsContext,
+  );
+  const observedCaptureEntries = collectObservedAvailabilityCaptures(
+    captureExpressions,
+    context,
+  );
+  const guardedCaptureEntries = collectExplicitAvailabilityGuardCaptures(
+    canonicalCallbackBody,
+    context,
+  );
+  const originalInputAvailabilityPaths = collectObservedAvailabilityInputPaths(
+    originalInput,
+    context,
+  );
+  if (
+    captureExpressions.size === 0 &&
+    originalInputAvailabilityPaths.length === 0
+  ) {
     // No captures - no transformation needed
     return undefined;
   }
@@ -391,7 +443,7 @@ export function transformLiftAppliedCall(
   // This allows nested transformations (like map -> mapWithPattern) to see the
   // correct unwrapped types for captured variables inside this lift-applied callback.
   preRegisterCaptureTypes(
-    callback.body,
+    canonicalCallbackBody,
     captureExpressions,
     checker,
     options.state?.typeRegistry,
@@ -399,7 +451,7 @@ export function transformLiftAppliedCall(
 
   // Recursively transform the callback body first
   const transformedBody = ts.visitNode(
-    callback.body,
+    canonicalCallbackBody,
     visitor,
   ) as ts.ConciseBody;
 
@@ -415,11 +467,30 @@ export function transformLiftAppliedCall(
   // Check if callback originally had zero parameters
   const hadZeroParameters = callback.parameters.length === 0;
 
+  const originalInputAvailabilityEntries = !hadZeroParameters
+    ? originalInputAvailabilityPaths.map((entry) => ({
+      ...entry,
+      path: [originalInputParamName, ...entry.path],
+    }))
+    : [];
+  const availabilityTypeEntries = mergeAvailabilityCaptureOverrides([
+    ...originalInputAvailabilityEntries,
+    ...observedCaptureEntries,
+    ...guardedCaptureEntries,
+  ]);
+
   // Resolve capture name collisions with the original input parameter name
   const captureNameMap = resolveLiftAppliedCaptureNameCollisions(
     hadZeroParameters ? "" : originalInputParamName,
     captureTree,
   );
+  const availabilityPolicyEntries = mergeAvailabilityCaptureOverrides([
+    ...originalInputAvailabilityEntries,
+    ...renameAvailabilityCapturePaths(
+      [...observedCaptureEntries, ...guardedCaptureEntries],
+      captureNameMap,
+    ),
+  ]);
 
   // Build merged input object
   const mergedInput = buildLiftAppliedInputObject(
@@ -464,7 +535,18 @@ export function transformLiftAppliedCall(
   let resultType: ts.Type | undefined;
   let hasTypeParameter = false;
 
-  if (callback.type) {
+  if (
+    ts.isExpression(callback.body) &&
+    ts.isCallExpression(callback.body) &&
+    detectCallKind(callback.body, checker)?.kind === "availability-guard"
+  ) {
+    // As with synthesized direct guards, syntax-only transformer consumers can
+    // see `any` for an unresolved commonfabric predicate. Classification still
+    // proves this callback returns boolean.
+    resultTypeNode = factory.createKeywordTypeNode(
+      ts.SyntaxKind.BooleanKeyword,
+    );
+  } else if (callback.type) {
     // Explicit return type annotation. This may be a synthesized annotation
     // attached upstream (pos < 0) that still carries raw
     // `import("commonfabric").X` refs, so normalize it to `__cfHelpers.X`
@@ -541,13 +623,20 @@ export function transformLiftAppliedCall(
     captureTree,
     captureNameMap,
     hadZeroParameters,
+    availabilityOverridesByPath(availabilityTypeEntries),
   );
   const inputParamSummary = getFirstParameterCapabilitySummary(
     newCallback,
     checker,
     options.state?.typeRegistry,
   );
-  if (inputParamSummary) {
+  if (inputParamSummary && availabilityTypeEntries.length === 0) {
+    // Availability policy is evaluated against the complete serialized module
+    // argument. Capability shrinking can remove an unused-but-present
+    // observed property while the merged input and exact-path policy still
+    // contain it, leaving type/schema/policy out of sync. Preserve the complete
+    // observed input contract; capability analysis is still used below for
+    // materializer write-path scheduler options.
     inputTypeNode = applyShrinkAndWrap(
       inputParamSummary,
       inputTypeNode,
@@ -568,6 +657,7 @@ export function transformLiftAppliedCall(
   }
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,
+    availabilityPolicyEntries,
     factory,
   );
 
