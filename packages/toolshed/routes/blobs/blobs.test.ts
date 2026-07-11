@@ -34,7 +34,8 @@ describe("Blob Routes", () => {
 
   beforeAll(() => {
     server = Deno.serve({ port: 0, onListen: () => {} }, app.fetch);
-    base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const address = server.addr as Deno.NetAddr;
+    base = new URL(`http://${address.hostname}:${address.port}`);
   });
 
   afterEach(async () => {
