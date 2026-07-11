@@ -3,16 +3,18 @@
 Status: design exercise — approaches explored, decision pending. Author:
 design session 2026-07-06; revised same day after review (dual handler
 execution as the event end-state, scoped derivation on the executor as the
-end-state, state-residency §6.7). No implementation in this spec.
+end-state, state-residency §6.7); revised 2026-07-07 (doc-centric demand
+§6.3, SQLite-primary state §6.7, transient executor pass §6.5, reactive
+interpreter de-scoped §3.4). No implementation in this spec.
 
 Related specs: `docs/specs/scheduler-v2/`,
 `docs/specs/persistent-scheduler-state.md`, `docs/specs/pull-based-scheduler/`,
 `docs/specs/content-addressed-action-identity.md`,
 `docs/history/specs/pattern-id-retirement.md`, `docs/specs/memory-v2/`,
 `docs/specs/toolshed-access-control.md`, `docs/specs/cfc-write-prefix-provenance.md`.
-Related in-flight PRs: #4288 (scheduler-v2 cutover), #4514 / #4298 (reactive
-interpreter v2/v1), #4427 (event parking), #4495 (conflict catch-up), #4139
-(seq-token draft), #4115 (closeSpace), #2659 (per-space LLM throttling).
+Related in-flight PRs: #4288 (scheduler-v2 cutover), #4427 (event parking),
+#4495 (conflict catch-up), #4139 (seq-token draft), #4115 (closeSpace),
+#2659 (per-space LLM throttling).
 
 ---
 
@@ -59,9 +61,9 @@ end-state.** B matches the product need (races on derived data disappear structu
 async is reliable; clients keep instant local feedback), reuses today's
 commit/conflict machinery for the remaining genuine contention on source
 writes, and can fall back to today's behavior per space via a flag. D is not
-a distinct migration target but where B trends as RI + VNode-doc
-consolidation land: clients that *choose* not to speculate get a working,
-slightly-laggier UI for free.
+a distinct migration target but where B trends if render output ever
+becomes doc data (§3.4): clients that *choose* not to speculate get a
+working, slightly-laggier UI for free.
 
 The load-bearing enablers are mostly already in the tree behind flags:
 persistent scheduler state (cheap spin-up/down of per-piece graphs —
@@ -69,10 +71,13 @@ BUILT behind `persistentSchedulerState`, §3.2), scheduler v2
 (bounded settle, static write surfaces, read-delta bookkeeping), source
 linking via the `source`/`pattern` doc annotations + content-addressed
 action identity (stale doc → producing piece → runnable action; §3.3.1's
-write-path stamping is what makes the chain universal), and the reactive
-interpreter (execution density on the server). §9 is a register of the gaps that remain even after all of those
-land — the two largest are **executor authority/identity** (§9 G1–G3) and
-**the derived/source write split in the runner** (§9 G5).
+write-path stamping is what makes the chain universal). Execution density
+on the server is carried by the SQLite-primary state model (§6.7) — idle
+spaces cost no memory, workers can be transient (§6.5) — not by any new
+execution engine (§3.4). §9 is a register of the gaps that remain even
+after all of those land — the two largest are **executor
+authority/identity** (§9 G1–G3) and **the derived/source write split in
+the runner** (§9 G5).
 
 ---
 
@@ -322,30 +327,28 @@ a sigil-link extension of `source` or an accepted walk fallback), and
 space root, which is exactly the nesting the walk expects). Docs created
 before stamping ships still need the one-time G6 audit-and-backfill.
 
-### 3.4 Reactive interpreter (#4514; v2 supersedes #4298; nothing on main)
+### 3.4 Reactive interpreter — de-scoped (delayed; not a dependency)
 
-One trusted interpreter node per pattern (`kind: "builtin"`) over a
-serializable, content-addressed ROG; leaf closures still run in SES; Tier
-1–2 expression lowering interprets simple functions natively. Measured on
-the RI branch: rendered-list docs/element 3→1ish (notes-list docs/note
-5→2, nodes 5→3), overall docs −34%, 88.4% op engagement, 123/173 corpus
-patterns fully interpretable. v2 emits the ROG as a compiled artifact —
-i.e., a piece's dataflow becomes *data* the server can load without
-executing pattern module code.
+An earlier revision listed the reactive-interpreter line of work as a
+density/spin-up accelerator for the executor. That work is delayed, and
+this design no longer references or depends on it: everything here runs
+on today's compiled pattern path (per-piece SES sandboxes, current doc
+counts). The de-scope was checked deliberately and invalidates nothing:
 
-Contribution to this design: **density and spin-up cost**. Without RI a
-server executor is browser-parity: per-piece SES sandboxes and 5+3N docs
-per collection. With RI, interior dataflow is pure in-memory evaluation and
-only externally-reachable cells become docs.
+- **Density** is carried by the SQLite-primary state model instead
+  (§6.7): parked spaces cost zero memory, workers can be transient
+  (§6.5), and module/compile caches are shared per host — executor
+  economics do not rest on cheaper per-piece execution.
+- **Scoped derivation on the executor** (§5.B.6, Phase 4) is
+  engine-agnostic: it runs on the compiled path; nothing waits for an
+  interpreter.
+- **D-projector mode** loses its intended mechanism (render output
+  stored as VNode docs was prototyped on that line of work); it was
+  already a bookend rather than a migration target and is now explicitly
+  deferred (§10.6).
 
-Caveats that matter here (G8): the cross-space pull-amplification loop
-(~226–270× re-sync on reader-isolated cross-space docs) and the F4 I/O
-coalescing conflict ratchet both currently gate RI default-on; **scoped
-(PerUser/PerSession) outputs are excluded from interpretation today** —
-tolerable during the transitional carve-out (§5.B.6) but a real gap for the
-end-state, where scoped derivation runs on the executor precisely because
-its integrity matters most (G16). RI is an *optimizer* for the executor, not a
-prerequisite: every approach below works with the compiled path first.
+If that work later revives, it slots back in as a pure optimizer — no
+interface in this design changes.
 
 ### 3.5 Deliberately not assumed
 
@@ -589,13 +592,8 @@ where the most personal data lives. That is more machinery, so it phases:
   session state of *disconnected* sessions has no consumers by
   construction.
 
-Two consequences elsewhere in the stack:
+One consequence elsewhere in the stack:
 
-- The RI currently refuses to interpret scoped outputs. As a client-side
-  fallback that was tolerable; for the executor it is a real gap — scoped
-  derivation is precisely where trusted execution is wanted — so RI
-  scoped-output interpretation graduates from design exclusion to work
-  item (G16).
 - Executor-computed scoped writes need the same endorsement treatment as
   space-scoped ones (§5.B.7): the integrity claim is "computed by the
   trusted executor from these inputs", regardless of scope.
@@ -735,8 +733,9 @@ default event path.
 ### Approach D — Thin projector (server renders everything)
 
 **Model.** Clients run nothing: the server computes all derived data
-*including VNode docs* (the RI-branch §4.8 consolidation stores rendered
-VNode subtrees inline in docs — on the RI branch, not main), and clients
+*including VNode docs* (requires render output stored inline in docs —
+prototyped only on the de-scoped interpreter branch, not on main,
+currently unscheduled; §3.4), and clients
 are DOM projectors: materialize VNode docs via the existing reconciler,
 send events (as C envelopes), echo input locally.
 
@@ -798,27 +797,49 @@ docs D₁..Dₖ changed". This is the "replace the cell-get mechanism with
 reading the local sqlite" goal, expressed at the provider seam so the
 runner is unchanged.
 
-### 6.3 What runs: interest sets
+### 6.3 What runs: demand, not pieces
+
+The unit of demand is the **doc**, not the piece. The scheduler is
+already pull-based — computations run only when demanded — so the only
+real design question is where demand comes from. Answer: the docs
+clients actually read, plus standing registrations for work with no
+client-read output. "Run this piece" is not a concept the client or the
+protocol needs; the client just pulls data.
 
 A space is *active* when any of:
 
-1. a client session declares interest — the client already knows its open
-   pieces (space root pattern + navigated piece); a new
-   `session.interest.set {space, pieces: <ids> | "*"}` message replaces
-   `session.watch.set` (G7). `.pull()`-driven fine-grained interest is a
-   later refinement — pull is one-shot today
-   (`packages/runner/src/cell.ts:1032`) and there is no standing pulled-set
-   to export (agent-verified gap);
-2. a persisted registration says so (BG pieces, timers, webhooks — today's
-   bps registry generalized);
-3. an incoming commit touches a doc that the **persisted read index** maps
-   to some piece's stale downstream (the §3.2 readers index) — wake, catch
-   up, hibernate.
+1. **Client-read demand:** the docs a client session reads — which is
+   exactly the session's feed set (§6.4), so the server already holds it;
+   in the limit no separate declaration protocol is needed. v1 grain is
+   coarser — a `session.interest.set {space, pieces: <ids> | "*"}`
+   message replacing `session.watch.set` (G7) — because a standing
+   per-doc pulled-set export from clients doesn't exist yet
+   (`.pull()` is one-shot, `packages/runner/src/cell.ts:1032`). The
+   message is a granularity hint over the doc-centric model, not the
+   model.
+2. **Standing registrations:** pieces whose value is their effects rather
+   than client-read outputs (importers, BG work, timers, webhook
+   targets) — today's bps registry generalized. These are the only place
+   a piece-shaped declaration survives, because no pulled doc can imply
+   them.
+3. **Wake-on-commit:** an incoming commit touches a doc that the
+   **persisted read index** maps to some demanded-but-parked downstream
+   (the §3.2 readers index) — wake, catch up, hibernate.
 
-Within an active space the executor's demand roots are: each interested
-piece's result graph (coarse per-piece demand — matches the space-root
-model) minus scoped subtrees (B.6), plus async builtins, minus render
-effects unless projector mode is on.
+Serving a demanded doc: if it is stale (readers/write-index watermark),
+the `source`→`pattern` walk on the doc (§3.3) names the producing piece;
+the worker instantiates it — rehydrated, so nothing re-runs except the
+stale subgraph — and pulls **that doc**, not the piece's whole result
+graph. The piece survives only as the code-loading unit
+(`patternIdentity` → module), the observation key (`pieceId`), and the
+CFC identity context — not as a scheduling concept. Per-piece demand
+roots (pull the piece's result cell) are the v1 *implementation* — a
+coarse over-approximation of the demanded doc set — and narrow to
+per-doc pulls as interest granularity improves.
+
+Always excluded from executor demand: scoped subtrees (B.6, until the
+scoped-execution phase) and render effects (unless projector mode is
+on).
 
 ### 6.4 Client feed (replacing graph-query subscriptions)
 
@@ -868,13 +889,22 @@ executor's own cross-space reads).
    stream from S. It also registers `onSpaceCommit` for every OTHER
    space in the pieces' read closures (§6.8).
 
-Cold-start cost without RI ≈ pattern load (compileCache by identity,
+Cold-start cost ≈ pattern load (compileCache by identity,
 single-flighted, plus a process-wide disk byte cache; pre-seed system
 patterns — the browser-wedge follow-up applies server-side directly) +
-observation rehydrate + the stale subset only. With RI v2, ROG artifacts
-replace pattern execution for the interpretable corpus. Parked→live is
-therefore far below a browser cold boot — which is what makes aggressive
+observation rehydrate + the stale subset only. Parked→live is therefore
+far below a browser cold boot — which is what makes aggressive
 hibernation viable.
+
+The limit case is the **transient executor pass**: because scheduler
+bookkeeping is SQLite-primary (§6.7), a worker need not outlive its work
+— wake, reconstruct the workset (`scheduler_action_state` dirty markers
+∩ demand, scanning only state changes past the worker's last-settled
+seq), instantiate only the affected pieces, settle (bounded by
+scheduler-v2's pass budget, so interruption is safe), write back, exit.
+Worker lifetime becomes a latency/cache-warmth policy knob, not a
+correctness concern; an idle space costs zero RAM. The liveness pins
+below are that policy's defaults, not requirements.
 
 **Liveness — what keeps a worker alive:**
 
@@ -912,7 +942,7 @@ hibernation viable.
 ### 6.6 Isolation and resources
 
 - Pattern leaf code still runs in SES inside the worker (same sandbox story
-  as clients); the RI shrinks how much code that is. Deno worker permissions
+  as clients). Deno worker permissions
   pin the executor's net access to the engine channel + toolshed-internal
   routes (LLM proxy); pattern-level `fetch` egress goes through the fetch
   builtin, now server-side — apply per-space egress policy + the #2659-style
@@ -926,33 +956,56 @@ hibernation viable.
   concern; single-writer-per-space makes it embarrassingly shardable by
   space DID (G14 notes the coordination primitive).
 
-### 6.7 State residency: what lives in memory vs on disk
+### 6.7 State residency: SQLite is primary, memory is a cache
 
-The scheduler state that replaces subscriptions exists in three tiers with
-different residency and different correctness weight:
+With observation persistence in the tree (§3.2 — durable tables
+including `scheduler_action_state` with dirty markers), nearly all
+scheduler bookkeeping is already durable, transaction-coupled with the
+commits it describes. The design therefore treats **SQLite as the
+primary store of scheduler state, and worker memory as a materialized
+view** rebuilt on demand:
 
-1. **Live tier — memory, per active space worker.** Node records, trigger
-   index, liveness refcounts, gate timers. Authoritative *while hot*; this
-   is what evaluates invalidations and drives the feed for connected
-   sessions. Lost on worker crash or hibernation, by design.
-2. **Durable tier — SQLite, transaction-coupled.** The observation rows
+1. **Primary tier — SQLite, transaction-coupled.** The observation rows
    (reads / writes / `observedAtSeq` / gate options per action,
-   `packages/runner/src/scheduler/persistent-observation.ts:22`) plus the
-   doc→readers index derived from them (G4), written in the same
-   transaction as the commits they describe. Three consumers: rehydration
-   on spin-up, wake-on-commit (the engine answers "does this commit make
-   any parked piece stale?" with one indexed lookup, no worker running),
-   and the derived-from watermark on commits (§5.B.4). The *producer*
+   `packages/runner/src/scheduler/persistent-observation.ts:22`), the
+   read/write indexes, and `scheduler_action_state` including dirty
+   markers — written in the same transaction as the commits they
+   describe. Consumers: rehydration on spin-up, wake-on-commit (the
+   engine answers "does this commit make any parked piece stale?" with
+   one indexed lookup, no worker running), the derived-from watermark on
+   commits (§5.B.4), and workset reconstruction (below). The *producer*
    direction is not part of this tier at all: `source`/`pattern`
    annotations ride the docs themselves (§3.3) — write-side provenance is
    ground truth, not an index.
+2. **Cache tier — memory, per live worker.** The RAM residue, enumerated
+   — everything here is rebuildable from tier 1, which is what makes the
+   transient executor pass (§6.5) legal:
+   - the runnable code graph (module closures, instantiated pieces): a
+     cache keyed by `patternIdentity`, shareable across every space on
+     the host and backed by the disk compile cache;
+   - decoded doc values (JSON decode dominates the ~2µs synchronous
+     read): an LRU decode cache — the "bit of caching";
+   - per-pass computation: the workset toposort, derived each settle
+     pass from the durable edge tables restricted to the workset (it was
+     never persistent state), plus trigger-index/dependents maps as
+     write-through caches of the durable indexes;
+   - soft scheduling state (gate timers, debounce/backoff eligibility):
+     resets on restart fail-open — worst case a run fires slightly early
+     or late, never incorrectly.
 3. **Session tier.** The delivery cursor (`seenSeq`) is already durable in
    the session-resume sense. The per-session **interest declaration**
    (space + piece ids) is persisted with the session; the derived doc-id
    **closure is deliberately not persisted** — it is recomputed on session
-   open from the declaration plus tier 2 (or the live scheduler when the
+   open from the declaration plus tier 1 (or the live cache when the
    space is hot), because closures churn with every read-delta and the
    durable read index is already their source of truth.
+
+The work queue is a query, not a data structure: the settle workset is
+`scheduler_action_state` dirty markers ∩ demand, reconstructed on wake by
+scanning state changes past the worker's last-settled seq (the drain
+protocol's watermark, §6.5), and ordering is computed per pass. Nothing
+queue-shaped needs separate persistence or periodic flushing — the
+per-commit state updates *are* the flush.
 
 Rules that keep this sound:
 
@@ -966,17 +1019,22 @@ Rules that keep this sound:
 - **Fail-open to recompute.** Missing, stale, or corrupt observations
   degrade to re-running actions (the persistent-scheduler-state spec's
   invariant: never incorrect cleanliness, at worst wasted recompute). The
-  live tier is therefore always rebuildable: worker crash → rehydrate from
-  tier 2; tier 2 damaged → cold re-run, i.e. today's behavior.
+  cache tier is therefore always rebuildable, and only from durable
+  state: worker crash → rehydrate from the SQLite primary (tier 1);
+  damaged/missing primary rows → cold re-run, i.e. today's behavior. The
+  cache tier is never a recovery source.
 - **Per-commit work stays memory-resident for hot spaces.** Feed fan-out
   consults in-memory per-session doc-sets; the disk index is consulted
   per-commit only on the cold path (no worker, no sessions — the
   wake-on-commit lookup), a single indexed read (µs-scale; reads are
-  synchronous FFI).
-- **Growth and compaction.** Observations are last-write-wins per
-  `actionId` (keep latest; no history requirement); no-op observations are
-  batch-elided (`schedulerObservationBatch`, planned in the spec); a
-  space's rows drop wholesale with the space.
+  synchronous FFI). SQLite-primary sets the *authority* order, not the
+  hot-path data flow.
+- **Growth and compaction.** The action snapshot is last-write-wins per
+  `actionId`; no-op observations are elided (`payloadChanged` gating,
+  `schedulerObservationBatch` — shipped); a space's rows drop wholesale
+  with the space. The `scheduler_observation` history table is the one
+  unbounded-growth surface — compaction policy is an adopt-phase question
+  (W0.1 records it).
 
 ### 6.8 Cross-space
 
@@ -1001,9 +1059,10 @@ deployment; federation is noted at the end.
   the exception propagates); it self-heals via the config write.
   Exceptions retry on config epoch bumps (e.g. when B later opts in).
 - **Scoped cross-space state** — the known pathological case
-  (reader-isolated cross-space PerUser docs drove the RI ~270×
-  re-run amplification) — is already excluded by the scope carve-out
-  (W2.5): the executor never demands scoped subtrees, local or remote.
+  (reader-isolated cross-space PerUser docs drove a measured ~270×
+  re-run amplification in earlier experiments) — is already excluded by
+  the scope carve-out (W2.5): the executor never demands scoped
+  subtrees, local or remote.
 - **Derived writes into another space.** Rare — cross-space writes are
   mostly handler-driven, and handler writes are client-committed source
   writes, unchanged. When a derived/materializer write targets
@@ -1071,16 +1130,16 @@ with C's envelope designed (not built) from the start:
    serialization-ready), adopted per-handler, then as the default event
    path.
 5. **D-projector** as a boot *mode* riding B (server-computed state first
-   paint), contingent on the RI/VNode consolidation landing.
+   paint), deferred until render output is stored as doc data (§3.4,
+   §10.6).
 
 ---
 
 ## 8. Phased plan
 
-Phases assume #4288 and the persistent-scheduler-state wiring land first;
-RI (#4514) accelerates but does not gate any phase. Executable work
-orders with per-step success criteria and review checklists:
-[implementation-plan.md](./implementation-plan.md).
+Phases assume #4288 and the persistent-scheduler-state wiring land first.
+Executable work orders with per-step success criteria and review
+checklists: [implementation-plan.md](./implementation-plan.md).
 
 - **Phase 0 — foundations (gap closure).** Persistent-state memory tables +
   commit wiring + doc→readers index (G4); tx-provenance source stamping
@@ -1104,8 +1163,7 @@ orders with per-step success criteria and review checklists:
   from server state before local warm-up; projector mode where VNode docs
   exist.
 - **Phase 4 — scoped execution.** User-partition delegation (G3) +
-  per-user demand roots; executor endorsement atom on scoped writes; RI
-  scoped-output interpretation (G16) if RI is the executor engine by then.
+  per-user demand roots; executor endorsement atom on scoped writes.
 - **Phase 5 — dual handler execution (C).** Signed event envelopes
   (`serialize: "server"` handlers first, then the default event path);
   the server runs handlers authoritatively while clients keep running them
@@ -1128,7 +1186,7 @@ means a design doc/decision is required before implementation.
 | G5 | Runner write split: route tx by originating action kind (rides the §3.3.1 tx provenance envelope); speculative overlay in `ISpaceReplica`; read layering; per-space ownership bit (sticky flag) | B | needs-spec (this doc §5.B.1) + impl |
 | G6 | Source attaching in the write path (§3.3.1: tx provenance envelope, transferred to created docs at apply) + one-time legacy audit/backfill of pre-stamping docs | catch-up completeness | needs-impl (mechanism); then audit |
 | G7 | `session.interest.set` + doc-set delta feed (+ watermark field); closure export from executor scheduler | A (feed), B | needs-spec (protocol addition) |
-| G8 | RI gates: cross-space pull-amplification loop; F4 I/O coalescing ratchet; scoped-output exclusion (by design) | RI-on-executor only | tracked in RI specs; not on B's critical path |
+| G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space: v1 policy designed (§6.8 — same-principal reads between enabled spaces; unservable-piece carve-out via `executorConfig.unservablePieces`; deployment-level readers index). Residuals: per-subgraph granularity, federation | B completeness | §6.8 designed; residuals later |
 | G10 | Watermark surfacing: `observedAtSeq` onto derived commits (via the §3.3.1 envelope); confirmation already returns source seq | B reconciliation | small, rides G4 + G6 mechanism |
 | G11 | Server-side async policy: per-space egress/throttle (#2659), retry/circuit-breaker, in-flight registry keyed `(actionId, inputHash)`, heartbeat/reclaim | A | partial (idempotency keys, toolshed LLM cache exist); needs-impl |
@@ -1136,7 +1194,7 @@ means a design doc/decision is required before implementation.
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |
 | G14 | Multi-executor coordination (space→executor affinity lease) | multi-machine scale | needs-spec later; single-writer-per-space makes it a lease, not consensus |
 | G15 | Client pending-commit durability (true offline) | orthogonal | out of scope here; noted |
-| G16 | RI scoped-output interpretation (excluded by design today; required once the executor computes scoped derivations) | scoped execution on RI | needs-design in RI v2 |
+| G16 | (retired — scoped execution runs on the compiled path; no execution-engine work gates it, §3.4) | — | retired |
 
 Cross-engine idempotency (the intent/attempt-cell ledger from
 `cfc-runner-future-work.md` Tier 2) is deliberately *not* listed as a B
@@ -1166,6 +1224,8 @@ single authoritative run per event is preserved.
    (co-process, simplest) vs a sibling service with the engine extracted
    behind the in-process channel? Phase 1 forces no commitment; the
    provider seam (G0) is the interface either way.
-6. **Render effects on the executor (D-mode):** gate on RI §4.8 landing, or
-   build a compiled-path VNode materialization for projector boot? Proposal:
-   gate on RI; projector mode is Phase 3+.
+6. **Render effects on the executor (D-mode):** projector boot needs
+   render output stored as doc data, and the work that prototyped that is
+   de-scoped (§3.4). Build a compiled-path VNode materialization, or
+   defer projector mode entirely? Proposal: defer; revisit only with a
+   concrete cold-boot/embed use case.

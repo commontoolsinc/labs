@@ -219,6 +219,23 @@ field, or provider method — they exist.
    is hardcoded `0` on read and write, so cross-generation invalidation is
    not exercised; per-restart generation bumping is a hibernate/resume
    identity concern deferred to W1.1.
+5. **Pin handler coverage (persistence only — NOT rehydration).**
+   Persistence should cover event-handler runs, not only
+   computations/effects: the vocabulary already has `"event-handler"` /
+   `"event-preflight"` kinds
+   (`packages/runner/src/scheduler/persistent-observation.ts:9,14`), but
+   `attachSchedulerActionObservation` is wired only at the action-run
+   seam (`packages/runner/src/scheduler/action-run.ts:521`), while
+   handlers dispatch through `dispatchQueuedEvent` with an event payload
+   — a different path. Determine whether that event-commit path attaches
+   observations for handler runs; if it does, pin it with a test; if it
+   does not, wire the attach at the event-commit seam and pin it. Scope
+   note: there is nothing to *rehydrate* for handlers — they run only
+   when an event arrives, and their registration comes from piece
+   instantiation, not from restored scheduler `Action`s. The value of
+   persisting handler observations is (a) their reads populate the
+   readers index (wake/staleness bookkeeping) and (b) run provenance —
+   not skip-on-restart.
 
 **Success criteria (most already pass — this WO proves the DELTA, not the
 substrate):**
@@ -251,6 +268,13 @@ substrate):**
       remains under `docs/specs/server-side-execution/` — only the
       historical rename note (§0.3, this WO's step 1) may mention the old
       name.
+- [ ] **Handler coverage (step 5, persistence only):** a fixture
+      event-handler run under the flag persists an observation with
+      `actionKind: "event-handler"` whose reads land in the readers
+      index; red run first if the event-path wire turns out to be
+      missing. Explicitly NOT asserted: any rehydration/registration
+      restore for handlers (no such path exists; see step 5's scope
+      note).
 
 **Review checklist:**
 
@@ -635,7 +659,9 @@ envelope conventions).
    grow). A session in interest mode for a space suppresses graph-query
    refresh for that space and instead receives `SessionSync` upserts for
    ALL changed docs in the space (compute from changed ids directly; no
-   graph re-evaluation).
+   graph re-evaluation). Framing: the message is a granularity hint over
+   the doc-centric demand model (README §6.3) — the target grain is the
+   session's read doc-set, with per-piece as the intermediate step.
 2. Catch-up: reuse the existing `seenSeq`→head resume path for interest
    sessions (it already iterates commits by seq).
 3. Client: behind `CF_INTEREST_FEED`, the shell/runtime sends
@@ -727,7 +753,11 @@ README §6.1–§6.5.
    interested piece → `resultCell.pull()` → await settle → await
    `runtime.settled()` (async builtins). Explicitly DO NOT register a
    standing schema-less sink over piece state (this exact shape caused a
-   ~270× re-run amplification; reviewers will reject it).
+   ~270× re-run amplification; reviewers will reject it). Per-piece pulls
+   are the v1 implementation of doc-centric demand (README §6.3) — a
+   coarse over-approximation of the demanded doc set. Keep the loop's
+   interface "wake with a stale doc/piece list" so narrowing to per-doc
+   pulls later is a loop change, not an architecture change.
 5. Hibernation: idle timer (no commits, no in-flight async for N min,
    default 10 to match the existing worker timeout) → `runtime.settled()`
    → per-space storage teardown (`StorageManager.closeSpace` ships with
@@ -1135,14 +1165,15 @@ folder for flagging a space on/off in staging.
   exit + W0.7 piece-granular interest (needs the executor to export
   per-piece read closures — design a small spec addendum first: closure
   export format, update cadence, cross-space handling per README §6.4).
-  Projector boot additionally gates on the RI-branch VNode-doc
-  consolidation landing on main (it is NOT on main today).
+  Projector boot additionally requires render output stored as VNode
+  docs — prototyped only on the de-scoped interpreter branch (README
+  §3.4), currently unscheduled — treat projector boot as deferred.
 - **Phase 4 — scoped execution.** Entry: README §10.4 decided
   (delegation shape: standing grant vs session-minted tokens; sub-worker
-  vs per-user demand roots) → G3 spec written and reviewed; G16 (RI
-  scoped-output interpretation) if RI is the executor engine by then;
-  executor endorsement atom spec (G1's second half) — coordinate with
-  CFC owners, it touches `writeAuthorizedBy`/integrity machinery.
+  vs per-user demand roots) → G3 spec written and reviewed; executor
+  endorsement atom spec (G1's second half) — coordinate with CFC owners,
+  it touches `writeAuthorizedBy`/integrity machinery. (Scoped execution
+  is engine-agnostic — runs on the compiled path; README §3.4.)
 - **Phase 5 — dual handler execution.** Entry: G13 envelope spec written
   (serialize trusted-event provenance; replay protection; verify path —
   precedent: `docs/specs/toolshed-access-control.md` request proofs) and
