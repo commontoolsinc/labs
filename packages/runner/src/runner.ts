@@ -259,6 +259,25 @@ function pathsEqual(
     left.every((part, index) => part === right[index]);
 }
 
+function handlerCapturedArgumentSchema(
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!isRecord(schema) || !isRecord(schema.properties)) {
+    return undefined;
+  }
+
+  const properties = { ...schema.properties };
+  delete properties.$event;
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((key) => key !== "$event")
+    : undefined;
+  return {
+    ...schema,
+    properties,
+    ...(required !== undefined && { required }),
+  } as JSONSchema;
+}
+
 function policyAcceptsUnavailableInput(
   policy: readonly UnavailableInputPolicyEntry[] | undefined,
   path: readonly string[],
@@ -3889,11 +3908,43 @@ export class Runner {
       }
       : undefined;
 
+    const capturedInputs = { ...(inputs as Record<string, any>) };
+    delete capturedInputs.$event;
+    const capturedInputModule: Module = {
+      ...module,
+      argumentSchema: handlerCapturedArgumentSchema(module.argumentSchema),
+      ...(module.unavailableInputPolicy !== undefined && {
+        unavailableInputPolicy: module.unavailableInputPolicy.filter(
+          (entry) => entry.path[0] !== "$event",
+        ),
+      }),
+    };
+    const inputReadiness = (
+      readinessTx: IExtendedStorageTransaction,
+      _event: any,
+    ): boolean => {
+      const inputsCell = this.runtime.getImmutableCell(
+        processCell.space,
+        capturedInputs,
+        undefined,
+        readinessTx,
+      );
+      return this.readJavaScriptArgument(
+        capturedInputModule,
+        inputsCell,
+        readinessTx,
+        {
+          writableProxy: (module as { writableProxy?: boolean }).writableProxy,
+        },
+      ).isValidArgument;
+    };
+
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
       module,
       pattern,
+      inputReadiness,
       ...(presyncInputs !== undefined && { presyncInputs }),
     });
 

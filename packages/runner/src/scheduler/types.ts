@@ -45,6 +45,16 @@ export type EventHandler =
       event: any,
     ) => void;
     /**
+     * Optional pre-dispatch readiness check for handler inputs. It runs in the
+     * same read-only transaction as dependency discovery so an unavailable
+     * input can park the original queued event on the exact reads that will
+     * wake it. Returning false must not invoke the handler or settle its event.
+     */
+    inputReadiness?: (
+      tx: IExtendedStorageTransaction,
+      event: any,
+    ) => boolean;
+    /**
      * Optional callback to ensure the handler's input docs are locally
      * available before the handler body runs. A handler reads its asCell
      * inputs (e.g. a SqliteDb handle) synchronously from the local replica;

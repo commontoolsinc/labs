@@ -356,6 +356,89 @@ describe("scheduler event lineage", () => {
     expect(payloads.get()).toEqual([]);
   });
 
+  it("does not dispatch a same-space descendant whose origin fails during presync", async () => {
+    const streamA = runtime.getCell<unknown>(
+      space,
+      "lineage presync origin stream",
+      undefined,
+      tx,
+    );
+    const streamB = runtime.getCell<unknown>(
+      space,
+      "lineage presync descendant stream",
+      undefined,
+      tx,
+    );
+    const originWrites = runtime.getCell<number>(
+      space,
+      "lineage presync origin writes",
+      undefined,
+      tx,
+    );
+    streamA.set({ $stream: true });
+    streamB.set({ $stream: true });
+    originWrites.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const presyncStarted = Promise.withResolvers<void>();
+    const releasePresync = Promise.withResolvers<void>();
+    let descendantCalls = 0;
+    const handlerA: EventHandler = (handlerTx) => {
+      originWrites.withTx(handlerTx).set(1);
+      runtime.scheduler.queueEvent(
+        streamB.getAsNormalizedFullLink(),
+        "descendant",
+        undefined,
+        undefined,
+        false,
+        { originTx: handlerTx },
+      );
+    };
+    const handlerB: EventHandler = () => {
+      descendantCalls++;
+    };
+    handlerB.presyncInputs = async () => {
+      presyncStarted.resolve();
+      await releasePresync.promise;
+    };
+    runtime.scheduler.addEventHandler(
+      handlerA,
+      streamA.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.addEventHandler(
+      handlerB,
+      streamB.getAsNormalizedFullLink(),
+    );
+
+    const gate = delayNextServerTransact(storageManager);
+    const originSettled = Promise.withResolvers<void>();
+    try {
+      // Opt out of retry so the injected origin conflict is a final failure.
+      runtime.scheduler.queueEvent(
+        streamA.getAsNormalizedFullLink(),
+        {},
+        false,
+        () => originSettled.resolve(),
+      );
+      await waitForSignal(gate.started, "origin commit did not start");
+      await waitForSignal(
+        presyncStarted.promise,
+        "descendant presync did not start",
+      );
+
+      gate.fail();
+      await originSettled.promise;
+      releasePresync.resolve();
+      await runtime.idle();
+
+      expect(descendantCalls).toBe(0);
+    } finally {
+      releasePresync.resolve();
+      gate.restore();
+    }
+  });
+
   it("keeps retried same-space follow-ups lineage-gated", async () => {
     const streamA = runtime.getCell<unknown>(
       space,

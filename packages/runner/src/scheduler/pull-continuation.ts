@@ -12,12 +12,14 @@ export function applyPullExecuteContinuation(
   // In pull mode, we consider ourselves done when there are no effects or
   // effect-demanded computations to execute.
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
+  const hasInputParkedHeadEvent = state.hasInputParkedHeadEvent();
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
     !isHeadEventParked(state.eventQueueWakeState) &&
-    !hasPendingLineageHeadEvent;
+    !hasPendingLineageHeadEvent &&
+    !hasInputParkedHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
     (isHeadEventParked(state.eventQueueWakeState) ||
-      hasPendingLineageHeadEvent);
+      hasPendingLineageHeadEvent || hasInputParkedHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 

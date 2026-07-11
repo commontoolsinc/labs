@@ -27,6 +27,7 @@ export interface ExecuteContinuationState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly hasPendingLineageHeadEvent: () => boolean;
+  readonly hasInputParkedHeadEvent: () => boolean;
   readonly resetLoopCounter: () => void;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;

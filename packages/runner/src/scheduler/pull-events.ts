@@ -46,6 +46,7 @@ export async function processPullQueuedEventDuringExecute(
       queuedEvent.eventLink.space,
     ) !== undefined;
     if (originStatus === "failed") {
+      state.clearEventInputWait(queuedEvent);
       state.eventQueue.shift();
       state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
       logger.debug("scheduler-lineage", () => [
@@ -58,6 +59,14 @@ export async function processPullQueuedEventDuringExecute(
       return;
     }
   }
+
+  if (state.isEventWaitingForInput(queuedEvent)) {
+    return;
+  }
+
+  // A one-shot input watcher has fired and cleared its parked bit. Remove its
+  // now-empty scheduler action before rechecking readiness or dispatching.
+  state.clearEventInputWait(queuedEvent);
 
   if (
     queuedEvent.notBefore !== undefined &&
@@ -86,10 +95,44 @@ export async function processPullQueuedEventDuringExecute(
     crossSpaceParkState.set(queuedEvent, parkState);
   }
 
+  // Sync handler-only input cells before readiness preflight. Keeping this
+  // await before the queue shift means readiness is checked again after the
+  // async boundary; once preflight says ready, dispatch reaches the handler
+  // body without another await in which the input could become unavailable.
+  // Fail open so the readiness/read path surfaces the actual state.
+  if (typeof handler.presyncInputs === "function") {
+    try {
+      await handler.presyncInputs(queuedEvent.event);
+    } catch (error) {
+      logger.warn(
+        "scheduler",
+        "handler input presync failed; checking readiness anyway",
+        { error, handlerId },
+      );
+    }
+  }
+
+  // Presync is an async boundary. A speculative origin can fail while it is
+  // in flight, and its lineage callback removes this exact queue object. Never
+  // continue into readiness/dispatch for a removed or newly-failed event.
+  if (state.eventQueue[0] !== queuedEvent) return;
+  if (
+    queuedEvent.originTx !== undefined &&
+    state.lineageStatus(queuedEvent.originTx) === "failed"
+  ) {
+    state.clearEventInputWait(queuedEvent);
+    state.eventQueue.shift();
+    state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+    return;
+  }
+
   // Ensure handler dependencies are computed before running.
   let shouldSkipEvent = false;
-  if (handler.populateDependencies) {
-    const preflight = preflightQueuedEventDependencies({
+  let preflight:
+    | ReturnType<typeof preflightQueuedEventDependencies>
+    | undefined;
+  if (handler.populateDependencies || handler.inputReadiness) {
+    preflight = preflightQueuedEventDependencies({
       runtime: state.runtime,
       eventQueue: state.eventQueue,
       dirty: state.dirty,
@@ -126,7 +169,7 @@ export async function processPullQueuedEventDuringExecute(
         pendingSizeBefore: preflight.pendingSizeBefore,
         dirtyDependencyCount: preflight.dirtyDeps.size,
         hasDirtyDependencies: preflight.hasDirtyDependencies,
-        skipped: shouldSkipEvent,
+        skipped: shouldSkipEvent || preflight.shouldParkForInputs,
         populateMs: preflight.populateMs,
         txToLogMs: preflight.txToLogMs,
         depCommitMs: preflight.depCommitMs,
@@ -185,6 +228,11 @@ export async function processPullQueuedEventDuringExecute(
       });
       return;
     }
+  }
+
+  if (preflight?.shouldParkForInputs) {
+    state.parkEventUntilInputChanges(queuedEvent, preflight.deps);
+    return;
   }
 
   await dispatchQueuedEvent({

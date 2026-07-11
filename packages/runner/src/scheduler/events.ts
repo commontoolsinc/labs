@@ -106,6 +106,7 @@ export function isHeadEventParked(
 
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
+  shouldParkForInputs: boolean;
   deps: ReactivityLog;
   dirtyDeps: Set<Action>;
   hasDirtyDependencies: boolean;
@@ -309,6 +310,12 @@ export interface SchedulerEventExecutionState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly isEventWaitingForInput: (event: QueuedEvent) => boolean;
+  readonly parkEventUntilInputChanges: (
+    event: QueuedEvent,
+    dependencies: ReactivityLog,
+  ) => void;
+  readonly clearEventInputWait: (event: QueuedEvent) => void;
   readonly lineageStatus: (
     originTx: IExtendedStorageTransaction,
   ) => OriginStatus;
@@ -364,6 +371,7 @@ export function preflightQueuedEventDependencies(state: {
   let collectMs = 0;
   let scheduleMs = 0;
   let shouldSkipEvent = false;
+  let inputsReady = true;
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
@@ -377,6 +385,7 @@ export function preflightQueuedEventDependencies(state: {
   );
   try {
     handler.populateDependencies?.(depTx, eventValue);
+    inputsReady = handler.inputReadiness?.(depTx, eventValue) ?? true;
   } catch (error) {
     state.eventQueue.shift();
     state.handleError(error as Error, handler);
@@ -505,6 +514,7 @@ export function preflightQueuedEventDependencies(state: {
 
   return {
     shouldSkipEvent,
+    shouldParkForInputs: !shouldSkipEvent && !inputsReady,
     deps,
     dirtyDeps,
     hasDirtyDependencies,
@@ -559,21 +569,6 @@ export async function dispatchQueuedEvent(state: {
     handlerInfo: state.getActionTelemetryInfo(handler),
   });
   state.eventQueue.shift();
-
-  // Ensure the handler's input docs are locally available before the body
-  // runs (see EventHandler.presyncInputs). Fail open: a presync error should
-  // surface as the handler's own read failure, not silently drop the event.
-  if (typeof handler.presyncInputs === "function") {
-    try {
-      await handler.presyncInputs(eventValue);
-    } catch (error) {
-      logger.warn(
-        "scheduler",
-        "handler input presync failed; dispatching anyway",
-        { error, handlerId },
-      );
-    }
-  }
 
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;

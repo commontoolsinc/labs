@@ -271,8 +271,13 @@ export type ExternalDependencyActionToken = Readonly<{
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  private eventInputWaits = new Map<
+    QueuedEvent,
+    { action: Action; parked: boolean }
+  >();
   readonly lineage = new SpeculationLineage({
     removeQueuedEvent: (event) => {
+      this.clearEventInputWait(event);
       const index = this.eventQueue.indexOf(event);
       if (index >= 0) this.eventQueue.splice(index, 1);
     },
@@ -1090,9 +1095,11 @@ export class Scheduler {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
         this.idlePromises.push(park);
-      } else if (this.hasPendingLineageHeadEvent()) {
-        // A cross-space lineage head has no timer; its origin commit callback
-        // is the wake source, so idle must stay open until that callback runs.
+      } else if (
+        this.hasPendingLineageHeadEvent() || this.hasInputParkedHeadEvent()
+      ) {
+        // These heads have no timer. Their origin commit or input dependency is
+        // the wake source, so idle must stay open until that callback runs.
         this.idlePromises.push(park);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {
@@ -1150,6 +1157,42 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
     });
+  }
+
+  private parkEventUntilInputChanges(
+    event: QueuedEvent,
+    dependencies: ReactivityLog,
+  ): void {
+    this.clearEventInputWait(event);
+
+    const wakeAction: Action = () => {
+      const wait = this.eventInputWaits.get(event);
+      if (wait?.action !== wakeAction || !wait.parked) return;
+
+      // Keep the action registered through its own finalize path. Its empty
+      // run log clears the one-shot trigger surface; the next event preflight
+      // removes the dormant action entirely before rechecking readiness.
+      wait.parked = false;
+      this.queueExecution();
+    };
+    this.eventInputWaits.set(event, { action: wakeAction, parked: true });
+    this.resubscribe(wakeAction, dependencies, { isEffect: true });
+  }
+
+  private clearEventInputWait(event: QueuedEvent): void {
+    const wait = this.eventInputWaits.get(event);
+    if (wait === undefined) return;
+    this.eventInputWaits.delete(event);
+    this.unsubscribe(wait.action);
+  }
+
+  private isEventWaitingForInput(event: QueuedEvent): boolean {
+    return this.eventInputWaits.get(event)?.parked === true;
+  }
+
+  private hasInputParkedHeadEvent(): boolean {
+    const head = this.eventQueue[0];
+    return head !== undefined && this.isEventWaitingForInput(head);
   }
 
   addEventHandler(
@@ -1496,6 +1539,9 @@ export class Scheduler {
     if (this.pendingQueueTaskTimer !== null) {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
+    }
+    for (const event of [...this.eventInputWaits.keys()]) {
+      this.clearEventInputWait(event);
     }
     this.triggerIndex.clear();
     cancelEventQueueWakeState(this.eventQueueWakeState);
@@ -2251,6 +2297,7 @@ export class Scheduler {
       getNextEligibleRunTime: (action) =>
         this.delays.getNextEligibleRunTime(action),
       hasPendingLineageHeadEvent: () => this.hasPendingLineageHeadEvent(),
+      hasInputParkedHeadEvent: () => this.hasInputParkedHeadEvent(),
       resetLoopCounter: () => {
         this.loopCounter = new WeakMap();
       },
@@ -2332,6 +2379,10 @@ export class Scheduler {
         this.delays.getNextEligibleRunTime(target),
       scheduleEventQueueWake: (notBefore) =>
         scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+      isEventWaitingForInput: (event) => this.isEventWaitingForInput(event),
+      parkEventUntilInputChanges: (event, dependencies) =>
+        this.parkEventUntilInputChanges(event, dependencies),
+      clearEventInputWait: (event) => this.clearEventInputWait(event),
       lineageStatus: (originTx) => this.lineage.originStatus(originTx),
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);
