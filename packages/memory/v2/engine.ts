@@ -1210,11 +1210,6 @@ const CORE_SCHEDULER_TABLES = [
   "scheduler_action_state",
 ] as const;
 
-const SCHEDULER_TABLES = [
-  ...CORE_SCHEDULER_TABLES,
-  "scheduler_context_floor",
-] as const;
-
 const primaryKeyColumns = (database: Database, table: string): string[] => {
   const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
     { name: string; pk: number }
