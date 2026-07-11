@@ -1,7 +1,14 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import {
+  dataUriFromValue,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import {
+  createFactoryShell,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
@@ -646,6 +653,106 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
+  it("reads Fabric data-URI context envelopes without materializing embedded factories", () => {
+    const documentId = "of:cfc-ui-contract-dual-data-uri-event-context";
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    const contractLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: documentId,
+          path: ["savedTitle"],
+          space,
+          scope: "space",
+          schema: trustedPatternUiActionSchema,
+        },
+      },
+    };
+    const contextEnvelope = {
+      $ctx: { savedTitle: contractLink },
+      $event: rawTrustedEvent,
+    };
+    const fabricUri = dataUriFromValue(contextEnvelope);
+    const inertFactory = createFactoryShell({
+      kind: "module",
+      ref: {
+        identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        symbol: "eventEnvelopeFactory",
+      },
+      argumentSchema: true,
+      resultSchema: true,
+    });
+    const fabricFactoryUri = dataUriFromValue({
+      ...contextEnvelope,
+      embeddedFactory: inertFactory,
+    });
+
+    const recordsTrustedInput = (id: string): boolean => {
+      const writePolicyInputs: Array<
+        ReturnType<
+          IExtendedStorageTransaction["getCfcState"]
+        >["writePolicyInputs"][number]
+      > = [];
+      const tx = {
+        getCfcState: () => ({ writePolicyInputs }),
+        recordCfcWritePolicyInput: (
+          input: typeof writePolicyInputs[number],
+        ) => {
+          writePolicyInputs.push(input);
+        },
+      };
+      const eventEnvelopeLink = {
+        "/": {
+          [LINK_V1_TAG]: { id, path: [], space },
+        },
+      };
+
+      recordTrustedEventPolicyInputs(
+        tx as unknown as IExtendedStorageTransaction,
+        [{
+          space,
+          scope: "space",
+          id: documentId,
+          path: ["savedTitle"],
+        }],
+        rendererEvent(eventEnvelopeLink),
+      );
+
+      return writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId === `trusted-event:click:${documentId}:savedTitle`
+      );
+    };
+
+    expect(recordsTrustedInput(fabricUri)).toBe(true);
+    expect(recordsTrustedInput(fabricFactoryUri)).toBe(true);
+    expect(recordsTrustedInput("data:application/jsonx,%7B%7D")).toBe(false);
+    expect(recordsTrustedInput(
+      "data:application/vnd.commonfabric.fabric-value,%7B%7D",
+    )).toBe(false);
+
+    const decoded = valueFromDataUri(fabricFactoryUri) as {
+      embeddedFactory: unknown;
+    };
+    expect(isAdmittedFabricFactory(decoded.embeddedFactory)).toBe(true);
+    expect(decoded.embeddedFactory).not.toBe(inertFactory);
+    expect(() => (decoded.embeddedFactory as () => unknown)()).toThrow(
+      "factory requires runner materialization",
+    );
+  });
+
   it("uses bound sigil-link event context as UI contract schema hints", () => {
     const documentId = "of:cfc-ui-contract-context-link-document-argument";
     const writePolicyInputs: Array<
@@ -677,9 +784,8 @@ describe("CFC trusted UI event enforcement", () => {
     };
     // At handler-execution time the `$ctx` entry is a bound sigil link that
     // already addresses the write's document, not a symbolic `$alias`. The event
-    // value is a plain in-memory envelope here; the `data:`-URI link form is the
-    // exceptional case, covered once by "records trusted event policy inputs from
-    // linked handler event envelopes".
+    // value is a plain in-memory envelope here; linked legacy and canonical
+    // `data:`-URI forms are covered by the two envelope tests above.
     const eventEnvelope = {
       value: {
         $ctx: {

@@ -401,7 +401,7 @@ Focused tests:
   source persistence or a verified storage-backed source closure, recursively
   including pinned Fabric-import roots; warm evaluation, requested-space
   lookup, and compiled-only caches do not grant writer authority.
-- [ ] Migrate every data-URI reader to the shared dual-format decoder before
+- [x] Migrate every data-URI reader to the shared dual-format decoder before
   the canonical writer changes, retaining percent/base64 UTF-8 compatibility
   and literal legacy slash-key objects without payload sniffing.
 - [x] Route the storage attestation loader through that shared decoder while
