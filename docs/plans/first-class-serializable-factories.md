@@ -407,10 +407,10 @@ Focused tests:
 - [x] Route the storage attestation loader through that shared decoder while
   preserving its invalid-vs-unsupported error taxonomy and legacy empty
   payload rejection; base64 input is decoded as UTF-8 for both formats.
-- [ ] Flip canonical durable inline-document writers to the Fabric-value MIME
+- [x] Flip canonical durable inline-document writers to the Fabric-value MIME
   only after every nested factory is proven available in the exact containing
   artifact space; a synchronous writer rejects otherwise.
-- [ ] Once canonical factory traversal is available, switch durable
+- [x] Once canonical factory traversal is available, switch durable
   factory-valued binding from Stage 0's `$patternRef` sentinel to `Factory@1`.
   Constrain `$patternRef` emission to explicitly legacy/internal graph fallback
   paths and add a test that new durable factory writes cannot choose it.
@@ -428,8 +428,9 @@ Focused tests:
   The in-memory binding walks now preserve admitted factories and traverse
   their hidden state without emitting `$patternRef`. The named list adapter is
   intentionally limited to a capture-free, unmodified base pattern so it
-  cannot discard params, scope, or space-selection state. This checkbox stays
-  open until the canonical durable data-URI writer also emits `Factory@1`.
+  cannot discard params, scope, or space-selection state. The canonical durable
+  data-URI writer now emits `Factory@1`, closing this gate; the named list
+  sentinel remains the explicit Stage 4 compatibility writer.
 
 ### WP1.6 — Add runner-owned factory materialization and generic resolution
 

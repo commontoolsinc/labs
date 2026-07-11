@@ -62,6 +62,7 @@ import {
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
+  createDataCellURI,
   isCellLink,
   isNormalizedFullLink,
   isSigilLink,
@@ -69,6 +70,7 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { factoryStateOf } from "@commonfabric/data-model/fabric-factory";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
@@ -1803,11 +1805,20 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
-    // (this data is immutable as given). `fabricFromNativeValue()` converts
-    // what callers actually pass -- notably `Cell`s, which become sigil
-    // links via their `toJSON()` -- into an encodable `FabricValue`.
-    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
+    const asDataURI = createDataCellURI(data, undefined, {
+      assertFactoryAvailable: (factory) => {
+        const ref = factoryStateOf(factory).ref;
+        if (ref === undefined) {
+          throw new Error(
+            `Factory has no durable artifact ref for space ${space}`,
+          );
+        }
+        this.patternManager.assertArtifactAvailableInSpace(
+          ref.identity,
+          space,
+        );
+      },
+    });
     return createCell(
       this,
       {
