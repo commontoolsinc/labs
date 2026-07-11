@@ -188,7 +188,8 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 
 This track depends on content-addressed builder-artifact identity, not on graph
 snapshots or the reactive-interpreter rollout. See
-[First-Class Serializable Factories](./node-factory-shipping.md).
+[First-Class Serializable Factories](./node-factory-shipping.md) and its
+[implementation plan](../../plans/first-class-serializable-factories.md).
 
 1. Make pattern, module/lift, and handler factory functions directly branded
    `Factory@1` Fabric values.

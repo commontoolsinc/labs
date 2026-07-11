@@ -113,8 +113,9 @@
 
 ## Planned Future Work
 
-- [ ] **First-class serializable factories** (see
-  `node-factory-shipping.md`)
+- [ ] **First-class serializable factories** (see the
+  [specification](./node-factory-shipping.md) and
+  [implementation plan](../../plans/first-class-serializable-factories.md))
   - [ ] Extract generic `$patternRef` binding/setup behavior independently of
     graph snapshots and reactive-interpreter work
   - [ ] Make pattern, module/lift, and handler factories directly branded

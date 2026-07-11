@@ -5,6 +5,9 @@
 Proposed. This document specifies intended behavior, not the current
 implementation.
 
+The ordered execution checklist is
+[First-Class Serializable Factories — Implementation Plan](../../plans/first-class-serializable-factories.md).
+
 The content-addressed identity prerequisite is shipped: every verified,
 module-scoped builder factory is addressable by `{ identity, symbol }`.
 Exports use their export name, while transformed and non-exported factories use
