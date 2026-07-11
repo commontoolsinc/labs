@@ -164,7 +164,12 @@ against the spec (§8.12.8 as amended on specs branch
   journals that observation itself (§8.10.1/§8.9.2). Residual: deletion
   leaves the frozen entry (over-taint) and re-creation keeps it instead of
   re-minting at the re-creating join — re-mint-on-recreation needs
-  per-path previousValue plumbing.
+  per-path previousValue plumbing. _Priority note (2026-07-10): with the
+  freeze-at-creation amendment now merged into the normative spec
+  (§8.12.8), the re-creation arm is a live conformance gap — keeping the
+  stale join UNDERSTATES the re-created path's existence channel, the
+  direction the spec forbids (the deletion arm merely over-taints, which
+  is documentable). Tracked as a fix chip._
 - **`origin:"structure"` membership stamps are `observes:"enumerate"`**,
   replace-from-criteria per §8.12.8 (normative — its rationale names and
   rejects accumulate-forever). Axis-mapping note: the labs `observes` axis
