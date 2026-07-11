@@ -168,10 +168,13 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   `schedulerDetails(space, options?)` API reports one of `absent`,
   `legacy-unclassified`, `partial`, or `context-qualified`, and exposes the raw
   `execution_context_key`, `read_scope_key`, and `write_scope_key` columns from
-  observation, snapshot, action-state, and read/write-index rows. A missing
-  column is returned as `null`; the inspector never guesses that a legacy row
-  belongs to the shared `space` context. This is currently an API surface, not a
-  standalone `cf inspect` subcommand.
+  observation, snapshot, action-state, and read/write-index rows.
+  `context-qualified` uses the memory engine's exact schema gate, including
+  ownership keys, lookup indexes, and composite foreign keys; qualifier columns
+  alone are reported as `partial`. A missing column is returned as `null`; the
+  inspector never guesses that a legacy row belongs to the shared `space`
+  context. This is currently an API surface, not a standalone `cf inspect`
+  subcommand.
 - **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
   marked rather than shown as clean. A count at a round cap may be truncated —
   narrow with flags or a per-entity command.

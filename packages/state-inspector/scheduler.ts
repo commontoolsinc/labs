@@ -7,6 +7,7 @@
 // infers that a legacy row belongs to the shared `space` context.
 
 import type { Database } from "@db/sqlite";
+import { schedulerExecutionContextSchemaCurrent } from "@commonfabric/memory/v2/engine";
 
 import type { SpaceDb } from "./db.ts";
 
@@ -174,7 +175,8 @@ export function schedulerSchema(
   ) {
     status = "legacy-unclassified";
   } else if (
-    presentCount === entries.length && qualifierValues.every(Boolean)
+    presentCount === entries.length && qualifierValues.every(Boolean) &&
+    schedulerExecutionContextSchemaCurrent(db)
   ) {
     status = "context-qualified";
   } else {

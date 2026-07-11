@@ -1,5 +1,13 @@
 import { assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
+import { toFileUrl } from "@std/path";
+
+import {
+  close as closeMemory,
+  open as openMemory,
+  resolveScopeKey,
+  upsertSchedulerObservation,
+} from "@commonfabric/memory/v2/engine";
 
 import { openSpace } from "../db.ts";
 import { schedulerDetails } from "../scheduler.ts";
@@ -209,7 +217,7 @@ Deno.test("scheduler details: mixed qualifier schema is partial", async () => {
   );
 });
 
-Deno.test("scheduler details: context-qualified rows expose raw keys", async () => {
+Deno.test("scheduler details: qualifier columns without runtime structures are partial", async () => {
   const context = "user:did%3Akey%3Aalice";
   await withDb(
     (db) => {
@@ -226,7 +234,7 @@ Deno.test("scheduler details: context-qualified rows expose raw keys", async () 
           processGeneration: 2,
           actionId: "action",
         });
-        assertEquals(details.schemaStatus, "context-qualified");
+        assertEquals(details.schemaStatus, "partial");
         assertEquals(details.observations[0].execution_context_key, context);
         assertEquals(details.snapshots[0].execution_context_key, context);
         assertEquals(details.actionState[0].execution_context_key, context);
@@ -239,4 +247,91 @@ Deno.test("scheduler details: context-qualified rows expose raw keys", async () 
       }
     },
   );
+});
+
+Deno.test("scheduler details: runtime-qualified rows expose raw keys", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "state-inspector-scheduler-" });
+  const path = `${dir}/space.sqlite`;
+  const principal = "did:key:alice";
+  const sessionId = "alice-session";
+  const ownerSpace = "did:key:space";
+  const context = resolveScopeKey("user", { principal, sessionId });
+  const address = {
+    space: ownerSpace,
+    scope: "user" as const,
+    id: "value",
+    path: ["value"],
+  };
+  const implementationFingerprint = "impl:state-inspector-scheduler";
+
+  try {
+    const engine = await openMemory({ url: toFileUrl(path) });
+    try {
+      upsertSchedulerObservation(engine, {
+        ownerSpace,
+        observedAtSeq: 0,
+        scopeContext: { principal, sessionId },
+        observation: {
+          version: 2,
+          ownerSpace,
+          branch: "",
+          pieceId: "space:piece",
+          processGeneration: 2,
+          actionId: "action",
+          actionKind: "computation",
+          implementationFingerprint,
+          runtimeFingerprint: "runtime:test",
+          observedAtSeq: 0,
+          transactionKind: "action-run",
+          reads: [address],
+          shallowReads: [],
+          actualChangedWrites: [],
+          currentKnownWrites: [address],
+          declaredWrites: [],
+          materializerWriteEnvelopes: [],
+          completeActionScopeSummary: {
+            version: 1,
+            complete: true,
+            implementationFingerprint,
+            runtimeFingerprint: "runtime:test",
+            piece: {
+              space: ownerSpace,
+              scope: "space",
+              id: "piece",
+              path: [],
+            },
+            reads: [address],
+            writes: [address],
+            materializerWriteEnvelopes: [],
+            directOutputs: [address],
+          },
+          status: "success",
+        },
+      });
+    } finally {
+      closeMemory(engine);
+    }
+
+    const space = openSpace(path);
+    try {
+      const details = schedulerDetails(space, {
+        branch: "",
+        pieceId: "space:piece",
+        processGeneration: 2,
+        actionId: "action",
+      });
+      assertEquals(details.schemaStatus, "context-qualified");
+      assertEquals(details.observations[0].execution_context_key, context);
+      assertEquals(details.snapshots[0].execution_context_key, context);
+      assertEquals(details.actionState[0].execution_context_key, context);
+      assertEquals(details.reads[0].execution_context_key, context);
+      assertEquals(details.reads[0].read_scope_key, context);
+      assertEquals(details.writes[0].execution_context_key, context);
+      assertEquals(details.writes[0].write_scope_key, context);
+    } finally {
+      space.close();
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
