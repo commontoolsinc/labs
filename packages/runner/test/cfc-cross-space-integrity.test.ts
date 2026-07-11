@@ -35,8 +35,10 @@ import { clausesEqual } from "../src/cfc/clause.ts";
 //   - Linking a whole object does NOT project it to a narrower schema — the
 //     full source labelMap crosses, undeclared sibling fields included (3d).
 //     Per-field links copy exactly the chosen subset (3e).
-//   - `projection` / `passThrough` (the spec's §8.3 / §8.2 subset & reference
-//     annotations) are unimplemented and FAIL CLOSED (3a).
+//   - `passThrough` (the spec's §8.2 reference annotation) is unimplemented
+//     and FAILS CLOSED (3a). `projection` (§8.3) IS implemented — verified at
+//     commit with scoped-integrity carry (3a′ shows the subset-declaration
+//     sliver; full behavior in cfc-projection.test.ts).
 // ===========================================================================
 
 const signer = await Identity.fromPassphrase("cfc-cross-space-integrity");
@@ -415,41 +417,89 @@ describe("CFC cross-space integrity", () => {
   });
 
   // -------------------------------------------------------------------------
-  // GAP: the spec's subset (§8.3 `projection`) and reference (§8.2
-  // `passThrough`) annotations are unimplemented; a write through a schema
-  // declaring one FAILS CLOSED rather than being silently ignored. So the
-  // ergonomic "declare this field is a projection / a reference with scoped
-  // integrity" syntax is the missing piece; the behaviours are reachable only
-  // via per-path labels and links (scenarios 1c / 3).
+  // GAP (remaining): the spec's reference annotation (§8.2 `passThrough`) is
+  // unimplemented; a write through a schema declaring it FAILS CLOSED rather
+  // than being silently ignored. Reference behaviours stay reachable via
+  // per-path labels and links (scenarios 1c / 3).
   // -------------------------------------------------------------------------
-  for (const claim of ["projection", "passThrough"] as const) {
-    it(`scenario 3a [GAP] — the ${claim} ifc annotation fails closed (unimplemented)`, async () => {
-      const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime(storageManager);
-      try {
-        const tx = runtime.edit();
-        const cell = runtime.getCell(spaceA, `s3a-${claim}`, {
-          type: "object",
-          properties: {
-            field: {
-              type: "string",
-              ifc: { [claim]: { from: "/other", path: "/lat" } },
+  it("scenario 3a [GAP] — the passThrough ifc annotation fails closed (unimplemented)", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime(storageManager);
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(spaceA, "s3a-passThrough", {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            ifc: { passThrough: { from: "/other", path: "/lat" } },
+          },
+        },
+        required: ["field"],
+      } as unknown as JSONSchema, tx);
+      cell.set({ field: "x" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "unsupported trust-sensitive claim passThrough",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 3a′ — the §8.3 `projection` annotation IS implemented: the
+  // ergonomic "declare this field is a scoped projection" syntax verifies at
+  // commit (the target must equal the claimed source field) and carries the
+  // source's confidentiality in full plus its integrity SCOPED to the
+  // projected pointer, so the projected field can never claim whole-object
+  // integrity. Mismatch/wildcard/malformed fail-closed behavior and the
+  // provenance-class drops live in cfc-projection.test.ts.
+  // -------------------------------------------------------------------------
+  it("scenario 3a′ — the projection ifc annotation verifies and carries a scoped label", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime(storageManager);
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(spaceA, "s3a-projection", {
+        type: "object",
+        properties: {
+          measurement: {
+            type: "object",
+            properties: { lat: { type: "number" } },
+            ifc: {
+              confidentiality: ["location"],
+              integrity: [{ type: "gps-reading" }],
             },
           },
-          required: ["field"],
-        } as unknown as JSONSchema, tx);
-        cell.set({ field: "x" });
-        tx.prepareCfc();
-        const result = await tx.commit();
-        expect(String((result.error as Error | undefined)?.message)).toContain(
-          `unsupported trust-sensitive claim ${claim}`,
-        );
-      } finally {
-        await runtime.dispose();
-        await storageManager.close();
-      }
-    });
-  }
+          latitude: {
+            type: "number",
+            ifc: { projection: { from: "/measurement", path: "/lat" } },
+          },
+        },
+        required: ["measurement", "latitude"],
+      } as const satisfies JSONSchema, tx);
+      cell.set({ measurement: { lat: 37.77 }, latitude: 37.77 });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const docId = parseLink(cell.getAsLink()).id!;
+      const [entry] = entriesFor(
+        readDoc(storageManager, spaceA, docId),
+        ["latitude"],
+      );
+      expect(entry?.label.confidentiality).toEqual(["location"]);
+      expect(entry?.label.integrity).toEqual([
+        { type: "gps-reading", scope: { projection: "/lat" } },
+      ]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 
   // -------------------------------------------------------------------------
   // Scenario 3 (reference variant): referencing only a SUBSET. A link to a
