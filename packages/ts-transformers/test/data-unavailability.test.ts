@@ -611,6 +611,282 @@ Deno.test("a typed explicit lift parameter infers guard policy without observati
   assertEquals(output.includes("observeAvailability"), false);
 });
 
+Deno.test("closure hoisting maps an explicit lift guard to the emitted input key", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, hasError, lift, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: {
+      request: AsyncResult<Repo>;
+      suffix: string;
+    }) => {
+      const suffix = input.suffix;
+      const failed = lift((value: AsyncResult<Repo>) =>
+        hasError(value) ? suffix : "ok"
+      )(input.request);
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["request"], reasons: ["error"] }]',
+  );
+  assertEquals(
+    output.includes('path: ["value"], reasons: ["error"]'),
+    false,
+  );
+});
+
+Deno.test("closure hoisting maps a destructured lift guard below the merged input key", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, hasError, lift, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: {
+      request: AsyncResult<Repo>;
+      suffix: string;
+    }) => {
+      const suffix = input.suffix;
+      const failed = lift(({ request }: { request: AsyncResult<Repo> }) =>
+        hasError(request) ? suffix : "ok"
+      )({ request: input.request });
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+  assertEquals(
+    output.includes('path: ["request"], reasons: ["error"]'),
+    false,
+  );
+});
+
+Deno.test("same-file helper guards contribute policy to their owning compute", async () => {
+  const output = await transformSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      hasError,
+      pattern,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    function failed(request: AsyncResult<Repo>) {
+      return hasError(request);
+    }
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const result = computed(() => failed(input.request));
+      return { result };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+});
+
+Deno.test("same-file helper guard paths retain nested caller structure", async () => {
+  const output = await transformSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      hasError,
+      pattern,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    function failed(state: { request: AsyncResult<Repo> }) {
+      return hasError(state.request);
+    }
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const result = computed(() => failed(input));
+      return { result };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+});
+
+Deno.test("a helper parameter cannot widen a plain caller input implicitly", async () => {
+  const { diagnostics } = await validateSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      hasError,
+      pattern,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    function failed(request: AsyncResult<Repo>) {
+      return hasError(request);
+    }
+
+    export default pattern((input: { repo: Repo }) => {
+      const result = computed(() => failed(input.repo));
+      return { result };
+    });
+  `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unobserved-compute-guard",
+    ),
+    true,
+  );
+});
+
+Deno.test("a local AsyncResult name does not authorize unavailable input", async () => {
+  const { diagnostics } = await validateSource(
+    `
+    import { computed, hasError, pattern } from "commonfabric";
+
+    interface AsyncResult {
+      local: string;
+    }
+
+    export default pattern((input: { value: AsyncResult }) => {
+      const failed = computed(() => hasError(input.value));
+      return { failed };
+    });
+  `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unobserved-compute-guard",
+    ),
+    true,
+  );
+});
+
+Deno.test("a concrete type name containing a variant name still receives the marker arm", async () => {
+  const output = await transformSource(
+    `
+    import { hasError, pattern } from "commonfabric";
+
+    interface HasErrorEnvelope {
+      local: string;
+    }
+
+    export default pattern((input: { value: HasErrorEnvelope }) => ({
+      failed: hasError(input.value),
+    }));
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    "value: HasErrorEnvelope | __cfHelpers.HasError",
+  );
+});
+
+Deno.test("object-rest guard paths map back to the source object", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, hasError, lift, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const failed = lift(({
+        ...rest
+      }: { request: AsyncResult<Repo> }) => hasError(rest.request))({
+        request: input.request,
+      });
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["request"], reasons: ["error"] }]',
+  );
+  assertEquals(output.includes('path: ["rest", "request"]'), false);
+});
+
+Deno.test("array-rest guard indices map back to source tuple positions", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, hasError, lift, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const failed = lift(([
+        _head,
+        ...rest
+      ]: [string, AsyncResult<Repo>]) => hasError(rest[0]))([
+        "head",
+        input.request,
+      ]);
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["1"], reasons: ["error"] }]',
+  );
+  assertEquals(output.includes('path: ["1", "0"]'), false);
+});
+
 Deno.test("pending error and success JSX shares one physical async capture", async () => {
   const output = await transformSource(
     `

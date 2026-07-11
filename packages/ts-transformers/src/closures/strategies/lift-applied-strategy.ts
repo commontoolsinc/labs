@@ -37,6 +37,7 @@ import {
   collectObservedAvailabilityInputPaths,
   createUnavailableInputPolicyOptions,
   mergeAvailabilityCaptureOverrides,
+  partitionGuardCapturesByCallbackInput,
   renameAvailabilityCapturePaths,
 } from "../../availability/captures.ts";
 import {
@@ -423,7 +424,7 @@ export function transformLiftAppliedCall(
     captureExpressions,
     context,
   );
-  const guardedCaptureEntries = collectExplicitAvailabilityGuardCaptures(
+  const rawGuardedEntries = collectExplicitAvailabilityGuardCaptures(
     canonicalCallbackBody,
     context,
   );
@@ -467,6 +468,18 @@ export function transformLiftAppliedCall(
   // Check if callback originally had zero parameters
   const hadZeroParameters = callback.parameters.length === 0;
 
+  const partitionedGuardEntries = partitionGuardCapturesByCallbackInput(
+    rawGuardedEntries,
+    callback,
+  );
+  const guardedInputEntries = !hadZeroParameters
+    ? partitionedGuardEntries.callbackInput.map((entry) => ({
+      ...entry,
+      path: [originalInputParamName, ...entry.path],
+    }))
+    : [];
+  const guardedCaptureEntries = partitionedGuardEntries.captures;
+
   const originalInputAvailabilityEntries = !hadZeroParameters
     ? originalInputAvailabilityPaths.map((entry) => ({
       ...entry,
@@ -475,6 +488,7 @@ export function transformLiftAppliedCall(
     : [];
   const availabilityTypeEntries = mergeAvailabilityCaptureOverrides([
     ...originalInputAvailabilityEntries,
+    ...guardedInputEntries,
     ...observedCaptureEntries,
     ...guardedCaptureEntries,
   ]);
@@ -486,6 +500,7 @@ export function transformLiftAppliedCall(
   );
   const availabilityPolicyEntries = mergeAvailabilityCaptureOverrides([
     ...originalInputAvailabilityEntries,
+    ...guardedInputEntries,
     ...renameAvailabilityCapturePaths(
       [...observedCaptureEntries, ...guardedCaptureEntries],
       captureNameMap,

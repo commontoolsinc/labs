@@ -4,19 +4,20 @@ import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import {
   ensureTypeNodeRegistered,
+  getTypeFromTypeNodeWithFallback,
   inferWidenedTypeFromExpression,
   isUnknownType,
   unwrapCellLikeType,
 } from "./type-inference.ts";
 import {
   getExpressionText,
-  getNodeText,
   isOptionalMemberSymbol,
   isOptionalSymbol,
   setParentPointers,
 } from "./utils.ts";
 import type { AvailabilityCaptureOverride } from "../availability/captures.ts";
 import { availabilityPathKey } from "../availability/captures.ts";
+import { typeContainsAvailabilityVariant } from "../availability/analysis.ts";
 
 /**
  * Rewrite commonfabric type references in a TypeNode tree to the canonical
@@ -964,10 +965,23 @@ export function widenTypeNodeForAvailability(
   context: TransformationContext,
 ): ts.TypeNode {
   const members: ts.TypeNode[] = [base];
-  const baseText = getNodeText(base);
+  const baseType = getTypeFromTypeNodeWithFallback(
+    base,
+    context.checker,
+    context.options.state?.typeRegistry,
+  );
 
   for (const variant of override.variants) {
-    if (baseText.includes(variant.name)) continue;
+    if (
+      baseType && variant.type &&
+      typeContainsAvailabilityVariant(
+        baseType,
+        variant.type,
+        context.checker,
+      )
+    ) {
+      continue;
+    }
     if (variant.type) {
       members.push(
         typeToTypeNodeWithRegistry(

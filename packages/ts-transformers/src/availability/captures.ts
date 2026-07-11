@@ -1,11 +1,14 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
+import { getTypeAtLocationWithFallback } from "../ast/utils.ts";
 import type { TransformationContext } from "../core/context.ts";
 import { parseCaptureExpression } from "../utils/capture-tree.ts";
 import {
   guardOperandExposesAvailability,
   resolveAvailabilityObservation,
+  typeContainsAvailabilityVariant,
+  unwrapAvailabilityExpression,
 } from "./analysis.ts";
 import type { AvailabilityObservation, AvailabilityReason } from "./types.ts";
 
@@ -38,6 +41,28 @@ const VARIANT_NAME_BY_REASON = {
 
 export function availabilityPathKey(path: readonly string[]): string {
   return JSON.stringify(path);
+}
+
+function parseAvailabilityCaptureExpression(
+  expression: ts.Expression,
+): ReturnType<typeof parseCaptureExpression> {
+  const parsed = parseCaptureExpression(expression);
+  if (parsed) return parsed;
+
+  const target = unwrapAvailabilityExpression(expression);
+  if (!ts.isElementAccessExpression(target)) return undefined;
+  const argument = unwrapAvailabilityExpression(target.argumentExpression);
+  if (!ts.isStringLiteralLike(argument) && !ts.isNumericLiteral(argument)) {
+    return undefined;
+  }
+  const receiver = parseAvailabilityCaptureExpression(target.expression);
+  return receiver
+    ? {
+      root: receiver.root,
+      path: [...receiver.path, argument.text],
+      expression,
+    }
+    : undefined;
 }
 
 function predicateTypeForCall(
@@ -89,7 +114,7 @@ export function collectObservedAvailabilityCaptures(
       context,
     );
     if (!observation) continue;
-    const capture = parseCaptureExpression(captureExpression);
+    const capture = parseAvailabilityCaptureExpression(captureExpression);
     if (!capture) continue;
     const path = [capture.root, ...capture.path];
     entries.set(
@@ -223,7 +248,9 @@ export function collectAvailabilityGuardCaptures(
       const callKind = detectCallKind(node, context.checker);
       if (callKind?.kind === "availability-guard") {
         const operand = node.arguments[0];
-        const capture = operand ? parseCaptureExpression(operand) : undefined;
+        const capture = operand
+          ? parseAvailabilityCaptureExpression(operand)
+          : undefined;
         if (!capture) {
           context.reportDiagnosticOnce({
             type: "availability:unsupported-guard-operand",
@@ -269,6 +296,120 @@ export function collectAvailabilityGuardCaptures(
   return [...byPath.values()];
 }
 
+type AvailabilityAnalyzableFunction =
+  & (
+    | ts.ArrowFunction
+    | ts.FunctionExpression
+    | ts.FunctionDeclaration
+    | ts.MethodDeclaration
+  )
+  & { readonly body: ts.ConciseBody };
+
+function localAvailabilityHelperForCall(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): AvailabilityAnalyzableFunction | undefined {
+  const declaration = context.checker.getResolvedSignature(call)?.declaration;
+  if (
+    !declaration ||
+    declaration.getSourceFile().fileName !== context.sourceFile.fileName ||
+    !(
+      ts.isArrowFunction(declaration) ||
+      ts.isFunctionExpression(declaration) ||
+      ts.isFunctionDeclaration(declaration) ||
+      ts.isMethodDeclaration(declaration)
+    ) || !declaration.body
+  ) {
+    return undefined;
+  }
+  return declaration as AvailabilityAnalyzableFunction;
+}
+
+function helperGuardEntryAtCallSite(
+  entry: AvailabilityCaptureOverride,
+  helper: AvailabilityAnalyzableFunction,
+  call: ts.CallExpression,
+  context: TransformationContext,
+): AvailabilityCaptureOverride | undefined {
+  const [root, ...rest] = entry.path;
+  if (!root) return entry;
+
+  for (let index = 0; index < helper.parameters.length; index++) {
+    const parameter = helper.parameters[index];
+    const argument = call.arguments[index];
+    if (!parameter || !argument) continue;
+    const binding = bindingPathForIdentifier(
+      ts.factory.createIdentifier(root),
+      parameter.name,
+    );
+    if (binding === undefined) continue;
+
+    const capture = parseAvailabilityCaptureExpression(argument);
+    if (!capture) return undefined;
+    const relativePath = applyBindingPath(binding, rest);
+    if (!relativePath) return undefined;
+    let relativeType = getTypeAtLocationWithFallback(
+      argument,
+      context.checker,
+      context.options.state?.typeRegistry,
+    );
+    for (const segment of relativePath) {
+      if (!relativeType) break;
+      const property = context.checker.getPropertyOfType(relativeType, segment);
+      if (property) {
+        const declaration = property.valueDeclaration ??
+          property.declarations?.[0];
+        relativeType = context.checker.getTypeOfSymbolAtLocation(
+          property,
+          declaration ?? argument,
+        );
+      } else if (/^(0|[1-9]\d*)$/.test(segment)) {
+        relativeType = context.checker.getIndexTypeOfType(
+          relativeType,
+          ts.IndexKind.Number,
+        );
+      } else {
+        relativeType = undefined;
+      }
+    }
+    const observation = resolveAvailabilityObservation(argument, context);
+    const acceptedReasons = entry.reasons.filter((reason) => {
+      const variantName = VARIANT_NAME_BY_REASON[reason];
+      const variantType = context.lookupAvailabilityVariantType(variantName);
+      const exposesAtPath = relativePath.length === 0
+        ? guardOperandExposesAvailability(
+          argument,
+          variantType,
+          context,
+        )
+        : !!relativeType && !!variantType && typeContainsAvailabilityVariant(
+          relativeType,
+          variantType,
+          context.checker,
+        );
+      return exposesAtPath || observation?.reasons.includes(reason);
+    });
+    if (acceptedReasons.length !== entry.reasons.length) {
+      context.reportDiagnosticOnce({
+        type: "availability:unobserved-compute-guard",
+        message:
+          "An availability guard reached through a helper requires the caller input to expose the same unavailable variant. Guard the original AsyncResult, or widen the caller value with observeAvailability() outside the compute.",
+        node: call,
+      });
+    }
+    if (acceptedReasons.length === 0) return undefined;
+    return {
+      ...entry,
+      path: [capture.root, ...capture.path, ...relativePath],
+      reasons: acceptedReasons,
+    };
+  }
+
+  // The helper guard refers to a closure capture rather than one of its
+  // parameters, so its path is already relative to the owning computation.
+  return entry;
+}
+
 /**
  * Guard policy for an existing compute boundary. Unlike direct pattern guard
  * lowering, this never widens a plain capture: the operand must already expose
@@ -280,10 +421,34 @@ export function collectExplicitAvailabilityGuardCaptures(
   expression: ts.Expression | ts.Block,
   context: TransformationContext,
 ): readonly AvailabilityCaptureOverride[] {
+  return collectExplicitAvailabilityGuardCapturesInternal(
+    expression,
+    context,
+    new Set(),
+  );
+}
+
+function collectExplicitAvailabilityGuardCapturesInternal(
+  expression: ts.Expression | ts.Block,
+  context: TransformationContext,
+  helpersInProgress: Set<AvailabilityAnalyzableFunction>,
+): readonly AvailabilityCaptureOverride[] {
   const byPath = new Map<string, {
     path: readonly string[];
     reasons: AvailabilityReason[];
   }>();
+
+  const record = (
+    path: readonly string[],
+    reasons: readonly AvailabilityReason[],
+  ): void => {
+    const key = availabilityPathKey(path);
+    const entry = byPath.get(key) ?? { path, reasons: [] };
+    for (const reason of reasons) {
+      if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
+    }
+    byPath.set(key, entry);
+  };
 
   const visit = (node: ts.Node): void => {
     if (node !== expression && ts.isFunctionLike(node)) return;
@@ -303,15 +468,31 @@ export function collectExplicitAvailabilityGuardCaptures(
               predicateType,
             );
           }
-          const capture = parseCaptureExpression(operand);
+          const capture = parseAvailabilityCaptureExpression(operand);
           if (capture) {
             const path = [capture.root, ...capture.path];
-            const key = availabilityPathKey(path);
-            const entry = byPath.get(key) ?? { path, reasons: [] };
-            if (!entry.reasons.includes(callKind.reason)) {
-              entry.reasons.push(callKind.reason);
-            }
-            byPath.set(key, entry);
+            record(path, [callKind.reason]);
+          }
+        }
+      } else {
+        const helper = localAvailabilityHelperForCall(node, context);
+        if (helper && !helpersInProgress.has(helper)) {
+          helpersInProgress.add(helper);
+          const helperEntries =
+            collectExplicitAvailabilityGuardCapturesInternal(
+              helper.body,
+              context,
+              helpersInProgress,
+            );
+          helpersInProgress.delete(helper);
+          for (const helperEntry of helperEntries) {
+            const mapped = helperGuardEntryAtCallSite(
+              helperEntry,
+              helper,
+              node,
+              context,
+            );
+            if (mapped) record(mapped.path, mapped.reasons);
           }
         }
       }
@@ -356,13 +537,36 @@ export function mergeAvailabilityCaptureOverrides(
   return [...merged.values()];
 }
 
+interface BindingPath {
+  readonly path: readonly string[];
+  readonly arrayRestOffset?: number;
+}
+
+function applyBindingPath(
+  binding: BindingPath,
+  tail: readonly string[],
+): readonly string[] | undefined {
+  if (binding.arrayRestOffset === undefined) {
+    return [...binding.path, ...tail];
+  }
+  const [index, ...rest] = tail;
+  if (index === undefined || !/^(0|[1-9]\d*)$/.test(index)) {
+    return undefined;
+  }
+  return [
+    ...binding.path,
+    String(binding.arrayRestOffset + Number(index)),
+    ...rest,
+  ];
+}
+
 function bindingPathForIdentifier(
   identifier: ts.Identifier,
   binding: ts.BindingName,
   path: readonly string[] = [],
-): readonly string[] | undefined {
+): BindingPath | undefined {
   if (ts.isIdentifier(binding)) {
-    return binding.text === identifier.text ? path : undefined;
+    return binding.text === identifier.text ? { path } : undefined;
   }
   const elements = ts.isObjectBindingPattern(binding)
     ? binding.elements
@@ -370,18 +574,76 @@ function bindingPathForIdentifier(
   for (let index = 0; index < elements.length; index++) {
     const element = elements[index];
     if (!element || !ts.isBindingElement(element)) continue;
-    const segment = ts.isObjectBindingPattern(binding)
+    const isObjectBinding = ts.isObjectBindingPattern(binding);
+    const segment = isObjectBinding
       ? propertyNameText(element.propertyName ?? element.name)
       : String(index);
     if (segment === undefined) continue;
+    // An object rest binding names the remaining source object, not a real
+    // property called after the local binding. A later `rest.foo` therefore
+    // maps to the source's `foo`, while ordinary `{ foo: local }` bindings
+    // retain the authored `foo` segment. Array rest similarly names a slice;
+    // its local index is translated back by the source offset below.
+    const isRest = !!element.dotDotDotToken;
+    const nestedPath = isRest ? path : [...path, segment];
     const nested = bindingPathForIdentifier(
       identifier,
       element.name,
-      [...path, segment],
+      nestedPath,
     );
-    if (nested) return nested;
+    if (nested) {
+      return !isObjectBinding && isRest
+        ? { ...nested, arrayRestOffset: index }
+        : nested;
+    }
   }
   return undefined;
+}
+
+export interface PartitionedCallbackGuardCaptures {
+  /** Guard paths rooted in the callback's first parameter. */
+  readonly callbackInput: readonly AvailabilityCaptureOverride[];
+  /** Guard paths rooted in closure captures rather than the callback input. */
+  readonly captures: readonly AvailabilityCaptureOverride[];
+}
+
+/** Separate callback-input guard paths from closure-capture guard paths. */
+export function partitionGuardCapturesByCallbackInput(
+  entries: readonly AvailabilityCaptureOverride[],
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): PartitionedCallbackGuardCaptures {
+  const parameter = callback.parameters[0];
+  if (!parameter) {
+    return { callbackInput: [], captures: entries };
+  }
+
+  const callbackInput: AvailabilityCaptureOverride[] = [];
+  const captures: AvailabilityCaptureOverride[] = [];
+  for (const entry of entries) {
+    const [root, ...rest] = entry.path;
+    if (!root) {
+      callbackInput.push(entry);
+      continue;
+    }
+    const binding = bindingPathForIdentifier(
+      ts.factory.createIdentifier(root),
+      parameter.name,
+    );
+    if (binding === undefined) {
+      captures.push(entry);
+    } else {
+      const path = applyBindingPath(binding, rest);
+      if (!path) {
+        captures.push(entry);
+        continue;
+      }
+      callbackInput.push({
+        ...entry,
+        path,
+      });
+    }
+  }
+  return { callbackInput, captures };
 }
 
 /** Translate guard paths rooted at a callback parameter to module-input paths. */
@@ -389,20 +651,8 @@ export function mapGuardCapturesToCallbackInput(
   entries: readonly AvailabilityCaptureOverride[],
   callback: ts.ArrowFunction | ts.FunctionExpression,
 ): readonly AvailabilityCaptureOverride[] {
-  const parameter = callback.parameters[0];
-  if (!parameter) return entries;
-  return entries.flatMap((entry) => {
-    const [root, ...rest] = entry.path;
-    if (!root) return [entry];
-    const rootIdentifier = ts.factory.createIdentifier(root);
-    const bindingPath = bindingPathForIdentifier(
-      rootIdentifier,
-      parameter.name,
-    );
-    return bindingPath
-      ? [{ ...entry, path: [...bindingPath, ...rest] }]
-      : [entry];
-  });
+  const partitioned = partitionGuardCapturesByCallbackInput(entries, callback);
+  return [...partitioned.callbackInput, ...partitioned.captures];
 }
 
 export function availabilityOverridesByPath(

@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
 import { getTypeAtLocationWithFallback } from "../ast/utils.ts";
+import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import type { TransformationContext } from "../core/context.ts";
 import {
   AVAILABILITY_REASONS,
@@ -410,11 +411,23 @@ export function rewriteResultOfAliasReferences<T extends ts.Node>(
   return ts.visitNode(node, visit) as T;
 }
 
-function typeName(type: ts.Type): string | undefined {
-  return type.aliasSymbol?.getName() ?? type.getSymbol()?.getName();
+const COMMONFABRIC_AVAILABILITY_CONTAINER_NAMES = new Set([
+  "AsyncResult",
+  "DataUnavailable",
+  "DataUnavailableVariant",
+]);
+
+function isCommonFabricAvailabilityContainer(type: ts.Type): boolean {
+  const symbols = [type.aliasSymbol, type.getSymbol()].filter(
+    (symbol): symbol is ts.Symbol => !!symbol,
+  );
+  return symbols.some((symbol) =>
+    COMMONFABRIC_AVAILABILITY_CONTAINER_NAMES.has(symbol.getName()) &&
+    isCommonFabricSymbol(symbol)
+  );
 }
 
-function typeContainsAvailabilityVariant(
+export function typeContainsAvailabilityVariant(
   type: ts.Type,
   variant: ts.Type,
   checker: ts.TypeChecker,
@@ -423,11 +436,11 @@ function typeContainsAvailabilityVariant(
   if (seen.has(type)) return false;
   seen.add(type);
 
-  const name = typeName(type);
-  if (
-    name === "AsyncResult" || name === "DataUnavailable" ||
-    name === "DataUnavailableVariant"
-  ) {
+  if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) {
+    return false;
+  }
+
+  if (isCommonFabricAvailabilityContainer(type)) {
     return true;
   }
 
@@ -438,18 +451,10 @@ function typeContainsAvailabilityVariant(
   }
 
   const members = type.isUnion() ? type.types : [type];
-  return members.some((member) => {
-    const memberName = typeName(member);
-    if (
-      memberName === "IsPending" || memberName === "HasError" ||
-      memberName === "IsSyncing" || memberName === "HasSchemaMismatch"
-    ) {
-      return checker.isTypeAssignableTo(member, variant) ||
-        checker.isTypeAssignableTo(variant, member);
-    }
-    return checker.isTypeAssignableTo(member, variant) &&
-      checker.isTypeAssignableTo(variant, member);
-  });
+  return members.some((member) =>
+    checker.isTypeAssignableTo(member, variant) &&
+    checker.isTypeAssignableTo(variant, member)
+  );
 }
 
 /**
