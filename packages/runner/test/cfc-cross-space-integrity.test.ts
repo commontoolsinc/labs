@@ -373,8 +373,12 @@ describe("CFC cross-space integrity", () => {
         label: { integrity: ["gps-reading"] },
       }]);
 
-      // Space B writes the SAME bytes as plain data (no link).
+      // Actually READ the labeled source and write its MATERIALIZED value (not a
+      // link) into space B — the "a handler read it and copied the bytes" path.
       const tx = runtime.edit();
+      const src = runtime.getCell(spaceA, "s1e-src", undefined, tx);
+      const materialized = src.get() as string;
+      expect(materialized).toBe("37.77,-122.41");
       const copy = runtime.getCell(
         spaceB,
         "s1e-copy",
@@ -385,7 +389,7 @@ describe("CFC cross-space integrity", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      copy.set({ reading: "37.77,-122.41" });
+      copy.set({ reading: materialized });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
@@ -393,6 +397,13 @@ describe("CFC cross-space integrity", () => {
         storageManager,
         spaceB,
         parseLink(copy.getAsLink()).id!,
+      );
+      // The copied bytes equal the source, but the source's declared integrity
+      // did not ride along — materializing severed the provenance. (Under the
+      // default cfcFlowLabels:"off"; a flow-persisting deployment would stamp a
+      // separate `derived` taint component, never the source's declared label.)
+      expect((doc?.value as { reading?: string })?.reading).toBe(
+        "37.77,-122.41",
       );
       const integrity = entriesFor(doc, ["reading"])
         .flatMap((e) => e.label.integrity ?? []);
