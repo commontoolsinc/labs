@@ -281,6 +281,155 @@ const LEGACY_SCHEDULER_SCHEMA = `
   );
 `;
 
+// A partially converted W0.1 schema that satisfies the former loose checks:
+// every context column is present, the context key is the final action PK /
+// index column, and the target scope key is the final lookup column. The tuple
+// ordering, uniqueness, and foreign-key ownership are nevertheless wrong.
+const PARTIAL_CONTEXT_SCHEDULER_SCHEMA = `
+  PRAGMA foreign_keys = OFF;
+
+  DROP INDEX idx_scheduler_observation_id_context;
+  CREATE INDEX idx_scheduler_observation_id_context
+    ON scheduler_observation (execution_context_key, observation_id);
+
+  DROP TABLE scheduler_action_snapshot;
+  CREATE TABLE scheduler_action_snapshot (
+    branch                TEXT    NOT NULL DEFAULT '',
+    owner_space           TEXT    NOT NULL DEFAULT '',
+    piece_id              TEXT    NOT NULL,
+    process_generation    INTEGER NOT NULL,
+    action_id             TEXT    NOT NULL,
+    execution_context_key TEXT    NOT NULL,
+    observation_id        INTEGER NOT NULL,
+    commit_seq            INTEGER,
+    observed_at_seq       INTEGER NOT NULL DEFAULT 0,
+    payload               JSON    NOT NULL,
+    PRIMARY KEY (
+      owner_space,
+      branch,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+    ),
+    FOREIGN KEY (observation_id)
+      REFERENCES scheduler_observation(observation_id)
+  );
+
+  DROP TABLE scheduler_read_index;
+  CREATE TABLE scheduler_read_index (
+    branch                TEXT    NOT NULL DEFAULT '',
+    owner_space           TEXT,
+    read_space            TEXT    NOT NULL,
+    read_id               TEXT    NOT NULL,
+    read_scope            TEXT    NOT NULL,
+    read_scope_key        TEXT    NOT NULL,
+    read_path             JSON    NOT NULL,
+    read_kind             TEXT    NOT NULL,
+    piece_id              TEXT    NOT NULL,
+    process_generation    INTEGER NOT NULL,
+    action_id             TEXT    NOT NULL,
+    execution_context_key TEXT    NOT NULL,
+    observation_id        INTEGER NOT NULL,
+    FOREIGN KEY (observation_id)
+      REFERENCES scheduler_observation(observation_id)
+  );
+  CREATE INDEX idx_scheduler_read_index_lookup
+    ON scheduler_read_index (
+      read_space,
+      branch,
+      read_id,
+      read_scope_key
+    );
+  CREATE INDEX idx_scheduler_read_index_action
+    ON scheduler_read_index (
+      branch,
+      piece_id,
+      owner_space,
+      process_generation,
+      action_id,
+      execution_context_key
+    );
+
+  DROP TABLE scheduler_write_index;
+  CREATE TABLE scheduler_write_index (
+    branch                TEXT    NOT NULL DEFAULT '',
+    owner_space           TEXT    NOT NULL DEFAULT '',
+    write_space           TEXT    NOT NULL,
+    write_id              TEXT    NOT NULL,
+    write_scope           TEXT    NOT NULL,
+    write_scope_key       TEXT    NOT NULL,
+    write_path            JSON    NOT NULL,
+    write_kind            TEXT    NOT NULL,
+    piece_id              TEXT    NOT NULL,
+    process_generation    INTEGER NOT NULL,
+    action_id             TEXT    NOT NULL,
+    execution_context_key TEXT    NOT NULL,
+    observation_id        INTEGER NOT NULL,
+    FOREIGN KEY (observation_id)
+      REFERENCES scheduler_observation(observation_id)
+  );
+  CREATE INDEX idx_scheduler_write_index_action
+    ON scheduler_write_index (
+      branch,
+      piece_id,
+      owner_space,
+      process_generation,
+      action_id,
+      execution_context_key
+    );
+
+  DROP TABLE scheduler_action_state;
+  CREATE TABLE scheduler_action_state (
+    branch                 TEXT    NOT NULL DEFAULT '',
+    owner_space            TEXT    NOT NULL DEFAULT '',
+    piece_id               TEXT    NOT NULL,
+    process_generation     INTEGER NOT NULL,
+    action_id              TEXT    NOT NULL,
+    execution_context_key  TEXT    NOT NULL,
+    latest_observation_id  INTEGER,
+    direct_dirty_seq       INTEGER,
+    stale_seq              INTEGER,
+    unknown_reason         TEXT,
+    PRIMARY KEY (
+      owner_space,
+      branch,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+    ),
+    FOREIGN KEY (latest_observation_id)
+      REFERENCES scheduler_observation(observation_id)
+  );
+
+  DROP TABLE scheduler_context_floor;
+  CREATE TABLE scheduler_context_floor (
+    branch                     TEXT NOT NULL DEFAULT '',
+    owner_space                TEXT NOT NULL DEFAULT '',
+    piece_id                   TEXT NOT NULL,
+    process_generation         INTEGER NOT NULL,
+    action_id                  TEXT NOT NULL,
+    implementation_fingerprint TEXT NOT NULL,
+    runtime_fingerprint        TEXT NOT NULL,
+    principal_key              TEXT NOT NULL DEFAULT '',
+    floor_scope                TEXT NOT NULL,
+    PRIMARY KEY (
+      owner_space,
+      branch,
+      piece_id,
+      process_generation,
+      action_id,
+      implementation_fingerprint,
+      runtime_fingerprint,
+      principal_key
+    ),
+    CHECK (floor_scope IN ('space', 'user', 'session'))
+  );
+
+  PRAGMA foreign_keys = ON;
+`;
+
 const insertLegacyActiveSchedulerRow = (
   database: Database,
   options: {
@@ -1085,6 +1234,159 @@ Deno.test("scheduler context migration preserves only provable space state and i
     // A second open must be a no-op over the already-qualified schema.
     engine = await openEngine({ url: toFileUrl(path) });
     assertMigrated(engine);
+  } finally {
+    if (engine) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("scheduler context rebuilds a partially converted ownership schema", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine: Engine | undefined;
+
+  const primaryKey = (table: string): string[] =>
+    (engine!.database.prepare(`PRAGMA table_info("${table}")`).all() as Array<{
+      name: string;
+      pk: number;
+    }>).filter((row) => row.pk > 0)
+      .sort((left, right) => left.pk - right.pk)
+      .map((row) => row.name);
+  const index = (
+    table: string,
+    name: string,
+  ): { columns: string[]; unique: number; partial: number } => {
+    const definition =
+      (engine!.database.prepare(`PRAGMA index_list("${table}")`)
+        .all() as Array<{
+          name: string;
+          unique: number;
+          partial: number;
+        }>).find((row) => row.name === name);
+    assertExists(definition);
+    return {
+      columns: (engine!.database.prepare(`PRAGMA index_info("${name}")`)
+        .all() as Array<{ seqno: number; name: string }>)
+        .sort((left, right) => left.seqno - right.seqno)
+        .map((row) => row.name),
+      unique: definition.unique,
+      partial: definition.partial,
+    };
+  };
+  const foreignKey = (
+    table: string,
+  ): Array<{ table: string; from: string; to: string }> =>
+    (engine!.database.prepare(`PRAGMA foreign_key_list("${table}")`)
+      .all() as Array<{
+        id: number;
+        seq: number;
+        table: string;
+        from: string;
+        to: string;
+      }>).sort((left, right) => left.id - right.id || left.seq - right.seq)
+      .map(({ table, from, to }) => ({ table, from, to }));
+
+  const assertCurrentSchema = (): void => {
+    const actionOwnershipKey = [
+      "branch",
+      "owner_space",
+      "piece_id",
+      "process_generation",
+      "action_id",
+      "execution_context_key",
+    ];
+    assertEquals(
+      primaryKey("scheduler_action_snapshot"),
+      actionOwnershipKey,
+    );
+    assertEquals(primaryKey("scheduler_action_state"), actionOwnershipKey);
+    assertEquals(primaryKey("scheduler_context_floor"), [
+      "branch",
+      "owner_space",
+      "piece_id",
+      "process_generation",
+      "action_id",
+      "implementation_fingerprint",
+      "runtime_fingerprint",
+      "principal_key",
+    ]);
+    assertEquals(
+      index(
+        "scheduler_observation",
+        "idx_scheduler_observation_id_context",
+      ),
+      {
+        columns: ["observation_id", "execution_context_key"],
+        unique: 1,
+        partial: 0,
+      },
+    );
+    assertEquals(
+      index("scheduler_read_index", "idx_scheduler_read_index_lookup"),
+      {
+        columns: ["branch", "read_space", "read_id", "read_scope_key"],
+        unique: 0,
+        partial: 0,
+      },
+    );
+    for (
+      const [table, name] of [
+        ["scheduler_read_index", "idx_scheduler_read_index_action"],
+        ["scheduler_write_index", "idx_scheduler_write_index_action"],
+      ] as const
+    ) {
+      assertEquals(index(table, name), {
+        columns: actionOwnershipKey,
+        unique: 0,
+        partial: 0,
+      });
+    }
+    for (
+      const [table, observationColumn] of [
+        ["scheduler_action_snapshot", "observation_id"],
+        ["scheduler_read_index", "observation_id"],
+        ["scheduler_write_index", "observation_id"],
+        ["scheduler_action_state", "latest_observation_id"],
+      ] as const
+    ) {
+      assertEquals(foreignKey(table), [
+        {
+          table: "scheduler_observation",
+          from: observationColumn,
+          to: "observation_id",
+        },
+        {
+          table: "scheduler_observation",
+          from: "execution_context_key",
+          to: "execution_context_key",
+        },
+      ]);
+    }
+    assertEquals(
+      engine!.database.prepare(`PRAGMA foreign_key_check`).all(),
+      [],
+    );
+  };
+
+  try {
+    engine = await openEngine({ url: toFileUrl(path) });
+    close(engine);
+    engine = undefined;
+
+    const partial = new Database(path, { create: true });
+    try {
+      partial.exec(PARTIAL_CONTEXT_SCHEDULER_SCHEMA);
+    } finally {
+      partial.close();
+    }
+
+    engine = await openEngine({ url: toFileUrl(path) });
+    assertCurrentSchema();
+    close(engine);
+    engine = undefined;
+
+    // The corrected schema must be recognized as current on the next open.
+    engine = await openEngine({ url: toFileUrl(path) });
+    assertCurrentSchema();
   } finally {
     if (engine) close(engine);
     await Deno.remove(path);

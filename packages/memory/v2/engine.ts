@@ -1234,6 +1234,75 @@ const indexColumns = (database: Database, index: string): string[] => {
     .map((row) => row.name);
 };
 
+const sameColumns = (
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean =>
+  actual.length === expected.length &&
+  actual.every((column, index) => column === expected[index]);
+
+const hasExactIndex = (
+  database: Database,
+  table: string,
+  index: string,
+  columns: readonly string[],
+  unique: boolean,
+): boolean => {
+  const definition = database.prepare(`PRAGMA index_list("${table}")`)
+    .all() as Array<{ name: string; unique: number; partial: number }>;
+  const match = definition.find((row) => row.name === index);
+  return match !== undefined && match.unique === Number(unique) &&
+    match.partial === 0 && sameColumns(indexColumns(database, index), columns);
+};
+
+type ForeignKeyShape = {
+  table: string;
+  from: string[];
+  to: string[];
+};
+
+const foreignKeyShapes = (
+  database: Database,
+  table: string,
+): ForeignKeyShape[] => {
+  const rows = database.prepare(`PRAGMA foreign_key_list("${table}")`)
+    .all() as Array<{
+      id: number;
+      seq: number;
+      table: string;
+      from: string;
+      to: string;
+    }>;
+  const grouped = new Map<number, typeof rows>();
+  for (const row of rows) {
+    const group = grouped.get(row.id) ?? [];
+    group.push(row);
+    grouped.set(row.id, group);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, group]) => {
+      group.sort((left, right) => left.seq - right.seq);
+      return {
+        table: group[0].table,
+        from: group.map((row) => row.from),
+        to: group.map((row) => row.to),
+      };
+    });
+};
+
+const hasExactForeignKey = (
+  database: Database,
+  table: string,
+  targetTable: string,
+  from: readonly string[],
+  to: readonly string[],
+): boolean => {
+  const shapes = foreignKeyShapes(database, table);
+  return shapes.length === 1 && shapes[0].table === targetTable &&
+    sameColumns(shapes[0].from, from) && sameColumns(shapes[0].to, to);
+};
+
 const migrateScopedEntityTables = (database: Database): void => {
   if (hasColumn(database, "revision", "scope_key")) {
     return;
@@ -1595,6 +1664,26 @@ COMMIT;
 `);
 };
 
+const SCHEDULER_ACTION_OWNERSHIP_COLUMNS = [
+  "branch",
+  "owner_space",
+  "piece_id",
+  "process_generation",
+  "action_id",
+  "execution_context_key",
+] as const;
+
+const SCHEDULER_CONTEXT_FLOOR_COLUMNS = [
+  "branch",
+  "owner_space",
+  "piece_id",
+  "process_generation",
+  "action_id",
+  "implementation_fingerprint",
+  "runtime_fingerprint",
+  "principal_key",
+] as const;
+
 const schedulerExecutionContextSchemaCurrent = (
   database: Database,
 ): boolean =>
@@ -1606,22 +1695,74 @@ const schedulerExecutionContextSchemaCurrent = (
   hasColumn(database, "scheduler_write_index", "write_scope_key") &&
   hasColumn(database, "scheduler_action_state", "execution_context_key") &&
   hasColumn(database, "scheduler_context_floor", "floor_scope") &&
-  primaryKeyColumns(database, "scheduler_action_snapshot").at(-1) ===
-    "execution_context_key" &&
-  primaryKeyColumns(database, "scheduler_action_state").at(-1) ===
-    "execution_context_key" &&
-  indexColumns(database, "idx_scheduler_read_index_lookup").at(-1) ===
-    "read_scope_key" &&
-  indexColumns(database, "idx_scheduler_read_index_action").includes(
-    "owner_space",
+  sameColumns(
+    primaryKeyColumns(database, "scheduler_action_snapshot"),
+    SCHEDULER_ACTION_OWNERSHIP_COLUMNS,
   ) &&
-  indexColumns(database, "idx_scheduler_read_index_action").at(-1) ===
-    "execution_context_key" &&
-  indexColumns(database, "idx_scheduler_write_index_action").includes(
-    "owner_space",
+  sameColumns(
+    primaryKeyColumns(database, "scheduler_action_state"),
+    SCHEDULER_ACTION_OWNERSHIP_COLUMNS,
   ) &&
-  indexColumns(database, "idx_scheduler_write_index_action").at(-1) ===
-    "execution_context_key";
+  sameColumns(
+    primaryKeyColumns(database, "scheduler_context_floor"),
+    SCHEDULER_CONTEXT_FLOOR_COLUMNS,
+  ) &&
+  hasExactIndex(
+    database,
+    "scheduler_observation",
+    "idx_scheduler_observation_id_context",
+    ["observation_id", "execution_context_key"],
+    true,
+  ) &&
+  hasExactIndex(
+    database,
+    "scheduler_read_index",
+    "idx_scheduler_read_index_lookup",
+    ["branch", "read_space", "read_id", "read_scope_key"],
+    false,
+  ) &&
+  hasExactIndex(
+    database,
+    "scheduler_read_index",
+    "idx_scheduler_read_index_action",
+    SCHEDULER_ACTION_OWNERSHIP_COLUMNS,
+    false,
+  ) &&
+  hasExactIndex(
+    database,
+    "scheduler_write_index",
+    "idx_scheduler_write_index_action",
+    SCHEDULER_ACTION_OWNERSHIP_COLUMNS,
+    false,
+  ) &&
+  hasExactForeignKey(
+    database,
+    "scheduler_action_snapshot",
+    "scheduler_observation",
+    ["observation_id", "execution_context_key"],
+    ["observation_id", "execution_context_key"],
+  ) &&
+  hasExactForeignKey(
+    database,
+    "scheduler_read_index",
+    "scheduler_observation",
+    ["observation_id", "execution_context_key"],
+    ["observation_id", "execution_context_key"],
+  ) &&
+  hasExactForeignKey(
+    database,
+    "scheduler_write_index",
+    "scheduler_observation",
+    ["observation_id", "execution_context_key"],
+    ["observation_id", "execution_context_key"],
+  ) &&
+  hasExactForeignKey(
+    database,
+    "scheduler_action_state",
+    "scheduler_observation",
+    ["latest_observation_id", "execution_context_key"],
+    ["observation_id", "execution_context_key"],
+  );
 
 type SchedulerMigrationCandidate = {
   branch: BranchName;
