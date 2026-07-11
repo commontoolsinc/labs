@@ -2,8 +2,8 @@
  * Shared library for CI performance regression detection.
  *
  * Used by:
- *   - perf-regression.ts  (scheduled 4-hourly checker)
- *   - perf-check.ts       (per-PR CI gate)
+ *   - perf-check.ts            (per-PR CI gate)
+ *   - post-coverage-comment.ts (posts the gate's coverage comment)
  */
 
 // ---------------------------------------------------------------------------
@@ -86,45 +86,17 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
 /** Minimum number of historical samples before we compute a baseline. */
 export const MIN_SAMPLES = 5;
 
-/** Number of recent runs to compare against the baseline. */
-export const RECENT_WINDOW = 3;
-
-/** How many of the recent runs must exceed the threshold to flag a regression. */
-export const RECENT_THRESHOLD = 2;
-
 /** Standard deviations above the median to flag a regression. */
 export const STDDEV_FACTOR = 3;
 
 /** Minimum percentage increase over median to flag a regression. */
 export const MIN_REGRESSION_PCT = 0.50;
 
-/** Minimum absolute increase (in seconds) over median for non-bench metrics. */
+/** Minimum absolute increase (in seconds) over median. */
 export const MIN_ABSOLUTE_DELTA = 2;
-
-/** Baseline window: at least this many runs. */
-export const MIN_BASELINE_RUNS = 20;
-
-/** Baseline window: at least this many days back. */
-export const MIN_BASELINE_DAYS = 7;
-
-/** Maximum workflow runs to fetch from API. */
-export const MAX_RUNS_TO_FETCH = 100;
-
-/**
- * Runs-list API path for successful main-branch Benchmarks runs. Carries no
- * event filter: the Benchmarks workflow runs on a schedule and via manual
- * dispatch, and older push-triggered runs also carry usable samples.
- */
-export function benchmarksRunsPath(): string {
-  return `/repos/${REPO}/actions/workflows/benchmarks.yml/runs` +
-    `?branch=main&status=success&per_page=${MAX_RUNS_TO_FETCH}`;
-}
 
 /** Concurrency limit for API calls. */
 export const API_CONCURRENCY = 5;
-
-/** Label applied to regression issues. */
-export const ISSUE_LABEL = "perf-regression";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -256,42 +228,10 @@ export interface Baseline {
   threshold: number;
 }
 
-export interface Regression {
-  metric: string;
-  recentValues: number[];
-  baseline: Baseline;
-  avgRecent: number;
-  pctIncrease: number;
-}
-
 export interface JUnitTestSuite {
   name: string;
   time: number;
   tests: { name: string; time: number }[];
-}
-
-/** Structured output from `deno bench --json`. */
-export interface DenoBenchResult {
-  version: number;
-  runtime: string;
-  cpu: string;
-  benches: {
-    origin: string;
-    group: string | null;
-    name: string;
-    baseline: boolean;
-    results: {
-      ok?: {
-        n: number;
-        min: number;
-        max: number;
-        avg: number;
-        p75: number;
-        p99: number;
-        p995: number;
-      };
-    }[];
-  }[];
 }
 
 export interface PRInfo {
@@ -343,7 +283,7 @@ export interface CiWallTimeRevisitSignal {
 // GitHub API helpers
 // ---------------------------------------------------------------------------
 
-export function apiHeaders(): Record<string, string> {
+function apiHeaders(): Record<string, string> {
   return {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${TOKEN}`,
@@ -831,29 +771,8 @@ export async function downloadAndExtractArtifact(
   return null;
 }
 
-export async function downloadAndParsePerfMetrics(
-  artifactId: number,
-): Promise<Map<string, TimingSample> | null> {
-  const tmpDir = await downloadAndExtractArtifact(
-    artifactId,
-    "perf-metrics-",
-  );
-  if (!tmpDir) return null;
-  try {
-    const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
-    const content = await Deno.readTextFile(jsonPath);
-    return parsePerfMetricsFile(content);
-  } catch {
-    return null;
-  } finally {
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
-  }
-}
-
 /**
- * Like {@link downloadAndParsePerfMetrics}, but also surfaces the run's
+ * Download a perf-metrics artifact and parse its metrics along with the run's
  * compile cache states (null when the file predates cache-state tagging).
  */
 export async function downloadAndParsePerfMetricsDetailed(
@@ -937,144 +856,6 @@ export function parseJUnitXml(xml: string): JUnitTestSuite[] {
   return suites;
 }
 
-// ---------------------------------------------------------------------------
-// Log parsing fallback (for runs without JUnit artifacts)
-// ---------------------------------------------------------------------------
-
-/**
- * Downloads the raw log for a job and parses deno test output to extract
- * per-file timing. This is a brittle fallback for historical runs that
- * predate JUnit artifact uploads. Remove after 2026-03-19.
- */
-export async function fetchJobLog(jobId: number): Promise<string> {
-  const resp = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/jobs/${jobId}/logs`,
-    { headers: apiHeaders(), redirect: "follow" },
-  );
-  if (!resp.ok) return "";
-  return resp.text();
-}
-
-export function parseDenoTestLog(log: string): JUnitTestSuite[] {
-  const suites: JUnitTestSuite[] = [];
-
-  const cleanLine = (s: string) =>
-    s
-      .replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, "")
-      // deno-lint-ignore no-control-regex
-      .replace(/\x1b\[[0-9;]*m/g, "")
-      .replace(/\[[\d;]*m/g, "")
-      .trim();
-
-  const lines = log.split("\n").map(cleanLine);
-
-  let currentFile: string | null = null;
-  let currentTests: { name: string; time: number }[] = [];
-
-  function parseDuration(timeStr: string, unit: string): number {
-    let d = parseFloat(timeStr);
-    if (unit === "ms") d /= 1000;
-    return d;
-  }
-
-  function parseDurationFull(s: string): number | null {
-    const full = s.match(/(\d+)m\s*(\d+)s/);
-    if (full) return parseInt(full[1]) * 60 + parseInt(full[2]);
-    const sec = s.match(/^(\d+(?:\.\d+)?)s$/);
-    if (sec) return parseFloat(sec[1]);
-    const ms = s.match(/^(\d+(?:\.\d+)?)ms$/);
-    if (ms) return parseFloat(ms[1]) / 1000;
-    return null;
-  }
-
-  function flushFile(duration: number) {
-    if (currentFile) {
-      suites.push({ name: currentFile, time: duration, tests: currentTests });
-      currentFile = null;
-      currentTests = [];
-    }
-  }
-
-  for (const line of lines) {
-    const runningMatch = line.match(
-      /^running \d+ tests? from (.+\.test\.tsx?)$/,
-    );
-    if (runningMatch) {
-      if (currentFile && currentTests.length > 0) {
-        const totalTime = currentTests.reduce((s, t) => s + t.time, 0);
-        flushFile(totalTime);
-      }
-      currentFile = runningMatch[1];
-      currentTests = [];
-      continue;
-    }
-
-    const subtestMatch = line.match(
-      /^(.+?) \.{3} ok \((\d+(?:\.\d+)?)(ms|s)\)$/,
-    );
-    if (subtestMatch && currentFile) {
-      const testName = subtestMatch[1];
-      const dur = parseDuration(subtestMatch[2], subtestMatch[3]);
-      currentTests.push({ name: testName, time: dur });
-      continue;
-    }
-
-    const subtestMinMatch = line.match(
-      /^(.+?) \.{3} ok \((\d+m\s*\d+s)\)$/,
-    );
-    if (subtestMinMatch && currentFile) {
-      const testName = subtestMinMatch[1];
-      const dur = parseDurationFull(subtestMinMatch[2]);
-      if (dur !== null) {
-        currentTests.push({ name: testName, time: dur });
-      }
-      continue;
-    }
-
-    const summaryMatch = line.match(
-      /^ok \| \d+ passed.*\((\d+(?:\.\d+)?)(ms|s)\)/,
-    );
-    if (summaryMatch) {
-      const dur = parseDuration(summaryMatch[1], summaryMatch[2]);
-      flushFile(dur);
-      continue;
-    }
-
-    const summaryMinMatch = line.match(
-      /^ok \| \d+ passed.*\((\d+m\s*\d+s)\)/,
-    );
-    if (summaryMinMatch) {
-      const dur = parseDurationFull(summaryMinMatch[1]);
-      if (dur !== null) flushFile(dur);
-      continue;
-    }
-
-    const failMatch = line.match(
-      /^FAILED \|.*\((\d+(?:\.\d+)?)(ms|s)\)/,
-    );
-    if (failMatch) {
-      const dur = parseDuration(failMatch[1], failMatch[2]);
-      flushFile(dur);
-      continue;
-    }
-  }
-
-  if (currentFile && currentTests.length > 0) {
-    const totalTime = currentTests.reduce((s, t) => s + t.time, 0);
-    flushFile(totalTime);
-  }
-
-  return suites;
-}
-
-/** Map from job name substring to the artifact-style label for test metrics. */
-export const JOB_TO_LABEL: Record<string, string> = {
-  "Package Integration Tests": "package-integration",
-  "Pattern Integration Tests": "pattern-integration",
-  "Pattern Reload Integration Tests": "pattern-reload-integration",
-  "Generated Patterns Integration Tests": "generated-patterns",
-};
-
 export function timingArtifactLabel(artifactName: string): string {
   const label = artifactName.replace(/^test-timing-/, "");
   return label
@@ -1084,43 +865,10 @@ export function timingArtifactLabel(artifactName: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Benchmark results parsing
-// ---------------------------------------------------------------------------
-
-export function extractBenchMetrics(
-  run: WorkflowRun,
-  benchData: DenoBenchResult,
-): Map<string, TimingSample> {
-  const metrics = new Map<string, TimingSample>();
-
-  for (const bench of benchData.benches) {
-    const result = bench.results[0]?.ok;
-    if (!result) continue;
-
-    const originFile = bench.origin.replace(
-      /^file:\/\/.*\/packages\//,
-      "packages/",
-    );
-    const group = bench.group ? `${bench.group}/` : "";
-    const key = `bench: ${originFile} > ${group}${bench.name}`;
-
-    metrics.set(key, {
-      runId: run.id,
-      runUrl: run.html_url,
-      sha: run.head_sha,
-      createdAt: run.created_at,
-      durationSeconds: result.avg, // nanoseconds — formatted appropriately
-    });
-  }
-
-  return metrics;
-}
-
-// ---------------------------------------------------------------------------
 // Metric extraction from jobs/steps
 // ---------------------------------------------------------------------------
 
-export function durationSeconds(
+function durationSeconds(
   start: string | null,
   end: string | null,
 ): number {
@@ -1128,7 +876,7 @@ export function durationSeconds(
   return (new Date(end).getTime() - new Date(start).getTime()) / 1000;
 }
 
-export function normalizeName(name: string): string {
+function normalizeName(name: string): string {
   return name
     .replace(
       /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FAFF}]/gu,
@@ -1546,7 +1294,7 @@ const COMPILE_CACHE_TEST_LABEL_RE = /^(?:sub)?test: ([^/]+)\//;
 /**
  * Map a metric name to the compile-cache family whose cold cache inflates
  * it, or null for metrics with no compile cache (Runner Tests,
- * pattern-reload-integration, `coverage-debt:`, `bench:`, ...). The mapping
+ * pattern-reload-integration, `coverage-debt:`, ...). The mapping
  * mirrors the names `extractMetrics` and `extractTestFileMetrics` emit.
  */
 export function compileCacheFamilyForMetric(
@@ -2095,11 +1843,6 @@ export function buildCoverageResolvedComment(
   return out.join("\n");
 }
 
-/** Escape a string for use inside a Markdown table cell. */
-export function escapeTableCell(s: string): string {
-  return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
-}
-
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const m = Math.floor(seconds / 60);
@@ -2107,19 +1850,12 @@ export function formatDuration(seconds: number): string {
   return `${m}m ${s.toFixed(0)}s`;
 }
 
-export function formatNanos(ns: number): string {
-  if (ns < 1_000) return `${ns.toFixed(1)}ns`;
-  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(1)}us`;
-  if (ns < 1_000_000_000) return `${(ns / 1_000_000).toFixed(1)}ms`;
-  return `${(ns / 1_000_000_000).toFixed(2)}s`;
-}
-
 export function formatMetricValue(name: string, value: number): string {
   if (isCoverageDebtMetric(name)) {
     const rounded = Math.round(value);
     return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
   }
-  return name.startsWith("bench:") ? formatNanos(value) : formatDuration(value);
+  return formatDuration(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -2149,23 +1885,6 @@ export async function readAndParseEvent(
 // ---------------------------------------------------------------------------
 // PR helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Look up the merged PR that introduced a given commit on main.
- * Returns null if no associated PR is found or if the API call fails.
- */
-export async function fetchPRForCommit(
-  sha: string,
-): Promise<PRInfo | null> {
-  try {
-    const prs = await githubGet<PRInfo[]>(
-      `/repos/${REPO}/commits/${sha}/pulls`,
-    );
-    return prs.find((pr) => pr.merged_at !== null) ?? prs[0] ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** Fetch the full body of a PR by number. */
 export async function fetchPRBody(prNumber: number): Promise<string> {
@@ -2245,7 +1964,6 @@ export async function fetchCurrentPRBody(
  *
  * Format (visible markdown, one per line):
  *   NEW_PERF_BASELINE: job: Package Integration Tests = 300s
- *   NEW_PERF_BASELINE: bench: foo > bar = 500us
  *   NEW_COVERAGE_BASELINE
  *
  * Values require a unit suffix: s, ms, us/µs, ns, line, or lines.
@@ -2305,10 +2023,6 @@ export function parseBaselineOverrides(body: string): BaselineOverrides {
         break;
     }
 
-    if (metric.startsWith("bench:")) {
-      value *= 1e9;
-    }
-
     result.metrics.set(metric, value);
   }
 
@@ -2326,13 +2040,6 @@ export function formatOverrideSuggestion(
   if (isCoverageDebtMetric(metric)) {
     const rounded = Math.ceil(value);
     return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
-  }
-  if (metric.startsWith("bench:")) {
-    // value is in nanoseconds
-    if (value < 1_000) return `${value.toFixed(0)}ns`;
-    if (value < 1_000_000) return `${(value / 1_000).toFixed(0)}us`;
-    if (value < 1_000_000_000) return `${(value / 1_000_000).toFixed(0)}ms`;
-    return `${(value / 1_000_000_000).toFixed(1)}s`;
   }
   // value is in seconds
   return `${Math.ceil(value)}s`;

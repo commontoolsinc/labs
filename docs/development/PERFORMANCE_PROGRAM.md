@@ -25,8 +25,9 @@ toylike even when it's functionally correct.
    outcomes.
 
 4. **Protect what you've gained.** Every improvement should be defended by an
-   existing benchmark. The CI regression detector already runs every 4 hours —
-   lean on it rather than building new infrastructure.
+   existing benchmark. CI already runs the benchmark suite every four hours
+   and gates PRs on CI timing regressions — lean on that rather than building
+   new infrastructure.
 
 5. **Balance direct wins with leverage.** We're a tiny team, so we can't
    afford to spend a month on infrastructure before delivering improvements.
@@ -54,9 +55,11 @@ step, and we'll ratchet targets down as we improve.
 
 **What exists today:**
 - 14 micro-benchmark files across runner, memory, utils
-- CI benchmarks on every push to main (64-core runner), JSON artifacts with
-  90-day retention
-- Regression detector every 4 hours (median + 3σ or +50%, auto-creates GitHub issues)
+- CI benchmarks every four hours on main (dedicated runner group), JSON
+  artifacts with 90-day retention, charted on the team ops dashboard's /bench
+  page
+- Per-PR performance gate comparing CI timings against recent main runs
+  (median + 3σ or +50%)
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
   LLM queue batching, scheduler debouncing, scheduler writer-index cleanup
   (`writersByEntity` is Set-backed), refer() caching (~2x)
@@ -163,13 +166,13 @@ debating when the timing is right.
 | INFRA-2 | Local benchmark comparison | High | S | `deno task bench` wrapper that saves `bench-baseline.json` and diffs against it. See results in seconds instead of waiting for CI. Every optimization project gets faster. |
 | INFRA-3 | Selective benchmark filtering | Medium | S | Verify and document `deno bench --filter` for subsystem-specific runs. Faster inner loop when working on a specific area. |
 | INFRA-4 | Single "pattern load" benchmark | High | M | One representative pattern that compiles, loads, receives data, and renders. The top-level number that tells you whether an optimization actually moved the user-visible needle. Without this you're optimizing components without knowing if they're the bottleneck. (Partly done in [#3133](https://github.com/commontoolsinc/labs/pull/3133)) |
-| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, compares against main, posts before/after comment. We already have the benchmark suite, artifact storage, and comparison logic in `perf-regression.ts`. Catches regressions before merge instead of 4 hours after. (done in [#3125](https://github.com/commontoolsinc/labs/pull/3125)?) |
-| INFRA-6 | Benchmark trend visualization | Medium | M | Script that pulls 90 days of benchmark JSON artifacts and produces charts or CSVs. Data already exists but isn't accessible without manual artifact downloads. Spots gradual drift the regression detector misses. |
+| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, runs the benchmarks, compares against main, posts a before/after comment. The per-PR gate from [#3125](https://github.com/commontoolsinc/labs/pull/3125) compares CI job, step, and test timings but never runs benchmarks, so benchmark regressions surface only in the dashboard trends, after merge. The benchmark suite, the four-hourly bench-results artifacts, and the generic baseline math in `tasks/perf-lib.ts` are reusable; the deno-bench ingestion was removed with the scheduled detector, so a bot would need to rebuild it. |
+| INFRA-6 | Benchmark trend visualization | Medium | M | Script that pulls 90 days of benchmark JSON artifacts and produces charts or CSVs. Spots gradual drift that per-PR checks miss. (done: the team ops dashboard charts benchmark trends on its /bench page) |
 | INFRA-7 | Automated budget enforcement | High | L | Hard budgets on critical metrics, CI fails if exceeded. Performance becomes a contract. Requires careful calibration for CI-vs-local variance and a warmup period as warnings-only. Risk of false positives creating CI noise. |
 | INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Note that the pattern unit tests integration test is the closest we have to that. It also run the backend in-memory, so it happens to measure both client and server in one go.) |
 | INFRA-9 | Ratcheting | Medium | L | When a metric improves, automatically lower the budget to lock in the gain. Requires budget enforcement as prerequisite. Compound improvement without discipline overhead. Risk: lucky fast runs ratcheting to unreproducible levels. |
 | INFRA-10 | Runtime profiling infrastructure | High | L | Structured traces from running toolshed/shell, queryable programmatically. "Show me the 10 slowest reactive cycles." Transforms profiling from squinting at flame charts to querying data. Significant design work to make it zero-cost when inactive. (Note: `cf test --verbose ...` is useful here) |
-| INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Replaces "download artifact, parse JSON, squint." Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. |
+| INFRA-11 | Performance dashboard | Medium | L | Hosted page with benchmark results, trends, regression status. Replaces "download artifact, parse JSON, squint." Creates shared visibility and accountability. Frontend work, CI integration, ongoing maintenance. (Partly done: the team ops dashboard's /bench page covers benchmark results and trends.) |
 
 ## Optimization Backlog
 
