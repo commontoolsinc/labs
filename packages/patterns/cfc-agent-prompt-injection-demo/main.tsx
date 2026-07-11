@@ -4,6 +4,10 @@ import {
   computed,
   fetchJsonUnchecked,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   llmDialog,
   NAME,
   pattern,
@@ -341,7 +345,15 @@ export default pattern<Record<string, never>>(() => {
   });
   const modelDirectory = resultOf(modelDirectoryRequest);
   const modelItems = computed(() => {
-    if (!modelDirectory) return FALLBACK_MODEL_ITEMS;
+    if (
+      isPending(modelDirectoryRequest) ||
+      hasError(modelDirectoryRequest) ||
+      isSyncing(modelDirectoryRequest) ||
+      hasSchemaMismatch(modelDirectoryRequest) ||
+      !modelDirectory
+    ) {
+      return FALLBACK_MODEL_ITEMS;
+    }
 
     const directoryItems = Object.keys(modelDirectory as any).map((key) => ({
       label: key,

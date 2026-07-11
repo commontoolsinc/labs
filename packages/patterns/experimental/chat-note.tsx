@@ -395,10 +395,19 @@ const ChatNote = pattern<Input, Output>(
       const generating = isGenerating.get();
       const pending = isPending(llmResponse.result);
       const result = llmResult;
+      // A terminal stream error must release the local generation latch. The
+      // request inputs are cleared as well so a later Generate action creates
+      // a fresh request instead of remaining attached to the failed one.
+      if (hasError(llmResponse.result)) {
+        if (generating) {
+          isGenerating.set(false);
+          llmMessages.set([]);
+          beforeAIInsert.set("");
+        }
+        return;
+      }
       // When complete, finalize with result and closing separator
-      if (
-        !pending && !hasError(llmResponse.result) && result && generating
-      ) {
+      if (!pending && result && generating) {
         const prefix = beforeAIInsert.get();
         if (prefix) {
           content.set(prefix + result + "\n---\n");
