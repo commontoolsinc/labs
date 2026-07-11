@@ -5,7 +5,10 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  noteDerivedCopy,
+} from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -494,6 +497,28 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
+    } else if (isPattern(binding)) {
+      const ref = getArtifactEntryRef(binding);
+      if (ref !== undefined) {
+        return {
+          $patternRef: { identity: ref.identity, symbol: ref.symbol },
+          argumentSchema: binding.argumentSchema,
+          resultSchema: binding.resultSchema,
+        };
+      }
+
+      // A keyless callable has no cold-resolvable artifact to reference. Keep
+      // the legacy live value intact. Object-shaped legacy pattern graphs still
+      // need their deferred aliases decremented one level below.
+      if (typeof binding !== "object") return binding;
+      const copy: Record<string | symbol, unknown> = Object.fromEntries(
+        Object.entries(binding).map(([key, value]) => [
+          key,
+          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
+        ]),
+      );
+      noteDerivedCopy(copy, binding);
+      return copy;
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(
@@ -502,17 +527,12 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         )
       );
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
+      return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,
           convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
-      // Carry the derivation link (trust + content-addressed entry ref) onto
-      // the bound copy so a pattern value re-bound here still resolves its
-      // `{ identity, symbol }` and stays trusted.
-      if (isPattern(binding)) noteDerivedCopy(result, binding);
-      return result;
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;

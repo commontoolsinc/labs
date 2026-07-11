@@ -87,6 +87,12 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
+import {
+  isPatternRefSentinel,
+  type PatternRefSentinel,
+  resolveStoredPattern,
+  resolveStoredPatternAsync,
+} from "./builtins/op-pattern-ref.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
@@ -832,6 +838,29 @@ export class Runner {
     resultCell: Cell<R>,
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
+    if (
+      providedTx === undefined && isPatternRefSentinel(patternOrModule) &&
+      resolveStoredPattern(this.runtime, patternOrModule) === undefined
+    ) {
+      const { identity, symbol } = patternOrModule.$patternRef;
+      return resolveStoredPatternAsync(
+        this.runtime,
+        patternOrModule,
+        resultCell.space,
+      ).then((loaded) => {
+        if (loaded === undefined) {
+          throw new Error(`Unknown pattern: ${identity}#${symbol}`);
+        }
+        // Loading evaluates and indexes the verified module. Re-enter through
+        // the sentinel path so kind and carried schemas are still checked.
+        return this.setup(
+          undefined,
+          patternOrModule,
+          argument,
+          resultCell,
+        );
+      });
+    }
     if (providedTx) {
       this.setupInternal(
         providedTx,
@@ -873,6 +902,32 @@ export class Runner {
     }
   }
 
+  private resolveTrustedPatternRef(
+    sentinel: PatternRefSentinel,
+  ): Pattern | undefined {
+    const { identity, symbol } = sentinel.$patternRef;
+    const resolved = resolveStoredPattern(this.runtime, sentinel);
+    if (resolved === undefined) return undefined;
+    if (!isPattern(resolved) || !isTrustedBuilderArtifact(resolved)) {
+      throw new Error(
+        `Resolved artifact ${identity}#${symbol} is not a trusted pattern`,
+      );
+    }
+    const carried = sentinel as PatternRefSentinel & {
+      argumentSchema?: JSONSchema;
+      resultSchema?: JSONSchema;
+    };
+    if (
+      carried.argumentSchema === undefined ||
+      carried.resultSchema === undefined ||
+      !deepEqual(carried.argumentSchema, resolved.argumentSchema) ||
+      !deepEqual(carried.resultSchema, resolved.resultSchema)
+    ) {
+      throw new Error(`Pattern schema mismatch for ${identity}#${symbol}`);
+    }
+    return resolved;
+  }
+
   private resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
     previousIdentityRef: { identity: string; symbol: string } | undefined,
@@ -884,6 +939,15 @@ export class Runner {
     }
     | undefined {
     let resolvedPatternOrModule = patternOrModule;
+
+    if (isPatternRefSentinel(resolvedPatternOrModule)) {
+      const { identity, symbol } = resolvedPatternOrModule.$patternRef;
+      const resolved = this.resolveTrustedPatternRef(resolvedPatternOrModule);
+      if (resolved === undefined) {
+        throw new Error(`Unknown pattern: ${identity}#${symbol}`);
+      }
+      resolvedPatternOrModule = resolved;
+    }
 
     // No pattern in hand: resolve the previously-stored `{ identity, symbol }`
     // pointer synchronously from the in-session artifact index (the module is
@@ -5365,13 +5429,27 @@ export class Runner {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindtoDoc(
+    const boundPatternImpl: unknown = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    let patternImpl: Pattern;
+    if (isPatternRefSentinel(boundPatternImpl)) {
+      const resolved = this.resolveTrustedPatternRef(boundPatternImpl);
+      if (resolved !== undefined) {
+        patternImpl = resolved;
+      } else {
+        const { identity, symbol } = boundPatternImpl.$patternRef;
+        throw new Error(`Unknown pattern: ${identity}#${symbol}`);
+      }
+    } else if (isPattern(boundPatternImpl)) {
+      patternImpl = boundPatternImpl;
+    } else {
+      throw new Error("Invalid bound pattern");
+    }
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,

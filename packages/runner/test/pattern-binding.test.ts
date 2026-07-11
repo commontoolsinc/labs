@@ -20,10 +20,29 @@ import {
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { noteDerivedCopy } from "../src/builder/pattern-metadata.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  isPatternRefSentinel,
+  resolveStoredPattern,
+} from "../src/builtins/op-pattern-ref.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+const ADDRESSABLE_PATTERN_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "export default pattern<{ value: number }>(({ value }) => ({ value }));",
+      ].join("\n"),
+    },
+  ],
+};
 
 describe("pattern-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -507,6 +526,90 @@ describe("pattern-binding", () => {
       expect(result.op.nodes[0].outputs).toEqual({
         $alias: { partialCause: "output", path: [] },
       });
+    });
+
+    it("keeps a keyless callable pattern on the legacy live path", () => {
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "keyless callable binding" },
+      });
+      try {
+        const { pattern } = createTrustedBuilder(runtime).commonfabric;
+        const keyless = pattern(() => ({ value: 1 }));
+        expect(runtime.patternManager.getArtifactEntryRef(keyless))
+          .toBeUndefined();
+
+        const resultCell = runtime.getCell(
+          space,
+          "keyless callable binding",
+          undefined,
+          tx,
+        );
+        const argumentCell = getMetaCell(resultCell, "argument", tx);
+        const bound = unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          keyless,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        );
+        expect(bound).toBe(keyless);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("binds nested addressable patterns as schema-carrying refs", async () => {
+      const compiled = await runtime.patternManager.compilePattern(
+        ADDRESSABLE_PATTERN_PROGRAM,
+      );
+      const entryRef = runtime.patternManager.getArtifactEntryRef(compiled);
+      expect(entryRef).toBeDefined();
+      const derived = {
+        argumentSchema: compiled.argumentSchema,
+        resultSchema: compiled.resultSchema,
+        result: compiled.result,
+        nodes: compiled.nodes,
+      };
+      noteDerivedCopy(derived, compiled);
+
+      const resultCell = runtime.getCell(
+        space,
+        "nested addressable patterns bind as refs",
+        undefined,
+        tx,
+      );
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+      const bound = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        {
+          direct: compiled,
+          nested: { operations: [compiled, derived] },
+        },
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      ) as {
+        direct: unknown;
+        nested: { operations: unknown[] };
+      };
+
+      for (
+        const value of [
+          bound.direct,
+          bound.nested.operations[0],
+          bound.nested.operations[1],
+        ]
+      ) {
+        expect(isPatternRefSentinel(value)).toBe(true);
+        expect(value).toEqual({
+          $patternRef: entryRef,
+          argumentSchema: compiled.argumentSchema,
+          resultSchema: compiled.resultSchema,
+        });
+        expect((value as Record<string, unknown>).nodes).toBeUndefined();
+        expect(resolveStoredPattern(runtime, value)).toBe(compiled);
+      }
     });
   });
 

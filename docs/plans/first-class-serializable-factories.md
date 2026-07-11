@@ -74,8 +74,9 @@ implementation. When the final removal gate passes, archive it under
   each `asFactory` argument as the current ordinary callable. Never expose an
   inert shell, promise, or lazy executable wrapper to authored callback code.
 - [ ] Make cold readiness local to the consuming dynamic node, lift attempt, or
-  handler event. Whole-parent preloading is cache-only; only a cold root
-  factory intrinsically gates parent setup.
+  handler event. Whole-parent preloading is cache-only; only a cold root passed
+  to non-transactional Promise-based `setup(undefined, ...)` intrinsically
+  gates parent setup. `run()` and transaction-bound setup remain warm-only.
 - [ ] Keep artifact source space as trusted runner provenance, distinct from a
   pattern factory's serialized `spaceSelector` execution target. Do not add
   source authority to `Factory@1`.
@@ -106,15 +107,15 @@ invent a second factory representation while waiting for Stage 2.
 
 Reference commits: `3b028c786`, `39b213e63`, and `ede6c5a7d`.
 
-- [ ] Compare each reference commit against current `main`; record which hunks
+- [x] Compare each reference commit against current `main`; record which hunks
   are already present and which semantic tests still fail.
-- [ ] Copy or reimplement only changes touching generic pattern-value binding,
+- [x] Copy or reimplement only changes touching generic pattern-value binding,
   executable lookup, and direct setup/sub-pattern resolution.
-- [ ] Explicitly exclude reactive-interpreter dispatch, strict-interpreter-only
+- [x] Explicitly exclude reactive-interpreter dispatch, strict-interpreter-only
   rewrites, or unrelated runner refactors from the port.
-- [ ] Keep current runner behavior outside the new `$patternRef` cases byte-for-
+- [x] Keep current runner behavior outside the new `$patternRef` cases byte-for-
   byte or test-for-test equivalent.
-- [ ] Record the API discrepancy from the reference work: current `run()` is
+- [x] Record the API discrepancy from the reference work: current `run()` is
   synchronous and cannot perform storage-backed cold loading without an API
   redesign. Preserve that API and put the cold fallback on Promise-based
   non-transactional `setup()`.
@@ -127,17 +128,36 @@ Expected implementation files:
 - `packages/runner/src/harness/executable-registry.ts` only if the current
   executable lookup still needs the generic artifact path
 
+Audit record (2026-07-11):
+
+- None of `3b028c786`, `39b213e63`, or `ede6c5a7d` is an ancestor of this
+  branch.
+- Current `main` already had the schema-carrying `PatternRefSentinel`, warm and
+  async stored-pattern resolvers, generic trusted artifact indexing, and the
+  canonical schema-carrying `patternToJSON()` form. It lacked the generic
+  binding conversion and direct sentinel setup/sub-pattern resolution covered
+  here.
+- `Runner.substituteOpPatternRefs()` remains because the newer keyless list
+  path and `keyless-op-identity.test.ts` still depend on it. The reference
+  deletion was not reproduced, and no executable-registry change was needed.
+- The reactive-interpreter dispatch/refactors from #4514 were excluded. The
+  only API discrepancy is the documented warm synchronous `run()` versus cold
+  asynchronous non-transactional `setup()` split.
+- Validation before completion: the focused six-file matrix passed with
+  `8 passed (48 steps), 0 failed`; the complete runner package task passed with
+  `870 passed (4686 steps), 0 failed, 0 ignored (10 steps)`.
+
 ### WP0.2 — Bind nested pattern values by reference
 
-- [ ] Add a red test showing an addressable pattern nested in an object/array
+- [x] Add a red test showing an addressable pattern nested in an object/array
   binding is replaced with a `$patternRef` sentinel rather than copied as an
   inert graph.
-- [ ] Preserve `argumentSchema` and `resultSchema` on the sentinel.
-- [ ] Preserve derivation provenance so a serialized copy still resolves its
+- [x] Preserve `argumentSchema` and `resultSchema` on the sentinel.
+- [x] Preserve derivation provenance so a serialized copy still resolves its
   root artifact ref after registration.
-- [ ] Cover direct, nested, repeated, and aliased occurrences without changing
+- [x] Cover direct, nested, repeated, and aliased occurrences without changing
   ordinary object traversal.
-- [ ] Preserve the current legacy graph fallback for a keyless pattern; the new
+- [x] Preserve the current legacy graph fallback for a keyless pattern; the new
   durable `Factory@1` identity rejection belongs to Stage 1, not this
   prerequisite port.
 
@@ -148,17 +168,17 @@ Tests to port or extend:
 
 ### WP0.3 — Resolve a sentinel passed directly to setup/run
 
-- [ ] Add a red test for a `$patternRef` handed directly to sub-pattern setup,
+- [x] Add a red test for a `$patternRef` handed directly to sub-pattern setup,
   not only nested inside another binding.
-- [ ] Resolve synchronously from the artifact index in both `run()` and
+- [x] Resolve synchronously from the artifact index in both `run()` and
   `setup()` when warm.
-- [ ] In `setup(undefined, ...)`, fall back to the existing storage-backed
+- [x] In `setup(undefined, ...)`, fall back to the existing storage-backed
   identity loader when cold, then re-enter the same sentinel validation path.
-- [ ] Keep synchronous `run()` and transaction-bound setup warm-only. A cold
+- [x] Keep synchronous `run()` and transaction-bound setup warm-only. A cold
   ref fails clearly without partially mutating or starting the piece; do not
   change `run()`'s return type.
-- [ ] Validate the resolved value is a trusted pattern with matching schemas.
-- [ ] Ensure a missing or wrong-kind ref fails closed and includes identity and
+- [x] Validate the resolved value is a trusted pattern with matching schemas.
+- [x] Ensure a missing or wrong-kind ref fails closed and includes identity and
   symbol in the diagnostic.
 
 Tests to port or extend:
@@ -169,13 +189,13 @@ Tests to port or extend:
 
 ### Stage 0 completion gate
 
-- [ ] The three reference commits are not ancestors of this work by accident;
+- [x] The three reference commits are not ancestors of this work by accident;
   only reviewed prerequisite behavior has been reproduced.
-- [ ] `deno test` passes for the focused Stage 0 runner tests.
-- [ ] `deno task test` passes in `packages/runner`.
-- [ ] No Stage 0 code depends on reactive-interpreter-only types or flags.
-- [ ] No async `run()` API or hidden fire-and-forget cold load was introduced.
-- [ ] Commit the stage as a standalone, revertible prerequisite.
+- [x] `deno test` passes for the focused Stage 0 runner tests.
+- [x] `deno task test` passes in `packages/runner`.
+- [x] No Stage 0 code depends on reactive-interpreter-only types or flags.
+- [x] No async `run()` API or hidden fire-and-forget cold load was introduced.
+- [x] Commit the stage as a standalone, revertible prerequisite.
 
 ## Stage 1 — Branded callable Fabric values
 
@@ -405,8 +425,9 @@ Expected files and tests:
 - [ ] Preserve `asScope()` and named, anonymous, and cell-derived `inSpace()`
   selectors across the round trip.
 - [ ] Prove artifact source space and `inSpace()` execution target may differ,
-  including a cross-space link and a by-value copy whose writer replicated the
-  artifact closure.
+  including a cross-space link and a by-value copy whose writer durably
+  replicated the artifact closure into the containing destination space before
+  committing the Factory value.
 - [ ] Verify equal state hashes equally across independent verified module
   evaluations.
 
@@ -587,8 +608,9 @@ cannot undo either classification.
   and selection generation. Loading A may warm a cache after B is selected but
   must never instantiate A or reschedule a stopped owner.
 - [ ] Keep this immediate switch-latest lifecycle scoped to direct dynamic
-  factory nodes. `lift`-mediated factory use retains the scheduler's existing
-  atomic last-successful-result replacement semantics in WP2.6.
+  factory nodes. In WP2.6, cold readiness itself must not tear down a lift's
+  prior result; once ready, existing lift replacement/commit semantics apply
+  unchanged.
 
 Expected runtime tests:
 
@@ -622,17 +644,24 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
   CFC provenance. Existing fail-open `presyncInputs` may prewarm caches but
   cannot be the correctness/security gate.
 - [ ] For lifts, reuse the normal reactive rerun loop. Keep the previous
-  successfully committed value/result-owned child until a successful rerun
-  atomically replaces it; do not import direct dynamic-node immediate teardown
-  semantics.
+  committed value/result-owned child while only cold readiness is pending; once
+  ready, use the existing lift execution/replacement/commit behavior without
+  importing direct dynamic-node immediate teardown semantics or claiming new
+  commit atomicity.
 - [ ] For handlers, materialize bound context and event data per event. Context
   changes alone do not invoke the handler or replace prior event-owned results;
   a by-value event factory is an event snapshot and an explicit Cell retains
   Cell semantics.
-- [ ] Delay/requeue a cold handler event with the same durable event identity.
-  Transient load failure follows existing retry policy; missing/forged/wrong-
-  kind/schema failure is terminal and fail-closed. Create no handler body
-  effects, normal receipt/result graph, or subscription before readiness.
+- [ ] Delay/requeue a cold handler event with the same complete durable intent:
+  identity, origin lineage, commit/final callbacks, retry metadata, and deadline.
+  Readiness deferral is not an authored attempt: it does not consume commit-
+  retry budget, call the final callback, or mint a receipt.
+- [ ] Add a dedicated bounded readiness retry/backoff policy for transient
+  artifact unavailability, independent of the authored event's `retries`
+  setting. Missing/forged/wrong-kind/schema failure is terminal and fail-
+  closed. Keep the enclosing handler stream subscribed, but create no handler
+  body effects, normal receipt/result graph, or event-created child/action
+  subscription before readiness.
 - [ ] Fence lift/event preparation by owner generation so teardown during load
   cannot reschedule or resurrect work. If A initiated a load and B is current
   on retry, authored code sees only B.
@@ -652,9 +681,10 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
 - [ ] Add typed factory round trips through Cells, query-result proxies, pieces,
   nested arrays, and nested objects now that `asFactory` exists.
 - [ ] Verify cross-space links remain links, artifact source space is passed to
-  loading, by-value copy replicates the artifact closure, `spaceSelector`
-  remains the execution target, and CFC labels survive the transactional
-  selection read.
+  loading, and a by-value writer durably replicates the artifact closure into
+  the containing space before committing/enqueueing the Factory value.
+  `spaceSelector` remains the execution target, and CFC labels survive the
+  transactional selection read.
 - [ ] Parameterize warm and genuinely cold callback tests over all three factory
   kinds in lift input, handler context, and handler event positions. Assert the
   authored callback receives a callable, can invoke it through the ordinary
@@ -981,6 +1011,10 @@ metadata path has equivalent fail-closed coverage.
   direct pattern factory's `*.tool` projection as a leaf.
 - [ ] Decode tagged factory JSON on supported FUSE writes to an inert shell and
   let the runner boundary materialize it.
+- [ ] Before CLI/FUSE or handler-event code commits/enqueues a by-value Factory,
+  durably replicate its artifact closure into the containing destination space
+  or reject the write. A context-free decoded value carries no alternate
+  source-space authority.
 - [ ] Verify runtime, CLI, and FUSE discover and invoke the same stored factory
   and report the same public input schema.
 
@@ -1159,9 +1193,9 @@ alone authorizes deleting readers for durable values.
 | A replaced dynamic factory writes after cancellation | Fence every async write/result by supervisor generation and test replacement before and after settle. |
 | A cold nested factory gates the whole parent and deadlocks on an upstream producer in that graph | Make readiness consumer-local; treat parent prewarming as cache-only and test a same-graph producer. |
 | Cold A completes after B is selected or after the owner stops | Check owner and selection generations, reread after await, and permit stale completion to warm only the cache. |
-| Handler cold preparation loses, duplicates, or prematurely receipts an event | Requeue the same durable event identity, gate body/receipt creation on readiness, and test transient retry plus terminal deterministic failure. |
+| Handler cold preparation loses, duplicates, or prematurely receipts an event | Preserve the complete durable intent, use a dedicated bounded readiness policy independent of authored commit retries, keep the enclosing stream subscribed, and gate body/receipt/event-child creation on readiness. |
 | Prewarming bypasses reactive or CFC authority tracking | Read and validate the value that executes inside the consuming action/event transaction; prewarm cannot authorize execution. |
-| Artifact source space is confused with pattern execution `spaceSelector` | Carry trusted source provenance outside `Factory@1`, replicate artifacts for by-value copies, and test source and target spaces independently. |
+| Artifact source space is confused with pattern execution `spaceSelector` | Load links from their source space; require by-value writers to replicate durably into the containing space before commit; test source and target independently. |
 | A synchronous Cell/query path exposes an inert shell because cold loading is async | Keep synchronous executable exposure warm-only and require an explicit async runner boundary before authored callback or adapter invocation. |
 | Wire/call-site schemas become authority | Resolve the trusted artifact first and require normalized equality; never elevate hints when trusted schemas are absent. |
 | Closure params leak into public input or tool schemas | Maintain separate argument/params roots and assert public-schema snapshots at transformer, runner, LLM, CLI, and FUSE boundaries. |
@@ -1202,7 +1236,8 @@ alone authorizes deleting readers for durable values.
   while retaining the output spot; same-state replay does not restart it.
 - [ ] Warm/cold `asFactory` values reach lift and handler callbacks as ordinary
   callables. Cold readiness stays local, rereads after await, retains lift
-  atomic-result semantics, and preserves handler event identity/receipt timing.
+  pre-readiness behavior without strengthening its commit contract, and
+  preserves complete handler event intent/receipt timing.
 - [ ] Cross-space linked and by-value factories load from trusted artifact
   provenance while `spaceSelector` independently controls child execution.
 - [ ] Hidden params cells preserve same-named public fields, nested aliases,

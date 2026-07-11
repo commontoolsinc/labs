@@ -217,9 +217,10 @@ Cold readiness is local to the consuming dynamic node, lift attempt, or
 handler event. A cold nested factory does not delay construction or startup of
 the whole parent pattern. Whole-parent prewarming is allowed only as a
 cache optimization; making it semantic could deadlock when another node in the
-same parent graph produces the factory value. The root factory passed to setup
-is the exception: its code is intrinsically required before the parent graph
-can be constructed.
+same parent graph produces the factory value. A root factory passed to
+non-transactional Promise-based `setup(undefined, ...)` is the exception: its
+code is intrinsically required before the parent graph can be constructed.
+Synchronous `run()` and transaction-bound setup remain warm-only.
 
 ### Nested patterns close over values
 
@@ -533,8 +534,10 @@ callable; a decoded shell is never used as a lazy executable wrapper.
 `Factory@1`. It identifies where the content-addressed source closure is
 available. A pattern's serialized `spaceSelector` is applied later and chooses
 where the child executes. When a factory is copied rather than linked across
-spaces, the canonical writer/transport must replicate its artifact closure or
-retain runner-owned source provenance; wire data cannot grant either authority.
+spaces, the canonical writer/transport must make the artifact closure durable
+in the containing destination space before the Factory value commits, or
+reject the write. A linked value instead retains the link's source space. Wire
+data cannot grant or retain a different source-space authority.
 
 Every executable runner exposure path uses this chokepoint: schema-driven
 `asFactory` reads, recursive Cell/query result materialization, dynamic module
@@ -882,20 +885,26 @@ runner performs schema-directed input preparation:
    same computation/event, and reread every factory value rather than using the
    value that initiated the load.
 
-For a lift, ordinary reactive input changes schedule the retry/rerun. Its last
-successfully committed value or result-owned child remains live until a
-successful rerun atomically publishes a replacement; the direct dynamic
-node's immediate teardown rule does not silently change general lift
-semantics.
+For a lift, ordinary reactive input changes schedule the retry/rerun. Cold
+readiness by itself does not tear down the lift's prior committed value or
+result-owned child. Once inputs are ready, the existing lift execution,
+replacement, and commit semantics apply unchanged; the direct dynamic node's
+immediate teardown rule does not silently change general lift semantics.
 
 For a handler, bound context is reread per event and a context change alone
 does not run the handler or replace children produced by earlier events. A cold
-event is delayed/requeued with the same durable event identity. Transient
-loading failure retries that event under existing delivery policy;
-deterministic missing/forged/wrong-kind/schema failure is terminal and
-fail-closed. No handler body, normal success receipt/result graph, or handler
-subscription is created before readiness. Owner teardown cancels preparation
-so a late load cannot resurrect either a lift attempt or handler event.
+event is delayed/requeued with the same durable event intent: identity, origin
+lineage, commit/final callbacks, retry metadata, and deadline all remain
+attached. Readiness waiting is distinct from an authored handler attempt and
+does not consume the event's commit-retry budget, call its final callback, or
+mint a receipt. Transient artifact unavailability follows a dedicated bounded
+readiness retry/backoff policy regardless of the authored event's `retries`
+setting; deterministic missing/forged/wrong-kind/schema failure is terminal
+and fail-closed. The enclosing handler stream subscription remains active so it
+can receive the event, but no handler body, normal success receipt/result graph,
+or event-created child/action subscription is created before readiness. Owner
+teardown cancels preparation so a late load cannot resurrect either a lift
+attempt or handler event.
 
 The selection reads above occur in the consuming action/event transaction so
 CFC authority and reactive dependencies flow from the actual current value.
@@ -924,14 +933,18 @@ This generalized `loadArtifactByIdentity()` path serves pattern, module, and
 handler factories. A legacy `$patternRef` may adapt to a pattern
 `FactoryStateV1` because it names the pattern factory artifact.
 
-There are three cold entry paths: async root setup, a direct dynamic node, and
-scheduled `lift`/handler input readiness. Root setup waits because the parent
-graph cannot be built without its root artifact. The other paths delay only
-the consuming node/attempt/event and always reread current state after loading.
-Canonical copy/transport writers ensure the content-addressed artifact closure
-is available in the destination space; links retain their source space. The
-bare `Factory@1` wire state remains only `{ identity, symbol }` and never names
-or grants an artifact source space.
+There are three cold entry paths: non-transactional Promise-based root
+`setup(undefined, ...)`, a direct dynamic node, and scheduled `lift`/handler
+input readiness. Root setup waits because the parent graph cannot be built
+without its root artifact; synchronous `run()` and transaction-bound setup do
+not enter this path. The other cold paths delay only the consuming
+node/attempt/event and always reread current state after loading. Linked values
+load from the resolved link's source space. A by-value Factory loads from its
+containing space, whose writer must have durably replicated the content-
+addressed artifact closure before committing or enqueueing that value. This
+applies equally to stored Cells, handler event payloads, CLI, and FUSE writes.
+The bare `Factory@1` wire state remains only `{ identity, symbol }` and never
+names or grants an artifact source space.
 
 A legacy `$implRef` does not feed this resolver as a factory ref. It may name
 only an implementation function and omits module/handler configuration. Its
