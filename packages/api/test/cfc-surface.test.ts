@@ -21,13 +21,9 @@ import type {
   CfcUserSurfaceInputAtom,
   Confidential,
   ExactCopy,
-  FilteredFrom,
   Integrity,
-  LengthPreservedFrom,
   MaxConfidentiality,
-  OpaqueInput,
   PathValue,
-  PermutationOf,
   Projection,
   ProjectionOf,
   ProjectionPath,
@@ -35,7 +31,6 @@ import type {
   RefValue,
   RepresentsCurrentUser,
   RequiresIntegrity,
-  SubsetOf,
   WriteAuthorizedBy,
 } from "@commonfabric/api/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -73,24 +68,6 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     {
       title: "zeta",
     };
-  const lengthPreserved: LengthPreservedFrom<
-    { items: string[] },
-    readonly ["source", "items"]
-  > = {
-    items: [],
-  };
-  const filtered: FilteredFrom<{ items: string[] }, readonly ["source"]> = {
-    items: [],
-  };
-  const subset: SubsetOf<{ items: string[] }, readonly ["source"]> = {
-    items: [],
-  };
-  const permutation: PermutationOf<{ items: string[] }, readonly ["source"]> = {
-    items: [],
-  };
-  const opaque: OpaqueInput<{ token: string }> = {
-    token: "eta",
-  };
   const cfcCarrier: Cfc<
     { title: string },
     { confidentiality: readonly ["secret"] }
@@ -210,11 +187,6 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(requiresIntegrity, { title: "delta" });
   assertEquals(maxConfidentiality, { title: "epsilon" });
   assertEquals(exactCopy, { title: "zeta" });
-  assertEquals(lengthPreserved, { items: [] });
-  assertEquals(filtered, { items: [] });
-  assertEquals(subset, { items: [] });
-  assertEquals(permutation, { items: [] });
-  assertEquals(opaque, { token: "eta" });
   assertEquals(cfcCarrier, { title: "theta" });
   assertEquals(rootCfcCarrier, { title: "theta-root" });
   assertEquals(projectionPath, { title: "iota" });
@@ -238,7 +210,6 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
-    "OpaqueInput",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",
     "TrustedActionWrite",
@@ -247,9 +218,5 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "ProjectionPath",
     "ProjectionOf",
     "Projection",
-    "LengthPreservedFrom",
-    "FilteredFrom",
-    "SubsetOf",
-    "PermutationOf",
   ]);
 });

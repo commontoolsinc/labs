@@ -588,7 +588,6 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
-  "OpaqueInput",
   "WriteAuthorizedBy",
   "TrustedActionWriteWithIntegrity",
   "TrustedActionWrite",
@@ -597,10 +596,6 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "ProjectionPath",
   "ProjectionOf",
   "Projection",
-  "LengthPreservedFrom",
-  "FilteredFrom",
-  "SubsetOf",
-  "PermutationOf",
 ] as const;
 
 export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
@@ -669,40 +664,12 @@ export type ExactCopy<T, P extends readonly string[]> = Cfc<T, {
   exactCopyOf: P;
 }>;
 
-export type LengthPreservedFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    sourceCollection: P;
-    lengthPreserved: true;
-  };
-}>;
-
-export type FilteredFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    filteredFrom: P;
-  };
-}>;
-
-export type SubsetOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    subsetOf: P;
-  };
-}>;
-
-export type PermutationOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    permutationOf: P;
-  };
-}>;
-
-export type OpaqueInput<
-  T,
-  Spec extends
-    | true
-    | {
-      schema?: unknown;
-      allowPassThrough?: boolean;
-    } = true,
-> = Cfc<T, { opaque: Spec }>;
+// NOTE: helper aliases for the spec's `collection` (§8.5) and `opaque`
+// (§8.13) claims (SubsetOf / FilteredFrom / LengthPreservedFrom /
+// PermutationOf / OpaqueInput) were removed: the runner does not implement
+// those transitions and rejects the lowered keys fail-closed, so the
+// authoring surface must not advertise them. Reintroduce the aliases
+// together with the runner enforcement when those chapters land.
 
 export type ProjectionPath<
   T,

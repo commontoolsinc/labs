@@ -1332,10 +1332,6 @@ export class CommonFabricFormatter implements TypeFormatter {
         return { maxConfidentiality: readValue(1) };
       case "ExactCopy":
         return { exactCopyOf: readValue(1) };
-      case "OpaqueInput":
-        return {
-          opaque: aliasArgs.length > 1 ? readValue(1) : true,
-        };
       case "WriteAuthorizedBy":
         return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
       case "TrustedActionWriteWithIntegrity":
@@ -1369,31 +1365,6 @@ export class CommonFabricFormatter implements TypeFormatter {
           },
         };
       }
-      case "LengthPreservedFrom":
-        return {
-          collection: {
-            sourceCollection: readValue(1),
-            lengthPreserved: true,
-          },
-        };
-      case "FilteredFrom":
-        return {
-          collection: {
-            filteredFrom: readValue(1),
-          },
-        };
-      case "SubsetOf":
-        return {
-          collection: {
-            subsetOf: readValue(1),
-          },
-        };
-      case "PermutationOf":
-        return {
-          collection: {
-            permutationOf: readValue(1),
-          },
-        };
       case "ProjectionPath":
         return this.buildProjectionMetadata(aliasArgs, context, {
           fromIndex: 1,
