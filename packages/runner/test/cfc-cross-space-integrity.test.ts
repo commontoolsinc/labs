@@ -463,24 +463,29 @@ describe("CFC cross-space integrity", () => {
     const runtime = makeRuntime(storageManager);
     try {
       const tx = runtime.edit();
-      const cell = runtime.getCell(spaceA, "s3a-projection", {
-        type: "object",
-        properties: {
-          measurement: {
-            type: "object",
-            properties: { lat: { type: "number" } },
-            ifc: {
-              confidentiality: ["location"],
-              integrity: [{ type: "gps-reading" }],
+      const cell = runtime.getCell(
+        spaceA,
+        "s3a-projection",
+        {
+          type: "object",
+          properties: {
+            measurement: {
+              type: "object",
+              properties: { lat: { type: "number" } },
+              ifc: {
+                confidentiality: ["location"],
+                integrity: [{ type: "gps-reading" }],
+              },
+            },
+            latitude: {
+              type: "number",
+              ifc: { projection: { from: "/measurement", path: "/lat" } },
             },
           },
-          latitude: {
-            type: "number",
-            ifc: { projection: { from: "/measurement", path: "/lat" } },
-          },
-        },
-        required: ["measurement", "latitude"],
-      } as const satisfies JSONSchema, tx);
+          required: ["measurement", "latitude"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
       cell.set({ measurement: { lat: 37.77 }, latitude: 37.77 });
       tx.prepareCfc();
       const result = await tx.commit();
