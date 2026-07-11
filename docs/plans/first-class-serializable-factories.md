@@ -488,23 +488,23 @@ Expected files and tests:
   writer commits in another space. This implementation item is explicit here
   because the original proof-only wording below otherwise had no writer seam
   capable of satisfying it.
-- [ ] Round-trip pattern, module, and handler factories through context-free
+- [x] Round-trip pattern, module, and handler factories through context-free
   JSON and confirm decode returns inert callable shells.
-- [ ] Re-encode each shell without a runner and get identical canonical state.
-- [ ] Materialize each shell in a warm runner and invoke it through its existing
+- [x] Re-encode each shell without a runner and get identical canonical state.
+- [x] Materialize each shell in a warm runner and invoke it through its existing
   direct path.
-- [ ] Cold-load each kind in a fresh runtime from the content-addressed module
+- [x] Cold-load each kind in a fresh runtime from the content-addressed module
   identity and the correct artifact source space.
-- [ ] Round-trip factories nested in plain arrays/objects and synthetic decoded
+- [x] Round-trip factories nested in plain arrays/objects and synthetic decoded
   factory state. Typed Cell/piece coverage waits for Stage 2 `asFactory`, and
   live bound-pattern params wait for Stage 3's internal curry and params root.
-- [ ] Preserve `asScope()` and named, anonymous, and cell-derived `inSpace()`
+- [x] Preserve `asScope()` and named, anonymous, and cell-derived `inSpace()`
   selectors across the round trip.
-- [ ] Prove artifact source space and `inSpace()` execution target may differ,
+- [x] Prove artifact source space and `inSpace()` execution target may differ,
   including a cross-space link and a by-value copy whose writer durably
   replicated the artifact closure into the containing destination space before
   committing the Factory value.
-- [ ] Verify equal state hashes equally across independent verified module
+- [x] Verify equal state hashes equally across independent verified module
   evaluations.
 
 ### WP1.8 — Update the live Fabric protocol documentation
@@ -628,6 +628,14 @@ union, and schema mismatch. Add paired `lift` parameter, handler-context, and
 handler-event fixtures proving those runtime calls remain direct while their
 schemas carry `asFactory`; extend pipeline regression coverage so later passes
 cannot undo either classification.
+
+Stage 1 transformed-output audit discrepancy: exporting
+`baseFactory.asScope(...).inSpace(...)` or `lift(...).asScope(...)` is currently
+wrapped in `__cf_data(...)`, so the sandbox correctly rejects the derived
+callable as non-plain data. The Stage 1 round-trip proof therefore derives
+modifiers from an already verified base artifact. WP2.3 must add a focused red
+fixture and classify these live factory-modifier chains as direct factory
+values; do not weaken the plain-data sandbox to accept arbitrary functions.
 
 ### WP2.4 — Build the internal dynamic factory node
 
