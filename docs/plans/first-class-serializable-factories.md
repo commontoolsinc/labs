@@ -376,6 +376,11 @@ Focused tests:
 - [x] Review graph payload fields in `packages/runner/src/builder/types.ts` and
   static-data walks in `packages/runner/src/cell.ts` so hidden factory state is
   neither flattened nor skipped.
+- [x] Route `createRef()` identity derivation and action writable/scheduler-read
+  collection through the same hidden-state visitor. Keep Fabric-special values
+  atomic, make occurrence-sensitive schema/path visits repeat safely, reject
+  real hidden-state cycles and arbitrary nested functions, and retain only the
+  explicit keyless pattern-graph implementation fallback.
 - [x] Verify `packages/runner/src/storage/differential.ts`,
   `packages/runner/src/storage/v2-transaction.ts`, and
   `packages/memory/v2/patch.ts` treat factories atomically through the shared

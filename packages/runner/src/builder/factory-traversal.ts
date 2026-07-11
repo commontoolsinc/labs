@@ -97,3 +97,42 @@ export function mapFactoryForTraversal<T>(
     context.active.delete(key);
   }
 }
+
+/**
+ * Visit the hidden value-bearing portion of an admitted factory without
+ * rebuilding or memoizing it.
+ *
+ * Unlike mapping, visiting is occurrence-sensitive: callers may attach schema
+ * or path meaning to the current occurrence, so a repeated factory must invoke
+ * the visitor again. The shared active set still distinguishes ordinary DAG
+ * reuse from a real recursive factory-state cycle.
+ */
+export function visitFactoryForTraversal(
+  factory: unknown,
+  visitValue: (
+    value: unknown,
+    field: FactoryStateValueField,
+  ) => void,
+  context: FactoryTraversalContext,
+): void {
+  if (!isAdmittedFabricFactory(factory)) {
+    throw new TypeError(
+      "Factory traversal requires an admitted Factory@1 value",
+    );
+  }
+
+  const key = factoryKey(factory);
+  if (context.active.has(key)) {
+    throw new TypeError("Circular reference detected in factory state");
+  }
+
+  context.active.add(key);
+  try {
+    mapFactoryStateValues(factoryStateOf(factory), (value, field) => {
+      visitValue(value, field);
+      return value;
+    });
+  } finally {
+    context.active.delete(key);
+  }
+}

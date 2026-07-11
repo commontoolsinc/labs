@@ -1,9 +1,11 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { hasEntityUriScheme } from "./entity-kind.ts";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
-  BaseFabricPrimitive,
-  FabricHash,
-} from "@commonfabric/data-model/fabric-primitives";
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import {
   type EntityRef,
   entityRefFrom,
@@ -11,7 +13,7 @@ import {
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { isRecord } from "@commonfabric/utils/types";
-import { isReactive } from "./builder/types.ts";
+import { isModule, isPattern, isReactive } from "./builder/types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -19,6 +21,10 @@ import {
 import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
 import { isSigilLink, parseLink } from "./link-utils.ts";
+import {
+  createFactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -61,84 +67,141 @@ export function createRef(
   })(),
 ): EntityId {
   const seen = new Set<any>();
+  const factoryContext = createFactoryTraversalContext();
+  const factoryStateAncestors = new WeakSet<object>();
 
-  // Unwrap query result proxies and replace docs with their ids; functions are
-  // stringified, since our data model doesn't support them as values.
-  function traverse(obj: any): any {
-    // Avoid cycles — only track objects/arrays/functions (not primitives).
-    // Primitives use value equality in Set, so repeated strings like
-    // "primary" would be incorrectly deduplicated, causing hash collisions
-    // for patterns that differ only in the position of repeated values.
-    if (
-      obj !== null && (typeof obj === "object" || typeof obj === "function")
-    ) {
-      if (seen.has(obj)) return null;
-      seen.add(obj);
+  // Unwrap query result proxies and replace docs with their ids. Admitted
+  // factories retain their callable value and map only their hidden semantic
+  // state; every other JavaScript function fails closed.
+  function traverse(
+    obj: any,
+    insideFactoryState = false,
+    allowLegacyImplementationFunction = false,
+    insideLegacyPatternGraph = false,
+  ): any {
+    if (isAdmittedFabricFactory(obj)) {
+      const state = factoryStateOf(obj);
+      const legacyPattern = obj as unknown as { toJSON?: () => unknown };
+      // Keyless hand-built patterns have no Factory@1 identity to hash. Keep
+      // the explicit legacy structural-identity fallback used by
+      // ensureKeylessPatternIdentity; every ref-backed factory takes the
+      // canonical hidden-state path below.
+      if (
+        state.ref === undefined && state.kind === "pattern" &&
+        typeof legacyPattern.toJSON === "function"
+      ) {
+        return traverse(
+          legacyPattern.toJSON(),
+          insideFactoryState,
+          false,
+          true,
+        );
+      }
+      return mapFactoryForTraversal(
+        obj,
+        (nested) => traverse(nested, true),
+        factoryContext,
+      );
     }
 
-    // Don't traverse into atomic values or already-serialized references. A
-    // `FabricPrimitive` (a `FabricHash` id, `FabricBytes`, a date, …) is an
-    // atomic value and must be hashed via its own codec — descending into one
-    // would decompose it to its (empty) enumerable props and collide distinct
-    // values. A serialized entity-ref or sigil link is a reference to another
-    // cell, recognized through the cell-rep / sigil chokepoint predicates rather
-    // than the raw `{ "/": ... }` shape.
-    //
-    // TODO(danfuzz): the other data-model special-object type, `FabricInstance`
-    // (a container that holds other values), is not handled here. Unlike a
-    // primitive it *does* need descending into — but by its actual contents,
-    // which the generic enumerable-prop traversal below won't do correctly. This
-    // site will need attention once FabricInstances see real use.
-    if (obj instanceof BaseFabricPrimitive) return obj;
+    if (typeof obj === "function") {
+      if (allowLegacyImplementationFunction) return obj.toString();
+      throw new TypeError(
+        insideFactoryState
+          ? "Arbitrary functions are not valid factory state values"
+          : "Arbitrary functions are not valid createRef values",
+      );
+    }
+
+    // Fabric-special values and serialized references are logical atoms. In
+    // particular, inspect neither protocol internals nor enumerable wrapper
+    // implementation details; hashOf() dispatches through their codecs.
+    if (obj instanceof FabricSpecialObject) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
-    // If there is a .toJSON method, replace obj with it, then descend.
-    // TODO(seefeld): We have to accept functions for now as the pattern factory
-    // is a function and has a .toJSON method. But we plan to move away from
-    // that kind of serialization anyway, so once we did, remove this.
-    if (
-      (isRecord(obj) || typeof obj === "function") &&
-      typeof obj.toJSON === "function"
-    ) {
-      obj = obj.toJSON() ?? obj;
-    }
-
-    if (isReactive(obj)) {
-      const val = obj.export().value;
-      if (val == null) {
-        // An Reactive feeding a derived id must carry a value; otherwise the
-        // id would silently become non-deterministic (audit S14). Fail closed.
-        throw new Error(
-          "[createRef] Reactive has no value; cannot derive a stable id",
-        );
+    const factoryStateContainer = insideFactoryState && obj !== null &&
+        typeof obj === "object"
+      ? obj as object
+      : undefined;
+    if (factoryStateContainer !== undefined) {
+      if (factoryStateAncestors.has(factoryStateContainer)) {
+        throw new TypeError("Circular reference detected in factory state");
       }
-      return val;
+      factoryStateAncestors.add(factoryStateContainer);
     }
 
-    if (isCellResultForDereferencing(obj)) {
-      // It'll traverse this and call .toJSON on the doc in the reference.
-      obj = getCellOrThrow(obj);
-    }
-
-    // If referencing other docs, return their ids.
-    if (isCell(obj)) {
-      const id = obj.entityId;
-      if (id == null) {
-        // A Cell referenced from a derived id must have an entityId; otherwise
-        // the id would silently become non-deterministic (audit S14). Fail
-        // closed rather than mint a random substitute.
-        throw new Error(
-          "[createRef] Cell has no entityId; cannot derive a stable id",
-        );
+    try {
+      // Avoid cycles — only track objects/arrays/functions (not primitives).
+      // Primitives use value equality in Set, so repeated strings like
+      // "primary" would be incorrectly deduplicated, causing hash collisions
+      // for patterns that differ only in the position of repeated values.
+      if (
+        obj !== null && (typeof obj === "object" || typeof obj === "function")
+      ) {
+        if (seen.has(obj)) return null;
+        seen.add(obj);
       }
-      return id;
-    } else if (Array.isArray(obj)) return obj.map(traverse);
-    else if (isRecord(obj)) {
-      return Object.fromEntries(
-        Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
-      );
-    } else if (typeof obj === "function") return obj.toString();
-    else return obj;
+
+      // If there is a .toJSON method, replace obj with it, then descend.
+      if (
+        isRecord(obj) &&
+        typeof obj.toJSON === "function"
+      ) {
+        obj = obj.toJSON() ?? obj;
+      }
+
+      if (isReactive(obj)) {
+        const val = obj.export().value;
+        if (val == null) {
+          // An Reactive feeding a derived id must carry a value; otherwise the
+          // id would silently become non-deterministic (audit S14). Fail closed.
+          throw new Error(
+            "[createRef] Reactive has no value; cannot derive a stable id",
+          );
+        }
+        return val;
+      }
+
+      if (isCellResultForDereferencing(obj)) {
+        // It'll traverse this and call .toJSON on the doc in the reference.
+        obj = getCellOrThrow(obj);
+      }
+
+      // If referencing other docs, return their ids.
+      if (isCell(obj)) {
+        const id = obj.entityId;
+        if (id == null) {
+          // A Cell referenced from a derived id must have an entityId; otherwise
+          // the id would silently become non-deterministic (audit S14). Fail
+          // closed rather than mint a random substitute.
+          throw new Error(
+            "[createRef] Cell has no entityId; cannot derive a stable id",
+          );
+        }
+        return id;
+      } else if (Array.isArray(obj)) {
+        return obj.map((value) =>
+          traverse(value, insideFactoryState, false, insideLegacyPatternGraph)
+        );
+      } else if (isRecord(obj)) {
+        return Object.fromEntries(
+          Object.entries(obj).map(([key, value]) => [
+            key,
+            traverse(
+              value,
+              insideFactoryState,
+              insideLegacyPatternGraph && key === "implementation" &&
+                isModule(obj),
+              insideLegacyPatternGraph,
+            ),
+          ]),
+        );
+      } else return obj;
+    } finally {
+      if (factoryStateContainer !== undefined) {
+        factoryStateAncestors.delete(factoryStateContainer);
+      }
+    }
   }
 
   // The entity kind deliberately does NOT enter the preimage: a computed
@@ -146,7 +209,14 @@ export function createRef(
   // differ only in their URI scheme (`computed:` vs `of:`, applied by
   // `toURI`). The full URI string is the identity; nothing may rebuild a
   // computed cell's URI from its bare hash.
-  return entityIdFrom(hashOf(traverse({ ...source, causal: cause })));
+  return entityIdFrom(hashOf(
+    traverse(
+      { ...source, causal: cause },
+      false,
+      false,
+      isPattern(source),
+    ),
+  ));
 }
 
 /**

@@ -1,5 +1,6 @@
 import {
   fabricFromNativeValue,
+  FabricSpecialObject,
   type FabricValue,
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -126,6 +127,10 @@ import {
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  createFactoryTraversalContext,
+  visitFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -3458,6 +3463,8 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<string>>();
+    const factoryContext = createFactoryTraversalContext();
+    const factoryAncestors = new Set<object>();
 
     const pathsOverlap = (
       left: readonly string[],
@@ -3475,47 +3482,127 @@ export class Runner {
       schema: unknown,
       currentValue: unknown,
       path: readonly string[],
+      insideFactoryState = false,
     ): void => {
-      if (!isRecord(schema)) return;
-      const pathKey = JSON.stringify(path);
-      const seenPaths = seen.get(schema);
-      if (seenPaths?.has(pathKey)) return;
-      if (seenPaths) {
-        seenPaths.add(pathKey);
-      } else {
-        seen.set(schema, new Set([pathKey]));
+      if (isAdmittedFabricFactory(currentValue)) {
+        const state = factoryStateOf(currentValue);
+        visitFactoryForTraversal(
+          currentValue,
+          (nested, field) => {
+            if (state.kind === "pattern") {
+              visit(
+                field === "params" ? state.paramsSchema : undefined,
+                nested,
+                path,
+                true,
+              );
+            }
+          },
+          factoryContext,
+        );
+        return;
       }
-
-      const asCell = schema.asCell;
-      if (
-        Array.isArray(asCell) &&
-        (asCell.includes("cell") || asCell.includes("writeonly"))
-      ) {
-        if (shouldCollectPath(path)) {
-          links.push(...findAllWriteRedirectCells(currentValue, processCell));
+      if (typeof currentValue === "function") {
+        if (insideFactoryState) {
+          throw new TypeError(
+            "Arbitrary functions are not valid factory state values",
+          );
         }
         return;
       }
+      if (currentValue instanceof FabricSpecialObject) return;
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` with no `FabricSpecialObject` guard, decomposing
-      // `FabricPrimitive` values and walking `FabricInstance` values by internal
-      // slots.
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key], [...path, key]);
+      const factoryContainer = insideFactoryState && currentValue !== null &&
+          typeof currentValue === "object" && !isCellLink(currentValue)
+        ? currentValue
+        : undefined;
+      if (factoryContainer !== undefined) {
+        if (factoryAncestors.has(factoryContainer)) {
+          throw new TypeError("Circular reference detected in factory state");
         }
+        factoryAncestors.add(factoryContainer);
       }
 
-      for (const key of ["items", "additionalProperties"] as const) {
-        if (schema[key] !== undefined) {
-          visit(schema[key], currentValue, path);
+      try {
+        if (!isRecord(schema)) {
+          if (insideFactoryState) {
+            if (Array.isArray(currentValue)) {
+              for (const item of currentValue) {
+                visit(undefined, item, path, true);
+              }
+            } else if (isRecord(currentValue)) {
+              for (const nested of Object.values(currentValue)) {
+                visit(undefined, nested, path, true);
+              }
+            }
+          }
+          return;
         }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue, path);
+        const pathKey = JSON.stringify(path);
+        const seenPaths = seen.get(schema);
+        if (seenPaths?.has(pathKey)) return;
+        if (seenPaths) {
+          seenPaths.add(pathKey);
+        } else {
+          seen.set(schema, new Set([pathKey]));
+        }
+
+        const asCell = schema.asCell;
+        if (
+          Array.isArray(asCell) &&
+          (asCell.includes("cell") || asCell.includes("writeonly"))
+        ) {
+          if (shouldCollectPath(path)) {
+            links.push(...findAllWriteRedirectCells(currentValue, processCell));
+          }
+          return;
+        }
+
+        if (isRecord(schema.properties) && isRecord(currentValue)) {
+          for (
+            const [key, propertySchema] of Object.entries(schema.properties)
+          ) {
+            visit(
+              propertySchema,
+              currentValue[key],
+              [...path, key],
+              insideFactoryState,
+            );
+          }
+        }
+
+        if (schema.items !== undefined && Array.isArray(currentValue)) {
+          for (const item of currentValue) {
+            visit(schema.items, item, path, insideFactoryState);
+          }
+        }
+        if (
+          schema.additionalProperties !== undefined && isRecord(currentValue)
+        ) {
+          const declaredKeys = isRecord(schema.properties)
+            ? new Set(Object.keys(schema.properties))
+            : undefined;
+          for (const [key, propertyValue] of Object.entries(currentValue)) {
+            if (declaredKeys?.has(key)) continue;
+            visit(
+              schema.additionalProperties,
+              propertyValue,
+              path,
+              insideFactoryState,
+            );
+          }
+        }
+        for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+          const branches = schema[key];
+          if (Array.isArray(branches)) {
+            for (const branch of branches) {
+              visit(branch, currentValue, path, insideFactoryState);
+            }
+          }
+        }
+      } finally {
+        if (factoryContainer !== undefined) {
+          factoryAncestors.delete(factoryContainer);
         }
       }
     };
@@ -3539,6 +3626,8 @@ export class Runner {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
     const rootSchema = argumentSchema;
+    const factoryContext = createFactoryTraversalContext();
+    const factoryAncestors = new Set<object>();
 
     const schemaWithRootDefinitions = (
       schema: JSONSchema | undefined,
@@ -3556,7 +3645,28 @@ export class Runner {
       };
     };
 
-    const visit = (schema: unknown, currentValue: unknown): void => {
+    const visit = (
+      schema: unknown,
+      currentValue: unknown,
+      insideFactoryState = false,
+    ): void => {
+      if (isAdmittedFabricFactory(currentValue)) {
+        const state = factoryStateOf(currentValue);
+        visitFactoryForTraversal(
+          currentValue,
+          (nested, field) => {
+            if (state.kind === "pattern") {
+              visit(
+                field === "params" ? state.paramsSchema : undefined,
+                nested,
+                true,
+              );
+            }
+          },
+          factoryContext,
+        );
+        return;
+      }
       // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
       // is post-unwrap, where the only `$alias` records left belong to
       // embedded Pattern values (their `defer` bookkeeping resolves them at
@@ -3575,41 +3685,85 @@ export class Runner {
       if (isCellLink(currentValue)) {
         return;
       }
-      if (!isRecord(schema)) return;
-      const seenValues = seen.get(schema) ?? new Set<unknown>();
-      if (seenValues.has(currentValue)) return;
-      seenValues.add(currentValue);
-      seen.set(schema, seenValues);
-
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` (guards only `isWriteRedirectLink`/`isCellLink`, not
-      // `FabricSpecialObject`), so `FabricPrimitive`/`FabricInstance` values are
-      // mishandled.
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key]);
+      if (typeof currentValue === "function") {
+        if (insideFactoryState) {
+          throw new TypeError(
+            "Arbitrary functions are not valid factory state values",
+          );
         }
+        return;
+      }
+      if (currentValue instanceof FabricSpecialObject) return;
+
+      const factoryContainer = insideFactoryState && currentValue !== null &&
+          typeof currentValue === "object"
+        ? currentValue
+        : undefined;
+      if (factoryContainer !== undefined) {
+        if (factoryAncestors.has(factoryContainer)) {
+          throw new TypeError("Circular reference detected in factory state");
+        }
+        factoryAncestors.add(factoryContainer);
       }
 
-      if (Array.isArray(currentValue) && schema.items !== undefined) {
-        for (const item of currentValue) visit(schema.items, item);
-      }
-      if (
-        schema.additionalProperties !== undefined &&
-        isRecord(currentValue)
-      ) {
-        const declaredKeys = isRecord(schema.properties)
-          ? new Set(Object.keys(schema.properties))
-          : undefined;
-        for (const [key, propertyValue] of Object.entries(currentValue)) {
-          if (declaredKeys?.has(key)) continue;
-          visit(schema.additionalProperties, propertyValue);
+      try {
+        if (!isRecord(schema)) {
+          if (insideFactoryState) {
+            if (Array.isArray(currentValue)) {
+              for (const item of currentValue) visit(undefined, item, true);
+            } else if (isRecord(currentValue)) {
+              for (const nested of Object.values(currentValue)) {
+                visit(undefined, nested, true);
+              }
+            }
+          }
+          return;
         }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue);
+        const seenValues = seen.get(schema) ?? new Set<unknown>();
+        if (seenValues.has(currentValue)) return;
+        seenValues.add(currentValue);
+        seen.set(schema, seenValues);
+
+        if (isRecord(schema.properties) && isRecord(currentValue)) {
+          for (
+            const [key, propertySchema] of Object.entries(schema.properties)
+          ) {
+            visit(propertySchema, currentValue[key], insideFactoryState);
+          }
+        }
+
+        if (Array.isArray(currentValue) && schema.items !== undefined) {
+          for (const item of currentValue) {
+            visit(schema.items, item, insideFactoryState);
+          }
+        }
+        if (
+          schema.additionalProperties !== undefined &&
+          isRecord(currentValue)
+        ) {
+          const declaredKeys = isRecord(schema.properties)
+            ? new Set(Object.keys(schema.properties))
+            : undefined;
+          for (const [key, propertyValue] of Object.entries(currentValue)) {
+            if (declaredKeys?.has(key)) continue;
+            visit(
+              schema.additionalProperties,
+              propertyValue,
+              insideFactoryState,
+            );
+          }
+        }
+        for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+          const branches = schema[key];
+          if (Array.isArray(branches)) {
+            for (const branch of branches) {
+              visit(branch, currentValue, insideFactoryState);
+            }
+          }
+        }
+      } finally {
+        if (factoryContainer !== undefined) {
+          factoryAncestors.delete(factoryContainer);
         }
       }
     };
