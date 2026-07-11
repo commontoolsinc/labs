@@ -121,6 +121,66 @@ describe("raw builtin data unavailability propagation", () => {
     expect(finalRaw(result.key("unless"))).toBe(marker);
   });
 
+  it("publishes syncing while a linked condition establishes coverage", async () => {
+    const missingCondition = runtime.getCell<boolean>(
+      space,
+      "missing linked control condition",
+    );
+    const missingConditionId = missingCondition.getAsNormalizedFullLink().id;
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
+      if (cell.getAsNormalizedFullLink().id === missingConditionId) {
+        started.resolve();
+        await release.promise;
+      }
+      return await originalSyncCell(cell);
+    };
+
+    try {
+      const Root = pattern<{ condition: boolean }>(({ condition }) => ({
+        ifElse: ifElse(condition, "yes", "no"),
+        when: when(condition, "yes"),
+        unless: unless(condition, "no"),
+      }));
+      const resultCell = runtime.getCell<any>(
+        space,
+        "missing linked control outputs",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, Root, {
+        condition: missingCondition.getAsLink() as unknown as boolean,
+      }, resultCell);
+
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      tx = runtime.edit();
+      const pull = result.pull();
+      await started.promise;
+      await runtime.idle();
+
+      expect(finalRaw(result.key("ifElse"))).toBe(
+        DataUnavailable.syncing(),
+      );
+      expect(finalRaw(result.key("when"))).toBe(DataUnavailable.syncing());
+      expect(finalRaw(result.key("unless"))).toBe(DataUnavailable.syncing());
+
+      release.resolve();
+      await storageManager.synced();
+      await pull;
+      await runtime.idle();
+
+      expect(result.key("ifElse").get()).toBe("no");
+      expect(finalRaw(result.key("when"))).toBeUndefined();
+      expect(result.key("unless").get()).toBe("no");
+    } finally {
+      release.resolve();
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
   it("does not propagate an unavailable unselected ifElse branch", async () => {
     const ignored = DataUnavailable.error(new Error("unselected"));
     const Root = pattern<{

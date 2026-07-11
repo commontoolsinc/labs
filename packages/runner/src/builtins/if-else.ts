@@ -20,14 +20,15 @@ export function ifElse(
   const readCondition = (
     tx: IExtendedStorageTransaction,
   ): { cell: Cell<any>; value: unknown } => {
-    const conditionCell = inputsCell.key("condition");
-    const resolvedCondition = resolveLink(
-      runtime,
-      tx,
-      conditionCell.getAsNormalizedFullLink(),
-    );
-    const cell = runtime.getCellFromLink(resolvedCondition).withTx(tx);
-    return { cell, value: readAvailabilityAwareCell(tx, cell) };
+    const sourceCondition = inputsCell.key("condition");
+    return {
+      cell: sourceCondition,
+      // Keep the source position for readiness classification. Passing the
+      // already-resolved target loses the information that a missing document
+      // was reached through a link, which is what distinguishes syncing from
+      // authoritative undefined.
+      value: readAvailabilityAwareCell(tx, sourceCondition),
+    };
   };
 
   const action: Action = (tx: IExtendedStorageTransaction) => {

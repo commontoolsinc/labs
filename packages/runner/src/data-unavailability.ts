@@ -198,5 +198,21 @@ export function readAvailabilityAwareCell<T>(
   if (isDataUnavailable(raw)) {
     return resolved.withTx(tx).getRaw() as DataUnavailableVariant;
   }
+
+  if (raw === undefined) {
+    // A raw miss is ambiguous: it can be an authored/authoritative undefined,
+    // or a linked selector whose local replica coverage is still loading.
+    // Probe the source position through a schema which admits every defined
+    // value so traversal can register the action's readiness waiter without
+    // changing the cell's ordinary authored schema. Non-syncing failures fall
+    // through to the existing get() behavior below (including authored
+    // undefined).
+    const status = getCellWithStatus(
+      cell.withTx(tx).asSchema(definedValueSchema),
+    );
+    if ("error" in status && status.unavailableReason === "syncing") {
+      return DataUnavailable.syncing();
+    }
+  }
   return cell.withTx(tx).get();
 }
