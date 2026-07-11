@@ -17,7 +17,7 @@ const __cfLift_1 = __cfHelpers.lift(() => {
         return "hello";
     }
     return 42;
-}, false);
+}, false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: schema-generation-computed-multiple-returns
 // Verifies: a reactive builder with multiple return paths infers a union output schema
 //   computed(() => { ... }) → output schema is an enum union of the returned literals

@@ -2465,17 +2465,13 @@ function resolveLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // Lift-applied `lift(...)(input)`: callback is the last arg of the inner lift
-  // call; input is the first arg of the outer applied call. The outer call's
-  // callee is always the inner CallExpression — that is the only shape
-  // detectCallKind classifies as lift-applied (see getLiftAppliedInputAndCallback
-  // in src/ast/call-kind.ts).
+  // Lift-applied `lift(...)(input)` is function-first: the callback is inner
+  // argument zero even when schemas/options trail it; input is outer arg zero.
   const innerCall = getLiftAppliedInnerCall(call);
   if (!innerCall) {
     return undefined;
   }
-  const callbackIndex = innerCall.arguments.length - 1;
-  const callbackExpression = innerCall.arguments[callbackIndex];
+  const callbackExpression = innerCall.arguments[0];
   const callback = callbackExpression
     ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
     : undefined;

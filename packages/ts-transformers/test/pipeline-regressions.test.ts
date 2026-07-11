@@ -371,6 +371,44 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
 );
 
 Deno.test(
+  "Pipeline regression: scheduler options preserve helper-backed keys in lift callbacks",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL(
+        "./fixtures/jsx-expressions/reactive-cell-map.input.tsx",
+        import.meta.url,
+      ),
+    );
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+
+    assert(
+      callsNamed(root, "lift").some((call) =>
+        schedulerOptionsFor(call)?.completeSchedulerScopeSummary === true
+      ),
+      "expected the transformed lift to carry a completeness marker",
+    );
+    const pieceNameReads = collect(root, ts.isElementAccessExpression).filter(
+      (access) =>
+        ts.isIdentifier(access.expression) &&
+        access.expression.text === "piece",
+    );
+    assert(pieceNameReads.length > 0, "expected a piece name element read");
+    assert(
+      pieceNameReads.every((access) =>
+        ts.isPropertyAccessExpression(access.argumentExpression) &&
+        ts.isIdentifier(access.argumentExpression.expression) &&
+        access.argumentExpression.expression.text === "__cfHelpers" &&
+        access.argumentExpression.name.text === "NAME"
+      ),
+      "options-bearing lift callbacks must retain __cfHelpers.NAME",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: nested writable map callbacks keep direct key reads in shrunk schemas",
   async () => {
     const source = await Deno.readTextFile(

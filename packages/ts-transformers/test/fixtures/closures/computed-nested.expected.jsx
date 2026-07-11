@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     sum: number;
 }, number>(({ sum }) => sum * 2, {
@@ -42,7 +42,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["sum"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first
 //   computed(() => a.get() + b.get()) → lift(({ a, b }) => a.get() + b.get())({ a, b })
