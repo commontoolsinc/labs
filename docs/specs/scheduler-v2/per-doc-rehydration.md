@@ -251,16 +251,17 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   map-children test rather than a timing-sensitive unit gate.
 - `reload-rehydration.test.ts`: the asserted listing query shape becomes the
   space-scoped one.
-- Reload churn: the ≤ 1 residual gate lives in the flag-OFF integration run,
-  where fresh child first-runs are inherent (v1 reached 0 via its populate
-  pass; v2 flag-off has no restore to lean on). A flag-ON churn assertion in
-  `integration/reload/` (the `pattern-reload-integration-test` job) pins
-  flag-ON at "never worse than flag-off". Measured: the rows rehydrate, but
-  the always-run coordinator's first reconcile still reads one cold hop
-  through the field-level alias chain, so the same coupled 1-conflict
-  residual remains. It reaches zero when resume-time runners pre-warm their
-  persisted read sets — an application of the incremental
-  observation-adoption direction (see below), not of the boot listing.
+- Reload churn: both the general integration population and the dedicated
+  `pattern-reload-integration-test` job now run default-on. The ≤ 1 residual
+  bound is retained from the historical rollback-off baseline; the dedicated
+  job additionally requires a positive rehydration count, so default-on cannot
+  silently degrade to fresh runs. Measured: the rows rehydrate, but the
+  always-run coordinator's first reconcile still reads one cold hop through
+  the field-level alias chain, so the same coupled 1-conflict residual remains.
+  It reaches zero when resume-time runners pre-warm their persisted read sets —
+  an application of the incremental observation-adoption direction (see below),
+  not of the boot listing. Explicit-false rollback is covered by the runtime and
+  memory protocol suites rather than a second browser population.
 
 ## 7.1 Live counterpart: incremental adoption
 

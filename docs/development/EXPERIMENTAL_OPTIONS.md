@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-09. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-11. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -28,7 +28,7 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
+| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -59,9 +59,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions`
-defaults on; the other flags in this category default off unless their section
-says otherwise.
+`undefined`, which means "take the built-in default".
+`persistentSchedulerState` and `commitPreconditions` default on; the other
+flags in this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -121,21 +121,21 @@ propagate](#how-flags-propagate).
 - **Purpose.** Persists the scheduler's observations to durable storage through
   memory-v2 and uses them to rehydrate scheduler state after a restart, instead
   of rediscovering everything by re-running.
-- **Current default and planned end state.** Off by default. The scheduler-v2
-  design is persistence-first, so the intended end state is to graduate this to
-  always-on. The scheduler-observation protocol is an optional capability rather
-  than a data-model contract, so peers with different settings can still share
-  memory data; the server's setting controls whether scheduler rows are accepted
-  on a connection.
-- **Status on 2026-07-08.** Implemented; the durable tables, the rehydration
-  primitives, and the memory-protocol capability are wired. Off by default,
-  rollout in progress. See
+- **Current default and planned end state.** On by default, with an explicit
+  `false` retained as a rollback override while the default-on posture soaks.
+  The intended end state remains always-on. The scheduler-observation protocol
+  is an optional capability rather than a data-model contract, so peers with
+  different settings can still share memory data; the server's setting controls
+  whether scheduler rows are accepted on a connection.
+- **Status on 2026-07-11.** Implemented; the durable tables, the rehydration
+  primitives, and the memory-protocol capability are wired. Default-on rollout
+  in progress. See
   [`docs/specs/persistent-scheduler-state.md`](../specs/persistent-scheduler-state.md)
   and [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) for the tracked
   status.
-- **Path to removal.** Confirm rehydration falls back cleanly when observations
-  are absent or stale; graduate the default to on across the fleet; then fold
-  the behavior into the base scheduler and delete the flag.
+- **Path to removal.** Let the default-on posture soak and confirm rehydration
+  falls back cleanly when observations are absent or stale; then fold the
+  behavior into the base scheduler and delete the rollback flag.
 
 ### `commitPreconditions`
 
@@ -761,7 +761,7 @@ golden: it pins the full `RuntimeOptions` each preset produces, including the
 through `experimentalOptionsFromEnv`. Any change to the fleet-wide posture or the
 env mapping shows up as a diff in that one file.
 
-Both tests pass as of 2026-07-08. They exercise the flag plumbing and the
+Both tests pass as of 2026-07-11. They exercise the flag plumbing and the
 per-preset posture, not the full behavior of every feature under every flag
 combination; the per-feature test matrices live with each feature's specs (for
 example under [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) and the CFC
@@ -772,7 +772,8 @@ design docs).
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
 `Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions` true, the other Category 1 flags false),
+(`persistentSchedulerState` and `commitPreconditions` true; the other Category
+1 flags false),
 propagates each one to its ambient control point, and then reads the effective
 state back so that `runtime.experimental.*` reflects what is actually in effect.
 

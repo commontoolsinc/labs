@@ -627,7 +627,7 @@ const schedulerObservationFor = (actionId: string) => ({
 });
 
 Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
-  resetPersistentSchedulerStateConfig();
+  setPersistentSchedulerStateConfig(false);
   const harness = createHarness();
   try {
     const result = await harness.replica.commitNative({
@@ -639,6 +639,7 @@ Deno.test("memory v2 ignores no-op scheduler observations when persistent schedu
     assertEquals(harness.model.transactLocalSeqs, []);
   } finally {
     await harness.close();
+    resetPersistentSchedulerStateConfig();
   }
 });
 

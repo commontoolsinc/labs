@@ -212,7 +212,7 @@ export type VersionSkewHandler = (info: VersionSkewInfo) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
-  /** Persist scheduler observations and use them for scheduler rehydration. */
+  /** Persist scheduler observations and rehydrate from them (default on). */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;

@@ -3,8 +3,8 @@
 ## Status
 
 Implemented behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` /
-`Runtime.experimental.persistentSchedulerState`; the default-on rollout remains
-a separate decision.
+`Runtime.experimental.persistentSchedulerState` and on by default. An explicit
+`false` remains as a rollback override while the default-on posture soaks.
 
 The landed implementation includes internal memory-v2 scheduler observation
 tables, no-op observation commits, same-space durable dirty marking,
@@ -1111,7 +1111,7 @@ Current branch status:
 
 | Area | Version 1 status |
 | --- | --- |
-| Feature flag | Implemented as `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, default off. |
+| Feature flag | Implemented as `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, default on with explicit-false rollback. |
 | Observation construction and no-op persistence | Implemented, including batched no-op observation commits. |
 | Memory scheduler tables and same-space dirty marking | Implemented. |
 | Context-qualified ownership and migration | Implemented with authenticated space/user/session filtering, monotonic floors, effective target keys, and conservative migration of only provably shared legacy rows. |
@@ -1123,15 +1123,15 @@ Current branch status:
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
 | Replication, retention, and mirror repair | Exact-session contexts are bounded per principal/action; generation/branch GC and failed-mirror repair remain future work. |
 
-The version 1 implementation is gated by the project's common
-experimental-option plumbing. With
-`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false` or unset, the runner does not
-attach scheduler observations to transactions, memory clients do not request
-scheduler snapshots, and the memory server does not write scheduler observation
-rows, dirty rows, or cross-space mirrors. Snapshot-list requests intentionally
-return an empty result while the flag is off, even if a previous flagged run
-left scheduler rows in the SQLite database. Unlike `modernCellRep`, this flag
-is not a required memory protocol compatibility flag: mismatched peers may still
+The version 1 implementation uses the project's common experimental-option
+plumbing. Unset now enables it by default. With an explicit
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false`, the runner does not attach
+scheduler observations to transactions, memory clients do not request scheduler
+snapshots, and the memory server does not write scheduler observation rows,
+dirty rows, or cross-space mirrors. Snapshot-list requests intentionally return
+an empty result while the flag is off, even if a previous flagged run left
+scheduler rows in the SQLite database. Unlike `modernCellRep`, this flag is not
+a required memory protocol compatibility flag: mismatched peers may still
 connect, and the server-side flag determines whether scheduler observation rows
 are accepted and served.
 

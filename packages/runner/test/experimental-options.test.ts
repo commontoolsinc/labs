@@ -36,6 +36,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
+          persistentSchedulerState: false,
           commitPreconditions: false,
         },
       });
@@ -58,11 +59,12 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
+          persistentSchedulerState: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
-        persistentSchedulerState: false,
+        persistentSchedulerState: true,
         commitPreconditions: true,
         eagerSourceAnnotation: false,
       });
@@ -79,7 +81,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        persistentSchedulerState: false,
+        persistentSchedulerState: true,
         commitPreconditions: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
@@ -118,6 +120,22 @@ describe("ExperimentalOptions", () => {
       });
 
       expect(getPersistentSchedulerStateConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("explicit false keeps persistentSchedulerState available as rollback", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          persistentSchedulerState: false,
+        },
+      });
+
+      expect(getPersistentSchedulerStateConfig()).toBe(false);
 
       await runtime.dispose();
       await sm.close();
@@ -184,7 +202,7 @@ describe("ExperimentalOptions", () => {
       await sm.close();
 
       expect(getModernCellRepConfig()).toBe(initial);
-      expect(getPersistentSchedulerStateConfig()).toBe(false);
+      expect(getPersistentSchedulerStateConfig()).toBe(true);
       expect(getCommitPreconditionsConfig()).toBe(true);
     });
   });

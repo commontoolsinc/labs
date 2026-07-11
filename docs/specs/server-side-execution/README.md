@@ -174,10 +174,10 @@ consolidated register is §9.
 
 ### 3.1 Scheduler v2 (#4288, phases 3c–7)
 
-Assumed landed: durable event IDs, speculation lineage, static write
+Implemented by scheduler v2 (#4288): durable event IDs, speculation lineage, static write
 surfaces, tx-carried source action, node records and liveness refcounts,
 unified gates, declared reads, read-delta tracking, persistent action state,
-and bounded settle (`PASS_RUN_BUDGET = 5`).
+and bounded settle (`PASS_RUN_BUDGET = 10`).
 
 Contribution: a scheduler whose per-node state is one record
 (status/liveRefs/reads/writes), whose demand is refcounted rather than
@@ -185,10 +185,11 @@ walked, and whose settle loop is bounded — i.e., a graph that can be
 suspended, described, and resumed. That is precisely the shape a server
 executor must hold for hundreds of spaces.
 
-### 3.2 Persistent scheduler state (BUILT behind a flag)
+### 3.2 Persistent scheduler state (BUILT, default-on with rollback)
 
-On the #4288 baseline, behind the default-off runtime option
-`persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`):
+Implemented on the #4288 branch with the default-on runtime option
+`persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`; an
+explicit false remains the rollback path):
 the full durable stack, not just shapes. Per-action observations
 (`SchedulerActionObservation` — `pieceId`, `actionId`, `actionKind`,
 `implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
