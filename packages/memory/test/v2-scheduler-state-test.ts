@@ -19,7 +19,11 @@ import {
   serverSeq,
   upsertSchedulerObservation,
 } from "../v2/engine.ts";
-import { connect, loopback } from "../v2/client.ts";
+import {
+  connect,
+  loopback,
+  type SessionOpenAuthFactory,
+} from "../v2/client.ts";
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
@@ -88,6 +92,17 @@ const observationForAction = (
   ...observation,
   actionId,
   ...overrides,
+});
+
+const schedulerAuthFactoryFor = (
+  principal: string,
+): SessionOpenAuthFactory =>
+(_space, _session, context) => ({
+  invocation: {
+    aud: context.audience,
+    challenge: context.challenge.value,
+  },
+  authorization: { principal },
 });
 
 Deno.test("memory v2 parses only well-formed principal session keys", () => {
@@ -1410,6 +1425,82 @@ Deno.test("memory v2 marks persisted readers dirty during semantic commits", asy
   } finally {
     close(engine);
     await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 keeps scheduler state for two user contexts", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const aliceClient = await connect({ transport: loopback(server) });
+  const bobClient = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-context-owner";
+  const alice = await aliceClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor("did:key:scheduler-alice"),
+  );
+  const bob = await bobClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor("did:key:scheduler-bob"),
+  );
+  const userRead = {
+    ...sourceRead,
+    space: ownerSpace,
+    scope: "user" as const,
+  };
+  const userWrite = {
+    ...targetWrite,
+    space: ownerSpace,
+    scope: "user" as const,
+  };
+  const userObservation = observationForAction(
+    "pattern.tsx:computed:user-context",
+    {
+      ownerSpace,
+      reads: [userRead],
+      currentKnownWrites: [userWrite],
+    },
+  );
+
+  try {
+    await alice.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: userObservation,
+    });
+    await bob.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: userObservation,
+    });
+
+    const aliceSnapshots = await alice.listSchedulerActionSnapshots({
+      actionId: userObservation.actionId,
+    });
+    const bobSnapshots = await bob.listSchedulerActionSnapshots({
+      actionId: userObservation.actionId,
+    });
+    assertEquals(aliceSnapshots.snapshots.length, 1);
+    assertEquals(bobSnapshots.snapshots.length, 1);
+  } finally {
+    await aliceClient.close().catch(() => {});
+    await bobClient.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
   }
 });
 
