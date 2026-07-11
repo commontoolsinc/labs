@@ -5,7 +5,10 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -88,11 +91,19 @@ export function exposedResultCell<T>(
 ): Cell<T> {
   // Ideally, we'd just call getRaw on the cell, but since that may be a link,
   // we need to know the base to use to parse that link.
-  const target = resolveLink(
-    runtime,
-    tx,
-    cell.getAsNormalizedFullLink(),
-    "writeRedirect",
+  // Coordinator scaffolding (machineryRead): the redirect resolution reads
+  // link topology only and must not consume `*`-path membership templates
+  // on plumbing containers (template-population §6). The value COPY below
+  // stays unmarked — the exposed cell genuinely depends on it.
+  const target = tx.runWithAmbientReadMeta(
+    machineryRead,
+    () =>
+      resolveLink(
+        runtime,
+        tx,
+        cell.getAsNormalizedFullLink(),
+        "writeRedirect",
+      ),
   );
   const initialCell = cell.withTx(tx);
   // Identity probe: the raw value is only link-parsed to decide which
@@ -103,7 +114,7 @@ export function exposedResultCell<T>(
   // coordinator rebuilding its output array re-consumes every reused
   // element result's label and smears it across fresh elements).
   const raw = tx.runWithAmbientReadMeta(
-    linkResolutionProbe,
+    { ...linkResolutionProbe, ...machineryRead },
     () => initialCell.getRaw({ lastNode: "writeRedirect" }),
   );
   // If the last writeRedirect target is a link, use that, but otherwise use

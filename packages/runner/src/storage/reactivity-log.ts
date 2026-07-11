@@ -215,6 +215,44 @@ export function isSchedulerDependencyRead(meta?: Metadata): boolean {
   return meta?.[schedulerDependencyReadMarker] === true;
 }
 
+const machineryReadMarker: unique symbol = Symbol(
+  "machineryReadMarker",
+);
+
+/**
+ * Marks reads the runtime's op-instantiation/wiring machinery issues while
+ * setting operations up or plumbing their results: binding node IO
+ * (write-redirect resolution), collecting static redirect write targets,
+ * dependency seeding's input/output materialization, result-write plumbing
+ * (`sendValueToBinding`), and the list coordinators' container scaffolding
+ * (presence probes, slot-identity diffs, `length` during instantiation).
+ * Sibling of `schedulerDependencyRead` (§8.10.1: dependency-discovery reads
+ * are not consumed inputs) but deliberately NARROWER in effect: flow-label
+ * derivation still counts a marked read's ordinary label consumption
+ * (link-origin pointer labels, concrete structure/derived entries — exactly
+ * what it consumed before templates existed); only runtime-minted `*`-path
+ * TEMPLATE consumption is excluded (template-population §3.1/§6). The
+ * machinery reading a plumbing container's child paths is the runtime
+ * wiring up operations, not an application observing a slot — letting those
+ * reads consume membership/slot templates smeared one reconcile's J into
+ * the next op's action chain (measured: the phase-B pointwise map suite),
+ * which is what kept the generic pure-link mint route disabled in Stage A
+ * (the SC-8 remainder).
+ *
+ * Stamp discipline: mark ONLY scopes whose every read the machinery itself
+ * issues — pattern/handler code must never execute inside a marked scope.
+ * Over-marking an application observation under-taints (the forbidden
+ * direction); a missed machinery read merely leaves residual over-taint
+ * (acceptable, additive-safe).
+ */
+export const machineryRead: Metadata = {
+  [machineryReadMarker]: true,
+};
+
+export function isMachineryRead(meta?: Metadata): boolean {
+  return meta?.[machineryReadMarker] === true;
+}
+
 const excludeReadFromConflictMarker: unique symbol = Symbol(
   "excludeReadFromConflictMarker",
 );
