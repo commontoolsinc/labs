@@ -380,6 +380,10 @@ Focused tests:
   `packages/runner/src/storage/v2-transaction.ts`, and
   `packages/memory/v2/patch.ts` treat factories atomically through the shared
   equality/clone protocol.
+- [x] Keep native type inspection at the proxy meta-object boundary: it must
+  obtain constructor identity from prototype metadata rather than reading an
+  inherited `constructor` through a live query proxy and misclassifying the
+  host `Object` constructor as authored Fabric data.
 - [x] Add one shared data-URI decoder that dispatches only by exact media type:
   legacy `application/json` remains ordinary JSON, while
   `application/vnd.commonfabric.fabric-value` requires a versioned `fvj1:`

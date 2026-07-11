@@ -86,6 +86,30 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue({})).toBe(NATIVE_TAGS.Object);
     });
 
+    it("classifies object proxies without reading an inherited constructor value", () => {
+      const reads: PropertyKey[] = [];
+      const value = new Proxy({}, {
+        get: (target, property, receiver) => {
+          reads.push(property);
+          if (property === "constructor") {
+            throw new Error("constructor value must not be read");
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      expect(tagFromNativeValue(value)).toBe(NATIVE_TAGS.Object);
+      expect(reads).not.toContain("constructor");
+    });
+
+    it("recognizes a constructorless compartment plain-object prototype shape", () => {
+      const foreignObjectPrototype = Object.create(null);
+
+      expect(tagFromNativeValue(Object.create(foreignObjectPrototype))).toBe(
+        NATIVE_TAGS.Object,
+      );
+    });
+
     it("returns `Array` tag for arrays", () => {
       expect(tagFromNativeValue([])).toBe(NATIVE_TAGS.Array);
     });

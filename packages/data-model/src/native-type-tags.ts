@@ -117,16 +117,43 @@ export function tagFromNativeClass(
 }
 
 /**
+ * Resolve the native constructor from prototype metadata without reading the
+ * value's inherited `constructor` property. The latter is observable through
+ * a Proxy `get` trap and can accidentally turn type inspection into an
+ * application-level property read.
+ */
+function constructorFromPrototype(
+  value: object,
+): { prototype: unknown } | undefined {
+  let prototype = Object.getPrototypeOf(value);
+  const seen = new Set<object>();
+  while (prototype !== null && !seen.has(prototype)) {
+    seen.add(prototype);
+    const descriptor = Object.getOwnPropertyDescriptor(
+      prototype,
+      "constructor",
+    );
+    if (descriptor !== undefined) {
+      return typeof descriptor.value === "function"
+        ? descriptor.value as { prototype: unknown }
+        : undefined;
+    }
+    prototype = Object.getPrototypeOf(prototype);
+  }
+  return undefined;
+}
+
+/**
  * Maps a JS value to its native-instance tag. Returns the tag string if the
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
- * which matches `Error` subclasses via `prototype instanceof Error`). Falls
- * back to `Error.isError()` and `Array.isArray()` for values whose constructor
- * is unreachable -- a severed prototype, or another realm -- since the internal
- * slot survives where a constructor lookup does not, and to a prototype check
- * for null-prototype objects.
+ * Dispatches via constructor metadata on the value's prototype chain (O(1)
+ * switch in `tagFromNativeClass`) without observing an inherited
+ * `value.constructor` property through a Proxy trap. Falls back to the
+ * feature-detected `Error.isError()` intrinsic and `Array.isArray()` when a
+ * constructor is unreachable (for example, a severed prototype or another
+ * realm), and to a prototype check for null-prototype objects.
  *
  * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
  * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
@@ -138,8 +165,10 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Primitive;
   }
   // Guard: null-prototype objects or exotic objects may not have a function
-  // constructor.
-  const ctor = value.constructor;
+  // constructor. Read prototype metadata directly so reactive/query proxies do
+  // not turn type inspection into a stored `constructor` cell read.
+  const directPrototype = Object.getPrototypeOf(value);
+  const ctor = constructorFromPrototype(value);
   let tag: NativeTag | null = null;
 
   if (typeof ctor === "function") {
@@ -161,8 +190,11 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // been severed, or one from another realm. An ordinary subclass (including
     // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
     // `prototype instanceof Error`. The internal slot survives either way,
-    // which is what `Error.isError()` reads.
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    // which is what `Error.isError()` reads. Some supported compartments may
+    // omit the newer intrinsic, so feature-detect it before use.
+    if (typeof Error.isError === "function" && Error.isError(value)) {
+      return NATIVE_TAGS.Error;
+    }
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
@@ -170,10 +202,20 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
 
-    // Null-prototype objects (`Object.create(null)`).
+    // Null-prototype objects (`Object.create(null)`) and cross-realm / SES
+    // ordinary objects. A foreign realm's `Object` constructor is not
+    // identity-equal to ours, and hardened compartments may remove its
+    // prototype's `constructor` property entirely. The defining shape is that
+    // the value's direct prototype itself terminates the prototype chain.
+    // Ordinary class prototypes inherit from that realm's Object.prototype
+    // and therefore do not match this shape.
     if (tag === null) {
-      const proto = Object.getPrototypeOf(value);
-      if (proto === null) tag = NATIVE_TAGS.Object;
+      if (
+        directPrototype === null ||
+        Object.getPrototypeOf(directPrototype) === null
+      ) {
+        tag = NATIVE_TAGS.Object;
+      }
     }
   }
 
