@@ -28,6 +28,7 @@ import {
   internalVerifierRead,
   isInternalVerifierRead,
   isLinkResolutionProbe,
+  isMachineryRead,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
 import {
@@ -1426,6 +1427,15 @@ const forEachFlowObservation = (
       // followed slot, and is excluded from `*`-template consumption in
       // `deriveFlowJoin`.
       coveredByTrace: boolean;
+      // True when the read carries the op-instantiation/wiring machinery
+      // marker (`machineryRead`): the runtime setting up operations reads
+      // plumbing containers' child paths (slot scalars, `length`, alias
+      // shells) with journal shapes indistinguishable from application
+      // observations. Marked reads keep their ordinary consumption but are
+      // excluded from `*`-template consumption in `deriveFlowJoin` — the
+      // machinery-read boundary that lets the generic pure-link mint route
+      // ship (SC-8 remainder; template-population §6).
+      machinery: boolean;
     },
   ) => boolean,
 ): boolean => {
@@ -1520,8 +1530,15 @@ const forEachFlowObservation = (
         // machinery journals ordinary reads at followed slots and inside
         // their link sigils, and those must stay pointer HANDLING, not
         // pointer observation — see the template exclusion in
-        // `deriveFlowJoin`.
-        { shape, nonRecursive: read.nonRecursive, coveredByTrace },
+        // `deriveFlowJoin`. `machinery` is the same boundary for the
+        // wiring reads no trace covers (op instantiation, dependency
+        // seeding, result plumbing, coordinator scaffolding).
+        {
+          shape,
+          nonRecursive: read.nonRecursive,
+          coveredByTrace,
+          machinery: isMachineryRead(read.meta),
+        },
       )
     ) {
       return true;
@@ -1560,7 +1577,12 @@ const forEachFlowObservation = (
         normalizeCellScope(trigger.scope),
         "application/json",
         trigger.path,
-        { shape: "value", nonRecursive: false, coveredByTrace: false },
+        {
+          shape: "value",
+          nonRecursive: false,
+          coveredByTrace: false,
+          machinery: false,
+        },
       )
     ) {
       return true;
@@ -1698,8 +1720,19 @@ export const deriveFlowJoin = (
       // closures). Without this, every traversal hop through a stamped
       // container smears the container's J onto whatever the transaction
       // writes — re-importing the pointwise smear the S16 substrate
-      // removed (measured: the phase-B pointwise map suite).
+      // removed (measured: the phase-B pointwise map suite). The
+      // `machinery` arm is the same boundary for the wiring reads no trace
+      // covers: op instantiation, dependency seeding, result plumbing and
+      // coordinator scaffolding read plumbing containers' child paths
+      // (slot scalars, `length`, alias shells) as scaffolding, and letting
+      // those standalone-shaped reads consume templates smeared one
+      // reconcile's J into the next op's action chain — what kept the
+      // generic mint route off in Stage A (the SC-8 remainder). Marked
+      // reads keep every OTHER consumption (link entries, concrete
+      // structure/derived) — byte-identical to their pre-template
+      // behavior, so the exclusion cannot under-taint relative to main.
       const excludesTemplates = observation.coveredByTrace ||
+        observation.machinery ||
         ownedContainers !== undefined;
       const label = effectiveReadLabel(
         metadataByDoc.get(key),
@@ -1710,7 +1743,7 @@ export const deriveFlowJoin = (
           ...(excludesTemplates
             ? {
               excludeEntry: (entry: LabelMapEntry) =>
-                (observation.coveredByTrace &&
+                ((observation.coveredByTrace || observation.machinery) &&
                   isRuntimeMintedTemplate({
                     origin: entry.origin,
                     path: canonicalizeLogicalPath(entry.path),
@@ -5645,25 +5678,25 @@ export const prepareBoundaryCommit = (
         // (never pooled — `poolsExistence` requires a class-less entry)
         // on covering writes.
         //
-        // DECLARED-CONTAINER ROUTE ONLY — a measured deviation from the
-        // design's §3.1 "both routes" (documented in
-        // cfc-template-population.md §6 Stage A). Minting templates on
-        // EVERY pure-link-structure value write puts them on the runtime's
-        // own builder/coordination plumbing (alias shells, internal
-        // arrays), and the op-instantiation machinery reads those docs'
-        // child paths (slot scalars, length) as scaffolding with NO
-        // distinguishing journal marker — neither probe-classified nor
-        // trace-covered — so each reconcile's J smears into the next
-        // (measured: the phase-B pointwise map suite). The declared
-        // list-coordinator containers (filter/flatMap results — the actual
-        // §8.5.6.1/SC-7 membership subjects) are where the membership
-        // decision lives; their templates close the SC-4/SC-8 residuals,
-        // and the generic value-write route keeps today's
-        // container-anchored stamps until machinery reads carry a marker.
+        // BOTH ROUTES mint (design §3.1): declared coordinator containers
+        // (the S16 `recordCfcStructureContainer` hook — filter/flatMap
+        // results, the §8.5.6.1/SC-7 membership subjects) and every
+        // container node of a generic pure-link-structure value write.
+        // Stage A shipped the declared route only, because generic mints
+        // put templates on the runtime's own builder/coordination plumbing
+        // (alias shells, internal arrays) and the op-instantiation
+        // machinery's reads of those docs' child paths (slot scalars,
+        // `length`) had no distinguishing journal shape — each reconcile's
+        // J smeared into the next op's action chain (measured: the phase-B
+        // pointwise map suite; the SC-8 remainder). Those wiring reads now
+        // carry the `machineryRead` marker and skip template consumption
+        // in `deriveFlowJoin` (they keep every other consumption), which
+        // is what lets the generic route mint: a hand-built pure-link
+        // container's membership/assignment J is consumable by genuine
+        // application probes without feeding the runtime's own plumbing
+        // traffic.
         if (
-          flowHasLabels && flowConfidentiality.length > 0 &&
-          structureContainerPath !== undefined &&
-          pathKey(structureContainerPath) === pathKey(path)
+          flowHasLabels && flowConfidentiality.length > 0
         ) {
           for (const observes of ["shape", "value", "followRef"] as const) {
             persistedLabelEntries.push(markFlowStampEntry({

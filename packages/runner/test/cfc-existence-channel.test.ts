@@ -864,14 +864,24 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const enumerateConf = structure
       .filter((e) => e.observes === "enumerate")
       .flatMap((e) => e.label.confidentiality ?? []);
-    const shapeConf = structure
-      .filter((e) => e.observes === "shape")
+    // The FROZEN existence entry is the concrete container-path shape entry;
+    // the `*`-child shape-class membership TEMPLATE (template-population
+    // §3.1, generic route) shares the observes value but follows the
+    // replace-from-criteria discipline instead — split the pin by path.
+    const frozenShapeConf = structure
+      .filter((e) => e.observes === "shape" && e.path.length === 0)
+      .flatMap((e) => e.label.confidentiality ?? []);
+    const templateConf = structure
+      .filter((e) => e.path.length === 1 && e.path[0] === "*")
       .flatMap((e) => e.label.confidentiality ?? []);
     // Current membership: alice's criteria only — bob's atom left with his
     // element (no unshrinkable accumulation).
     expect(enumerateConf).toEqual(["alice"]);
     // Frozen existence: the creation join only — untouched by A2/A3.
-    expect(shapeConf).toEqual(["alice"]);
+    expect(frozenShapeConf).toEqual(["alice"]);
+    // The templates re-mint per criteria like the enumerate stamp: bob's
+    // atom does not accumulate across A2 → A3.
+    expect([...new Set(templateConf)]).toEqual(["alice"]);
   });
 
   // Legacy migration through the OTHER carry-forward skips: a pre-class

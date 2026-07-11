@@ -3,7 +3,10 @@ import type { Runtime } from "../runtime.ts";
 import type { Logger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
 import { cellIdentityKey } from "./scope-policy.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
 
 type ElementRuns = Map<
   string,
@@ -121,7 +124,7 @@ export function createResumeRepublisher(
       // slots for identity, so it runs under the link-resolution probe (S16) to
       // avoid re-journaling prior element content — matching map/filter/flatMap.
       tx.runWithAmbientReadMeta(
-        linkResolutionProbe,
+        { ...linkResolutionProbe, ...machineryRead },
         () => result.asSchema(resultSchema).withTx(tx).set(out),
       );
       return [];
