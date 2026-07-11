@@ -853,9 +853,12 @@ Deno.test("scheduler context migration preserves only provable space state and i
   const identityMismatchAction = "context:migration:identity-mismatch";
   const orphanSnapshotAction = "context:migration:orphan-snapshot";
   const orphanStateAction = "context:migration:orphan-state";
+  const orphanCommitAction = "context:migration:orphan-commit";
   const staleStateAction = "context:migration:stale-state";
   const ambiguousActionA = "context:migration:ambiguous-a";
   const ambiguousActionB = "context:migration:ambiguous-b";
+  const ambiguousReplayActionA = "context:migration:ambiguous-replay-a";
+  const ambiguousReplayActionB = "context:migration:ambiguous-replay-b";
   try {
     legacy.exec(LEGACY_SCHEDULER_SCHEMA);
     insertLegacyActiveSchedulerRow(legacy, {
@@ -944,11 +947,24 @@ Deno.test("scheduler context migration preserves only provable space state and i
     `).run({ action_id: orphanStateAction });
     insertLegacyActiveSchedulerRow(legacy, {
       observationId: 8,
+      actionId: orphanCommitAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: orphanCommitAction }) as never,
+      ),
+      dirtySeq: 14,
+    });
+    legacy.prepare(`
+      UPDATE scheduler_observation
+      SET commit_seq = 999
+      WHERE observation_id = 8
+    `).run();
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 9,
       actionId: staleStateAction,
       payload: encodeMemoryBoundary(
         observationFor({ actionId: staleStateAction }) as never,
       ),
-      dirtySeq: 14,
+      dirtySeq: 15,
     });
     legacy.prepare(`
       UPDATE scheduler_action_state
@@ -956,21 +972,42 @@ Deno.test("scheduler context migration preserves only provable space state and i
       WHERE action_id = :action_id
     `).run({ action_id: staleStateAction });
     insertLegacyActiveSchedulerRow(legacy, {
-      observationId: 9,
+      observationId: 10,
       actionId: ambiguousActionA,
       payload: encodeMemoryBoundary(
         observationFor({ actionId: ambiguousActionA }) as never,
       ),
-      dirtySeq: 15,
+      dirtySeq: 16,
     });
     insertLegacySnapshotAndState(legacy, {
-      observationId: 9,
+      observationId: 10,
       actionId: ambiguousActionB,
       payload: encodeMemoryBoundary(
         observationFor({ actionId: ambiguousActionB }) as never,
       ),
-      dirtySeq: 16,
+      dirtySeq: 17,
     });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 11,
+      actionId: ambiguousReplayActionA,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: ambiguousReplayActionA }) as never,
+      ),
+      dirtySeq: 18,
+    });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 12,
+      actionId: ambiguousReplayActionB,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: ambiguousReplayActionB }) as never,
+      ),
+      dirtySeq: 19,
+    });
+    legacy.prepare(`
+      UPDATE scheduler_observation
+      SET session_id = 'duplicate-session', local_seq = 1
+      WHERE observation_id IN (11, 12)
+    `).run();
   } finally {
     legacy.close();
   }
@@ -994,9 +1031,12 @@ Deno.test("scheduler context migration preserves only provable space state and i
         identityMismatchAction,
         orphanSnapshotAction,
         orphanStateAction,
+        orphanCommitAction,
         staleStateAction,
         ambiguousActionA,
         ambiguousActionB,
+        ambiguousReplayActionA,
+        ambiguousReplayActionB,
       ]
     ) {
       assertOwnedContexts(engine, discardedAction, []);
