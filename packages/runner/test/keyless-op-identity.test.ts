@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import {
   Engine,
   Runtime,
@@ -29,8 +30,11 @@ import type { RuntimeProgram } from "./engine-test-support.ts";
  *
  * The program is the CT-1811 regression pattern (gideon-tests/
  * ct-1811-mapped-subpattern-derived-output.test.tsx), with the traversal
- * result exposed as a readable `rendered` output and the Wrapper exported so
- * the mint itself is observable.
+ * result exposed as a readable `rendered` output. The nested Wrapper is
+ * exported to prove it remains distinct from the transformer-generated list
+ * callback factory whose identity this compatibility adapter must mint. The
+ * older embedded-graph test accidentally observed Wrapper through derivation
+ * provenance; first-class factory graph values pin the actual `op` object.
  */
 
 const CT_1812_PROGRAM_SOURCE = `
@@ -168,8 +172,26 @@ describe("keyless op identity (CT-1812)", () => {
     const main = evalResult.main!;
     const factory = main.default as Parameters<Runtime["run"]>[1];
     const wrapperOp = main.wrapperOp as object;
+    const mapNode = (factory as unknown as {
+      nodes: Array<
+        {
+          module: { type: string; implementation?: unknown };
+          inputs: { op?: unknown };
+        }
+      >;
+    }).nodes.find((node) =>
+      node.module.type === "ref" && node.module.implementation === "map"
+    );
+    const listOp = mapNode?.inputs.op;
+    expect(isAdmittedFabricFactory(listOp)).toBe(true);
+    if (!isAdmittedFabricFactory(listOp)) {
+      throw new Error("expected admitted generated list op");
+    }
+    expect(listOp).not.toBe(wrapperOp);
 
     // Bare evaluation indexed nothing: the op is keyless going in.
+    expect(runtime.patternManager.getArtifactEntryRef(listOp))
+      .toBeUndefined();
     expect(runtime.patternManager.getArtifactEntryRef(wrapperOp))
       .toBeUndefined();
 
@@ -197,8 +219,14 @@ describe("keyless op identity (CT-1812)", () => {
     // And it worked BY IDENTITY: instantiation minted the keyless pointer for
     // the op, so it resolved to the pristine artifact instead of the
     // defer-corrupted embedded graph.
-    const minted = runtime.patternManager.getArtifactEntryRef(wrapperOp);
+    const minted = runtime.patternManager.getArtifactEntryRef(listOp);
     expect(minted?.identity).toMatch(/^keyless:/);
+    expect(runtime.patternManager.artifactFromIdentitySync(
+      minted!.identity,
+      minted!.symbol,
+    )).toBe(listOp);
+    expect(runtime.patternManager.getArtifactEntryRef(wrapperOp))
+      .toBeUndefined();
 
     cancel();
     await runtime.idle();

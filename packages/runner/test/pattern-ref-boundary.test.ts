@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Pattern } from "../src/builder/types.ts";
@@ -12,6 +13,7 @@ import {
   toJSONWithAliasBindings,
 } from "../src/builder/json-utils.ts";
 import {
+  isPatternRefSentinel,
   resolveOpPattern,
   resolveStoredPattern,
   resolveStoredPatternAsync,
@@ -128,10 +130,16 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect(Array.isArray(viaLegacyAliases.nodes)).toBe(true);
   });
 
-  it("nodes of a freshly compiled pattern embed bare op graphs (no $patternRef)", async () => {
+  it("keeps a named list op callable through in-memory graph construction", async () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
-    const json = JSON.stringify((compiled as unknown as Pattern).nodes);
-    expect(json.includes("$patternRef")).toBe(false);
+    const listNode = (compiled as unknown as Pattern).nodes.find((node) =>
+      node.module.type === "ref" && node.module.implementation === "map"
+    );
+    expect(listNode).toBeDefined();
+    const op = (listNode!.inputs as Record<string, unknown>).op;
+    expect(isAdmittedFabricFactory(op)).toBe(true);
+    expect(typeof op).toBe("function");
+    expect(isPatternRefSentinel(op)).toBe(false);
   });
 
   it("a stored refs-only value resolves to the live canonical pattern", async () => {

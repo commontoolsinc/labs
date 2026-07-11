@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  type LivePatternFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
@@ -20,7 +27,11 @@ import {
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { noteDerivedCopy } from "../src/builder/pattern-metadata.ts";
+import {
+  deriveFactoryStateCopy,
+  noteDerivedCopy,
+  setDurableArtifactEntryRef,
+} from "../src/builder/pattern-metadata.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import {
   isPatternRefSentinel,
@@ -42,6 +53,11 @@ const ADDRESSABLE_PATTERN_PROGRAM: RuntimeProgram = {
       ].join("\n"),
     },
   ],
+};
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "factory",
 };
 
 describe("pattern-binding", () => {
@@ -71,6 +87,36 @@ describe("pattern-binding", () => {
   });
 
   describe("sendValueToBinding", () => {
+    it("writes an admitted factory atomically through a redirect binding", () => {
+      const testCell = runtime.getCell<{ factory?: unknown }>(
+        space,
+        "factory redirect binding",
+        undefined,
+        tx,
+      );
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const factory = createFactoryShell({
+        kind: "module",
+        ref: FACTORY_REF,
+        argumentSchema: true,
+        resultSchema: true,
+      });
+
+      sendValueToBinding(
+        tx,
+        testCell,
+        argumentCellLink,
+        { $alias: { cell: "result", path: ["factory"] } },
+        factory,
+      );
+
+      const stored = testCell.key("factory").getRaw();
+      expect(isAdmittedFabricFactory(stored)).toBe(true);
+      expect(factoryStateOf(stored)).toEqual(factoryStateOf(factory));
+      expect(isPatternRefSentinel(stored)).toBe(false);
+    });
+
     it("should send value to a simple binding", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
@@ -560,7 +606,7 @@ describe("pattern-binding", () => {
       }
     });
 
-    it("binds nested addressable patterns as schema-carrying refs", async () => {
+    it("keeps admitted addressable factories callable and retains the structural legacy ref path", async () => {
       const compiled = await runtime.patternManager.compilePattern(
         ADDRESSABLE_PATTERN_PROGRAM,
       );
@@ -594,21 +640,370 @@ describe("pattern-binding", () => {
         nested: { operations: unknown[] };
       };
 
-      for (
-        const value of [
-          bound.direct,
-          bound.nested.operations[0],
-          bound.nested.operations[1],
-        ]
-      ) {
-        expect(isPatternRefSentinel(value)).toBe(true);
-        expect(value).toEqual({
-          $patternRef: entryRef,
-          argumentSchema: compiled.argumentSchema,
-          resultSchema: compiled.resultSchema,
+      expect(bound.direct).toBe(compiled);
+      expect(bound.nested.operations[0]).toBe(compiled);
+      expect(isAdmittedFabricFactory(bound.direct)).toBe(true);
+      expect(isPatternRefSentinel(bound.direct)).toBe(false);
+
+      const legacy = bound.nested.operations[1];
+      expect(isPatternRefSentinel(legacy)).toBe(true);
+      expect(legacy).toEqual({
+        $patternRef: entryRef,
+        argumentSchema: compiled.argumentSchema,
+        resultSchema: compiled.resultSchema,
+      });
+      expect((legacy as Record<string, unknown>).nodes).toBeUndefined();
+      expect(resolveStoredPattern(runtime, legacy)).toBe(compiled);
+
+      setDurableArtifactEntryRef(compiled, entryRef!);
+      const compiledState = factoryStateOf(compiled);
+      if (compiledState.kind !== "pattern" || compiledState.ref === undefined) {
+        throw new Error("expected addressable pattern factory state");
+      }
+      const decoded = createFactoryShell({
+        kind: "pattern",
+        ref: compiledState.ref,
+        argumentSchema: compiledState.argumentSchema,
+        resultSchema: compiledState.resultSchema,
+      });
+      expect(() =>
+        sendValueToBinding(
+          tx,
+          resultCell,
+          argumentCell.getAsNormalizedFullLink(),
+          compiled,
+          decoded,
+        )
+      ).not.toThrow();
+    });
+
+    it("binds aliases in hidden factory state while preserving callable identity semantics", () => {
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "hidden factory binding aliases" },
+      });
+      try {
+        const { pattern } = createTrustedBuilder(runtime).commonfabric;
+        const base = pattern(() => ({ value: 1 }));
+        const state = factoryStateOf(base);
+        if (state.kind !== "pattern" || !("rootToken" in state)) {
+          throw new Error("expected live pattern factory state");
+        }
+        const derive = (
+          params: unknown,
+          spaceSelector?: unknown,
+        ) =>
+          deriveFactoryStateCopy(
+            base,
+            {
+              ...state,
+              paramsSchema: true,
+              params,
+              ...(spaceSelector === undefined ? {} : { spaceSelector }),
+            } satisfies LivePatternFactoryState,
+          );
+
+        const resultCell = runtime.getCell<Record<string, unknown>>(
+          space,
+          "hidden factory binding aliases",
+          undefined,
+          tx,
+        );
+        resultCell.set({ sink: 0 });
+        const argumentCell = getMetaCell(resultCell, "argument", tx);
+        const factory = derive(
+          {
+            fromArgument: {
+              $alias: { cell: "argument", path: ["captured"] },
+            },
+          },
+          { $alias: { cell: "result", path: ["targetSpace"] } },
+        );
+
+        const bound = unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          factory,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        );
+        const boundState = factoryStateOf(bound);
+        if (boundState.kind !== "pattern") {
+          throw new Error("expected bound pattern state");
+        }
+
+        expect(bound).not.toBe(factory);
+        expect(isAdmittedFabricFactory(bound)).toBe(true);
+        expect(isPatternRefSentinel(bound)).toBe(false);
+        expect(
+          parseLink(
+            (boundState.params as { fromArgument: unknown }).fromArgument,
+            resultCell,
+          )?.path,
+        ).toEqual(["captured"]);
+        expect(parseLink(boundState.spaceSelector, resultCell)?.path).toEqual([
+          "targetSpace",
+        ]);
+
+        const repeated = unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          { first: factory, second: factory },
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        ) as { first: unknown; second: unknown };
+        expect(repeated.first).toBe(repeated.second);
+
+        const links = findAllWriteRedirectCells(bound, resultCell);
+        expect(links.map((link) => link.path)).toEqual([
+          ["captured"],
+          ["targetSpace"],
+        ]);
+
+        const outputBinding = derive({
+          sink: { $alias: { cell: "result", path: ["sink"] } },
         });
-        expect((value as Record<string, unknown>).nodes).toBeUndefined();
-        expect(resolveStoredPattern(runtime, value)).toBe(compiled);
+        const outputValue = derive({ sink: 42 });
+        sendValueToBinding(
+          tx,
+          resultCell,
+          argumentCell.getAsNormalizedFullLink(),
+          outputBinding,
+          outputValue,
+        );
+        expect(resultCell.key("sink").get()).toBe(42);
+
+        const unchanged = derive({ static: "same" });
+        expect(unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          unchanged,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        )).toBe(unchanged);
+        expect(() =>
+          sendValueToBinding(
+            tx,
+            resultCell,
+            argumentCell.getAsNormalizedFullLink(),
+            unchanged,
+            unchanged,
+          )
+        ).not.toThrow();
+
+        const invalid = derive({ fn: () => undefined });
+        expect(() =>
+          unwrapOneLevelAndBindtoDoc(
+            runtime.cfc,
+            invalid,
+            argumentCell.getAsNormalizedFullLink(),
+            resultCell,
+          )
+        ).toThrow("Arbitrary functions are not valid binding values");
+      } finally {
+        popFrame(frame);
+      }
+    });
+
+    it("compares independent canonical shells by state and rejects arbitrary functions", () => {
+      const state = () => ({
+        kind: "pattern" as const,
+        ref: FACTORY_REF,
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: { bytes: new FabricBytes(new Uint8Array([1, 2, 3])) },
+      });
+      const left = createFactoryShell(state());
+      const right = createFactoryShell(state());
+      const different = createFactoryShell({
+        ...state(),
+        params: { bytes: new FabricBytes(new Uint8Array([9, 8, 7])) },
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "canonical factory binding equality",
+        undefined,
+        tx,
+      );
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+
+      expect(() =>
+        sendValueToBinding(
+          tx,
+          resultCell,
+          argumentCell.getAsNormalizedFullLink(),
+          left,
+          right,
+        )
+      ).not.toThrow();
+      expect(() =>
+        sendValueToBinding(
+          tx,
+          resultCell,
+          argumentCell.getAsNormalizedFullLink(),
+          left,
+          different,
+        )
+      ).toThrow("Fabric special binding does not match value");
+      expect(unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        left,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      )).toBe(left);
+      expect(findAllWriteRedirectCells(left, resultCell)).toEqual([]);
+
+      const arbitrary = () => undefined;
+      expect(() =>
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          arbitrary,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        )
+      ).toThrow("Arbitrary functions are not valid binding values");
+      expect(() =>
+        sendValueToBinding(
+          tx,
+          resultCell,
+          argumentCell.getAsNormalizedFullLink(),
+          arbitrary,
+          arbitrary,
+        )
+      ).toThrow("Arbitrary functions are not valid binding values");
+      expect(() => findAllWriteRedirectCells(arbitrary, resultCell)).toThrow(
+        "Arbitrary functions are not valid binding values",
+      );
+
+      const forgedModuleShape = {
+        type: "javascript",
+        implementation: arbitrary,
+      };
+      expect(() =>
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          forgedModuleShape,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        )
+      ).toThrow("Arbitrary functions are not valid binding values");
+      expect(() => findAllWriteRedirectCells(forgedModuleShape, resultCell))
+        .toThrow("Arbitrary functions are not valid binding values");
+
+      const legacyPatternWithAuthoredFunction = {
+        argumentSchema: true,
+        resultSchema: true,
+        nodes: [],
+        result: { authored: { toJSON: arbitrary } },
+      };
+      expect(() =>
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          legacyPatternWithAuthoredFunction,
+          argumentCell.getAsNormalizedFullLink(),
+          resultCell,
+        )
+      ).toThrow("Arbitrary functions are not valid binding values");
+      expect(() =>
+        findAllWriteRedirectCells(legacyPatternWithAuthoredFunction, resultCell)
+      ).toThrow("Arbitrary functions are not valid binding values");
+    });
+
+    it("preserves only the named function fields of a structural legacy graph", () => {
+      const patternToJSON = () => ({ legacy: "pattern" });
+      const moduleToJSON = () => ({ legacy: "module" });
+      const implementation = () => undefined;
+      const legacyPattern = {
+        argumentSchema: true,
+        resultSchema: true,
+        nodes: [{
+          module: {
+            type: "javascript",
+            implementation,
+            toJSON: moduleToJSON,
+          },
+          inputs: {},
+          outputs: {},
+        }],
+        result: {},
+        toJSON: patternToJSON,
+      };
+      const resultCell = runtime.getCell(
+        space,
+        "legacy graph function fields",
+        undefined,
+        tx,
+      );
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+
+      const bound = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        legacyPattern,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      ) as typeof legacyPattern;
+      expect(bound.toJSON).toBe(patternToJSON);
+      expect(bound.nodes[0].module.toJSON).toBe(moduleToJSON);
+      expect(bound.nodes[0].module.implementation).toBe(implementation);
+      expect(findAllWriteRedirectCells(legacyPattern, resultCell)).toEqual([]);
+    });
+
+    it("keeps admitted list ops on the named legacy sentinel fallback only", async () => {
+      const compiled = await runtime.patternManager.compilePattern(
+        ADDRESSABLE_PATTERN_PROGRAM,
+      );
+      const substitute = runtime.runner as unknown as {
+        substituteOpPatternRefs(
+          moduleRefName: string | undefined,
+          inputBindings: unknown,
+        ): void;
+      };
+
+      const listBindings = { op: compiled };
+      substitute.substituteOpPatternRefs("map", listBindings);
+      expect(isPatternRefSentinel(listBindings.op)).toBe(true);
+
+      const ordinaryBindings = { op: compiled };
+      substitute.substituteOpPatternRefs("ifElse", ordinaryBindings);
+      expect(ordinaryBindings.op).toBe(compiled);
+
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "keyless admitted list op fallback" },
+      });
+      try {
+        const { pattern } = createTrustedBuilder(runtime).commonfabric;
+        const keyless = pattern(() => ({ value: 1 }));
+        const keylessBindings = { op: keyless };
+        substitute.substituteOpPatternRefs("flatMap", keylessBindings);
+        expect(isPatternRefSentinel(keylessBindings.op)).toBe(true);
+        expect(runtime.patternManager.getArtifactEntryRef(keyless)?.identity)
+          .toMatch(/^keyless:/);
+
+        const keylessState = factoryStateOf(keyless);
+        if (keylessState.kind !== "pattern") {
+          throw new Error("expected keyless pattern factory state");
+        }
+        const modified = [
+          keyless.inSpace("child-space"),
+          keyless.asScope("user"),
+          deriveFactoryStateCopy(keyless, {
+            ...keylessState,
+            paramsSchema: true,
+            params: { captured: 1 },
+          }),
+        ];
+        for (const factory of modified) {
+          const modifiedBindings = { op: factory };
+          expect(() =>
+            substitute.substituteOpPatternRefs("filter", modifiedBindings)
+          ).toThrow("legacy list op cannot discard factory state");
+          expect(modifiedBindings.op).toBe(factory);
+        }
+      } finally {
+        popFrame(frame);
       }
     });
   });

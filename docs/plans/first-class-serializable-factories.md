@@ -369,7 +369,7 @@ Focused tests:
 - [x] Convert captured Cells/Reactives to aliases inside factory state.
 - [x] Descend into nested factories without exposing enumerable `curried` or
   state fields.
-- [ ] Keep CFC inspection and alias traversal on the same logical state view as
+- [x] Keep CFC inspection and alias traversal on the same logical state view as
   serialization, hashing, and equality.
 - [x] Verify two references to the same factory do not cause false cycle errors,
   while an actual cycle through params is rejected.
@@ -410,10 +410,16 @@ Focused tests:
   Constrain `$patternRef` emission to explicitly legacy/internal graph fallback
   paths and add a test that new durable factory writes cannot choose it.
   Until that switch, explicit root pattern graph serialization remains an
-  internal helper; within node payload serialization, the named fallbacks are
-  a pattern node's `module.implementation` and the top-level `op` input of the
-  legacy `map`/`filter`/`flatMap` ref modules. Stage 4 removes the list writer
-  fallback; arbitrary factory-valued graph data already stays callable.
+  internal helper; within node payload serialization, a pattern node's
+  `module.implementation` remains an explicit graph fallback. The obsolete
+  builder-time list-`op` graph conversion is removed: an admitted list op stays
+  callable through graph construction, and only Runner's named
+  `map`/`filter`/`flatMap` compatibility adapter replaces the unmodified base op
+  with `$patternRef` at instantiation. Stage 4 removes that named sentinel
+  writer; arbitrary factory-valued graph data already stays callable.
+  The keyless list regression now observes the actual transformer-generated
+  `op` callable; its former association with a nested exported wrapper was a
+  derivation artifact of the removed embedded-graph path.
   The in-memory binding walks now preserve admitted factories and traverse
   their hidden state without emitting `$patternRef`. The named list adapter is
   intentionally limited to a capture-free, unmodified base pattern so it

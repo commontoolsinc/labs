@@ -10,7 +10,6 @@ import {
   type Frame,
   type ICell,
   isModule,
-  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -242,19 +241,6 @@ export function assertNoReservedCauseKeys(cause: unknown): void {
         `help: "$generated" marks system-generated cell causes; rename the key`,
     );
   }
-}
-
-const LEGACY_LIST_PATTERN_OPS = new Set(["map", "filter", "flatMap"]);
-
-/**
- * The three legacy list builtins still read an embedded pattern graph from the
- * top-level `op` input. Stage 4 replaces this writer with a bound Factory@1;
- * until then keep this fallback named and restricted to the exact ref modules.
- */
-function usesLegacyListPatternOp(module: NodeRef["module"]): boolean {
-  return isRecord(module) && module.type === "ref" &&
-    typeof module.implementation === "string" &&
-    LEGACY_LIST_PATTERN_OPS.has(module.implementation);
 }
 
 function factoryFromPattern<T, R>(

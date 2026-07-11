@@ -4,6 +4,10 @@ import {
   nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   getPersistentSchedulerStateConfig,
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
@@ -5067,12 +5071,43 @@ export class Runner {
     }
     if (!isRecord(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isRecord(op)) return;
+    const opIsFactory = isAdmittedFabricFactory(op);
+    if (!isRecord(op) && !opIsFactory) return;
+    const original = resolveOriginal(op as unknown as object);
+    if (
+      opIsFactory &&
+      (!isTrustedBuilderArtifact(original) || !isPattern(original))
+    ) {
+      throw new Error(
+        `${moduleRefName}: legacy list op requires a trusted live pattern factory`,
+      );
+    }
+    if (opIsFactory) {
+      const state = factoryStateOf(op);
+      if (state.kind !== "pattern") {
+        throw new Error(
+          `${moduleRefName}: legacy list op requires a pattern factory`,
+        );
+      }
+      for (
+        const field of [
+          "paramsSchema",
+          "params",
+          "defaultScope",
+          "spaceSelector",
+        ] as const
+      ) {
+        if (Object.hasOwn(state, field)) {
+          throw new Error(
+            `${moduleRefName}: legacy list op cannot discard factory state field ${field}`,
+          );
+        }
+      }
+    }
     let ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
     if (!ref) {
-      const original = resolveOriginal(op as unknown as object);
       if (isTrustedBuilderArtifact(original) && isPattern(original)) {
         ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
           original as unknown as Pattern,
