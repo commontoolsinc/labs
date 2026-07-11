@@ -323,6 +323,10 @@ minted into the same entries, not the mechanism.
 
 ## 7. Spec-change queue
 
+_Applied to the spec 2026-07-10 (specs 31220671 + 75d97ec9: the §4.6.3
+read-API table, the template conformance note incl. the join rule and the
+record-only restriction, and the §8.12.8 shipped-with-scope rewrite)._
+
 - The owed **§4.6.3 read-API → class table** (SC-8's "file it once C1
   validates the mapping in code" — long since validated) should ship
   together with a normative note that a conforming implementation MAY
