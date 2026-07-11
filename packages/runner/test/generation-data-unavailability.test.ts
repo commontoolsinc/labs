@@ -930,4 +930,71 @@ describe("generation data unavailability", () => {
       LLMClient.prototype.generateObject = originalGenerateObject;
     }
   });
+
+  // Keep this last: compiling the fixture installs SES lockdown for the host
+  // process, which is the boundary this regression deliberately exercises.
+  it("publishes a terminal stream error to a guarded resultOf consumer", async () => {
+    // This mirrors ChatNote's completion shape: one compute observes pending
+    // and error on the request while consuming its policy-free usable
+    // projection. The deterministic provider failure crosses the pre-SES /
+    // post-lockdown Error boundary and must still become an error marker so the
+    // guard can release the local generation latch.
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import {
+            computed,
+            generateTextStream,
+            hasError,
+            isPending,
+            pattern,
+            resultOf,
+            Writable,
+          } from "commonfabric";
+
+          export default pattern(() => {
+            const response = generateTextStream({
+              prompt: "guarded resultOf terminal failure",
+            });
+            const result = resultOf(response.result);
+            const isGenerating = new Writable(true);
+
+            computed(() => {
+              const generating = isGenerating.get();
+              const pending = isPending(response.result);
+              const value = result;
+              if (hasError(response.result)) {
+                if (generating) isGenerating.set(false);
+                return;
+              }
+              if (!pending && value.length > 0 && generating) {
+                isGenerating.set(false);
+              }
+            });
+
+            return { isGenerating };
+          });
+        `,
+      }],
+    });
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<{ isGenerating: boolean }>(
+      space,
+      `guarded-result-stream-${nextId++}`,
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, compiled, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+
+    // Mock mode is deliberately enabled without a matching response. The
+    // provider path deterministically publishes a terminal error marker.
+    await runtime.settled();
+    await runtime.idle();
+
+    expect(await result.key("isGenerating").pull()).toBe(false);
+  });
 });
