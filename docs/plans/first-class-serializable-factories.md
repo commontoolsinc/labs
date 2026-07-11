@@ -376,7 +376,7 @@ Focused tests:
 - [ ] Review graph payload fields in `packages/runner/src/builder/types.ts` and
   static-data walks in `packages/runner/src/cell.ts` so hidden factory state is
   neither flattened nor skipped.
-- [ ] Verify `packages/runner/src/storage/differential.ts`,
+- [x] Verify `packages/runner/src/storage/differential.ts`,
   `packages/runner/src/storage/v2-transaction.ts`, and
   `packages/memory/v2/patch.ts` treat factories atomically through the shared
   equality/clone protocol.

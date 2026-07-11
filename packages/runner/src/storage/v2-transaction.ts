@@ -245,15 +245,18 @@ const invalidateFrozenReadsOnChain = (
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   if (
     value === undefined || value === null ||
-    typeof value !== "object"
+    (typeof value !== "object" && typeof value !== "function")
   ) {
     return value;
   }
   // `cloneIfNecessary()` (frozen by default) returns an already-deep-frozen
   // value by identity (O(1) via the deep-frozen cache) and otherwise
   // deep-clones-and-freezes -- isolating the result from later source
-  // mutation. On the hot read path, repeated reads of the same stored
-  // (deep-frozen) value collapse to a single cache lookup.
+  // mutation. Admitted callable factories deliberately pass through this gate:
+  // the shared clone protocol seals and freezes them as immutable logical
+  // atoms, while rejecting arbitrary JavaScript functions. On the hot read
+  // path, repeated reads of the same stored (deep-frozen) value collapse to a
+  // single cache lookup.
   return cloneIfNecessary(value as FabricValue) as T;
 };
 

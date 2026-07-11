@@ -200,6 +200,10 @@ const collectChangedPaths = (
     return;
   }
 
+  // Callable factories never enter the record walk above. Keep them atomic at
+  // their containing path and delegate both admission and canonical-state
+  // comparison to the shared Fabric equality protocol; arbitrary functions
+  // are rejected there rather than being treated as empty callable objects.
   if (!valueEqual(before, after)) {
     pushChangedPath(paths, currentPath, depth);
   }

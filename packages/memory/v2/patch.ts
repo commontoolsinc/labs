@@ -4,9 +4,9 @@ import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -289,7 +289,7 @@ const addUniqueAtPath = (
     );
   }
   for (const value of values) {
-    if (!container.some((existing) => deepEqual(existing, value))) {
+    if (!container.some((existing) => valueEqual(existing, value))) {
       container.push(cloneValue(value));
     }
   }
@@ -309,7 +309,7 @@ const removeByValueAtPath = (
   if (!Array.isArray(existing)) {
     return root;
   }
-  if (!existing.some((element) => deepEqual(element, value))) {
+  if (!existing.some((element) => valueEqual(element, value))) {
     return root;
   }
   const { root: newRoot, container } = thawSpine(root, path, path);
@@ -317,7 +317,7 @@ const removeByValueAtPath = (
   // container is that same array.
   const array = container as FabricValue[];
   for (let index = array.length - 1; index >= 0; index -= 1) {
-    if (deepEqual(array[index], value)) {
+    if (valueEqual(array[index], value)) {
       array.splice(index, 1);
     }
   }
