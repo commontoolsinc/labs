@@ -46,6 +46,14 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import {
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  preferDataUnavailable,
+  readAvailabilityAwareCell,
+} from "../data-unavailability.ts";
 
 const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
 
@@ -110,6 +118,7 @@ export function filter(
     aggregateNoun: "filtered list",
     elementNoun: "predicate",
     contribute: (included, inputElement, out) => {
+      if (isDataUnavailable(included)) return included;
       if (included) out.push(inputElement);
       else if (included === undefined) return "pending";
     },
@@ -239,6 +248,16 @@ export function filter(
     // every element's taint into the coordinator's per-tx join.
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
+
+    if (isDataUnavailable(rawList)) {
+      resultWithLog.setRawUntyped(rawList, true);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+      elementRuns.clear();
+      return;
+    }
+
     // (S16) Declare the result container so prepare re-derives its `structure`
     // label (membership/order, §8.5.6.1) from this tx's J — the selection
     // criteria the coordinator read (predicate results) — EVERY reconcile,
@@ -262,6 +281,7 @@ export function filter(
         { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
+    const rawResult = probeScoped(() => result!.getRaw());
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -278,6 +298,7 @@ export function filter(
     // no-ops against the durable value.
     if (
       elementAwaitSync &&
+      !isDataUnavailable(rawResult) &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
       const pending = result.sync();
@@ -358,6 +379,7 @@ export function filter(
     // list can be republished once they confirm — distinct from a predicate that
     // has settled falsy, which reads false and is excluded immediately.
     const pendingCells: Cell<any>[] = [];
+    let unavailable: DataUnavailableVariant | undefined;
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create predicate runs for them
       if (!(i in list)) continue;
@@ -424,12 +446,19 @@ export function filter(
       // Read predicate result — creates subscription for reactivity.
       // Truthy/falsy coercion, not strict boolean.
       const childCell = elementRuns.get(elementKey)!.resultCell;
-      const included = childCell.withTx(tx).get();
-      if (included) {
+      const included = readAvailabilityAwareCell(tx, childCell);
+      if (isDataUnavailable(included)) {
+        unavailable = preferDataUnavailable(unavailable, included);
+      } else if (included) {
         newArrayValue.push(list[i]); // Original element cell reference
       } else if (included === undefined) {
         pendingCells.push(childCell);
       }
+    }
+
+    if (unavailable !== undefined) {
+      resultWithLog.setRawUntyped(unavailable, true);
+      return;
     }
 
     // Resume preservation: a predicate whose result is still streaming in reads

@@ -317,15 +317,10 @@ export function resolveLink(
       } else {
         link = nextLink;
       }
-      // If we're crossing spaces, force fetching data from server, as the
-      // original server will not have pushed the data to the client yet.
+      // If we're crossing spaces, establish target coverage explicitly: the
+      // original space's server query cannot push another space's document.
       if (crossSpace) {
-        // Swallow sync failures: this kick is best-effort (the read still
-        // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path.
-        runtime.storageManager.trackUntilSettled(
-          runtime.getCellFromLink(link).sync().catch(() => {}),
-        );
+        runtime.ensureLinkedDocLoaded(link);
       }
     } else {
       break;

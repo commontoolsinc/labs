@@ -1,4 +1,9 @@
 import {
+  DataUnavailable,
+  type DataUnavailableReason,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import {
   fabricFromNativeValue,
   type FabricValue,
   nativeFromFabricValue,
@@ -25,13 +30,14 @@ import {
   type NodeFactory,
   type Pattern,
   UI,
+  type UnavailableInputPolicyEntry,
 } from "./builder/types.ts";
 import {
   patternFromFrame,
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import { type Cell, createCell, getCellWithStatus, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
@@ -50,6 +56,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
@@ -99,6 +106,9 @@ import {
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import { SchemaObjectTraverser } from "./traverse.ts";
+import { assertValidUnavailableInputPolicy } from "./unavailable-input-policy.ts";
+import { dataUnavailableReasonPrecedes } from "./data-unavailability.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -135,6 +145,163 @@ type InternalCellDescriptor = {
   partialCause: JSONValue;
   link: SigilLink;
 };
+
+type UnavailableInput = Readonly<{
+  value: DataUnavailable;
+  path: readonly string[];
+}>;
+
+type AvailabilityPreflight = Readonly<{
+  unavailable?: UnavailableInput;
+  accepted: readonly UnavailableInput[];
+}>;
+
+function pathsEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length &&
+    left.every((part, index) => part === right[index]);
+}
+
+function policyAcceptsUnavailableInput(
+  policy: readonly UnavailableInputPolicyEntry[] | undefined,
+  path: readonly string[],
+  reason: DataUnavailableReason,
+): boolean {
+  return policy?.some((entry) =>
+    pathsEqual(entry.path, path) && entry.reasons.includes(reason)
+  ) ?? false;
+}
+
+/**
+ * Select the unavailable marker which controls this computation.
+ *
+ * Walking the serialized binding graph resolves bound links and records their
+ * normal scheduler/CFC reads. Object keys provide deterministic argument
+ * order; a marker with a higher-priority reason replaces an earlier selection,
+ * while equal-priority markers retain that order. Accepted markers remain
+ * ordinary leaves and are materialized by the declared schema after this
+ * preflight.
+ */
+function preflightUnavailableInputs(
+  inputBindings: unknown,
+  argumentSchema: JSONSchema | undefined,
+  policy: readonly UnavailableInputPolicyEntry[] | undefined,
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<any>,
+): AvailabilityPreflight {
+  // Track only the active recursion stack. The same container may be bound at
+  // multiple argument paths, and exact-path policy must inspect every such
+  // occurrence; a global visited set would let the first path hide the rest.
+  const active = new WeakSet<object>();
+  let selected: UnavailableInput | undefined;
+  const accepted: UnavailableInput[] = [];
+
+  const visit = (value: unknown, path: readonly string[]): void => {
+    const schemaAtPath = path.length === 0
+      ? argumentSchema
+      : runtime.cfc.getSchemaAtPath(argumentSchema, [...path]);
+    // An asCell argument is the handle itself. Reading through it here would
+    // both inspect data outside the callback's argument and turn sample() into
+    // a reactive read, so availability belongs to the callback's eventual
+    // get()/sample(), not this boundary.
+    if (SchemaObjectTraverser.hasAsCell(schemaAtPath)) return;
+
+    if (isDataUnavailable(value)) {
+      if (policyAcceptsUnavailableInput(policy, path, value.reason)) {
+        accepted.push({ value, path });
+        return;
+      }
+      if (
+        selected === undefined ||
+        dataUnavailableReasonPrecedes(value.reason, selected.value.reason)
+      ) {
+        selected = { value, path };
+      }
+      return;
+    }
+
+    if (isCellLink(value)) {
+      const link = resolveLink(runtime, tx, parseLink(value, inputsCell));
+      const resolved = tx.read(toMemorySpaceAddress(link));
+      // Missing coverage is classified by schema traversal below, whose
+      // cross-space callback can distinguish a replica miss from a locally
+      // complete mismatch. Preflight only selects concrete values it can read.
+      if (resolved.ok !== undefined) visit(resolved.ok.value, path);
+      return;
+    }
+
+    if (
+      value === null ||
+      (typeof value !== "object" && typeof value !== "function")
+    ) {
+      return;
+    }
+    if (active.has(value)) return;
+    active.add(value);
+    try {
+      for (const key of Object.keys(value)) {
+        visit((value as Record<string, unknown>)[key], [...path, key]);
+      }
+    } finally {
+      active.delete(value);
+    }
+  };
+
+  visit(inputBindings, []);
+  return { unavailable: selected, accepted };
+}
+
+/**
+ * Restore concrete accepted markers after structural schema materialization.
+ *
+ * Availability union arms intentionally use a structural `{ type: "object" }`
+ * schema because JSON Schema cannot authenticate a FabricInstance brand. The
+ * traverser therefore preserves the surrounding argument shape but may
+ * materialize the opaque marker leaf as `undefined`. Preflight already made
+ * the authoritative brand/reason/path decision, so splice those exact values
+ * back into a shallow-cloned argument before invoking the callback.
+ */
+function restoreAcceptedUnavailableInputs(
+  argument: unknown,
+  accepted: readonly UnavailableInput[],
+): unknown {
+  const replaceAtPath = (
+    current: unknown,
+    path: readonly string[],
+    index: number,
+    value: DataUnavailable,
+  ): unknown => {
+    if (index === path.length) return value;
+
+    const key = path[index];
+    if (Array.isArray(current)) {
+      const copy = current.slice();
+      copy[Number(key)] = replaceAtPath(
+        current[Number(key)],
+        path,
+        index + 1,
+        value,
+      );
+      return copy;
+    }
+
+    const record = current !== null && typeof current === "object"
+      ? current as Record<string, unknown>
+      : undefined;
+    return {
+      ...(record ?? {}),
+      [key]: replaceAtPath(record?.[key], path, index + 1, value),
+    };
+  };
+
+  return accepted.reduce(
+    (current, marker) => replaceAtPath(current, marker.path, 0, marker.value),
+    argument,
+  );
+}
 
 // The debug-name builders reuse the action's already-computed
 // `schedulerActionInstanceKey` as their uniquifying suffix instead of hashing
@@ -2128,19 +2295,51 @@ export class Runner {
     moduleRefName?: string,
   ) {
     if (isModule(module)) {
+      if (module.unavailableInputPolicy !== undefined) {
+        assertValidUnavailableInputPolicy(module.unavailableInputPolicy);
+      }
+      if (
+        module.type === "javascript-availability" &&
+        module.unavailableInputPolicy === undefined
+      ) {
+        throw new TypeError(
+          "Invalid unavailable input policy: javascript-availability modules require policy metadata",
+        );
+      }
       switch (module.type) {
         case "ref": {
           const refName = module.implementation as string;
           const resolved = this.runtime.moduleRegistry.getModule(refName);
-          // `.asScope(scope)` records its scope on the *ref* module (the node's
-          // module), but resolving the ref swaps in the registry's module — so
-          // carry the declared default scope across, or it is silently dropped
-          // and the node falls back to "space".
+          // Execution metadata is authored on the ref node by the transformer
+          // and must survive swapping in the registry implementation. In
+          // particular, dropping availability policy while retaining a widened
+          // schema would let an older/default boundary invoke the callback with
+          // an unobserved marker.
+          const hasAuthoredExecutionMetadata =
+            module.defaultScope !== undefined ||
+            module.argumentSchema !== undefined ||
+            module.resultSchema !== undefined ||
+            module.unavailableInputPolicy !== undefined;
+          const executionModule = hasAuthoredExecutionMetadata
+            ? {
+              ...resolved,
+              ...(module.defaultScope !== undefined && {
+                defaultScope: module.defaultScope,
+              }),
+              ...(module.argumentSchema !== undefined && {
+                argumentSchema: module.argumentSchema,
+              }),
+              ...(module.resultSchema !== undefined && {
+                resultSchema: module.resultSchema,
+              }),
+              ...(module.unavailableInputPolicy !== undefined && {
+                unavailableInputPolicy: module.unavailableInputPolicy,
+              }),
+            }
+            : resolved;
           this.instantiateNode(
             tx,
-            module.defaultScope !== undefined
-              ? { ...resolved, defaultScope: module.defaultScope }
-              : resolved,
+            executionModule,
             inputBindings,
             outputBindings,
             resultCell,
@@ -2152,6 +2351,7 @@ export class Runner {
           break;
         }
         case "javascript":
+        case "javascript-availability":
           this.instantiateJavaScriptNode(
             tx,
             module,
@@ -2703,17 +2903,85 @@ export class Runner {
     inputsCell: Cell<any>,
     tx: IExtendedStorageTransaction,
     options: { bindTxToSchema?: boolean; writableProxy?: boolean } = {},
-  ): { argument: any; isValidArgument: boolean } {
-    const argument = module.argumentSchema !== undefined
-      ? options.bindTxToSchema
-        ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-        : inputsCell.asSchema(module.argumentSchema).get()
-      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+  ): {
+    argument: any;
+    isValidArgument: boolean;
+    unavailable?: DataUnavailable;
+  } {
+    // Marker discovery deliberately precedes schema traversal. Fabric
+    // instances are opaque schema leaves, so an object-shaped schema can
+    // otherwise admit a marker without the module explicitly observing it.
+    const availability = preflightUnavailableInputs(
+      inputsCell.getRaw(),
+      module.argumentSchema,
+      module.unavailableInputPolicy,
+      this.runtime,
+      tx,
+      inputsCell,
+    );
+    if (availability.unavailable !== undefined) {
+      return {
+        argument: undefined,
+        isValidArgument: false,
+        unavailable: availability.unavailable.value,
+      };
+    }
 
+    const unresolvedArgument = inputsCell.getAsQueryResult(
+      [],
+      tx,
+      options.writableProxy,
+    );
+
+    if (module.argumentSchema === undefined) {
+      return unresolvedArgument === undefined
+        ? {
+          argument: undefined,
+          isValidArgument: false,
+          unavailable: DataUnavailable.schemaMismatch(),
+        }
+        : {
+          argument: restoreAcceptedUnavailableInputs(
+            unresolvedArgument,
+            availability.accepted,
+          ),
+          isValidArgument: true,
+        };
+    }
+
+    // Preserve the existing explicit-false behavior. Although traversal of a
+    // false schema fails, false is used by legacy modules as a validation
+    // bypass and has historically invoked the callback with undefined when no
+    // policy-authorized marker is present.
+    if (module.argumentSchema === false) {
+      return {
+        argument: restoreAcceptedUnavailableInputs(
+          undefined,
+          availability.accepted,
+        ),
+        isValidArgument: true,
+      };
+    }
+
+    const schemaCell = options.bindTxToSchema
+      ? inputsCell.asSchema(module.argumentSchema).withTx(tx)
+      : inputsCell.asSchema(module.argumentSchema);
+    const transformed = getCellWithStatus(schemaCell);
+    if ("error" in transformed) {
+      return {
+        argument: undefined,
+        isValidArgument: false,
+        unavailable: transformed.unavailableReason === "syncing"
+          ? DataUnavailable.syncing()
+          : DataUnavailable.schemaMismatch(),
+      };
+    }
     return {
-      argument,
-      isValidArgument: module.argumentSchema === false ||
-        argument !== undefined,
+      argument: restoreAcceptedUnavailableInputs(
+        transformed.ok,
+        availability.accepted,
+      ),
+      isValidArgument: true,
     };
   }
 
@@ -3052,7 +3320,8 @@ export class Runner {
     narrowestReadScope?: CellScope,
   ): any {
     if (
-      !validateAndCheckReactives(result, name) &&
+      (isDataUnavailable(result) ||
+        !validateAndCheckReactives(result, name)) &&
       frame.reactives.size === 0
     ) {
       recordOutputSchemaPolicyInputs(
@@ -3212,7 +3481,7 @@ export class Runner {
           tx,
         );
         logger.timeStart("stream", "readInputs");
-        const { argument, isValidArgument } = (() => {
+        const { argument, isValidArgument, unavailable } = (() => {
           try {
             return this.readJavaScriptArgument(
               module,
@@ -3245,7 +3514,7 @@ export class Runner {
           logger.error(
             "stream",
             () => [
-              "action argument is undefined (potential schema mismatch) -- not running",
+              `action argument is unavailable (${unavailable?.reason}) -- not running`,
               {
                 schema: inputState.schema,
                 raw: inputState.raw,
@@ -3524,7 +3793,7 @@ export class Runner {
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
-        const { argument, isValidArgument } = (() => {
+        const { argument, isValidArgument, unavailable } = (() => {
           try {
             return this.readJavaScriptArgument(
               module,
@@ -3556,7 +3825,7 @@ export class Runner {
             () => [
               isValidArgument
                 ? "action argument is valid now -- running"
-                : "action argument is undefined (potential schema mismatch) -- not running",
+                : `action argument is unavailable (${unavailable?.reason}) -- not running`,
               {
                 schema: inputState.schema,
                 raw: inputState.raw,
@@ -3567,7 +3836,10 @@ export class Runner {
           previouslyInvalidArgument = !isValidArgument;
         }
 
-        let result: any = undefined;
+        // Invalid value-node input is itself a value result. The callback is
+        // suppressed, but the selected marker still follows the ordinary
+        // result-writing path so scope and CFC bookkeeping remain intact.
+        let result: any = unavailable;
         if (isValidArgument) {
           logger.timeStart("action", "invokeJavaScriptImplementation");
           try {

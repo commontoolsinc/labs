@@ -294,7 +294,15 @@ export const GenerateTextResultSchema = internSchema(
       pending: { type: "boolean", default: false },
       // `result`/`partial` are model output; stamped at the writeback (llm.ts),
       // not declared here — see {@link LLM_DERIVED_RESULT_STAMP_SCHEMA}.
-      result: { type: "string" },
+      result: {
+        anyOf: [
+          { type: "string" },
+          // DataUnavailable is a FabricInstance object. The runtime owns the
+          // concrete brand/reason check; this arm keeps the control value
+          // materializable without admitting it as text.
+          { type: "object" },
+        ],
+      },
       error: { type: "string" },
       partial: { type: "string" },
       requestHash: { type: "string" },
@@ -310,7 +318,7 @@ export const GenerateTextResultSchema = internSchema(
         },
       },
     },
-    required: ["pending"],
+    required: ["pending", "result"],
   } as const,
 );
 
@@ -332,6 +340,6 @@ export const GenerateObjectResultSchema = internSchema(
       // No `groundingSources` here — generateObject's JSON-mode path returns
       // only the object, not the grounded response. Use generateText for sources.
     },
-    required: ["pending"],
+    required: ["pending", "result"],
   } as const,
 );

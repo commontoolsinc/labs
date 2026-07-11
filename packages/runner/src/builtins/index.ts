@@ -22,6 +22,7 @@ import { inspectConfLabel } from "./inspect-conf-label.ts";
 import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";
 import type {
+  AsyncResult,
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
 } from "@commonfabric/api";
@@ -66,7 +67,7 @@ export function registerBuiltins(runtime: Runtime) {
     "generateObject",
     raw<BuiltInGenerateObjectParams, {
       pending: Cell<boolean>;
-      result: Cell<Record<string, unknown> | undefined>;
+      result: Cell<AsyncResult<Record<string, unknown>>>;
       error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
@@ -76,7 +77,7 @@ export function registerBuiltins(runtime: Runtime) {
     "generateText",
     raw<BuiltInGenerateTextParams, {
       pending: Cell<boolean>;
-      result: Cell<string | undefined>;
+      result: Cell<AsyncResult<string>>;
       error: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;

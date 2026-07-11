@@ -38,7 +38,7 @@ describe("generateText outbox mechanism", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateText"];
+  >["commonfabric"]["generateTextStream"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -50,7 +50,7 @@ describe("generateText outbox mechanism", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateText } = commonfabric);
+    ({ pattern, generateTextStream: generateText } = commonfabric);
   });
 
   afterEach(async () => {

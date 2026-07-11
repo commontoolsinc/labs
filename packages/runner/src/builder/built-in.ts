@@ -11,17 +11,26 @@ import type {
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
 import type {
+  AsyncResult,
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
-  BuiltInGenerateTextState,
-  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
   ConfLabelQuery,
+  FetchBinaryFunction,
   FetchBinaryResult,
+  FetchJsonFunction,
+  FetchJsonUncheckedFunction,
   FetchOptions,
+  FetchProgramFunction,
+  FetchProgramResult,
+  FetchTextFunction,
+  GenerateObjectFunction,
+  GenerateObjectStreamFunction,
+  GenerateTextFunction,
+  GenerateTextStreamFunction,
   InspectConfLabelResult,
   PatternToolFunction,
   PatternToolResult,
@@ -37,6 +46,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
+import { wishStateSchemaForResult } from "../builtins/wish-schema.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
@@ -122,21 +132,31 @@ export const llmDialog = createNodeFactory({
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMDialogState>;
 
-export const generateObject = createNodeFactory({
+export const generateObjectStream = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
-}) as <T = any>(
-  params: FactoryInput<BuiltInGenerateObjectParams>,
-) => Reactive<BuiltInLLMGenerateObjectState<T>>;
+}) as GenerateObjectStreamFunction;
 
-export const generateText = createNodeFactory({
+export const generateObject = ((
+  params: FactoryInput<BuiltInGenerateObjectParams>,
+) => generateObjectStream(params).result) as GenerateObjectFunction;
+
+export const generateTextStream = createNodeFactory({
   type: "ref",
   implementation: "generateText",
-}) as (
-  params: FactoryInput<BuiltInGenerateTextParams>,
-) => Reactive<BuiltInGenerateTextState>;
+}) as GenerateTextStreamFunction;
 
-export const fetchBinary = createNodeFactory({
+export const generateText = ((
+  params: FactoryInput<BuiltInGenerateTextParams>,
+) => generateTextStream(params).result) as GenerateTextFunction;
+
+type FetchState<T> = {
+  pending: boolean;
+  result: AsyncResult<T>;
+  error?: unknown;
+};
+
+const fetchBinaryState = createNodeFactory({
   type: "ref",
   implementation: "fetchBinary",
 }) as (
@@ -144,13 +164,12 @@ export const fetchBinary = createNodeFactory({
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{
-  pending: boolean;
-  result: FetchBinaryResult;
-  error?: unknown;
-}>;
+) => Reactive<FetchState<FetchBinaryResult>>;
 
-export const fetchText = createNodeFactory({
+export const fetchBinary =
+  ((params) => fetchBinaryState(params).result) as FetchBinaryFunction;
+
+const fetchTextState = createNodeFactory({
   type: "ref",
   implementation: "fetchText",
 }) as (
@@ -158,9 +177,12 @@ export const fetchText = createNodeFactory({
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: string; error?: unknown }>;
+) => Reactive<FetchState<string>>;
 
-export const fetchJson = createNodeFactory({
+export const fetchText =
+  ((params) => fetchTextState(params).result) as FetchTextFunction;
+
+const fetchJsonState = createNodeFactory({
   type: "ref",
   implementation: "fetchJson",
 }) as <T>(
@@ -170,9 +192,12 @@ export const fetchJson = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+) => Reactive<FetchState<T>>;
 
-export const fetchJsonUnchecked = createNodeFactory({
+export const fetchJson =
+  ((params) => fetchJsonState(params).result) as FetchJsonFunction;
+
+const fetchJsonUncheckedState = createNodeFactory({
   type: "ref",
   implementation: "fetchJsonUnchecked",
 }) as (
@@ -180,21 +205,21 @@ export const fetchJsonUnchecked = createNodeFactory({
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: any; error?: unknown }>;
+) => Reactive<FetchState<any>>;
 
-export const fetchProgram = createNodeFactory({
+export const fetchJsonUnchecked =
+  ((params) =>
+    fetchJsonUncheckedState(params).result) as FetchJsonUncheckedFunction;
+
+const fetchProgramState = createNodeFactory({
   type: "ref",
   implementation: "fetchProgram",
 }) as (
   params: FactoryInput<{ url: string }>,
-) => Reactive<{
-  pending: boolean;
-  result: {
-    files: Array<{ name: string; contents: string }>;
-    main: string;
-  } | undefined;
-  error?: unknown;
-}>;
+) => Reactive<FetchState<FetchProgramResult>>;
+
+export const fetchProgram =
+  ((params) => fetchProgramState(params).result) as FetchProgramFunction;
 
 export const streamData = createNodeFactory({
   type: "ref",
@@ -466,7 +491,7 @@ export function wish<T = unknown>(
     type: "ref",
     implementation: "wish",
     argumentSchema: WISH_ARGUMENT_SCHEMA,
-    resultSchema,
+    resultSchema: wishStateSchemaForResult(resultSchema),
   })(param);
 }
 

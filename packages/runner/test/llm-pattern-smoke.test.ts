@@ -35,10 +35,10 @@ describe("LLM pattern smoke tests", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateText"];
+  >["commonfabric"]["generateTextStream"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -52,7 +52,11 @@ describe("LLM pattern smoke tests", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateText, generateObject } = commonfabric);
+    ({
+      pattern,
+      generateTextStream: generateText,
+      generateObjectStream: generateObject,
+    } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 

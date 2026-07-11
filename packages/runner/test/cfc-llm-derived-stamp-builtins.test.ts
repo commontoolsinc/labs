@@ -277,7 +277,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     const testPattern = builder.pattern(() =>
-      builder.generateText({ prompt: testPrompt })
+      builder.generateTextStream({ prompt: testPrompt })
     );
     const resultCell = runtime.getCell(
       space,
@@ -318,7 +318,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     const testPattern = builder.pattern(() =>
-      builder.generateObject({ prompt: testPrompt, schema: objectSchema })
+      builder.generateObjectStream({ prompt: testPrompt, schema: objectSchema })
     );
     const resultCell = runtime.getCell(
       space,
@@ -368,7 +368,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
 
     const dummyPattern = builder.pattern(() => ({}), { type: "object" });
     const testPattern = builder.pattern(() =>
-      builder.generateObject({
+      builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         tools: {
@@ -436,7 +436,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     const testPattern = builder.pattern(() =>
-      builder.generateObject({
+      builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         schemaSanitizePromptInjection: true,
@@ -542,7 +542,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     const testPattern = builder.pattern(() =>
-      builder.generateObject({
+      builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         schemaSanitizePromptInjection: true,
@@ -669,7 +669,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
 
     try {
       const testPattern = commonfabric.pattern(() =>
-        commonfabric.generateObject({
+        commonfabric.generateObjectStream({
           prompt: testPrompt,
           schema: objectSchema,
         })

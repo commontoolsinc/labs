@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
@@ -56,7 +57,7 @@ describe("generateObject with tools", () => {
   >["commonfabric"]["patternTool"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -71,7 +72,7 @@ describe("generateObject with tools", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
-      generateObject,
+      generateObjectStream: generateObject,
       handler,
       Cell,
       lift,
@@ -336,7 +337,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           prompt: testPrompt,
           schema: resultSchema,
-          tools: {},
+          tools: {
+            dummy: {
+              description: "Force the tool-calling path",
+              pattern: dummyPattern,
+            },
+          },
         });
         return result;
       },
@@ -359,8 +365,10 @@ describe("generateObject with tools", () => {
 
     // Should handle the error gracefully
     expect(result.key("pending").get()).toBe(false);
-    // Result should be undefined after error
-    expect(result.key("result").get()).toBeUndefined();
+    const unavailable = result.key("result").resolveAsCell()
+      .getRaw() as DataUnavailable;
+    expect(unavailable.reason).toBe("error");
+    expect(unavailable.error?.message).toContain("presentResult");
     expect(typeof result.key("error").get()).toBe("string");
   });
 
@@ -1997,7 +2005,7 @@ describe("generateObject with tools", () => {
         type: "string",
         ifc: { confidentiality: [promptRisk, promptInfluence] },
       });
-      return commonfabric.generateObject({
+      return commonfabric.generateObjectStream({
         prompt: "schema-sanitize-generateObject",
         schema: resultSchema,
         context: { briefing: briefing as any },

@@ -33,7 +33,7 @@ describe("generateObject outbox mechanism", () => {
   let dummyPattern: any;
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -45,7 +45,7 @@ describe("generateObject outbox mechanism", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateObject } = commonfabric);
+    ({ pattern, generateObjectStream: generateObject } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 

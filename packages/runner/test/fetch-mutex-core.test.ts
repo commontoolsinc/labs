@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -14,7 +15,9 @@ import { setPatternEnvironment } from "../src/env.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
+  scheduleFetchMutexClaimRetry,
   tryClaimMutex,
+  tryWriteResult,
 } from "../src/builtins/fetch-utils.ts";
 import type { Schema } from "../src/builder/types.ts";
 
@@ -299,6 +302,186 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     expect(claim.claimed).toBe(false);
     expect(claim.inputHash).not.toBe(approvedHash);
     expect(pending.get()).toBe(false);
+  });
+
+  it("does not claim when the live input is unavailable even if its snapshot hash matches", async () => {
+    const inputs = runtime.getCell<any>(
+      space,
+      "fetch-mutex-unavailable-inputs",
+      undefined,
+      tx,
+    );
+    const pending = runtime.getCell<boolean>(
+      space,
+      "fetch-mutex-unavailable-pending",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-unavailable-result",
+      undefined,
+      tx,
+    );
+    const error = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-unavailable-error",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-unavailable-internal",
+      internalSchema,
+      tx,
+    );
+    inputs.setRaw(DataUnavailable.syncing());
+    // Model the claim hand-off window: the prior snapshot is still pending,
+    // but the live input has already become unavailable and its reactive
+    // reconciliation has not run yet.
+    pending.set(true);
+    result.setRaw(DataUnavailable.pending());
+    internal.set({ requestId: "", lastActivity: 0, inputHash: "" });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const snapshot = { url: "/api/approved" };
+    const inputHash = computeInputHashFromValue(snapshot);
+    const claim = await tryClaimMutex(
+      runtime,
+      inputs,
+      pending,
+      result,
+      error,
+      internal,
+      "request-for-unavailable-input",
+      () => snapshot,
+      inputHash,
+    );
+
+    expect(claim.claimed).toBe(false);
+    expect(pending.get()).toBe(true);
+    expect(result.getRaw()).toBe(DataUnavailable.pending());
+    expect(internal.get().requestId).toBe("");
+  });
+
+  it("releases a persisted pending claim when its lease expires", async () => {
+    const inputs = runtime.getCell<{ url?: string }>(
+      space,
+      "fetch-mutex-persisted-inputs",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-persisted-result",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-persisted-internal",
+      internalSchema,
+      tx,
+    );
+    const snapshot = { url: "/api/recover" };
+    const inputHash = computeInputHashFromValue(snapshot);
+    inputs.set(snapshot);
+    result.setRaw(DataUnavailable.pending());
+    internal.set({
+      requestId: "persisted-owner",
+      lastActivity: Date.now(),
+      inputHash,
+    });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cancel = scheduleFetchMutexClaimRetry(
+      runtime,
+      inputs,
+      (cell) => cell.get() ?? {},
+      result,
+      internal,
+      inputHash,
+      "persisted-owner",
+      Date.now(),
+      20,
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await runtime.idle();
+      const readTx = runtime.edit();
+      try {
+        expect(internal.withTx(readTx).get().requestId).toBe("");
+        expect(internal.withTx(readTx).get().lastActivity).toBe(0);
+      } finally {
+        readTx.abort();
+      }
+    } finally {
+      cancel();
+    }
+  });
+
+  it("rejects completion from an abandoned same-input claim owner", async () => {
+    const inputs = runtime.getCell<{ url?: string }>(
+      space,
+      "fetch-mutex-owner-inputs",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<unknown>(
+      space,
+      "fetch-mutex-owner-result",
+      undefined,
+      tx,
+    );
+    const internal = runtime.getCell<Schema<typeof internalSchema>>(
+      space,
+      "fetch-mutex-owner-internal",
+      internalSchema,
+      tx,
+    );
+    const snapshot = { url: "/api/same-input" };
+    const inputHash = computeInputHashFromValue(snapshot);
+    inputs.set(snapshot);
+    result.setRaw(DataUnavailable.pending());
+    internal.set({
+      requestId: "new-owner",
+      lastActivity: Date.now(),
+      inputHash,
+    });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const oldWrite = await tryWriteResult(
+      runtime,
+      internal,
+      inputs,
+      inputHash,
+      (writeTx) => result.withTx(writeTx).setRaw("stale"),
+      (cell) => cell.get() ?? {},
+      "old-owner",
+    );
+    expect(oldWrite).toBe(false);
+
+    const newWrite = await tryWriteResult(
+      runtime,
+      internal,
+      inputs,
+      inputHash,
+      (writeTx) => result.withTx(writeTx).setRaw("fresh"),
+      (cell) => cell.get() ?? {},
+      "new-owner",
+    );
+    expect(newWrite).toBe(true);
+
+    const readTx = runtime.edit();
+    try {
+      expect(result.withTx(readTx).getRaw()).toBe("fresh");
+      expect(internal.withTx(readTx).get().requestId).toBe("");
+    } finally {
+      readTx.abort();
+    }
   });
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {

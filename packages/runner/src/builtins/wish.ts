@@ -1,4 +1,3 @@
-import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
@@ -19,11 +18,7 @@ import {
   type Pattern,
   UI,
 } from "../builder/types.ts";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { extractHashtags } from "@commonfabric/data-model/schema-tags";
 import { getPatternEnvironment } from "../env.ts";
@@ -36,6 +31,7 @@ import {
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { wishStateSchemaForResult } from "./wish-schema.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -1358,62 +1354,6 @@ function createWishCandidatesCell(
     ? candidates
     : candidates.map((candidate) => projectWishCellValue(candidate, schema));
   return runtime.getImmutableCell(space, values, undefined, tx);
-}
-
-// asCell-wrapped schemas keyed by content hash. `hashSchema()` is one
-// unavoidable walk (through the query-result proxy when the input is one) and
-// is the cache key: it is `FabricValue`-aware, so schemas that differ only in
-// non-JSON `FabricValue` content (e.g. a `FabricBytes` default) get distinct
-// keys — a `JSON.stringify()` key would collide them. The clone-and-intern
-// repeats for the same content on every wish send, so cache it.
-const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
-
-function schemaAsCell(schema: unknown): JSONSchema {
-  if (schema && typeof schema === "object") {
-    const key = hashSchema(schema as JSONSchema);
-    let result = schemaAsCellCache.get(key);
-    if (result === undefined) {
-      // `schema` may be a query-result proxy, so deep-frozen-clone rather than
-      // freeze in place; the clone de-proxies and preserves `FabricValue`
-      // leaves that a JSON round-trip would mangle.
-      result = deepFrozenCloneAndInternSchema({
-        ...(schema as Record<string, unknown>),
-        asCell: ["cell"],
-      });
-      schemaAsCellCache.put(key, result);
-    }
-    return result;
-  }
-  return { asCell: ["cell"] };
-}
-
-function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
-  if (schema === undefined) return undefined;
-  // schemaAsCell JSON-round-trips its input, and `schema` is typically a
-  // query-result proxy where every property access during stringify pays the
-  // full cell-read machinery (~7ms for a large search schema in profiles).
-  // Materialize once and share the instance for both slots — internSchema
-  // canonicalizes the wrapper, so the duplicate reference is fine.
-  const resultSchema = schemaAsCell(schema);
-  const candidateSchema = resultSchema;
-  return internSchema({
-    type: "object",
-    properties: {
-      result: {
-        anyOf: [
-          { type: "undefined" },
-          resultSchema,
-        ],
-      },
-      candidates: {
-        type: "array",
-        items: candidateSchema,
-      },
-      error: true,
-      [UI]: true,
-    },
-    required: ["result", "candidates"],
-  });
 }
 
 function explicitWishSchemaScope(schema: unknown): CellScope | undefined {

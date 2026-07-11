@@ -28,7 +28,7 @@ describe("generateText", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateText"];
+  >["commonfabric"]["generateTextStream"];
 
   let dummyPattern: any;
 
@@ -42,7 +42,7 @@ describe("generateText", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateText } = commonfabric);
+    ({ pattern, generateTextStream: generateText } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -310,7 +310,7 @@ describe("generateText with queue", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateText"];
+  >["commonfabric"]["generateTextStream"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -322,7 +322,7 @@ describe("generateText with queue", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateText } = commonfabric);
+    ({ pattern, generateTextStream: generateText } = commonfabric);
   });
 
   afterEach(async () => {

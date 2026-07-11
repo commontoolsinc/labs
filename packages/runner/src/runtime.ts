@@ -51,7 +51,11 @@ import {
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Action, Scheduler } from "./scheduler.ts";
+import {
+  Action,
+  type ExternalDependencyActionToken,
+  Scheduler,
+} from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -68,6 +72,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -162,6 +167,33 @@ const WriteDebugContextStorage =
 Error.stackTraceLimit = 500;
 
 export const DEFAULT_MAX_RETRIES = 5;
+
+const MISSING_DOC_RETRY_INITIAL_MS = 25;
+const MISSING_DOC_RETRY_MAX_MS = 1_000;
+const MISSING_DOC_MAX_ATTEMPTS = 3;
+
+type MissingDocLoadEntry = {
+  status: "pending" | "retry-ready" | "settled";
+  attempts: number;
+  waiters: Map<Action, ExternalDependencyActionToken>;
+  cancelRetryDelay?: () => void;
+};
+
+/**
+ * Match the identity passed to `StorageManager.syncCell()`: scope defaults to
+ * `space`, path parts are serialized as strings, and an absent schema is the
+ * same selector as `false`. Coverage for one selector is not authoritative for
+ * another selector on the same document.
+ */
+function missingDocLoadKey(link: NormalizedFullLink): string {
+  return hashStringOf({
+    space: link.space,
+    id: link.id,
+    scope: normalizeCellScope(link.scope),
+    path: link.path.map((part) => part.toString()),
+    schema: link.schema ?? false,
+  });
+}
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
@@ -1103,6 +1135,15 @@ export class Runtime {
    * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
+    // Cancel readiness backoff timers before storage teardown. In-flight syncs
+    // observe the cleared map when they settle and exit without scheduling
+    // actions against a disposing runtime.
+    for (const entry of this.missingDocLoads.values()) {
+      entry.waiters.clear();
+      entry.cancelRetryDelay?.();
+    }
+    this.missingDocLoads.clear();
+
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
@@ -1241,31 +1282,134 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, id) pairs for which a missing-link-target load has been kicked
-  // this session. The kicked sync establishes a live per-doc subscription, so
-  // a later creation of the doc still arrives — one kick per doc suffices.
-  private missingDocLoadKicks = new Set<string>();
+  // Readiness of missing linked documents whose selector sync was kicked this
+  // session. A settled entry means the local absence is authoritative; the
+  // sync leaves a live subscription behind so later creation still arrives.
+  private missingDocLoads = new Map<
+    string,
+    MissingDocLoadEntry
+  >();
 
   /**
-   * Asynchronously load a cross-space link target that a read found absent
-   * from the local replica (CT-1667): per-space server queries cannot follow
-   * links across space boundaries, so the client must fetch such targets
-   * itself. Fire-and-forget, but registered as a cross-space promise so
-   * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
-   * it; the absent doc is a tracked read, so the reader re-runs on arrival.
-   * Deduped per (space, id): the kicked sync leaves a live subscription
-   * behind, so repeat kicks add nothing.
+   * Asynchronously establish selector coverage for a linked target that a read
+   * found absent from the local replica. This is required across spaces and
+   * after same-space dynamic retargets to a document outside prior coverage.
+   * The status distinguishes pending replica coverage (`syncing`) from a
+   * settled, authoritative absence (`schema-mismatch`).
+   *
+   * Deduped by the full normalized selector identity: document, scope, path,
+   * and schema. The kicked sync leaves a live subscription. If a sync settles
+   * without a document update, its readers receive an explicit scheduler wake
+   * so they can replace `syncing` with `schema-mismatch`.
    */
-  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
-    const key = `${link.space}\0${link.id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
-    this.missingDocLoadKicks.add(key);
-    this.storageManager.trackUntilSettled(
-      this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
-        this.missingDocLoadKicks.delete(key);
-      }),
+  ensureLinkedDocLoaded(
+    link: NormalizedFullLink,
+  ): "pending" | "settled" {
+    const key = missingDocLoadKey(link);
+    const token = this.scheduler.getExecutingActionToken();
+    const existing = this.missingDocLoads.get(key);
+    if (existing !== undefined) {
+      if (existing.status !== "settled" && token !== undefined) {
+        existing.waiters.set(token.action, token);
+      }
+      if (existing.status === "retry-ready") {
+        this.startMissingDocLoadAttempt(key, link, existing);
+      }
+      return existing.status === "settled" ? "settled" : "pending";
+    }
+
+    const entry: MissingDocLoadEntry = {
+      status: "retry-ready",
+      attempts: 0,
+      waiters: new Map(
+        token === undefined ? [] : [[token.action, token]],
+      ),
+    };
+    this.missingDocLoads.set(key, entry);
+    this.startMissingDocLoadAttempt(key, link, entry);
+    return "pending";
+  }
+
+  private startMissingDocLoadAttempt(
+    key: string,
+    link: NormalizedFullLink,
+    entry: MissingDocLoadEntry,
+  ): void {
+    if (
+      this.missingDocLoads.get(key) !== entry ||
+      entry.status !== "retry-ready"
+    ) {
+      return;
+    }
+    entry.status = "pending";
+    entry.attempts++;
+
+    const work = this.getCellFromLink(link).sync().then(
+      () => {
+        if (this.missingDocLoads.get(key) !== entry) return;
+        entry.status = "settled";
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      },
+      () => {
+        if (this.missingDocLoads.get(key) !== entry) return;
+        if (entry.attempts >= MISSING_DOC_MAX_ATTEMPTS) {
+          // Give convergence waiters a bounded outcome under a persistently
+          // offline provider. The visible value remains `syncing`; a later
+          // dependency change/read starts a fresh bounded retry cycle.
+          this.missingDocLoads.delete(key);
+          entry.waiters.clear();
+          return;
+        }
+        this.scheduleMissingDocLoadRetry(key, entry);
+      },
     );
+    this.storageManager.trackUntilSettled(work);
+  }
+
+  private scheduleMissingDocLoadRetry(
+    key: string,
+    entry: MissingDocLoadEntry,
+  ): void {
+    const retryDelayMs = Math.min(
+      MISSING_DOC_RETRY_INITIAL_MS * 2 ** (entry.attempts - 1),
+      MISSING_DOC_RETRY_MAX_MS,
+    );
+    const retryDelay = new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(finish, retryDelayMs);
+      entry.cancelRetryDelay = finish;
+    });
+    const retryWork = retryDelay.then(() => {
+      entry.cancelRetryDelay = undefined;
+      if (this.missingDocLoads.get(key) !== entry) return;
+      entry.status = "retry-ready";
+      const liveWaiters = this.wakeMissingDocLoadWaiters(entry);
+      if (liveWaiters === 0) {
+        // No current action still depends on this selector. Drop the retry-ready
+        // entry so an event preflight or later direct read can start afresh.
+        this.missingDocLoads.delete(key);
+      }
+    });
+    this.storageManager.trackUntilSettled(retryWork);
+  }
+
+  private wakeMissingDocLoadWaiters(entry: MissingDocLoadEntry): number {
+    let liveWaiters = 0;
+    for (const [action, token] of entry.waiters) {
+      if (this.scheduler.scheduleExternalDependencySettlement(token)) {
+        liveWaiters++;
+      } else {
+        entry.waiters.delete(action);
+      }
+    }
+    return liveWaiters;
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {

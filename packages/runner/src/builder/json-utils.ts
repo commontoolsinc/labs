@@ -348,6 +348,8 @@ export function moduleToJSON(module: Module) {
     bind?: unknown;
   };
   let implementation = module.implementation;
+  const isJavaScriptModule = module.type === "javascript" ||
+    module.type === "javascript-availability";
 
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
   //
@@ -386,7 +388,7 @@ export function moduleToJSON(module: Module) {
     // design §5) — closure-bearing, so by-identity resolution is their only
     // rehydration. Everything else (test-built, never verified) keeps its
     // stringified body below for the SES fallback.
-    const provenance = module.type === "javascript"
+    const provenance = isJavaScriptModule
       ? getVerifiedProvenance(implementation)
       : undefined;
     // The entry-ref fallback (host pseudo-modules) is REGISTRY-scoped, unlike
@@ -395,7 +397,7 @@ export function moduleToJSON(module: Module) {
     // a host trust grant in another runtime of the same process proves
     // nothing here (Codex/cubic P1 on the E5 PR).
     const entryRefCandidate =
-      provenance?.symbol === undefined && module.type === "javascript"
+      provenance?.symbol === undefined && isJavaScriptModule
         ? getArtifactEntryRef(implementation)
         : undefined;
     const entryRefValue = entryRefCandidate !== undefined &&
@@ -429,7 +431,7 @@ export function moduleToJSON(module: Module) {
     return {
       ...rest,
       ...implRef,
-      ...(module.type === "javascript" && !implRefResolvable
+      ...(isJavaScriptModule && !implRefResolvable
         ? {
           implementation: Function.prototype.toString.call(implementation),
         }

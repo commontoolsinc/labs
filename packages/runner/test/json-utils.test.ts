@@ -14,6 +14,7 @@ import {
   type FabricValue,
   type JSONSchema,
   type JSONSchemaObj,
+  type UnavailableInputPolicy,
 } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -812,6 +813,28 @@ describe("moduleToJSON", () => {
       preview: "(value) => value * 2",
       location: "main.tsx:1:1",
     });
+  });
+
+  it("preserves exact-path unavailable input policy", () => {
+    const unavailableInputPolicy = [{
+      path: ["repo", "owner"],
+      reasons: ["error", "pending"],
+    }, {
+      path: [],
+      reasons: ["syncing", "schema-mismatch"],
+    }] as const satisfies UnavailableInputPolicy;
+
+    const serialized = moduleToJSON({
+      type: "javascript-availability",
+      implementation: (value: unknown) => value,
+      unavailableInputPolicy,
+    });
+
+    expect(serialized.type).toBe("javascript-availability");
+    expect(serialized.implementation).toContain("value");
+    expect(serialized.unavailableInputPolicy).toEqual(
+      unavailableInputPolicy,
+    );
   });
 
   it("serializes non-javascript function-backed modules without leaking implementations", () => {

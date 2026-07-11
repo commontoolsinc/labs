@@ -263,6 +263,11 @@ export {
   markReadAsAttemptedWrite,
 };
 
+export type ExternalDependencyActionToken = Readonly<{
+  action: Action;
+  generation: number;
+}>;
+
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
@@ -389,6 +394,8 @@ export class Scheduler {
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
+  private executingActionGeneration: number | undefined;
+  private actionExecutionGenerations = new WeakMap<Action, number>();
   currentActionId?: string;
   private dependencyGraphState!: DependencyGraphState;
   private dependencyUpdateState!: DependencyUpdateState;
@@ -484,6 +491,19 @@ export class Scheduler {
     }
   }
 
+  private beginActionExecution(action: Action): number {
+    const generation = (this.actionExecutionGenerations.get(action) ?? 0) + 1;
+    this.actionExecutionGenerations.set(action, generation);
+    return generation;
+  }
+
+  private invalidateActionExecution(action: Action): void {
+    this.actionExecutionGenerations.set(
+      action,
+      (this.actionExecutionGenerations.get(action) ?? 0) + 1,
+    );
+  }
+
   /**
    * Temporarily set the executing action so that any child actions created
    * during `fn` are registered as children of `action`. Restores the previous
@@ -491,12 +511,61 @@ export class Scheduler {
    */
   withExecutingAction<T>(action: Action, fn: () => T): T {
     const prev = this.executingAction;
+    const prevGeneration = this.executingActionGeneration;
+    const generation = prev === action && prevGeneration !== undefined
+      ? prevGeneration
+      : this.beginActionExecution(action);
     this.executingAction = action;
+    this.executingActionGeneration = generation;
     try {
       return fn();
     } finally {
       this.executingAction = prev;
+      this.executingActionGeneration = prevGeneration;
     }
+  }
+
+  /**
+   * Return the action whose callback is currently reading runtime state.
+   * Async readiness helpers use this to arrange one retry when work that
+   * cannot produce a storage notification settles (for example, a confirmed
+   * absent linked document).
+   */
+  getExecutingActionToken(): ExternalDependencyActionToken | undefined {
+    return this.executingAction !== null &&
+        this.executingActionGeneration !== undefined
+      ? {
+        action: this.executingAction,
+        generation: this.executingActionGeneration,
+      }
+      : undefined;
+  }
+
+  /**
+   * Re-run an action after an external dependency settles without a storage
+   * write. This mirrors storage-trigger scheduling: effects are scheduled
+   * directly, while computations are dirtied and wake their demanded effects.
+   */
+  scheduleExternalDependencySettlement(
+    token: ExternalDependencyActionToken,
+  ): boolean {
+    const { action, generation } = token;
+    if (this.actionExecutionGenerations.get(action) !== generation) {
+      return false;
+    }
+    if (this.nodes.effects.has(action)) {
+      this.conditionallyScheduledEffects.delete(action);
+      this.scheduleWithDebounce(action);
+      return true;
+    }
+    if (!this.nodes.computations.has(action)) return false;
+
+    markSchedulerDirty(this.dirtySchedulingState, action);
+    this.scheduleAffectedEffects(action);
+    if (this.materializers.isMaterializer(action)) {
+      this.queueExecution();
+    }
+    return true;
   }
 
   /**
@@ -949,6 +1018,7 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.invalidateActionExecution(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
   }
@@ -2371,11 +2441,13 @@ export class Scheduler {
       },
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
+        this.executingActionGeneration = this.beginActionExecution(target);
         this.executingAction = target;
         this.currentActionId = targetActionId;
       },
       clearExecutingAction: () => {
         this.executingAction = null;
+        this.executingActionGeneration = undefined;
         this.currentActionId = undefined;
       },
     };

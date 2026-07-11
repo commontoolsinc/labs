@@ -6,6 +6,8 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { readAvailabilityAwareCell } from "../data-unavailability.ts";
 
 export function ifElse(
   inputsCell: Cell<[any, any, any]>,
@@ -25,7 +27,7 @@ export function ifElse(
       conditionCell.getAsNormalizedFullLink(),
     );
     const cell = runtime.getCellFromLink(resolvedCondition).withTx(tx);
-    return { cell, value: cell.get() };
+    return { cell, value: readAvailabilityAwareCell(tx, cell) };
   };
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
@@ -41,6 +43,11 @@ export function ifElse(
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
+
+    if (isDataUnavailable(condition)) {
+      resultWithLog.setRawUntyped(condition, true);
+      return;
+    }
 
     const ref = inputsWithLog.key(condition ? "ifTrue" : "ifFalse")
       .getAsLink({ base: result });

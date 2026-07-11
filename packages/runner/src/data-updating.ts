@@ -1114,7 +1114,10 @@ export function normalizeAndDiff(
     // writes land in a slot whose stored parent is still an array and storage
     // rejects them with a TypeMismatchError. This mirrors the array branch
     // above, which resets a mismatched container via `value: []`.
-    if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
+    if (
+      !isObject(currentValue) || isPrimitiveCellLink(currentValue) ||
+      currentValue instanceof FabricSpecialObject
+    ) {
       diffLogger.debug(
         "diff",
         () =>

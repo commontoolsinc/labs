@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -125,6 +126,7 @@ describe("list builtin resume input-settle", () => {
     field: string,
     items: unknown[],
     builtValue: unknown[],
+    persistUnavailableOutput = false,
   ): Promise<void> {
     const sm1 = SM.make(signer, server);
     const rt1 = new Runtime({
@@ -153,7 +155,14 @@ describe("list builtin resume input-settle", () => {
     // durable container stays non-empty while the input is empty.
     rt1.scheduler.dispose();
     const tx1 = rt1.edit();
-    rc1.withTx(tx1).key("items").set([]);
+    if (persistUnavailableOutput) {
+      rc1.withTx(tx1).key(field).resolveAsCell().setRawUntyped(
+        DataUnavailable.pending(),
+        true,
+      );
+    } else {
+      rc1.withTx(tx1).key("items").set([]);
+    }
     await tx1.commit();
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
@@ -182,7 +191,9 @@ describe("list builtin resume input-settle", () => {
       }
       // The container is held while the input confirms, then settled to [] —
       // converging on the confirmed empty input rather than the stale value.
-      expect(rc2.key(field).getAsQueryResult() ?? []).toEqual([]);
+      expect(rc2.key(field).getAsQueryResult() ?? []).toEqual(
+        persistUnavailableOutput ? builtValue : [],
+      );
     } finally {
       await rt2.dispose();
     }
@@ -215,6 +226,36 @@ describe("list builtin resume input-settle", () => {
       "doubled",
       [{ n: 1 }, { n: 2 }, { n: 3 }],
       [2, 4, 6],
+    );
+  });
+
+  it("filter reconciles a persisted unavailable container", async () => {
+    const items = [
+      { keep: true, label: "a" },
+      { keep: false, label: "b" },
+    ];
+    await run(FILTER_PROGRAM, "du-filter", "kept", items, [items[0]], true);
+  });
+
+  it("flatMap reconciles a persisted unavailable container", async () => {
+    await run(
+      FLATMAP_PROGRAM,
+      "du-flatmap",
+      "values",
+      [{ keep: true, n: 1 }, { keep: false, n: 2 }],
+      [1],
+      true,
+    );
+  });
+
+  it("map reconciles a persisted unavailable container", async () => {
+    await run(
+      MAP_PROGRAM,
+      "du-map",
+      "doubled",
+      [{ n: 1 }, { n: 2 }, { n: 3 }],
+      [2, 4, 6],
+      true,
     );
   });
 });

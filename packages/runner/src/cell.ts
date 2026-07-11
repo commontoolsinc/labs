@@ -94,6 +94,8 @@ import {
   resolveSchema,
   schemaHasIfc,
   validateAndTransform,
+  type ValidateAndTransformResult,
+  validateAndTransformResult,
 } from "./schema.ts";
 import {
   readStoredCfcMetadata,
@@ -929,6 +931,15 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
+    const result = this.getWithStatus(options);
+    return ("ok" in result ? result.ok : undefined) as Readonly<
+      StripDefaultBrand<T>
+    >;
+  }
+
+  getWithStatus(options?: {
+    traverseCells?: boolean;
+  }): ValidateAndTransformResult {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
     // Per-transaction read cache: within one ready transaction, repeatedly
@@ -949,17 +960,17 @@ export class CellImpl<T extends FabricValue>
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
-    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    const variant = `${options?.traverseCells ?? false}|${this.synced}|status`;
     const cacheKey = cacheable ? this.viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
-        return cached.value as Readonly<StripDefaultBrand<T>>;
+        return cached.value as ValidateAndTransformResult;
       }
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
+    const result = validateAndTransformResult(
       this.runtime,
       this.tx,
       this.viewRef,
@@ -978,9 +989,9 @@ export class CellImpl<T extends FabricValue>
       // Re-read this._link: validateAndTransform (via viewRef -> link) may have
       // run ensureLink() and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
-      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
+      tx.setCachedReadResult!(this.viewRefHash(), variant, result);
     }
-    return value;
+    return result;
   }
 
   /**
@@ -2589,6 +2600,22 @@ export function setCellUnlinkedSpace(
   space: MemorySpace,
 ): void {
   asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+/**
+ * Runner-internal status-bearing schema read. Kept out of the pattern-visible
+ * Cell interface because traversal failure is an execution concern, not an
+ * authoring capability.
+ */
+export function getCellWithStatus(
+  cell: Cell<unknown>,
+  options?: { traverseCells?: boolean },
+): ValidateAndTransformResult {
+  const implementation = asCellImpl(cell);
+  if (implementation === undefined) {
+    throw new TypeError("Expected a runner Cell implementation");
+  }
+  return implementation.getWithStatus(options);
 }
 
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {

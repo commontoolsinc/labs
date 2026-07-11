@@ -10,7 +10,10 @@ import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
+import {
+  schemaWithOpenObjects,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -19,11 +22,23 @@ import {
 import {
   computeInputHashFromValue,
   internalSchema,
+  legacyFetchResultMarker,
+  liveFetchClaimMatches,
+  releaseFetchMutexClaim,
+  REQUEST_TIMEOUT,
+  scheduleFetchMutexClaimRetry,
+  selectUnavailableFetchInput,
   tryClaimMutex,
   tryWriteResult,
+  writeUnavailableFetchResult,
 } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 type FetchRequestOptions = {
   body?: any;
@@ -138,10 +153,16 @@ async function processJsonResponse(
   if (schema !== undefined) {
     const failure = validateAgainstSchema(schemaWithOpenObjects(schema), data);
     if (failure !== undefined) {
-      throw new Error(`fetchJson result failed schema validation: ${failure}`);
+      throw new FetchResponseSchemaMismatch(
+        `fetchJson result failed schema validation: ${failure}`,
+      );
     }
   }
   return data;
+}
+
+class FetchResponseSchemaMismatch extends Error {
+  override readonly name = "FetchResponseSchemaMismatch";
 }
 
 async function processBinaryResponse(
@@ -152,58 +173,6 @@ async function processBinaryResponse(
   const mediaType = contentType?.split(";")[0].trim().toLowerCase() ||
     "application/octet-stream";
   return { bytes, mediaType };
-}
-
-const asTypeArray = (type: unknown): string[] =>
-  typeof type === "string" ? [type] : Array.isArray(type) ? type : [];
-
-/**
- * Returns a copy of `schema` with `additionalProperties: true` on every
- * object-shaped subschema that doesn't declare it. validateAgainstSchema
- * treats such schemas as closed (a CFC-sanitization rule); fetch
- * verification follows standard JSON Schema semantics, where unknown object
- * properties are allowed unless the schema names `additionalProperties`.
- */
-function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
-  if (typeof schema === "boolean") return schema;
-  const result: Record<string, unknown> = { ...schema };
-
-  for (const key of ["not", "additionalProperties"]) {
-    if (typeof result[key] === "object" && result[key] !== null) {
-      result[key] = schemaWithOpenObjects(result[key] as JSONSchema);
-    }
-  }
-  if (Array.isArray(result.items)) {
-    result.items = result.items.map((item) =>
-      schemaWithOpenObjects(item as JSONSchema)
-    );
-  } else if (typeof result.items === "object" && result.items !== null) {
-    result.items = schemaWithOpenObjects(result.items as JSONSchema);
-  }
-  for (const key of ["allOf", "anyOf", "oneOf"]) {
-    if (Array.isArray(result[key])) {
-      result[key] = (result[key] as JSONSchema[]).map((branch) =>
-        schemaWithOpenObjects(branch)
-      );
-    }
-  }
-  for (const key of ["properties", "$defs"]) {
-    if (typeof result[key] === "object" && result[key] !== null) {
-      result[key] = Object.fromEntries(
-        Object.entries(result[key] as Record<string, JSONSchema>).map((
-          [name, child],
-        ) => [name, schemaWithOpenObjects(child)]),
-      );
-    }
-  }
-
-  const declaresObjectShape = asTypeArray(result.type).includes("object") ||
-    result.properties !== undefined ||
-    result.required !== undefined;
-  if (declaresObjectShape && result.additionalProperties === undefined) {
-    result.additionalProperties = true;
-  }
-  return result as JSONSchema;
 }
 
 const fetchBinaryKind: FetchKind = {
@@ -284,9 +253,10 @@ function mutexTimeoutForCell(
  * memoization, a cross-tab mutex, abort handling, and a CFC sink request
  * enqueued per fetch.
  *
- * Returns the fetched result as `result`. `pending` is true while a request
- * is pending; failures (including fetchJson schema verification failures)
- * land on `error`.
+ * The internal node still publishes `{ pending, result, error }` while the
+ * builder projects its `result` child as the public value. That child is the
+ * fetched value when usable and a DataUnavailable marker otherwise; the
+ * sibling pending/error cells remain temporarily for compatibility.
  */
 function fetchBuiltin(kind: FetchKind) {
   const snapshotInputs = snapshotInputsFor(kind);
@@ -307,9 +277,36 @@ function fetchBuiltin(kind: FetchKind) {
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
     let abortController: AbortController | undefined = undefined;
+    let cancelClaimRetry: (() => void) | undefined;
+
+    const clearClaimRetry = (): void => {
+      cancelClaimRetry?.();
+      cancelClaimRetry = undefined;
+    };
+
+    const scheduleClaimRetry = (
+      expectedInputHash: string,
+      requestId: string,
+      lastActivity: number,
+      timeout: number,
+    ): void => {
+      clearClaimRetry();
+      cancelClaimRetry = scheduleFetchMutexClaimRetry(
+        runtime,
+        inputsCell,
+        snapshotInputs,
+        result,
+        internal,
+        expectedInputHash,
+        requestId,
+        lastActivity,
+        timeout,
+      );
+    };
 
     // This is called when the pattern containing this node is being stopped.
     addCancel(() => {
+      clearClaimRetry();
       // Abort the request if it's still pending.
       abortController?.abort("Pattern stopped");
 
@@ -338,8 +335,16 @@ function fetchBuiltin(kind: FetchKind) {
 
     return (tx: IExtendedStorageTransaction) => {
       tx.resetNarrowestReadScope();
-      const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
-      const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
+      const unavailableInput = selectUnavailableFetchInput(
+        inputsCell.withTx(tx).getRaw(),
+        { runtime, tx, base: inputsCell },
+      );
+      const inputsSnapshot = unavailableInput === undefined
+        ? snapshotInputs(inputsCell.withTx(tx))
+        : undefined;
+      const mutexTimeoutMs = unavailableInput === undefined
+        ? mutexTimeoutForCell(kind, inputsCell.withTx(tx))
+        : undefined;
       const outputScope = tx.getNarrowestReadScope();
 
       if (!cellsInitialized || cellScope !== outputScope) {
@@ -408,16 +413,42 @@ function fetchBuiltin(kind: FetchKind) {
       // should be fine.
       sendResult(tx, { pending, result, error });
 
+      if (unavailableInput !== undefined) {
+        clearClaimRetry();
+        abortController?.abort("Inputs unavailable");
+        abortController = undefined;
+        myRequestId = undefined;
+        writeUnavailableFetchResult(
+          tx,
+          pending,
+          result,
+          error,
+          unavailableInput,
+        );
+        internal.withTx(tx).set({
+          requestId: "",
+          lastActivity: 0,
+          inputHash: "",
+        });
+        return;
+      }
+
       const url = inputsSnapshot?.url;
       if (!url) {
+        clearClaimRetry();
+        abortController?.abort("URL unavailable");
+        abortController = undefined;
+        myRequestId = undefined;
         // Only update if values actually need to change to reduce transaction conflicts
         const currentPending = pending.withTx(tx).get();
-        const currentResult = result.withTx(tx).get();
+        const currentResult = result.withTx(tx).getRaw();
         const currentError = error.withTx(tx).get();
         const currentInternal = internal.withTx(tx).get();
 
         if (currentPending !== false) pending.withTx(tx).set(false);
-        if (currentResult !== undefined) result.withTx(tx).set(undefined);
+        if (currentResult !== DataUnavailable.schemaMismatch()) {
+          result.withTx(tx).setRaw(DataUnavailable.schemaMismatch());
+        }
         if (currentError !== undefined) error.withTx(tx).set(undefined);
         // Clear internal state when URL is empty so we don't think we have cached results
         if (currentInternal.inputHash !== "") {
@@ -434,21 +465,43 @@ function fetchBuiltin(kind: FetchKind) {
       // Check if we're already working on or have the result for these inputs
       const currentInternal = internal.withTx(tx).get();
       const currentPending = pending.withTx(tx).get();
-      const currentResult = result.withTx(tx).get();
+      let currentResult = result.withTx(tx).getRaw();
       const currentError = error.withTx(tx).get();
 
       const inputsMatch = currentInternal?.inputHash === inputHash;
 
+      // Upgrade state persisted before the direct AsyncResult cutover. Legacy
+      // fetches kept pending/error only in sibling cells and left result
+      // undefined; without this repair a matching terminal error never retries
+      // and the public projection would remain undefined forever. Recreating a
+      // pending marker also activates the normal persisted-claim lease path.
+      if (inputsMatch) {
+        const legacyMarker = legacyFetchResultMarker(
+          currentResult,
+          currentPending,
+          currentError,
+        );
+        if (legacyMarker !== undefined) {
+          result.withTx(tx).setRaw(legacyMarker);
+          currentResult = legacyMarker;
+        }
+      }
+
       // If inputs changed, clear everything and abort any in-flight request
       if (!inputsMatch) {
+        clearClaimRetry();
         if (myRequestId) {
           abortController?.abort("Inputs changed");
           myRequestId = undefined;
         }
 
-        pending.withTx(tx).set(false);
-        result.withTx(tx).set(undefined);
-        error.withTx(tx).set(undefined);
+        writeUnavailableFetchResult(
+          tx,
+          pending,
+          result,
+          error,
+          DataUnavailable.pending(),
+        );
         internal.withTx(tx).update({
           inputHash,
           requestId: "",
@@ -457,20 +510,38 @@ function fetchBuiltin(kind: FetchKind) {
       }
 
       // If we have a result OR error for these inputs, we're done
-      const hasValidResult = inputsMatch && currentResult !== undefined;
+      const hasValidResult = inputsMatch && currentResult !== undefined &&
+        !(isDataUnavailable(currentResult) &&
+          currentResult.reason === "pending");
       const hasError = inputsMatch && currentError !== undefined;
 
       // If we're already fetching these inputs, wait
       const alreadyFetching = inputsMatch && currentPending &&
         myRequestId !== undefined;
 
+      const claimTimeout = mutexTimeoutMs ?? REQUEST_TIMEOUT;
+      const persistedClaim = inputsMatch && currentPending &&
+        myRequestId === undefined && currentInternal.requestId !== "" &&
+        isDataUnavailable(currentResult) &&
+        currentResult.reason === "pending";
+      if (persistedClaim) {
+        scheduleClaimRetry(
+          inputHash,
+          currentInternal.requestId,
+          currentInternal.lastActivity,
+          claimTimeout,
+        );
+      } else {
+        clearClaimRetry();
+      }
+
       // Start a new fetch if we don't have a result/error and aren't already fetching
       if (!hasValidResult && !hasError && !alreadyFetching) {
-        const newRequestId = inputHash;
+        const newRequestId = crypto.randomUUID();
         enqueueSinkRequestPostCommitEffect(
           tx,
           kind.name,
-          `${kind.name}:${newRequestId}`,
+          `${kind.name}:${inputHash}`,
           inputsSnapshot,
           `${kind.name}-start`,
           () => {
@@ -500,12 +571,39 @@ function fetchBuiltin(kind: FetchKind) {
                   return;
                 }
 
-                // Clear any previous result/error when starting a new fetch
-                // This ensures observers see a clean pending state
-                runtime.editWithRetry((tx) => {
-                  result.withTx(tx).set(undefined);
-                  error.withTx(tx).set(undefined);
-                });
+                clearClaimRetry();
+                const controller = new AbortController();
+                abortController = controller;
+                myRequestId = newRequestId;
+
+                // The mutex claim atomically published pending. Revalidate at
+                // the claim-to-effect hand-off so an unavailable/new input
+                // committed in that window cannot launch the approved old
+                // request.
+                if (
+                  !liveFetchClaimMatches(
+                    runtime,
+                    inputsCell,
+                    snapshotInputs,
+                    inputHash,
+                    internal,
+                    result,
+                    newRequestId,
+                  )
+                ) {
+                  controller.abort("Inputs changed before fetch started");
+                  if (myRequestId === newRequestId) {
+                    myRequestId = undefined;
+                    abortController = undefined;
+                  }
+                  await releaseFetchMutexClaim(
+                    runtime,
+                    internal,
+                    inputHash,
+                    newRequestId,
+                  );
+                  return;
+                }
 
                 // Check if URL became empty while waiting for mutex
                 if (!inputsSnapshot.url) {
@@ -513,7 +611,9 @@ function fetchBuiltin(kind: FetchKind) {
                   myRequestId = undefined;
                   runtime.editWithRetry((tx) => {
                     pending.withTx(tx).set(false);
-                    result.withTx(tx).set(undefined);
+                    result.withTx(tx).setRaw(
+                      DataUnavailable.schemaMismatch(),
+                    );
                     error.withTx(tx).set(undefined);
                     internal.withTx(tx).set({
                       requestId: "",
@@ -524,22 +624,20 @@ function fetchBuiltin(kind: FetchKind) {
                   return;
                 }
 
-                abortController = new AbortController();
-
                 // We claimed the mutex, start the fetch
-                myRequestId = newRequestId;
                 await startFetch(
                   runtime,
                   kind,
                   snapshotInputs,
                   inputsCell,
                   inputsSnapshot,
+                  inputHash,
                   newRequestId,
                   pending,
                   result,
                   error,
                   internal,
-                  abortController.signal,
+                  controller.signal,
                 );
               },
             );
@@ -591,6 +689,7 @@ async function startFetch(
   inputsCell: Cell<FetchInputs>,
   inputsSnapshot: FetchInputs,
   inputHash: string,
+  requestId: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
   error: Cell<any | undefined>,
@@ -616,6 +715,7 @@ async function startFetch(
       apiBase,
       options,
     );
+    if (abortSignal.aborted) return;
     const response = await runtime.fetch(
       resolvedUrl,
       {
@@ -628,7 +728,9 @@ async function startFetch(
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     const data = await kind.process(response, inputsSnapshot);
+    if (abortSignal.aborted) return;
     await runtime.idle();
+    if (abortSignal.aborted) return;
 
     // Try to write result - any tab can write if inputs match
     await tryWriteResult(
@@ -638,10 +740,11 @@ async function startFetch(
       inputHash,
       (tx) => {
         pending.withTx(tx).set(false);
-        result.withTx(tx).set(data);
+        result.withTx(tx).setRaw(data as FabricValue);
         error.withTx(tx).set(undefined);
       },
       snapshotInputs,
+      requestId,
     );
   } catch (err) {
     // Don't write errors if request was aborted
@@ -649,51 +752,61 @@ async function startFetch(
 
     await runtime.idle();
 
-    // Write error - but only update inputHash if inputs haven't changed
-    await runtime.editWithRetry((tx) => {
-      const currentHash = computeInputHashFromValue(
-        snapshotInputs(inputsCell.withTx(tx)),
+    const unavailable = err instanceof FetchResponseSchemaMismatch
+      ? DataUnavailable.schemaMismatch()
+      : DataUnavailable.error(
+        err instanceof Error ? err : new Error(String(err)),
       );
 
-      // Always clear pending and result
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-
-      // Only write error and inputHash if inputs still match
-      if (currentHash === inputHash) {
-        error.withTx(tx).set(err);
-        internal.withTx(tx).update({ inputHash });
-      }
-    });
+    // Write the failure only while this request still owns the live inputs.
+    // A stale failure must not clear a newer input's pending marker.
+    await tryWriteResult(
+      runtime,
+      internal,
+      inputsCell,
+      inputHash,
+      (tx) => {
+        writeUnavailableFetchResult(
+          tx,
+          pending,
+          result,
+          error,
+          unavailable,
+          err,
+        );
+      },
+      snapshotInputs,
+      requestId,
+    );
   }
 }
 
 /**
  * Fetch binary data from a URL.
  *
- * Returns the response body as `result`, shaped `{ bytes, mediaType }` where
- * `bytes` is a FabricBytes byte buffer. `pending` is true while a request is
- * pending; failures land on `error`.
+ * The builder projects the result child as `{ bytes, mediaType }`, where
+ * `bytes` is a FabricBytes byte buffer. Unavailable states are carried by the
+ * same child at runtime.
  */
 export const fetchBinary = fetchBuiltin(fetchBinaryKind);
 
 /**
  * Fetch text from a URL.
  *
- * Returns the response body decoded as UTF-8 text as `result`. `pending` is
- * true while a request is pending; failures land on `error`.
+ * The builder projects the result child as UTF-8 text. Unavailable states are
+ * carried by the same child at runtime.
  */
 export const fetchText = fetchBuiltin(fetchTextKind);
 
 /**
  * Fetch JSON from a URL.
  *
- * Returns the parsed response body as `result`. When a `schema` input is
+ * Returns the parsed response body. When a `schema` input is
  * present, the parsed body is verified against it at fetch time; a
- * verification failure lands on `error` and `result` stays undefined.
+ * verification failure publishes a schema-mismatch unavailable marker.
  * Verification follows standard JSON Schema semantics for object
  * properties not named in the schema (allowed unless the schema declares
- * `additionalProperties`). `pending` is true while a request is pending.
+ * `additionalProperties`).
  */
 export const fetchJson = fetchBuiltin(fetchJsonKind);
 

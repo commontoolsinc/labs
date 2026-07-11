@@ -103,7 +103,7 @@ describe("auto-provided sandboxId", () => {
   >["commonfabric"]["patternTool"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
 
   beforeEach(() => {
     enableMockMode();
@@ -115,7 +115,11 @@ describe("auto-provided sandboxId", () => {
     });
     tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, patternTool, generateObject } = commonfabric);
+    ({
+      pattern,
+      patternTool,
+      generateObjectStream: generateObject,
+    } = commonfabric);
   });
 
   afterEach(async () => {

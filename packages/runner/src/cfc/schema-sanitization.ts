@@ -465,6 +465,54 @@ const typeMatches = (value: unknown, type: string): boolean => {
   }
 };
 
+/**
+ * Return a copy whose object-shaped schemas use standard JSON Schema's open
+ * default unless they explicitly declare `additionalProperties`.
+ *
+ * {@link validateAgainstSchema} also serves CFC sanitization, where an omitted
+ * `additionalProperties` is intentionally treated as closed. External response
+ * validation must call this helper first so that authored fetch/generation
+ * schemas retain ordinary JSON Schema semantics.
+ */
+export const schemaWithOpenObjects = (schema: JSONSchema): JSONSchema => {
+  if (typeof schema === "boolean") return schema;
+  const result: Record<string, unknown> = { ...schema };
+
+  for (const key of ["not", "additionalProperties"]) {
+    if (typeof result[key] === "object" && result[key] !== null) {
+      result[key] = schemaWithOpenObjects(result[key] as JSONSchema);
+    }
+  }
+  if (Array.isArray(result.items)) {
+    result.items = result.items.map((item) =>
+      schemaWithOpenObjects(item as JSONSchema)
+    );
+  } else if (typeof result.items === "object" && result.items !== null) {
+    result.items = schemaWithOpenObjects(result.items as JSONSchema);
+  }
+  for (const key of ["allOf", "anyOf", "oneOf"]) {
+    if (Array.isArray(result[key])) {
+      result[key] = (result[key] as JSONSchema[]).map(schemaWithOpenObjects);
+    }
+  }
+  for (const key of ["properties", "$defs"]) {
+    if (typeof result[key] === "object" && result[key] !== null) {
+      result[key] = Object.fromEntries(
+        Object.entries(result[key] as Record<string, JSONSchema>).map(
+          ([name, child]) => [name, schemaWithOpenObjects(child)],
+        ),
+      );
+    }
+  }
+
+  const declaresObjectShape = asTypeArray(result.type).includes("object") ||
+    result.properties !== undefined || result.required !== undefined;
+  if (declaresObjectShape && result.additionalProperties === undefined) {
+    result.additionalProperties = true;
+  }
+  return result as JSONSchema;
+};
+
 export const validateAgainstSchema = (
   schema: JSONSchema,
   value: unknown,

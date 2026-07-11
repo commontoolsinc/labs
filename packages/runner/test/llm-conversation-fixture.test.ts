@@ -58,7 +58,7 @@ describe("conversation fixtures", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
 
   beforeEach(() => {
@@ -71,7 +71,13 @@ describe("conversation fixtures", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
+    ({
+      pattern,
+      generateObjectStream: generateObject,
+      llmDialog,
+      Cell,
+      patternTool,
+    } = commonfabric);
   });
 
   afterEach(async () => {

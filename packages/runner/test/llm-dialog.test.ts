@@ -41,7 +41,7 @@ describe("llmDialog", () => {
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  >["commonfabric"]["generateObjectStream"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -60,7 +60,7 @@ describe("llmDialog", () => {
       Writable,
       handler,
       patternTool,
-      generateObject,
+      generateObjectStream: generateObject,
     } = commonfabric);
   });
 

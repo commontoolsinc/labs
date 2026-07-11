@@ -1,4 +1,5 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -2712,7 +2713,14 @@ async function handleInvoke(
 
   // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
-    r !== undefined && resolve(r);
+    // Async pattern results now publish a concrete pending marker rather than
+    // `undefined`. Keep the existing wait-for-usable tool contract: returning
+    // the marker here would serialize the opaque FabricInstance as `{}` and
+    // let the parent tool loop continue before the child generation finishes.
+    // Read the resolved raw cell because the pattern's ordinary object schema
+    // can materialize the opaque marker as `{}` before this callback sees it.
+    const rawResult = result.resolveAsCell().getRaw();
+    r !== undefined && !(rawResult instanceof DataUnavailable) && resolve(r);
   });
 
   let timeout;

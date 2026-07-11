@@ -21,6 +21,7 @@ import {
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -48,6 +49,30 @@ describe("data-updating", () => {
   });
 
   describe("setNestedValue", () => {
+    it("replaces an unavailable FabricInstance with a usable object", () => {
+      const testCell = runtime.getCell<{ answer: number }>(
+        space,
+        "replace unavailable marker with object",
+        {
+          type: "object",
+          properties: { answer: { type: "number" } },
+          required: ["answer"],
+        },
+        tx,
+      );
+      testCell.setRawUntyped(DataUnavailable.pending());
+
+      expect(() =>
+        diffAndUpdate(
+          runtime,
+          tx,
+          testCell.getAsNormalizedFullLink(),
+          { answer: 42 },
+        )
+      ).not.toThrow();
+      expect(testCell.getRaw()).toEqual({ answer: 42 });
+    });
+
     it("should set a value at a path", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,

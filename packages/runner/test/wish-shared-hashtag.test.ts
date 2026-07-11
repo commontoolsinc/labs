@@ -6,6 +6,8 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type JSONSchema, NAME } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { wishStateSchemaForResult } from "../src/builtins/wish-schema.ts";
+import { sanitizeSchemaForLinks } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("wish shared hashtag test");
 const space = signer.did();
@@ -229,10 +231,14 @@ Deno.test(
       }
       expect(
         rawLinkSchema(results[0].key("result").getRaw()),
-      ).toEqual(nameOnlyWishSchema);
+      ).toEqual(
+        sanitizeSchemaForLinks(wishStateSchemaForResult(nameOnlyWishSchema)),
+      );
       expect(
         rawLinkSchema(results[1].key("result").getRaw()),
-      ).toEqual(bodyOnlyWishSchema);
+      ).toEqual(
+        sanitizeSchemaForLinks(wishStateSchemaForResult(bodyOnlyWishSchema)),
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

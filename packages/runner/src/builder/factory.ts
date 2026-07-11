@@ -29,6 +29,14 @@ import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
 import { action, byRef, computed, handler, lift } from "./module.ts";
 import {
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
+  observeAvailability,
+  resultOf,
+} from "./data-unavailable.ts";
+import {
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -36,7 +44,9 @@ import {
   fetchProgram,
   fetchText,
   generateObject,
+  generateObjectStream,
   generateText,
+  generateTextStream,
   ifElse,
   inspectConfLabel,
   llm,
@@ -170,6 +180,14 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     action,
     computed: trustedComputed,
 
+    // Pure unavailable-data observation helpers
+    isPending,
+    hasError,
+    isSyncing,
+    hasSchemaMismatch,
+    observeAvailability,
+    resultOf,
+
     // Built-in modules
     str: trustedStr,
     ifElse,
@@ -179,7 +197,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     llm,
     llmDialog,
     generateObject,
+    generateObjectStream,
     generateText,
+    generateTextStream,
     fetchBinary,
     fetchText,
     fetchJson,

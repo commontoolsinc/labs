@@ -46,6 +46,7 @@ import {
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -234,6 +235,15 @@ export function map(
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
 
+    if (isDataUnavailable(rawList)) {
+      resultWithLog.setRawUntyped(rawList, true);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+      elementRuns.clear();
+      return;
+    }
+
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -258,6 +268,7 @@ export function map(
         { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
+    const rawResult = probeScoped(() => result!.getRaw());
     // Resume against confirmed state, not the not-yet-loaded value: on the
     // resume reconcile an undefined container is its durable value still
     // streaming in (a map that has run persisted at least []). Reconciling now
@@ -267,6 +278,7 @@ export function map(
     // reconcile, which then no-ops against the durable value.
     if (
       elementAwaitSync &&
+      !isDataUnavailable(rawResult) &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
       const pending = result.sync();
