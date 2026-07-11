@@ -66,7 +66,10 @@ import {
   ignoreReadForScheduling,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
-import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
+import {
+  machineryRead,
+  schedulerDependencyRead,
+} from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
@@ -2231,28 +2234,32 @@ export class Runner {
       return [];
     }
 
-    const targets: NormalizedFullLink[] = [];
-    for (const output of outputCells) {
-      if (output.overwrite !== "redirect") continue;
-      try {
-        const { overwrite: _overwrite, ...target } = resolveLink(
-          this.runtime,
-          tx,
-          output,
-          "writeRedirect",
-        );
-        targets.push(target);
-      } catch (error) {
-        // Some setup paths have not fully materialized metadata redirects
-        // yet. Leave those to runtime dependency collection after the action
-        // has run, but keep debug context for unexpected resolution failures.
-        logger.debug("static-redirect-write-target", () => [
-          "Unable to resolve static redirect write target",
-          { output, error },
-        ]);
+    // Redirect-target resolution is op-wiring machinery (machineryRead):
+    // its reads must not consume `*`-path membership templates.
+    return tx.runWithAmbientReadMeta(machineryRead, () => {
+      const targets: NormalizedFullLink[] = [];
+      for (const output of outputCells) {
+        if (output.overwrite !== "redirect") continue;
+        try {
+          const { overwrite: _overwrite, ...target } = resolveLink(
+            this.runtime,
+            tx,
+            output,
+            "writeRedirect",
+          );
+          targets.push(target);
+        } catch (error) {
+          // Some setup paths have not fully materialized metadata redirects
+          // yet. Leave those to runtime dependency collection after the action
+          // has run, but keep debug context for unexpected resolution failures.
+          logger.debug("static-redirect-write-target", () => [
+            "Unable to resolve static redirect write target",
+            { output, error },
+          ]);
+        }
       }
-    }
-    return dedupeNormalizedLinks(targets);
+      return dedupeNormalizedLinks(targets);
+    });
   }
 
   private populateDeclaredSchedulerReads(
@@ -3682,25 +3689,33 @@ export class Runner {
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
       logger.timeStart("action", "populateDependencies");
       try {
-        if (reads.length > 0) {
-          this.populateDeclaredSchedulerReads(reads, depTx);
-        } else if (module.argumentSchema !== undefined) {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            inputs,
-            undefined,
-            depTx,
-          );
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        }
+        // Dependency seeding is scheduling machinery end to end
+        // (machineryRead): the declared-reads branch additionally carries
+        // schedulerDependencyRead (full flow exclusion) inside; the input
+        // materialization and the output-target resolution below keep their
+        // ordinary consumption but must not consume `*`-path membership
+        // templates while resolving plumbing containers.
+        depTx.runWithAmbientReadMeta(machineryRead, () => {
+          if (reads.length > 0) {
+            this.populateDeclaredSchedulerReads(reads, depTx);
+          } else if (module.argumentSchema !== undefined) {
+            const inputsCell = this.runtime.getImmutableCell(
+              processCell.space,
+              inputs,
+              undefined,
+              depTx,
+            );
+            inputsCell.asSchema(module.argumentSchema!).get({
+              traverseCells: true,
+            });
+          }
 
-        for (const output of writes) {
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsAttemptedWrite,
-          });
-        }
+          for (const output of writes) {
+            this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+              meta: markReadAsAttemptedWrite,
+            });
+          }
+        });
       } finally {
         logger.timeEnd("action", "populateDependencies");
       }
@@ -3724,12 +3739,20 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const io = this.bindNodeIO(
-      inputBindings,
-      outputBindings,
-      resultCell,
-      processCell,
-      pattern,
+    // Binding resolution is op-wiring machinery: the write-redirect walk
+    // reads alias shells and plumbing containers' child paths, and those
+    // reads must not consume `*`-path membership templates (machineryRead;
+    // template-population §6 — the SC-8 machinery-read boundary).
+    const io = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        this.bindNodeIO(
+          inputBindings,
+          outputBindings,
+          resultCell,
+          processCell,
+          pattern,
+        ),
     );
     const { fn, name } = this.resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {

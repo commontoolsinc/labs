@@ -40,7 +40,10 @@ import {
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -118,7 +121,7 @@ export function map(
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
               settleTx.runWithAmbientReadMeta(
-                linkResolutionProbe,
+                { ...linkResolutionProbe, ...machineryRead },
                 () =>
                   result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set(
                     [],
@@ -247,8 +250,14 @@ export function map(
     // journals a content read of every prior element result, feeding the
     // coordinator's own output taint back into its next reconcile's J and
     // smearing it onto fresh elements' scaffolding (S16 pointwise).
+    // machineryRead rides along (template-population §6): the same
+    // scaffolding reads must not consume `*`-path membership templates on
+    // plumbing containers now that the generic mint route is on (SC-8).
     const probeScoped = <T>(fn: () => T): T =>
-      tx.runWithAmbientReadMeta(linkResolutionProbe, fn);
+      tx.runWithAmbientReadMeta(
+        { ...linkResolutionProbe, ...machineryRead },
+        fn,
+      );
     // Resume against confirmed state, not the not-yet-loaded value: on the
     // resume reconcile an undefined container is its durable value still
     // streaming in (a map that has run persisted at least []). Reconciling now
