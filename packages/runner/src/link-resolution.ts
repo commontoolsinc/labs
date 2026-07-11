@@ -124,7 +124,8 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Allows you to preserve the `overwrite` field if needed
+ * @param options - Preserve `overwrite` when needed, or suppress cross-space
+ * target prefetch for a side-effect-free topology verification pass.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -132,7 +133,7 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean } = {},
+  options: { preserveOverwrite?: boolean; prefetch?: boolean } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -322,7 +323,7 @@ export function resolveLink(
       // This resolves only reference topology, not target content, so do not
       // subscribe the executing action to target-settlement wakeups. A later
       // schema-aware target read registers that waiter if it needs one.
-      if (crossSpace) {
+      if (crossSpace && options.prefetch !== false) {
         runtime.prefetchLinkedDoc(link);
       }
     } else {

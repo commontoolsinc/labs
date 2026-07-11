@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  type DataUnavailableReason,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -564,6 +567,125 @@ describe("JavaScript-node data unavailability", () => {
     expect(verifierReads).toHaveLength(1);
   });
 
+  it("keeps legacy schema modes subscribed to linked availability", async () => {
+    for (
+      const [label, argumentSchema] of [
+        ["undefined", undefined],
+        ["false", false],
+      ] as const
+    ) {
+      const target = runtime.getCell<number | DataUnavailable>(
+        space,
+        `legacy availability target ${label} ${nextResultId++}`,
+      );
+      const seedTx = runtime.edit();
+      target.withTx(seedTx).set(7);
+      await seedTx.commit();
+
+      let calls = 0;
+      const pattern = {
+        argumentSchema: {},
+        resultSchema: {},
+        result: {
+          output: { $alias: { partialCause: "output", path: [] } },
+        },
+        nodes: [{
+          module: {
+            type: "javascript",
+            ...(argumentSchema !== undefined && { argumentSchema }),
+            implementation: () => `call ${++calls}`,
+          },
+          inputs: {
+            ignored: { $alias: { cell: "argument", path: ["value"] } },
+          },
+          outputs: { $alias: { partialCause: "output", path: [] } },
+        }],
+      } as Pattern;
+      const result = await runtime.runSynced(
+        runtime.getCell(
+          space,
+          `legacy availability result ${label} ${nextResultId++}`,
+        ),
+        trustExecutable(runtime, pattern),
+        { value: target.getAsLink() },
+      );
+      await result.pull();
+      const output = getDerivedInternalCell(result, {
+        partialCause: "output",
+      });
+      expect(output.getRaw()).toBe("call 1");
+
+      const pendingTx = runtime.edit();
+      target.withTx(pendingTx).set(DataUnavailable.pending());
+      await pendingTx.commit();
+      await output.pull();
+
+      expect(calls).toBe(1);
+      expect(output.getRaw()).toBe(DataUnavailable.pending());
+    }
+  });
+
+  it("resolves a nested relative marker from the reached linked container", async () => {
+    const holder = runtime.getCell(
+      space,
+      `relative availability holder ${nextResultId++}`,
+    );
+    const relativeMarker = holder.key("payload").getAsLink({
+      base: holder.key("container", "nested"),
+    });
+    const seedTx = runtime.edit();
+    holder.withTx(seedTx).setRaw({
+      payload: DataUnavailable.pending(),
+      container: { nested: relativeMarker },
+    });
+    await seedTx.commit();
+
+    let calls = 0;
+    const output = await runValueNode({
+      argument: { value: holder.key("container").getAsLink() },
+      argumentSchema: { type: "object" },
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+    });
+
+    expect(calls).toBe(0);
+    expect(output).toBe(DataUnavailable.pending());
+  });
+
+  it("terminates a linked-container cycle and still selects its sibling marker", async () => {
+    const first = runtime.getCell(
+      space,
+      `availability cycle first ${nextResultId++}`,
+    );
+    const second = runtime.getCell(
+      space,
+      `availability cycle second ${nextResultId++}`,
+    );
+    const pending = DataUnavailable.pending();
+    const seedTx = runtime.edit();
+    first.withTx(seedTx).setRaw({
+      next: second.getAsLink(),
+      sibling: pending,
+    });
+    second.withTx(seedTx).setRaw({ next: first.getAsLink() });
+    await seedTx.commit();
+
+    let calls = 0;
+    const output = await runValueNode({
+      argument: { value: first.getAsLink() },
+      argumentSchema: { type: "object" },
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+    });
+
+    expect(calls).toBe(0);
+    expect(output).toBe(pending);
+  });
+
   it("writes schema-mismatch when locally complete input fails its schema", async () => {
     let calls = 0;
 
@@ -626,6 +748,46 @@ describe("JavaScript-node data unavailability", () => {
     expect(localWrites[0]).toBe("syncing");
     expect(localWrites.at(-1)).toBe("schema-mismatch");
     expect((localOutput as DataUnavailable).reason).toBe("schema-mismatch");
+  });
+
+  it("selects syncing ahead of a concrete schema mismatch", async () => {
+    const writes: DataUnavailableReason[] = [];
+    const missingRemote = runtime.getCell(
+      remoteSpace,
+      `precedence missing remote ${nextResultId++}`,
+    );
+    let calls = 0;
+
+    const output = await runValueNode({
+      argument: {
+        mismatch: DataUnavailable.schemaMismatch(),
+        missing: missingRemote.getAsLink(),
+      },
+      nodeInputs: {
+        mismatch: { $alias: { cell: "argument", path: ["mismatch"] } },
+        missing: { $alias: { cell: "argument", path: ["missing"] } },
+      },
+      argumentSchema: {
+        type: "object",
+        properties: {
+          mismatch: { type: "number" },
+          missing: { type: "number" },
+        },
+        required: ["mismatch", "missing"],
+      },
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+      captureWrittenResult: (value) => {
+        if (value instanceof DataUnavailable) writes.push(value.reason);
+      },
+    });
+
+    expect(calls).toBe(0);
+    expect(writes[0]).toBe("syncing");
+    expect(writes.at(-1)).toBe("schema-mismatch");
+    expect(output).toBe(DataUnavailable.schemaMismatch());
   });
 
   it("tracks missing-link readiness by full selector identity", async () => {
@@ -751,6 +913,44 @@ describe("JavaScript-node data unavailability", () => {
     } finally {
       release.resolve();
       scheduler.scheduleExternalDependencySettlement = originalSchedule;
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
+  it("can verify cross-space link topology without starting a prefetch", async () => {
+    const source = runtime.getCell(
+      space,
+      `no-prefetch source ${nextResultId++}`,
+    );
+    const target = runtime.getCell(
+      remoteSpace,
+      `no-prefetch target ${nextResultId++}`,
+    );
+    const seedTx = runtime.edit();
+    source.withTx(seedTx).setRaw(target.getAsLink());
+    await seedTx.commit();
+
+    const targetId = target.getAsNormalizedFullLink().id;
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    let targetSyncs = 0;
+    storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
+      if (cell.getAsNormalizedFullLink().id === targetId) targetSyncs++;
+      return await originalSyncCell(cell);
+    };
+
+    const readTx = runtime.edit();
+    try {
+      const resolved = resolveLink(
+        runtime,
+        readTx,
+        source.getAsNormalizedFullLink(),
+        "value",
+        { prefetch: false },
+      );
+      expect(resolved.space).toBe(remoteSpace);
+      expect(targetSyncs).toBe(0);
+      expect((await readTx.commit()).ok).toBeDefined();
+    } finally {
       storageManager.syncCell = originalSyncCell;
     }
   });

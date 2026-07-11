@@ -164,6 +164,10 @@ const AVAILABILITY_PREFLIGHT_PROBE_READ = {
   ...internalVerifierRead,
 };
 
+const AVAILABILITY_DEFINED_VALUE_SCHEMA = {
+  not: { type: "undefined" },
+} as const satisfies JSONSchema;
+
 function pathsEqual(
   left: readonly string[],
   right: readonly string[],
@@ -196,15 +200,23 @@ function scanUnavailableInputs(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   inputsCell: Cell<any>,
+  observeReadiness: boolean,
 ): AvailabilityPreflight {
   // Track only the active recursion stack. The same container may be bound at
   // multiple argument paths, and exact-path policy must inspect every such
   // occurrence; a global visited set would let the first path hide the rest.
   const active = new WeakSet<object>();
+  const activeLinks = new Set<string>();
   let selected: UnavailableInput | undefined;
+  let selectedIsSyntheticSyncing = false;
+  let sawConcreteUnaccepted = false;
   const accepted: UnavailableInput[] = [];
 
-  const visit = (value: unknown, path: readonly string[]): void => {
+  const visit = (
+    value: unknown,
+    path: readonly string[],
+    source: Cell<any>,
+  ): void => {
     const schemaAtPath = path.length === 0
       ? argumentSchema
       : runtime.cfc.getSchemaAtPath(argumentSchema, [...path]);
@@ -219,22 +231,90 @@ function scanUnavailableInputs(
         accepted.push({ value, path });
         return;
       }
+      sawConcreteUnaccepted = true;
       if (
         selected === undefined ||
         dataUnavailableReasonPrecedes(value.reason, selected.value.reason)
       ) {
         selected = { value, path };
+        selectedIsSyntheticSyncing = false;
       }
       return;
     }
 
     if (isCellLink(value)) {
-      const link = resolveLink(runtime, tx, parseLink(value, inputsCell));
-      const resolved = tx.read(toMemorySpaceAddress(link));
-      // Missing coverage is classified by schema traversal below, whose
-      // cross-space callback can distinguish a replica miss from a locally
-      // complete mismatch. Preflight only selects concrete values it can read.
-      if (resolved.ok !== undefined) visit(resolved.ok.value, path);
+      const target = observeReadiness
+        ? source.withTx(tx).resolveAsCell()
+        : runtime.getCellFromLink(
+          resolveLink(
+            runtime,
+            tx,
+            parseLink(value, source),
+            "value",
+            { prefetch: false },
+          ),
+          undefined,
+          tx,
+        );
+      const link = target.getAsNormalizedFullLink();
+      const linkKey = JSON.stringify([
+        link.space,
+        link.scope,
+        link.id,
+        link.path,
+      ]);
+      // Use the recursion stack, not a global visited set: the same target can
+      // appear at multiple argument paths with different exact-path policy.
+      if (activeLinks.has(linkKey)) return;
+
+      if (!observeReadiness) {
+        const resolved = tx.read(toMemorySpaceAddress(link));
+        if (resolved.ok === undefined) {
+          // A later observing pass or ordinary schema materialization
+          // distinguishes syncing from a locally complete mismatch.
+          return;
+        }
+        activeLinks.add(linkKey);
+        try {
+          visit(resolved.ok.value, path, target.withTx(tx));
+        } finally {
+          activeLinks.delete(linkKey);
+        }
+        return;
+      }
+
+      // Probe through the serialized source position. This distinguishes a
+      // replica miss (syncing) from a locally complete mismatch.
+      const status = getCellWithStatus(
+        source.asSchema(AVAILABILITY_DEFINED_VALUE_SCHEMA).withTx(tx),
+      );
+      if ("error" in status && status.unavailableReason === "syncing") {
+        if (!policyAcceptsUnavailableInput(policy, path, "syncing")) {
+          const syncing = DataUnavailable.syncing();
+          if (
+            selected === undefined ||
+            dataUnavailableReasonPrecedes(
+              syncing.reason,
+              selected.value.reason,
+            )
+          ) {
+            selected = { value: syncing, path };
+            selectedIsSyntheticSyncing = true;
+          }
+        }
+        return;
+      }
+
+      if ("error" in status) return;
+      activeLinks.add(linkKey);
+      try {
+        // The readiness schema is deliberately broad and cannot authenticate
+        // a FabricInstance nested inside a container. Inspect the raw target
+        // after status has established local coverage.
+        visit(target.withTx(tx).getRaw(), path, target.withTx(tx));
+      } finally {
+        activeLinks.delete(linkKey);
+      }
       return;
     }
 
@@ -248,15 +328,26 @@ function scanUnavailableInputs(
     active.add(value);
     try {
       for (const key of Object.keys(value)) {
-        visit((value as Record<string, unknown>)[key], [...path, key]);
+        visit(
+          (value as Record<string, unknown>)[key],
+          [...path, key],
+          source.key(key),
+        );
       }
     } finally {
       active.delete(value);
     }
   };
 
-  visit(inputBindings, []);
-  return { unavailable: selected, accepted };
+  visit(inputBindings, [], inputsCell);
+  const deferSyntheticSyncingToSchema = selectedIsSyntheticSyncing &&
+    !sawConcreteUnaccepted &&
+    argumentSchema !== undefined &&
+    argumentSchema !== false;
+  return {
+    unavailable: deferSyntheticSyncingToSchema ? undefined : selected,
+    accepted,
+  };
 }
 
 /**
@@ -287,9 +378,15 @@ function preflightUnavailableInputs(
         runtime,
         tx,
         inputsCell,
+        false,
       ),
   );
-  if (probe.unavailable === undefined && probe.accepted.length === 0) {
+  if (
+    probe.unavailable === undefined &&
+    probe.accepted.length === 0 &&
+    argumentSchema !== undefined &&
+    argumentSchema !== false
+  ) {
     return probe;
   }
   return scanUnavailableInputs(
@@ -299,6 +396,7 @@ function preflightUnavailableInputs(
     runtime,
     tx,
     inputsCell,
+    true,
   );
 }
 
