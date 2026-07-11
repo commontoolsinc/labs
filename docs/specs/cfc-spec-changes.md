@@ -647,21 +647,35 @@ this file is the single tracking place:
 ## From the exchange-rules pattern-authoring design (2026-07-11)
 
 Companion design: [`cfc-exchange-rules-authoring.md`](./cfc-exchange-rules-authoring.md).
-All `open`.
+Critical review and dependency-ordered implementation work:
+[`cfc-exchange-rule-authoring.md`](../plans/cfc-exchange-rule-authoring.md).
+All `open`; Stage 0 of that plan records corrections required before these
+items become implementation contracts.
 
 **SC-29 [normative] Module-identity-addressed policy references — §4.4.2 +
 §15.3.** Policy principals today are `{name, subject, hash}` with a
-name→hash discovery step (§4.4.1). For rule sets declared in pattern code,
-the reference should be the SC-22 identity pair — `{module identity, symbol}`
-(content-addressed entry-module identity + exported name), the same reference
-form the runtime uses for patterns/lifts/handlers. The pair is content-derived,
-so §4.4.2's hash-binding requirement is inherent in the reference and no
-separate discovery hop exists to fail; rebinding semantics are SC-22's (any
-code change ⇒ new identity ⇒ new policy version; migration per §4.4.4 rides
-the ordinary pattern-upgrade story). Proposed edit: add the pair-addressed
-`Policy` form to §4.4.2 and the §15.3 table alongside the name-addressed form,
-and state that home-clause locality (§4.4.5) and clause-local authority
-(§5.3.3) apply identically.
+name→hash discovery step (§4.4.1). For rule sets declared in authored modules,
+the reference should carry the SC-22 identity pair —
+`{module identity, symbol}` (content-addressed module identity + exported name)
+— plus a canonical `policyDigest` and concrete `subject`. The pair names the
+defining source export. The digest is canonical `hashStringOf` over `{ domain:
+"cfc/policy-manifest/v1", manifest: {formatVersion, moduleIdentity, symbol,
+subjectIndependentTemplate} }`; an envelope may repeat the digest but excludes
+it from its own hash projection.
+The subject is bound relative to each invoking piece. A trusted compiler or
+verifier must attest the source-closure→export→manifest lowering; checking the
+digest alone proves byte integrity, not that derivation. No space may commit a
+persisted reference unless it already has, or atomically creates, a verified
+local manifest copy, so later evaluation is no less durable than that space and
+does not require retaining the defining source closure. Source-closure changes
+create a new pair and, because the pair is in the manifest body, a new digest
+for future labels; existing labels keep their old tuple until explicit §4.4.4
+migration. The subject-independent digest plus the label subject is a new
+module-policy binding form that §4.4.2/§4.4.3 must define explicitly. Proposed
+edit: add it to §4.4.2 and the §15.3 table alongside the name-addressed form,
+define trusted derivation, local verification/retention, and commitment-aware
+subject instantiation, and state that home-clause locality (§4.4.5) and
+clause-local authority (§5.3.3) apply identically.
 
 **SC-30 [normative] Concept-scoped owner policy records (user defaults) —
 §4.3/§4.4.1 + new §13 worked example.** Define the indirect-raise mechanism:
@@ -694,7 +708,7 @@ as `UserSurfaceInput`/`LlmDerived`. Needs a registry row and a minting rule.
 
 **SC-32 [clarify] Concept identity coordination — §4.8.1 + §5.7.1.** State
 that concept ids have exactly two forms — well-known URIs (ecosystem
-coordination) and pattern-relative `{identity, symbol}` (no registration;
+coordination) and module-relative `{identity, symbol}` (no registration;
 globally referencable once deployed, resolvable via `cf:` imports per the
 labs pattern-imports design) — and that bare string names are not a
 coordination form. Note the same concept id may appear in confidentiality

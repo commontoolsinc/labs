@@ -10,9 +10,12 @@ evaluation, adoption-by-workflow where authority is someone else's to give.
 
 ## Status
 
-Design sketches, one notch below the core doc: each is believed lowerable to
-existing spec machinery, but none has been sized against the runtime. New
-spec-change items: SC-36, SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md).
+Exploratory design sketches, one notch below the core doc. Critical review
+found that several require new runtime semantics rather than authoring sugar;
+none is scheduled by the core implementation program. See the
+[`cfc-exchange-rule-authoring` implementation plan](../plans/cfc-exchange-rule-authoring.md)
+for the prerequisite and safety disposition of each surface. New spec-change
+items: SC-36, SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md).
 
 ## Last Updated
 
@@ -32,7 +35,7 @@ the dependency classification.
 // Strip the gateway token only where it lawfully appears; the sink gate
 // fires this during boundary execution and emits AuthorizedRequest (§5.2.1).
 export const stripGatewayToken = exchangeRule({
-  appliesTo: SELF,
+  appliesTo: THIS_POLICY,
   post: { dropClause: true }, // spec's empty-postcondition removal form
   sink: "fetchData",
   paths: [["options", "headers", "Authorization"]],
@@ -77,7 +80,7 @@ export const gatewayErrorSanitizer = errorSanitizer({
 });
 
 export const gatewayErrorRules = errorExchangeRules({
-  match: { policy: SELF, errorCode: [400, 401, 404, 429] },
+  match: { policy: THIS_POLICY, errorCode: [400, 401, 404, 429] },
   release: [
     { path: "/error/code", to: actingUser() },
     { path: "/error/message", to: actingUser(), sanitizedBy: gatewayErrorSanitizer },
