@@ -8,6 +8,7 @@ import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getCellWithStatus } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { wishStateSchemaForResult } from "../src/builtins/wish-schema.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 
 const signer = await Identity.fromPassphrase("undefined values");
 const space = signer.did();
@@ -268,6 +269,38 @@ Deno.test("wish output schema preserves undefined through its result redirect", 
     await runtime.dispose();
     await storageManager.close();
   }
+});
+
+Deno.test("wish output schema preserves local defs through result paths", () => {
+  const pieceSchema = {
+    type: "object",
+    properties: {
+      allPieces: {
+        type: "array",
+        items: { $ref: "#/$defs/MinimalPiece" },
+        asCell: ["cell"],
+      },
+    },
+    required: ["allPieces"],
+    $defs: {
+      MinimalPiece: {
+        type: "object",
+        properties: { "$NAME": { type: "string" } },
+      },
+    },
+  } as const;
+
+  const stateSchema = wishStateSchemaForResult(pieceSchema)!;
+  const allPiecesSchema = new ContextualFlowControl().schemaAtPath(
+    stateSchema,
+    ["result", "allPieces"],
+  );
+
+  assertEquals(
+    (allPiecesSchema as { $defs?: unknown }).$defs,
+    pieceSchema.$defs,
+  );
+  ContextualFlowControl.joinSchema(new Set(), allPiecesSchema);
 });
 
 Deno.test("removed keys are deleted, not left as undefined", async () => {

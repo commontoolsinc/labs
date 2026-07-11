@@ -43,6 +43,11 @@ export function wishStateSchemaForResult(
   // canonicalizes the wrapper, so the duplicate reference is fine.
   const resultSchema = schemaAsCell(schema);
   const candidateSchema = resultSchema;
+  // Local refs are resolved from the schema root. Hoist authored definitions
+  // so paths selected through the WishState wrapper retain that root context.
+  const rootDefs = typeof resultSchema === "object" && resultSchema !== null
+    ? resultSchema.$defs
+    : undefined;
   return internSchema({
     type: "object",
     properties: {
@@ -60,5 +65,6 @@ export function wishStateSchemaForResult(
       [UI]: true,
     },
     required: ["result", "candidates"],
+    ...(rootDefs !== undefined && { $defs: rootDefs }),
   });
 }
