@@ -386,6 +386,12 @@ Focused tests:
   payload and decodes context-free to inert shells. Add the pure canonical
   Fabric-value URI encoder at the same seam without flipping repository
   writers yet.
+- [x] Make the shared `createDataCellURI()` boundary emit the canonical Fabric
+  document, map relative links through hidden factory state, preserve
+  Fabric-special atoms, and require a runner-supplied artifact-space
+  availability proof before encoding any nested factory. Make data-URI
+  inlining traverse the same hidden state without materializing decoded
+  shells.
 - [ ] Migrate every data-URI reader to the shared dual-format decoder before
   the canonical writer changes, retaining percent/base64 UTF-8 compatibility
   and literal legacy slash-key objects without payload sniffing.

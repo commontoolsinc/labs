@@ -7,7 +7,16 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
+import {
+  createDataCellURI,
+  findAndInlineDataURILinks,
+} from "../src/link-utils.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -33,6 +42,53 @@ describe("data URI inlining", () => {
   });
 
   describe("findAndInlineDataUriLinks", () => {
+    it("keeps decoded factories inert and inlines links in hidden state", () => {
+      const nestedURI = createDataCellURI("captured value");
+      const factory = createFactoryShell({
+        kind: "pattern",
+        ref: {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "factory",
+        },
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: {
+          captured: {
+            "/": {
+              [LINK_V1_TAG]: { id: nestedURI, path: [] },
+            },
+          },
+        },
+      });
+      const factoryURI = createDataCellURI(factory, undefined, {
+        assertFactoryAvailable: () => {},
+      });
+      const storedFactoryLink = {
+        "/": {
+          [LINK_V1_TAG]: { id: factoryURI, path: [] },
+        },
+      };
+
+      const decoded = findAndInlineDataURILinks(storedFactoryLink);
+      expect(isAdmittedFabricFactory(decoded)).toBe(true);
+      expect(() => decoded()).toThrow(
+        "factory requires runner materialization",
+      );
+
+      const inlined = findAndInlineDataURILinks(decoded);
+      expect(isAdmittedFabricFactory(inlined)).toBe(true);
+      expect(inlined).not.toBe(decoded);
+      const state = factoryStateOf(inlined);
+      if (state.kind !== "pattern") {
+        throw new Error("expected pattern factory state");
+      }
+      expect(state.params).toEqual({ captured: "captured value" });
+      expect(() => inlined()).toThrow(
+        "factory requires runner materialization",
+      );
+    });
+
     it("returns a link-free array holding NaN by reference", () => {
       // The copy-on-write gate must treat an untouched `NaN` leaf as
       // unchanged (`Object.is` semantics), not clone the container.

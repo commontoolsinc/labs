@@ -4,6 +4,7 @@ import {
   areLinksSame,
   areNormalizedLinksSame,
   areNormalizedLinksSameIgnoringScope,
+  createDataCellURI,
   createLLMFriendlyLink,
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
@@ -12,6 +13,7 @@ import {
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
+  getJSONFromDataURI,
   KeepAsCell,
   type NormalizedLink,
   parseAliasBinding,
@@ -24,10 +26,17 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1441,6 +1450,270 @@ describe("link-utils", () => {
       // With keepAsCell: All, it should be preserved
       const resultKept = sanitizeSchemaForLinks(schema, KeepAsCell.All);
       expect((resultKept as any).asCell).toEqual(["opaque"]);
+    });
+  });
+
+  describe("createDataCellURI", () => {
+    it("writes canonical Fabric documents and requires factory availability proof", () => {
+      const baseCell = runtime.getCell(
+        space,
+        "factory data URI base",
+        undefined,
+        tx,
+      );
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["captured", "value"],
+          },
+        },
+      };
+      const factory = createFactoryShell({
+        kind: "pattern",
+        ref: {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "factory",
+        },
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: {
+          relativeLink,
+          bytes: new FabricBytes(new Uint8Array([1, 2, 3])),
+        },
+      });
+
+      expect(() => createDataCellURI({ factory }, baseCell)).toThrow(
+        "artifact-space availability proof",
+      );
+
+      const checked: unknown[] = [];
+      const uri = createDataCellURI(
+        { factory, repeated: factory },
+        baseCell,
+        {
+          assertFactoryAvailable: (candidate) => checked.push(candidate),
+        },
+      );
+      expect(uri.startsWith(
+        "data:application/vnd.commonfabric.fabric-value;charset=utf-8,",
+      )).toBe(true);
+      expect(checked).toHaveLength(1);
+      expect(checked[0]).toBe(factory);
+
+      const parsed = getJSONFromDataURI(uri);
+      expect(isAdmittedFabricFactory(parsed.value.factory)).toBe(true);
+      expect(isAdmittedFabricFactory(parsed.value.repeated)).toBe(true);
+      const state = factoryStateOf(parsed.value.factory);
+      if (state.kind !== "pattern") {
+        throw new Error("expected pattern factory state");
+      }
+      const mappedLink = (
+        (state.params as { relativeLink: Record<string, unknown> })
+          .relativeLink["/"] as Record<string, Record<string, unknown>>
+      )[LINK_V1_TAG];
+      expect(mappedLink.id).toBe(baseId);
+      expect(mappedLink.path).toEqual(["captured", "value"]);
+      expect(
+        (state.params as { bytes: unknown }).bytes,
+      ).toBeInstanceOf(FabricBytes);
+      expect(() => parsed.value.factory()).toThrow(
+        "factory requires runner materialization",
+      );
+    });
+
+    it("rejects arbitrary functions at the canonical data URI boundary", () => {
+      expect(() => createDataCellURI({ invalid: () => undefined })).toThrow();
+    });
+
+    it("should throw on circular data", () => {
+      const circular: any = { name: "test" };
+      circular.self = circular;
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on nested circular data", () => {
+      const obj1: any = { name: "obj1" };
+      const obj2: any = { name: "obj2", ref: obj1 };
+      obj1.ref = obj2;
+
+      expect(() => createDataCellURI(obj1)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on circular data in arrays", () => {
+      const circular: any = { items: [] };
+      circular.items.push(circular);
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should rewrite relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        baseCell,
+      );
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "nested",
+        "value",
+      ]);
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+    });
+
+    it("should rewrite relative links with base scope", () => {
+      const baseCell = runtime.getCell(space, "scoped base", undefined, tx);
+      const scopedBaseCell = createCell(runtime, {
+        ...baseCell.getAsNormalizedFullLink(),
+        scope: "session",
+      }, tx);
+      const baseId = scopedBaseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        scopedBaseCell,
+      );
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].scope).toBe("session");
+    });
+
+    it("should rewrite nested relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const data = {
+        items: [
+          {
+            "/": {
+              [LINK_V1_TAG]: {
+                path: ["item", "0"],
+              },
+            },
+          },
+          {
+            nested: {
+              link: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    path: ["item", "1"],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const dataURI = createDataCellURI(data, baseCell);
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
+        baseId,
+      );
+    });
+
+    it("should not modify absolute links", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const otherCell = runtime.getCell(space, "other", undefined, tx);
+      const otherId = otherCell.getAsNormalizedFullLink().id;
+
+      const absoluteLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: otherId,
+            path: ["some", "path"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI({ link: absoluteLink }, baseCell);
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      // Should remain unchanged
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "some",
+        "path",
+      ]);
+    });
+
+    it("should handle reused acyclic objects without throwing", () => {
+      const sharedObject = { value: 42 };
+      const data = {
+        first: sharedObject,
+        second: sharedObject,
+        nested: {
+          third: sharedObject,
+        },
+      };
+
+      // Should not throw even though sharedObject is referenced multiple times
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.first.value).toBe(42);
+      expect(parsed.value.second.value).toBe(42);
+      expect(parsed.value.nested.third.value).toBe(42);
+    });
+
+    it("should handle UTF-8 characters (emojis, special characters)", () => {
+      const data = {
+        emoji: "🚀 Hello World! 🌍",
+        chinese: "你好世界",
+        arabic: "مرحبا بالعالم",
+        special: "Ñoño™©®",
+        mixed: "Test 🎉 with ñ and 中文",
+      };
+
+      // Should not throw with UTF-8 characters
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.emoji).toBe("🚀 Hello World! 🌍");
+      expect(parsed.value.chinese).toBe("你好世界");
+      expect(parsed.value.arabic).toBe("مرحبا بالعالم");
+      expect(parsed.value.special).toBe("Ñoño™©®");
+      expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
     });
   });
 

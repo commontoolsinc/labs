@@ -2,6 +2,8 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -15,9 +17,17 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
+import {
+  type CellLinkRefPayload,
+  type SigilLink,
+  type URI,
+} from "./sigil-types.ts";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "./uri-utils.ts";
+import {
+  encodeFabricValueDataURI,
+  getJSONFromDataURI,
+  toURI,
+} from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
   CellResultInternals,
@@ -43,6 +53,10 @@ import {
 import { MetaLinkField } from "@commonfabric/api";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { createRef } from "./create-ref.ts";
+import {
+  createFactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 
 export * from "./link-types.ts";
 
@@ -264,6 +278,189 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
+}
+
+  /**
+ * Find any data: URI links and inline them.
+ *
+ * @param value - The value to find and inline data: URI links in.
+ * @returns The value with any data: URI links inlined.
+ */
+export function findAndInlineDataURILinks(value: any): any {
+  return findAndInlineDataURILinksInner(
+    value,
+    createFactoryTraversalContext(),
+  );
+}
+
+function findAndInlineDataURILinksInner(
+  value: any,
+  factoryContext: ReturnType<typeof createFactoryTraversalContext>,
+): any {
+  if (isAdmittedFabricFactory(value)) {
+    return mapFactoryForTraversal(
+      value,
+      (nested) => findAndInlineDataURILinksInner(nested, factoryContext),
+      factoryContext,
+    );
+  } else if (typeof value === "function") {
+    throw new TypeError("Arbitrary functions are not valid Fabric values");
+  } else if (isCellLink(value)) {
+    const dataLink = parseLink(value)!;
+
+    if (dataLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      const path = [...dataLink.path];
+
+      // This is a storage item, so we have to look into the "value" field for
+      // the actual data.
+      if (!isRecord(dataValue)) return undefined;
+      dataValue = dataValue["value"];
+
+      // If there is a link on the way to `path`, follow it, appending remaining
+      // path to the target link.
+      while (dataValue !== undefined) {
+        if (isPrimitiveCellLink(dataValue)) {
+          // Parse the link found in the data URI
+          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
+          const newLink = parseLink(dataValue);
+          let schema = newLink.schema;
+          if (schema !== undefined && path.length > 0) {
+            const cfc = new ContextualFlowControl();
+            schema = cfc.getSchemaAtPath(schema, path);
+          }
+          // Create new link by merging dataLink with remaining path
+          const newSigilLink = createSigilLinkFromParsedLink({
+            // Start with values from the original data link
+            ...dataLink,
+
+            // overwrite with values from the new link
+            ...newLink,
+
+            // extend path with remaining segments
+            path: [...newLink.path, ...path],
+
+            // use resolved schema if we have one
+            ...(schema !== undefined && { schema }),
+          }, {
+            includeSchema: true,
+            keepAsCell: KeepAsCell.All,
+          });
+          return findAndInlineDataURILinksInner(newSigilLink, factoryContext);
+        }
+        if (path.length > 0) {
+          dataValue = dataValue[path.shift()!];
+        } else {
+          break;
+        }
+      }
+
+      return dataValue;
+    } else {
+      return value;
+    }
+  } else if (Array.isArray(value)) {
+    let next: any[] | undefined;
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) continue;
+      const current = value[index];
+      const inlined = findAndInlineDataURILinksInner(current, factoryContext);
+      if (next) {
+        next[index] = inlined;
+      } else if (inlined !== current) {
+        next = value.slice();
+        next[index] = inlined;
+      }
+    }
+    return next ?? value;
+  } else if (value instanceof FabricSpecialObject) {
+    return value;
+  } else if (isRecord(value)) {
+    let next: Record<string, unknown> | undefined;
+    for (const [key, entry] of Object.entries(value)) {
+      const inlined = findAndInlineDataURILinksInner(entry, factoryContext);
+      if (next) {
+        next[key] = inlined;
+      } else if (inlined !== entry) {
+        next = { ...value };
+        next[key] = inlined;
+      }
+    }
+    return next ?? value;
+  } else {
+    return value;
+  }
+}
+
+export interface CreateDataCellURIOptions {
+  /**
+   * Runner-owned proof that the factory's complete artifact closure is
+   * available in the containing document's exact source space.
+   */
+  readonly assertFactoryAvailable?: (factory: unknown) => void;
+}
+
+/** Create the canonical inline Fabric document used by durable cell links. */
+export function createDataCellURI(
+  data: any,
+  base?: Cell | NormalizedLink,
+  options: CreateDataCellURIOptions = {},
+): URI {
+  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  const factoryContext = createFactoryTraversalContext();
+  const checkedFactories = new WeakSet<object>();
+
+  function traverseAndAddBaseIdToRelativeLinks(
+    value: any,
+    seen: Set<object>,
+  ): any {
+    if (isAdmittedFabricFactory(value)) {
+      if (!checkedFactories.has(value)) {
+        if (!options.assertFactoryAvailable) {
+          throw new Error(
+            "Cannot create durable data URI containing Factory@1 without artifact-space availability proof",
+          );
+        }
+        options.assertFactoryAvailable(value);
+        checkedFactories.add(value);
+      }
+      return mapFactoryForTraversal(
+        value,
+        (nested) => traverseAndAddBaseIdToRelativeLinks(nested, seen),
+        factoryContext,
+      );
+    }
+    if (value instanceof FabricSpecialObject) return value;
+    if (!isRecord(value)) return value;
+    if (seen.has(value)) {
+      throw new Error(`Cycle detected when creating data URI`);
+    }
+    seen.add(value);
+    try {
+      if (isPrimitiveCellLink(value)) {
+        const link = parseLink(value, baseLink);
+        return createSigilLinkFromParsedLink(link, {
+          includeSchema: true,
+          keepAsCell: KeepAsCell.All,
+        });
+      } else if (Array.isArray(value)) {
+        return value.map((item) =>
+          traverseAndAddBaseIdToRelativeLinks(item, seen)
+        );
+      } else { // isObject
+        return Object.fromEntries(
+          Object.entries(value).map((
+            [key, value],
+          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+        );
+      }
+    } finally {
+      seen.delete(value);
+    }
+  }
+  return encodeFabricValueDataURI({
+    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  });
 }
 
 /**
