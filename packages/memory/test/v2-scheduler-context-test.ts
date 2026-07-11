@@ -1434,6 +1434,80 @@ Deno.test("scheduler context rebuilds a partially converted ownership schema", a
   }
 });
 
+Deno.test("scheduler context schema repair never broadens a qualified scoped row", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const actionId = "context:partial-schema:narrowed";
+  const sharedActionId = "context:partial-schema:shared";
+  let engine: Engine | undefined;
+  try {
+    engine = await openEngine({ url: toFileUrl(path) });
+    const sharedObservation = observationFor({ actionId });
+    assertEquals(
+      storeObservation(engine, sharedObservation, ALICE_A)
+        .executionContextKey,
+      SPACE_KEY,
+    );
+    assertEquals(
+      storeObservation(
+        engine,
+        observationFor({ actionId, runtimeScope: "session" }),
+        ALICE_A,
+      ).executionContextKey,
+      ALICE_A_SESSION_KEY,
+    );
+    // The durable floor keeps a later space-looking run narrowed.
+    assertEquals(
+      storeObservation(engine, sharedObservation, ALICE_A)
+        .executionContextKey,
+      ALICE_A_SESSION_KEY,
+    );
+    assertEquals(
+      storeObservation(
+        engine,
+        observationFor({ actionId: sharedActionId }),
+        ALICE_A,
+      ).executionContextKey,
+      SPACE_KEY,
+    );
+    close(engine);
+    engine = undefined;
+
+    // Leave the qualified rows intact while making the lookup index only
+    // partially current, forcing the conservative schema-repair path.
+    const partial = new Database(path, { create: true });
+    try {
+      partial.exec(`
+        DROP INDEX idx_scheduler_read_index_lookup;
+        CREATE INDEX idx_scheduler_read_index_lookup
+          ON scheduler_read_index (
+            read_space,
+            branch,
+            read_id,
+            read_scope_key
+          );
+      `);
+    } finally {
+      partial.close();
+    }
+
+    engine = await openEngine({ url: toFileUrl(path) });
+    // Dropping scoped active state is conservative; restoring it as `space`
+    // would violate the monotonic narrowing proof and leak across sessions.
+    assertOwnedContexts(engine, actionId, []);
+    assertOwnedContexts(engine, sharedActionId, [SPACE_KEY]);
+    assertEquals(engine.database.prepare(`PRAGMA foreign_key_check`).all(), []);
+    close(engine);
+    engine = undefined;
+
+    engine = await openEngine({ url: toFileUrl(path) });
+    assertOwnedContexts(engine, actionId, []);
+    assertOwnedContexts(engine, sharedActionId, [SPACE_KEY]);
+  } finally {
+    if (engine) close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("scheduler context read lookup keeps its target index at 10k rows", async () => {
   await withEngine((engine) => {
     const actionId = "context:index-plan";

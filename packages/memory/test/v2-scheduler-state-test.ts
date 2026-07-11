@@ -1106,6 +1106,20 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
       null,
     );
 
+    const supersededReplay = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-coalesce",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+    });
+    assertEquals(
+      supersededReplay.schedulerObservationResults?.[0]?.executionContextKey,
+      undefined,
+    );
+
     const replay = applyCommit(engine, {
       sessionId: "session:scheduler-observation-coalesce",
       commit: {
@@ -1119,6 +1133,9 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
       },
     });
     assertEquals(replay.schedulerObservationId, first.schedulerObservationId);
+    assertExists(
+      replay.schedulerObservationResults?.[0]?.executionContextKey,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -2215,6 +2232,164 @@ Deno.test("memory v2 server preserves an origin-narrowed scheduler mirror contex
         writeRow.write_scope_key,
         `user:${encodeURIComponent(principal)}`,
       );
+    } finally {
+      close(readEngine);
+    }
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server does not resurrect a broader scheduler mirror on replay", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const principal = "did:key:scheduler-replay-mirror-principal";
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const authorized = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof authorized === "string" ? authorized : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-replay-mirror-owner";
+  const readSpace = "did:key:scheduler-replay-mirror-read";
+  const owner = await client.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(principal),
+  );
+  await client.mount(readSpace, {}, schedulerAuthFactoryFor(principal));
+  const actionId = "pattern.tsx:computed:replay-mirror";
+  const implementationFingerprint = `impl:${actionId}`;
+  const piece = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:piece",
+    path: [],
+  };
+  const userRead = {
+    space: readSpace,
+    scope: "user" as const,
+    id: "of:user-input",
+    path: ["value"],
+  };
+  const userWrite = {
+    space: ownerSpace,
+    scope: "user" as const,
+    id: "of:user-output",
+    path: ["value"],
+  };
+  const sessionRead = {
+    space: ownerSpace,
+    scope: "session" as const,
+    id: "of:session-input",
+    path: ["value"],
+  };
+  const changedSessionRead = {
+    ...sessionRead,
+    path: ["changed-value"],
+  };
+  const userObservation = {
+    ...observation,
+    version: 2 as const,
+    ownerSpace,
+    pieceId: "space:of:piece",
+    actionId,
+    implementationFingerprint,
+    reads: [userRead],
+    currentKnownWrites: [userWrite],
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint,
+      runtimeFingerprint: observation.runtimeFingerprint,
+      piece,
+      reads: [userRead],
+      writes: [userWrite],
+      materializerWriteEnvelopes: [],
+      directOutputs: [userWrite],
+    },
+  } satisfies SchedulerActionObservation;
+  const sessionObservation = {
+    ...userObservation,
+    reads: [userRead, sessionRead],
+    currentKnownWrites: [],
+  } satisfies SchedulerActionObservation;
+  const changedSessionObservation = {
+    ...sessionObservation,
+    reads: [userRead, changedSessionRead],
+  } satisfies SchedulerActionObservation;
+  const initialCommit = {
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set" as const,
+      id: "of:semantic-write",
+      value: { value: { initialized: true } },
+    }],
+    schedulerObservation: userObservation,
+  };
+  const sessionCommit = {
+    localSeq: 2,
+    reads: { confirmed: [], pending: [] },
+    operations: [],
+    schedulerObservation: sessionObservation,
+  };
+  const expectedSessionContext = `session:${encodeURIComponent(principal)}:${
+    encodeURIComponent(owner.sessionId)
+  }`;
+
+  try {
+    await owner.transact(initialCommit);
+    const sessionResult = await owner.transact(sessionCommit);
+    const changedSessionResult = await owner.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: changedSessionObservation,
+    });
+    assertEquals(
+      changedSessionResult.schedulerObservationId,
+      sessionResult.schedulerObservationId,
+    );
+
+    const sessionReplay = await owner.transact(sessionCommit);
+    assertEquals(
+      sessionReplay.schedulerObservationResults?.[0]?.executionContextKey,
+      undefined,
+    );
+
+    const userReplay = await owner.transact(initialCommit);
+    assertEquals(
+      userReplay.schedulerObservationResults?.[0]?.executionContextKey,
+      undefined,
+    );
+
+    await client.close();
+    await server.close();
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const snapshots = listSchedulerActionSnapshots(readEngine, { actionId })
+        .snapshots;
+      assertEquals(
+        snapshots.map(
+          (snapshot) => snapshot.executionContextKey,
+        ),
+        [expectedSessionContext],
+      );
+      assertEquals(snapshots[0]?.observation.reads, [
+        userRead,
+        changedSessionRead,
+      ]);
     } finally {
       close(readEngine);
     }

@@ -3252,13 +3252,20 @@ export class Server {
       }
       for (const { localSeq, observation } of observations) {
         const result = observationResults?.get(localSeq);
-        if (result?.status === "dropped") {
+        if (result === undefined) {
+          throw new Error(
+            `scheduler observation ${localSeq} missing owner result`,
+          );
+        }
+        if (result.status === "dropped") {
           continue;
         }
-        if (result?.executionContextKey === undefined) {
-          throw new Error(
-            `kept scheduler observation ${localSeq} missing owner execution context`,
-          );
+        // A kept replay remains idempotently acknowledged even after a later
+        // observation replaced or narrowed its owner snapshot. The engine omits
+        // the effective context in that case so this stale payload cannot
+        // recreate or roll back a mirror.
+        if (result.executionContextKey === undefined) {
+          continue;
         }
         await this.mirrorSchedulerObservation(
           ownerSpace,

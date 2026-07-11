@@ -1679,7 +1679,7 @@ const SCHEDULER_CONTEXT_FLOOR_COLUMNS = [
   "principal_key",
 ] as const;
 
-const schedulerExecutionContextSchemaCurrent = (
+export const schedulerExecutionContextSchemaCurrent = (
   database: Database,
 ): boolean =>
   hasColumn(database, "scheduler_observation", "execution_context_key") &&
@@ -1766,6 +1766,10 @@ type SchedulerMigrationCandidate = {
   process_generation: number;
   action_id: string;
   observation_id: number;
+  qualified_context_schema: number;
+  snapshot_execution_context_key: SchedulerExecutionContextKey | null;
+  observation_execution_context_key: SchedulerExecutionContextKey | null;
+  state_execution_context_key: SchedulerExecutionContextKey | null;
   snapshot_commit_seq: number | null;
   snapshot_observed_at_seq: number;
   snapshot_payload: string;
@@ -1791,8 +1795,31 @@ type SchedulerMigrationCandidate = {
 
 const schedulerMigrationCandidates = (
   database: Database,
-): SchedulerMigrationCandidate[] =>
-  database.prepare(`
+): SchedulerMigrationCandidate[] => {
+  const contextColumnsPresent = [
+    ["scheduler_action_snapshot", "execution_context_key"],
+    ["scheduler_observation", "execution_context_key"],
+    ["scheduler_action_state", "execution_context_key"],
+  ].map(([table, column]) => hasColumn(database, table, column));
+  const anyContextColumn = contextColumnsPresent.some(Boolean);
+  const qualifiedContextSchema = contextColumnsPresent.every(Boolean);
+  // A mixed ownership tuple cannot prove either legacy-unqualified or
+  // context-qualified identity. Drop all active candidates and run fresh.
+  if (anyContextColumn && !qualifiedContextSchema) return [];
+
+  const contextColumns = qualifiedContextSchema
+    ? `
+      1 AS qualified_context_schema,
+      s.execution_context_key AS snapshot_execution_context_key,
+      o.execution_context_key AS observation_execution_context_key,
+      a.execution_context_key AS state_execution_context_key,`
+    : `
+      0 AS qualified_context_schema,
+      NULL AS snapshot_execution_context_key,
+      NULL AS observation_execution_context_key,
+      NULL AS state_execution_context_key,`;
+
+  return database.prepare(`
     SELECT
       s.branch,
       s.owner_space,
@@ -1800,6 +1827,7 @@ const schedulerMigrationCandidates = (
       s.process_generation,
       s.action_id,
       s.observation_id,
+      ${contextColumns}
       s.commit_seq AS snapshot_commit_seq,
       s.observed_at_seq AS snapshot_observed_at_seq,
       s.payload AS snapshot_payload,
@@ -1856,12 +1884,17 @@ const schedulerMigrationCandidates = (
       AND a.action_id = s.action_id
       AND a.latest_observation_id = s.observation_id
   `).all() as SchedulerMigrationCandidate[];
+};
 
 function schedulerMigrationObservation(
   candidate: SchedulerMigrationCandidate,
 ): SchedulerActionObservation | undefined {
   try {
     if (
+      (candidate.qualified_context_schema === 1 &&
+        (candidate.snapshot_execution_context_key !== "space" ||
+          candidate.observation_execution_context_key !== "space" ||
+          candidate.state_execution_context_key !== "space")) ||
       candidate.observation_branch !== candidate.branch ||
       candidate.observation_piece_id !== candidate.piece_id ||
       candidate.observation_process_generation !==
@@ -4086,12 +4119,19 @@ function getSchedulerObservationReplay(
       replay.status,
       replay.reason,
       replay.observation_id,
-      observation.execution_context_key,
+      active_snapshot.execution_context_key,
       replay.observed_at_seq,
       replay.payload
     FROM scheduler_observation_replay replay
     LEFT JOIN scheduler_observation observation
       ON observation.observation_id = replay.observation_id
+    LEFT JOIN scheduler_action_snapshot active_snapshot
+      ON active_snapshot.observation_id = observation.observation_id
+      AND active_snapshot.execution_context_key =
+        observation.execution_context_key
+      AND active_snapshot.payload = replay.payload
+      AND active_snapshot.observed_at_seq = replay.observed_at_seq
+      AND observation.session_id = replay.session_id
     WHERE replay.branch = :branch
       AND replay.session_id = :session_id
       AND replay.local_seq = :local_seq
@@ -4763,8 +4803,7 @@ const applyCommitTransaction = (
       : undefined;
     const observationResult = observationReplay &&
         (observationReplay.status === "dropped" ||
-          observationReplay.observation_id !== null &&
-            observationReplay.execution_context_key !== null)
+          observationReplay.observation_id !== null)
       ? replayedSchedulerObservationResult(
         commit.localSeq,
         observationReplay,
@@ -5405,18 +5444,18 @@ const replayedSchedulerObservationResult = (
       reason: replay.reason ?? "stale-confirmed-read",
     };
   }
-  if (
-    replay.observation_id === null || replay.execution_context_key === null
-  ) {
+  if (replay.observation_id === null) {
     throw new ProtocolError(
-      `kept scheduler observation replay missing active context for localSeq ${localSeq}`,
+      `kept scheduler observation replay missing observation identity for localSeq ${localSeq}`,
     );
   }
   return {
     localSeq,
     status: "kept",
     schedulerObservationId: replay.observation_id,
-    executionContextKey: replay.execution_context_key,
+    ...(replay.execution_context_key !== null
+      ? { executionContextKey: replay.execution_context_key }
+      : {}),
   };
 };
 
