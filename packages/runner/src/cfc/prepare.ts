@@ -2164,6 +2164,24 @@ const projectionClaimSpec = (
   return { source: canonicalizeLogicalPath(source), field };
 };
 
+// A schema-entry path (a `pathKey` — the canonical pointer encoding) parsed
+// back to segments. Entry paths use "*" for array-item / record-value
+// positions (walkIfcSchema).
+const entryPathFromKey = (key: string): readonly string[] =>
+  key === "" ? [] : key.slice(1).split("/").map(decodePointerSegment);
+
+// Does a schema-entry path cover a PREFIX of a concrete source path? "*"
+// matches any concrete segment: an items-level label applies uniformly to
+// every element, so treating it as covering a concrete index is exact — the
+// exact-`Map.get` alternative silently DROPPED the items-level label for a
+// concrete-element projection (fail-open label loss; review P1).
+const entryPathCoversPrefix = (
+  entryPath: readonly string[],
+  source: readonly string[],
+): boolean =>
+  entryPath.length <= source.length &&
+  entryPath.every((segment, i) => segment === "*" || segment === source[i]);
+
 // §8.3.2 scoped-integrity carry for a verified projection claim: the
 // projected field inherits the source's confidentiality in full (§8.3.1) and
 // carries the source's integrity SCOPED to the projected pointer — the
@@ -2189,13 +2207,15 @@ const projectedSourceLabel = (
   const source = canonicalizeLogicalPath([...claim.source, ...claim.field]);
   const confidentiality: unknown[] = [];
   const integrity: unknown[] = [];
-  for (let depth = 0; depth <= source.length; depth++) {
-    const label = sourceEntryLabels.get(pathKey(source.slice(0, depth)));
-    if (label === undefined) {
+  // Map insertion order is the schema-walk order (parents before children),
+  // so contributions stay ordered ancestor-first along the source lineage.
+  for (const [key, label] of sourceEntryLabels) {
+    const entryPath = entryPathFromKey(key);
+    if (!entryPathCoversPrefix(entryPath, source)) {
       continue;
     }
     confidentiality.push(...label.confidentiality ?? []);
-    const relative = source.slice(depth);
+    const relative = source.slice(entryPath.length);
     for (const atom of label.integrity ?? []) {
       if (relative.length === 0) {
         integrity.push(atom);

@@ -205,6 +205,117 @@ describe("CFC projection claims", () => {
     }
   });
 
+  it("carries the items-level (*) label for a concrete array-element projection", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-array-element",
+        {
+          type: "object",
+          properties: {
+            // Primitive elements stay INLINE in the document (object elements
+            // are normalized into child docs and fail the same-doc value
+            // comparison — pinned below), so this is the shape where the
+            // items-level label carry is reachable.
+            latitudes: {
+              type: "array",
+              items: {
+                type: "number",
+                // Stored under the wildcard entry path latitudes/* — an
+                // items-level label applies uniformly to every element, so a
+                // concrete-element projection must still find and carry it
+                // (review P1: the exact-path lookup silently lost it).
+                ifc: {
+                  confidentiality: ["secret"],
+                  integrity: [{ type: "GPSMeasurement" }],
+                },
+              },
+            },
+            firstLatitude: {
+              type: "number",
+              ifc: { projection: { from: "/latitudes", path: "/0" } },
+            },
+          },
+          required: ["latitudes", "firstLatitude"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      cell.set({
+        latitudes: [37.77, -12.3],
+        firstLatitude: 37.77,
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = readPersistedEntries(storageManager, persistedId);
+      const entry = entries?.find((e) =>
+        e.path.length === 1 && e.path[0] === "firstLatitude"
+      );
+      expect(entry?.label.confidentiality).toEqual(["secret"]);
+      // The items entry IS the element (relative pointer is the root), so its
+      // atoms carry unscoped — the target is an exact copy of the element.
+      expect(entry?.label.integrity).toEqual([
+        { type: "GPSMeasurement" },
+      ]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("fails closed for a projection into a normalized (object) array element", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-object-element",
+        {
+          type: "object",
+          properties: {
+            measurements: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { lat: { type: "number" } },
+                ifc: { confidentiality: ["secret"] },
+              },
+            },
+            firstLatitude: {
+              type: "number",
+              ifc: { projection: { from: "/measurements", path: "/0/lat" } },
+            },
+          },
+          required: ["measurements", "firstLatitude"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      // Object elements are normalized into child documents: the element path
+      // holds a link sigil, so the same-doc value comparison cannot succeed
+      // and the claim rejects — no label is ever carried (or lost) silently.
+      cell.set({
+        measurements: [{ lat: 37.77 }],
+        firstLatitude: 37.77,
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "projection claim failed at /firstLatitude",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("ignores a projection claim whose target path was not written", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

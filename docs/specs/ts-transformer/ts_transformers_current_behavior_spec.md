@@ -552,9 +552,11 @@ local type aliases and type-parameter substitution
 - the bound name is not a supported origin — a local `handler()` / `module()` /
   `requireEventIntegrity()` initializer, or a local function declaration
 
-Well-formed `WriteAuthorizedBy` usage passes validation; the base schema still
-lowers as `T` (the `WriteAuthorizedBy` wrapper contributes no schema metadata on
-current `main`). This stage is exercised by `test/cfc-authoring.test.ts`,
+Well-formed `WriteAuthorizedBy` usage passes validation; the base schema
+lowers as `T` plus the writer-identity claim (`ifc.writeAuthorizedBy` carrying
+the `__ctWriterIdentityOf` binding marker, preserved through schema emission —
+see the identity tests in `test/cfc-authoring.test.ts`). This stage is
+exercised by `test/cfc-authoring.test.ts`,
 `test/cfc-transformer-coverage.test.ts`, and pipeline regressions.
 
 `ts-transformers` also re-exports the canonical CFC alias-name set
@@ -563,9 +565,11 @@ current `main`). This stage is exercised by `test/cfc-authoring.test.ts`,
 `WriteAuthorizedBy`, the `TrustedAction*` family, the projection aliases, etc.
 (The former collection/opaque helpers — `OpaqueInput`, `SubsetOf`,
 `FilteredFrom`, `LengthPreservedFrom`, `PermutationOf` — were removed: the
-runner rejects their lowered `ifc` keys fail-closed.) These names are
-recognized as CFC vocabulary but, apart from `WriteAuthorizedBy` validation
-above, are not yet lowered.
+runner rejects their lowered `ifc` keys fail-closed.) The canonical aliases
+are lowered into schema `ifc` metadata by the schema-generator's
+common-fabric formatter during the `SchemaGeneratorTransformer` stage (the
+lowering rules live in `cfc_authoring_contract.md`); `WriteAuthorizedBy`
+additionally gets the transformer-side validation above.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
@@ -1125,16 +1129,17 @@ pipeline. Current built-in behavior:
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
-6. The CFC authoring and trusted-UI helper contracts under
-   `docs/specs/ts-transformer/cfc_*.md` are draft **lowering** contracts: the
-   current pipeline on `main` does not lower those forms (no `ifc.*` schema
-   metadata emission). The one landed exception is **`WriteAuthorizedBy`
-   validation** (§6.8) — usage is validated (`cfc-write-authorized-by`) even
-   though the wrapper is not yet lowered. The canonical CFC alias names are
-   re-exported but otherwise inert. Note: the authoring draft says the schema
-   generator validates `WriteAuthorizedBy`; on `main` that validation is a
-   separate stage-10 `WriteAuthorizedByValidationTransformer`, not the schema
-   generator.
+6. The CFC authoring contract under `docs/specs/ts-transformer/cfc_*.md` is
+   implemented for the canonical alias set: the schema-generator's
+   common-fabric formatter lowers `Cfc` payloads, the wrapper aliases, the
+   projection helpers, and the `WriteAuthorizedBy` writer-identity marker into
+   `ifc.*` schema metadata during the `SchemaGeneratorTransformer` stage. The
+   former collection/opaque helpers were removed (the runner rejects their
+   lowered keys fail-closed). `WriteAuthorizedBy` usage is additionally
+   validated (`cfc-write-authorized-by`, §6.8). Note: the authoring contract
+   says the schema generator validates `WriteAuthorizedBy`; in the pipeline
+   that validation is a separate stage-10
+   `WriteAuthorizedByValidationTransformer`, not the schema generator.
 
 ## 15. Test Coverage Snapshot
 

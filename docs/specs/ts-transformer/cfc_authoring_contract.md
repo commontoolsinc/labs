@@ -225,9 +225,6 @@ Required failure modes:
   conditional or computed type programs are out of scope.
 - The supported alias set is closed by name. New sugar needs explicit formatter
   support.
-- `OpaqueInput<T, Spec>` only declares schema-level opacity. The compile-time
-  read restrictions on opaque values still come from the existing `Reactive`
-  type/runtime contract.
 
 ## Acceptance Coverage
 
@@ -236,4 +233,3 @@ coverage exists:
 
 - `packages/ts-transformers/test/cfc-authoring.test.ts`
 - `packages/schema-generator/test/schema/cfc-type.test.ts`
-- equivalent coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
