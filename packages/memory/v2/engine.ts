@@ -922,6 +922,10 @@ const isSchedulerRecord = (
 
 const isSchedulerObservationAddress = (value: unknown): boolean =>
   isSchedulerRecord(value) &&
+  !("scopeKey" in value) &&
+  !("scope_key" in value) &&
+  !("readScopeKey" in value) &&
+  !("writeScopeKey" in value) &&
   typeof value.space === "string" &&
   typeof value.id === "string" &&
   (value.scope === undefined || value.scope === "space" ||
@@ -932,10 +936,14 @@ const isSchedulerObservationAddress = (value: unknown): boolean =>
 const isSchedulerAddressArray = (value: unknown): boolean =>
   Array.isArray(value) && value.every(isSchedulerObservationAddress);
 
-const isCompleteActionScopeSummary = (value: unknown): boolean =>
+const isCompleteActionScopeSummary = (
+  value: unknown,
+  implementationFingerprint: unknown,
+  runtimeFingerprint: unknown,
+): boolean =>
   isSchedulerRecord(value) && value.version === 1 && value.complete === true &&
-  typeof value.implementationFingerprint === "string" &&
-  typeof value.runtimeFingerprint === "string" &&
+  value.implementationFingerprint === implementationFingerprint &&
+  value.runtimeFingerprint === runtimeFingerprint &&
   isSchedulerObservationAddress(value.piece) &&
   isSchedulerAddressArray(value.reads) &&
   isSchedulerAddressArray(value.writes) &&
@@ -947,6 +955,8 @@ export const schedulerObservationFromValue = (
 ): SchedulerActionObservation | undefined => {
   if (
     !isSchedulerRecord(value) ||
+    "executionContextKey" in value ||
+    "execution_context_key" in value ||
     (value.version !== 1 && value.version !== 2) ||
     (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
     typeof value.branch !== "string" || typeof value.pieceId !== "string" ||
@@ -958,7 +968,12 @@ export const schedulerObservationFromValue = (
     typeof value.implementationFingerprint !== "string" ||
     typeof value.runtimeFingerprint !== "string" ||
     (value.completeActionScopeSummary !== undefined &&
-      !isCompleteActionScopeSummary(value.completeActionScopeSummary)) ||
+      (value.version !== 2 ||
+        !isCompleteActionScopeSummary(
+          value.completeActionScopeSummary,
+          value.implementationFingerprint,
+          value.runtimeFingerprint,
+        ))) ||
     !Number.isSafeInteger(value.observedAtSeq) ||
     Number(value.observedAtSeq) < 0 ||
     (value.observedAtLocalSeq !== undefined &&
@@ -3156,6 +3171,7 @@ function trustedSchedulerScopeSummary(
     !summary || summary.version !== 1 || summary.complete !== true ||
     summary.implementationFingerprint !==
       observation.implementationFingerprint ||
+    !observation.implementationFingerprint.startsWith("impl:") ||
     summary.runtimeFingerprint !== observation.runtimeFingerprint ||
     ownerSpace === undefined ||
     `${normalizeSchedulerScope(summary.piece.scope)}:${summary.piece.id}` !==
