@@ -129,7 +129,8 @@ export const driftFlagRules = exchangeRules([
   evaluate the policy without copying the module's whole source closure. The
   concrete `subject` is bound by each invoking piece at label creation.
   Changing a rule creates a new pair and digest for future labels; old labels
-  keep their old reference until explicit migration.
+  keep their old reference until explicit migration. Upgrading the module alone
+  never extends the release paths of data that is already labeled.
 - `THIS_POLICY` is the placeholder for the policy principal being defined, which
   cannot be named before the module is hashed. It resolves relative to the
   containing exported `exchangeRules` artifact—not to the module as a
@@ -144,14 +145,12 @@ export const driftFlagRules = exchangeRules([
   `allowedPaths`), and `policyState` (grants); `post` is exactly one of
   `addAlternatives` / `dropClause`. `preConfScope` defaults to
   `"targetClause"`.
-- Lowering rejects a rule with no guard at all. Admissible guard forms: a
-  `pre.integrity` pattern, a `pre.policyState` grant guard, `pre.boundary`
-  sink/path scoping (§5.2.1's structural authorization), or the
-  **owner-self binding** — the target's subject constrained to the acting
-  principal with release only to that same principal (the §5.4.2
-  `$actingUser` shape; safe by construction, since it can only ever hand the
-  clause's own subject their own access). A rule with none of these is a
-  standing leak (invariant 3).
+- Lowering rejects a general-surface rule unless it has a `pre.integrity`
+  pattern or `pre.policyState` grant guard. A `pre.boundary` pattern may narrow
+  where an otherwise-authorized rule applies, but boundary context alone is not
+  release authority; boundary-only authoring remains extensions-gated. If the
+  owner-self case is approved, it ships as a narrow trusted standard-profile
+  rule rather than a generic authoring exemption.
 
 ### 2a. Raising, direct
 
@@ -167,22 +166,31 @@ export, its portable manifest digest, and the invocation-relative subject —
 `Policy{ module: <identity>, symbol: "driftFlagRules", policyDigest:
 <digest>, subject: <owning space> }`. The pair binds the authored source export;
 the digest binds the proposed module-policy variant's canonical,
-  subject-independent manifest body. The complete tuple binds the exact policy
-  instance while letting another space evaluate without retaining or recompiling
-  the source. A trusted compiler/verifier first proves that the source closure
-  and exported symbol lower to that manifest; digest verification alone proves
-  only copied-byte integrity. At label creation the subject is bound. Before any
-  space commits a persisted reference, it atomically stores or confirms a
-  verified local copy of the small manifest keyed by `policyDigest`. After
-  cross-space protection, the
-resolver seeds `THIS_POLICY.subject` from the represented subject value before
-matching, allowing commitment-aware comparison with concrete evidence without
-opening the commitment. The record lands as a
+subject-independent manifest body. The complete tuple binds the exact policy
+instance while letting another space evaluate without retaining or recompiling
+the source. A trusted compiler/verifier first proves that the source closure
+and exported symbol lower to that manifest; digest verification alone proves
+only copied-byte integrity. At label creation the subject is bound. Before any
+space commits a persisted reference, it atomically stores or confirms a
+verified local copy of the small manifest keyed by `policyDigest`.
+
+Under cross-space label-metadata protection, `Policy.subject` may be represented
+by a self-describing `{ digestOf: <hash> }` field commitment rather than
+plaintext; see
+[`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md#5-staging)
+and SC-25. The resolver seeds `THIS_POLICY.subject` from that represented value
+before matching. Existing commitment-aware equality can then compare concrete
+evidence without opening or disclosing the committed subject.
+
+The record lands as a
 `selection: "referenced"` policy record — the shipped label-carried,
 home-clause-local selection mode (CT-1874) — with the `{ identity, symbol }`
 pair, manifest digest, and invocation-relative subject added alongside the
-legacy label reference `{ name, subject, hash }` (SC-29). Its resolved template
-adapts to the shipped runtime record form.
+legacy label reference `{ name, subject, hash }` (SC-29). Stage 1's
+representation adapter validates the subject-independent manifest and maps its
+canonical rules into the shipped
+`PolicyRecord { id, digest, rules, selection: "referenced" }`; the resolver
+separately supplies home-clause and pre-seeded subject context during evaluation.
 
 Semantics, all inherited rather than invented:
 

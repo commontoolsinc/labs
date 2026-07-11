@@ -57,11 +57,15 @@ interface GatewayInput {
   token's taint only because the sink-scoped rule fires at the permitted
   path — "not a global exemption such as 'tokens never taint'" (§5.3.1). A
   token that leaks into the request body has no matching rule and taints.
-- The core doc's lint ("no unguarded rewrites") is satisfied here by the
-  boundary scoping — §5.2.1's structural authorization is one of its
-  admissible guard forms.
+- Boundary scoping does not satisfy the core authoring surface's integrity or
+  policy-state guard requirement by itself. This boundary-only syntax remains
+  unavailable until the runtime can enforce its path-local authority contract;
+  if shipped, it uses a dedicated extension surface rather than weakening the
+  general rule lint.
 
-Spec owes: nothing — this is §5.2/§5.3 verbatim with a typed carrier.
+Spec/runtime owe: per-path boundary evaluation, authority-only flow semantics,
+and an acceptance case proving a token leaked outside the authorized path keeps
+its clause.
 
 ## 2. Error exchange rules
 
@@ -142,6 +146,7 @@ export const participantConsent = exchangeRule({
       participant: v("P"),
       scope: "calendar-intersection",
       audience: v("A"),
+      purpose: "find-mutual-availability",
     })],
   },
   post: { addAlternatives: [cfcAtom.user(v("A"))] },

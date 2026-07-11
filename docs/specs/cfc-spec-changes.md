@@ -763,7 +763,7 @@ unchanged). Authoring sketch:
 strongly enough that the shared-result rewrite is clause-local and
 reviewable," while deliberately not privileging a payload. Reserve the family
 shape so profiles interoperate: `ConsentEvidence {participant, scope,
-audience, purpose?, expires?}`, minted only by trusted consent surfaces (the
+audience, purpose, expires?}`, minted only by trusted consent surfaces (the
 §13.4.3 state-scoped-intent shape per participant), matched per participant
 clause by ordinary rules (each participant's evidence rewrites only that
 participant's clause; the multi-party conjunction dissolves exactly when all
