@@ -15,7 +15,7 @@ const FACTORY_REF = {
 
 describe("shallowMutableClone()", () => {
   it("preserves a factory atom by identity while hardening it", () => {
-    const factory = registerFabricFactory(() => undefined, {
+    const factory = registerFabricFactory(() => undefined, "module", {
       kind: "module",
       rootToken: {},
       ref: FACTORY_REF,

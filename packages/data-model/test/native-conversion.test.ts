@@ -92,7 +92,7 @@ describe("native-conversion", () => {
           return "legacy";
         },
       });
-      const factory = registerFabricFactory(callable, {
+      const factory = registerFabricFactory(callable, "module", {
         kind: "module",
         rootToken: {},
         ref: FACTORY_REF,
@@ -709,7 +709,7 @@ describe("native-conversion", () => {
             return "legacy";
           },
         });
-        const factory = registerFabricFactory(callable, {
+        const factory = registerFabricFactory(callable, "module", {
           kind: "module",
           ref: FACTORY_REF,
         });
@@ -720,7 +720,7 @@ describe("native-conversion", () => {
       });
 
       it("fails direct conversion before a live factory has an artifact ref", () => {
-        const factory = registerFabricFactory(() => undefined, {
+        const factory = registerFabricFactory(() => undefined, "module", {
           kind: "module",
           rootToken: {},
         });
@@ -1121,7 +1121,7 @@ describe("native-conversion", () => {
       });
 
       it("deep-freezes an admitted factory through its canonical state", () => {
-        const factory = registerFabricFactory(() => undefined, {
+        const factory = registerFabricFactory(() => undefined, "handler", {
           kind: "handler",
           rootToken: {},
           ref: FACTORY_REF,
@@ -1134,7 +1134,7 @@ describe("native-conversion", () => {
       });
 
       it("fails nested conversion before a live factory has an artifact ref", () => {
-        const factory = registerFabricFactory(() => undefined, {
+        const factory = registerFabricFactory(() => undefined, "handler", {
           kind: "handler",
           rootToken: {},
         });
@@ -1848,7 +1848,7 @@ describe("native-conversion", () => {
           return Symbol("not fabric");
         },
       });
-      const factory = registerFabricFactory(callable, {
+      const factory = registerFabricFactory(callable, "module", {
         kind: "module",
         ref: FACTORY_REF,
       });

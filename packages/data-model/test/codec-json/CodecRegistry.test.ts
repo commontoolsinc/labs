@@ -177,7 +177,7 @@ describe("CodecRegistry", () => {
 
   describe("registerCallable()", () => {
     it("dispatches only admitted callable factories and registers their tag", () => {
-      const factory = registerFabricFactory(() => undefined, {
+      const factory = registerFabricFactory(() => undefined, "module", {
         kind: "module",
         ref: FACTORY_REF,
       });

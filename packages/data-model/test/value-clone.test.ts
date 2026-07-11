@@ -21,7 +21,7 @@ const obj = (v: unknown) => v as any;
 describe("value-clone", () => {
   describe("cloneWithValueAtPath", () => {
     it("stores one hardened factory atom without cloning its identity", () => {
-      const factory = registerFabricFactory(() => undefined, {
+      const factory = registerFabricFactory(() => undefined, "handler", {
         kind: "handler",
         rootToken: {},
         ref: FACTORY_REF,

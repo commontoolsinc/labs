@@ -105,13 +105,23 @@ export type FactoryStateView = LiveFactoryState | FactoryStateV1;
 
 type Callable = (...args: never[]) => unknown;
 type FactoryStateAccessor = () => FactoryStateView;
+type FactoryKind = FactoryStateV1["kind"];
+type FactoryStateForKind<K extends FactoryKind> = Extract<
+  FactoryStateView,
+  { kind: K }
+>;
 
 /** Callback used to harden Fabric values encountered while sealing state. */
 export type FactoryStateValueHardener = (
   value: FabricValue,
 ) => FabricValue;
 
+type FactoryAdmissionSource =
+  | Readonly<{ source: "builder"; expectedKind: FactoryKind }>
+  | Readonly<{ source: "codec" }>;
+
 interface FactoryAdmission {
+  readonly source: FactoryAdmissionSource;
   readonly stateAccessor: FactoryStateAccessor;
   canonicalState?: FactoryStateV1;
 }
@@ -691,9 +701,11 @@ function canonicalFactoryStateView(
  *
  * @internal
  */
-export function registerFabricFactory<T extends Callable>(
+function admitFabricFactory<T extends Callable>(
   value: T,
-  state: FactoryStateView | FactoryStateAccessor,
+  stateAccessor: FactoryStateAccessor,
+  source: FactoryAdmissionSource,
+  canonicalState?: FactoryStateV1,
 ): T & FabricFactory<Parameters<T>, ReturnType<T>> {
   if (factoryAdmissions.has(value)) {
     throw new TypeError("Callable is already an admitted FabricFactory");
@@ -709,7 +721,6 @@ export function registerFabricFactory<T extends Callable>(
     );
   }
 
-  const stateAccessor = typeof state === "function" ? state : () => state;
   Object.defineProperties(value, {
     [FABRIC_FACTORY]: {
       configurable: false,
@@ -724,8 +735,36 @@ export function registerFabricFactory<T extends Callable>(
       writable: false,
     },
   });
-  factoryAdmissions.set(value, { stateAccessor });
+  factoryAdmissions.set(value, { source, stateAccessor, canonicalState });
   return value as T & FabricFactory<Parameters<T>, ReturnType<T>>;
+}
+
+/**
+ * Admit a callable produced by a trusted builder with an independently fixed
+ * expected kind. This protocol fact does not grant runner execution trust.
+ * The state accessor remains lazy so late artifact refs can resolve after
+ * verified module registration without touching runner state at module init.
+ *
+ * @internal
+ */
+export function registerFabricFactory<
+  T extends Callable,
+  K extends FactoryKind,
+>(
+  value: T,
+  expectedKind: K,
+  state:
+    | FactoryStateForKind<K>
+    | (() => FactoryStateForKind<K>),
+): T & FabricFactory<Parameters<T>, ReturnType<T>> {
+  const stateAccessor: FactoryStateAccessor = typeof state === "function"
+    ? state as () => FactoryStateView
+    : () => state;
+  return admitFabricFactory(
+    value,
+    stateAccessor,
+    Object.freeze({ source: "builder", expectedKind }),
+  );
 }
 
 /** Return whether a callable was admitted by the trusted factory protocol. */
@@ -736,11 +775,32 @@ export function isAdmittedFabricFactory(
     factoryAdmissions.has(value as Callable);
 }
 
+function readCheckedFactoryState(
+  admission: FactoryAdmission,
+): FactoryStateView {
+  const state = admission.stateAccessor();
+  if (admission.source.source === "builder") {
+    const actualKind = isPlainObject(state)
+      ? (state as unknown as Record<string, unknown>).kind
+      : undefined;
+    if (actualKind !== admission.source.expectedKind) {
+      validationError(
+        "state.kind",
+        `trusted builder kind ${
+          JSON.stringify(admission.source.expectedKind)
+        } does not match state kind ${JSON.stringify(actualKind)}`,
+      );
+    }
+  }
+  return state;
+}
+
 /** Return admitted factory state, or `undefined` for every other value. */
 export function tryFactoryState(value: unknown): FactoryStateView | undefined {
   if (typeof value !== "function") return undefined;
   const admission = factoryAdmissions.get(value as Callable);
-  return admission?.canonicalState ?? admission?.stateAccessor();
+  return admission?.canonicalState ??
+    (admission === undefined ? undefined : readCheckedFactoryState(admission));
 }
 
 /** Return already-sealed canonical state without reading a live accessor. */
@@ -788,10 +848,21 @@ function canonicalFactoryStateOf(
   const finish = beginVisit(callable, "factory", visiting);
   try {
     const canonical = canonicalFactoryStateView(
-      admission.stateAccessor(),
+      readCheckedFactoryState(admission),
       visiting,
       hardenValue,
     );
+    if (
+      admission.source.source === "builder" &&
+      canonical.kind !== admission.source.expectedKind
+    ) {
+      validationError(
+        "state.kind",
+        `trusted builder kind ${
+          JSON.stringify(admission.source.expectedKind)
+        } does not match state kind ${JSON.stringify(canonical.kind)}`,
+      );
+    }
     admission.canonicalState = canonical;
     return canonical;
   } finally {
@@ -813,13 +884,13 @@ export function createFactoryShell(
   hardenValue?: FactoryStateValueHardener,
 ): FabricFactory<never[], never> {
   const canonicalState = validateFactoryStateV1(state, hardenValue);
-  const shell = registerFabricFactory(
+  const shell = admitFabricFactory(
     (..._args: never[]): never => {
       throw new Error("factory requires runner materialization");
     },
+    () => canonicalState,
+    Object.freeze({ source: "codec" }),
     canonicalState,
   );
-  const admission = factoryAdmissions.get(shell as Callable)!;
-  admission.canonicalState = canonicalState;
   return Object.freeze(shell);
 }

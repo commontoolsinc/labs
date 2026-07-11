@@ -48,7 +48,7 @@ describe("valueEqual()", () => {
     });
 
     it("seals before the same-reference shortcut and fails pre-ref", () => {
-      const factory = registerFabricFactory(() => undefined, {
+      const factory = registerFabricFactory(() => undefined, "module", {
         kind: "module",
         rootToken: {},
       });

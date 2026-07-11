@@ -10,6 +10,7 @@ import {
   isTrustedPattern,
   resolveOriginal,
   setArtifactEntryRef,
+  setDurableArtifactEntryRef,
   setPatternProgram,
 } from "./builder/pattern-metadata.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
@@ -1389,7 +1390,9 @@ export class PatternManager {
     symbol: string,
     entryIdentity: string,
   ): Pattern {
-    this.registerEvaluatedModules(result);
+    // This path is reached only after a verified compiled/source closure was
+    // loaded from `space`, so every indexed artifact is cold-resolvable there.
+    this.registerDurableEvaluatedModules(result);
     const { main } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
@@ -1410,12 +1413,12 @@ export class PatternManager {
     }
     // Trust gate stays pattern-only on purpose: the forward
     // `{ identity, symbol }` ref for a NON-pattern artifact was already set by
-    // `registerEvaluatedModules` via `indexArtifact`, whose gate is the wider
-    // `isTrustedBuilderArtifact` — narrowing `indexArtifact` would drop
+    // the durable registration above via `indexArtifact`, whose gate is the
+    // wider `isTrustedBuilderArtifact` — narrowing `indexArtifact` would drop
     // exported lift/handler forward refs (the gap Codex flagged on an earlier
     // revision of #3912).
     if (isTrustedPattern(pattern)) {
-      setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
+      setDurableArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
     }
     return pattern;
   }
@@ -1439,7 +1442,22 @@ export class PatternManager {
    * run. Idempotent per identity (re-registering refreshes the LRU), so paths that
    * already registered are unaffected.
    */
+  // Ordinary evaluation proves an in-memory artifact but says nothing about a
+  // storage closure. Keep this public seam session-only; only the private
+  // storage-backed path below may unlock Factory@1 sealing.
   registerEvaluatedModules(result: EvaluateResult): void {
+    this.registerEvaluatedModulesWithDurability(result, false);
+  }
+
+  /** Index artifacts whose source closure is known durable in a concrete space. */
+  private registerDurableEvaluatedModules(result: EvaluateResult): void {
+    this.registerEvaluatedModulesWithDurability(result, true);
+  }
+
+  private registerEvaluatedModulesWithDurability(
+    result: EvaluateResult,
+    durable: boolean,
+  ): void {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {
@@ -1453,7 +1471,12 @@ export class PatternManager {
         // instead of cold-recompiling — CT-1623.)
         for (const exportName of Object.keys(exports)) {
           if (exportName === "__esModule") continue;
-          this.indexArtifact(identity, exportName, exports[exportName]);
+          this.indexArtifact(
+            identity,
+            exportName,
+            exports[exportName],
+            durable,
+          );
         }
       }
       while (this.modulesByIdentity.size > this.maxEvaluatedModuleCacheSize) {
@@ -1469,7 +1492,7 @@ export class PatternManager {
     if (sink) {
       for (const [identity, entries] of sink) {
         for (const [symbol, value] of entries) {
-          this.indexArtifact(identity, symbol, value);
+          this.indexArtifact(identity, symbol, value, durable);
         }
       }
     }
@@ -1496,6 +1519,7 @@ export class PatternManager {
     identity: string,
     symbol: string,
     value: unknown,
+    durable = false,
   ): void {
     if (!isTrustedBuilderArtifact(value)) return;
     // Reverse index. Overwrite an existing symbol so a re-evaluation of the
@@ -1519,7 +1543,12 @@ export class PatternManager {
     // the forward ref stays pinned to the original — acceptable because the
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
-    setArtifactEntryRef(value, { identity, symbol });
+    const ref = { identity, symbol };
+    if (durable) {
+      setDurableArtifactEntryRef(value, ref);
+    } else {
+      setArtifactEntryRef(value, ref);
+    }
     // Note: content-addressed CFC provenance is recorded by the engine at
     // evaluation time (Engine.recordModuleProvenance) — the single home, so it
     // covers every load path, not only ones routed through this indexing.
@@ -1892,7 +1921,13 @@ export class PatternManager {
     program: RuntimeProgram,
     entryIdentity?: string,
   ): Pattern {
-    this.registerEvaluatedModules(result);
+    if (entryIdentity === undefined) {
+      this.registerEvaluatedModules(result);
+    } else {
+      // Callers pass an entry identity only after awaiting persistence in a
+      // concrete artifact space, or after loading a verified closure from one.
+      this.registerDurableEvaluatedModules(result);
+    }
     const { main } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
@@ -1910,7 +1945,7 @@ export class PatternManager {
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
-        setArtifactEntryRef(pattern, {
+        setDurableArtifactEntryRef(pattern, {
           identity: entryIdentity,
           symbol: exportName,
         });

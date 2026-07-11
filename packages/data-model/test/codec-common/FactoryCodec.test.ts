@@ -27,7 +27,11 @@ describe("FactoryCodec", () => {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
     };
-    const live = registerFabricFactory((input: unknown) => input, state);
+    const live = registerFabricFactory(
+      (input: unknown) => input,
+      "pattern",
+      state,
+    );
     const codec = new FactoryCodec();
 
     expect(codec.encode(live)).toEqual(state);
@@ -52,7 +56,7 @@ describe("FactoryCodec", () => {
     expect(codec.uniqueHandledClass).toBeUndefined();
     expect(codec.canEncode((() => undefined) as never)).toBe(false);
 
-    const admitted = registerFabricFactory(() => undefined, {
+    const admitted = registerFabricFactory(() => undefined, "module", {
       kind: "module",
       ref: REF,
     });
@@ -113,7 +117,11 @@ describe("FactoryCodec", () => {
 
   it("memoizes validated canonical state and ignores later accessor drift", () => {
     let state: FactoryStateV1 = { kind: "module", ref: REF };
-    const factory = registerFabricFactory(() => undefined, () => state);
+    const factory = registerFabricFactory(
+      () => undefined,
+      "module",
+      () => state,
+    );
     const sealed = sealFactoryState(factory);
     state = { kind: "handler", ref: REF };
 
@@ -121,11 +129,29 @@ describe("FactoryCodec", () => {
     expect(factoryStateOf(factory)).toBe(sealed);
   });
 
+  it("rejects a live builder state whose kind disagrees with its admission", () => {
+    const factory = registerFabricFactory(
+      () => undefined,
+      "module",
+      { kind: "handler", ref: REF } as unknown as Extract<
+        FactoryStateV1,
+        { kind: "module" }
+      >,
+    );
+
+    expect(() => factoryStateOf(factory)).toThrow(
+      'trusted builder kind "module" does not match state kind "handler"',
+    );
+    expect(() => sealFactoryState(factory)).toThrow(
+      'trusted builder kind "module" does not match state kind "handler"',
+    );
+  });
+
   it("hardens and preserves a mutable unknown instance nested in params", () => {
     const unknown = new UnknownValue("FutureParam@2", {
       nested: [1, 2, 3],
     });
-    const factory = registerFabricFactory(() => undefined, {
+    const factory = registerFabricFactory(() => undefined, "pattern", {
       kind: "pattern",
       rootToken: {},
       ref: REF,
@@ -142,7 +168,7 @@ describe("FactoryCodec", () => {
   });
 
   it("seals live state once its artifact ref exists and rejects it before then", () => {
-    const factory = registerFabricFactory(() => undefined, {
+    const factory = registerFabricFactory(() => undefined, "module", {
       kind: "module",
       rootToken: {},
       ref: REF,
@@ -151,7 +177,7 @@ describe("FactoryCodec", () => {
     expect(codec.encode(factory)).toEqual({ kind: "module", ref: REF });
     expect(Object.hasOwn(factoryStateOf(factory), "rootToken")).toBe(false);
 
-    const preRef = registerFabricFactory(() => undefined, {
+    const preRef = registerFabricFactory(() => undefined, "module", {
       kind: "module",
       rootToken: {},
     });

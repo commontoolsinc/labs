@@ -102,17 +102,17 @@ describe("type-check", () => {
 
       it("accepts admitted factories of every kind", () => {
         const factories = [
-          registerFabricFactory(() => undefined, {
+          registerFabricFactory(() => undefined, "pattern", {
             kind: "pattern",
             ref: FACTORY_REF,
             argumentSchema: true,
             resultSchema: true,
           }),
-          registerFabricFactory(() => undefined, {
+          registerFabricFactory(() => undefined, "module", {
             kind: "module",
             ref: FACTORY_REF,
           }),
-          registerFabricFactory(() => undefined, {
+          registerFabricFactory(() => undefined, "handler", {
             kind: "handler",
             ref: FACTORY_REF,
           }),

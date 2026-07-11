@@ -326,7 +326,7 @@ describe("deep-freeze", () => {
 
   describe("Fabric factories", () => {
     it("fails before freezing a live factory whose artifact ref is unavailable", () => {
-      const factory = registerFabricFactory(() => undefined, {
+      const factory = registerFabricFactory(() => undefined, "module", {
         kind: "module",
         rootToken: {},
       });
@@ -340,6 +340,7 @@ describe("deep-freeze", () => {
       let frozenWhenStateWasRead: boolean | undefined;
       const factory = registerFabricFactory(
         () => undefined,
+        "pattern",
         () => {
           accessorCalls++;
           frozenWhenStateWasRead = Object.isFrozen(factory);

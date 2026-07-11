@@ -370,7 +370,10 @@ describe("generateObject outbox mechanism", () => {
       tools: {
         dummy: {
           description: "A dummy tool to force tool-calling path",
-          pattern: dummyPattern,
+          // This test writes the legacy BuiltInLLMTool shape directly to a
+          // Cell. Store its Pattern graph, not the keyless live factory: a
+          // keyless factory deliberately has no durable Factory@1 ref.
+          pattern: dummyPattern.toJSON(),
         },
       },
     });

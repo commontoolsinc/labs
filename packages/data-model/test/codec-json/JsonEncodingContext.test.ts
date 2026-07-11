@@ -38,7 +38,7 @@ const FACTORY_REF = {
 function testPatternFactory(
   params?: FabricPlainObject,
 ): FabricFactory<[unknown], unknown> {
-  return registerFabricFactory((input: unknown) => input, {
+  return registerFabricFactory((input: unknown) => input, "pattern", {
     kind: "pattern",
     ref: FACTORY_REF,
     argumentSchema: { type: "object" },
@@ -155,7 +155,11 @@ describe("JsonEncodingContext", () => {
       ];
 
       for (const state of states) {
-        const factory = registerFabricFactory(() => undefined, state);
+        const factory = registerFabricFactory(
+          () => undefined,
+          state.kind,
+          state,
+        );
         const decoded = roundTrip(factory) as FabricFactory<[]>;
         expect(factoryStateOf(decoded)).toEqual(state);
         expect(Object.isFrozen(decoded)).toBe(true);
@@ -202,7 +206,7 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips a factory inside another factory's params", () => {
-      const child = registerFabricFactory(() => undefined, {
+      const child = registerFabricFactory(() => undefined, "module", {
         kind: "module",
         ref: { ...FACTORY_REF, symbol: "__cfModule_1" },
       });

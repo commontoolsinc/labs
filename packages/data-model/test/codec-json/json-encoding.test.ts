@@ -52,7 +52,7 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 
 describe("json-encoding", () => {
   it("round-trips Factory@1 without a reconstruction context", () => {
-    const factory = registerFabricFactory(() => undefined, {
+    const factory = registerFabricFactory(() => undefined, "handler", {
       kind: "handler",
       ref: FACTORY_REF,
       contextSchema: true,

@@ -90,7 +90,7 @@ describe("value-hash", () => {
           kind: "module",
           ref: FACTORY_REF,
         });
-        const parent = registerFabricFactory(() => undefined, {
+        const parent = registerFabricFactory(() => undefined, "pattern", {
           kind: "pattern",
           rootToken: {},
           ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
@@ -99,7 +99,7 @@ describe("value-hash", () => {
           paramsSchema: true,
           params: { child },
         });
-        const sameParent = registerFabricFactory(() => undefined, {
+        const sameParent = registerFabricFactory(() => undefined, "pattern", {
           kind: "pattern",
           rootToken: {},
           ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
@@ -113,27 +113,31 @@ describe("value-hash", () => {
             }),
           },
         });
-        const differentParent = registerFabricFactory(() => undefined, {
-          kind: "pattern",
-          rootToken: {},
-          ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
-          argumentSchema: true,
-          resultSchema: true,
-          paramsSchema: true,
-          params: {
-            child: createFactoryShell({
-              kind: "module",
-              ref: { ...FACTORY_REF, symbol: "__cfFactory_2" },
-            }),
+        const differentParent = registerFabricFactory(
+          () => undefined,
+          "pattern",
+          {
+            kind: "pattern",
+            rootToken: {},
+            ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
+            argumentSchema: true,
+            resultSchema: true,
+            paramsSchema: true,
+            params: {
+              child: createFactoryShell({
+                kind: "module",
+                ref: { ...FACTORY_REF, symbol: "__cfFactory_2" },
+              }),
+            },
           },
-        });
+        );
 
         expect(hashBytesOf(parent)).toEqual(hashBytesOf(sameParent));
         expect(hashBytesOf(parent)).not.toEqual(hashBytesOf(differentParent));
       });
 
       it("fails before hashing a live factory whose artifact ref is unavailable", () => {
-        const factory = registerFabricFactory(() => undefined, {
+        const factory = registerFabricFactory(() => undefined, "module", {
           kind: "module",
           rootToken: {},
         });
@@ -144,7 +148,11 @@ describe("value-hash", () => {
 
       it("memoizes canonical state before hashing accessor state can drift", () => {
         let state: FactoryStateV1 = { kind: "module", ref: FACTORY_REF };
-        const factory = registerFabricFactory(() => undefined, () => state);
+        const factory = registerFabricFactory(
+          () => undefined,
+          "module",
+          () => state,
+        );
         const first = hashStringOf(factory);
         state = { kind: "handler", ref: FACTORY_REF };
         expect(hashStringOf(factory)).toBe(first);

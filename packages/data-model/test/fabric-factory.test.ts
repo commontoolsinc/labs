@@ -17,6 +17,7 @@ import type { FabricFactory, FabricValue } from "@/interface.ts";
 // Compile-time contract: the dependency-free API mirror and data-model arm are
 // mutually assignable, while specializing a public factory retains its exact
 // one-argument call signature.
+// deno-lint-ignore no-constant-condition
 if (false) {
   const apiFactory = null as unknown as ApiFabricFactory<[string], number>;
   const dataModelFactory: FabricFactory<[string], number> = apiFactory;
@@ -47,7 +48,7 @@ describe("FabricFactory protocol", () => {
       resultSchema: false,
     };
     const original = (input: unknown) => input;
-    const factory = registerFabricFactory(original, () => state);
+    const factory = registerFabricFactory(original, "pattern", () => state);
 
     const acceptsFabricValue = (_value: FabricValue) => undefined;
     acceptsFabricValue(factory);
@@ -88,9 +89,11 @@ describe("FabricFactory protocol", () => {
 
   it("supports live pending refs and canonical state for every factory kind", () => {
     const rootToken = {};
+    // deno-lint-ignore prefer-const -- reassigned after the accessor's first read
     let ref: { identity: string; symbol: string } | undefined;
     const liveFactory = registerFabricFactory(
       () => undefined,
+      "module",
       (): LiveFactoryState => ({
         kind: "module",
         rootToken,
@@ -141,6 +144,7 @@ describe("FabricFactory protocol", () => {
         () => {
           throw new Error("factory requires runner materialization");
         },
+        state.kind,
         state,
       );
       expect(factoryStateOf(shell)).toBe(state);

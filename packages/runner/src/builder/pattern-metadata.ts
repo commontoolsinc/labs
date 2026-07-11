@@ -106,6 +106,30 @@ const entryRefByValue = new WeakMap<
   { identity: string; symbol: string }
 >();
 
+type ArtifactEntryRef = { identity: string; symbol: string };
+
+// These stores are reached by `createNodeFactory()` during the builder import
+// cycle, so they use the same hoisted lazy-accessor pattern as the trust set
+// above rather than top-level `const` bindings that may still be in TDZ.
+function durableEntryRefs(): WeakMap<object, ArtifactEntryRef> {
+  const self = durableEntryRefs as {
+    map?: WeakMap<object, ArtifactEntryRef>;
+  };
+  return (self.map ??= new WeakMap<object, ArtifactEntryRef>());
+}
+
+function factoryRootTokens(): WeakMap<object, object> {
+  const self = factoryRootTokens as { map?: WeakMap<object, object> };
+  return (self.map ??= new WeakMap<object, object>());
+}
+
+function durableRefsByRootToken(): WeakMap<object, ArtifactEntryRef> {
+  const self = durableRefsByRootToken as {
+    map?: WeakMap<object, ArtifactEntryRef>;
+  };
+  return (self.map ??= new WeakMap<object, ArtifactEntryRef>());
+}
+
 /**
  * Resolve a (possibly derived) value to its root original. Identity for
  * values that were never copied. Bounded: the chain is a tree toward the
@@ -148,6 +172,12 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
   const ref = entryRefByValue.get(root);
   if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+  const durableRef = durableEntryRefs().get(root);
+  if (durableRef && !durableEntryRefs().has(c)) {
+    durableEntryRefs().set(c, durableRef);
+  }
+  const rootToken = factoryRootTokens().get(root);
+  if (rootToken) factoryRootTokens().set(c, rootToken);
 }
 
 /**
@@ -162,6 +192,58 @@ export function setArtifactEntryRef(
 ): void {
   const key = asKey(value);
   if (key && !entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+}
+
+/**
+ * Bind a live builder callable to its stable runner-private factory root token.
+ * Modifier and later traversal derivations bind the same token explicitly.
+ */
+export function bindFactoryRootToken(value: unknown, rootToken: object): void {
+  const key = asKey(value);
+  if (!key) return;
+  const tokens = factoryRootTokens();
+  // Do not call resolveOriginal() here: module-init node factories reach this
+  // function while the builder import cycle is still evaluating and its
+  // `derivedFrom` store may remain in TDZ. Trusted constructors pass the shared
+  // token explicitly, so exact-key binding is sufficient at this seam.
+  const existing = tokens.get(key);
+  if (existing !== undefined && existing !== rootToken) {
+    throw new Error("Factory derivation cannot change its root token");
+  }
+  tokens.set(key, rootToken);
+
+  const durableRef = durableEntryRefs().get(key);
+  if (durableRef !== undefined) {
+    durableRefsByRootToken().set(rootToken, durableRef);
+  }
+}
+
+/**
+ * Record a verified content-addressed export/`__cfReg` ref. Unlike the legacy
+ * session ref channel, this fact may unlock durable Factory@1 sealing.
+ */
+export function setDurableArtifactEntryRef(
+  value: unknown,
+  ref: ArtifactEntryRef,
+): void {
+  setArtifactEntryRef(value, ref);
+  const key = asKey(value);
+  if (!key) return;
+  const refs = durableEntryRefs();
+  if (!refs.has(key)) refs.set(key, ref);
+  const root = resolveOriginal(key) as object;
+  const rootToken = factoryRootTokens().get(key) ??
+    factoryRootTokens().get(root);
+  if (rootToken !== undefined && !durableRefsByRootToken().has(rootToken)) {
+    durableRefsByRootToken().set(rootToken, ref);
+  }
+}
+
+/** Durable ref associated with a shared factory root token, if verified. */
+export function getDurableArtifactRefForRootToken(
+  rootToken: object,
+): ArtifactEntryRef | undefined {
+  return durableRefsByRootToken().get(rootToken);
 }
 
 /**

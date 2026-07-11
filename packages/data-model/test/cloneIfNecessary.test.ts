@@ -26,19 +26,19 @@ describe("cloneIfNecessary", () => {
   describe("Fabric factories", () => {
     it("preserves one hardened factory atom for mutable and frozen requests", () => {
       const factories = [
-        registerFabricFactory(() => undefined, {
+        registerFabricFactory(() => undefined, "pattern", {
           kind: "pattern",
           rootToken: {},
           ref: FACTORY_REF,
           argumentSchema: true,
           resultSchema: true,
         }),
-        registerFabricFactory(() => undefined, {
+        registerFabricFactory(() => undefined, "module", {
           kind: "module",
           rootToken: {},
           ref: FACTORY_REF,
         }),
-        registerFabricFactory(() => undefined, {
+        registerFabricFactory(() => undefined, "handler", {
           kind: "handler",
           rootToken: {},
           ref: FACTORY_REF,
@@ -60,7 +60,7 @@ describe("cloneIfNecessary", () => {
     });
 
     it("fails before cloning a live factory whose artifact ref is unavailable", () => {
-      const factory = registerFabricFactory(() => undefined, {
+      const factory = registerFabricFactory(() => undefined, "handler", {
         kind: "handler",
         rootToken: {},
       });

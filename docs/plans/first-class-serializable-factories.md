@@ -311,30 +311,42 @@ but equal decoded shells, pre-seal failure, and arbitrary-function rejection.
 
 ### WP1.4 — Attach canonical state in runner builders
 
-- [ ] Brand the function returned by `pattern()` in
+- [x] Brand the function returned by `pattern()` in
   `packages/runner/src/builder/pattern.ts` as kind `pattern`.
-- [ ] Brand functions returned by `createNodeFactory()`, including `lift()`,
+- [x] Brand functions returned by `createNodeFactory()`, including `lift()`,
   `byRef()`, raw/builtin factories, and equivalent helpers, as kind `module`.
-- [ ] Brand `handler()` results as kind `handler` while retaining separate
+- [x] Brand `handler()` results as kind `handler` while retaining separate
   `contextSchema` and `eventSchema` before the internal `$ctx`/`$event` schema
   combination.
-- [ ] Populate state from the complete builder descriptor, never from
+- [x] Populate state from the complete builder descriptor, never from
   `moduleToJSON(...).$implRef`.
-- [ ] Reuse or generalize the derivation/root tracking in
+- [x] Reuse or generalize the derivation/root tracking in
   `packages/runner/src/builder/pattern-metadata.ts` so `asScope()`, `inSpace()`,
   later `.curry()`, and traversal copies share one root token and late ref.
-- [ ] Make `asScope()` and every `inSpace()` selector form create a new branded
+- [x] Make `asScope()` and every `inSpace()` selector form create a new branded
   factory whose canonical state includes the modifier without resolving a raw
   selector prematurely.
-- [ ] Seal through `getArtifactEntryRef(root)` after `PatternManager` indexes
-  the verified export or `__cfReg` artifact.
-- [ ] Make `setArtifactEntryRef()` feed the root token's late-ref state so a
-  derived factory created before registration seals against the same canonical
-  artifact without introducing a data-model-to-runner dependency.
-- [ ] Reject durable encoding of keyless/manual, action-created, and `host:<n>`
+- [x] Seal through the root token's durable artifact-ref lookup only after
+  `PatternManager` indexes an export or `__cfReg` artifact whose source closure
+  was persisted in, or verified-loaded from, a concrete artifact space.
+- [x] Make that cold-resolvable artifact association feed the root token's
+  late-ref state so a derived factory created before registration seals against
+  the same canonical artifact without introducing a data-model-to-runner
+  dependency.
+- [x] Reject durable encoding of keyless/manual, action-created, and `host:<n>`
   pseudo-module factories.
-- [ ] Preserve existing direct live invocation behavior before and after state
+- [x] Preserve existing direct live invocation behavior before and after state
   attachment.
+
+Implementation note: the existing `setArtifactEntryRef()` is also used for
+session-only manual, keyless, action-created, and `host:<n>` identities. Bare
+evaluation and `compileAndRegisterModules()` likewise establish only a verified
+in-memory index; they do not persist a closure for cold reconstruction. Feeding
+either channel into durable factory state would contradict the rejection
+requirement above. WP1.4 therefore adds a distinct storage-durable association
+path used only after an awaited cache write or a verified storage-backed load.
+The legacy setter and ordinary evaluated-module registration remain
+compatibility/session lookups and cannot unlock `Factory@1` sealing.
 
 Focused tests:
 

@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { registerFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -28,7 +29,12 @@ import {
   type UnsafeBinding,
 } from "./types.ts";
 import { reactive } from "./reactive.ts";
-import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
+import {
+  bindFactoryRootToken,
+  brandTrustedPattern,
+  getDurableArtifactRefForRootToken,
+  noteDerivedCopy,
+} from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -570,6 +576,8 @@ function factoryFromPattern<T, R>(
     toJSON: () => patternToJSON(patternFactory),
   };
 
+  const factoryRootToken = {};
+
   const makePatternFactory = (
     defaultScope?: CellScope,
     defaultSpace?: string | unknown,
@@ -632,6 +640,19 @@ function factoryFromPattern<T, R>(
     // sites check `isTrustedPattern` so a `__cf_data`-forged pattern-shaped
     // object cannot acquire program / verified-load-id metadata.
     brandTrustedPattern(factory);
+    bindFactoryRootToken(factory, factoryRootToken);
+    registerFabricFactory(factory, "pattern", () => {
+      const ref = getDurableArtifactRefForRootToken(factoryRootToken);
+      return {
+        kind: "pattern",
+        rootToken: factoryRootToken,
+        ...(ref === undefined ? {} : { ref }),
+        argumentSchema: pattern.argumentSchema,
+        resultSchema: pattern.resultSchema,
+        ...(defaultScope === undefined ? {} : { defaultScope }),
+        ...(defaultSpace === undefined ? {} : { spaceSelector: defaultSpace }),
+      };
+    });
     return factory;
   };
 
