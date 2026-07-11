@@ -11,6 +11,13 @@ import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import { factoryStateOf, registerFabricFactory } from "@/fabric-factory.ts";
+import type { FabricFactory } from "@/interface.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfHandler_1",
+} as const;
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {
@@ -42,6 +49,24 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 }
 
 describe("json-encoding", () => {
+  it("round-trips Factory@1 without a reconstruction context", () => {
+    const factory = registerFabricFactory(() => undefined, {
+      kind: "handler",
+      ref: FACTORY_REF,
+      contextSchema: true,
+      eventSchema: false,
+    });
+    const encoded = jsonFromValue(factory);
+    const decoded = valueFromJson(encoded) as FabricFactory<[]>;
+
+    expect(factoryStateOf(decoded)).toEqual(factoryStateOf(factory));
+    expect(jsonFromValue(decoded)).toBe(encoded);
+    expect(() => decoded()).toThrow(
+      "factory requires runner materialization",
+    );
+    expect(() => plainObjectFromJson(encoded)).toThrow(/primitive/);
+  });
+
   it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });

@@ -21,3 +21,4 @@ export { UndefinedCodec } from "./UndefinedCodec.ts";
 export { BigIntCodec } from "./BigIntCodec.ts";
 export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
 export { SymbolCodec } from "./SymbolCodec.ts";
+export { FactoryCodec } from "./FactoryCodec.ts";

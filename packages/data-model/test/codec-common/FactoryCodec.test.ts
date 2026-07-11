@@ -1,0 +1,272 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import { FactoryCodec } from "@/codec-common/FactoryCodec.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+import {
+  factoryStateOf,
+  type FactoryStateV1,
+  registerFabricFactory,
+  sealFactoryState,
+} from "@/fabric-factory.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
+import type { FabricFactory } from "@/interface.ts";
+
+const REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfPattern_1",
+} as const;
+
+describe("FactoryCodec", () => {
+  it("round-trips an admitted factory as a frozen inert callable", () => {
+    const state: FactoryStateV1 = {
+      kind: "pattern",
+      ref: REF,
+      argumentSchema: { type: "object" },
+      resultSchema: { type: "object" },
+    };
+    const live = registerFabricFactory((input: unknown) => input, state);
+    const codec = new FactoryCodec();
+
+    expect(codec.encode(live)).toEqual(state);
+
+    const decoded = codec.decode(
+      "Factory@1",
+      state,
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    ) as FabricFactory<[]>;
+    expect(typeof decoded).toBe("function");
+    expect(Object.isFrozen(decoded)).toBe(true);
+    expect(factoryStateOf(decoded)).toEqual(state);
+    expect(codec.encode(decoded)).toEqual(state);
+    expect(() => decoded()).toThrow(
+      "factory requires runner materialization",
+    );
+  });
+
+  it("uses one callable-only tag and rejects arbitrary or copy-branded functions", () => {
+    const codec = new FactoryCodec();
+    expect(codec.recognizedTypeTag).toBe("Factory@1");
+    expect(codec.uniqueHandledClass).toBeUndefined();
+    expect(codec.canEncode((() => undefined) as never)).toBe(false);
+
+    const admitted = registerFabricFactory(() => undefined, {
+      kind: "module",
+      ref: REF,
+    });
+    const copied = () => undefined;
+    for (const key of Reflect.ownKeys(admitted)) {
+      if (typeof key !== "symbol") continue;
+      Object.defineProperty(
+        copied,
+        key,
+        Object.getOwnPropertyDescriptor(admitted, key)!,
+      );
+    }
+    expect(codec.canEncode(copied as never)).toBe(false);
+  });
+
+  it("validates and round-trips every factory kind", () => {
+    const states: FactoryStateV1[] = [
+      {
+        kind: "pattern",
+        ref: REF,
+        argumentSchema: true,
+        resultSchema: false,
+        paramsSchema: { type: "object" },
+        params: { prefix: "hello" },
+        defaultScope: "space",
+        spaceSelector: "did:key:example",
+      },
+      {
+        kind: "module",
+        ref: REF,
+        argumentSchema: true,
+        resultSchema: false,
+        defaultScope: "user",
+      },
+      {
+        kind: "handler",
+        ref: REF,
+        contextSchema: true,
+        eventSchema: false,
+      },
+    ];
+    const codec = new FactoryCodec();
+
+    for (const state of states) {
+      const decoded = codec.decode(
+        "Factory@1",
+        state,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      ) as FabricFactory<[]>;
+      expect(Object.isFrozen(decoded)).toBe(true);
+      expect(Object.isFrozen(factoryStateOf(decoded))).toBe(true);
+      expect(codec.encode(decoded)).toEqual(state);
+      expect(() => decoded()).toThrow(
+        "factory requires runner materialization",
+      );
+    }
+  });
+
+  it("memoizes validated canonical state and ignores later accessor drift", () => {
+    let state: FactoryStateV1 = { kind: "module", ref: REF };
+    const factory = registerFabricFactory(() => undefined, () => state);
+    const sealed = sealFactoryState(factory);
+    state = { kind: "handler", ref: REF };
+
+    expect(sealFactoryState(factory)).toBe(sealed);
+    expect(factoryStateOf(factory)).toBe(sealed);
+  });
+
+  it("does not encode live root-token state in the codec stage", () => {
+    const factory = registerFabricFactory(() => undefined, {
+      kind: "module",
+      rootToken: {},
+      ref: REF,
+    });
+    expect(() => new FactoryCodec().encode(factory)).toThrow(
+      "live factory state is not encodable",
+    );
+  });
+
+  for (
+    const [name, state, message] of [
+      [
+        "unknown kind",
+        { kind: "other", ref: REF },
+        "expected pattern, module, or handler",
+      ],
+      [
+        "extra field",
+        { kind: "module", ref: REF, params: {} },
+        "unexpected field",
+      ],
+      [
+        "pseudo ref",
+        { kind: "module", ref: { identity: "host:1", symbol: "lift" } },
+        "43-character base64url",
+      ],
+      [
+        "empty symbol",
+        { kind: "module", ref: { identity: REF.identity, symbol: "" } },
+        "non-empty string",
+      ],
+      [
+        "missing pattern schema",
+        { kind: "pattern", ref: REF, resultSchema: true },
+        'missing required field "argumentSchema"',
+      ],
+      [
+        "invalid scope",
+        { kind: "module", ref: REF, defaultScope: "global" },
+        "expected space, user, or session",
+      ],
+      [
+        "params without schema",
+        {
+          kind: "pattern",
+          ref: REF,
+          argumentSchema: true,
+          resultSchema: true,
+          params: {},
+        },
+        "params requires a pattern paramsSchema",
+      ],
+      [
+        "explicit undefined",
+        { kind: "module", ref: REF, argumentSchema: undefined },
+        "optional fields must be omitted",
+      ],
+    ] as const
+  ) {
+    it(`rejects ${name}`, () => {
+      expect(() =>
+        new FactoryCodec().decode(
+          "Factory@1",
+          state as never,
+          EMPTY_RECONSTRUCTION_CONTEXT,
+        )
+      ).toThrow(message);
+    });
+  }
+
+  it("rejects cyclic state while allowing shared acyclic values", () => {
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    expect(() =>
+      new FactoryCodec().decode(
+        "Factory@1",
+        {
+          kind: "pattern",
+          ref: REF,
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: cycle,
+        } as never,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      )
+    ).toThrow("cyclic state is not allowed");
+
+    const shared = { value: 1 };
+    const decoded = new FactoryCodec().decode(
+      "Factory@1",
+      {
+        kind: "pattern",
+        ref: REF,
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: { left: shared, right: shared },
+      },
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    );
+    expect(typeof decoded).toBe("function");
+  });
+
+  it("preserves __proto__ as data without prototype mutation", () => {
+    const params = JSON.parse(
+      '{"__proto__":{"polluted":true}}',
+    ) as Record<string, unknown>;
+    const decoded = new FactoryCodec().decode(
+      "Factory@1",
+      {
+        kind: "pattern",
+        ref: REF,
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params,
+      },
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    ) as FabricFactory<[]>;
+    const state = factoryStateOf(decoded) as Extract<
+      FactoryStateV1,
+      { kind: "pattern" }
+    >;
+
+    expect(Object.hasOwn(state.params!, "__proto__")).toBe(true);
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it("rejects shallow-frozen Fabric instances in canonical state", () => {
+    const link = new FabricLink({ nested: { mutable: true } });
+    Object.freeze(link);
+
+    expect(() =>
+      new FactoryCodec().decode(
+        "Factory@1",
+        {
+          kind: "pattern",
+          ref: REF,
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: { link },
+        },
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      )
+    ).toThrow("Fabric instances must already be deeply frozen");
+  });
+});

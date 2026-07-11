@@ -232,22 +232,23 @@ Expected implementation files:
 
 ### WP1.2 — Add `Factory@1` codec dispatch
 
-- [ ] Add the `Factory@1` constant to
+- [x] Add the `Factory@1` constant to
   `packages/data-model/src/codec-common/codec-type-tags.ts`.
-- [ ] Implement a `FactoryCodec` with wire tag `Factory@1`.
-- [ ] Validate discriminant, exact allowed fields, content-addressed ref shape,
+- [x] Implement a `FactoryCodec` with wire tag `Factory@1`.
+- [x] Validate discriminant, exact allowed fields, content-addressed ref shape,
   schemas, modifiers, and pattern-only params fields during decode.
-- [ ] Decode to a frozen branded callable shell whose body throws
+- [x] Decode to a frozen branded callable shell whose body throws
   `factory requires runner materialization` and whose state can be re-encoded.
-- [ ] Add a dedicated callable-factory codec slot to
+- [x] Add a dedicated callable-factory codec slot to
   `packages/data-model/src/codec-json/CodecRegistry.ts`; do not classify all
   functions as primitives or match `Function` by constructor.
-- [ ] Register the codec in
+- [x] Register the codec in
   `packages/data-model/src/codec-json/createDefaultRegistry.ts`.
-- [ ] Route callable factories through codec lookup before the generic function
-  rejection and before legacy `toJSON()` conversion.
-- [ ] Include callable factories in JSON encoder cycle tracking.
-- [ ] Reject arbitrary functions, copied brand symbols, malformed state,
+- [x] Route callable factories through codec lookup before generic function
+  rejection in JSON serialization. Native conversion's ordering before legacy
+  function `toJSON()` remains part of WP1.3.
+- [x] Include callable factories in JSON encoder cycle tracking.
+- [x] Reject arbitrary functions, copied brand symbols, malformed state,
   unknown kinds, extra fields, and cyclic state.
 
 Expected implementation and test files:

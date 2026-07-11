@@ -1,9 +1,17 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import type {
   FabricFactory,
   FabricPlainObject,
   FabricValue,
+} from "./interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  IS_DEEP_FROZEN,
 } from "./interface.ts";
 
 /** Content-addressed reference to a builder factory artifact. */
@@ -94,12 +102,502 @@ export type FactoryStateView = LiveFactoryState | FactoryStateV1;
 type Callable = (...args: never[]) => unknown;
 type FactoryStateAccessor = () => FactoryStateView;
 
+interface FactoryAdmission {
+  readonly stateAccessor: FactoryStateAccessor;
+  canonicalState?: FactoryStateV1;
+}
+
 const FABRIC_FACTORY = Symbol.for("common.fabricFactory");
 const FACTORY_STATE = Symbol.for("common.factoryState");
 
 // This table, rather than the copyable symbol properties, is the admission
 // authority. It deliberately carries no runner execution-trust information.
-const factoryStates = new WeakMap<Callable, FactoryStateAccessor>();
+const factoryAdmissions = new WeakMap<Callable, FactoryAdmission>();
+
+const CONTENT_IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
+const FACTORY_SCOPES = new Set<CellScope>(["space", "user", "session"]);
+
+function validationError(path: string, message: string): never {
+  throw new TypeError(`Invalid Factory@1 state at ${path}: ${message}`);
+}
+
+function ownEnumerableStringKeys(
+  value: object,
+  path: string,
+): readonly string[] {
+  const keys = Object.keys(value);
+  if (Reflect.ownKeys(value).length !== keys.length) {
+    validationError(path, "properties must be enumerable strings");
+  }
+  return keys;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  path: string,
+): void {
+  for (const key of ownEnumerableStringKeys(value, path)) {
+    if (!allowed.has(key)) {
+      validationError(path, `unexpected field ${JSON.stringify(key)}`);
+    }
+  }
+}
+
+function requiredField(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+): unknown {
+  if (!Object.hasOwn(value, key)) {
+    validationError(path, `missing required field ${JSON.stringify(key)}`);
+  }
+  return value[key];
+}
+
+function beginVisit(
+  value: object,
+  path: string,
+  visiting: Set<object>,
+): () => void {
+  if (visiting.has(value)) {
+    validationError(path, "cyclic state is not allowed");
+  }
+  visiting.add(value);
+  return () => visiting.delete(value);
+}
+
+function canonicalJsonValue(
+  value: unknown,
+  path: string,
+  visiting: Set<object>,
+): unknown {
+  if (
+    value === null || typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      validationError(path, "schema numbers must be finite");
+    }
+    return value;
+  }
+  if (typeof value !== "object") {
+    validationError(path, "expected a JSON value");
+  }
+
+  const finish = beginVisit(value as object, path, visiting);
+  try {
+    if (Array.isArray(value)) {
+      if (!isArrayWithOnlyIndexProperties(value)) {
+        validationError(path, "array has non-index properties");
+      }
+      const result: unknown[] = [];
+      for (let i = 0; i < value.length; i++) {
+        if (!(i in value)) {
+          validationError(`${path}[${i}]`, "sparse arrays are not JSON");
+        }
+        result.push(canonicalJsonValue(value[i], `${path}[${i}]`, visiting));
+      }
+      return Object.freeze(result);
+    }
+    if (!isPlainObject(value)) {
+      validationError(path, "expected a plain JSON object");
+    }
+    const entries: [string, unknown][] = [];
+    for (const key of ownEnumerableStringKeys(value, path)) {
+      entries.push([
+        key,
+        canonicalJsonValue(
+          (value as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          visiting,
+        ),
+      ]);
+    }
+    return Object.freeze(Object.fromEntries(entries));
+  } finally {
+    finish();
+  }
+}
+
+function canonicalSchema(
+  value: unknown,
+  path: string,
+  visiting: Set<object>,
+): JSONSchema {
+  if (typeof value === "boolean") return value;
+  if (!isPlainObject(value)) {
+    validationError(path, "expected a boolean or plain schema object");
+  }
+  return canonicalJsonValue(value, path, visiting) as JSONSchema;
+}
+
+function isCanonicallyDeepFrozenValue(
+  value: unknown,
+  visiting: Set<object>,
+): boolean {
+  switch (typeof value) {
+    case "undefined":
+    case "boolean":
+    case "string":
+    case "number":
+    case "bigint":
+      return true;
+    case "symbol":
+      return Symbol.keyFor(value) !== undefined;
+    case "function":
+      if (!factoryAdmissions.has(value as Callable)) return false;
+      try {
+        canonicalFactoryStateOf(value, visiting);
+        return true;
+      } catch {
+        return false;
+      }
+    case "object":
+      if (value === null) return true;
+      break;
+  }
+
+  if (visiting.has(value)) return false;
+  visiting.add(value);
+  try {
+    if (value instanceof FabricPrimitive) {
+      return Object.isFrozen(value);
+    }
+    if (value instanceof FabricInstance) {
+      return value[IS_DEEP_FROZEN]((nested) =>
+        isCanonicallyDeepFrozenValue(nested, visiting)
+      );
+    }
+    if (Array.isArray(value)) {
+      if (!Object.isFrozen(value) || !isArrayWithOnlyIndexProperties(value)) {
+        return false;
+      }
+      for (let i = 0; i < value.length; i++) {
+        if (i in value && !isCanonicallyDeepFrozenValue(value[i], visiting)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (!isPlainObject(value) || !Object.isFrozen(value)) return false;
+    if (Reflect.ownKeys(value).length !== Object.keys(value).length) {
+      return false;
+    }
+    return Object.values(value).every((nested) =>
+      isCanonicallyDeepFrozenValue(nested, visiting)
+    );
+  } finally {
+    visiting.delete(value);
+  }
+}
+
+function canonicalFabricValue(
+  value: unknown,
+  path: string,
+  visiting: Set<object>,
+): FabricValue {
+  switch (typeof value) {
+    case "undefined":
+    case "boolean":
+    case "string":
+    case "number":
+    case "bigint":
+      return value;
+    case "symbol":
+      if (Symbol.keyFor(value) === undefined) {
+        validationError(path, "unique symbols are not Fabric values");
+      }
+      return value;
+    case "function": {
+      const admission = factoryAdmissions.get(value as Callable);
+      if (admission === undefined) {
+        validationError(path, "arbitrary functions are not Fabric values");
+      }
+      canonicalFactoryStateOf(value, visiting);
+      return value as FabricFactory;
+    }
+    case "object":
+      if (value === null) return null;
+      break;
+  }
+
+  if (value instanceof FabricPrimitive) {
+    if (!Object.isFrozen(value)) {
+      validationError(path, "Fabric primitives must be frozen");
+    }
+    return value as FabricValue;
+  }
+  if (value instanceof FabricInstance) {
+    // Generic decode deep-freezes codec results before FactoryCodec sees the
+    // outer state. Live/mutable Fabric instances are sealed by the shared
+    // Fabric operations in WP1.3; accepting one here would make an allegedly
+    // canonical state mutable without importing deep-freeze back into this
+    // dependency-light protocol module.
+    if (!isCanonicallyDeepFrozenValue(value, visiting)) {
+      validationError(
+        path,
+        "Fabric instances must already be deeply frozen",
+      );
+    }
+    return value as FabricValue;
+  }
+  if (value instanceof FabricSpecialObject) {
+    validationError(path, "unknown Fabric special value kind");
+  }
+
+  const finish = beginVisit(value, path, visiting);
+  try {
+    if (Array.isArray(value)) {
+      if (!isArrayWithOnlyIndexProperties(value)) {
+        validationError(path, "array has non-index properties");
+      }
+      const result = new Array<FabricValue>(value.length);
+      for (let i = 0; i < value.length; i++) {
+        if (i in value) {
+          result[i] = canonicalFabricValue(
+            value[i],
+            `${path}[${i}]`,
+            visiting,
+          );
+        }
+      }
+      return Object.freeze(result) as FabricValue;
+    }
+    if (!isPlainObject(value)) {
+      validationError(path, "expected a Fabric value");
+    }
+    const entries: [string, FabricValue][] = [];
+    for (const key of ownEnumerableStringKeys(value, path)) {
+      entries.push([
+        key,
+        canonicalFabricValue(
+          (value as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          visiting,
+        ),
+      ]);
+    }
+    return Object.freeze(Object.fromEntries(entries)) as FabricValue;
+  } finally {
+    finish();
+  }
+}
+
+function canonicalRef(
+  value: unknown,
+  path: string,
+): FactoryArtifactRef {
+  if (!isPlainObject(value)) {
+    validationError(path, "expected a ref object");
+  }
+  const ref = value as Record<string, unknown>;
+  exactKeys(ref, new Set(["identity", "symbol"]), path);
+  const identity = requiredField(ref, "identity", path);
+  const symbol = requiredField(ref, "symbol", path);
+  if (typeof identity !== "string" || !CONTENT_IDENTITY_RE.test(identity)) {
+    validationError(
+      `${path}.identity`,
+      "expected a 43-character base64url content identity",
+    );
+  }
+  if (typeof symbol !== "string" || symbol.length === 0) {
+    validationError(`${path}.symbol`, "expected a non-empty string");
+  }
+  return Object.freeze({ identity, symbol });
+}
+
+function canonicalScope(value: unknown, path: string): CellScope {
+  if (typeof value !== "string" || !FACTORY_SCOPES.has(value as CellScope)) {
+    validationError(path, "expected space, user, or session");
+  }
+  return value as CellScope;
+}
+
+function optionalCanonical<T>(
+  source: Record<string, unknown>,
+  key: string,
+  path: string,
+  canonicalize: (value: unknown, path: string) => T,
+): T | undefined {
+  if (!Object.hasOwn(source, key)) return undefined;
+  const value = source[key];
+  if (value === undefined) {
+    validationError(`${path}.${key}`, "optional fields must be omitted");
+  }
+  return canonicalize(value, `${path}.${key}`);
+}
+
+function canonicalFactoryState(
+  value: unknown,
+  visiting: Set<object>,
+): FactoryStateV1 {
+  const path = "state";
+  if (!isPlainObject(value)) {
+    validationError(path, "expected a plain object");
+  }
+  const state = value as Record<string, unknown>;
+  if (Object.hasOwn(state, "rootToken")) {
+    validationError(path, "live factory state is not encodable");
+  }
+
+  const finish = beginVisit(value as object, path, visiting);
+  try {
+    const kind = requiredField(state, "kind", path);
+    const ref = canonicalRef(requiredField(state, "ref", path), "state.ref");
+
+    switch (kind) {
+      case "pattern": {
+        exactKeys(
+          state,
+          new Set([
+            "kind",
+            "ref",
+            "argumentSchema",
+            "resultSchema",
+            "paramsSchema",
+            "params",
+            "defaultScope",
+            "spaceSelector",
+          ]),
+          path,
+        );
+        const argumentSchema = canonicalSchema(
+          requiredField(state, "argumentSchema", path),
+          "state.argumentSchema",
+          visiting,
+        );
+        const resultSchema = canonicalSchema(
+          requiredField(state, "resultSchema", path),
+          "state.resultSchema",
+          visiting,
+        );
+        const paramsSchema = optionalCanonical(
+          state,
+          "paramsSchema",
+          path,
+          (item, itemPath) => canonicalSchema(item, itemPath, visiting),
+        );
+        const params = optionalCanonical(
+          state,
+          "params",
+          path,
+          (item, itemPath) => {
+            if (!isPlainObject(item)) {
+              validationError(itemPath, "expected a plain params object");
+            }
+            return canonicalFabricValue(
+              item,
+              itemPath,
+              visiting,
+            ) as FabricPlainObject;
+          },
+        );
+        if (params !== undefined && paramsSchema === undefined) {
+          validationError(
+            "state.params",
+            "params requires a pattern paramsSchema",
+          );
+        }
+        const defaultScope = optionalCanonical(
+          state,
+          "defaultScope",
+          path,
+          canonicalScope,
+        );
+        const spaceSelector = optionalCanonical(
+          state,
+          "spaceSelector",
+          path,
+          (item, itemPath) => canonicalFabricValue(item, itemPath, visiting),
+        );
+        return Object.freeze({
+          kind,
+          ref,
+          argumentSchema,
+          resultSchema,
+          ...(paramsSchema === undefined ? {} : { paramsSchema }),
+          ...(params === undefined ? {} : { params }),
+          ...(defaultScope === undefined ? {} : { defaultScope }),
+          ...(spaceSelector === undefined ? {} : { spaceSelector }),
+        });
+      }
+
+      case "module": {
+        exactKeys(
+          state,
+          new Set([
+            "kind",
+            "ref",
+            "argumentSchema",
+            "resultSchema",
+            "defaultScope",
+          ]),
+          path,
+        );
+        const argumentSchema = optionalCanonical(
+          state,
+          "argumentSchema",
+          path,
+          (item, itemPath) => canonicalSchema(item, itemPath, visiting),
+        );
+        const resultSchema = optionalCanonical(
+          state,
+          "resultSchema",
+          path,
+          (item, itemPath) => canonicalSchema(item, itemPath, visiting),
+        );
+        const defaultScope = optionalCanonical(
+          state,
+          "defaultScope",
+          path,
+          canonicalScope,
+        );
+        return Object.freeze({
+          kind,
+          ref,
+          ...(argumentSchema === undefined ? {} : { argumentSchema }),
+          ...(resultSchema === undefined ? {} : { resultSchema }),
+          ...(defaultScope === undefined ? {} : { defaultScope }),
+        });
+      }
+
+      case "handler": {
+        exactKeys(
+          state,
+          new Set(["kind", "ref", "contextSchema", "eventSchema"]),
+          path,
+        );
+        const contextSchema = optionalCanonical(
+          state,
+          "contextSchema",
+          path,
+          (item, itemPath) => canonicalSchema(item, itemPath, visiting),
+        );
+        const eventSchema = optionalCanonical(
+          state,
+          "eventSchema",
+          path,
+          (item, itemPath) => canonicalSchema(item, itemPath, visiting),
+        );
+        return Object.freeze({
+          kind,
+          ref,
+          ...(contextSchema === undefined ? {} : { contextSchema }),
+          ...(eventSchema === undefined ? {} : { eventSchema }),
+        });
+      }
+
+      default:
+        validationError("state.kind", "expected pattern, module, or handler");
+    }
+  } finally {
+    finish();
+  }
+}
 
 /**
  * Admit a callable created by a trusted builder constructor or the factory
@@ -111,7 +609,7 @@ export function registerFabricFactory<T extends Callable>(
   value: T,
   state: FactoryStateView | FactoryStateAccessor,
 ): T & FabricFactory<Parameters<T>, ReturnType<T>> {
-  if (factoryStates.has(value)) {
+  if (factoryAdmissions.has(value)) {
     throw new TypeError("Callable is already an admitted FabricFactory");
   }
   if (!Object.isExtensible(value)) {
@@ -140,14 +638,15 @@ export function registerFabricFactory<T extends Callable>(
       writable: false,
     },
   });
-  factoryStates.set(value, stateAccessor);
+  factoryAdmissions.set(value, { stateAccessor });
   return value as T & FabricFactory<Parameters<T>, ReturnType<T>>;
 }
 
 /** Return admitted factory state, or `undefined` for every other value. */
 export function tryFactoryState(value: unknown): FactoryStateView | undefined {
   if (typeof value !== "function") return undefined;
-  return factoryStates.get(value as Callable)?.();
+  const admission = factoryAdmissions.get(value as Callable);
+  return admission?.canonicalState ?? admission?.stateAccessor();
 }
 
 /** Return admitted factory state, failing closed for arbitrary callables. */
@@ -157,4 +656,59 @@ export function factoryStateOf(value: unknown): FactoryStateView {
     throw new TypeError("Value is not an admitted FabricFactory");
   }
   return state;
+}
+
+/** Validate and deeply freeze an alleged canonical wire state. */
+export function validateFactoryStateV1(value: unknown): FactoryStateV1 {
+  return canonicalFactoryState(value, new Set<object>());
+}
+
+function canonicalFactoryStateOf(
+  value: unknown,
+  visiting: Set<object>,
+): FactoryStateV1 {
+  if (typeof value !== "function") {
+    throw new TypeError("Value is not an admitted FabricFactory");
+  }
+  const callable = value as Callable;
+  const admission = factoryAdmissions.get(callable);
+  if (admission === undefined) {
+    throw new TypeError("Value is not an admitted FabricFactory");
+  }
+  if (admission.canonicalState !== undefined) {
+    return admission.canonicalState;
+  }
+
+  const finish = beginVisit(callable, "factory", visiting);
+  try {
+    const canonical = canonicalFactoryState(
+      admission.stateAccessor(),
+      visiting,
+    );
+    admission.canonicalState = canonical;
+    return canonical;
+  } finally {
+    finish();
+  }
+}
+
+/** Return the memoized canonical codec state of an admitted factory. */
+export function sealFactoryState(value: unknown): FactoryStateV1 {
+  return canonicalFactoryStateOf(value, new Set<object>());
+}
+
+/** Create a context-free, data-admitted shell from validated canonical state. */
+export function createFactoryShell(
+  state: unknown,
+): FabricFactory<never[], never> {
+  const canonicalState = validateFactoryStateV1(state);
+  const shell = registerFabricFactory(
+    (..._args: never[]): never => {
+      throw new Error("factory requires runner materialization");
+    },
+    canonicalState,
+  );
+  const admission = factoryAdmissions.get(shell as Callable)!;
+  admission.canonicalState = canonicalState;
+  return Object.freeze(shell);
 }

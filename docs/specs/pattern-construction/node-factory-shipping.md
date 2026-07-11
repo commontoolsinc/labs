@@ -433,6 +433,12 @@ copied from `moduleToJSON(...).$implRef`: that legacy ref names an
 implementation-resolution record and may not recover the factory descriptor or
 methods.
 
+For the `Factory@1` V1 wire contract, `ref.identity` is exactly the current
+prefix-free module-content identity: 43 characters of unpadded base64url
+(SHA-256), with no `cf:module/` prefix. `ref.symbol` is a non-empty artifact
+export or `__cfReg` symbol. Session-only `host:<n>` and `keyless:<hash>` pseudo
+identities are therefore invalid on this wire.
+
 `params` is either absent or the complete value for callback argument 1. It is
 never a map of public input overrides. `paramsSchema` is trusted only after it
 matches compiler metadata on the resolved base artifact; a wire value cannot
