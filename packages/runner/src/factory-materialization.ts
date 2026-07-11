@@ -19,7 +19,10 @@ import type {
 } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import type { FactoryContract } from "./factory-contract.ts";
+import {
+  type FactoryContract,
+  factoryContractFromSchema,
+} from "./factory-contract.ts";
 
 export type { FactoryContract } from "./factory-contract.ts";
 
@@ -49,6 +52,14 @@ export type MaterializedFactory =
   | HandlerFactory<unknown, unknown>;
 
 type FactoryRef = FactoryStateV1["ref"];
+
+/** A well-formed factory whose trusted artifact is not available locally yet. */
+export class FactoryArtifactUnavailableError extends Error {
+  constructor(readonly ref: FactoryRef) {
+    super(`Factory materialization could not resolve ${refLabel(ref)}`);
+    this.name = "FactoryArtifactUnavailableError";
+  }
+}
 
 interface InspectedFactory {
   readonly value: MaterializedFactory;
@@ -313,10 +324,16 @@ function materializeResolved(
 function sameSelection(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   try {
-    const leftState = tryFactoryState(left);
-    const rightState = tryFactoryState(right);
-    return leftState !== undefined && rightState !== undefined &&
-      deepEqual(leftState, rightState);
+    if (
+      tryFactoryState(left) === undefined ||
+      tryFactoryState(right) === undefined
+    ) {
+      return false;
+    }
+    // Compare the sealed wire state. Live builder views also carry an opaque
+    // root token, whose object identity is intentionally process-local and is
+    // not part of a factory selection's canonical equality.
+    return deepEqual(sealFactoryState(left), sealFactoryState(right));
   } catch {
     return false;
   }
@@ -358,16 +375,37 @@ export function materializeFactory(
   const ref = requireRef(inspected.state);
   const carried = inspected.state as FactoryStateV1;
   assertDecodedPatternHasNoParams(carried);
-  const resolved = context.runtime.patternManager.artifactFromIdentitySync(
-    ref.identity,
-    ref.symbol,
-  );
+  const resolved = context.runtime.patternManager.isArtifactAvailableInSpace(
+      ref.identity,
+      context.artifactSpace,
+    )
+    ? context.runtime.patternManager.artifactFromIdentitySync(
+      ref.identity,
+      ref.symbol,
+    )
+    : undefined;
   if (resolved === undefined) {
-    throw new Error(
-      `Factory materialization could not resolve ${refLabel(ref)}`,
-    );
+    throw new FactoryArtifactUnavailableError(ref);
   }
   return materializeResolved(resolved, carried, context);
+}
+
+/**
+ * Warm-only runner exposure for one schema-declared factory leaf.
+ *
+ * This is used by synchronous Cell/query delivery. It returns ordinary values
+ * unchanged, returns a live callable when the trusted artifact is warm, and
+ * throws {@link FactoryArtifactUnavailableError} rather than leaking an inert
+ * shell when the artifact is cold.
+ */
+export function materializeFactoryForSchema(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  context: Omit<FactoryMaterializationContext, "expected">,
+): unknown {
+  const expected = factoryContractFromSchema(schema);
+  if (expected === undefined || value === undefined) return value;
+  return materializeFactory(value, { ...context, expected });
 }
 
 /**
@@ -388,10 +426,15 @@ export async function prepareFactory(
   const ref = requireRef(inspected.state);
   const carried = inspected.state as FactoryStateV1;
   assertDecodedPatternHasNoParams(carried);
-  const warm = context.runtime.patternManager.artifactFromIdentitySync(
-    ref.identity,
-    ref.symbol,
-  );
+  const warm = context.runtime.patternManager.isArtifactAvailableInSpace(
+      ref.identity,
+      context.artifactSpace,
+    )
+    ? context.runtime.patternManager.artifactFromIdentitySync(
+      ref.identity,
+      ref.symbol,
+    )
+    : undefined;
   if (warm !== undefined) return materializeResolved(warm, carried, context);
 
   const loaded = await context.runtime.patternManager.loadArtifactByIdentity(
@@ -401,9 +444,7 @@ export async function prepareFactory(
   );
   assertCurrentAfterAwait(value, context.fence);
   if (loaded === undefined) {
-    throw new Error(
-      `Factory materialization could not resolve ${refLabel(ref)}`,
-    );
+    throw new FactoryArtifactUnavailableError(ref);
   }
   return materializeResolved(loaded, carried, context);
 }

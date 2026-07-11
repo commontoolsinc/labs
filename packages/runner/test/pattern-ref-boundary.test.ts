@@ -6,7 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { Pattern } from "../src/builder/types.ts";
+import { isModule, type Pattern } from "../src/builder/types.ts";
 import {
   patternToJSON,
   serializePatternGraph,
@@ -133,7 +133,8 @@ describe("refs-only pattern JSON at the boundary", () => {
   it("keeps a named list op callable through in-memory graph construction", async () => {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
     const listNode = (compiled as unknown as Pattern).nodes.find((node) =>
-      node.module.type === "ref" && node.module.implementation === "map"
+      isModule(node.module) && node.module.type === "ref" &&
+      node.module.implementation === "map"
     );
     expect(listNode).toBeDefined();
     const op = (listNode!.inputs as Record<string, unknown>).op;

@@ -24,6 +24,9 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("factory-materialization-test");
 const artifactSpace = signer.did();
+const unrelatedArtifactSpace = (await Identity.fromPassphrase(
+  "factory-materialization-unrelated-space",
+)).did();
 
 const ARGUMENT_SCHEMA = {
   type: "object",
@@ -104,6 +107,14 @@ describe("runner-owned factory materialization", () => {
     loads = [];
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
       warm.get(key(identity, symbol));
+    runtime.patternManager.isArtifactAvailableInSpace = (
+      identity,
+      sourceSpace,
+    ) =>
+      sourceSpace === artifactSpace &&
+      [...warm.keys()].some((candidate) =>
+        candidate.startsWith(`${identity}#`)
+      );
     runtime.patternManager.loadArtifactByIdentity = (
       identity,
       symbol,
@@ -223,6 +234,31 @@ describe("runner-owned factory materialization", () => {
       throw new Error("expected a materialized pattern");
     }
     expect(selectedPatternState.spaceSelector).toBe("execution-target");
+  });
+
+  it("does not let an unrelated space borrow a globally warm decoded artifact", async () => {
+    const { bases } = makeFactories();
+    const state = sealFactoryState(bases[0]);
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), bases[0]);
+    cold.set(key(REFS.pattern.identity, REFS.pattern.symbol), bases[0]);
+    const shell = createFactoryShell(state);
+
+    expect(() =>
+      materializeFactory(shell, {
+        runtime,
+        artifactSpace: unrelatedArtifactSpace,
+      })
+    ).toThrow("Factory materialization could not resolve");
+
+    const materialized = await prepareFactory(shell, {
+      runtime,
+      artifactSpace: unrelatedArtifactSpace,
+    });
+    expect(materialized).toBeDefined();
+    expect(loads).toEqual([{
+      ...REFS.pattern,
+      artifactSpace: unrelatedArtifactSpace,
+    }]);
   });
 
   it("uses only trusted ModuleRegistry metadata for schema-light byRef modules", () => {

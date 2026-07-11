@@ -225,11 +225,11 @@ describe("PatternManager exact-space artifact availability", () => {
         ),
       ).toBe(true);
 
-      // The live index now serves this request without reading space B. A
-      // caller-supplied space must not mint availability authority.
+      // A globally warm index is not source authority for space B. The load
+      // must verify B's closure and fail because none exists there.
       const warmInOtherSpace = await coldRuntime.patternManager
         .loadPatternByIdentity(ref.identity, ref.symbol, spaceB);
-      expect(warmInOtherSpace).toBe(loaded);
+      expect(warmInOtherSpace).toBeUndefined();
       expect(
         coldRuntime.patternManager.isArtifactAvailableInSpace(
           ref.identity,

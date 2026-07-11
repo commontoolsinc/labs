@@ -22,6 +22,7 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import { materializeFactoryForSchema } from "./factory-materialization.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -66,6 +67,7 @@ const proxyCacheKey = (
   link: NormalizedFullLink,
   writable: boolean,
   cfcLabelView: CfcLabelView | undefined,
+  materializeFactories: boolean,
 ): string =>
   JSON.stringify([
     writable,
@@ -73,12 +75,23 @@ const proxyCacheKey = (
     link.id,
     link.path,
     cfcLabelView ?? null,
+    materializeFactories,
   ]);
 
 const childLabelView = (
   cfcLabelView: CfcLabelView | undefined,
   segment: string,
 ): CfcLabelView | undefined => rebaseCfcLabelView(cfcLabelView, [segment]);
+
+const childLink = (
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  segment: string,
+): NormalizedFullLink => ({
+  ...link,
+  path: [...link.path, segment],
+  schema: runtime.cfc.getSchemaAtPath(link.schema, [segment]),
+});
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -151,6 +164,7 @@ export function createQueryResultProxy<T>(
   depth: number = 0,
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
+  materializeFactories = false,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -172,6 +186,18 @@ export function createQueryResultProxy<T>(
     ),
   ]);
   const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+
+  if (materializeFactories) {
+    const materialized = materializeFactoryForSchema(value, link.schema, {
+      runtime,
+      artifactSpace: link.space,
+    });
+    if (!Object.is(materialized, value)) {
+      // A factory leaf is an atomic value, not a container shape.
+      readTx.readValueOrThrow(link);
+      return materialized as T;
+    }
+  }
 
   // The SHAPE_READ above only tracks the container's shape, but the stream
   // check depends on a specific field's VALUE. Register an explicit read of
@@ -239,13 +265,20 @@ export function createQueryResultProxy<T>(
 
   // Get the appropriate cache index by log
   const txCache = getProxyCache(tx);
-  const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
+  const cacheKey = proxyCacheKey(
+    link,
+    writable,
+    cfcLabelView,
+    materializeFactories,
+  );
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache.byLink.get(cacheKey) ??
-    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
+    (cfcLabelView === undefined && !materializeFactories
+      ? txCache.byValue.get(value)
+      : undefined);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(proxyTarget as object, {
@@ -282,13 +315,11 @@ export function createQueryResultProxy<T>(
                     value: createQueryResultProxy(
                       runtime,
                       proxyTx,
-                      {
-                        ...link,
-                        path: [...link.path, String(index)],
-                      },
+                      childLink(runtime, link, String(index)),
                       depth + 1,
                       writable,
                       childLabelView(cfcLabelView, String(index)),
+                      materializeFactories,
                     ),
                     done: false,
                   };
@@ -343,10 +374,11 @@ export function createQueryResultProxy<T>(
               copy[i] = createQueryResultProxy(
                 runtime,
                 proxyTx,
-                { ...link, path: [...link.path, String(i)] },
+                childLink(runtime, link, String(i)),
                 depth + 1,
                 writable,
                 childLabelView(cfcLabelView, String(i)),
+                materializeFactories,
               );
             }
 
@@ -393,9 +425,10 @@ export function createQueryResultProxy<T>(
                   runtime,
                   proxyTx,
                   index,
-                  { ...link, path: [...link.path, String(index)] },
+                  childLink(runtime, link, String(index)),
                   writable,
                   childLabelView(cfcLabelView, String(index)),
+                  materializeFactories,
                 )
               );
             }
@@ -477,6 +510,8 @@ export function createQueryResultProxy<T>(
                 resultLink,
                 0,
                 writable,
+                undefined,
+                materializeFactories,
               );
             }
 
@@ -497,10 +532,11 @@ export function createQueryResultProxy<T>(
       return createQueryResultProxy(
         runtime,
         proxyTx,
-        { ...link, path: [...link.path, prop] },
+        childLink(runtime, link, prop),
         depth + 1,
         writable,
         childLabelView(cfcLabelView, String(prop)),
+        materializeFactories,
       );
     },
     set: (_, prop, value) => {
@@ -524,7 +560,7 @@ export function createQueryResultProxy<T>(
       diffAndUpdate(
         runtime,
         tx,
-        { ...link, path: [...link.path, String(prop)] },
+        childLink(runtime, link, String(prop)),
         value,
       );
 
@@ -572,10 +608,11 @@ export function createQueryResultProxy<T>(
           value: createQueryResultProxy(
             runtime,
             proxyTx,
-            { ...link, path: [...link.path, prop as string] },
+            childLink(runtime, link, prop as string),
             depth + 1,
             writable,
             childLabelView(cfcLabelView, String(prop)),
+            materializeFactories,
           ),
         };
       }
@@ -622,7 +659,7 @@ export function createQueryResultProxy<T>(
 
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
-  if (cfcLabelView === undefined) {
+  if (cfcLabelView === undefined && !materializeFactories) {
     txCache.byValue.set(value, proxy);
   }
   return proxy;
@@ -644,6 +681,7 @@ const createProxyForArrayValue = (
   link: NormalizedFullLink,
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
+  materializeFactories = false,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
@@ -654,11 +692,20 @@ const createProxyForArrayValue = (
         0,
         writable,
         cfcLabelView,
+        materializeFactories,
       );
     },
     toString: function () {
       return String(
-        createQueryResultProxy(runtime, tx, link, 0, writable, cfcLabelView),
+        createQueryResultProxy(
+          runtime,
+          tx,
+          link,
+          0,
+          writable,
+          cfcLabelView,
+          materializeFactories,
+        ),
       );
     },
     [originalIndex]: source,

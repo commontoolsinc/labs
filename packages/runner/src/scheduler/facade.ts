@@ -160,6 +160,7 @@ import type {
   Action,
   ActionRunTraceEntry,
   EventHandler,
+  EventHandlerRegistration,
   EventPreflightTraceContext,
   QueuedEvent,
   ReactivityLog,
@@ -412,7 +413,8 @@ export {
 
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
-  private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  private eventHandlers: EventHandlerRegistration[] = [];
+  private eventHandlerGeneration = 0;
   readonly lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
@@ -425,6 +427,8 @@ export class Scheduler {
   private triggerIndex = new SchedulerTriggerIndex();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
+  private actionGenerations = new WeakMap<Action, number>();
+  private actionReadinessAttempts = new WeakMap<Action, symbol>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -681,6 +685,7 @@ export class Scheduler {
       | SchedulerRegisterOptions,
     maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
+    const generation = this.advanceActionGeneration(action);
     const { dependencies, options } = normalizeRegistrationArgs(
       dependenciesOrOptions,
       maybeOptions,
@@ -747,7 +752,11 @@ export class Scheduler {
     if (!rehydrated && options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
-    return cancel;
+    return () => {
+      if (this.isActionGenerationCurrent(action, generation)) {
+        cancel();
+      }
+    };
   }
 
   // Hold a resumed action's initial run until its space finishes syncing. The
@@ -1166,6 +1175,7 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.advanceActionGeneration(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
@@ -1179,6 +1189,39 @@ export class Scheduler {
     ) {
       this.actionsByObservationIdentity.delete(identityKey);
     }
+  }
+
+  private advanceActionGeneration(action: Action): number {
+    const generation = (this.actionGenerations.get(action) ?? 0) + 1;
+    this.actionGenerations.set(action, generation);
+    this.retries.delete(action);
+    return generation;
+  }
+
+  private getActionGeneration(action: Action): number {
+    return this.actionGenerations.get(action) ?? 0;
+  }
+
+  private beginActionReadinessAttempt(action: Action): symbol {
+    const attempt = Symbol("scheduler-action-readiness-attempt");
+    this.actionReadinessAttempts.set(action, attempt);
+    return attempt;
+  }
+
+  private isActionGenerationCurrent(
+    action: Action,
+    generation: number,
+  ): boolean {
+    return this.getActionGeneration(action) === generation;
+  }
+
+  private isActionReadinessAttemptCurrent(
+    action: Action,
+    generation: number,
+    attempt: symbol,
+  ): boolean {
+    return this.isActionGenerationCurrent(action, generation) &&
+      this.actionReadinessAttempts.get(action) === attempt;
   }
 
   async run(action: Action): Promise<any> {
@@ -1451,6 +1494,7 @@ export class Scheduler {
   ): Cancel {
     return addSchedulerEventHandler({
       eventHandlers: this.eventHandlers,
+      nextEventHandlerGeneration: () => ++this.eventHandlerGeneration,
     }, {
       handler,
       ref,
@@ -1464,6 +1508,13 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.errorHandlers.add(fn);
+  }
+
+  reportError(error: unknown, action: unknown = { name: "runner" }): void {
+    this.handleError(
+      error instanceof Error ? error : new Error(String(error)),
+      action,
+    );
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
@@ -2501,6 +2552,13 @@ export class Scheduler {
       retries: this.retries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
+      getActionGeneration: (target) => this.getActionGeneration(target),
+      beginActionReadinessAttempt: (target) =>
+        this.beginActionReadinessAttempt(target),
+      isActionGenerationCurrent: (target, generation) =>
+        this.isActionGenerationCurrent(target, generation),
+      isActionReadinessAttemptCurrent: (target, generation, attempt) =>
+        this.isActionReadinessAttemptCurrent(target, generation, attempt),
       nodes: this.nodes,
       diagnosisHistory: this.diagnosisHistory,
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,

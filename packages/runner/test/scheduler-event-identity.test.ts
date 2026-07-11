@@ -63,7 +63,13 @@ describe("scheduler event identity", () => {
 
     queueSchedulerEvent({
       runtime: {} as Runtime,
-      eventHandlers: [[eventLink, handler]],
+      eventHandlers: [{
+        ref: eventLink,
+        handler,
+        generation: 1,
+        active: true,
+        readinessCancels: new Set(),
+      }],
       eventQueue,
       backgroundTasks: new Set(),
       queueExecution: () => {},

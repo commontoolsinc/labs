@@ -12,6 +12,16 @@ import { connectInputAndOutputs } from "./node-utils.ts";
 export function invokeFactory(
   factory: unknown,
   input: FactoryInput<unknown>,
+  expected: Extract<FactoryContract, { kind: "handler" }>,
+): Stream<unknown>;
+export function invokeFactory(
+  factory: unknown,
+  input: FactoryInput<unknown>,
+  expected: Exclude<FactoryContract, { kind: "handler" }>,
+): Reactive<unknown>;
+export function invokeFactory(
+  factory: unknown,
+  input: FactoryInput<unknown>,
   expected: FactoryContract,
 ): Reactive<unknown> | Stream<unknown> {
   const frame = getTopFrame();

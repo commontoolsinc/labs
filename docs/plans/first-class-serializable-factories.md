@@ -65,9 +65,9 @@ implementation. When the final removal gate passes, archive it under
 - [ ] Permit durable encoding only when the root artifact has a cold-resolvable
   content-addressed `{ identity, symbol }` ref. Reject keyless, action-created,
   and host-pseudo-module factories.
-- [ ] Keep the dynamic call site's output spot as the stable identity anchor
+- [x] Keep the dynamic call site's output spot as the stable identity anchor
   when the selected factory changes.
-- [ ] In an eager pattern callback, keep a factory-valued input/capture as a
+- [x] In an eager pattern callback, keep a factory-valued input/capture as a
   symbolic Cell/link binding. Serialize that binding in the dynamic node;
   never snapshot the currently selected factory ref into the graph.
 - [ ] Before invoking a `lift` implementation or handler event, materialize
@@ -77,7 +77,7 @@ implementation. When the final removal gate passes, archive it under
   handler event. Whole-parent preloading is cache-only; only a cold root passed
   to non-transactional Promise-based `setup(undefined, ...)` intrinsically
   gates parent setup. `run()` and transaction-bound setup remain warm-only.
-- [ ] Keep artifact source space as trusted runner provenance, distinct from a
+- [x] Keep artifact source space as trusted runner provenance, distinct from a
   pattern factory's serialized `spaceSelector` execution target. Do not add
   source authority to `Factory@1`.
 - [ ] Read the selected factory in the consuming action/event transaction and
@@ -706,56 +706,96 @@ symbolic and scheduled/direct factory calls.
   selected factory ref into the serialized node or its cause.
 - [x] Extend `NodeRef.module`/serialized node typing only as narrowly as needed;
   do not add another public factory wrapper.
-- [ ] Complete the dynamic-module arm currently marked `TODO` in
+- [x] Complete the dynamic-module arm currently marked `TODO` in
   `packages/runner/src/runner.ts`.
-- [ ] Subscribe to the factory binding before its first value. Initial absence
+- [x] Subscribe to the factory binding before its first value. Initial absence
   leaves the node pending with no child and later arrival instantiates it.
-- [ ] Resolve the factory cell value through `materializeFactory`, validate kind
+- [x] Resolve the factory cell value through `materializeFactory`, validate kind
   and trusted normalized schemas, then tail-call the existing pattern,
   JavaScript-module, or handler instantiation path.
-- [ ] Derive trusted artifact source space from the resolved binding/link and
+- [x] Derive trusted artifact source space from the resolved binding/link and
   pass it to materialization; keep it distinct from the selected pattern's
   later execution `spaceSelector`.
-- [ ] Resolve a schema-light `byRef()` through `ModuleRegistry`; fail if no
+- [x] Resolve a schema-light `byRef()` through `ModuleRegistry`; fail if no
   trusted concrete schema is available.
-- [ ] Apply pattern scope and raw space-selector modifiers after base resolution
+- [x] Apply pattern scope and raw space-selector modifiers after base resolution
   and before child instantiation.
-- [ ] Do not execute implementation code during decode, value resolution, or
+- [x] Do not execute implementation code during decode, value resolution, or
   property inspection.
+
+WP2.4 implementation audit (2026-07-11): the serialized dynamic node keeps a
+write-redirect factory binding plus the explicit trusted call contract; no
+selected ref enters graph identity. The runner now installs a provisional
+dependency subscription before invoking the initial sink callback, so initial
+absence and even an immediate invalid-to-valid replacement cannot fall into a
+run-before-subscribe window. A live factory whose hidden `spaceSelector` is a
+Cell is converted to a link before Factory sealing, including when nested in a
+frame-less setup argument.
+
+Two existing fast paths required correction rather than extension. First, the
+global evaluated-artifact index did not prove that the closure existed in the
+binding's exact source space; both warm materialization and PatternManager load
+now require exact-space availability before using that index. Second, named
+and anonymous execution-space selection is asynchronous even when the artifact
+itself is warm. That readiness remains node-local (it is not registered as
+global scheduler background work), rereads the current selection, and keeps
+artifact source provenance separate from the execution target. Focused dynamic
+tests cover all three kinds, schema-light `byRef`, modifiers, source/target
+separation, cell-derived selectors, no-code-before-validation, initial absence,
+invalid recovery, and selector CFC provenance.
 
 ### WP2.5 — Supervise replacement and teardown
 
-- [ ] Make the factory cell a reactive dependency of one dynamic-node
+- [x] Make the factory cell a reactive dependency of one dynamic-node
   supervisor.
-- [ ] Give each selected child/action/handler generation its own cancellation
+- [x] Give each selected child/action/handler generation its own cancellation
   scope and monotonically increasing generation token.
-- [ ] Add a scheduler/transaction generation guard: cancellation alone does not
+- [x] Add a scheduler/transaction generation guard: cancellation alone does not
   currently prevent an already-running async action from committing its final
   writes.
-- [ ] On a different canonical factory state, cancel the previous generation,
+- [x] On a different canonical factory state, cancel the previous generation,
   fence late async writes/results, tear down result-owned internals and handler
   subscriptions, and instantiate the replacement. Equal-state replay is a
   no-op.
-- [ ] Preserve the call site's output binding and cause as the stable identity
+- [x] Preserve the call site's output binding and cause as the stable identity
   anchor across replacement.
-- [ ] Verify two distinct call sites still receive distinct output identities.
-- [ ] Cover replacement before settle, replacement after settle, same-factory
+- [x] Verify two distinct call sites still receive distinct output identities.
+- [x] Cover replacement before settle, replacement after settle, same-factory
   replay, wrong-kind replacement, rejected cold load, and handler unsubscribe.
-- [ ] Specify output readiness: initial absence fabricates no result; during a
+- [x] Specify output readiness: initial absence fabricates no result; during a
   cold/invalid replacement the stable output spot may retain its last committed
   value, but the canceled generation has no live subscriptions or writes and
   runner diagnostics carry pending/error state.
-- [ ] Cover stale cold load A completing after B is selected, owner/piece
+- [x] Cover stale cold load A completing after B is selected, owner/piece
   teardown while load/action work is pending, invalid-then-valid replacement
   recovery, replacement-only handler stream routing, and cold resume with the
   selected factory and stable output identity.
-- [ ] Make every post-await continuation reread the binding and check both owner
+- [x] Make every post-await continuation reread the binding and check both owner
   and selection generation. Loading A may warm a cache after B is selected but
   must never instantiate A or reschedule a stopped owner.
-- [ ] Keep this immediate switch-latest lifecycle scoped to direct dynamic
+- [x] Keep this immediate switch-latest lifecycle scoped to direct dynamic
   factory nodes. In WP2.6, cold readiness itself must not tear down a lift's
   prior result; once ready, existing lift replacement/commit semantics apply
   unchanged.
+
+WP2.5 implementation audit (2026-07-11): cancellation groups are now latched,
+so cleanup registered after teardown runs immediately instead of reviving a
+retired owner. Scheduler action subscriptions and handler registrations carry
+monotonic generations. Action generations are checked after queue waits and
+authored awaits, before transaction commit/resubscription, and across conflict
+readiness/retry continuations. Queued events retain the exact handler
+registration that owned them; cancellation during presync/body or replacement
+before dispatch aborts that intent rather than rerouting it to a newer handler.
+
+Deterministic supervisor tests cover equal replay, warm and cold replacement,
+wrong-kind and rejected-load recovery, owner teardown during a gated load,
+distinct call-site identities, stable output retention, and handler-only-B
+routing after A is canceled. The complete runner task reached
+`874 passed (4676 steps), 24 failed (118 steps), 0 ignored (10 steps)`; every
+new dynamic/CFC/cancellation/generation test passed. The remaining failures are
+the already-audited legacy tool/list writer, replay-golden, and wish/profile
+migration cluster, so the Stage 2 package completion gate remains unchecked
+rather than being waived.
 
 Expected runtime tests:
 
@@ -770,71 +810,71 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
 
 ### WP2.6 — Materialize factories at runner and scheduled callback boundaries
 
-- [ ] Preserve the three deliberate exposure forms: context-free data-model
+- [x] Preserve the three deliberate exposure forms: context-free data-model
   decode returns an inert shell; warm executable runner exposure returns a live
   callable synchronously; cold scheduled exposure uses an async readiness
   phase and invokes authored code only after a live callable exists.
-- [ ] Route schema-driven `asFactory` runtime reads through the materialization
+- [x] Route schema-driven `asFactory` runtime reads through the materialization
   chokepoint without changing synchronous `Cell.get()` into a promise. Warm
   synchronous reads may return a live callable; cold adapters must use an
   explicit async runner boundary and may not leak a shell into authored code.
-- [ ] Before invoking a `lift` implementation or handler callback, recursively
+- [x] Before invoking a `lift` implementation or handler callback, recursively
   prepare only schema-declared `asFactory` leaves; do not eagerly walk unrelated
   opaque data.
-- [ ] Implement two-phase scheduled readiness: read/validate the factory in the
+- [x] Implement two-phase scheduled readiness: read/validate the factory in the
   action/event transaction; if cold, run no authored callback and commit no
   authored result, arrange a single-flight load outside that transaction, then
   retry and reread the current value under the same live owner.
-- [ ] Ensure the selection read that ultimately executes carries reactive and
+- [x] Ensure the selection read that ultimately executes carries reactive and
   CFC provenance. Existing fail-open `presyncInputs` may prewarm caches but
   cannot be the correctness/security gate.
-- [ ] For lifts, reuse the normal reactive rerun loop. Keep the previous
+- [x] For lifts, reuse the normal reactive rerun loop. Keep the previous
   committed value/result-owned child while only cold readiness is pending; once
   ready, use the existing lift execution/replacement/commit behavior without
   importing direct dynamic-node immediate teardown semantics or claiming new
   commit atomicity.
-- [ ] For handlers, materialize bound context and event data per event. Context
+- [x] For handlers, materialize bound context and event data per event. Context
   changes alone do not invoke the handler or replace prior event-owned results;
   a by-value event factory is an event snapshot and an explicit Cell retains
   Cell semantics.
-- [ ] Delay/requeue a cold handler event with the same complete durable intent:
+- [x] Delay/requeue a cold handler event with the same complete durable intent:
   identity, origin lineage, commit/final callbacks, retry metadata, and deadline.
   Readiness deferral is not an authored attempt: it does not consume commit-
   retry budget, call the final callback, or mint a receipt.
-- [ ] Add a dedicated bounded readiness retry/backoff policy for transient
+- [x] Add a dedicated bounded readiness retry/backoff policy for transient
   artifact unavailability, independent of the authored event's `retries`
   setting. Missing/forged/wrong-kind/schema failure is terminal and fail-
   closed. Keep the enclosing handler stream subscribed, but create no handler
   body effects, normal receipt/result graph, or event-created child/action
   subscription before readiness.
-- [ ] Fence lift/event preparation by owner generation so teardown during load
+- [x] Fence lift/event preparation by owner generation so teardown during load
   cannot reschedule or resurrect work. If A initiated a load and B is current
   on retry, authored code sees only B.
-- [ ] Keep cold readiness local. Add a same-parent upstream-produced factory
+- [x] Keep cold readiness local. Add a same-parent upstream-produced factory
   regression proving parent startup does not wait on all nested factories;
   whole-parent prewarming remains optimization-only and an unused cold factory
   need never load.
-- [ ] Route direct dynamic dispatch through the same materialization helper
+- [x] Route direct dynamic dispatch through the same materialization helper
   while keeping graph binding dependency-only and non-executable.
-- [ ] Verify memory v1/v2 storage, patch/diff, and sync paths treat a canonical
+- [x] Verify memory v1/v2 storage, patch/diff, and sync paths treat a canonical
   factory as an atomic codec value while still traversing its encoded state.
-- [ ] Cover `packages/memory/v2.ts` `encodeMemoryBoundary` /
+- [x] Cover `packages/memory/v2.ts` `encodeMemoryBoundary` /
   `decodeMemoryBoundary` with a focused
   `packages/memory/test/v2-factory-boundary-test.ts` round trip.
-- [ ] Add a fresh-runtime client/server round trip in which one runtime writes a
+- [x] Add a fresh-runtime client/server round trip in which one runtime writes a
   factory, another decodes it, and a runner materializes/invokes it.
-- [ ] Add typed factory round trips through Cells, query-result proxies, pieces,
+- [x] Add typed factory round trips through Cells, query-result proxies, pieces,
   nested arrays, and nested objects now that `asFactory` exists.
 - [ ] Verify cross-space links remain links, artifact source space is passed to
   loading, and a by-value writer durably replicates the artifact closure into
   the containing space before committing/enqueueing the Factory value.
   `spaceSelector` remains the execution target, and CFC labels survive the
   transactional selection read.
-- [ ] Parameterize warm and genuinely cold callback tests over all three factory
+- [x] Parameterize warm and genuinely cold callback tests over all three factory
   kinds in lift input, handler context, and handler event positions. Assert the
   authored callback receives a callable, can invoke it through the ordinary
   direct path, and is not called before cold readiness.
-- [ ] Add deterministic loader gates/error injection rather than sleep-based
+- [x] Add deterministic loader gates/error injection rather than sleep-based
   races. Cover A-loading/B-selected reread, event retry identity, callback and
   receipt timing, kind/schema/missing failures, later valid recovery, and
   artifact-source versus execution-target spaces.
@@ -852,19 +892,63 @@ Concrete seams and focused tests:
 - `packages/runner/test/scheduler-event-receipts.test.ts`
 - cross-space factory input and `inSpace()` reload tests
 
+WP2.6 implementation audit (2026-07-11): schema-driven preparation now walks
+only declared `asFactory` leaves, aggregates cold readiness without invoking
+authored code, and starts no load when a later leaf fails terminal validation.
+Warm and genuinely cold pattern/module/handler inputs are covered in lift,
+handler-context, and handler-event positions. Explicit `Cell<Factory>` values
+remain Cells; by-value event factories remain event snapshots. Cell and query
+exposure is synchronous and fail-closed: raw reads retain inert shells, warm
+schema-driven reads return live callables, and cold synchronous reads throw the
+dedicated unavailable error so an inert shell never reaches authored code.
+
+Scheduled readiness retains one event intent and independently bounds
+transient artifact retries (three attempts with deterministic backoff). Owner,
+action, and handler generations fence every post-await continuation, including
+cancellation while readiness never settles and speculative-origin failure.
+Loading remains local to the selected node/event: same-parent production does
+not deadlock startup and unused cold factories issue no load. Deterministic
+tests also cover A-loading/B-selected rereads, result-owned child retention,
+terminal-then-valid recovery, all three CFC-labeled factory kinds, and exact
+artifact-source versus execution-target spaces.
+
+Fresh-runtime runner round trips cover all three factory kinds across
+independent storage clients. Dedicated memory-v2 and piece-result tests prove
+the inert-at-rest/live-at-runner boundary; complete memory tests pass
+(`357 passed (139 steps)`). The complete piece task reaches `15 passed (61
+steps), 1 failed (1 step)` with the new round trip green; its sole failure is
+the already-audited keyless legacy pattern lookup in
+`pull-materialization.test.ts`.
+
+The cross-space by-value writer checkbox intentionally remains open. The
+canonical synchronous cell writer rejects a Factory value unless the complete
+artifact closure already exists in the exact containing space, satisfying the
+spec's fail-closed “replicate or reject” rule without pretending a synchronous
+API can await replication. Stage 4 async adapters must call
+`ensureArtifactClosureInSpace` before enqueue/commit; that durable replication
+half of the checkbox will be checked only with those adapter migrations.
+
+Complete runner validation after WP2.6 reached `880 passed (4738 steps), 24
+failed (118 steps), 0 ignored (10 steps)` in 3m31s. All new factory,
+readiness, cancellation, generation-fencing, CFC, and round-trip suites passed.
+The 24 failing test files remain the audited canonical-writer migration cluster:
+legacy raw builtin/tool/list/patternTool values and their dependent
+piece/profile/wish/replay fixtures. The package completion gate remains open
+until Stage 4 migrates those writers; no failure is waived.
+
 ### Stage 2 completion gate
 
-- [ ] Factory-valued inputs, outputs, and stored cells carry `asFactory`.
-- [ ] Symbolic eager pattern/module/handler calls use one internal dynamic path;
+- [x] Factory-valued inputs, outputs, and stored cells carry `asFactory`.
+- [x] Symbolic eager pattern/module/handler calls use one internal dynamic path;
   runtime-materialized lift/handler values use the same materialization
   chokepoint and then the ordinary direct callable path.
-- [ ] Direct live-factory calls have unchanged emitted code and behavior.
-- [ ] Dynamic replacement cancels/fences the prior generation without changing
+- [x] Direct live-factory calls have unchanged emitted code and behavior.
+- [x] Dynamic replacement cancels/fences the prior generation without changing
   the stable output spot.
-- [ ] Scheduled cold readiness is node/event-local, does not deadlock parent
+- [x] Scheduled cold readiness is node/event-local, does not deadlock parent
   start, never calls authored code with a shell, and preserves one durable
   handler event identity through retry.
-- [ ] Warm and cold resolution fail closed on kind or schema mismatch.
+- [x] Warm and cold resolution fail closed on kind or schema mismatch.
 - [ ] `deno task test` passes in `packages/api`, `packages/schema-generator`,
   `packages/ts-transformers`, and `packages/runner` using each package's
   available task names.

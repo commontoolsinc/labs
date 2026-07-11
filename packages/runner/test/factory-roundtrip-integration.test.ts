@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type {
   HandlerFactory,
@@ -31,6 +32,9 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { Options } from "../src/storage/v2.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("factory roundtrip integration");
 const sourceSpace = signer.did();
@@ -63,6 +67,46 @@ type FactoryTuple = readonly [
   ModuleFactory<unknown, unknown>,
   HandlerFactory<unknown, unknown>,
 ];
+
+type PersistedFactoryValues = {
+  pattern: FactoryTuple[0];
+  module: FactoryTuple[1];
+  handler: FactoryTuple[2];
+};
+
+// Each instance owns a separate cold client replica while all instances talk
+// to one in-process server. This catches false "fresh runtime" tests that keep
+// using a writer's warm StorageManager cache.
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager.sharedServer = server;
+    return manager;
+  }
+
+  private sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this.sharedServer;
+  }
+}
+
+function createSharedServer(): MemoryV2Server.Server {
+  return new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+  });
+}
 
 interface StoredFactories {
   readonly identity: string;
@@ -283,6 +327,148 @@ describe("Factory@1 runner round trips", () => {
     if (state.kind !== "pattern") throw new Error("expected pattern state");
     expect(state.spaceSelector).toBe("execution-target");
     expect(destinationSpace).not.toBe(state.spaceSelector);
+  });
+});
+
+describe("Factory@1 fresh-runtime value round trip", () => {
+  it("persists, cold-decodes, materializes, and invokes every factory kind", async () => {
+    const server = createSharedServer();
+    let writerStorage: SharedServerStorageManager | undefined =
+      SharedServerStorageManager.connectTo(server, { as: signer });
+    let coldWriter: Runtime | undefined = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: writerStorage,
+    });
+    let readerStorage: SharedServerStorageManager | undefined;
+    let reader: Runtime | undefined;
+
+    try {
+      let identity: string | undefined;
+      await coldWriter.patternManager.compilePattern(PROGRAM, {
+        space: sourceSpace,
+        onEntryIdentity(value) {
+          identity = value;
+        },
+      });
+      expect(identity).toBeDefined();
+
+      const factories = SYMBOLS.map((symbol) =>
+        coldWriter!.patternManager.artifactFromIdentitySync(identity!, symbol)
+      ) as unknown as FactoryTuple;
+      const values: PersistedFactoryValues = {
+        pattern: factories[0],
+        module: factories[1],
+        handler: factories[2],
+      };
+      const states = factories.map((factory) => sealFactoryState(factory));
+      for (const state of states) {
+        expect(state.ref.identity).toBe(identity);
+        expect("$implRef" in state).toBe(false);
+      }
+
+      const tx = coldWriter.edit();
+      const cell = coldWriter.getCell<PersistedFactoryValues>(
+        sourceSpace,
+        "fresh-runtime persisted factory values",
+        undefined,
+        tx,
+      );
+      cell.set(values);
+      coldWriter.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      await coldWriter.patternManager.flushCompileCacheWrites();
+      await writerStorage.synced();
+
+      // End the writer session completely before constructing the reader. The
+      // only remaining bridge is the shared server's persisted memory.
+      await coldWriter.dispose();
+      coldWriter = undefined;
+      await writerStorage.close();
+      writerStorage = undefined;
+
+      readerStorage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      reader = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: readerStorage,
+      });
+      for (let index = 0; index < SYMBOLS.length; index++) {
+        expect(
+          reader.patternManager.artifactFromIdentitySync(
+            identity!,
+            SYMBOLS[index],
+          ),
+        ).toBeUndefined();
+      }
+
+      const stored = reader.getCell<PersistedFactoryValues>(
+        sourceSpace,
+        "fresh-runtime persisted factory values",
+      );
+      await stored.sync();
+      const decoded = stored.getRaw() as unknown as PersistedFactoryValues;
+      const shells = [
+        decoded.pattern,
+        decoded.module,
+        decoded.handler,
+      ] as const satisfies FactoryTuple;
+      for (let index = 0; index < shells.length; index++) {
+        expect(isAdmittedFabricFactory(shells[index])).toBe(true);
+        expect(factoryStateOf(shells[index])).toEqual(states[index]);
+        expect(() => shells[index](undefined as never)).toThrow(
+          "factory requires runner materialization",
+        );
+      }
+
+      // Trusted provenance comes from the containing cell, never Factory@1
+      // state. This is the exact space the cold artifact loader must query.
+      const artifactSpace = stored.getAsNormalizedFullLink().space;
+      expect(artifactSpace).toBe(sourceSpace);
+      const loads: Array<{
+        identity: string;
+        symbol: string;
+        sourceSpace: MemorySpace;
+      }> = [];
+      const loadArtifact = reader.patternManager.loadArtifactByIdentity.bind(
+        reader.patternManager,
+      );
+      reader.patternManager.loadArtifactByIdentity = (
+        loadedIdentity,
+        symbol,
+        loadedSourceSpace,
+      ) => {
+        loads.push({
+          identity: loadedIdentity,
+          symbol,
+          sourceSpace: loadedSourceSpace,
+        });
+        return loadArtifact(loadedIdentity, symbol, loadedSourceSpace);
+      };
+
+      const materialized: MaterializedFactory[] = [];
+      for (let index = 0; index < shells.length; index++) {
+        const factory = await prepareFactory(shells[index], {
+          runtime: reader,
+          artifactSpace,
+        });
+        expect(sealFactoryState(factory)).toEqual(states[index]);
+        invokeOne(reader, index, factory, sourceSpace);
+        materialized.push(factory);
+      }
+      expect(loads.length).toBeGreaterThan(0);
+      expect(loads.every((load) => load.sourceSpace === sourceSpace)).toBe(
+        true,
+      );
+      expect(loads.every((load) => load.identity === identity)).toBe(true);
+      expect(materialized).toHaveLength(3);
+    } finally {
+      await reader?.dispose();
+      await readerStorage?.close();
+      await coldWriter?.dispose();
+      await writerStorage?.close();
+      await server.close();
+    }
   });
 });
 

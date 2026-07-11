@@ -108,6 +108,7 @@ describe("reactive retries", () => {
     >;
     watchReactiveActionCommit({
       action,
+      generation: 0,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,
@@ -121,6 +122,7 @@ describe("reactive retries", () => {
         queued++;
       },
       restoreInvalidCauses: () => {},
+      isActionGenerationCurrent: () => true,
     });
     await commitPromise;
     await new Promise((r) => setTimeout(r, 0));

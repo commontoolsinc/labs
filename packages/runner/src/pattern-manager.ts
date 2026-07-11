@@ -1309,12 +1309,16 @@ export class PatternManager {
     const retryFailedRecovery = this.failedCompileCacheRecoveries.has(
       recoveryKey,
     );
+    const sourceAvailable = this.isArtifactAvailableInSpace(
+      entryIdentity,
+      artifactSpace,
+    ) && !retryFailedRecovery;
     // The generic live index is populated only through indexArtifact's trusted
     // builder gate. Probe the gate again here so this public API never turns a
     // corrupted/private-table value into executable authority.
     const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
     if (
-      !retryFailedRecovery && indexed !== undefined &&
+      sourceAvailable && indexed !== undefined &&
       isTrustedBuilderArtifact(indexed)
     ) {
       this.esmCacheStats.byIdentityHits++;
@@ -1327,9 +1331,9 @@ export class PatternManager {
     // parent bundle's evaluation. Reuse any trusted builder kind directly — no
     // storage closure read and no SES re-evaluation. A failed cache recovery
     // bypasses session shortcuts so storage repair is attempted again.
-    const live = retryFailedRecovery
-      ? undefined
-      : this.artifactFromEvaluatedModule(entryIdentity, symbol);
+    const live = sourceAvailable
+      ? this.artifactFromEvaluatedModule(entryIdentity, symbol)
+      : undefined;
     if (live !== undefined) {
       this.esmCacheStats.byIdentityHits++;
       return live;
@@ -1340,9 +1344,10 @@ export class PatternManager {
     // lookup; do not re-evaluate just because the requested symbol is missing
     // or names an arbitrary JavaScript export.
     if (
-      !retryFailedRecovery &&
-      this.evaluatedArtifactIdentities.has(entryIdentity)
-    ) return undefined;
+      sourceAvailable && this.evaluatedArtifactIdentities.has(entryIdentity)
+    ) {
+      return undefined;
+    }
 
     // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const key = `${artifactSpace}\0${entryIdentity}`;

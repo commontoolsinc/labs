@@ -7,6 +7,7 @@ import {
 import {
   factoryStateOf,
   isAdmittedFabricFactory,
+  sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import {
   getPersistentSchedulerStateConfig,
@@ -37,13 +38,19 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  isCell,
+  prepareFactoryStatesForWrite,
+} from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
   type PersistedSchedulerObservationSnapshot,
 } from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
+import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
@@ -131,6 +138,14 @@ import {
   createFactoryTraversalContext,
   visitFactoryForTraversal,
 } from "./builder/factory-traversal.ts";
+import type { FactoryContract } from "./factory-contract.ts";
+import { materializeScheduledFactoryInputs } from "./factory-input-preparation.ts";
+import {
+  FactoryArtifactUnavailableError,
+  type MaterializedFactory,
+  materializeFactory,
+  prepareFactory,
+} from "./factory-materialization.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -151,6 +166,13 @@ const sourceLocationLogger = getLogger("runner.source-location", {
   level: "warn",
   logCountEvery: 0,
 });
+
+class DynamicFactoryExecutionSpaceUnavailableError extends Error {
+  constructor(readonly spaceName: string) {
+    super(`Dynamic factory execution space is not ready: ${spaceName}`);
+    this.name = "DynamicFactoryExecutionSpaceUnavailableError";
+  }
+}
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -635,6 +657,7 @@ type JavaScriptNodeContext = BoundNodeIO & {
   fn: (...args: any[]) => any;
   name: string | undefined;
   schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
+  factorySelectionLink?: NormalizedFullLink;
 };
 
 type JavaScriptActionResultCells = {
@@ -1016,24 +1039,25 @@ export class Runner {
     argument: T,
     argumentSchema: JSONSchema | undefined,
   ): void {
+    const preparedArgument = prepareFactoryStatesForWrite(argument) as T;
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
       undefined,
       tx,
     );
-    argumentCell.set(argument);
+    argumentCell.set(preparedArgument);
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
       argumentCell,
       argumentSchema,
-      argument,
+      preparedArgument,
     );
     diffAndUpdate(
       this.runtime,
       tx,
       argumentLink,
-      argument,
+      preparedArgument,
       argumentLink,
     );
   }
@@ -1674,6 +1698,8 @@ export class Runner {
             addNodeCancel,
             pattern,
             schedulerRehydration,
+            undefined,
+            node.expectedFactory,
           );
         }
         if (!doNotUpdateOnPatternChange && schedulePatternUpdate) {
@@ -3187,6 +3213,8 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
+    expectedFactory?: FactoryContract,
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     if (isModule(module)) {
       switch (module.type) {
@@ -3209,6 +3237,8 @@ export class Runner {
             pattern,
             schedulerRehydration,
             refName,
+            expectedFactory,
+            factorySelectionLink,
           );
           break;
         }
@@ -3223,6 +3253,7 @@ export class Runner {
             addCancel,
             pattern,
             schedulerRehydration,
+            factorySelectionLink,
           );
           break;
         case "raw":
@@ -3265,11 +3296,382 @@ export class Runner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
-      // TODO(seefeld): Implement, a dynamic node
+    } else if (isWriteRedirectLink(module)) {
+      if (expectedFactory === undefined) {
+        throw new Error(
+          "Dynamic factory node is missing its call-site contract",
+        );
+      }
+      this.instantiateDynamicFactoryNode(
+        tx,
+        module,
+        inputBindings,
+        outputBindings,
+        resultCell,
+        addCancel,
+        pattern,
+        schedulerRehydration,
+        expectedFactory,
+      );
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
     }
+  }
+
+  /**
+   * Supervise one symbolic factory binding. The binding stays the reactive
+   * dependency and output bindings stay fixed; selected artifacts are never
+   * folded into graph identity.
+   */
+  private instantiateDynamicFactoryNode(
+    _tx: IExtendedStorageTransaction,
+    moduleBinding: FabricValue,
+    inputBindings: FabricValue,
+    outputBindings: FabricValue,
+    resultCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    expected: FactoryContract,
+  ): void {
+    const argumentCellLink = getMetaLink(resultCell, "argument")!;
+    const bound = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      moduleBinding,
+      argumentCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
+    if (!isWriteRedirectLink(bound)) {
+      throw new Error(
+        "Dynamic factory module did not resolve to a cell binding",
+      );
+    }
+    const bindingLink = parseLink(bound, resultCell);
+    if (bindingLink === undefined || bindingLink.space === undefined) {
+      throw new Error("Dynamic factory module has an incomplete cell binding");
+    }
+    const bindingCell = this.runtime.getCellFromLink<unknown>(bindingLink);
+
+    const owner = {};
+    let active = true;
+    let generation = 0;
+    let currentCanonical: unknown = undefined;
+    let currentSelectionLabel: unknown = undefined;
+    let hasSelection = false;
+    let childCancel: Cancel | undefined;
+    let sinkCancel: Cancel | undefined;
+    const resolvedExecutionSpaces = new Map<string, MemorySpace>();
+    const callSiteLink = resultCell.getAsNormalizedFullLink();
+    const anonymousExecutionSpaceName = "dynamic-factory:" + hashOf({
+      result: {
+        space: callSiteLink.space,
+        id: callSiteLink.id,
+        path: [...callSiteLink.path],
+        scope: callSiteLink.scope ?? "space",
+      },
+      outputs: outputBindings,
+    }).hashString;
+
+    const canonicalSelection = (selection: unknown): unknown => {
+      if (!isAdmittedFabricFactory(selection)) return selection;
+      return sealFactoryState(selection);
+    };
+
+    const readCurrent = (): {
+      selection: unknown;
+      artifactSpace: MemorySpace;
+    } => {
+      const readTx = this.runtime.readTx();
+      const resolved = resolveLink(
+        this.runtime,
+        readTx,
+        bindingLink,
+      );
+      return {
+        selection: bindingCell.withTx(readTx)
+          .getWithoutFactoryMaterialization(),
+        artifactSpace: resolved.space,
+      };
+    };
+
+    const moduleFor = (
+      factory: MaterializedFactory,
+      selection: unknown,
+    ): Module => {
+      if (expected.kind !== "pattern") {
+        if (!isModule(factory)) {
+          throw new Error(
+            `Materialized ${expected.kind} factory is not executable module metadata`,
+          );
+        }
+        return factory;
+      }
+      if (!isPattern(factory)) {
+        throw new Error("Materialized pattern factory is not a pattern");
+      }
+      const state = factoryStateOf(selection);
+      if (state.kind !== "pattern") {
+        throw new Error("Materialized pattern selection has another kind");
+      }
+      const dynamicModule: Module = {
+        type: "pattern",
+        implementation: factory,
+        ...(state.defaultScope === undefined
+          ? {}
+          : { defaultScope: state.defaultScope }),
+      };
+      if (Object.hasOwn(state, "spaceSelector")) {
+        const selector = state.spaceSelector;
+        if (typeof selector === "string" && /^did:[^:]+:.+/.test(selector)) {
+          dynamicModule.targetSpace = selector as MemorySpace;
+        } else {
+          const selectorLink = parseLink(selector, bindingCell);
+          if (selectorLink?.space !== undefined) {
+            dynamicModule.targetSpace = selectorLink.space;
+          } else if (typeof selector === "string") {
+            const name = selector.length > 0
+              ? selector
+              : anonymousExecutionSpaceName;
+            const named = resolvedExecutionSpaces.get(name) ??
+              this.runtime.resolveSpaceNameSync(name);
+            if (named === undefined) {
+              throw new DynamicFactoryExecutionSpaceUnavailableError(name);
+            }
+            dynamicModule.targetSpace = named;
+          }
+        }
+      }
+      return dynamicModule;
+    };
+
+    const instantiateSelection = (
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+    ): void => {
+      if (!active || selectedGeneration !== generation) return;
+      const factory = materializeFactory(selection, {
+        runtime: this.runtime,
+        artifactSpace,
+        expected,
+      });
+      if (!active || selectedGeneration !== generation) return;
+
+      const [cancelChild, addChildCancel] = useCancelGroup();
+      childCancel = cancelChild;
+      const childTx = this.runtime.edit();
+      try {
+        // The selected code is data-dependent. Keep that selection read in the
+        // setup transaction, and thread the same link into scheduled
+        // action/event transactions below so reactive and CFC provenance are
+        // not severed by materialization.
+        bindingCell.withTx(childTx).get();
+        this.instantiateNode(
+          childTx,
+          moduleFor(factory, selection),
+          inputBindings,
+          outputBindings,
+          resultCell.withTx(childTx),
+          addChildCancel,
+          pattern,
+          schedulerRehydration,
+          undefined,
+          undefined,
+          bindingLink,
+        );
+        this.runtime.prepareTxForCommit(childTx);
+        void childTx.commit();
+      } catch (error) {
+        cancelChild();
+        childCancel = undefined;
+        if (childTx.status().status === "ready") childTx.abort(error as Error);
+        throw error;
+      }
+    };
+
+    let activateSelection!: (
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+    ) => void;
+
+    const beginColdPreparation = (
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+    ): void => {
+      const task = prepareFactory(selection, {
+        runtime: this.runtime,
+        artifactSpace,
+        expected,
+        fence: {
+          owner,
+          generation: selectedGeneration,
+          currentOwner: () => active ? owner : undefined,
+          currentGeneration: () => active ? generation : undefined,
+          currentSelection: () => readCurrent().selection,
+        },
+      }).then(() => {
+        if (!active || generation !== selectedGeneration) return;
+        // Cold readiness is only a cache transition. Reread the live binding
+        // and synchronously rematerialize that current value before execution.
+        const current = readCurrent();
+        if (
+          !deepEqual(canonicalSelection(current.selection), currentCanonical)
+        ) {
+          return;
+        }
+        activateSelection(
+          current.selection,
+          current.artifactSpace,
+          selectedGeneration,
+        );
+      }).catch((error) => {
+        if (!active || generation !== selectedGeneration) return;
+        if (
+          error instanceof Error &&
+          error.message ===
+            "Factory materialization was superseded while loading"
+        ) {
+          return;
+        }
+        this.runtime.scheduler.reportError(error, {
+          name: "dynamic-factory-readiness",
+        });
+      });
+      // Deliberately do not register this promise as global scheduler
+      // background work. `idle()` prioritizes such work over reactive reruns;
+      // a cold A would therefore block the selector action that replaces it
+      // with warm B. Readiness is node-local and result consumers wait on the
+      // stable output cell instead.
+      void task;
+    };
+
+    const beginExecutionSpacePreparation = (
+      spaceName: string,
+      selectedGeneration: number,
+    ): void => {
+      const task = this.runtime.resolveSpaceName(spaceName).then(
+        (resolvedSpace) => {
+          if (!active || generation !== selectedGeneration) return;
+          resolvedExecutionSpaces.set(spaceName, resolvedSpace);
+          const current = readCurrent();
+          if (
+            !deepEqual(canonicalSelection(current.selection), currentCanonical)
+          ) {
+            return;
+          }
+          activateSelection(
+            current.selection,
+            current.artifactSpace,
+            selectedGeneration,
+          );
+        },
+        (error) => {
+          if (!active || generation !== selectedGeneration) return;
+          this.runtime.scheduler.reportError(error, {
+            name: "dynamic-factory-space-readiness",
+          });
+        },
+      );
+      // Name resolution is node-local readiness. A replacement selector must
+      // remain runnable while this promise is open.
+      void task;
+    };
+
+    activateSelection = (
+      selection,
+      artifactSpace,
+      selectedGeneration,
+    ): void => {
+      try {
+        instantiateSelection(selection, artifactSpace, selectedGeneration);
+      } catch (error) {
+        if (
+          error instanceof FactoryArtifactUnavailableError ||
+          error instanceof DynamicFactoryExecutionSpaceUnavailableError
+        ) {
+          // Publish the selector dependency before exposing deterministic
+          // readiness gates; otherwise a replacement can land in that window.
+          queueMicrotask(() => {
+            if (!active || generation !== selectedGeneration) return;
+            if (error instanceof FactoryArtifactUnavailableError) {
+              beginColdPreparation(
+                selection,
+                artifactSpace,
+                selectedGeneration,
+              );
+            } else {
+              beginExecutionSpacePreparation(
+                error.spaceName,
+                selectedGeneration,
+              );
+            }
+          });
+          return;
+        }
+        throw error;
+      }
+    };
+
+    const select = (selection: unknown, cfcLabel?: unknown): void => {
+      if (!active) return;
+      const canonical = canonicalSelection(selection);
+      if (
+        hasSelection && deepEqual(canonical, currentCanonical) &&
+        deepEqual(cfcLabel, currentSelectionLabel)
+      ) {
+        return;
+      }
+
+      hasSelection = true;
+      currentCanonical = canonical;
+      currentSelectionLabel = cfcLabel;
+      generation++;
+      const selectedGeneration = generation;
+      childCancel?.();
+      childCancel = undefined;
+      if (selection === undefined) return;
+
+      const { artifactSpace } = readCurrent();
+      activateSelection(selection, artifactSpace, selectedGeneration);
+    };
+
+    sinkCancel = bindingCell.sink(
+      (selection, cfcLabel) => {
+        try {
+          select(selection, cfcLabel);
+        } catch (error) {
+          // Cell.sink invokes once before installing its subscription. Keep the
+          // supervisor alive across a preloaded invalid value so a later valid
+          // replacement can recover. Deliver the diagnostic only after this
+          // sink action settles: error listeners may synchronously replace the
+          // value, and a currently-running scheduler action cannot consume its
+          // own invalidation as the required later generation.
+          void this.runtime.scheduler.idle().then(() => {
+            if (!active) return;
+            this.runtime.scheduler.reportError(error, {
+              name: "dynamic-factory-selection",
+            });
+          });
+        }
+      },
+      {
+        includeCfcLabel: true,
+        subscribeBeforeInitial: true,
+        materializeFactories: false,
+      },
+    );
+    addCancel(() => {
+      if (!active) return;
+      active = false;
+      generation++;
+      sinkCancel?.();
+      sinkCancel = undefined;
+      childCancel?.();
+      childCancel = undefined;
+    });
   }
 
   private bindNodeIO(
@@ -3421,7 +3823,8 @@ export class Runner {
           ]);
         }
       }
-      this.runtime.getCellFromLink(target, target.schema, depTx)?.get();
+      this.runtime.getCellFromLink(target, target.schema, depTx)
+        ?.getWithoutFactoryMaterialization();
     }
   }
 
@@ -3453,9 +3856,10 @@ export class Runner {
       undefined,
       depTx,
     );
-    inputsCell.asSchema(eventDependencySchema).get({
-      traverseCells: true,
-    });
+    inputsCell.asSchema(eventDependencySchema)
+      .getWithoutFactoryMaterialization({
+        traverseCells: true,
+      });
   }
 
   private collectWritableCellArgumentLinks(
@@ -3974,9 +4378,16 @@ export class Runner {
   ): { argument: any; isValidArgument: boolean } {
     const argument = module.argumentSchema !== undefined
       ? options.bindTxToSchema
-        ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-        : inputsCell.asSchema(module.argumentSchema).get()
-      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+        ? inputsCell.asSchema(module.argumentSchema).withTx(tx)
+          .getWithoutFactoryMaterialization()
+        : inputsCell.asSchema(module.argumentSchema)
+          .getWithoutFactoryMaterialization()
+      : inputsCell.getAsQueryResult(
+        [],
+        tx,
+        options.writableProxy,
+        false,
+      );
 
     return {
       argument,
@@ -3990,7 +4401,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
   ): string {
     try {
-      return JSON.stringify(inputsCell.getAsQueryResult([], tx));
+      return JSON.stringify(inputsCell.getAsQueryResult([], tx, false, false));
     } catch (_error) {
       return "(Can't serialize to JSON)";
     }
@@ -4450,10 +4861,18 @@ export class Runner {
       reads,
       writes,
       streamLink,
+      factorySelectionLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
+      if (factorySelectionLink !== undefined) {
+        this.runtime.getCellFromLink(
+          factorySelectionLink,
+          factorySelectionLink.schema,
+          tx,
+        ).get();
+      }
 
       const eventInputs = {
         ...(inputs as Record<string, any>),
@@ -4493,7 +4912,7 @@ export class Runner {
           tx,
         );
         logger.timeStart("stream", "readInputs");
-        const { argument, isValidArgument } = (() => {
+        const { argument: unpreparedArgument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
               module,
@@ -4508,6 +4927,13 @@ export class Runner {
             logger.timeEnd("stream", "readInputs");
           }
         })();
+        const argument = isValidArgument
+          ? materializeScheduledFactoryInputs(
+            unpreparedArgument,
+            module.argumentSchema,
+            { runtime: this.runtime, tx, inputsCell },
+          )
+          : unpreparedArgument;
 
         this.updateInvalidInputFlag(
           name,
@@ -4592,6 +5018,7 @@ export class Runner {
         // pending names and retry instead of surfacing the error.
         if (
           !(error instanceof RetryImmediately) &&
+          !(error instanceof RetryWhenReady) &&
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
@@ -4630,7 +5057,8 @@ export class Runner {
           eventInputs,
           undefined,
         );
-        const argument = inputsCell.asSchema(module.argumentSchema!).get();
+        const argument = inputsCell.asSchema(module.argumentSchema!)
+          .getWithoutFactoryMaterialization();
         const promises: Promise<unknown>[] = [];
         const seen = new Set<unknown>();
         const collect = (value: unknown, depth: number): void => {
@@ -4683,10 +5111,11 @@ export class Runner {
       inputs,
       processCell,
     );
-    const declaredSchedulerReads = schedulerReads.length > 0
-      ? schedulerReads
-      : reads;
-    const populateDependencies = reads.length > 0
+    const declaredSchedulerReads = dedupeNormalizedLinks([
+      ...(schedulerReads.length > 0 ? schedulerReads : reads),
+      ...(factorySelectionLink === undefined ? [] : [factorySelectionLink]),
+    ]);
+    const populateDependencies = declaredSchedulerReads.length > 0
       ? (depTx: IExtendedStorageTransaction, event: any) => {
         this.populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
         this.populateHandlerEventSchedulerReads(
@@ -4708,9 +5137,10 @@ export class Runner {
           undefined,
           depTx,
         );
-        inputsCell.asSchema(module.argumentSchema!).get({
-          traverseCells: true,
-        });
+        inputsCell.asSchema(module.argumentSchema!)
+          .getWithoutFactoryMaterialization({
+            traverseCells: true,
+          });
       }
       : undefined;
 
@@ -4738,6 +5168,7 @@ export class Runner {
       reads,
       writes,
       schedulerRehydration,
+      factorySelectionLink,
     }: JavaScriptNodeContext,
   ): void {
     if (isRecord(inputs) && "$event" in inputs) {
@@ -4757,6 +5188,10 @@ export class Runner {
     };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
+    const effectiveReads = dedupeNormalizedLinks([
+      ...reads,
+      ...(factorySelectionLink === undefined ? [] : [factorySelectionLink]),
+    ]);
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
@@ -4783,10 +5218,11 @@ export class Runner {
       const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
-        // RetryImmediately is an internal control-flow signal: re-throw it
-        // untouched so the scheduler re-runs the action instead of writing an
-        // error result into the binding.
-        if (error instanceof RetryImmediately) throw error;
+        // Scheduler retry signals are internal control flow: re-throw them
+        // untouched instead of writing an error result into the binding.
+        if (
+          error instanceof RetryImmediately || error instanceof RetryWhenReady
+        ) throw error;
         if (
           error !== null &&
           (typeof error === "object" || typeof error === "function")
@@ -4813,9 +5249,16 @@ export class Runner {
 
       let popFrameAfterReturn = true;
       try {
+        if (factorySelectionLink !== undefined) {
+          this.runtime.getCellFromLink(
+            factorySelectionLink,
+            factorySelectionLink.schema,
+            tx,
+          ).get();
+        }
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
-        const { argument, isValidArgument } = (() => {
+        const { argument: unpreparedArgument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
               module,
@@ -4827,6 +5270,13 @@ export class Runner {
             logger.timeEnd("action", "readInputs");
           }
         })();
+        const argument = isValidArgument
+          ? materializeScheduledFactoryInputs(
+            unpreparedArgument,
+            module.argumentSchema,
+            { runtime: this.runtime, tx, inputsCell },
+          )
+          : unpreparedArgument;
 
         this.updateInvalidInputFlag(
           name,
@@ -4918,6 +5368,7 @@ export class Runner {
         // instead of surfacing the error.
         if (
           !(error instanceof RetryImmediately) &&
+          !(error instanceof RetryWhenReady) &&
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
@@ -4947,7 +5398,7 @@ export class Runner {
     this.applyImplementationHash(action, fn);
     const instanceKey = schedulerActionInstanceKey({
       process: processCell.getAsNormalizedFullLink(),
-      reads,
+      reads: effectiveReads,
       writes,
     });
     (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
@@ -5010,7 +5461,7 @@ export class Runner {
       )
       : [];
     const wrappedAction = Object.assign(action, {
-      reads,
+      reads: effectiveReads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       ...(module.completeSchedulerScopeSummary === true &&
@@ -5065,6 +5516,7 @@ export class Runner {
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     // Binding resolution is op-wiring machinery: the write-redirect walk
     // reads alias shells and plumbing containers' child paths, and those
@@ -5092,6 +5544,7 @@ export class Runner {
       fn,
       name,
       schedulerRehydration,
+      ...(factorySelectionLink === undefined ? {} : { factorySelectionLink }),
       ...io,
     };
 

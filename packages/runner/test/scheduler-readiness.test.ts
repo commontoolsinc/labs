@@ -1,0 +1,478 @@
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  ErrorWithContext,
+  EventHandler,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
+import { RetryWhenReady } from "../src/scheduler/retry-when-ready.ts";
+
+type TestMemoryServer = {
+  transact(message: { requestId: string }): Promise<{
+    type: "response";
+    requestId: string;
+    ok?: unknown;
+    error?: { name: string; message: string };
+  }>;
+};
+
+function delayNextServerTransact(
+  storageManager: SchedulerTestStorageManager,
+) {
+  const server = (storageManager as unknown as { server(): TestMemoryServer })
+    .server();
+  const original = server.transact.bind(server);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<"confirm" | "fail">();
+  let shouldDelay = true;
+  server.transact = async (message) => {
+    if (!shouldDelay) return await original(message);
+    shouldDelay = false;
+    started.resolve();
+    if (await release.promise === "fail") {
+      return {
+        type: "response",
+        requestId: message.requestId,
+        error: {
+          name: "ConflictError",
+          message: "forced readiness-lineage conflict",
+        },
+      };
+    }
+    return await original(message);
+  };
+  return {
+    started: started.promise,
+    fail: () => release.resolve("fail"),
+    restore: () => server.transact = original,
+  };
+}
+
+describe("scheduler RetryWhenReady", () => {
+  let storageManager: SchedulerTestStorageManager;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
+  });
+
+  afterEach(async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+  });
+
+  it("aborts reactive writes, keeps subscriptions, and coalesces stale readiness attempts", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "readiness-action-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "readiness-action-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const firstAttempt = Promise.withResolvers<void>();
+    const secondAttempt = Promise.withResolvers<void>();
+    let ready = false;
+    let runs = 0;
+    const action: Action = (actionTx) => {
+      const value = source.withTx(actionTx).get();
+      runs++;
+      if (!ready) {
+        output.withTx(actionTx).send(1_000 + runs);
+        if (runs === 1) firstAttempt.resolve();
+        if (runs === 2) secondAttempt.resolve();
+        throw new RetryWhenReady(readiness.promise);
+      }
+      output.withTx(actionTx).send(value);
+    };
+
+    const cancel = runtime.scheduler.subscribe(action, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+    }, { isEffect: true });
+
+    await firstAttempt.promise;
+    await runtime.idle();
+    expect(output.get()).toBe(0);
+
+    let unrelatedRuns = 0;
+    await runtime.scheduler.run(() => {
+      unrelatedRuns++;
+    });
+    expect(unrelatedRuns).toBe(1);
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await secondAttempt.promise;
+    await runtime.idle();
+    expect(runs).toBe(2);
+    expect(output.get()).toBe(0);
+
+    ready = true;
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+
+    expect(runs).toBe(3);
+    expect(output.get()).toBe(2);
+    cancel();
+  });
+
+  it("fences a reactive readiness continuation after cancellation", async () => {
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+      parked.resolve();
+      throw new RetryWhenReady(readiness.promise);
+    };
+    const cancel = runtime.scheduler.subscribe(
+      action,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    await parked.promise;
+    await runtime.idle();
+    cancel();
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+
+    expect(runs).toBe(1);
+  });
+
+  it("reports rejected reactive readiness without rerunning", async () => {
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    const errors: ErrorWithContext[] = [];
+    runtime.scheduler.onError((error) => errors.push(error));
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+      parked.resolve();
+      throw new RetryWhenReady(readiness.promise);
+    };
+    const cancel = runtime.scheduler.subscribe(
+      action,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    await parked.promise;
+    await runtime.idle();
+    readiness.reject(new Error("factory load rejected"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+
+    expect(runs).toBe(1);
+    expect(errors.map((error) => error.message)).toContain(
+      "factory load rejected",
+    );
+    cancel();
+  });
+
+  it("requeues the same event intent after readiness without blocking another event", async () => {
+    const stream = runtime.getCell<number>(
+      space,
+      "readiness-event-stream",
+      undefined,
+      tx,
+    );
+    const otherStream = runtime.getCell<number>(
+      space,
+      "readiness-event-other-stream",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "readiness-event-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    let ready = false;
+    const eventIds: (string | undefined)[] = [];
+    let handlerRuns = 0;
+    const handler: EventHandler = (eventTx, event: number) => {
+      handlerRuns++;
+      eventIds.push(eventTx.dispatchedEventId);
+      if (!ready) {
+        output.withTx(eventTx).send(1_000);
+        parked.resolve();
+        throw new RetryWhenReady(readiness.promise);
+      }
+      output.withTx(eventTx).send(event);
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+
+    let otherRuns = 0;
+    runtime.scheduler.addEventHandler(
+      () => {
+        otherRuns++;
+      },
+      otherStream.getAsNormalizedFullLink(),
+    );
+
+    let commitCalls = 0;
+    let commitStatus: string | undefined;
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      7,
+      false,
+      (eventTx) => {
+        commitCalls++;
+        commitStatus = eventTx.status().status;
+      },
+      false,
+      { eventId: "readiness-event-id" },
+    );
+    runtime.scheduler.queueEvent(
+      otherStream.getAsNormalizedFullLink(),
+      1,
+    );
+
+    await parked.promise;
+    await runtime.idle();
+    expect(output.get()).toBe(0);
+    expect(otherRuns).toBe(1);
+    expect(commitCalls).toBe(0);
+
+    ready = true;
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+    // Event commit callbacks observe storage completion, which idle()
+    // intentionally does not await.
+    await runtime.settled();
+
+    expect(handlerRuns).toBe(2);
+    expect(eventIds).toEqual(["readiness-event-id", "readiness-event-id"]);
+    expect(output.get()).toBe(7);
+    expect(commitCalls).toBe(1);
+    expect(commitStatus).toBe("done");
+  });
+
+  it("fences a parked event after handler cancellation and settles its callback", async () => {
+    const stream = runtime.getCell<number>(
+      space,
+      "readiness-event-cancel-stream",
+      undefined,
+      tx,
+    );
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    let runs = 0;
+    const handler: EventHandler = () => {
+      runs++;
+      parked.resolve();
+      throw new RetryWhenReady(readiness.promise);
+    };
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    let commitCalls = 0;
+    let commitStatus: string | undefined;
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      1,
+      true,
+      (eventTx) => {
+        commitCalls++;
+        commitStatus = eventTx.status().status;
+      },
+    );
+
+    await parked.promise;
+    await runtime.idle();
+    cancel();
+
+    // Cancellation is itself a final outcome. It must settle the durable
+    // intent even when the readiness promise never does.
+    await Promise.resolve();
+    expect(runs).toBe(1);
+    expect(commitCalls).toBe(1);
+    expect(commitStatus).toBe("error");
+
+    // A late load completion remains fenced and cannot settle twice.
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+
+    expect(runs).toBe(1);
+    expect(commitCalls).toBe(1);
+    expect(commitStatus).toBe("error");
+  });
+
+  it("reports rejected event readiness without requeueing or consuming authored retry policy", async () => {
+    const stream = runtime.getCell<number>(
+      space,
+      "readiness-event-rejection-stream",
+      undefined,
+      tx,
+    );
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    const errors: ErrorWithContext[] = [];
+    runtime.scheduler.onError((error) => errors.push(error));
+    let runs = 0;
+    runtime.scheduler.addEventHandler(
+      () => {
+        runs++;
+        parked.resolve();
+        throw new RetryWhenReady(readiness.promise);
+      },
+      stream.getAsNormalizedFullLink(),
+    );
+    let commitCalls = 0;
+    let commitStatus: string | undefined;
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      1,
+      false,
+      (eventTx) => {
+        commitCalls++;
+        commitStatus = eventTx.status().status;
+      },
+    );
+
+    await parked.promise;
+    await runtime.idle();
+    readiness.reject(new Error("event factory load rejected"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+
+    expect(runs).toBe(1);
+    expect(errors.map((error) => error.message)).toContain(
+      "event factory load rejected",
+    );
+    expect(commitCalls).toBe(1);
+    expect(commitStatus).toBe("error");
+  });
+
+  it("settles parked readiness when its speculative origin fails", async () => {
+    const originStream = runtime.getCell<number>(
+      space,
+      "readiness-lineage-origin-stream",
+      undefined,
+      tx,
+    );
+    const childStream = runtime.getCell<number>(
+      space,
+      "readiness-lineage-child-stream",
+      undefined,
+      tx,
+    );
+    const originWrite = runtime.getCell<number>(
+      space,
+      "readiness-lineage-origin-write",
+      undefined,
+      tx,
+    );
+    originWrite.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    let childRuns = 0;
+    runtime.scheduler.addEventHandler(
+      () => {
+        childRuns++;
+        parked.resolve();
+        throw new RetryWhenReady(readiness.promise);
+      },
+      childStream.getAsNormalizedFullLink(),
+    );
+
+    const finalCallback = Promise.withResolvers<string>();
+    let finalCalls = 0;
+    runtime.scheduler.addEventHandler(
+      (originTx) => {
+        originWrite.withTx(originTx).set(1);
+        runtime.scheduler.queueEvent(
+          childStream.getAsNormalizedFullLink(),
+          1,
+          false,
+          (childTx) => {
+            finalCalls++;
+            finalCallback.resolve(childTx.status().status);
+          },
+          false,
+          { originTx },
+        );
+      },
+      originStream.getAsNormalizedFullLink(),
+    );
+
+    const gate = delayNextServerTransact(storageManager);
+    try {
+      runtime.scheduler.queueEvent(
+        originStream.getAsNormalizedFullLink(),
+        1,
+        false,
+      );
+      await gate.started;
+      await parked.promise;
+      expect(childRuns).toBe(1);
+      expect(finalCalls).toBe(0);
+
+      gate.fail();
+      expect(await finalCallback.promise).toBe("error");
+      expect(finalCalls).toBe(1);
+
+      readiness.resolve();
+      await Promise.resolve();
+      await runtime.idle();
+      expect(childRuns).toBe(1);
+      expect(finalCalls).toBe(1);
+    } finally {
+      gate.restore();
+    }
+  });
+});
