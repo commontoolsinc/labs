@@ -5763,12 +5763,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             value: {
               type: "string",
-              ifc: {
-                projection: {
-                  from: ["input", "value"],
-                  path: ["value"],
-                } as any,
-              },
+              ifc: { opaque: true } as any,
             },
           },
           required: ["value"],
@@ -5780,7 +5775,48 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
       expect(tx.getCfcState().diagnostics).toContain(
-        "unsupported trust-sensitive claim projection at /value",
+        "unsupported trust-sensitive claim opaque at /value",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("records diagnostics for malformed projection claims in observe mode", async () => {
+    const { runtime, storageManager } = createRuntime("observe");
+    try {
+      const tx = runtime.edit();
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-observe-malformed-projection-claim",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              // Array-form pointers are not the lowered CanonicalPointer
+              // dialect — the claim is malformed, and observe mode must
+              // diagnose it rather than silently skip verification.
+              ifc: {
+                projection: {
+                  from: ["input", "value"],
+                  path: ["value"],
+                },
+              } as any,
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "observed" });
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      expect(tx.getCfcState().diagnostics).toContain(
+        "malformed projection claim at /value",
       );
     } finally {
       await runtime.dispose();
@@ -5807,8 +5843,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
                 collection: {
                   subsetOf: ["input", "items"],
                   memberIntegrity: "preserved",
-                } as any,
-              },
+                },
+              } as any,
             },
           },
           required: ["value"],

@@ -447,8 +447,9 @@ const metadataAppliesToPath = (
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
   // A labelMap entry is persisted whenever the source schema had label values
-  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf — see the
-  // entry-construction site). The mere presence of the entry signals "policy
+  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf /
+  // projection — see the entry-construction site). The mere presence of the
+  // entry signals "policy
   // applies on this path"; do NOT filter on `hasLabelValues` here, or
   // claim-only entries get silently bypassed.
   //
@@ -474,7 +475,8 @@ const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
   }
   return schema.ifc.writeAuthorizedBy !== undefined ||
     schema.ifc.uiContract !== undefined ||
-    schema.ifc.exactCopyOf !== undefined;
+    schema.ifc.exactCopyOf !== undefined ||
+    schema.ifc.projection !== undefined;
 };
 
 const claimPathToLogicalPath = (
@@ -2046,7 +2048,6 @@ const unsupportedTrustSensitiveReason = (
   // fail closed rather than be silently ignored (and dropped by schema-merge),
   // which would give an author no enforcement and no error (audit S10).
   const unsupportedKeys = [
-    "projection",
     "collection",
     "opaque",
     "passThrough",
@@ -2106,6 +2107,117 @@ const exactCopySourcePath = (
     return undefined;
   }
   return claimPathToLogicalPath(schema.ifc.exactCopyOf);
+};
+
+// §8.3 projection claims. The lowered authored form (`Projection` /
+// `ProjectionOf` / `ProjectionPath` in @commonfabric/api/cfc) is
+// `{ from, path }`: this entry's value is the field at JSON pointer `path`
+// inside the structured value at logical path `from` of the SAME document
+// (like `exactCopyOf`, cross-document claims are not expressible — a link at
+// the source path compares as the link sigil and fails closed). Both
+// pointers use the CanonicalPointer dialect: "/" is the root, segments are
+// ~0/~1-escaped.
+type ProjectionClaim = {
+  // Logical path of the structured source value within the document.
+  source: readonly string[];
+  // Pointer segments of the projected field inside the source value.
+  field: readonly string[];
+};
+
+const decodePointerSegment = (segment: string): string =>
+  segment.replaceAll("~1", "/").replaceAll("~0", "~");
+
+const parseCanonicalPointer = (
+  pointer: unknown,
+): readonly string[] | undefined => {
+  if (typeof pointer !== "string" || !pointer.startsWith("/")) {
+    return undefined;
+  }
+  if (pointer === "/") {
+    return [];
+  }
+  return pointer.slice(1).split("/").map(decodePointerSegment);
+};
+
+// `undefined` = no claim on this schema; `"malformed"` = a claim is present
+// but unparseable — the caller must fail closed (a schema arriving from
+// storage or the wire is not typed; silently skipping verification would
+// accept the claim unverified, audit S10's posture).
+const projectionClaimSpec = (
+  schema: JSONSchema,
+): ProjectionClaim | "malformed" | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+  const claim = (schema.ifc as { projection?: unknown }).projection;
+  if (claim === undefined) {
+    return undefined;
+  }
+  if (!isRecord(claim)) {
+    return "malformed";
+  }
+  const source = parseCanonicalPointer(claim.from);
+  const field = parseCanonicalPointer(claim.path);
+  if (source === undefined || field === undefined) {
+    return "malformed";
+  }
+  return { source: canonicalizeLogicalPath(source), field };
+};
+
+// §8.3.2 scoped-integrity carry for a verified projection claim: the
+// projected field inherits the source's confidentiality in full (§8.3.1) and
+// carries the source's integrity SCOPED to the projected pointer — the
+// projection can never claim whole-object integrity (§8.3.4 goal 1), while
+// checked recomposition (`recomposeProjections`) stays unsupported. Every
+// source schema entry covering the projected location contributes, each
+// scoped by the pointer of the projected field RELATIVE to that entry (a
+// deeper source location makes a longer residual claim); the entry AT the
+// projected location itself is an exact copy, so its atoms carry unscoped
+// (§8.3.4's interop note: no `projection: "/"`). Dropped, fail-closed:
+// - string atoms (no field to carry the scope binding),
+// - provenance-class atoms (facts about how a specific value came to be —
+//   the propagation-class registry forbids any claim carrying them onto an
+//   output; see atom-classes.ts),
+// - atoms whose existing `scope` is not a record (cannot be extended).
+// Like the `exactCopyOf` carry, the result feeds `derivePersistedLabel`,
+// so `gateRuntimeMintedIntegrity` still strips runtime-minted evidence from
+// non-builtin-authored writes downstream.
+const projectedSourceLabel = (
+  sourceEntryLabels: Map<string, IFCLabel>,
+  claim: ProjectionClaim,
+): IFCLabel => {
+  const source = canonicalizeLogicalPath([...claim.source, ...claim.field]);
+  const confidentiality: unknown[] = [];
+  const integrity: unknown[] = [];
+  for (let depth = 0; depth <= source.length; depth++) {
+    const label = sourceEntryLabels.get(pathKey(source.slice(0, depth)));
+    if (label === undefined) {
+      continue;
+    }
+    confidentiality.push(...label.confidentiality ?? []);
+    const relative = source.slice(depth);
+    for (const atom of label.integrity ?? []) {
+      if (relative.length === 0) {
+        integrity.push(atom);
+        continue;
+      }
+      if (!isRecord(atom) || atomPropagationClass(atom) === "provenance") {
+        continue;
+      }
+      const scope = (atom as { scope?: unknown }).scope;
+      if (scope !== undefined && !isRecord(scope)) {
+        continue;
+      }
+      integrity.push({
+        ...atom,
+        scope: { ...(scope ?? {}), projection: encodePointer(relative) },
+      });
+    }
+  }
+  return {
+    confidentiality: confidentiality.length > 0 ? confidentiality : undefined,
+    integrity: integrity.length > 0 ? integrity : undefined,
+  };
 };
 
 const currentPrincipalIntegrityReason = (
@@ -3496,6 +3608,72 @@ const verifyExactCopyRequirements = (
   return undefined;
 };
 
+// §8.3 projection-claim verification, the exactCopyOf discipline applied to
+// a sub-path: the written target value must equal the value at
+// `from + path` inside the same document, reconstructed from this
+// transaction's writes. A claim that cannot be verified (malformed shape,
+// wildcard path) fails closed rather than being silently skipped.
+const verifyProjectionRequirements = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  schema: JSONSchema,
+): string | undefined => {
+  for (const entry of walkIfcSchema(schema)) {
+    const claim = projectionClaimSpec(entry.schema);
+    if (claim === undefined) {
+      continue;
+    }
+    // Only verify a claim whose target path the transaction actually wrote
+    // (mirrors verifyExactCopyRequirements: an untouched entry compares
+    // undefined to undefined and would accept the claim — and copy its
+    // label — unverified).
+    if (
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
+    ) {
+      continue;
+    }
+    if (claim === "malformed") {
+      return `malformed projection claim at /${entry.path.join("/")}`;
+    }
+    const sourcePath = canonicalizeLogicalPath([
+      ...claim.source,
+      ...claim.field,
+    ]);
+    // Array-item (wildcard) claims are unsupported for the same reason as
+    // exactCopyOf (audit W2.15): the per-path value reconstruction matches
+    // segments literally, so "*" never resolves against a concrete write and
+    // the comparison would pass vacuously. Fail closed.
+    if (entry.path.includes("*") || sourcePath.includes("*")) {
+      return `projection claim under an array wildcard is unsupported at /${
+        entry.path.join("/")
+      }`;
+    }
+    const targetValue = writeValueForTarget(tx, {
+      ...target,
+      path: entry.path,
+    });
+    const sourceValue = writeValueForTarget(tx, {
+      ...target,
+      path: sourcePath,
+    });
+
+    if (!deepEqual(sourceValue, targetValue)) {
+      return `projection claim failed at /${entry.path.join("/")}`;
+    }
+  }
+  return undefined;
+};
+
 const derivePersistedLabel = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -3507,6 +3685,17 @@ const derivePersistedLabel = (
   const copiedInputLabel = sourceEntryLabels && exactCopySourcePath(schema)
     ? sourceEntryLabels.get(pathKey(exactCopySourcePath(schema)!))
     : undefined;
+  // §8.3 projection carry — full confidentiality, scoped integrity (see
+  // projectedSourceLabel). A malformed claim carries nothing: verification
+  // already rejects it fail-closed, and non-rejecting enforcement modes must
+  // not copy a label the claim never earned.
+  const projectionClaim = sourceEntryLabels !== undefined
+    ? projectionClaimSpec(schema)
+    : undefined;
+  const projectedInputLabel =
+    projectionClaim !== undefined && projectionClaim !== "malformed"
+      ? projectedSourceLabel(sourceEntryLabels!, projectionClaim)
+      : undefined;
   return {
     // Normalize confidentiality clauses on persist (Epic A4): an authored or
     // copied `{anyOf:[…]}` clause is deduped/canonically-ordered/singleton-
@@ -3516,6 +3705,7 @@ const derivePersistedLabel = (
     confidentiality: mergeLabelValues(
       schemaLabel.confidentiality?.map(normalizeClause),
       copiedInputLabel?.confidentiality?.map(normalizeClause),
+      projectedInputLabel?.confidentiality?.map(normalizeClause),
     ),
     integrity: mergeLabelValues(
       resolveCurrentPrincipalLabelValues(
@@ -3523,6 +3713,7 @@ const derivePersistedLabel = (
         actingPrincipal,
       ),
       copiedInputLabel?.integrity,
+      projectedInputLabel?.integrity,
       resolveCurrentPrincipalLabelValues(
         Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
         actingPrincipal,
@@ -4235,9 +4426,9 @@ const attemptedWritePathsUnder = (
  * on a floor-declaring path fails.
  *
  * What credits the value (mirrors what this commit persists at the path):
- * - the schema-derived label — `addIntegrity` mints and `exactCopyOf` carry,
- *   evidence-gated by the write's authoring identity (a pattern cannot forge
- *   runtime-minted evidence to pass its own floor);
+ * - the schema-derived label — `addIntegrity` mints plus `exactCopyOf` and
+ *   `projection` carries, evidence-gated by the write's authoring identity
+ *   (a pattern cannot forge runtime-minted evidence to pass its own floor);
  * - each link written at/under the path — the linked source's own label, the
  *   D2 by-reference contract on the write side. Every link must individually
  *   satisfy the floor (one endorsed sibling never launders another);
@@ -4327,8 +4518,9 @@ const verifyWriteFloor = (
     }
 
     // The label this commit persists at the path: schema integrity +
-    // `addIntegrity` mints + `exactCopyOf` carry, evidence-gated so a pattern
-    // author cannot forge runtime-minted atoms to satisfy their own floor.
+    // `addIntegrity` mints + `exactCopyOf`/`projection` carries,
+    // evidence-gated so a pattern author cannot forge runtime-minted atoms
+    // to satisfy their own floor.
     const base = gateRuntimeMintedIntegrity(
       derivePersistedLabel(tx, entry.schema, entry.label, entryLabels),
       ctx.identityForPath(entry.path),
@@ -4755,6 +4947,17 @@ export const prepareBoundaryCommit = (
     );
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
+      if (!isIngestTarget) continue;
+      ingestVerificationFailed = true;
+    }
+
+    const projectionFailure = verifyProjectionRequirements(
+      tx,
+      target,
+      verificationSchema,
+    );
+    if (projectionFailure) {
+      reasons.push(projectionFailure);
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
