@@ -2,7 +2,6 @@ import { assertEquals } from "@std/assert";
 import type {
   AsyncResult,
   AvailableResult,
-  DataUnavailable,
   DataUnavailableFor,
   DataUnavailableVariant,
   FetchBinaryFunction,
@@ -18,6 +17,7 @@ import type {
   HasError,
   HasErrorFunction,
   HasSchemaMismatch,
+  HasSchemaMismatchFunction,
   IsPending,
   IsPendingFunction,
   IsSyncing,
@@ -81,7 +81,7 @@ function observationTypecheck(
   > = true;
 
   const all = observe(value);
-  const allIsExact: Equal<typeof all, Repo | DataUnavailable> = true;
+  const allIsExact: Equal<typeof all, Repo | DataUnavailableVariant> = true;
 
   const extracted: Equal<
     DataUnavailableFor<"error" | "schema-mismatch">,
@@ -92,6 +92,25 @@ function observationTypecheck(
   void selectedIsExact;
   void allIsExact;
   void extracted;
+}
+
+function exhaustiveObservationTypecheck(
+  value: Repo,
+  observe: ObserveAvailabilityFunction,
+  isPending: IsPendingFunction,
+  hasError: HasErrorFunction,
+  isSyncing: (value: unknown) => value is IsSyncing,
+  hasSchemaMismatch: HasSchemaMismatchFunction,
+  resultOf: ResultOfFunction,
+): string {
+  const observed = observe(value);
+  if (isPending(observed)) return "pending";
+  if (hasError(observed)) return observed.error.message;
+  if (isSyncing(observed)) return "syncing";
+  if (hasSchemaMismatch(observed)) return "schema mismatch";
+
+  const usable: Repo = observed;
+  return resultOf(observed).name ?? usable.name;
 }
 
 function modulePolicyTypecheck(): void {
@@ -238,6 +257,7 @@ Deno.test("data-unavailability helper declarations preserve narrowing types", ()
   assertEquals(typeof guardNarrowingTypecheck, "function");
   assertEquals(typeof asyncResultNarrowingTypecheck, "function");
   assertEquals(typeof observationTypecheck, "function");
+  assertEquals(typeof exhaustiveObservationTypecheck, "function");
   assertEquals(typeof modulePolicyTypecheck, "function");
   assertEquals(typeof directAsyncBuiltinTypecheck, "function");
 });

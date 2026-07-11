@@ -2993,7 +2993,7 @@ export type HasSchemaMismatchFunction = (
  * observing selected unavailable reasons.
  */
 export interface ObserveAvailabilityFunction {
-  <T>(value: T): T | DataUnavailable;
+  <T>(value: T): T | DataUnavailableVariant;
   <T, K extends DataUnavailableReason>(
     value: T,
     ...reasons: K[]
