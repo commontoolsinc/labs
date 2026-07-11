@@ -24,13 +24,18 @@ describe("shell blob upload", () => {
           commonfabric?: { rt?: unknown };
         }).commonfabric?.rt,
       ));
+    await waitForCondition(shell.page(), () => {
+      const rootView = document.querySelector("x-root-view");
+      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+        | { _patterns?: { value?: { spaceRootPattern?: unknown } } }
+        | null;
+      return Boolean(appView?._patterns?.value?.spaceRootPattern);
+    });
 
-    const result = await shell.page().evaluate(async (spaceName) => {
+    const result = await shell.page().evaluate(async () => {
       const g = globalThis as unknown as {
         commonfabric?: {
           rt?: {
-            resolveSpaceName(name: string): Promise<string>;
-            getSpaceRootPattern(space: string): Promise<unknown>;
             uploadBlob(options: {
               space: string;
               contentType: string;
@@ -47,8 +52,10 @@ describe("shell blob upload", () => {
       // Blob authorization is deferred, but direct writes under ACL
       // enforcement still need an existing space. Await the normal named-space
       // root bootstrap before exercising the upload compatibility path.
-      const space = await rt.resolveSpaceName(spaceName);
-      await rt.getSpaceRootPattern(space);
+      const space = (document.querySelector("x-root-view") as
+        | { space?: string }
+        | null)?.space;
+      if (!space) throw new Error("Named space did not resolve");
 
       const upload = await rt.uploadBlob({
         space,
@@ -124,7 +131,7 @@ describe("shell blob upload", () => {
           document.head.querySelector("[data-commonfabric-space-base='true']"),
         ),
       };
-    }, { args: [spaceName] });
+    });
 
     const image = await shell.page().waitForSelector(
       "[data-blob-upload-test='true']",
