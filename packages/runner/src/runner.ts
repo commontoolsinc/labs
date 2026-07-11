@@ -74,6 +74,8 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import {
+  ignoreReadForCommit,
+  internalVerifierRead,
   machineryRead,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
@@ -156,6 +158,12 @@ type AvailabilityPreflight = Readonly<{
   accepted: readonly UnavailableInput[];
 }>;
 
+const AVAILABILITY_PREFLIGHT_PROBE_READ = {
+  ...ignoreReadForScheduling,
+  ...ignoreReadForCommit,
+  ...internalVerifierRead,
+};
+
 function pathsEqual(
   left: readonly string[],
   right: readonly string[],
@@ -177,14 +185,11 @@ function policyAcceptsUnavailableInput(
 /**
  * Select the unavailable marker which controls this computation.
  *
- * Walking the serialized binding graph resolves bound links and records their
- * normal scheduler/CFC reads. Object keys provide deterministic argument
- * order; a marker with a higher-priority reason replaces an earlier selection,
- * while equal-priority markers retain that order. Accepted markers remain
- * ordinary leaves and are materialized by the declared schema after this
- * preflight.
+ * Object keys provide deterministic argument order; a marker with a
+ * higher-priority reason replaces an earlier selection, while equal-priority
+ * markers retain that order.
  */
-function preflightUnavailableInputs(
+function scanUnavailableInputs(
   inputBindings: unknown,
   argumentSchema: JSONSchema | undefined,
   policy: readonly UnavailableInputPolicyEntry[] | undefined,
@@ -252,6 +257,49 @@ function preflightUnavailableInputs(
 
   visit(inputBindings, []);
   return { unavailable: selected, accepted };
+}
+
+/**
+ * Authenticate unavailable inputs before schema materialization.
+ *
+ * The first scan is a verifier probe: its link reads do not become scheduler,
+ * conflict, or CFC inputs. If it finds a concrete marker, scan normally so a
+ * skipped computation remains reactive to the marker and its link topology,
+ * and so propagation retains the marker's CFC labels. Otherwise ordinary
+ * argument materialization supplies the computation's sole normal target
+ * reads. Both scans apply the same exact-path policy and precedence rules.
+ */
+function preflightUnavailableInputs(
+  inputBindings: unknown,
+  argumentSchema: JSONSchema | undefined,
+  policy: readonly UnavailableInputPolicyEntry[] | undefined,
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<any>,
+): AvailabilityPreflight {
+  const probe = tx.runWithAmbientReadMeta(
+    AVAILABILITY_PREFLIGHT_PROBE_READ,
+    () =>
+      scanUnavailableInputs(
+        inputBindings,
+        argumentSchema,
+        policy,
+        runtime,
+        tx,
+        inputsCell,
+      ),
+  );
+  if (probe.unavailable === undefined && probe.accepted.length === 0) {
+    return probe;
+  }
+  return scanUnavailableInputs(
+    inputBindings,
+    argumentSchema,
+    policy,
+    runtime,
+    tx,
+    inputsCell,
+  );
 }
 
 /**

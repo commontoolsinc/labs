@@ -10,6 +10,16 @@ import { type Cell, createCell } from "../src/cell.ts";
 import { getDerivedInternalCell, parseLink } from "../src/link-utils.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
+import type {
+  IExtendedStorageTransaction,
+  IReadActivity,
+} from "../src/storage/interface.ts";
+import {
+  isInternalVerifierRead,
+  isLinkResolutionProbe,
+  isReadIgnoredForCommit,
+  isReadIgnoredForScheduling,
+} from "../src/storage/reactivity-log.ts";
 import { trustExecutable, trustModule } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("data unavailability test");
@@ -48,6 +58,7 @@ describe("JavaScript-node data unavailability", () => {
     isEffect?: boolean;
     captureWrittenResult?: (value: unknown) => void;
     captureSelectedInput?: (value: unknown) => void;
+    captureArgumentReads?: (reads: readonly IReadActivity[]) => void;
   }): Promise<unknown> {
     const module: Module = {
       type: options.moduleType ?? "javascript",
@@ -96,10 +107,18 @@ describe("JavaScript-node data unavailability", () => {
         return originalWrite.apply(this, args);
       };
     }
-    if (options.captureSelectedInput !== undefined) {
+    if (
+      options.captureSelectedInput !== undefined ||
+      options.captureArgumentReads !== undefined
+    ) {
       runner.readJavaScriptArgument = function (...args: any[]) {
+        const tx = args[2] as IExtendedStorageTransaction;
+        const readCountBefore = [...(tx.getReadActivities?.() ?? [])].length;
         const result = originalRead.apply(this, args);
-        options.captureSelectedInput!(result.unavailable);
+        options.captureSelectedInput?.(result.unavailable);
+        options.captureArgumentReads?.(
+          [...(tx.getReadActivities?.() ?? [])].slice(readCountBefore),
+        );
         return result;
       };
     }
@@ -503,6 +522,46 @@ describe("JavaScript-node data unavailability", () => {
 
     expect(calls).toBe(0);
     expect(output).toBe(marker);
+  });
+
+  it("does not duplicate an ordinary linked target's effective read", async () => {
+    const target = runtime.getCell<number>(
+      space,
+      `ordinary linked input ${nextResultId++}`,
+    );
+    const seedTx = runtime.edit();
+    target.withTx(seedTx).set(41);
+    await seedTx.commit();
+
+    let reads: readonly IReadActivity[] = [];
+    const output = await runValueNode({
+      argument: { value: target.getAsLink() },
+      argumentSchema: { type: "number" },
+      implementation: (value: number) => value + 1,
+      captureArgumentReads: (argumentReads) => reads = argumentReads,
+    });
+
+    expect(output).toBe(42);
+    const targetId = target.getAsNormalizedFullLink().id;
+    const contentReads = reads.filter((read) =>
+      read.id === targetId && !isLinkResolutionProbe(read.meta)
+    );
+    const ordinaryReads = contentReads.filter((read) =>
+      !isReadIgnoredForScheduling(read.meta) &&
+      !isReadIgnoredForCommit(read.meta) &&
+      !isInternalVerifierRead(read.meta)
+    );
+    expect(
+      ordinaryReads.filter((read) => read.nonRecursive !== true),
+    ).toHaveLength(0);
+    expect(ordinaryReads).toHaveLength(2);
+
+    const verifierReads = contentReads.filter((read) =>
+      isReadIgnoredForScheduling(read.meta) &&
+      isReadIgnoredForCommit(read.meta) &&
+      isInternalVerifierRead(read.meta)
+    );
+    expect(verifierReads).toHaveLength(1);
   });
 
   it("writes schema-mismatch when locally complete input fails its schema", async () => {
