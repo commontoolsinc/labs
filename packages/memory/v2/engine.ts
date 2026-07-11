@@ -1631,8 +1631,13 @@ type SchedulerMigrationCandidate = {
   snapshot_commit_seq: number | null;
   snapshot_observed_at_seq: number;
   snapshot_payload: string;
+  observation_branch: BranchName;
+  observation_piece_id: string;
+  observation_process_generation: number;
+  observation_action_id: string;
   observation_commit_seq: number | null;
   observation_observed_at_seq: number;
+  observation_payload: string;
   session_id: string | null;
   local_seq: number | null;
   created_at: string;
@@ -1640,6 +1645,10 @@ type SchedulerMigrationCandidate = {
   direct_dirty_seq: number | null;
   stale_seq: number | null;
   unknown_reason: string | null;
+  snapshot_reference_count: number;
+  state_reference_count: number;
+  replay_identity_count: number;
+  observation_commit_valid: number;
 };
 
 const schedulerMigrationCandidates = (
@@ -1656,15 +1665,48 @@ const schedulerMigrationCandidates = (
       s.commit_seq AS snapshot_commit_seq,
       s.observed_at_seq AS snapshot_observed_at_seq,
       s.payload AS snapshot_payload,
+      o.branch AS observation_branch,
+      o.piece_id AS observation_piece_id,
+      o.process_generation AS observation_process_generation,
+      o.action_id AS observation_action_id,
       o.commit_seq AS observation_commit_seq,
       o.observed_at_seq AS observation_observed_at_seq,
+      o.payload AS observation_payload,
       o.session_id,
       o.local_seq,
       o.created_at,
       a.latest_observation_id,
       a.direct_dirty_seq,
       a.stale_seq,
-      a.unknown_reason
+      a.unknown_reason,
+      (
+        SELECT COUNT(*)
+        FROM scheduler_action_snapshot duplicate_snapshot
+        WHERE duplicate_snapshot.observation_id = s.observation_id
+      ) AS snapshot_reference_count,
+      (
+        SELECT COUNT(*)
+        FROM scheduler_action_state duplicate_state
+        WHERE duplicate_state.latest_observation_id = s.observation_id
+      ) AS state_reference_count,
+      CASE
+        WHEN o.session_id IS NULL OR o.local_seq IS NULL THEN 1
+        ELSE (
+          SELECT COUNT(*)
+          FROM scheduler_observation replay_peer
+          WHERE replay_peer.branch = o.branch
+            AND replay_peer.session_id = o.session_id
+            AND replay_peer.local_seq = o.local_seq
+        )
+      END AS replay_identity_count,
+      CASE
+        WHEN o.commit_seq IS NULL OR EXISTS (
+          SELECT 1
+          FROM "commit" commit_row
+          WHERE commit_row.seq = o.commit_seq
+        ) THEN 1
+        ELSE 0
+      END AS observation_commit_valid
     FROM scheduler_action_snapshot s
     JOIN scheduler_observation o
       ON o.observation_id = s.observation_id
@@ -1681,10 +1723,34 @@ function schedulerMigrationObservation(
   candidate: SchedulerMigrationCandidate,
 ): SchedulerActionObservation | undefined {
   try {
+    if (
+      candidate.observation_branch !== candidate.branch ||
+      candidate.observation_piece_id !== candidate.piece_id ||
+      candidate.observation_process_generation !==
+        candidate.process_generation ||
+      candidate.observation_action_id !== candidate.action_id ||
+      candidate.observation_payload !== candidate.snapshot_payload ||
+      candidate.snapshot_reference_count !== 1 ||
+      candidate.state_reference_count !== 1 ||
+      candidate.replay_identity_count !== 1 ||
+      candidate.observation_commit_valid !== 1
+    ) {
+      return undefined;
+    }
     const parsed = schedulerObservationFromValue(
       decodeMemoryBoundary(candidate.snapshot_payload),
     );
-    if (!parsed) return undefined;
+    if (
+      !parsed ||
+      parsed.branch !== candidate.branch ||
+      normalizeSchedulerOwnerSpace(parsed.ownerSpace) !==
+        candidate.owner_space ||
+      parsed.pieceId !== candidate.piece_id ||
+      parsed.processGeneration !== candidate.process_generation ||
+      parsed.actionId !== candidate.action_id
+    ) {
+      return undefined;
+    }
     const observation = normalizeSchedulerObservation(
       parsed,
       candidate.branch,
@@ -1692,9 +1758,6 @@ function schedulerMigrationObservation(
       denormalizeSchedulerOwnerSpace(candidate.owner_space),
     );
     if (
-      observation.pieceId !== candidate.piece_id ||
-      observation.processGeneration !== candidate.process_generation ||
-      observation.actionId !== candidate.action_id ||
       schedulerStaticContextFloor(observation) !== "space" ||
       schedulerRuntimeContextFloor(observation) !== "space"
     ) {

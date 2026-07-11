@@ -368,6 +368,69 @@ const insertLegacyActiveSchedulerRow = (
   });
 };
 
+const insertLegacySnapshotAndState = (
+  database: Database,
+  options: {
+    observationId: number;
+    actionId: string;
+    payload: string;
+    dirtySeq: number;
+  },
+): void => {
+  database.prepare(`
+    INSERT INTO scheduler_action_snapshot (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      observation_id,
+      observed_at_seq,
+      payload
+    ) VALUES (
+      '',
+      :owner_space,
+      :piece_id,
+      1,
+      :action_id,
+      :observation_id,
+      0,
+      :payload
+    )
+  `).run({
+    owner_space: OWNER_SPACE,
+    piece_id: PIECE_ID,
+    action_id: options.actionId,
+    observation_id: options.observationId,
+    payload: options.payload,
+  });
+  database.prepare(`
+    INSERT INTO scheduler_action_state (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      latest_observation_id,
+      direct_dirty_seq
+    ) VALUES (
+      '',
+      :owner_space,
+      :piece_id,
+      1,
+      :action_id,
+      :observation_id,
+      :dirty_seq
+    )
+  `).run({
+    owner_space: OWNER_SPACE,
+    piece_id: PIECE_ID,
+    action_id: options.actionId,
+    observation_id: options.observationId,
+    dirty_seq: options.dirtySeq,
+  });
+};
+
 Deno.test("scheduler context keeps two PerSession rows for one principal", async () => {
   await withEngine((engine) => {
     const actionId = "context:two-alice-sessions";
@@ -786,6 +849,13 @@ Deno.test("scheduler context migration preserves only provable space state and i
   const spaceAction = "context:migration:space";
   const userAction = "context:migration:user";
   const malformedAction = "context:migration:malformed";
+  const payloadMismatchAction = "context:migration:payload-mismatch";
+  const identityMismatchAction = "context:migration:identity-mismatch";
+  const orphanSnapshotAction = "context:migration:orphan-snapshot";
+  const orphanStateAction = "context:migration:orphan-state";
+  const staleStateAction = "context:migration:stale-state";
+  const ambiguousActionA = "context:migration:ambiguous-a";
+  const ambiguousActionB = "context:migration:ambiguous-b";
   try {
     legacy.exec(LEGACY_SCHEDULER_SCHEMA);
     insertLegacyActiveSchedulerRow(legacy, {
@@ -816,6 +886,91 @@ Deno.test("scheduler context migration preserves only provable space state and i
       }),
       dirtySeq: 9,
     });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 4,
+      actionId: payloadMismatchAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: payloadMismatchAction }) as never,
+      ),
+      dirtySeq: 10,
+    });
+    legacy.prepare(`
+      UPDATE scheduler_observation
+      SET payload = :payload
+      WHERE observation_id = 4
+    `).run({
+      payload: encodeMemoryBoundary({
+        ...observationFor({ actionId: payloadMismatchAction }),
+        status: "failed",
+        errorFingerprint: "different-payload",
+      } as never),
+    });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 5,
+      actionId: identityMismatchAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: identityMismatchAction }) as never,
+      ),
+      dirtySeq: 11,
+    });
+    legacy.prepare(`
+      UPDATE scheduler_observation
+      SET action_id = :action_id
+      WHERE observation_id = 5
+    `).run({ action_id: `${identityMismatchAction}:other` });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 6,
+      actionId: orphanSnapshotAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: orphanSnapshotAction }) as never,
+      ),
+      dirtySeq: 12,
+    });
+    legacy.prepare(`
+      DELETE FROM scheduler_action_state
+      WHERE action_id = :action_id
+    `).run({ action_id: orphanSnapshotAction });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 7,
+      actionId: orphanStateAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: orphanStateAction }) as never,
+      ),
+      dirtySeq: 13,
+    });
+    legacy.prepare(`
+      DELETE FROM scheduler_action_snapshot
+      WHERE action_id = :action_id
+    `).run({ action_id: orphanStateAction });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 8,
+      actionId: staleStateAction,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: staleStateAction }) as never,
+      ),
+      dirtySeq: 14,
+    });
+    legacy.prepare(`
+      UPDATE scheduler_action_state
+      SET latest_observation_id = 999
+      WHERE action_id = :action_id
+    `).run({ action_id: staleStateAction });
+    insertLegacyActiveSchedulerRow(legacy, {
+      observationId: 9,
+      actionId: ambiguousActionA,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: ambiguousActionA }) as never,
+      ),
+      dirtySeq: 15,
+    });
+    insertLegacySnapshotAndState(legacy, {
+      observationId: 9,
+      actionId: ambiguousActionB,
+      payload: encodeMemoryBoundary(
+        observationFor({ actionId: ambiguousActionB }) as never,
+      ),
+      dirtySeq: 16,
+    });
   } finally {
     legacy.close();
   }
@@ -833,6 +988,26 @@ Deno.test("scheduler context migration preserves only provable space state and i
     assertOwnedContexts(engine, spaceAction, [SPACE_KEY]);
     assertOwnedContexts(engine, userAction, []);
     assertOwnedContexts(engine, malformedAction, []);
+    for (
+      const discardedAction of [
+        payloadMismatchAction,
+        identityMismatchAction,
+        orphanSnapshotAction,
+        orphanStateAction,
+        staleStateAction,
+        ambiguousActionA,
+        ambiguousActionB,
+      ]
+    ) {
+      assertOwnedContexts(engine, discardedAction, []);
+    }
+    assertEquals(
+      engine.database.prepare(`
+        SELECT count(*) AS count
+        FROM scheduler_observation
+      `).get(),
+      { count: 1 },
+    );
     assertEquals(
       engine.database.prepare(`
         SELECT read_scope_key
