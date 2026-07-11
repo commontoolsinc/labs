@@ -17,6 +17,7 @@ import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
+import { FactoryFormatter } from "./formatters/factory-formatter.ts";
 import {
   detectWrapperViaNode,
   getNamedTypeKey,
@@ -33,6 +34,7 @@ import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
  */
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
+    new FactoryFormatter(this),
     new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
     new UnionFormatter(this),

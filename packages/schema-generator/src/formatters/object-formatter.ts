@@ -27,6 +27,7 @@ import {
 } from "../doc-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { containsFactoryType } from "./factory-formatter.ts";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -34,10 +35,8 @@ const logger = getLogger("schema-generator.object", {
 });
 
 /**
- * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
- * ModuleFactory<T, R> when called returns Reactive<R>.
- * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
- * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
+ * Check if a legacy callable value returns a wrapper type. First-class factory
+ * types bypass this fallback and are handled by FactoryFormatter.
  *
  * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
@@ -266,15 +265,17 @@ export class ObjectFormatter implements TypeFormatter {
         propTypeNode,
       );
 
-      if (isFunctionLike(resolvedPropType)) {
-        // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
-        // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
+      if (
+        isFunctionLike(resolvedPropType) &&
+        !containsFactoryType(resolvedPropType, checker)
+      ) {
+        // Preserve the legacy callable-return-wrapper behavior for non-factory
+        // callables that return Stream or Cell instead of skipping them.
         const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
           checker,
         );
         if (wrapperSchema) {
-          // This is a factory that returns a wrapper type (Stream or Cell)
           if (
             !isOptionalSymbol(prop) &&
             !isDefaultNodeWithUndefined(propTypeNode, checker)

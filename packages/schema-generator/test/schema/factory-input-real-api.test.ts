@@ -183,4 +183,83 @@ describe("Schema: real API FactoryInput", () => {
       asCell: ["stream", "opaque"],
     });
   });
+
+  it("formats real API factories, aliases, nested captures, and byRef results", () => {
+    const code = `
+      import {
+        byRef,
+        type HandlerFactory,
+        type ModuleFactory,
+        type PatternFactory,
+      } from "./packages/api/index.ts";
+
+      type PatternAlias<T, R> = PatternFactory<T, R>;
+      declare const captureBrand: unique symbol;
+      type CapturedModule<T, R> = ModuleFactory<T, R> & {
+        readonly [captureBrand]: true;
+      };
+      const referenced = byRef<{ id: string }, { ok: boolean }>("test:ref");
+
+      interface SchemaRoot {
+        inputFactory: PatternAlias<{ query: string }, { count: number }>;
+        outputFactory: CapturedModule<{ value: number }, string>;
+        capture: {
+          handlers: HandlerFactory<{ room: string }, { body: string }>[];
+        };
+        referenced: typeof referenced;
+      }
+    `;
+    const { type, checker, sourceFile } = getTypeFromRealApiCode(
+      code,
+      "SchemaRoot",
+    );
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(
+        type,
+        checker,
+        undefined,
+        undefined,
+        undefined,
+        sourceFile,
+      ),
+    );
+
+    expect((result.properties?.inputFactory as any).asFactory).toEqual({
+      kind: "pattern",
+      argumentSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      },
+    });
+    expect((result.properties?.outputFactory as any).asFactory.kind).toBe(
+      "module",
+    );
+    const handler = (result.properties?.capture as any).properties.handlers
+      .items;
+    expect(handler.asFactory.kind).toBe("handler");
+    expect(handler.asFactory.contextSchema.properties.room.type).toBe(
+      "string",
+    );
+    expect(handler.asFactory.eventSchema.properties.body.type).toBe("string");
+    expect(handler).not.toHaveProperty("asCell");
+    expect((result.properties?.referenced as any).asFactory).toEqual({
+      kind: "module",
+      argumentSchema: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+      },
+    });
+  });
 });

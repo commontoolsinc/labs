@@ -29,6 +29,7 @@ import {
   CFC_ATOM_TYPE,
   CFC_CANONICAL_ALIAS_NAMES,
 } from "@commonfabric/api/cfc";
+import { containsFactoryType } from "./factory-formatter.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -124,6 +125,16 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    // Factory-valued unions are storage schemas, even when one arm is a
+    // HandlerFactory whose call result is Stream. Leave those to UnionFormatter
+    // instead of collapsing the whole value to an asCell stream schema.
+    if (
+      (type.flags & ts.TypeFlags.Union) !== 0 &&
+      containsFactoryType(type, context.typeChecker)
+    ) {
+      return false;
+    }
+
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (scopeForWrapperName(aliasName) !== undefined) {
       return true;

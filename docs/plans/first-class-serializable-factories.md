@@ -580,23 +580,31 @@ compare the complete recursive schema document exactly.
 
 ### WP2.2 — Generate schemas for all factory kinds
 
-- [ ] Teach `packages/schema-generator/src/formatters/object-formatter.ts` to
+- [x] Teach `packages/schema-generator/src/formatters/object-formatter.ts` to
   recognize `PatternFactory`, `ModuleFactory`, and `HandlerFactory` before its
   generic callable and callable-return-wrapper cases.
-- [ ] Prefer one dedicated factory detector/formatter, registered before union,
+- [x] Prefer one dedicated factory detector/formatter, registered before union,
   intersection, and object formatting, so aliases and branded intersections
   cannot fall through to generic callable handling.
-- [ ] Extract public input/output schemas from the factory type arguments.
-- [ ] Ensure `HandlerFactory` emits `contextSchema`/`eventSchema` and is not
+- [x] Extract public input/output schemas from the factory type arguments.
+- [x] Ensure `HandlerFactory` emits `contextSchema`/`eventSchema` and is not
   mistaken for `{ asCell: ["stream"] }` merely because its call signature
   returns a stream.
-- [ ] Preserve schemas for aliases, properties, arrays/maps of factories, and
+- [x] Preserve schemas for aliases, properties, arrays/maps of factories, and
   factory unions used only as stored/returned values, using `anyOf` or the
   schema generator's equivalent union representation.
-- [ ] Keep storage representability separate from callability: cross-kind or
+- [x] Keep storage representability separate from callability: cross-kind or
   schema-varying unions are rejected only when WP2.3 tries to invoke them.
-- [ ] Add fixtures covering factory-valued inputs, outputs, captures, nested
+- [x] Add fixtures covering factory-valued inputs, outputs, captures, nested
   containers, `byRef()`, and all three kinds.
+
+WP2.2 audit discrepancy: the existing Common Fabric callable-wrapper formatter
+claimed a union containing `HandlerFactory` before `UnionFormatter` could retain
+its stored union shape, because the handler call signature returns `Stream`.
+Registering the dedicated factory formatter first was therefore insufficient on
+its own. The callable-wrapper path now explicitly declines factory-containing
+unions, leaving them to ordinary union storage formatting; invocation-time
+cross-kind/schema compatibility remains WP2.3's responsibility.
 
 Expected tests:
 
