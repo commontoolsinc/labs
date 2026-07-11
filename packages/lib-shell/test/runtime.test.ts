@@ -48,6 +48,13 @@ class MockRuntimeClient {
     return Promise.resolve();
   }
 
+  resolvedSpaceNames: string[] = [];
+
+  resolveSpaceName(name: string): Promise<DID> {
+    this.resolvedSpaceNames.push(name);
+    return Promise.resolve(`did:key:z6Mk-${name}` as DID);
+  }
+
   getPageSlug(pageId: string): Promise<string | undefined> {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
@@ -102,6 +109,20 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  it("resolves named spaces through the worker client", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+    try {
+      await expect(runtime.resolveSpaceName("notebook")).resolves.toBe(
+        "did:key:z6Mk-notebook",
+      );
+      expect(client.resolvedSpaceNames).toEqual(["notebook"]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("exposes page slug metadata", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
