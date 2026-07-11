@@ -208,6 +208,7 @@ const observationMinimumContextRank = (
     return 2;
   }
   let rank = pieceScope === "session" ? 2 : pieceScope === "user" ? 1 : 0;
+  let crossesSpace = false;
   for (
     const address of [
       ...summary.reads,
@@ -216,9 +217,10 @@ const observationMinimumContextRank = (
       ...summary.directOutputs,
     ]
   ) {
-    if (address.space !== summary.piece.space) return 2;
+    crossesSpace ||= address.space !== summary.piece.space;
     rank = Math.max(rank, schedulerAddressScopeRank(address));
   }
+  if (crossesSpace && rank === 0) return 2;
 
   const runtimeGroups: Array<[
     readonly IMemorySpaceAddress[],
@@ -246,14 +248,15 @@ const observationMinimumContextRank = (
       summary.materializerWriteEnvelopes,
     ],
   ];
-  for (const [observed, envelopes] of runtimeGroups) {
+  for (const [groupIndex, [observed, envelopes]] of runtimeGroups.entries()) {
     for (const address of observed) {
-      if (
-        address.space !== summary.piece.space ||
-        !envelopes.some((envelope) =>
-          schedulerEnvelopeCovers(envelope, address)
-        )
-      ) {
+      const covered = envelopes.some((envelope) =>
+        schedulerEnvelopeCovers(envelope, address)
+      );
+      const trustedSameSpaceFrameworkRead = groupIndex === 0 &&
+        address.space === summary.piece.space &&
+        schedulerAddressScopeRank(address) === 0;
+      if (!covered && !trustedSameSpaceFrameworkRead) {
         return 2;
       }
       rank = Math.max(rank, schedulerAddressScopeRank(address));

@@ -814,6 +814,90 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("accepts a certified cross-space PerUser candidate", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const action = Object.assign(
+        function crossSpaceUserCandidate() {
+          runs++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:cross-space-user",
+        },
+      );
+      const actionId = "cf:module/test:cross-space-user";
+      const crossSpaceUserRead = {
+        ...readAddress,
+        space: "did:key:other-space" as const,
+        scope: "user" as const,
+      };
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:of:cross-space-user-process",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
+        transactionLog: {
+          reads: [crossSpaceUserRead],
+          shallowReads: [],
+          writes: [],
+        },
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:cross-space-user-process",
+            path: [],
+          },
+          reads: [crossSpaceUserRead],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      });
+      testRuntime.runtime.scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: observation.pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{
+              executionContextKey: "user:did%3Akey%3Aalice",
+              observation,
+            }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      expect(runs).toBe(0);
+      expect(testRuntime.runtime.scheduler.isDirty(action)).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("rejects a fallback-fingerprint shared candidate and runs fresh", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
@@ -1421,9 +1505,13 @@ describe("persistent scheduler observations", () => {
       });
 
       expect(ownerSnapshots?.snapshots.length).toBe(1);
-      // Mirrors retain their originating execution context. The read-space
-      // provider has a distinct authenticated session and cannot list it.
-      expect(readSnapshots?.snapshots.length).toBe(0);
+      // One StorageManager owns one authenticated session across all mounted
+      // spaces, so the read-space mirror exposes the same context-qualified
+      // snapshot to this manager and no other session.
+      expect(readSnapshots?.snapshots.length).toBe(1);
+      expect(readSnapshots?.snapshots[0]?.executionContextKey).toBe(
+        ownerSnapshots?.snapshots[0]?.executionContextKey,
+      );
       expect(
         (ownerSnapshots?.snapshots[0]?.observation as
           & SchedulerActionObservation

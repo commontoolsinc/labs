@@ -51,6 +51,7 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
+  getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
   isCellLink,
@@ -4300,6 +4301,20 @@ export class Runner {
       ...writes,
       ...staticRedirectWriteTargets,
     ]);
+    const structuralMetaLinks = module.completeSchedulerScopeSummary === true
+      ? (["pattern", "argument", "result"] as const)
+        .map((field) => getMetaLink(patternResultCell, field))
+        .filter((link): link is NormalizedFullLink => link !== undefined)
+      : [];
+    const internalMetaLink = module.completeSchedulerScopeSummary === true
+      ? getMetaCell(patternResultCell, "internal", tx)
+        .getAsNormalizedFullLink()
+      : undefined;
+    const derivedInternalLinks = module.completeSchedulerScopeSummary === true
+      ? (pattern.derivedInternalCells ?? []).map((descriptor) =>
+        getDerivedInternalCellLink(patternResultCell, descriptor)
+      )
+      : [];
     const wrappedAction = Object.assign(action, {
       reads,
       writes: schedulingWrites,
@@ -4310,7 +4325,21 @@ export class Runner {
           completeSchedulerScopeSummary: {
             complete: true as const,
             piece: patternResultCell.getAsNormalizedFullLink(),
-            reads,
+            // The callback's declared reads are only part of the action's
+            // structurally fixed read surface. The runner also materializes
+            // the immutable argument container and reads direct output cells
+            // while diffing/writing their values. Include those framework
+            // reads in the trusted certificate so a complete space-only lift
+            // is not mistaken for a runtime contradiction.
+            reads: dedupeNormalizedLinks([
+              ...reads,
+              inputsCell.getAsNormalizedFullLink(),
+              processCell.getAsNormalizedFullLink(),
+              ...structuralMetaLinks,
+              ...(internalMetaLink ? [internalMetaLink] : []),
+              ...derivedInternalLinks,
+              ...schedulingWrites,
+            ]),
             writes: dedupeNormalizedLinks([
               ...schedulingWrites,
               ...redirectWriteTargets.targets,

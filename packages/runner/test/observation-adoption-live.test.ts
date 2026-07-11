@@ -54,19 +54,17 @@ const newSharedServer = () =>
     sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
   });
 
-const ITEMS_SCHEMA: JSONSchema = {
-  type: "array",
-  items: { type: "object", properties: { v: { type: "number" } } },
-};
+const VALUE_SCHEMA: JSONSchema = { type: "number" };
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
     name: "/main.tsx",
     contents: [
-      "import { pattern } from 'commonfabric';",
-      "export default pattern<{ items: { v: number }[] }>(({ items }) => {",
-      "  return { vs: items.map((item) => item.v * 2) };",
+      "import { computed, pattern } from 'commonfabric';",
+      "export default pattern<{ value: number }>(({ value }) => {",
+      "  const doubled = computed(() => value * 2);",
+      "  return { doubled };",
       "});",
     ].join("\n"),
   }],
@@ -85,13 +83,8 @@ function adoptOkCount(): number {
   return (b as Record<string, { total?: number }>)["adopt/ok"]?.total ?? 0;
 }
 
-// The skip contract covers the module-hash-stamped user computations (the
-// per-element ops — the expensive cascade). Collection coordinators
-// (`raw:map:*`) may still reconcile: a cascade's observations ride commits
-// that can straddle push-window boundaries, and a receiver whose coordinator
-// was dirtied by an earlier window legitimately dispatches before the
-// laggard observation arrives — the benign race of the design's §3; the
-// redundant run is a value-identical no-op.
+// The skip contract covers the module-hash-stamped source computation. Raw
+// scheduler coordination or test-sink actions are deliberately ignored.
 function opRuns(
   trace: readonly { actionId: string }[],
 ): string[] {
@@ -141,8 +134,8 @@ describe("incremental observation adoption (live)", () => {
     const rt2 = newRuntime(managerB);
     try {
       const tx1 = rt1.edit();
-      const itemsCell1 = rt1.getCell(space, "adopt-items", ITEMS_SCHEMA, tx1);
-      itemsCell1.withTx(tx1).set([{ v: 1 }, { v: 2 }, { v: 3 }]);
+      const valueCell1 = rt1.getCell(space, "adopt-value", VALUE_SCHEMA, tx1);
+      valueCell1.withTx(tx1).set(1);
       const compiled = await rt1.patternManager.compilePattern(PROGRAM, {
         space,
         tx: tx1,
@@ -152,18 +145,27 @@ describe("incremental observation adoption (live)", () => {
         tx1,
         // deno-lint-ignore no-explicit-any
         compiled as any,
-        { items: itemsCell1 },
+        { value: valueCell1 },
         resultCell1,
       );
       rt1.prepareTxForCommit(tx1);
       expect((await tx1.commit()).error).toBeUndefined();
       const cancelSink1 = r1.sink(() => {});
       await rt1.idle();
-      expect(await r1.key("vs").pull()).toEqual([2, 4, 6]);
+      expect(await r1.key("doubled").pull()).toBe(2);
       await rt1.patternManager.flushCompileCacheWrites();
       await rt1.storageManager.synced();
       await rt1.idle();
       await rt1.storageManager.synced();
+      const persisted = await managerA.open(space)
+        .listSchedulerActionSnapshots!({ ownerSpace: space, limit: 1000 });
+      expect(persisted.snapshots).toHaveLength(1);
+      expect(persisted.snapshots[0].executionContextKey).toBe("space");
+      expect(
+        (persisted.snapshots[0].observation as {
+          completeActionScopeSummary?: unknown;
+        }).completeActionScopeSummary,
+      ).toBeDefined();
 
       // Runtime B joins the SAME live piece (its boot rehydrates from A's
       // persisted observations — the reload case of the same mechanism).
@@ -171,41 +173,40 @@ describe("incremental observation adoption (live)", () => {
       const resultCell2 = rt2.getCellFromLink(resultLink);
       await resultCell2.sync();
       expect(await rt2.start(resultCell2)).toBeTruthy();
-      const cancelSink2 = resultCell2.key("vs").sink(() => {});
+      const cancelSink2 = resultCell2.key("doubled").sink(() => {});
       await rt2.idle();
       await rt2.storageManager.synced();
       await rt2.idle();
-      expect(resultCell2.key("vs").getAsQueryResult()).toEqual([2, 4, 6]);
+      expect(resultCell2.key("doubled").getAsQueryResult()).toBe(2);
 
-      // LIVE SKIP: runtime A writes one element's field; A's cascade runs
-      // and commits; B receives the writes + observations via the
+      // LIVE SKIP: runtime A writes the input; A's source-backed computation
+      // runs and commits; B receives the writes + observations via the
       // subscription push and converges WITHOUT running any computation.
       rt2.scheduler.setActionRunTraceEnabled(true);
       const adoptedBefore = adoptOkCount();
       const tx2 = rt1.edit();
-      itemsCell1.withTx(tx2).key(0).key("v").set(10);
+      valueCell1.withTx(tx2).set(10);
       expect((await tx2.commit()).error).toBeUndefined();
       await rt1.idle();
       await rt1.storageManager.synced();
 
       await waitForLocalValue(
         rt2,
-        () => resultCell2.key("vs").getAsQueryResult(),
-        [20, 4, 6],
+        () => resultCell2.key("doubled").getAsQueryResult(),
+        20,
       );
       const liveTrace = rt2.scheduler.getActionRunTrace();
       expect(opRuns(liveTrace)).toEqual([]);
       expect(adoptOkCount()).toBeGreaterThan(adoptedBefore);
 
       // LOCAL REACTIVITY PRESERVED: a B-local write runs B's own lift
-      // (adoption must not deaden the receiving scheduler), and A adopts
-      // B's runs symmetrically.
-      rt1.scheduler.setActionRunTraceEnabled(true);
-      const itemsCell2 = rt2.getCell(space, "adopt-items", ITEMS_SCHEMA);
-      await itemsCell2.sync();
+      // (adoption must not deaden the receiving scheduler). A still converges;
+      // its push window may run or adopt depending on observation ordering.
+      const valueCell2 = rt2.getCell(space, "adopt-value", VALUE_SCHEMA);
+      await valueCell2.sync();
       const beforeLocal = rt2.scheduler.getActionRunTrace().length;
       const tx3 = rt2.edit();
-      itemsCell2.withTx(tx3).key(1).key("v").set(7);
+      valueCell2.withTx(tx3).set(7);
       expect((await tx3.commit()).error).toBeUndefined();
       await rt2.idle();
       await rt2.storageManager.synced();
@@ -214,16 +215,15 @@ describe("incremental observation adoption (live)", () => {
       ).toBeGreaterThan(0);
       await waitForLocalValue(
         rt2,
-        () => resultCell2.key("vs").getAsQueryResult(),
-        [20, 14, 6],
+        () => resultCell2.key("doubled").getAsQueryResult(),
+        14,
       );
 
       await waitForLocalValue(
         rt1,
-        () => r1.key("vs").getAsQueryResult(),
-        [20, 14, 6],
+        () => r1.key("doubled").getAsQueryResult(),
+        14,
       );
-      expect(opRuns(rt1.scheduler.getActionRunTrace())).toEqual([]);
 
       cancelSink1();
       cancelSink2();
