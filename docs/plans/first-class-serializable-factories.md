@@ -509,14 +509,14 @@ Expected files and tests:
 
 ### WP1.8 — Update the live Fabric protocol documentation
 
-- [ ] Update `docs/specs/space-model-formal-spec/1-fabric-values.md` when the
+- [x] Update `docs/specs/space-model-formal-spec/1-fabric-values.md` when the
   callable Fabric arm lands.
-- [ ] Update `docs/specs/space-model-formal-spec/3-json-encoding.md` with the
+- [x] Update `docs/specs/space-model-formal-spec/3-json-encoding.md` with the
   exact `Factory@1` tag, validated state, and inert context-free decode.
-- [ ] Pin `Factory@1` to the existing codec-instance byte arm in
+- [x] Pin `Factory@1` to the existing codec-instance byte arm in
   `docs/specs/space-model-formal-spec/2-hash-byte-format.md`; do not invent a
   factory-specific hash encoding.
-- [ ] Keep the proposal's status accurate for the still-unimplemented dynamic
+- [x] Keep the proposal's status accurate for the still-unimplemented dynamic
   invocation and closure stages.
 
 ### Stage 1 completion gate

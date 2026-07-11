@@ -396,6 +396,19 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
 - **Encoded state**: The value returned by the codec's `encode()`, hashed
   recursively as a complete tagged value.
 
+`Factory@1` uses this existing arm without a factory-specific tag byte:
+
+```
+TAG_INSTANCE  string("Factory@1")  FactoryStateV1-as-recursive-value
+```
+
+The value being callable does not affect its byte format. Hashing first seals
+the admitted factory's exact canonical codec state, then hashes that state
+recursively in the same way as every other codec value. An independently
+decoded inert shell and a trusted live builder factory with equal canonical
+state therefore hash identically. Arbitrary JavaScript functions never reach
+this arm and are rejected.
+
 > **Note on types with dedicated tags.** `FabricBytes`,
 > `FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, and `FabricRegExp` are
 > **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
