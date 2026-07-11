@@ -1583,28 +1583,49 @@ export type JSONSchemaTypes =
 export type AsCellType = AsCellEntry;
 
 /**
+ * Serializable schema document nested inside factory metadata.
+ *
+ * Keeping this boundary JSON-shaped avoids recursively expanding three more
+ * complete `JSONSchemaObj` branches in every schema consumer. Concrete schema
+ * literals retain their exact type for `Schema<T>` inference, while runtime
+ * validation still checks that each document is a JSON Schema.
+ */
+export type EmbeddedFactorySchema =
+  | boolean
+  | (Readonly<Record<string, JSONValue>> & IDFields);
+
+/**
  * Describes the public call contract carried by a first-class factory value.
  *
  * A factory schema has one type meaning but two runtime exposures: eager
  * pattern construction receives a symbolic binding, while scheduled lift and
  * handler callbacks receive a runner-materialized callable.
  */
+export interface PatternFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "pattern";
+  readonly argumentSchema: EmbeddedFactorySchema;
+  readonly resultSchema: EmbeddedFactorySchema;
+}
+
+export interface ModuleFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "module";
+  readonly argumentSchema: EmbeddedFactorySchema;
+  readonly resultSchema: EmbeddedFactorySchema;
+}
+
+export interface HandlerFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "handler";
+  readonly contextSchema: EmbeddedFactorySchema;
+  readonly eventSchema: EmbeddedFactorySchema;
+}
+
 export type AsFactoryType =
-  | {
-    readonly kind: "pattern";
-    readonly argumentSchema: JSONSchema;
-    readonly resultSchema: JSONSchema;
-  }
-  | {
-    readonly kind: "module";
-    readonly argumentSchema: JSONSchema;
-    readonly resultSchema: JSONSchema;
-  }
-  | {
-    readonly kind: "handler";
-    readonly contextSchema: JSONSchema;
-    readonly eventSchema: JSONSchema;
-  };
+  | PatternFactorySchema
+  | ModuleFactorySchema
+  | HandlerFactorySchema;
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
@@ -1742,7 +1763,9 @@ export type JSONSchemaObj = {
  * should be unified; see that module for the canonical version.
  */
 type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T extends object ? ({
+      -readonly [P in keyof T]: P extends "asFactory" ? T[P] : Mutable<T[P]>;
+    })
   : T;
 
 /**

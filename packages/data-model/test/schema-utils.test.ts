@@ -13,6 +13,7 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
+  factorySchemasEqual,
   internPathSelector,
   internSchemaPairAsKey,
   isNontrivialSchema,
@@ -1175,6 +1176,119 @@ describe("schema-utils", () => {
       expect(Object.isFrozen(dup)).toBe(true);
       expect(Object.isFrozen(dup.path)).toBe(true);
       expect(dup.schema).toBe(canonical.schema);
+    });
+  });
+
+  describe("factorySchemasEqual()", () => {
+    it("compares exact normalized structure deterministically", () => {
+      expect(factorySchemasEqual(
+        {
+          required: ["value"],
+          properties: { value: { type: "number" } },
+          type: "object",
+        },
+        {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+      )).toBe(true);
+      expect(factorySchemasEqual(
+        { type: "object", required: ["left", "right"] },
+        { type: "object", required: ["right", "left"] },
+      )).toBe(false);
+      expect(factorySchemasEqual(undefined, undefined)).toBe(true);
+      expect(factorySchemasEqual(undefined, true)).toBe(false);
+    });
+
+    it("resolves local $defs and legacy definitions before comparison", () => {
+      const byDefs: JSONSchema = {
+        $defs: {
+          Payload: {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+        },
+        $ref: "#/$defs/Payload",
+      };
+      const byLegacyDefinitions: JSONSchema = {
+        definitions: {
+          "Payload/value": {
+            required: ["value"],
+            properties: { value: { type: "number" } },
+            type: "object",
+          },
+        },
+        $ref: "#/definitions/Payload~1value",
+      };
+      const inline: JSONSchema = {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      };
+
+      expect(factorySchemasEqual(byDefs, inline)).toBe(true);
+      expect(factorySchemasEqual(byLegacyDefinitions, inline)).toBe(true);
+      expect(byDefs).toHaveProperty("$defs");
+      expect(byLegacyDefinitions).toHaveProperty("definitions");
+    });
+
+    it("preserves and recursively normalizes asFactory", () => {
+      const referenced = {
+        $defs: {
+          Input: {
+            type: "object",
+            properties: { value: { type: "number" } },
+          },
+        },
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: { $ref: "#/$defs/Input" },
+          resultSchema: { type: "string" },
+        },
+      } as JSONSchema;
+      const inline: JSONSchemaObj = {
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            properties: { value: { type: "number" } },
+            type: "object",
+          },
+          resultSchema: { type: "string" },
+        },
+      };
+      const different: JSONSchemaObj = {
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            properties: { value: { type: "number" } },
+            type: "object",
+          },
+          resultSchema: { type: "number" },
+        },
+      };
+
+      expect(factorySchemasEqual(referenced, inline)).toBe(true);
+      expect(factorySchemasEqual(referenced, different)).toBe(false);
+    });
+
+    it("fails closed on unresolved, external, malformed, and cyclic refs", () => {
+      const unresolved = { $ref: "#/$defs/Missing" } as JSONSchema;
+      const external = { $ref: "other.json#/$defs/Value" } as JSONSchema;
+      const malformed = { $ref: "#/$defs/Bad~2escape" } as JSONSchema;
+      const cyclic = {
+        $defs: {
+          Left: { $ref: "#/$defs/Right" },
+          Right: { $ref: "#/$defs/Left" },
+        },
+        $ref: "#/$defs/Left",
+      } as JSONSchema;
+
+      for (const invalid of [unresolved, external, malformed, cyclic]) {
+        expect(factorySchemasEqual(invalid, invalid)).toBe(false);
+        expect(factorySchemasEqual(invalid, true)).toBe(false);
+      }
     });
   });
 });

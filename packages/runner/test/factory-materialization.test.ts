@@ -286,6 +286,29 @@ describe("runner-owned factory materialization", () => {
     );
   });
 
+  it("resolves local schema refs through the shared comparator", () => {
+    const localRefSchema: JSONSchema = {
+      $defs: { Input: ARGUMENT_SCHEMA },
+      $ref: "#/$defs/Input",
+    };
+    const localRefFactory = lift(
+      ({ value }: { value: number }) => ({ result: value }),
+      localRefSchema,
+      RESULT_SCHEMA,
+    );
+    expect(() =>
+      materializeFactory(localRefFactory, {
+        runtime,
+        artifactSpace,
+        expected: {
+          kind: "module",
+          argumentSchema: ARGUMENT_SCHEMA,
+          resultSchema: RESULT_SCHEMA,
+        },
+      })
+    ).not.toThrow();
+  });
+
   it("fails closed for nonfactories, missing refs, wrong kinds, missing artifacts, and forged refs", async () => {
     expect(() => materializeFactory({}, { runtime, artifactSpace })).toThrow(
       "Factory materialization requires an admitted FabricFactory",

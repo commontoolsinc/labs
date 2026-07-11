@@ -9,6 +9,8 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import { deepFreeze } from "./deep-freeze.ts";
 import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
@@ -24,6 +26,342 @@ import { type FabricValue } from "./interface.ts";
  * interned schemas. Populated lazily.
  */
 const BASIC_SCHEMAS: Record<string, JSONSchemaObj> = {};
+
+const SCHEMA_NORMALIZATION_FAILED = Symbol("schema normalization failed");
+
+type NormalizedSchemaValue =
+  | null
+  | boolean
+  | number
+  | string
+  | NormalizedSchemaArray
+  | NormalizedSchemaObject;
+
+interface NormalizedSchemaArray extends ReadonlyArray<NormalizedSchemaValue> {}
+
+interface NormalizedSchemaObject {
+  readonly [key: string]: NormalizedSchemaValue;
+}
+
+type SchemaNormalizationResult =
+  | NormalizedSchemaValue
+  | typeof SCHEMA_NORMALIZATION_FAILED;
+
+interface SchemaNormalizationContext {
+  readonly root: JSONSchema;
+  readonly activeObjects: Set<object>;
+  readonly activeRefs: Set<string>;
+}
+
+const SINGLE_SCHEMA_KEYWORDS = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+const SCHEMA_ARRAY_KEYWORDS = new Set([
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+]);
+
+const SCHEMA_MAP_KEYWORDS = new Set([
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+]);
+
+const FACTORY_SCHEMA_FIELDS = new Set([
+  "argumentSchema",
+  "contextSchema",
+  "eventSchema",
+  "resultSchema",
+]);
+
+function decodeJsonPointerSegment(segment: string): string | undefined {
+  if (/~(?:[^01]|$)/.test(segment)) return undefined;
+  return segment.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+function resolveLocalSchemaRef(
+  ref: string,
+  root: JSONSchema,
+): JSONSchema | undefined {
+  if (ref === "" || ref === "#") return root;
+  if (!ref.startsWith("#/")) return undefined;
+
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(ref.slice(2));
+  } catch {
+    return undefined;
+  }
+
+  let current: unknown = root;
+  for (const encodedSegment of pointer.split("/")) {
+    const segment = decodeJsonPointerSegment(encodedSegment);
+    if (
+      segment === undefined || current === null ||
+      (typeof current !== "object" && typeof current !== "function") ||
+      !Object.hasOwn(current, segment)
+    ) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return typeof current === "boolean" || isPlainObject(current)
+    ? current as JSONSchema
+    : undefined;
+}
+
+function normalizeSchemaData(
+  value: unknown,
+  context: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (
+    value === null || typeof value === "boolean" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : SCHEMA_NORMALIZATION_FAILED;
+  }
+  if (typeof value !== "object") return SCHEMA_NORMALIZATION_FAILED;
+  if (context.activeObjects.has(value)) return SCHEMA_NORMALIZATION_FAILED;
+
+  context.activeObjects.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const normalized: NormalizedSchemaValue[] = [];
+      for (const entry of value) {
+        const result = normalizeSchemaData(entry, context);
+        if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+        normalized.push(result);
+      }
+      return normalized;
+    }
+    if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
+
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, NormalizedSchemaValue> = {};
+    for (const key of Object.keys(record).sort()) {
+      const result = normalizeSchemaData(record[key], context);
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized[key] = result;
+    }
+    return normalized;
+  } finally {
+    context.activeObjects.delete(value);
+  }
+}
+
+function normalizeSchemaMap(
+  value: unknown,
+  context: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
+  const record = value as Record<string, unknown>;
+  const normalized: Record<string, NormalizedSchemaValue> = {};
+  for (const key of Object.keys(record).sort()) {
+    const result = normalizeSchemaNode(record[key] as JSONSchema, context);
+    if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+    normalized[key] = result;
+  }
+  return normalized;
+}
+
+function normalizeFactoryContract(
+  value: unknown,
+  context: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
+  const record = value as Record<string, unknown>;
+  const normalized: Record<string, NormalizedSchemaValue> = {};
+  for (const key of Object.keys(record).sort()) {
+    const result = FACTORY_SCHEMA_FIELDS.has(key)
+      ? normalizeSchemaNode(record[key] as JSONSchema, context)
+      : normalizeSchemaData(record[key], context);
+    if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+    normalized[key] = result;
+  }
+  return normalized;
+}
+
+function normalizeSchemaKeyword(
+  key: string,
+  value: unknown,
+  context: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (SINGLE_SCHEMA_KEYWORDS.has(key)) {
+    return normalizeSchemaNode(value as JSONSchema, context);
+  }
+  if (SCHEMA_ARRAY_KEYWORDS.has(key)) {
+    if (!Array.isArray(value)) return SCHEMA_NORMALIZATION_FAILED;
+    const normalized: NormalizedSchemaValue[] = [];
+    for (const entry of value) {
+      const result = normalizeSchemaNode(entry as JSONSchema, context);
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized.push(result);
+    }
+    return normalized;
+  }
+  if (SCHEMA_MAP_KEYWORDS.has(key)) {
+    return normalizeSchemaMap(value, context);
+  }
+  if (key === "items") {
+    if (!Array.isArray(value)) {
+      return normalizeSchemaNode(value as JSONSchema, context);
+    }
+    const normalized: NormalizedSchemaValue[] = [];
+    for (const entry of value) {
+      const result = normalizeSchemaNode(entry as JSONSchema, context);
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized.push(result);
+    }
+    return normalized;
+  }
+  if (key === "dependencies") {
+    if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, NormalizedSchemaValue> = {};
+    for (const dependency of Object.keys(record).sort()) {
+      const entry = record[dependency];
+      const result = Array.isArray(entry)
+        ? normalizeSchemaData(entry, context)
+        : normalizeSchemaNode(entry as JSONSchema, context);
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized[dependency] = result;
+    }
+    return normalized;
+  }
+  if (key === "asFactory") {
+    return normalizeFactoryContract(value, context);
+  }
+  return normalizeSchemaData(value, context);
+}
+
+function mergeResolvedSchemaRef(
+  target: NormalizedSchemaValue,
+  siblings: Readonly<Record<string, NormalizedSchemaValue>>,
+): NormalizedSchemaValue {
+  if (Object.keys(siblings).length === 0) return target;
+  if (isPlainObject(target)) {
+    const targetObject = target as NormalizedSchemaObject;
+    const canFlatten = Object.keys(siblings).every((key) =>
+      !Object.hasOwn(targetObject, key) ||
+      deepEqual(targetObject[key], siblings[key])
+    );
+    if (!canFlatten) {
+      return ["$ref-and-siblings", target, siblings];
+    }
+    return Object.fromEntries(
+      [...Object.entries(targetObject), ...Object.entries(siblings)]
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
+    ) as Readonly<Record<string, NormalizedSchemaValue>>;
+  }
+  // Internal normalization marker for a `$ref` whose sibling assertions
+  // cannot be losslessly flattened into the resolved object.
+  return ["$ref-and-siblings", target, siblings];
+}
+
+function normalizeSchemaNode(
+  schema: JSONSchema,
+  context: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (typeof schema === "boolean") return schema;
+  if (!isPlainObject(schema)) return SCHEMA_NORMALIZATION_FAILED;
+  if (context.activeObjects.has(schema)) return SCHEMA_NORMALIZATION_FAILED;
+
+  context.activeObjects.add(schema);
+  try {
+    const hasRef = Object.hasOwn(schema, "$ref");
+    let resolved: NormalizedSchemaValue | undefined;
+    if (hasRef) {
+      if (typeof schema.$ref !== "string") {
+        return SCHEMA_NORMALIZATION_FAILED;
+      }
+      if (context.activeRefs.has(schema.$ref)) {
+        return SCHEMA_NORMALIZATION_FAILED;
+      }
+      const target = resolveLocalSchemaRef(schema.$ref, context.root);
+      if (target === undefined) return SCHEMA_NORMALIZATION_FAILED;
+      context.activeRefs.add(schema.$ref);
+      try {
+        const normalized = normalizeSchemaNode(target, context);
+        if (normalized === SCHEMA_NORMALIZATION_FAILED) return normalized;
+        resolved = normalized;
+      } finally {
+        context.activeRefs.delete(schema.$ref);
+      }
+    }
+
+    const normalized: Record<string, NormalizedSchemaValue> = {};
+    const schemaRecord = schema as unknown as Record<string, unknown>;
+    for (const key of Object.keys(schema).sort()) {
+      if (key === "$ref" || key === "$defs" || key === "definitions") {
+        continue;
+      }
+      const result = normalizeSchemaKeyword(
+        key,
+        schemaRecord[key],
+        context,
+      );
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized[key] = result;
+    }
+    return resolved === undefined
+      ? normalized
+      : mergeResolvedSchemaRef(resolved, normalized);
+  } finally {
+    context.activeObjects.delete(schema);
+  }
+}
+
+function normalizeFactorySchema(
+  schema: JSONSchema,
+): SchemaNormalizationResult {
+  return normalizeSchemaNode(schema, {
+    root: schema,
+    activeObjects: new Set(),
+    activeRefs: new Set(),
+  });
+}
+
+/**
+ * Compare factory public schemas after deterministic structural normalization.
+ *
+ * Each schema resolves JSON Pointer `$ref`s only against its own document root.
+ * Definition containers are removed after resolution; every other keyword,
+ * including Common Fabric's `asFactory`, remains part of exact equality. Any
+ * external, missing, malformed, or cyclic reference fails closed (`false`).
+ * Missing schemas remain distinct from the JSON Schema `true` value.
+ */
+export function factorySchemasEqual(
+  left: JSONSchema | undefined,
+  right: JSONSchema | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  try {
+    const normalizedLeft = normalizeFactorySchema(left);
+    const normalizedRight = normalizeFactorySchema(right);
+    return normalizedLeft !== SCHEMA_NORMALIZATION_FAILED &&
+      normalizedRight !== SCHEMA_NORMALIZATION_FAILED &&
+      deepEqual(normalizedLeft, normalizedRight);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Helper for `schemaForValueType()` and `emptySchemaObject()`, which does

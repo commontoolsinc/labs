@@ -176,6 +176,29 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(ContextualFlowControl.isTrueSchema({ scope: "any" })).toBe(true);
   });
 
+  it("preserves factory metadata and discovers refs in its public schemas", () => {
+    const schema: JSONSchema = {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: { $ref: "#/$defs/Argument" },
+        resultSchema: { $ref: "#/$defs/Result" },
+      },
+      $defs: {
+        Argument: { type: "string" },
+        Result: { type: "number" },
+      },
+    };
+    const refs = new Set<string>();
+
+    findCfcSchemaRefs(schema, refs);
+
+    expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
+    expect([...refs].sort()).toEqual([
+      "#/$defs/Argument",
+      "#/$defs/Result",
+    ]);
+  });
+
   it("uses nested property $defs while traversing through array item refs", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {

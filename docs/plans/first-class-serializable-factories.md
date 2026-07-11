@@ -521,16 +521,27 @@ Expected files and tests:
 
 ### Stage 1 completion gate
 
-- [ ] `Factory@1` is the only new wire tag and no wrapper factory type exists.
-- [ ] All three trusted factory constructors attach state and direct invocation
+- [x] `Factory@1` is the only new wire tag and no wrapper factory type exists.
+- [x] All three trusted factory constructors attach state and direct invocation
   remains green.
-- [ ] Arbitrary functions and pseudo refs are still rejected.
-- [ ] Context-free decode is inert; runner materialization is the only path to
+- [x] Arbitrary functions and pseudo refs are still rejected.
+- [x] Context-free decode is inert; runner materialization is the only path to
   executable behavior.
 - [ ] `deno task test` passes in `packages/data-model` and `packages/runner`.
-- [ ] `deno check packages/api/index.ts` (or the package's standard type-check)
+- [x] `deno check packages/api/index.ts` (or the package's standard type-check)
   passes with `.curry` absent from public `PatternFactory`.
-- [ ] Commit Stage 1 in protocol, builder-state, and materialization slices.
+- [x] Commit Stage 1 in protocol, builder-state, and materialization slices.
+
+Stage 1 full-runner gate audit (2026-07-11): the complete task ran to
+`868 passed (4635 steps), 24 failed (124 steps)`. Every representative failure
+was green at the branch merge-base and was traced to a deliberate new boundary:
+deprecated keyless `patternTool` payloads reached the durable Factory writer,
+other ephemeral built-in constants reached the canonical inline writer, and
+traverse replay goldens retained legacy data-URI identities. The explicit
+`patternTool` structural compatibility writer is now restored without weakening
+ordinary keyless-factory rejection, and its sandbox suite is green. The package
+gate remains unchecked until the remaining Stage 2/4 migrations land and the
+logically-equivalent replay goldens are regenerated; it is not waived.
 
 ## Stage 2 — Factory schemas and symbolic invocation
 
@@ -544,9 +555,9 @@ Expected files and tests:
   form: an eager pattern root produces a symbolic binding, while a scheduled
   `lift`/handler argument is runner-materialized to a live callable. API typing
   alone must not make a symbolic proxy executable.
-- [ ] Define one schema normalization/equality helper for trusted factory
+- [x] Define one schema normalization/equality helper for trusted factory
   comparisons; version 1 requires equality, not variance.
-- [ ] Update schema validation/resolution utilities that copy, merge, sanitize,
+- [x] Update schema validation/resolution utilities that copy, merge, sanitize,
   or format Common Fabric extensions so `asFactory` is preserved.
 - [x] Teach `Schema<T>` / `SchemaWithoutCell<T>` in
   `packages/api/schema.ts` to materialize `asFactory` as the matching generic
@@ -556,6 +567,16 @@ Expected files and tests:
 - [x] Add public type assertions in `packages/api/test/factory-input-types.test.ts`
   and `packages/api/index.test.ts` proving factories are Fabric values, schema
   inference preserves their generics, and `.curry` is unavailable.
+
+Type-system audit: embedding three recursively complete `JSONSchema` branches
+inside `JSONSchemaObj.asFactory` and recursively re-entering `SchemaInner`
+caused checked runner files to exceed V8's 4 GB heap. The public field therefore
+uses a JSON-shaped `EmbeddedFactorySchema` boundary (concrete literals retain
+their exact schema type), and inference carries a one-boundary factory budget.
+This keeps ordinary nested containers fully typed and allows a factory schema
+at any such leaf without making broad `Schema<JSONSchema>` instantiations
+exponential. Runtime normalization and materialization still validate and
+compare the complete recursive schema document exactly.
 
 ### WP2.2 — Generate schemas for all factory kinds
 

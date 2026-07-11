@@ -128,10 +128,11 @@ type MergeRefSiteWithTargetGeneric<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   WrapCells extends boolean,
+  FactoryDepth extends FactoryDepthLevel,
 > = RefSite extends { $ref: string }
   ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
     infer Merged extends JSONSchema
-    ? SchemaInner<Merged, Root, Depth, WrapCells>
+    ? SchemaInner<Merged, Root, Depth, WrapCells, FactoryDepth>
   : never
   : never;
 
@@ -140,9 +141,15 @@ type SchemaAnyOf<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   WrapCells extends boolean,
+  FactoryDepth extends FactoryDepthLevel,
 > = {
-  [I in keyof Schemas]: Schemas[I] extends JSONSchema
-    ? SchemaInner<Schemas[I], Root, DecrementDepth<Depth>, WrapCells>
+  [I in keyof Schemas]: Schemas[I] extends JSONSchema ? SchemaInner<
+      Schemas[I],
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells,
+      FactoryDepth
+    >
     : never;
 }[number];
 
@@ -151,37 +158,83 @@ type SchemaArrayItems<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   WrapCells extends boolean,
-> = Items extends JSONSchema
-  ? Array<SchemaInner<Items, Root, DecrementDepth<Depth>, WrapCells>>
+  FactoryDepth extends FactoryDepthLevel,
+> = Items extends JSONSchema ? Array<
+    SchemaInner<
+      Items,
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells,
+      FactoryDepth
+    >
+  >
   : unknown[];
 
 type SchemaFactory<
   Factory,
   Root extends JSONSchema,
   Depth extends DepthLevel,
-> = Factory extends {
-  kind: "pattern";
-  argumentSchema: infer Argument extends JSONSchema;
-  resultSchema: infer Result extends JSONSchema;
-} ? PatternFactory<
-    SchemaInner<Argument, Root, DecrementDepth<Depth>, false>,
-    SchemaInner<Result, Root, DecrementDepth<Depth>, true>
-  >
+  FactoryDepth extends FactoryDepthLevel,
+> = FactoryDepth extends 0 ? unknown
+  : Factory extends {
+    kind: "pattern";
+    argumentSchema: infer Argument extends JSONSchema;
+    resultSchema: infer Result extends JSONSchema;
+  } ? PatternFactory<
+      SchemaInner<
+        Argument,
+        Root,
+        DecrementDepth<Depth>,
+        false,
+        DecrementFactoryDepth<FactoryDepth>
+      >,
+      SchemaInner<
+        Result,
+        Root,
+        DecrementDepth<Depth>,
+        true,
+        DecrementFactoryDepth<FactoryDepth>
+      >
+    >
   : Factory extends {
     kind: "module";
     argumentSchema: infer Argument extends JSONSchema;
     resultSchema: infer Result extends JSONSchema;
   } ? ModuleFactory<
-      SchemaInner<Argument, Root, DecrementDepth<Depth>, false>,
-      SchemaInner<Result, Root, DecrementDepth<Depth>, true>
+      SchemaInner<
+        Argument,
+        Root,
+        DecrementDepth<Depth>,
+        false,
+        DecrementFactoryDepth<FactoryDepth>
+      >,
+      SchemaInner<
+        Result,
+        Root,
+        DecrementDepth<Depth>,
+        true,
+        DecrementFactoryDepth<FactoryDepth>
+      >
     >
   : Factory extends {
     kind: "handler";
     contextSchema: infer Context extends JSONSchema;
     eventSchema: infer Event extends JSONSchema;
   } ? HandlerFactory<
-      SchemaInner<Context, Root, DecrementDepth<Depth>, false>,
-      SchemaInner<Event, Root, DecrementDepth<Depth>, false>
+      SchemaInner<
+        Context,
+        Root,
+        DecrementDepth<Depth>,
+        false,
+        DecrementFactoryDepth<FactoryDepth>
+      >,
+      SchemaInner<
+        Event,
+        Root,
+        DecrementDepth<Depth>,
+        false,
+        DecrementFactoryDepth<FactoryDepth>
+      >
     >
   : never;
 
@@ -190,11 +243,13 @@ type SchemaCore<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   WrapCells extends boolean,
+  FactoryDepth extends FactoryDepthLevel,
 > = T extends { $ref: "#" } ? SchemaInner<
     Omit<Root, "asCell">,
     Root,
     DecrementDepth<Depth>,
-    WrapCells
+    WrapCells,
+    FactoryDepth
   >
   : T extends { $ref: infer RefStr extends string }
     ? MergeRefSiteWithTargetGeneric<
@@ -202,18 +257,21 @@ type SchemaCore<
       ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
       Root,
       DecrementDepth<Depth>,
-      WrapCells
+      WrapCells,
+      FactoryDepth
     >
   : T extends { enum: infer E extends readonly any[] } ? E[number]
   : T extends { anyOf: infer U extends readonly JSONSchema[] }
-    ? SchemaAnyOf<U, Root, Depth, WrapCells>
-  : T extends { asFactory: infer Factory } ? SchemaFactory<Factory, Root, Depth>
+    ? SchemaAnyOf<U, Root, Depth, WrapCells, FactoryDepth>
+  : T extends { asFactory: infer Factory }
+    ? SchemaFactory<Factory, Root, Depth, FactoryDepth>
   : T extends { type: "string" } ? string
   : T extends { type: "number" | "integer" } ? number
   : T extends { type: "boolean" } ? boolean
   : T extends { type: "null" } ? null
   : T extends { type: "array" }
-    ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
+    ? T extends { items: infer I }
+      ? SchemaArrayItems<I, Root, Depth, WrapCells, FactoryDepth>
     : unknown[]
   : T extends { type: "object" }
     ? T extends { properties: infer P }
@@ -225,7 +283,8 @@ type SchemaCore<
           T extends { additionalProperties: infer AP extends JSONSchema } ? AP
             : false,
           GetDefaultKeys<T>,
-          WrapCells
+          WrapCells,
+          FactoryDepth
         >
       : Record<string, unknown>
     : T extends { additionalProperties: infer AP }
@@ -233,7 +292,13 @@ type SchemaCore<
       : AP extends true ? Record<string | number | symbol, unknown>
       : AP extends JSONSchema ? Record<
           string | number | symbol,
-          SchemaInner<AP, Root, DecrementDepth<Depth>, WrapCells>
+          SchemaInner<
+            AP,
+            Root,
+            DecrementDepth<Depth>,
+            WrapCells,
+            FactoryDepth
+          >
         >
       : Record<string | number | symbol, unknown>
     : Record<string, unknown>
@@ -278,19 +343,27 @@ type SchemaInner<
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
   WrapCells extends boolean = true,
+  FactoryDepth extends FactoryDepthLevel = 0,
 > = IsAny<T> extends true ? any
   : Depth extends 0 ? unknown
-  : WrapperList<T> extends readonly [] ? SchemaCore<T, Root, Depth, WrapCells>
+  : WrapperList<T> extends readonly [] ? SchemaCore<
+      T,
+      Root,
+      Depth,
+      WrapCells,
+      FactoryDepth
+    >
   : WrapCells extends true ? ApplyWrapper<
       FirstWrapper<WrapperList<T>>,
       SchemaInner<
         ReapplyWrappers<T, ShiftWrapper<WrapperList<T>>>,
         Root,
         Depth,
-        WrapCells
+        WrapCells,
+        FactoryDepth
       >
     >
-  : SchemaInner<StripWrappers<T>, Root, Depth, WrapCells>;
+  : SchemaInner<StripWrappers<T>, Root, Depth, WrapCells, FactoryDepth>;
 
 /**
  * Convert a JSONSchema type to its corresponding TypeScript type.
@@ -321,7 +394,7 @@ export type Schema<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> = SchemaInner<T, Root, Depth, true>;
+> = SchemaInner<T, Root, Depth, true, FactoryDepthFor<T>>;
 
 // Get keys from the default object
 type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
@@ -338,18 +411,31 @@ type ObjectFromProperties<
   AP extends JSONSchema = false,
   DK extends string = never,
   WrapCells extends boolean = true,
+  FactoryDepth extends FactoryDepthLevel = 0,
 > =
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? K : never
         : never
-    ]: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
+    ]: SchemaInner<
+      P[K],
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells,
+      FactoryDepth
+    >;
   }
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? never : K
         : never
-    ]?: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
+    ]?: SchemaInner<
+      P[K],
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells,
+      FactoryDepth
+    >;
   }
   & (
     AP extends false ? Record<never, never>
@@ -359,7 +445,8 @@ type ObjectFromProperties<
             AP,
             Root,
             DecrementDepth<Depth>,
-            WrapCells
+            WrapCells,
+            FactoryDepth
           >;
         }
       : Record<string | number | symbol, never>
@@ -367,6 +454,12 @@ type ObjectFromProperties<
 
 // Restrict Depth to these numeric literal types
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+type FactoryDepthLevel = 0 | 1;
+
+type DecrementFactoryDepth<_D extends FactoryDepthLevel> = 0;
+
+type FactoryDepthFor<T extends JSONSchema> = [JSONSchema] extends [T] ? 0 : 1;
 
 // Decrement map for recursion limit
 type Decrement = {
@@ -398,7 +491,7 @@ export type SchemaWithoutCell<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> = SchemaInner<T, Root, Depth, false>;
+> = SchemaInner<T, Root, Depth, false, FactoryDepthFor<T>>;
 
 // ===== Module Augmentation for Schema-based Overloads =====
 

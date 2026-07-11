@@ -1,6 +1,7 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
+import { serializePatternGraph } from "./json-utils.ts";
 import type {
   FactoryInput,
   JSONSchema,
@@ -557,7 +558,15 @@ export const patternTool = (<
   extraParams?: FactoryInput<E>,
 ): PatternToolResult<E> => {
   return {
-    pattern,
+    // `patternTool` is an explicitly deprecated compatibility writer until
+    // the Stage 4 tool migration lands. Preserve its historical structural
+    // Pattern payload here, at the helper boundary, so a keyless/manual tool
+    // pattern does not masquerade as a durably cold-loadable Factory@1 value.
+    // Ordinary factory-valued graph data remains callable and must satisfy the
+    // exact-space artifact-availability proof at a durable boundary.
+    pattern: serializePatternGraph(pattern) as unknown as PatternToolResult<
+      E
+    >["pattern"],
     extraParams: (extraParams ?? {}) as E,
   };
 }) as PatternToolFunction;

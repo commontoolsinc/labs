@@ -82,6 +82,7 @@ export const UNUSED_RECORD_SUBSCHEMA_KEYS = [
 ] as const;
 
 export type SubschemaKeyword =
+  | "asFactory"
   | (typeof SINGLE_SUBSCHEMA_KEYS)[number]
   | (typeof ARRAY_SUBSCHEMA_KEYS)[number]
   | (typeof RECORD_SUBSCHEMA_KEYS)[number]
@@ -176,6 +177,21 @@ export function forEachSubschema(
 ): boolean {
   if (!isRecord(schema)) return false;
   const node = schema as JSONSchemaObj;
+  if (node.asFactory !== undefined) {
+    const fields = node.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    for (const field of fields) {
+      if (
+        visit(
+          node.asFactory[field] as JSONSchema,
+          "asFactory",
+          field,
+          undefined,
+        )
+      ) return true;
+    }
+  }
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
     if (child !== undefined && visit(child, keyword, undefined, undefined)) {
@@ -241,6 +257,18 @@ export function* subschemaEdges(
 ): Generator<SubschemaEdge> {
   if (!isRecord(schema)) return;
   const node = schema as JSONSchemaObj;
+  if (node.asFactory !== undefined) {
+    const fields = node.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    for (const field of fields) {
+      yield {
+        schema: node.asFactory[field] as JSONSchema,
+        keyword: "asFactory",
+        key: field,
+      };
+    }
+  }
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
     if (child !== undefined) yield { schema: child, keyword };
@@ -280,6 +308,22 @@ export function mapSubschemas(
     result ??= { ...schema };
     result[key] = value;
   };
+
+  if (schema.asFactory !== undefined) {
+    const fields = schema.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    let mappedFactory: Record<string, unknown> | undefined;
+    for (const field of fields) {
+      const child = schema.asFactory[field] as JSONSchema;
+      const mapped = map(child);
+      if (mapped !== child) {
+        mappedFactory ??= { ...schema.asFactory };
+        mappedFactory[field] = mapped;
+      }
+    }
+    if (mappedFactory !== undefined) update("asFactory", mappedFactory);
+  }
 
   for (const keyword of singleKeywordsFor(opts)) {
     const child = schema[keyword];

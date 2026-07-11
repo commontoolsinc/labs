@@ -7,6 +7,7 @@ import {
   sealFactoryState,
   tryFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
+import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { isTrustedBuilderArtifact } from "./builder/pattern-metadata.ts";
@@ -157,30 +158,6 @@ function contractForTrustedFactory(
   }
 }
 
-function normalizeSchema(value: JSONSchema | undefined): unknown {
-  if (value === undefined || typeof value !== "object" || value === null) {
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(normalizeSchema as never);
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [
-        key,
-        entry !== null && typeof entry === "object"
-          ? normalizeSchema(entry as JSONSchema)
-          : entry,
-      ]),
-  );
-}
-
-function schemasEqual(
-  left: JSONSchema | undefined,
-  right: JSONSchema | undefined,
-): boolean {
-  return deepEqual(normalizeSchema(left), normalizeSchema(right));
-}
-
 function schemaFields(kind: FactoryContract["kind"]): readonly string[] {
   switch (kind) {
     case "pattern":
@@ -209,7 +186,9 @@ function assertExpectedContract(
     );
   }
   for (const field of schemaFields(actual.kind)) {
-    if (!schemasEqual(schemaAt(actual, field), schemaAt(expected, field))) {
+    if (
+      !factorySchemasEqual(schemaAt(actual, field), schemaAt(expected, field))
+    ) {
       throw new Error(
         `Factory materialization schema mismatch: expected ${actual.kind} ${field}`,
       );
@@ -234,7 +213,7 @@ function assertCarriedSchemas(
     // metadata; final canonical-state equality rejects the forged addition.
     if (
       schemaLightByRef && carriedSchema === undefined ||
-      schemasEqual(carriedSchema, trustedSchema)
+      factorySchemasEqual(carriedSchema, trustedSchema)
     ) {
       continue;
     }

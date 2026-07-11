@@ -7,6 +7,7 @@ import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
+  isPattern,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
@@ -42,6 +43,7 @@ import {
 } from "./storage/interface.ts";
 import type { Runtime } from "./runtime.ts";
 import {
+  isLegacyAlias,
   isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
@@ -413,6 +415,7 @@ export function createDataCellURI(
   function traverseAndAddBaseIdToRelativeLinks(
     value: any,
     seen: Set<object>,
+    insideLegacyPatternGraph = false,
   ): any {
     if (isAdmittedFabricFactory(value)) {
       if (!checkedFactories.has(value)) {
@@ -437,6 +440,15 @@ export function createDataCellURI(
     }
     seen.add(value);
     try {
+      // A structural legacy Pattern carries unresolved `$alias` bindings as
+      // executable graph metadata. They are not links relative to the inline
+      // document that happens to transport the graph; resolving them here
+      // would erase the pseudo-cell (`argument` / `result`) and later make the
+      // tool pattern point back into its containing inputs cell. Preserve them
+      // until Runner binds the pattern for its own invocation.
+      if (insideLegacyPatternGraph && isLegacyAlias(value)) {
+        return value;
+      }
       if (isPrimitiveCellLink(value)) {
         const link = parseLink(value, baseLink);
         return createSigilLinkFromParsedLink(link, {
@@ -445,13 +457,26 @@ export function createDataCellURI(
         });
       } else if (Array.isArray(value)) {
         return value.map((item) =>
-          traverseAndAddBaseIdToRelativeLinks(item, seen)
+          traverseAndAddBaseIdToRelativeLinks(
+            item,
+            seen,
+            insideLegacyPatternGraph,
+          )
         );
       } else { // isObject
+        const childIsInsideLegacyPattern = insideLegacyPatternGraph ||
+          isPattern(value);
         return Object.fromEntries(
           Object.entries(value).map((
             [key, value],
-          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+          ) => [
+            key,
+            traverseAndAddBaseIdToRelativeLinks(
+              value,
+              seen,
+              childIsInsideLegacyPattern,
+            ),
+          ]),
         );
       }
     } finally {
@@ -593,6 +618,26 @@ interface SanitizeContext {
   keepAsCell: KeepAsCell;
 }
 
+function cloneSchemaMetadata(
+  value: unknown,
+  seen: Map<object, unknown> = new Map(),
+): unknown {
+  if (value === null || typeof value !== "object") return value;
+  const cached = seen.get(value);
+  if (cached !== undefined) return cached;
+  const clone: unknown[] | Record<PropertyKey, unknown> = Array.isArray(value)
+    ? []
+    : {};
+  seen.set(value, clone);
+  for (const key of Reflect.ownKeys(value)) {
+    (clone as Record<PropertyKey, unknown>)[key] = cloneSchemaMetadata(
+      (value as Record<PropertyKey, unknown>)[key],
+      seen,
+    );
+  }
+  return clone;
+}
+
 /**
  * Recursively strips asCell flags from a JSON schema.
  * This also ensures there are no circular references in the output schema
@@ -677,6 +722,15 @@ function recursiveStripAsCellFromSchema(
   for (const [key, value] of Object.entries(result)) {
     // Skip $ref - it's just a string pointer, not a schema to process
     if (key === "$ref") continue;
+
+    // `asFactory` carries an exact public call contract. Its nested schemas are
+    // metadata about a different invocation boundary, so stripping their cell
+    // wrappers would silently change the factory type. Copy the extension as a
+    // unit while allowing the enclosing link schema to be sanitized normally.
+    if (key === "asFactory") {
+      result[key] = cloneSchemaMetadata(value);
+      continue;
+    }
 
     if (value && typeof value === "object") {
       if (key === "$defs") {
