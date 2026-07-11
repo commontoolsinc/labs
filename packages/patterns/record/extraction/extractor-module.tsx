@@ -1785,7 +1785,7 @@ export const ExtractorModule = pattern<
         prompt: prompt as any,
         model: "anthropic:claude-sonnet-4-5",
       });
-      const result = resultOf(request);
+      const ocrResult = resultOf(request);
       const ocr = computed(() => {
         if (isPending(request)) {
           return { pending: true, result: undefined, error: undefined };
@@ -1797,7 +1797,7 @@ export const ExtractorModule = pattern<
             error: request.error.message,
           };
         }
-        return { pending: false, result, error: undefined };
+        return { pending: false, result: ocrResult, error: undefined };
       });
       return { index: photo.index, ocr };
     });
