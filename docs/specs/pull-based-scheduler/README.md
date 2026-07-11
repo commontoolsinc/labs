@@ -324,8 +324,9 @@ Both are triggered when input changes. Topological sort sees a cycle. By preferr
 ## Event Handlers
 
 Event handlers (button clicks, form submissions) may depend on computed values.
-In pull mode, the scheduler preflights those dependencies before dispatching the
-queued handler action. In push mode, the handler dispatch path is direct.
+In pull mode, the scheduler preflights those dependencies and the readiness of
+captured inputs before dispatching the queued handler action. In push mode, the
+handler dispatch path is direct.
 
 ### The traverseCells Flag
 
@@ -356,7 +357,12 @@ If dirty:
     Schedule dirty computations
     Keep event at queue head (will run after deps compute)
 Else:
-    Run handler action and commit its transaction
+    Check captured-input readiness
+        ↓
+    If unavailable:
+        Park event at queue head until an input read changes
+    Else:
+        Run handler action and commit its transaction
 ```
 
 ### Global FIFO Ordering
@@ -681,13 +687,17 @@ global FIFO ordering. If no handler is registered and
 `idle()` waits for those background tasks before resolving.
 
 `addEventHandler()` registers a handler for a link and optionally attaches a
-`populateDependencies(tx, event)` callback. The cancel function removes the
-exact handler/ref pair.
+`populateDependencies(tx, event)` callback. A handler may also carry an
+`inputReadiness(tx, event)` check for unaccepted unavailable captured inputs
+which can become usable later. The cancel function removes the exact
+handler/ref pair.
 
 Pull mode preflights the head event before dispatch when the handler has a
-`populateDependencies` callback:
+`populateDependencies` callback or an `inputReadiness` check:
 
 - Runs `handler.populateDependencies` in a read-only runtime transaction.
+- Runs `handler.inputReadiness` in that same transaction so its reads become
+  wake dependencies.
 - Converts that transaction to a reactivity log.
 - Commits the read-only inspection transaction as a no-op so dependency
   discovery does not participate in CFC prepare/commit gating.
@@ -697,8 +707,16 @@ Pull mode preflights the head event before dispatch when the handler has a
 - If dependencies are dirty but delayed by debounce/throttle, parks the head
   event with `notBefore`, schedules the event wake timer, and preserves FIFO
   ordering.
+- If dependencies are settled but `inputReadiness` returns false, subscribes a
+  one-shot wake action to the preflight reads and parks the original event at
+  the FIFO head. No handler transaction, receipt, or `onCommit` callback is
+  produced until a later input change makes the check pass.
 - Optionally emits `scheduler.event.preflight` with timing and dirty-dependency
   stats.
+
+Readiness checks exclude the immutable event payload. A malformed `$event`
+cannot improve while queued, so dispatch treats its schema failure as a final
+no-op outcome, settles the event, and continues to the next queue entry.
 
 Push mode dispatches the head event directly.
 

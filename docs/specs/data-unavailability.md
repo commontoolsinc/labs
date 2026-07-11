@@ -587,6 +587,20 @@ An event handler or effect with no value output is not invoked while it has an
 unaccepted unavailable input. It has nowhere to propagate the value and keeps
 the existing gated behavior.
 
+For an event handler, an unaccepted unavailable captured input, including a
+mutable capture, gates the event before dispatch. The original queued event
+remains at the head of the global FIFO queue, and later events remain behind
+it. While the input is unavailable, the handler is not invoked, no event
+transaction or receipt is produced, and its `onCommit` callback does not fire.
+The scheduler waits on the captured reads; when they change, it rechecks the
+same event and dispatches it once the inputs are usable.
+
+The immutable `$event` payload is deliberately excluded from that wait. A
+malformed event cannot become valid while queued, so it is dispatched through
+ordinary argument validation and settled as that event's final no-op outcome.
+It must be removed from the queue and settle its `onCommit` callback so it
+cannot deadlock later events.
+
 An effect which also owns a data result, including a fetch or generation
 built-in, does propagate an unavailable input to that result while suppressing
 the external effect. Scheduler classification as an effect must not by itself
