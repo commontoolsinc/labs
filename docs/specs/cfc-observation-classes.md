@@ -161,15 +161,25 @@ against the spec (§8.12.8 as amended on specs branch
   absorbed at the one-time migration, conservatively over-attributed to
   the first labeled stamping), never cleared and never grown by overwrites
   of a still-existing path. Soundness: a writer conditional on existence
-  journals that observation itself (§8.10.1/§8.9.2). Residual: deletion
-  leaves the frozen entry (over-taint) and re-creation keeps it instead of
-  re-minting at the re-creating join — re-mint-on-recreation needs
-  per-path previousValue plumbing. _Priority note (2026-07-10): with the
-  freeze-at-creation amendment now merged into the normative spec
-  (§8.12.8), the re-creation arm is a live conformance gap — keeping the
-  stale join UNDERSTATES the re-created path's existence channel, the
-  direction the spec forbids (the deletion arm merely over-taints, which
-  is documentable). Tracked as a fix chip._
+  journals that observation itself (§8.10.1/§8.9.2). **Delete +
+  re-create re-mints (resolved 2026-07-10)**: §8.12.8 makes re-creation a
+  fresh creation event — the frozen entry is REPLACED at the re-creating
+  attempt's join (`recreate_remints` in the spec's
+  `formal/Cfc/StoreExistence.lean`), since carrying the stale join would
+  UNDERSTATE the re-created path's existence channel, the direction the
+  spec forbids. The carry in `prepare.ts` refuses a frozen entry whose
+  path shows the per-path transition absent-before → present-after against
+  the recorded writes' pre-transaction snapshots (`previousValue`, probed
+  relative to each write's materialization point; the probes walk own-key
+  PRESENCE — a slot holding `undefined` is present, per the storage patch
+  layer — and at the recorded path itself the detail's `previousPresent`
+  flag decides, with value-definedness as the fallback for transactions
+  that do not provide it), and a
+  replacement mints at the entry's own path with the current join — empty join mints nothing
+  (a cleanly re-created path's existence is public; pre-deletion
+  observations stay protected by their journaled reads). Remaining
+  residual: deletion alone leaves the frozen entry in place until a
+  re-creation (over-taint, the fail-safe direction — documentable).
 - **`origin:"structure"` membership stamps are `observes:"enumerate"`**,
   replace-from-criteria per §8.12.8 (normative — its rationale names and
   rejects accumulate-forever). Axis-mapping note: the labs `observes` axis

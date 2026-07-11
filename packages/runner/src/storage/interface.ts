@@ -1570,6 +1570,14 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+  /**
+   * Pre-transaction slot presence at `address.path` — distinguishes an
+   * absent slot from a present slot holding `undefined`, which
+   * `previousValue` alone cannot (the storage write path keeps presence
+   * distinct from value). Optional: transactions that cannot compute it
+   * omit it, and consumers fall back to `previousValue` definedness.
+   */
+  previousPresent?: boolean;
 }
 
 export interface TransactionReadDetail {

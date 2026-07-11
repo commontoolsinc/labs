@@ -151,8 +151,12 @@ flow join only (every other consumption kept — byte-identical to their
 pre-template behavior; the egress/observation-gate screens stay
 over-inclusive), and the generic route mints the same three `*`-child
 templates as the declared route. Existence-entry update discipline settled
-as freeze-at-creation — spec §8.12.8 amendment on branch
-`cfc/existence-freeze-at-creation`.)
+as freeze-at-creation — spec §8.12.8, normative since the 2026-07-10 spec
+landing (amended on branch `cfc/existence-freeze-at-creation`, mechanized
+in `formal/Cfc/StoreExistence.lean`); the runner conforms including the
+delete/re-create arm — re-creation REPLACES the frozen entry at the
+re-creating attempt's join (`prepare.ts` re-mint-on-recreation; deletion
+alone still leaves the entry as a fail-safe over-taint).)
 
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
