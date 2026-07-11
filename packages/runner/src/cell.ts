@@ -12,6 +12,12 @@ import {
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+  trySealedFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
@@ -149,6 +155,11 @@ import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { MetaField } from "@commonfabric/api";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -2743,7 +2754,19 @@ function sinkHelper(
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;
+
+  if (isAdmittedFabricFactory(value)) {
+    if (seen.has(value)) return;
+    seen.add(value);
+    mapFactoryStateValues(factoryStateOf(value), (nested) => {
+      deepTraverse(nested, seen);
+      return nested;
+    });
+    return;
+  }
+
   if (typeof value !== "object") return;
+  if (value instanceof FabricSpecialObject) return;
 
   // Avoid infinite loops with circular references
   if (seen.has(value)) return;
@@ -2884,6 +2907,15 @@ function validateStaticData(value: unknown): void {
       );
     }
 
+    if (typeof val === "function" && !isAdmittedFabricFactory(val)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a JavaScript function at path '${
+          path.join(".")
+        }'.\n` +
+          "help: only branded pattern, module, and handler factories are valid callable Fabric values",
+      );
+    }
+
     // Check for cycles - only ancestors in current path, not all seen objects
     if (ancestors.has(obj)) {
       throw new Error(
@@ -2896,11 +2928,23 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
-    //
+    if (isAdmittedFabricFactory(val)) {
+      mapFactoryStateValues(factoryStateOf(val), (nested, field) => {
+        traverse(nested, [...path, field]);
+        return nested;
+      });
+      ancestors.delete(obj);
+      return;
+    }
+
+    // Fabric special values are atomic at runner graph boundaries. Their
+    // codec-owned state is validated by the data-model boundary rather than
+    // flattened through enumerable implementation details here.
+    if (val instanceof FabricSpecialObject) {
+      ancestors.delete(obj);
+      return;
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
@@ -2944,9 +2988,25 @@ export function recursivelyAddIDIfNeeded<T>(
   value: T,
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
 ): T {
   // Can't add IDs without frame.
   if (!frame) return value;
+
+  // Factories are atomic callable values whose graph-bearing fields live in
+  // hidden protocol state. Visit that state before native conversion attempts
+  // to seal the callable at this still-live builder boundary.
+  if (isAdmittedFabricFactory(value)) {
+    // A canonical codec value has already passed the complete Fabric walk and
+    // is deeply frozen. Injecting runner-only `[ID]` symbols into its hidden
+    // params would make the validated Factory@1 state unencodable.
+    if (trySealedFactoryState(value) !== undefined) return value;
+    return mapFactoryForTraversal(
+      value,
+      (nested) => recursivelyAddIDIfNeeded(nested, frame, seen, factoryContext),
+      factoryContext,
+    );
+  }
 
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
@@ -2970,7 +3030,7 @@ export function recursivelyAddIDIfNeeded<T>(
 
     const state = codecOf(value).encode(value);
     if (isRecord(state) || Array.isArray(state)) {
-      recursivelyAddIDIfNeeded(state, frame, seen);
+      recursivelyAddIDIfNeeded(state, frame, seen, factoryContext);
     }
     return value;
   }
@@ -2996,7 +3056,7 @@ export function recursivelyAddIDIfNeeded<T>(
     if (converted instanceof FabricInstance) {
       const state = codecOf(converted).encode(converted);
       if (isRecord(state) || Array.isArray(state)) {
-        recursivelyAddIDIfNeeded(state, frame, seen);
+        recursivelyAddIDIfNeeded(state, frame, seen, factoryContext);
       }
     }
     return converted as T;
@@ -3029,7 +3089,7 @@ export function recursivelyAddIDIfNeeded<T>(
     if (convertedDiffers) seen.set(converted, result);
 
     sourceArray.forEach((el, i) => {
-      const v = recursivelyAddIDIfNeeded(el, frame, seen);
+      const v = recursivelyAddIDIfNeeded(el, frame, seen, factoryContext);
       // For objects on arrays only: Add ID if not already present. A
       // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
       // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
@@ -3071,7 +3131,7 @@ export function recursivelyAddIDIfNeeded<T>(
     if (convertedDiffers) seen.set(converted, result);
 
     Object.entries(sourceRecord).forEach(([key, v]) => {
-      const next = recursivelyAddIDIfNeeded(v, frame, seen);
+      const next = recursivelyAddIDIfNeeded(v, frame, seen, factoryContext);
       if (!Object.is(next, v)) {
         changed = true;
       }
@@ -3116,7 +3176,23 @@ export function convertCellsToLinks(
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
 ): any {
+  if (isAdmittedFabricFactory(value)) {
+    return mapFactoryForTraversal(
+      value,
+      (nested, field) =>
+        convertCellsToLinks(
+          nested,
+          options,
+          [...path, field],
+          seen,
+          factoryContext,
+        ),
+      factoryContext,
+    );
+  }
+
   if (seen.has(value)) {
     return linkRefFrom({ path: seen.get(value) });
   }
@@ -3154,19 +3230,33 @@ export function convertCellsToLinks(
   // convertible.
   value = shallowFabricFromNativeValue(value);
 
+  if (value instanceof FabricSpecialObject) return value;
+
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
     // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>
-      convertCellsToLinks(value, options, [...path, String(index)], seen)
+      convertCellsToLinks(
+        value,
+        options,
+        [...path, String(index)],
+        seen,
+        factoryContext,
+      )
     );
   } else {
     return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], seen),
+        convertCellsToLinks(
+          value,
+          options,
+          [...path, String(key)],
+          seen,
+          factoryContext,
+        ),
       ]),
     );
   }

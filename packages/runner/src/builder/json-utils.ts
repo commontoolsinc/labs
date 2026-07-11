@@ -7,7 +7,10 @@ import {
 } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
-import type { FabricFactory } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricFactory,
+  FabricSpecialObject,
+} from "@commonfabric/data-model/fabric-value";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FactoryInput,
@@ -160,6 +163,12 @@ export function toJSONWithAliasBindings(
     );
   }
 
+  // Fabric-special values are encoded atomically by their registered codec;
+  // enumerable implementation details are not serialized graph state.
+  if (value instanceof FabricSpecialObject) {
+    return value as unknown as JSONValue;
+  }
+
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
@@ -208,13 +217,6 @@ export function toJSONWithAliasBindings(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
-    // the other special-object type, `FabricInstance` (a container), still
-    // reaches this `for...in` copy and is walked by its internal slots (zero
-    // enumerable own-props) instead of its codec contents. Unlike a primitive it
-    // *does* need descending into — but by its actual contents, which this walk
-    // won't do correctly. This site will need attention once FabricInstances see
-    // real use.
     for (const key in valueToProcess as any) {
       const nestedValue = valueToProcess[key];
       // A pattern node's module implementation is the other explicit legacy

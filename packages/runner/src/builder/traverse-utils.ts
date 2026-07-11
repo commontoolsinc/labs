@@ -1,6 +1,7 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import {
@@ -17,15 +18,6 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * @param value - The value to traverse
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
- *
- * TODO(danfuzz): The `isRecord`-gated `Object.entries`/`Array.map` descent
- * below now leaves `FabricPrimitive` values atomic (an `instanceof` check
- * short-circuits the descent condition), but the other special-object type,
- * `FabricInstance` (a container), is still walked by its internal slots instead
- * of its codec contents. Unlike a primitive it *does* need descending into —
- * but by its actual contents, which the generic enumerable-prop traversal won't
- * do correctly. This site will need attention once FabricInstances see real
- * use.
  */
 export function traverseValue(
   unprocessedValue: FactoryInput<any>,
@@ -66,6 +58,10 @@ export function traverseValue(
       factoryContext,
     );
   }
+
+  // Fabric-special values are atomic codec values. Their observable state is
+  // owned by the data model, not by enumerable runner graph properties.
+  if (value instanceof FabricSpecialObject) return value;
 
   // Prevent infinite recursion
   if (seen.has(value) || seen.has(result)) return value;

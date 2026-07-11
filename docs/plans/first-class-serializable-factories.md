@@ -373,7 +373,7 @@ Focused tests:
   serialization, hashing, and equality.
 - [x] Verify two references to the same factory do not cause false cycle errors,
   while an actual cycle through params is rejected.
-- [ ] Review graph payload fields in `packages/runner/src/builder/types.ts` and
+- [x] Review graph payload fields in `packages/runner/src/builder/types.ts` and
   static-data walks in `packages/runner/src/cell.ts` so hidden factory state is
   neither flattened nor skipped.
 - [x] Verify `packages/runner/src/storage/differential.ts`,

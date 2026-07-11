@@ -3,6 +3,11 @@ import {
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -1407,6 +1412,26 @@ export class StorageManager implements IStorageManager {
     if (value === null || value === undefined || seen.has(value)) {
       return;
     }
+
+    if (isAdmittedFabricFactory(value)) {
+      seen.add(value);
+      const state = factoryStateOf(value);
+      mapFactoryStateValues(state, (nested, field) => {
+        this.collectLinkedCellSyncs(
+          nested,
+          base,
+          field === "params" && state.kind === "pattern"
+            ? state.paramsSchema
+            : undefined,
+          cfc,
+          promises,
+          seen,
+        );
+        return nested;
+      });
+      return;
+    }
+
     if (typeof value !== "object") {
       return;
     }

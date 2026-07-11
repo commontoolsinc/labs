@@ -23,6 +23,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  FabricValue as ApiFabricValue,
   FactoryInput,
   FetchBinaryFunction,
   FetchJsonFunction,
@@ -250,9 +251,12 @@ export function isModule(value: unknown): value is Module {
 export type Node = {
   description?: string;
   module: Module; // TODO(seefeld): Add `Alias` here once supported
-  inputs: JSONValue;
-  outputs: JSONValue;
+  inputs: GraphValue;
+  outputs: GraphValue;
 };
+
+/** Serialized pattern graph data, including admitted callable factories. */
+export type GraphValue = ApiFabricValue;
 
 export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
@@ -273,7 +277,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: JSONValue;
+    result: GraphValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
