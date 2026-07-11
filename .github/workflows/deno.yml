@@ -693,7 +693,6 @@ jobs:
         run: |
           mkdir -p test-results
           HEADLESS=1 \
-          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
           CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
           deno task integration --junit-dir=test-results patterns-reload

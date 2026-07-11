@@ -92,8 +92,8 @@ where server and clients knowingly duplicate authoritative work.
   whether server-primary execution is allowed. It does not contain liveness,
   actor, epoch, authority, or unservable-piece state.
 - Runtime experimental option: serverPrimaryExecution, default false.
-- Existing scheduler option: persistentSchedulerState, default false until its
-  own rollout changes that default.
+- Existing scheduler option: persistentSchedulerState, default true; explicitly
+  setting it false remains the rollback path.
 - Protocol capability: server-primary-execution-v1.
 - Protocol messages:
   - session.execution.demand.set
@@ -158,7 +158,8 @@ not overlap.
 - packages/memory/v2/engine.ts scheduler table DDL, observation upsert,
   dirtying, and list/read methods
 - packages/runner/src/scheduler/persistent-observation.ts
-- packages/runner/src/scheduler.ts rehydration facade
+- packages/runner/src/runner.ts cold-start listing and lifecycle ownership
+- packages/runner/src/scheduler/facade.ts synchronous observation application
 - packages/runner/src/storage/v2.ts scope resolution and scheduler state calls
 - packages/memory/test/v2-scheduler-state-test.ts
 - packages/runner/test/reload-rehydration.test.ts
@@ -346,7 +347,7 @@ that it settled.
 
 **Read first:**
 
-- packages/runner/src/scheduler/action-run.ts read tracking, transaction open,
+- packages/runner/src/scheduler/run.ts read tracking, transaction open,
   no-op elision, and observation construction
 - Scheduler-v2 commit gates and bounded settle
 - Memory-v2 revision sequence assignment and feed ordering
@@ -604,7 +605,8 @@ and signing authority are separate.
   patterns only; do not make its registry the primary discovery path
 - Scheduler-v2 demand/pull and bounded settle APIs
 - Cell.pull and piece result-root instantiation
-- Persistent scheduler rehydration through packages/runner/src/scheduler.ts
+- Persistent scheduler cold-start listing through packages/runner/src/runner.ts
+  and observation application through packages/runner/src/scheduler/facade.ts
 
 **Steps:**
 

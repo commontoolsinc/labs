@@ -174,10 +174,10 @@ consolidated register is §9.
 
 ### 3.1 Scheduler v2 (#4288, phases 3c–7)
 
-Assumed landed: durable event IDs, speculation lineage, static write
+Implemented by scheduler v2 (#4288): durable event IDs, speculation lineage, static write
 surfaces, tx-carried source action, node records and liveness refcounts,
 unified gates, declared reads, read-delta tracking, persistent action state,
-and bounded settle (`PASS_RUN_BUDGET = 5`).
+and bounded settle (`PASS_RUN_BUDGET = 10`).
 
 Contribution: a scheduler whose per-node state is one record
 (status/liveRefs/reads/writes), whose demand is refcounted rather than
@@ -185,26 +185,27 @@ walked, and whose settle loop is bounded — i.e., a graph that can be
 suspended, described, and resumed. That is precisely the shape a server
 executor must hold for hundreds of spaces.
 
-### 3.2 Persistent scheduler state (BUILT behind a flag)
+### 3.2 Persistent scheduler state (BUILT, default-on with rollback)
 
-On the #4288 baseline, behind the default-off runtime option
-`persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`):
+Implemented on the #4288 branch with the default-on runtime option
+`persistentSchedulerState` (env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`; an
+explicit false remains the rollback path):
 the full durable stack, not just shapes. Per-action observations
 (`SchedulerActionObservation` — `pieceId`, `actionId`, `actionKind`,
 `implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
 `declaredWrites`, gate options, status —
 `packages/runner/src/scheduler/persistent-observation.ts:22`) are attached
-to the live commit tx (`action-run.ts:646/708`) and persisted **inside the
+to the live commit tx (`packages/runner/src/scheduler/run.ts`) and persisted **inside the
 single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
 → `upsertSchedulerObservationTransaction` `:3285`) across five tables
 (`scheduler_observation`, `scheduler_action_snapshot` LWW,
 `scheduler_read_index`, `scheduler_write_index`, `scheduler_action_state` —
 DDL `engine.ts:206`+). Cold start reads them back
 (`listSchedulerActionSnapshots` through the provider seam) and rehydrates
-without re-running unchanged actions. On #4288, the runner loads the
-snapshots and the facade in `packages/runner/src/scheduler.ts` applies
-fingerprint-gated, fail-open
-rehydration. Restart-skip is proven by `reload-rehydration.test.ts` and
+without re-running unchanged actions. The runner owns cold-start listing and
+lifecycle in `packages/runner/src/runner.ts`; synchronous observation
+application in `packages/runner/src/scheduler/facade.ts` is fingerprint-gated
+and fail-open. Restart-skip is proven by `reload-rehydration.test.ts` and
 `v2-scheduler-state-test.ts`.
 
 Still missing (G4): durable dirty markers

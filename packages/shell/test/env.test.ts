@@ -74,3 +74,28 @@ Deno.test({
     expect(prod.EXPERIMENTAL.eagerSourceAnnotation).toBe(false);
   },
 });
+
+Deno.test({
+  name:
+    "shell env preserves the persistent scheduler default and exact override semantics",
+  permissions: { read: true },
+  async fn() {
+    const unset = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: undefined,
+    }, importFreshEnvModule);
+    expect(unset.EXPERIMENTAL.persistentSchedulerState).toBeUndefined();
+
+    const explicitFalse = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "false",
+    }, importFreshEnvModule);
+    expect(explicitFalse.EXPERIMENTAL.persistentSchedulerState).toBe(false);
+
+    const invalid = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "1",
+    }, importFreshEnvModule);
+    expect(invalid.EXPERIMENTAL.persistentSchedulerState).toBeUndefined();
+  },
+});

@@ -667,7 +667,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
-let persistentSchedulerStateEnabled = false;
+let persistentSchedulerStateEnabled = true;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 
@@ -677,7 +677,7 @@ let syncSchemaTableEnabled = true;
  * client/server handshakes, so it lives beside the memory protocol flags.
  */
 export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
-  persistentSchedulerStateEnabled = enabled ?? false;
+  persistentSchedulerStateEnabled = enabled ?? true;
 }
 
 export function getPersistentSchedulerStateConfig(): boolean {
@@ -685,7 +685,7 @@ export function getPersistentSchedulerStateConfig(): boolean {
 }
 
 export function resetPersistentSchedulerStateConfig(): void {
-  persistentSchedulerStateEnabled = false;
+  persistentSchedulerStateEnabled = true;
 }
 
 /**

@@ -1902,6 +1902,7 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
     resetPersistentSchedulerStateConfig();
   }
 
+  setPersistentSchedulerStateConfig(false);
   const server = new Server({
     store,
     authorizeSessionOpen: () => "did:key:test-principal",
@@ -1921,6 +1922,7 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
   }
 });
 
