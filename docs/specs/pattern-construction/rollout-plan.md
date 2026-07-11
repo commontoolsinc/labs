@@ -113,11 +113,17 @@
 
 ## Planned Future Work
 
-- [ ] **Serializable node factories** (see `node-factory-shipping.md`)
-  - [ ] Implement `nodeFactory@1` sigil format for shipping factories
-  - [ ] Add `.curry(value, argIndex)` method for partial application
-  - [ ] Support rehydration of serialized factories from cells/events
-  - [ ] Ensure currying metadata is preserved during serialization
+- [ ] **First-class serializable factories** (see
+  `node-factory-shipping.md`)
+  - [ ] Extract generic `$patternRef` binding/setup behavior independently of
+    graph snapshots and reactive-interpreter work
+  - [ ] Make pattern, module/lift, and handler factories directly branded
+    `Factory@1` Fabric values
+  - [ ] Add factory schemas, symbolic invocation, and generic cold resolution
+  - [ ] Add nested-pattern closure conversion with a separate params root and
+    one transformer-only `.curry(params)` operation
+  - [ ] Replace `patternTool` consumers with inline wrapper patterns and retain
+    compatibility reads
 
 ## Open Questions
 
