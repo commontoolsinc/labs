@@ -172,8 +172,9 @@ against the spec (§8.12.8 as amended on specs branch
   the recorded writes' pre-transaction snapshots (`previousValue`, probed
   relative to each write's materialization point; the probes walk own-key
   PRESENCE — a slot holding `undefined` is present, per the storage patch
-  layer — collapsing to value-definedness only at the recorded path
-  itself, where `TransactionWriteDetail` carries no presence flag), and a
+  layer — and at the recorded path itself the detail's `previousPresent`
+  flag decides, with value-definedness as the fallback for transactions
+  that do not provide it), and a
   replacement mints at the entry's own path with the current join — empty join mints nothing
   (a cleanly re-created path's existence is public; pre-deletion
   observations stay protected by their journaled reads). Remaining

@@ -537,6 +537,7 @@ describe("transaction inspection", () => {
         },
         value: 3,
         previousValue: 1,
+        previousPresent: true,
       }]);
 
       assertEquals([...tx.journal.novelty(space)], [{
@@ -594,11 +595,13 @@ describe("transaction inspection", () => {
             address: { space, scope: "space", id, path: ["value", "a"] },
             value: 10,
             previousValue: 1,
+            previousPresent: true,
           },
           {
             address: { space, scope: "space", id, path: ["value", "b"] },
             value: 20,
             previousValue: 2, // <- regression: was 20 (post-mutation) before fix
+            previousPresent: true,
           },
         ]);
       } finally {
@@ -660,6 +663,7 @@ describe("transaction inspection", () => {
           address: { space, scope: "space", id, path: ["value", "a"] },
           value: 10,
           previousValue: 1,
+          previousPresent: true,
         });
         // `/value` is the create-parents materialization point. The
         // entry's previousValue is what was at `/value` before the
@@ -669,6 +673,7 @@ describe("transaction inspection", () => {
           address: { space, scope: "space", id, path: ["value"] },
           value: { a: 10, new: { nested: "hello" } },
           previousValue: { a: 10 },
+          previousPresent: true,
         });
       } finally {
         await storageManager.close();

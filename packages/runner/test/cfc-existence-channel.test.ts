@@ -404,6 +404,59 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     expect(shape[0].label.confidentiality).toEqual(["secret-one"]);
   });
 
+  // The same presence contract at an EXACTLY-recorded path: the write
+  // detail's `previousPresent` flag (not `previousValue` definedness)
+  // decides absent-vs-present when the overwrite lands at the entry's own
+  // path, where there is no covering snapshot to walk (review on this PR,
+  // round 2 — without the flag the frozen root/slot label is replaced at
+  // the overwrite join and prior confidentiality is lost).
+  it("exact-path overwrite of a slot that held undefined keeps the frozen entry", async () => {
+    const rt = makeRuntime();
+    const secretOne = await seedDoc(rt, "ec-undef-exact-one", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret-one"] } },
+    ]);
+    const secretTwo = await seedDoc(rt, "ec-undef-exact-two", { n: 2 }, [
+      { path: [], label: { confidentiality: ["secret-two"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-undef-exact-out", {
+      other: 1,
+    });
+    const create = rt.edit();
+    create.readOrThrow(readAddress(secretOne, []));
+    create.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { deep: true },
+    );
+    create.prepareCfc();
+    expect((await create.commit()).ok).toBeDefined();
+
+    const toUndef = rt.edit();
+    toUndef.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      undefined,
+    );
+    toUndef.prepareCfc();
+    expect((await toUndef.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["child"])[0]?.label.confidentiality)
+      .toEqual(["secret-one"]);
+
+    // Overwrite the present (undefined-valued) slot AT ITS OWN PATH under
+    // a different join: still an ordinary overwrite — the frozen entry
+    // keeps the creation join.
+    const overwrite = rt.edit();
+    overwrite.readOrThrow(readAddress(secretTwo, []));
+    overwrite.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      5,
+    );
+    overwrite.prepareCfc();
+    expect((await overwrite.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["child"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toEqual(["secret-one"]);
+  });
+
   // A CLEAN re-creation (nothing labeled read) is a fresh creation event
   // under an empty join: the stale frozen entry must not survive it, and
   // with nothing to record the confidentiality-only encoding mints no

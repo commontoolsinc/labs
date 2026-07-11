@@ -1213,6 +1213,12 @@ const valueWriteTargets = (
     // Consumed by the §8.12.8 re-mint-on-recreation arm of the frozen
     // existence carry.
     previousValuesByPath: Map<string, unknown>;
+    // Pre-transaction slot presence AT each recorded path (first write
+    // wins, like the snapshot): the detail's `previousPresent` flag where
+    // the transaction provides it, else `previousValue` definedness — a
+    // present slot holding `undefined` must not read as absent (the
+    // snapshot value cannot make that distinction at its own root).
+    previousPresentByPath: Map<string, boolean>;
   }
 > => {
   const result = new Map<
@@ -1225,6 +1231,7 @@ const valueWriteTargets = (
       paths: (readonly string[])[];
       valuesByPath: Map<string, unknown>;
       previousValuesByPath: Map<string, unknown>;
+      previousPresentByPath: Map<string, boolean>;
     }
   >();
   const log = tx.getReactivityLog?.();
@@ -1275,12 +1282,16 @@ const valueWriteTargets = (
       // The creation signal unwraps the envelope like `writtenValue`: a
       // document-root write's `previousValue` is the prior RAW envelope, so
       // the logical root existed before only if that envelope carried a
-      // `value` member.
+      // `value` member (the detail's presence flag describes the envelope,
+      // not the member — definedness stands in at that one level).
       const previousWrittenValue = rawPath.length === 0
         ? (isRecord(write.previousValue)
           ? (write.previousValue as { value?: unknown }).value
           : undefined)
         : write.previousValue;
+      const previousWrittenPresent = rawPath.length === 0
+        ? previousWrittenValue !== undefined
+        : write.previousPresent ?? write.previousValue !== undefined;
       const key = targetKey(write.address);
       const existing = result.get(key);
       if (existing !== undefined) {
@@ -1290,6 +1301,10 @@ const valueWriteTargets = (
           existing.previousValuesByPath.set(
             pathKey(writePath),
             previousWrittenValue,
+          );
+          existing.previousPresentByPath.set(
+            pathKey(writePath),
+            previousWrittenPresent,
           );
         }
       } else {
@@ -1303,6 +1318,10 @@ const valueWriteTargets = (
           previousValuesByPath: new Map([[
             pathKey(writePath),
             previousWrittenValue,
+          ]]),
+          previousPresentByPath: new Map([[
+            pathKey(writePath),
+            previousWrittenPresent,
           ]]),
         });
       }
@@ -4837,11 +4856,13 @@ export const prepareBoundaryCommit = (
     const flowTarget = flowPersist ? flowTargets?.get(key) : undefined;
     const flowWrittenPaths = flowTarget?.paths ?? [];
     const flowWrittenValues = flowTarget?.valuesByPath;
-    // Pre-transaction snapshots per written path, for the §8.12.8
-    // re-mint-on-recreation probe below. Gated on flowPersist like the
-    // written paths: with nothing re-minting, refusing a frozen entry's
-    // carry would erase the existence history rather than replace it.
+    // Pre-transaction snapshots (and slot presence at each recorded path)
+    // per written path, for the §8.12.8 re-mint-on-recreation probe below.
+    // Gated on flowPersist like the written paths: with nothing
+    // re-minting, refusing a frozen entry's carry would erase the
+    // existence history rather than replace it.
     const flowPreviousValues = flowTarget?.previousValuesByPath;
+    const flowPreviousPresence = flowTarget?.previousPresentByPath;
     // The Wave 2 grow-only ratchet stood in for the missing default
     // transition: with flow labels persisting, taint rides the derived
     // component instead, and only legacy (untagged) entries keep the
@@ -5016,11 +5037,14 @@ export const prepareBoundaryCommit = (
     // undefined-valued slot as absent would misread an ordinary overwrite
     // of it as a re-creation and REPLACE the frozen entry at the
     // overwriting join, an under-taint (cubic/codex review on this PR).
-    // At the recorded path itself (empty relative path) presence collapses
-    // to value-definedness: `TransactionWriteDetail` carries optional
-    // value/previousValue with no presence flags — the same detail-level
-    // collapse the seed-materialization and same-tx-child-doc gates
-    // already live with.
+    // At the recorded path itself (empty relative path) the walk cannot
+    // decide, so the write detail's `previousPresent` flag does — with
+    // `previousValue` definedness as the fallback for transactions that
+    // do not provide the flag (the journal-derived details). Residual on
+    // the POST side only: an explicit-`undefined` WRITE at an
+    // exactly-recorded deleted path still reads absent-after (the detail
+    // has no value-presence flag), so the stale entry carries — the
+    // pre-fix direction, not a new under-taint.
     const presentAtPath = (
       base: unknown,
       path: readonly string[],
@@ -5046,7 +5070,10 @@ export const prepareBoundaryCommit = (
         }
         const rel = entryPath.slice(written.length);
         const writtenKey = pathKey(written);
-        if (presentAtPath(flowPreviousValues?.get(writtenKey), rel)) {
+        const presentBefore = rel.length === 0
+          ? flowPreviousPresence?.get(writtenKey) ?? false
+          : presentAtPath(flowPreviousValues?.get(writtenKey), rel);
+        if (presentBefore) {
           return false;
         }
         return presentAtPath(flowWrittenValues?.get(writtenKey), rel);
