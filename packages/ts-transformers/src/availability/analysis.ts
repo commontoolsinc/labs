@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
+import { getStableConstAliasInitializer } from "../ast/stable-const-alias.ts";
 import { getTypeAtLocationWithFallback } from "../ast/utils.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import type { TransformationContext } from "../core/context.ts";
@@ -85,18 +86,7 @@ function constInitializer(
   context: TransformationContext,
 ): ts.Expression | undefined {
   const symbol = valueSymbolAtIdentifier(identifier, context);
-  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  if (
-    !declaration || !ts.isVariableDeclaration(declaration) ||
-    !declaration.initializer
-  ) {
-    return undefined;
-  }
-  const declarationList = declaration.parent;
-  return ts.isVariableDeclarationList(declarationList) &&
-      (declarationList.flags & ts.NodeFlags.Const) !== 0
-    ? declaration.initializer
-    : undefined;
+  return getStableConstAliasInitializer(symbol, context.factory);
 }
 
 /**

@@ -224,6 +224,43 @@ Deno.test("advanced generation state is plain while its any result retains async
   );
 });
 
+Deno.test("a destructured advanced generation result retains async provenance", async () => {
+  const source = `
+    import {
+      computed,
+      generateObjectStream,
+      hasError,
+      pattern,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const { result: request } = generateObjectStream<any>({
+        prompt: "object",
+      });
+      const failed = computed(() => hasError(request));
+      return { failed };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unobserved-compute-guard",
+    ),
+    false,
+  );
+
+  const output = await transformSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+    typeCheck: true,
+  });
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["request"], reasons: ["error"] }]',
+  );
+});
+
 Deno.test("availability guards are plain predicates inside an existing compute", async () => {
   const source = `
     import {
