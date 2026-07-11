@@ -738,6 +738,13 @@ correctness comes from cancellation, not staging:
    accepted, but the registry stops the locally registered piece so no
    running zombie sits on top of it. `navigateTo` results keep the fully
    commit-gated start (durability before navigation).
+   Ownership of a commit-gated start begins when the start is scheduled, not
+   when its post-commit callback installs it. Cancelling the parent or lineage
+   before that commit tombstones the pending start, so the callback must not
+   install it. After installation, cancellation may stop only the exact local
+   registration installed by that attempt; if another attempt has replaced or
+   won the same result key, its registration remains live. This prevents a
+   receipt-losing duplicate from stopping the winner.
 3. Descendants of a *failed attempt* are never retried (permanent
    rejection); when the parent itself retries and succeeds, the re-run
    emits fresh follow-ups under the new attempt's tx id. This is what

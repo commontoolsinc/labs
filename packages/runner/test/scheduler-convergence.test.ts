@@ -368,15 +368,24 @@ describe("bounded convergence", () => {
       { isEffect: true },
     );
 
-    await runtime.scheduler.idle();
+    try {
+      await runtime.scheduler.idle();
 
-    expect(runCountA).toBeLessThanOrEqual(
-      PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
-    );
-    expect(runCountB).toBeLessThanOrEqual(
-      PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
-    );
-    expect(runCountA + runCountB).toBeGreaterThan(0);
+      expect(runCountA).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
+      expect(runCountB).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
+      expect(runCountA + runCountB).toBeGreaterThan(0);
+    } finally {
+      // This cycle is intentionally permanent. Leaving it subscribed makes
+      // runtime disposal enter another capped backoff sequence after the
+      // assertion has already proven the behavior.
+      runtime.scheduler.unsubscribe(actionA);
+      runtime.scheduler.unsubscribe(actionB);
+      runtime.scheduler.unsubscribe(effect);
+    }
   });
 
   it("materializes a discovered-dependency chain within idle()", async () => {

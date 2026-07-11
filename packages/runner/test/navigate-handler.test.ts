@@ -10,6 +10,44 @@ import { navigateTo as rawNavigateTo } from "../src/builtins/navigate-to.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type TransactMessage = { requestId: string };
+type TransactResponse = {
+  type: "response";
+  requestId: string;
+  ok?: unknown;
+  error?: { name: string; message: string };
+};
+
+function delayNextServerTransact(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+) {
+  const server = (storageManager as unknown as {
+    server(): {
+      transact(message: TransactMessage): Promise<TransactResponse>;
+    };
+  }).server();
+  const original = server.transact.bind(server);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let shouldDelay = true;
+
+  server.transact = async (message) => {
+    if (!shouldDelay) return await original(message);
+    shouldDelay = false;
+    started.resolve();
+    await release.promise;
+    return await original(message);
+  };
+
+  return {
+    started: started.promise,
+    confirm: () => release.resolve(),
+    restore: () => {
+      server.transact = original;
+    },
+  };
+}
+
 async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
   const storageManager = StorageManager.emulate({ as: signer });
   const navigations: string[] = [];
@@ -103,6 +141,81 @@ Deno.test("handler can update local state and still navigate", async () => {
 Deno.test("conditional handler still navigates after it hides itself", async () => {
   await runNavigateHandlerTest(true);
 });
+
+async function runCancelledDeferredNavigateTest(
+  nested: boolean,
+): Promise<void> {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const navigations: string[] = [];
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    experimental: { commitPreconditions: true },
+    navigateCallback: (target) => {
+      navigations.push(entityRefToString(target.entityId));
+    },
+  });
+  let tx: IExtendedStorageTransaction = runtime.edit();
+  let gate: ReturnType<typeof delayNextServerTransact> | undefined;
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "cancelled target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => {
+        const navigation = navigateTo(Target({}));
+        return nested ? { navigation } : navigation;
+      },
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+    const rootCell = runtime.getCell<{ openTarget: unknown }>(
+      space,
+      { cancelledDeferredNavigate: nested ? "nested" : "direct" },
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, Root, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+    await runtime.scheduler.idleWithPendingCommits();
+
+    gate = delayNextServerTransact(storageManager);
+    root.key("openTarget").send({});
+    await gate.started;
+
+    // The navigate result is assembled, but both result shapes defer its
+    // start until this handler commit succeeds. Stopping the parent must
+    // tombstone that pending start before the commit callback can install it.
+    runtime.runner.stop(rootCell);
+    assertEquals(runtime.runner.cancels.size, 0);
+
+    gate.confirm();
+    await runtime.settled();
+
+    assertEquals(navigations, []);
+    assertEquals(runtime.runner.cancels.size, 0);
+  } finally {
+    gate?.confirm();
+    gate?.restore();
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+}
+
+Deno.test(
+  "stopping a parent tombstones a direct deferred navigateTo result",
+  async () => await runCancelledDeferredNavigateTest(false),
+);
+
+Deno.test(
+  "stopping a parent tombstones a nested deferred navigateTo result",
+  async () => await runCancelledDeferredNavigateTest(true),
+);
 
 Deno.test("navigateTo is idempotent for one result cell", async () => {
   const storageManager = StorageManager.emulate({ as: signer });

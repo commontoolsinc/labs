@@ -62,7 +62,13 @@ import {
 } from "./link-utils.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
-import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
+import {
+  type AddCancel,
+  type Cancel,
+  type DeferredCancelOwnership,
+  useCancelGroup,
+  useDeferredCancelOwnership,
+} from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -532,8 +538,19 @@ type SetupResult<R> = {
 
 type RunResult<R> = {
   resultCell: Cell<R>;
-  /** This invocation installed the result's local start/cancel registration. */
-  installedStart: boolean;
+  /** The exact local cancel registration installed by this invocation. */
+  installedCancel?: Cancel;
+  /**
+   * Cancels a start that this invocation deferred until its transaction
+   * commits. Before installation it tombstones the pending start; afterwards
+   * it stops the piece only when this invocation actually installed it.
+   */
+  cancelDeferredStart?: Cancel;
+};
+
+type DeferredStartResult<R> = {
+  resultCell: Cell<R>;
+  cancelDeferredStart?: Cancel;
 };
 
 type BoundNodeIO = {
@@ -1273,8 +1290,7 @@ export class Runner {
    * @param resultCell - The result cell to start
    * @param options.tx - Transaction to use for initial setup (optional)
    * @param options.givenPattern - Pattern to use instead of looking up by ID
-   * @param options.allowAsyncLoad - Whether to allow async pattern loading
-   * @returns Promise for async mode, void for sync mode
+   * @returns The exact cancel registration installed for this start
    */
   private startCore<T = any>(
     resultCell: Cell<T>,
@@ -1287,7 +1303,7 @@ export class Runner {
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
     } = {},
-  ): void {
+  ): Cancel {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
     this.locallyStoppedResults.delete(key);
@@ -1450,7 +1466,7 @@ export class Runner {
       if (!doNotUpdateOnPatternChange) {
         setupPatternWatcher();
       }
-      return;
+      return cancel;
     }
 
     if (!initialRef) {
@@ -1478,7 +1494,7 @@ export class Runner {
       setupPatternWatcher();
     }
 
-    return;
+    return cancel;
   }
 
   /**
@@ -1704,17 +1720,29 @@ export class Runner {
     resultCell: Cell<T>,
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
-  ): boolean {
+  ): Cancel | undefined {
     const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return false;
+    if (this.cancels.has(key)) return undefined;
 
-    this.startCore(resultCell, {
+    return this.startCore(resultCell, {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
-    return this.cancels.has(key);
+  }
+
+  private createDeferredStartOwnership<T>(
+    resultCell: Cell<T>,
+  ): DeferredCancelOwnership {
+    const key = this.getDocKey(resultCell);
+    return useDeferredCancelOwnership((installedCancel) => {
+      // A result key can be stopped and restarted while deferred startup is
+      // re-entering runner code. Only stop if this attempt's exact cancel
+      // registration is still current; a later replacement owns itself.
+      if (this.cancels.get(key) !== installedCancel) return;
+      this.stop(resultCell);
+    });
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -1723,10 +1751,11 @@ export class Runner {
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
-  ): void {
+  ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
+      if (result.error || ownership.isCancelled()) {
         return;
       }
 
@@ -1737,11 +1766,23 @@ export class Runner {
         startTx,
       );
       try {
-        this.startWithTx(startTx, committedResultCell, givenPattern, options);
+        if (
+          ownership.markInstalled(
+            this.startWithTx(
+              startTx,
+              committedResultCell,
+              givenPattern,
+              options,
+            ),
+          )
+        ) {
+          startTx.abort("Deferred runner start was cancelled");
+          return;
+        }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            this.stop(committedResultCell);
+            ownership.cancel();
             logger.error(
               "tx-commit-error",
               "Error committing deferred start transaction",
@@ -1749,11 +1790,11 @@ export class Runner {
             );
             return;
           }
-          if (pullOnceAfterStart) {
+          if (pullOnceAfterStart && !ownership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
-          this.stop(committedResultCell);
+          ownership.cancel();
           logger.error(
             "tx-commit-error",
             "Deferred start transaction commit rejected",
@@ -1762,10 +1803,12 @@ export class Runner {
         });
       } catch (error) {
         startTx.abort(error);
+        ownership.cancel();
         logger.error("runner-start", "Deferred start failed", error);
         throw error;
       }
     });
+    return ownership.cancel;
   }
 
   private runPatternAfterSuccessfulCommit<T = any>(
@@ -1775,10 +1818,11 @@ export class Runner {
     inputs: FabricValue,
     pullOnceAfterStart = false,
     markCreateOnlyResult = false,
-  ): void {
+  ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) return;
+      if (result.error || ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       const committedResultCell = this.runtime.getCellFromLink<T>(
@@ -1787,7 +1831,19 @@ export class Runner {
         startTx,
       );
       try {
-        this.run(startTx, pattern, inputs, committedResultCell);
+        if (
+          ownership.markInstalled(
+            this.runWithStartOwnership(
+              startTx,
+              pattern,
+              inputs,
+              committedResultCell,
+            ).installedCancel,
+          )
+        ) {
+          startTx.abort("Deferred runner start was cancelled");
+          return;
+        }
         if (markCreateOnlyResult) {
           startTx.markCreateOnly?.(
             committedResultCell.getAsNormalizedFullLink(),
@@ -1796,7 +1852,7 @@ export class Runner {
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
-            this.stop(committedResultCell);
+            ownership.cancel();
             logger.error(
               "tx-commit-error",
               "Error committing deferred cross-space pattern transaction",
@@ -1804,11 +1860,11 @@ export class Runner {
             );
             return;
           }
-          if (pullOnceAfterStart) {
+          if (pullOnceAfterStart && !ownership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
-          this.stop(committedResultCell);
+          ownership.cancel();
           logger.error(
             "tx-commit-error",
             "Deferred cross-space pattern transaction rejected",
@@ -1817,6 +1873,7 @@ export class Runner {
         });
       } catch (error) {
         startTx.abort(error);
+        ownership.cancel();
         logger.error(
           "runner-start",
           "Deferred cross-space pattern failed",
@@ -1825,6 +1882,7 @@ export class Runner {
         throw error;
       }
     });
+    return ownership.cancel;
   }
 
   /**
@@ -1882,9 +1940,9 @@ export class Runner {
   }
 
   /**
-   * Internal run variant that reports whether this invocation installed the
-   * result wrapper's local start/cancel registration. Callers that attach
-   * failure compensation must only compensate work they actually started: a
+   * Internal run variant that reports whether this invocation installed or
+   * commit-gated the result wrapper's local start/cancel registration. Callers
+   * that attach failure compensation must only compensate work they own: a
    * duplicate event can reuse a winner's deterministic result cell, and must
    * never stop that shared winner when its create-only receipt loses.
    */
@@ -1912,7 +1970,8 @@ export class Runner {
       resultCell,
     );
 
-    let installedStart = false;
+    let installedCancel: Cancel | undefined;
+    let cancelDeferredStart: Cancel | undefined;
     if (needsStart) {
       const pullOnceAfterStart = this.patternNeedsOneShotPull(pattern);
       if (
@@ -1920,7 +1979,7 @@ export class Runner {
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
             .deferRunnerStartUntilCommit === true
       ) {
-        this.startAfterSuccessfulCommit(
+        cancelDeferredStart = this.startAfterSuccessfulCommit(
           tx,
           resultCell,
           pattern,
@@ -1928,7 +1987,7 @@ export class Runner {
           pullOnceAfterStart,
         );
       } else {
-        installedStart = this.startWithTx(
+        installedCancel = this.startWithTx(
           tx,
           resultCell,
           pattern,
@@ -1945,7 +2004,11 @@ export class Runner {
       tx.commit();
     }
 
-    return { resultCell, installedStart };
+    return {
+      resultCell,
+      installedCancel,
+      cancelDeferredStart,
+    };
   }
 
   async runSynced(
@@ -3366,7 +3429,7 @@ export class Runner {
     if (deferForNavigate && result === undefined) {
       // navigateTo results are commit-gated (startAfterSuccessfulCommit);
       // the receipt precondition rides the deferred start's own create.
-      this.runPatternAfterSuccessfulCommit(
+      const cancelDeferredStart = this.runPatternAfterSuccessfulCommit(
         tx,
         receiptCell,
         resultPattern,
@@ -3374,19 +3437,28 @@ export class Runner {
         true,
         true,
       );
-      addCancel(() => this.stop(receiptCell));
+      addCancel(cancelDeferredStart);
+      this.runtime.scheduler.lineage.recordPieceStop(
+        tx,
+        cancelDeferredStart,
+      );
       return result;
     }
 
-    let installedStart = false;
+    let installedCancel: Cancel | undefined;
+    let cancelDeferredStart: Cancel | undefined;
     const resultCell = deferForNavigate
-      ? this.setupDeferredHandlerResultPattern(
-        tx,
-        resultPattern,
-        processCell.space,
-        cause,
-        true,
-      )
+      ? (() => {
+        const setup = this.setupDeferredHandlerResultPattern(
+          tx,
+          resultPattern,
+          processCell.space,
+          cause,
+          true,
+        );
+        cancelDeferredStart = setup.cancelDeferredStart;
+        return setup.resultCell;
+      })()
       : (() => {
         const run = this.runWithStartOwnership(
           tx,
@@ -3394,7 +3466,8 @@ export class Runner {
           undefined,
           receiptCell,
         );
-        installedStart = run.installedStart;
+        installedCancel = run.installedCancel;
+        cancelDeferredStart = run.cancelDeferredStart;
         return run.resultCell;
       })();
 
@@ -3403,20 +3476,38 @@ export class Runner {
     }
 
     if (deferForNavigate) {
-      // The start itself is commit-gated, but the parent piece still owns the
-      // successfully committed deferred result for its eventual lifetime.
-      addCancel(() => this.stop(resultCell));
-    } else if (installedStart) {
+      if (cancelDeferredStart !== undefined) {
+        // The start itself is commit-gated, but the parent piece owns it from
+        // scheduling onward: cancellation before commit tombstones the start;
+        // cancellation after installation stops only this attempt's child.
+        addCancel(cancelDeferredStart);
+        this.runtime.scheduler.lineage.recordPieceStop(
+          tx,
+          cancelDeferredStart,
+        );
+      }
+    } else if (
+      installedCancel !== undefined || cancelDeferredStart !== undefined
+    ) {
       // Both lifetime cancellation and failure compensation belong only to the
-      // attempt that installed this local start. A receipt-losing duplicate
-      // reuses the deterministic wrapper and must not stop the winner.
-      addCancel(() => this.stop(resultCell));
+      // attempt that owns this local start (immediate or commit-gated). A
+      // receipt-losing duplicate reuses the deterministic wrapper and must not
+      // stop the winner.
+      let cancelled = false;
+      const cancelOwnedStart = cancelDeferredStart ?? (() => {
+        if (cancelled) return;
+        cancelled = true;
+        const key = this.getDocKey(resultCell);
+        if (this.cancels.get(key) !== installedCancel) return;
+        this.stop(resultCell);
+      });
+      addCancel(cancelOwnedStart);
       // Spec scheduler-v2 §7.6 rule 2: the launch is speculative; if this
       // handler's transaction ultimately fails, stop the piece (data writes
       // roll back with the transaction; registrations do not).
       this.runtime.scheduler.lineage.recordPieceStop(
         tx,
-        () => this.stop(resultCell),
+        cancelOwnedStart,
       );
       if (receiptsEnabled) {
         tx.addCommitCallback((_committedTx, commitResult) => {
@@ -3464,7 +3555,7 @@ export class Runner {
     resultSpace: MemorySpace,
     cause: Record<string, any>,
     markCreateOnlyResult = false,
-  ): Cell<any> {
+  ): DeferredStartResult<any> {
     const resultCell = this.runtime.getCell(
       resultSpace,
       { resultFor: cause },
@@ -3485,16 +3576,16 @@ export class Runner {
     if (markCreateOnlyResult) {
       tx.markCreateOnly?.(resultCell.getAsNormalizedFullLink());
     }
-    if (resultSetup.needsStart) {
-      this.startAfterSuccessfulCommit(
+    const cancelDeferredStart = resultSetup.needsStart
+      ? this.startAfterSuccessfulCommit(
         tx,
         resultCell,
         resultSetup.pattern,
         {},
         this.patternNeedsOneShotPull(resultSetup.pattern),
-      );
-    }
-    return resultCell;
+      )
+      : undefined;
+    return { resultCell, cancelDeferredStart };
   }
 
   private patternNeedsOneShotPull(pattern?: Pattern): boolean {

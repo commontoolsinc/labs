@@ -64,6 +64,49 @@ function rejectNextServerTransact(
   };
 }
 
+function delayNextServerTransact(
+  storageManager: SchedulerTestStorageManager,
+) {
+  const server = emulatedServer(storageManager);
+  const original = server.transact.bind(server);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let shouldDelay = true;
+
+  server.transact = async (message) => {
+    if (!shouldDelay) return await original(message);
+    shouldDelay = false;
+    started.resolve();
+    await release.promise;
+    return await original(message);
+  };
+
+  return {
+    started: started.promise,
+    release: () => release.resolve(),
+    restore: () => {
+      server.transact = original;
+    },
+  };
+}
+
+async function waitForSignal(
+  signal: Promise<void>,
+  message: string,
+): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      signal,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 async function waitForSchedulerCondition(
   runtime: Runtime,
   condition: () => boolean,
@@ -280,6 +323,153 @@ describe("scheduler event receipts", () => {
         ),
       ).toBe(true);
     } finally {
+      commitTelemetry.dispose();
+    }
+  });
+
+  it("keeps a deferred launch winner live after a concurrent receipt loser", async () => {
+    const target = runtime.getCell<unknown>(
+      space,
+      "deferred receipt winner link",
+      undefined,
+      tx,
+    );
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { cell, handler, lift, pattern } = commonfabric;
+    const Child = pattern(() => {
+      const state = cell(1);
+      const doubled = lift((value: number) => value * 2)(state);
+      return { state, doubled };
+    });
+    let handlerInvocations = 0;
+    const secondInvocation = Promise.withResolvers<void>();
+    const launchChild = handler<
+      { value: number },
+      { target: Cell<unknown> }
+    >(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      },
+      {
+        type: "object",
+        properties: {
+          target: { asCell: ["cell"] },
+        },
+        required: ["target"],
+      },
+      (_event, { target }) => {
+        handlerInvocations++;
+        if (handlerInvocations === 2) secondInvocation.resolve();
+        const handlerTx = target.tx;
+        if (handlerTx === undefined) {
+          throw new Error("handler target must carry the dispatch transaction");
+        }
+        handlerTx.tx.immediate = true;
+        (handlerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+          .deferRunnerStartUntilCommit = true;
+        target.set(Child({}));
+      },
+    );
+    const Root = pattern<{ target: Cell<unknown> }>(
+      ({ target }) => ({ stream: launchChild({ target }) }),
+      {
+        type: "object",
+        properties: { target: { asCell: ["cell"] } },
+        required: ["target"],
+      },
+    );
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "deferred receipt winner liveness root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, Root, { target }, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+    await runtime.scheduler.idleWithPendingCommits();
+
+    const commitTelemetry = collectEventCommitMarkers(runtime);
+    const eventId = "evt:deferred-winner-live:0:root";
+    let cancelDoubled: (() => void) | undefined;
+    const gate = delayNextServerTransact(storageManager);
+    try {
+      const streamLink = resolvedStreamLink(root.key("stream"), runtime);
+      runtime.scheduler.queueEvent(
+        streamLink,
+        { value: 7 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSignal(
+        gate.started,
+        "first deferred receipt transaction did not start",
+      );
+      expect(handlerInvocations).toBe(1);
+
+      runtime.scheduler.queueEvent(
+        streamLink,
+        { value: 7 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSignal(
+        secondInvocation.promise,
+        "second deferred receipt start did not overlap the first commit",
+      );
+      expect(handlerInvocations).toBe(2);
+
+      // Let the second delivery commit first. Releasing the first transaction
+      // then makes its receipt precondition lose against an already-live child.
+      gate.release();
+
+      await waitForSchedulerCondition(
+        runtime,
+        () => handlerInvocations === 2 && commitTelemetry.markers.length >= 2,
+        "concurrent deferred receipt deliveries did not settle",
+      );
+      expect(
+        commitTelemetry.markers.some((marker) =>
+          permanentRejection(marker) === "receipt-exists"
+        ),
+      ).toBe(true);
+
+      await runtime.storageManager.synced();
+      await target.sync();
+      const winningChild = target.resolveAsCell() as Cell<{
+        state: number;
+        doubled: number;
+      }>;
+      cancelDoubled = winningChild.key("doubled").withTx(tx).sink(() => {});
+      await runtime.settled();
+      await winningChild.key("doubled").pull();
+      await runtime.idle();
+      expect(winningChild.key("state").get()).toBe(1);
+      expect(winningChild.key("doubled").get()).toBe(2);
+
+      // The receipt loser owns only its tombstoned deferred start. A later
+      // write proves it did not stop the winner's long-lived computation.
+      const updateTx = runtime.edit();
+      winningChild.key("state").withTx(updateTx).set(4);
+      runtime.prepareTxForCommit(updateTx);
+      expect((await updateTx.commit()).error).toBeUndefined();
+      await waitForSchedulerCondition(
+        runtime,
+        () => winningChild.key("doubled").get() === 8,
+        "deferred receipt loser stopped the winner",
+      );
+      expect(winningChild.key("doubled").get()).toBe(8);
+    } finally {
+      gate.release();
+      gate.restore();
+      cancelDoubled?.();
       commitTelemetry.dispose();
     }
   });
