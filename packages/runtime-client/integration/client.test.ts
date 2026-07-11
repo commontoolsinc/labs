@@ -77,6 +77,24 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("named spaces", () => {
+    it("resolves and opens a runtime-derived named space", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const name = `runtime-client-named-${crypto.randomUUID()}`;
+      const expected = await createSession({
+        identity: session.as,
+        spaceName: name,
+      });
+
+      const space = await rt.resolveSpaceName(name);
+      assertEquals(space, expected.space);
+      const root = await rt.getSpaceRootPattern(space);
+      assertExists(root);
+      await rt.synced(space);
+    });
+  });
+
   describe("cell operations", () => {
     it("creates a cell with getCell and syncs its value", async () => {
       const session = await createTestSession();

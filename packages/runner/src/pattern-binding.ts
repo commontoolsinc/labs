@@ -24,7 +24,10 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  internalVerifierRead,
+  machineryRead,
+} from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   Cell,
@@ -184,6 +187,33 @@ export function sendValueToBinding<T>(
   value: unknown,
   options: SendValueToBindingOptions = {},
 ): void {
+  // Result-write plumbing is machinery (machineryRead): the redirect walk
+  // and the diff reads at plumbing containers must not consume `*`-path
+  // membership templates (template-population §6, the SC-8 machinery-read
+  // boundary) — the action body's own reads carry the taint. Every caller
+  // is the runner's result plumbing; no user code runs inside.
+  tx.runWithAmbientReadMeta(
+    machineryRead,
+    () =>
+      sendValueToBindingInner(
+        tx,
+        cell,
+        argumentCellLink,
+        binding,
+        value,
+        options,
+      ),
+  );
+}
+
+function sendValueToBindingInner<T>(
+  tx: IExtendedStorageTransaction,
+  cell: AnyCell<T>,
+  argumentCellLink: NormalizedFullLink | undefined,
+  binding: unknown,
+  value: unknown,
+  options: SendValueToBindingOptions = {},
+): void {
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
@@ -307,7 +337,7 @@ export function sendValueToBinding<T>(
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(
+        sendValueToBindingInner(
           tx,
           cell,
           argumentCellLink,
@@ -325,7 +355,7 @@ export function sendValueToBinding<T>(
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
-        sendValueToBinding(
+        sendValueToBindingInner(
           tx,
           cell,
           argumentCellLink,

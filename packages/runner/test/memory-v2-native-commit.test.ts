@@ -585,6 +585,7 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
       },
       value: 2,
       previousValue: 0,
+      previousPresent: true,
     }]);
   } finally {
     await storage.close();
@@ -649,6 +650,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         },
         value: "Grace",
         previousValue: "Ada",
+        previousPresent: true,
       },
       {
         address: {
@@ -659,6 +661,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         },
         value: "Professor",
         previousValue: "Dr",
+        previousPresent: true,
       },
     ]);
 

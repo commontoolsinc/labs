@@ -112,9 +112,10 @@ container path and by recursive ancestor reads, never by reads strictly below �
 so the §8.5.6.1 membership/length channel is labeled while per-slot pointer
 handling stays clean. Pointer identity at a slot, i.e. WHICH element sits
 there observed without dereferencing, was an SC-4/SC-8 residual until
-template-population Stage A: on declared list-coordinator containers a
-standalone slot observation now consumes the assignment `J` through the
-`*`-path `followRef` template — see the SC-8 note below for what remains.)
+template-population Stage A: a standalone slot observation now consumes the
+assignment `J` through the `*`-path `followRef` template — on declared
+list-coordinator containers since Stage A, and on ALL pure-link containers
+since the machinery-read marker landed (#4674; see the SC-8 note below).)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/ `followRef`,
@@ -131,26 +132,39 @@ under-taint — a static per-child existence probe ("is `/items/3` present?")
 is a `shape` read at the child (§8.10.1.1) and does not consume the
 exact-path container stamp. The spec-conforming fix is per-slot shape
 entries, at the per-row entry-count cost (#3998). **Closed by
-template-population Stage A for declared list-coordinator containers** (the
-actual §8.5.6.1 membership subjects): runtime-minted `*`-path per-class
-entries — O(1) per container where per-slot entries were O(n) — make the
-per-child probe, the raw slot materialization, and the standalone
+template-population Stage A** (declared list-coordinator containers — the
+actual §8.5.6.1 membership subjects) **and completed for ALL pure-link
+containers by the machinery-read marker (#4674)**: runtime-minted `*`-path
+per-class entries — O(1) per container where per-slot entries were O(n) —
+make the per-child probe, the raw slot materialization, and the standalone
 slot-pointer observation consume the membership/assignment `J`
 ([`cfc-template-population.md`](./cfc-template-population.md) §6 Stage A,
-including the frozen-vs-membership join rule and two machinery boundaries).
-The remaining slice: generic pure-link value writes (non-declared
-containers) keep the container-anchored compaction — extending the mints
-there needs a machinery-read marker first, because the runner's
-op-instantiation scaffolding reads plumbing containers' child paths with no
-distinguishing journal shape (measured re-smear on the phase-B pointwise
-suite). Existence-entry update discipline settled as freeze-at-creation —
-spec §8.12.8 amendment on branch `cfc/existence-freeze-at-creation`.)
+including the frozen-vs-membership join rule and the machinery boundaries).
+The formerly remaining slice — generic pure-link value writes
+(non-declared containers) kept the container-anchored compaction because
+the runner's op-instantiation scaffolding read plumbing containers' child
+paths with no distinguishing journal shape (measured re-smear on the
+phase-B pointwise suite) — closed in #4674: those wiring reads now carry
+the `machineryRead` marker (`reactivity-log.ts`, the
+`schedulerDependencyRead` family) and skip `*`-template consumption in the
+flow join only (every other consumption kept — byte-identical to their
+pre-template behavior; the egress/observation-gate screens stay
+over-inclusive), and the generic route mints the same three `*`-child
+templates as the declared route. Existence-entry update discipline settled
+as freeze-at-creation — spec §8.12.8, normative since the 2026-07-10 spec
+landing (amended on branch `cfc/existence-freeze-at-creation`, mechanized
+in `formal/Cfc/StoreExistence.lean`); the runner conforms including the
+delete/re-create arm — re-creation REPLACES the frozen entry at the
+re-creating attempt's join (`prepare.ts` re-mint-on-recreation; deletion
+alone still leaves the entry as a fail-safe over-taint).)
 
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
 §5 SC-4 grow-vs-replace split, the §3 `origin:"link"` ⇒ implicit
 `observes:"followRef"` covering-rule carve-out, and `count` folding into
-`enumerate`. The spec PR to `commontoolsinc/specs` for §4.6.3 is now owed;
+`enumerate`. The §4.6.3 spec table LANDED 2026-07-10 (specs 31220671: the
+six-row normative mapping + count-folds MAY + the link-carve-out refinements;
+75d97ec9 added the template-population conformance note + §8.12.8 rewrite);
 file it once C1 validates the mapping in code.)
 
 **SC-9 [normative] Staged conformance for the default transition — §8.9.3 or
@@ -186,7 +200,12 @@ has enforcement modes (`disabled|observe|enforce-explicit|strict`, audit item
 what each combination means, which combinations are conforming deployment
 states, and the rollout ordering constraint (propagation-observe before
 propagation-persist; persist before any enforcement that consumes derived
-labels).
+labels). `applied` — specs 9e0ecd9c (2026-07-10): new §18.6.3.1 with the
+dial semantics as profile knobs, five ordering constraints (incl. the
+one-hop laundering counterexample), the `enforce-strict` delta with the
+SC-18b/c writer-fit reject + stable-reason contract, and the informative
+progression table; §18.6.3's ladder bullets corrected (missing-policy is
+pinned at explicit, not strict-only) and §18.6.4's checklist extended.
 
 **SC-14 [clarify] Cross-space derived labels — §4.6.4.1 or §17.** Deriving J
 from space-A reads and persisting it into a space-B document's envelope
@@ -511,7 +530,13 @@ and has **no enforcement role**: it never feeds a future release decision —
 labels keep governing what the fabric serves; the record exists for honesty,
 audit, and deriving "who could have this" (current grants ∪ past egress).
 State the shared-vs-sent vocabulary distinction normatively so UIs cannot
-present an egress as revocable. `open`.
+present an egress as revocable. `applied` — specs b020ea87 (2026-07-10):
+new §8.10.7 with the post-commit re-verification contract (discharging the
+audit-3.11 queue item), sent-record-on-successful-send, record-then-clear,
+attempt-markers-never-sent, no-enforcement-role, and the normative
+shared-vs-sent vocabulary; §8.10.5.2 links the record as durable
+destination-binding evidence. Runner build remains open (the SC-27 build
+item).
 
 **SC-28 [normative] Attested deployment config is a federation-sound policy
 store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The
@@ -546,7 +571,12 @@ shipped against the deployment snapshot — `PolicyRecord.selection:
 fail-closed ref matching per §4.4.2/§4.4.3, the home-clause gate with
 per-batch recomputation (`exchange-eval.ts`), and inv-12 representation
 rows for the ref atom's fields (name/hash public, subject commitment);
-grants (labs#4627) remain the one space-hosted policy state. `open`.
+grants (labs#4627) remain the one space-hosted policy state. `applied` —
+specs a788e3aa (2026-07-10): §4.4.1 attested deployment/system policy root,
+§4.4.5 home-clause locality for label-carried refs (CT-1874/SP-1), §5.7.2
+attestation-measures-config conformance sentence. Also landed same day:
+§4.3.5 grant records + policyState guards + single-use semantics (9f334163,
+0b970117) and the §6.8 grantConsumed row.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
@@ -578,9 +608,11 @@ this file is the single tracking place:
 - Schema-merge per-key direction table (audit 3.10). **Verified silent**
   2026-06-12: §4.2.2.1 covers schema evolution, not per-key conflict
   resolution between composed schemas' IFC annotations — confirmed open.
-- Post-commit outbox + sink-release re-verification contract (audit 3.11).
-  **Verified silent** 2026-06-12: §8.10 is entirely pre-commit — confirmed
-  open.
+- ~~Post-commit outbox + sink-release re-verification contract (audit
+  3.11)~~ — **discharged 2026-07-10** by the new §8.10.7 (specs b020ea87):
+  the flush re-verifies the release decision's bindings before sending
+  (the §8.10.1 conformance shape shifted post-commit); egress records ride
+  the same section (SC-27).
 - Schema-sanitization / contamination scoping promotion from ch. 14 to
   normative (audit 3.12). Not re-verified.
 - ~~`/value` envelope-prefix wire-format decision (audit Wave 4 #28)~~ —
@@ -608,6 +640,6 @@ this file is the single tracking place:
   runtime-minted `*`-path per-class entries (the existing declared-`*`
   entry form; no new wire shape), closing both SC-8 under-taints in Stage
   A and carrying Stage-2 full metadata population in Stage B. **Stage A
-  landed** (declared list-coordinator containers; the generic
-  pure-link-write slice stays open pending a machinery-read marker — see
-  the SC-8 note and the design's §6 implementation note).
+  landed** (declared list-coordinator containers), and the generic
+  pure-link-write slice **closed in #4674** via the machinery-read marker
+  — see the SC-8 note and the design's §6 implementation note.

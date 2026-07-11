@@ -85,6 +85,29 @@ describe("RuntimeClient.setForwardWorkerConsole", () => {
   });
 });
 
+describe("RuntimeClient.resolveSpaceName", () => {
+  it("resolves the name inside the worker runtime", async () => {
+    const space = "did:key:z6Mk-runtime-client-named-space";
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ space });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    expect(await client.resolveSpaceName("notebook")).toBe(space);
+    expect(requests).toEqual([{
+      type: RequestType.ResolveSpaceName,
+      name: "notebook",
+    }]);
+  });
+});
+
 describe("RuntimeClient.hasPendingWrites", () => {
   // The constructor registers connection listeners; capture them so the
   // pending-writes notification can be driven directly, no worker needed.

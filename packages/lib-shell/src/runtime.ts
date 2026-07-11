@@ -376,6 +376,11 @@ export class RuntimeInternals extends EventTarget {
     return pattern;
   }
 
+  resolveSpaceName(name: string): Promise<DID> {
+    this.#check();
+    return this.#client.resolveSpaceName(name);
+  }
+
   async recreateSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     this.#check();
     // Clear cached pattern since we're recreating it

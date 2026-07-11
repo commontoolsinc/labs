@@ -149,6 +149,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
   /**
+   * Register a derived space identity for fresh-space ACL genesis. Optional:
+   * storage managers without ACL bootstrap support may ignore this capability.
+   * The identity is never used as the principal for ordinary storage work.
+   */
+  registerSpaceIdentity?(identity: Signer): void;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;
@@ -1646,6 +1653,14 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+  /**
+   * Pre-transaction slot presence at `address.path` — distinguishes an
+   * absent slot from a present slot holding `undefined`, which
+   * `previousValue` alone cannot (the storage write path keeps presence
+   * distinct from value). Optional: transactions that cannot compute it
+   * omit it, and consumers fall back to `previousValue` definedness.
+   */
+  previousPresent?: boolean;
 }
 
 export interface TransactionReadDetail {

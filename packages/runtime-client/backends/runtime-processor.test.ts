@@ -201,12 +201,15 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
       // grant for the acting user. The denied space gets no ACL doc at all —
       // its bytes may still be resident, but residency is not read authority.
       const aclCell = runtime.getCellFromLink({
-        id: grantedSpace,
+        id: `of:${grantedSpace}`,
         path: [],
         space: grantedSpace as MemorySpace,
       });
       const tx = runtime.edit();
-      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      aclCell.withTx(tx).set({
+        [grantedSpace]: "OWNER",
+        [cfcSigner.did()]: "READ",
+      });
       await tx.commit();
       await runtime.idle();
       await storageManager.synced();
@@ -253,12 +256,15 @@ describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
     const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
     try {
       const aclCell = runtime.getCellFromLink({
-        id: grantedSpace,
+        id: `of:${grantedSpace}`,
         path: [],
         space: grantedSpace as MemorySpace,
       });
       const tx = runtime.edit();
-      aclCell.withTx(tx).set({ [cfcSigner.did()]: "READ" });
+      aclCell.withTx(tx).set({
+        [grantedSpace]: "OWNER",
+        [cfcSigner.did()]: "READ",
+      });
       await tx.commit();
       await runtime.idle();
       await storageManager.synced();

@@ -383,6 +383,11 @@ build, not a design program.
 
 ## 7. Spec-change queue
 
+_All items below applied to the spec 2026-07-10 (specs f65553cf..fbc9c2fc:
+§4.3.5 grants + policyState + single-use, §6.8 grantConsumed row, §8.10.7
+egress records + post-commit contract, §8.12.7 2a↔§4.3.5 links); the
+runner-side egress-records build remains open (SC-27)._
+
 - **§8.12.7 route 2 splits** into 2a (durable grant records consumed by
   access-time rules — the §13.4.3/§13.4.4 shape, generalizing the §4.9.3 ACL
   document) and 2b (the in-place rewrite event proper, with the §4 contract:

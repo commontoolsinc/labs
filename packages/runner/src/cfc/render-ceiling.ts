@@ -118,7 +118,7 @@ export type RenderConfidentialityResolverConfig = {
    *
    * The cross-space guarantee is exactly as strong as the deployment's
    * `MEMORY_ACL_MODE`: under `enforce` the ACL is authoritative; under
-   * `observe`/`off` the lookup reads the same declared (creator-seeded) record
+   * `observe`/`off` the lookup reads the same declared ACL record
    * — strictly better than residency, but only as strong as the posture. Fail
    * closed throughout: a `null` role (absent/unsynced/malformed ACL, or a
    * non-reader principal) mints nothing and the `Space(...)` clause stays

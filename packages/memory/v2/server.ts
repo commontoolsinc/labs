@@ -46,7 +46,13 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
-import { ANYONE_USER, type Capability, isACL, isCapable } from "../acl.ts";
+import {
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+  isCapable,
+} from "../acl.ts";
 import {
   aliasForDbId,
   attachDatabase,
@@ -291,6 +297,11 @@ const toPreconditionFailedError = (
 
 export type MemoryAclMode = "off" | "observe" | "enforce";
 
+type AclState =
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "valid"; acl: Record<string, Capability | undefined> };
+
 /** Engine doc id of a space's ACL document: the doc whose entity id is the
  *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
  *  (runner `toURI` prefixes bare ids with `of:`). */
@@ -420,6 +431,38 @@ class Connection {
 
   hasSession(space: string, sessionId: string): boolean {
     return this.#sessions.has(sessionKey(space, sessionId));
+  }
+
+  private shouldSuppressSessionSend(
+    space: string,
+    sessionId: string,
+  ): boolean {
+    return this.server.isAclActive() &&
+      (!this.hasSession(space, sessionId) ||
+        !this.server.isSessionAttached(space, sessionId, this.id));
+  }
+
+  private sendSessionResponse(
+    space: string,
+    sessionId: string,
+    requestId: string,
+    response: ServerMessage,
+  ): void {
+    if (this.shouldSuppressSessionSend(space, sessionId)) {
+      // session/revoked is a lifecycle notification; it does not settle the
+      // generic request promise. Always pair suppression of an in-flight RPC
+      // result with a typed response error carrying the original request id.
+      this.send({
+        type: "response",
+        requestId,
+        error: toError(
+          "SessionRevokedError",
+          "Session was revoked while the request was in flight",
+        ),
+      });
+      return;
+    }
+    this.send(response);
   }
 
   addSession(space: string, sessionId: string): void {
@@ -651,7 +694,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.graphQuery(parsed));
+        {
+          const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "sqlite.query":
         if (
@@ -659,7 +710,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.sqliteQuery(parsed));
+        {
+          const response = await this.server.sqliteQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "sqlite.register-disk-source":
         if (
@@ -667,7 +726,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.sqliteRegisterDiskSource(parsed));
+        {
+          const response = await this.server.sqliteRegisterDiskSource(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "session.watch.set":
         if (
@@ -679,7 +746,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.watchSet(parsed));
+        {
+          const response = await this.server.watchSet(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "session.watch.add":
         if (
@@ -691,7 +766,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.watchAdd(parsed));
+        {
+          const response = await this.server.watchAdd(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "scheduler.snapshot.list":
         if (
@@ -703,7 +786,17 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.listSchedulerActionSnapshots(parsed));
+        {
+          const response = await this.server.listSchedulerActionSnapshots(
+            parsed,
+          );
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
       case "session.ack":
         if (
@@ -715,7 +808,15 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.ackSession(parsed));
+        {
+          const response = await this.server.ackSession(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
         return;
     }
   }
@@ -742,6 +843,11 @@ class Connection {
       );
       if (this.#closed) {
         return;
+      }
+      // ACL revocation can remove the session while watch evaluation awaits
+      // its engine. Never emit the already-computed effect after that removal.
+      if (this.shouldSuppressSessionSend(space, sessionId)) {
+        continue;
       }
       if (effect !== null) {
         this.send(effect);
@@ -827,17 +933,19 @@ export class Server {
       /**
        * Space access control. `off` (default) preserves the historical
        * any-authenticated-session-may-do-anything behavior. `observe`
-       * evaluates the policy, counts and logs would-denies, but allows.
-       * `enforce` denies.
+       * evaluates ordinary capability decisions, counts and logs
+       * would-denies, but allows those decisions. Invalid ACL state and
+       * fresh-space genesis violations remain hard failures. `enforce` denies
+       * all capability shortfalls as well.
        *
        * Policy: a session principal has implicit OWNER on a space when it
        * IS the space DID or is listed in `serviceDids`; otherwise the
        * space's ACL document (entity id == the space DID, as managed by the
        * runner's `ACLManager` / `cf acl`) grants per-DID or `"*"`
-       * capabilities. On the first-ever open of a commit-less space by a
-       * regular principal, the server seeds that document with
-       * `{ [principal]: "OWNER" }` (creator ownership) in observe and
-       * enforce modes.
+       * capabilities. A missing ACL on a populated legacy space grants every
+       * authenticated principal READ and WRITE (never OWNER). A fresh space
+       * grants authenticated READ only: its first write must be a valid ACL
+       * initialized by the space identity or a service DID.
        *
        * Requirements: session.open, queries, and watches need READ;
        * transact needs WRITE; ACL-document writes and disk-source
@@ -879,7 +987,7 @@ export class Server {
   /** Counters for ACL decisions; `wouldDeny` is the observe-mode rollout
    *  signal (a nonzero value on a deployment means flipping to `enforce`
    *  would break that traffic). */
-  readonly aclStats = { seeded: 0, wouldDeny: 0, denied: 0 };
+  readonly aclStats = { wouldDeny: 0, denied: 0 };
 
   /** space → (principal key → capability). Invalidated whenever a commit
    *  touches the space's ACL document. */
@@ -897,6 +1005,19 @@ export class Server {
     this.#aclCapabilities.delete(space);
   }
 
+  #aclState(engine: Engine.Engine, space: string): AclState {
+    const state = Engine.readState(engine, { id: aclDocId(space) });
+    if (state === null) return { kind: "missing" };
+    // A retracted ACL is not equivalent to a never-created ACL: treating the
+    // tombstone as public would turn deletion into an authorization bypass.
+    if (state.document === null) return { kind: "invalid" };
+    const acl = state.document.value;
+    if (!isACL(acl)) return { kind: "invalid" };
+    const byPrincipal = acl as Record<string, Capability | undefined>;
+    if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
+    return { kind: "valid", acl: byPrincipal };
+  }
+
   #resolveCapability(
     engine: Engine.Engine,
     space: string,
@@ -908,14 +1029,20 @@ export class Server {
     ) {
       return "OWNER";
     }
-    const document = Engine.read(engine, { id: aclDocId(space) });
-    const acl = document?.value;
-    // Missing or malformed ACL document grants nothing (fail closed); the
-    // implicit owners above are unaffected.
-    if (!isACL(acl)) return null;
-    const byPrincipal = acl as Record<string, Capability | undefined>;
-    return (principal !== undefined ? byPrincipal[principal] : undefined) ??
-      byPrincipal[ANYONE_USER] ?? null;
+    const state = this.#aclState(engine, space);
+    if (state.kind === "valid") {
+      return (principal !== undefined ? state.acl[principal] : undefined) ??
+        state.acl[ANYONE_USER] ?? null;
+    }
+    if (state.kind === "missing" && principal !== undefined) {
+      // Temporary pre-launch compatibility: populated spaces without an ACL
+      // are public to authenticated principals. Empty spaces remain read-only
+      // until their identity (or a service DID) writes a valid genesis ACL.
+      return Engine.serverSeq(engine) === 0 ? "READ" : "WRITE";
+    }
+    // Malformed and ownerless ACLs fail closed. Implicit owners above may
+    // still repair them explicitly.
+    return null;
   }
 
   #capabilityFor(
@@ -938,20 +1065,28 @@ export class Server {
   }
 
   /** Evaluate the ACL policy for a message. Returns `null` when the message
-   *  may proceed and a typed error when it must be rejected; in `observe`
-   *  mode a shortfall is counted and logged but never rejected. */
-  async #authorizeMessage(
+   *  may proceed and a typed error when it must be rejected. In `observe`, an
+   *  ordinary capability shortfall is counted and logged; invalid ACL state
+   *  still fails closed. */
+  #authorizeMessageWithEngine(
+    engine: Engine.Engine,
     space: string,
     principal: string | undefined,
     requirement: Capability,
-  ): Promise<V2Error | null> {
+  ): V2Error | null {
     if (this.#aclMode() === "off") return null;
-    const engine = await this.openEngine(space);
     const capability = this.#capabilityFor(engine, space, principal);
     if (capability !== null && isCapable(capability, requirement)) {
       return null;
     }
     const principalLabel = principal ?? "<anonymous>";
+    if (this.#aclState(engine, space).kind === "invalid") {
+      this.aclStats.denied += 1;
+      return toError(
+        "AuthorizationError",
+        `Space ${space} has a malformed, ownerless, or retracted ACL`,
+      );
+    }
     if (this.#aclMode() === "observe") {
       this.aclStats.wouldDeny += 1;
       console.warn(
@@ -965,6 +1100,110 @@ export class Server {
       "AuthorizationError",
       `Principal ${principalLabel} lacks ${requirement} on space ${space}`,
     );
+  }
+
+  async #authorizeMessage(
+    space: string,
+    principal: string | undefined,
+    requirement: Capability,
+  ): Promise<V2Error | null> {
+    // Keep off mode's historical async shape: callers await this immediate
+    // return, then independently await their read engine/evaluation. Some
+    // legacy runtime ordering depends on those two yield points.
+    if (this.#aclMode() === "off") return null;
+    const engine = await this.openEngine(space);
+    return this.#authorizeMessageWithEngine(
+      engine,
+      space,
+      principal,
+      requirement,
+    );
+  }
+
+  #authorizeCurrentSessionWithEngine(
+    engine: Engine.Engine,
+    space: string,
+    sessionId: string,
+    session: SessionState,
+    requirement: Capability,
+  ): V2Error | null {
+    if (this.#sessions.get(space, sessionId) !== session) {
+      return toError("SessionError", "Unknown session for space");
+    }
+    return this.#authorizeMessageWithEngine(
+      engine,
+      space,
+      session.principal,
+      requirement,
+    );
+  }
+
+  /** Enforce ACL document shape and fresh-space genesis independently of the
+   *  observe/enforce access-decision dial. These are storage invariants: an
+   *  invalid ACL or an ordinary first write would make later enforcement
+   *  ambiguous or impossible. */
+  #validateAclCommit(
+    engine: Engine.Engine,
+    space: string,
+    principal: string | undefined,
+    commit: ClientCommit,
+  ): V2Error | null {
+    if (this.#aclMode() === "off") return null;
+
+    const state = this.#aclState(engine, space);
+    const aclTouched = commitTouchesAclDoc(commit.operations, space);
+
+    if (!aclTouched) {
+      if (state.kind === "missing" && Engine.serverSeq(engine) === 0) {
+        return toError(
+          "AuthorizationError",
+          `Space ${space} requires an ACL genesis commit before ordinary writes`,
+        );
+      }
+      return null;
+    }
+
+    if (commit.branch !== undefined && commit.branch !== "") {
+      return toError(
+        "ProtocolError",
+        "ACL mutations are only valid on the default branch",
+      );
+    }
+    if (commit.operations.length !== 1) {
+      return toError(
+        "ProtocolError",
+        "ACL mutations must be an ACL-only commit",
+      );
+    }
+    const operation = commit.operations[0];
+    if (
+      operation.op !== "set" ||
+      operation.id !== aclDocId(space) ||
+      (operation.scope !== undefined && operation.scope !== "space")
+    ) {
+      return toError(
+        "ProtocolError",
+        "ACL mutations must replace the space-scoped ACL document",
+      );
+    }
+    const acl = operation.value?.value;
+    if (!isACL(acl) || !hasConcreteOwner(acl)) {
+      return toError(
+        "ProtocolError",
+        "ACL must be valid and retain at least one concrete OWNER",
+      );
+    }
+    if (
+      state.kind === "missing" &&
+      (principal === undefined ||
+        (principal !== space && !this.#isServicePrincipal(principal)))
+    ) {
+      return toError(
+        "AuthorizationError",
+        `Only the space identity or a service DID may initialize ${space}`,
+      );
+    }
+    return null;
   }
 
   /** After an ACL change, drop live sessions whose principal no longer
@@ -1008,42 +1247,23 @@ export class Server {
     }
   }
 
-  /** On the first-ever open of a commit-less space by a regular principal,
-   *  seed the ACL document with creator ownership. Skipped for service
-   *  principals and the space's own key: they hold implicit OWNER, and
-   *  seeding would wrongly claim the space for them (e.g. the background
-   *  service touching a user's not-yet-created space). */
-  #ensureCreatorSeeded(
-    engine: Engine.Engine,
-    space: string,
-    principal: string | undefined,
-  ): void {
-    if (this.#aclMode() === "off") return;
-    if (principal === undefined) return;
-    if (principal === space || this.#isServicePrincipal(principal)) return;
-    if (Engine.serverSeq(engine) !== 0) return;
-    Engine.applyCommit(engine, {
-      sessionId: "memory-acl-seed",
-      space,
-      principal,
-      commit: {
-        localSeq: 1,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: aclDocId(space),
-          value: { value: { [principal]: "OWNER" } },
-        }],
-      },
-    });
-    this.aclStats.seeded += 1;
-    this.#invalidateAclCapabilities(space);
-  }
-
   connect(send: Send): Connection {
     const connection = new Connection(crypto.randomUUID(), this, send);
     this.#connections.set(connection.id, connection);
     return connection;
+  }
+
+  isAclActive(): boolean {
+    return this.#aclMode() !== "off";
+  }
+
+  isSessionAttached(
+    space: string,
+    sessionId: string,
+    connectionId: string,
+  ): boolean {
+    return this.#sessions.get(space, sessionId)?.ownerConnectionId ===
+      connectionId;
   }
 
   disconnect(connection: Connection): void {
@@ -1103,6 +1323,27 @@ export class Server {
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
     const engine = await this.openEngine(space);
+    if (this.#aclMode() !== "off") {
+      if (id === aclDocId(space)) {
+        throw new Engine.ProtocolError(
+          "direct writes may not mutate the ACL document",
+        );
+      }
+      const aclState = this.#aclState(engine, space);
+      if (aclState.kind === "invalid") {
+        throw new Engine.ProtocolError(
+          `space ${space} has invalid ACL state`,
+        );
+      }
+      if (
+        aclState.kind === "missing" &&
+        Engine.serverSeq(engine) === 0
+      ) {
+        throw new Engine.ProtocolError(
+          `space ${space} requires an ACL genesis commit before direct writes`,
+        );
+      }
+    }
     const commit = Engine.applyCommit(engine, {
       sessionId: this.#directSessionId,
       space,
@@ -1210,6 +1451,7 @@ export class Server {
     space: string,
     id: string,
     path: string,
+    beforeRegister?: (engine: Engine.Engine) => void,
   ): Promise<void> {
     if (!Path.isAbsolute(path)) {
       throw new Engine.ProtocolError(
@@ -1253,6 +1495,10 @@ export class Server {
         "disk source path may not be an internal cell-db file",
       );
     }
+    // The RPC path uses this synchronous hook to re-authorize beside the
+    // registry mutation after the filesystem awaits above. Direct internal
+    // callers do not need to provide it.
+    beforeRegister?.(engine);
     this.#diskSources.register(space, id, { path: canonical });
   }
 
@@ -1413,12 +1659,23 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "READ",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
       if (deny) {
         return respondTypedError<SqliteQueryResult>(message.requestId, deny);
       }
@@ -1465,6 +1722,21 @@ export class Server {
           }),
           wantColumns,
         );
+      // SQLite reads necessarily await filesystem work. Re-check both the
+      // session identity and its current ACL immediately before exposing the
+      // rows, so a revoke during that I/O cannot leak a late result.
+      if (aclEngine !== undefined) {
+        const deny = this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
+        if (deny) {
+          return respondTypedError<SqliteQueryResult>(message.requestId, deny);
+        }
+      }
       return {
         type: "response",
         requestId: message.requestId,
@@ -1503,13 +1775,24 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
       // Maps a server filesystem path into the space — operator surface.
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "OWNER",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "OWNER",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "OWNER",
+        );
       if (deny) {
         return respondTypedError<SqliteRegisterDiskSourceResult>(
           message.requestId,
@@ -1518,7 +1801,23 @@ export class Server {
       }
     }
     try {
-      await this.registerDiskSource(message.space, message.id, message.path);
+      await this.registerDiskSource(
+        message.space,
+        message.id,
+        message.path,
+        aclEngine === undefined ? undefined : (resolvedEngine) => {
+          const deny = this.#authorizeCurrentSessionWithEngine(
+            resolvedEngine,
+            message.space,
+            message.sessionId,
+            session,
+            "OWNER",
+          );
+          if (deny) {
+            throw Object.assign(new Error(deny.message), { name: deny.name });
+          }
+        },
+      );
     } catch (error) {
       return respondTypedError<SqliteRegisterDiskSourceResult>(
         message.requestId,
@@ -1547,8 +1846,8 @@ export class Server {
       );
       connection.consumeSessionOpenChallenge(authContext.challenge);
       const engine = await this.openEngine(message.space);
-      this.#ensureCreatorSeeded(engine, message.space, principal);
-      const deny = await this.#authorizeMessage(
+      const deny = this.#authorizeMessageWithEngine(
+        engine,
         message.space,
         principal,
         "READ",
@@ -1576,6 +1875,26 @@ export class Server {
           opened.sessionId,
         )
         : null;
+      // A resumed session is registered before catch-up, and catch-up awaits
+      // graph evaluation. An ACL commit (or takeover) can remove or replace it
+      // during that await, before Connection.receiveOrdered has added its local
+      // handle. In active ACL modes, never return catch-up data or let the
+      // connection add a ghost handle unless this exact token is still owned
+      // by this connection. Off mode preserves the legacy session timing.
+      const current = this.#sessions.get(message.space, opened.sessionId);
+      if (
+        this.isAclActive() &&
+        (current?.ownerConnectionId !== connection.id ||
+          current.sessionToken !== opened.sessionToken)
+      ) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError(
+            "SessionRevokedError",
+            "Session was revoked while opening",
+          ),
+        );
+      }
       const nextSessionOpen = connection.issueSessionOpenAuth();
       return {
         type: "response",
@@ -1668,12 +1987,36 @@ export class Server {
         }
         try {
           const engine = await this.openEngine(message.space);
+          // The session may be revoked or replaced while openEngine awaits.
+          // Re-check the exact registry object before using the captured
+          // principal so an old connection cannot commit after takeover.
+          if (
+            this.#sessions.get(message.space, message.sessionId) !== session
+          ) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              toError("SessionError", "Unknown or replaced session for space"),
+            );
+          }
+          const invalid = this.#validateAclCommit(
+            engine,
+            message.space,
+            session.principal,
+            message.commit,
+          );
+          if (invalid) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              invalid,
+            );
+          }
           // ACL-document writes change who may access the space — OWNER only.
           const aclTouched = commitTouchesAclDoc(
             message.commit.operations,
             message.space,
           );
-          const deny = await this.#authorizeMessage(
+          const deny = this.#authorizeMessageWithEngine(
+            engine,
             message.space,
             session.principal,
             aclTouched ? "OWNER" : "WRITE",
@@ -1853,12 +2196,23 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "READ",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
       if (deny) {
         return respondTypedError<GraphQueryResult>(message.requestId, deny);
       }
@@ -1880,7 +2234,7 @@ export class Server {
         ok: await this.evaluateGraphQuery(
           message.space,
           message.query,
-          undefined,
+          aclEngine,
           undefined,
           {
             principal: session.principal,
@@ -1909,12 +2263,23 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "READ",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
       if (deny) {
         return respondTypedError<SchedulerSnapshotListResult>(
           message.requestId,
@@ -1924,7 +2289,7 @@ export class Server {
     }
 
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = aclEngine ?? await this.openEngine(message.space);
       if (!getPersistentSchedulerStateConfig()) {
         return {
           type: "response",
@@ -1996,12 +2361,23 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "READ",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
       if (deny) {
         return respondTypedError<WatchSetResult>(message.requestId, deny);
       }
@@ -2011,7 +2387,7 @@ export class Server {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
-        undefined,
+        aclEngine,
         {
           principal: session.principal,
           sessionId: message.sessionId,
@@ -2057,12 +2433,23 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
     {
-      const deny = await this.#authorizeMessage(
-        message.space,
-        session.principal,
-        "READ",
-      );
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
       if (deny) {
         return respondTypedError<WatchAddResult>(message.requestId, deny);
       }
@@ -2070,7 +2457,7 @@ export class Server {
 
     try {
       const startedAt = performance.now();
-      const engine = await this.openEngine(message.space);
+      const engine = aclEngine ?? await this.openEngine(message.space);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
       );

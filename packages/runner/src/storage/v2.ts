@@ -555,6 +555,8 @@ export interface Options {
   spaceHostMap?: Record<string, string>;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
+  /** Space authority used only for fresh named-space ACL genesis. The durable
+   *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
 }
 
@@ -715,7 +717,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
-  #spaceIdentity?: Signer;
+  #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
@@ -746,7 +748,9 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
-    this.#spaceIdentity = options.spaceIdentity;
+    if (options.spaceIdentity) {
+      this.registerSpaceIdentity(options.spaceIdentity);
+    }
     // Snapshot + freeze: the resolver snapshotted its own copy at
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
@@ -789,6 +793,15 @@ export class StorageManager implements IStorageManager {
     return true;
   }
 
+  /**
+   * Retain a derived space key solely as the authority for that space's first
+   * ACL commit. Providers continue to authenticate all ordinary replica work
+   * as `this.as`.
+   */
+  registerSpaceIdentity(identity: Signer): void {
+    this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
+  }
+
   open(space: MemorySpace): IStorageProviderWithReplica {
     let provider = this.#providers.get(space);
     if (!provider) {
@@ -801,11 +814,112 @@ export class StorageManager implements IStorageManager {
         space,
         settings: this.#settings,
         subscription: this.#subscription,
-        createSession: () => this.#sessionFactory.create(space, signer),
+        createSession: this.#sessionFactory.supportsAclBootstrap === true
+          ? () => this.#createInitializedSession(space, signer)
+          : () => this.#sessionFactory.create(space, signer),
       });
       this.#providers.set(space, provider);
     }
     return provider;
+  }
+
+  /**
+   * Mount the normal user session, but serialize fresh-space ACL genesis ahead
+   * of any replica work when this manager holds the space key. The temporary
+   * bootstrap session authenticates as the space identity; the returned
+   * durable session always authenticates as `signer`, preserving user/session
+   * scope partitioning.
+   *
+   * Named-space keys only initialize a truly fresh space, with the active user
+   * as OWNER and wildcard WRITE as the rollout default. Populated ACL-less
+   * spaces are the temporary public-compatibility case and stay public. The
+   * home identity (`signer.did() === space`) is the explicit private exception:
+   * it claims a never-created owner-only ACL even when legacy data already
+   * exists. A retracted ACL remains a tombstone and must not be recreated.
+   */
+  async #createInitializedSession(
+    space: MemorySpace,
+    signer: Signer,
+  ): Promise<{
+    client: MemoryV2Client.Client;
+    session: MemoryV2Client.SpaceSession;
+  }> {
+    const normal = await this.#sessionFactory.create(space, signer);
+    if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
+    const isHomeSpace = signer.did() === space;
+    const spaceIdentity = isHomeSpace
+      ? signer
+      : this.#spaceIdentities.get(space);
+    if (spaceIdentity === undefined) return normal;
+
+    const openedServerSeq = normal.session.serverSeq;
+    const aclId = `of:${space}`;
+    const aclResult = await normal.session.queryGraph({
+      roots: [{ id: aclId, selector: { path: [], schema: false } }],
+    });
+    const aclSnapshot = aclResult.entities.find((entity) =>
+      entity.id === aclId && (entity.scope ?? "space") === "space"
+    );
+    const aclNeverCreated = aclSnapshot?.seq === 0 &&
+      aclSnapshot.document === null;
+    if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
+      return normal;
+    }
+
+    // Do not reuse the bootstrap session for replica work: both it and the
+    // replica allocate localSeq from 1, and named spaces must switch back from
+    // the space signer to the active user before any user-scoped operation.
+    await normal.client.close();
+    const bootstrap = await this.#sessionFactory.create(space, spaceIdentity);
+    try {
+      const current = await bootstrap.session.queryGraph({
+        roots: [{ id: aclId, selector: { path: [], schema: false } }],
+      });
+      const snapshot = current.entities.find((entity) =>
+        entity.id === aclId && (entity.scope ?? "space") === "space"
+      );
+      // Recheck emptiness in the authority session. In `off` mode an unrelated
+      // writer can still populate the space between the first inspection and
+      // bootstrap; that turns it into the named legacy-public case and must
+      // not be claimed. Home remains the explicit exception.
+      const aclStillNeverCreated = snapshot?.seq === 0 &&
+        snapshot.document === null;
+      if (aclStillNeverCreated && (isHomeSpace || current.serverSeq === 0)) {
+        try {
+          const bootstrapAcl = isHomeSpace
+            ? { [signer.did()]: "OWNER" }
+            : { [signer.did()]: "OWNER", "*": "WRITE" };
+          await bootstrap.session.transact({
+            localSeq: 1,
+            reads: {
+              confirmed: [{
+                id: aclId,
+                path: toDocumentPath([]),
+                seq: snapshot?.seq ?? 0,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: aclId,
+              value: { value: bootstrapAcl },
+            }],
+          });
+        } catch (error) {
+          // A concurrent space-authorized initializer may win between the
+          // point read and commit. Reopening as the user below is the
+          // authoritative outcome: it succeeds only if the winning ACL grants
+          // access. Other failures are real bootstrap errors.
+          if (!(error instanceof Error) || error.name !== "ConflictError") {
+            throw error;
+          }
+        }
+      }
+    } finally {
+      await bootstrap.client.close();
+    }
+
+    return await this.#sessionFactory.create(space, signer);
   }
 
   async close(): Promise<void> {

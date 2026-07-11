@@ -351,7 +351,6 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
-  "OpaqueInput",
   "WriteAuthorizedBy",
   "TrustedActionWriteWithIntegrity",
   "TrustedActionWrite",
@@ -360,10 +359,6 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "ProjectionPath",
   "ProjectionOf",
   "Projection",
-  "LengthPreservedFrom",
-  "FilteredFrom",
-  "SubsetOf",
-  "PermutationOf",
 ];
 export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
 export type Ref<Root, Path extends readonly string[]> = {
@@ -426,36 +421,6 @@ export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
 }>;
 export type ExactCopy<T, P extends readonly string[]> = Cfc<T, {
   exactCopyOf: P;
-}>;
-export type LengthPreservedFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    sourceCollection: P;
-    lengthPreserved: true;
-  };
-}>;
-export type FilteredFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    filteredFrom: P;
-  };
-}>;
-export type SubsetOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    subsetOf: P;
-  };
-}>;
-export type PermutationOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    permutationOf: P;
-  };
-}>;
-export type OpaqueInput<
-  T,
-  Spec extends true | {
-    schema?: unknown;
-    allowPassThrough?: boolean;
-  } = true,
-> = Cfc<T, {
-  opaque: Spec;
 }>;
 export type ProjectionPath<
   T,

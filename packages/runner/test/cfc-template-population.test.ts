@@ -5,7 +5,10 @@ import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../src/storage/reactivity-log.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import {
   commitCfcFieldValue,
@@ -515,6 +518,232 @@ describe("CFC template population (Stage A): the two under-taints", () => {
       });
     });
     expect(join).not.toContainEqual("memb-secret");
+  });
+});
+
+// The SC-8 remainder (template-population §6, closed here): the generic
+// pure-link value-write route mints the same `*`-child class templates the
+// declared coordinator route does, so HAND-BUILT pure-link containers — no
+// coordinator, no `recordCfcStructureContainer` — carry consumable
+// membership/assignment taint. What makes the route safe to enable is the
+// machinery-read boundary: the op-instantiation/wiring machinery's reads of
+// plumbing containers (slot scalars, `length`, alias shells) carry the
+// `machineryRead` marker and skip template consumption in the flow join, so
+// the runtime's own scaffolding traffic no longer smears one reconcile's J
+// into the next op's action chain (the measured phase-B pointwise re-smear
+// that kept the route off in Stage A). The end-to-end smear pin is the
+// cfc-flow-pointwise map test, which runs with the generic route on.
+describe("CFC template population (SC-8 remainder): generic pure-link containers", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    runtime = undefined;
+    storageManager = undefined;
+  });
+
+  const makeRuntime = () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+    });
+    return runtime;
+  };
+
+  const seedDoc = async (
+    rt: Runtime,
+    cause: string,
+    value: unknown,
+    entries: LabelMapEntry[],
+  ): Promise<string> => {
+    const seed = rt.edit();
+    const cell = rt.getCell(space, cause, undefined, seed);
+    const id = cell.getAsNormalizedFullLink().id;
+    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      value,
+      cfc: {
+        version: 1,
+        schemaHash: "seed-schema",
+        labelMap: { version: 1, entries },
+      },
+    });
+    expect((await seed.commit()).ok).toBeDefined();
+    return id;
+  };
+
+  const entriesOf = (id: string): StoredEntry[] => {
+    const replica = storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): {
+        cfc?: { labelMap?: { entries: StoredEntry[] } };
+      } | undefined;
+    };
+    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  };
+
+  const derivedConfidentiality = (id: string): unknown[] =>
+    entriesOf(id)
+      .filter((e) => e.origin === "derived")
+      .flatMap((e) => e.label.confidentiality ?? []);
+
+  const readAddress = (id: string, path: string[]) => ({
+    space,
+    scope: "space" as const,
+    id: id as `${string}:${string}`,
+    type: "application/json" as const,
+    path: ["value", ...path],
+  });
+
+  // The declared-route `buildList` minus the coordinator declaration: a
+  // plain transaction that reads the criteria doc and writes a pure-link
+  // list — the §8.5.6.1 "which slots exist was computed under J" shape any
+  // application (or the runtime's own plumbing) can produce.
+  const buildGenericList = async (
+    rt: Runtime,
+    listCause: string,
+    criteriaId: string,
+    memberCauses: string[],
+  ): Promise<string> => {
+    const tx = rt.edit();
+    tx.readOrThrow(readAddress(criteriaId, []));
+    const members = memberCauses.map((cause) =>
+      rt.getCell(space, cause, undefined, tx)
+    );
+    const list = rt.getCell(space, listCause, {
+      type: "array",
+      items: { asCell: ["cell"] },
+    }, tx);
+    list.set(members);
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+    return list.getAsNormalizedFullLink().id;
+  };
+
+  const flowJoinOf = async (
+    rt: Runtime,
+    outCause: string,
+    observe: (tx: ReturnType<Runtime["edit"]>) => void,
+  ): Promise<unknown[]> => {
+    const tx = rt.edit();
+    observe(tx);
+    const out = rt.getCell(space, outCause, undefined, tx);
+    out.set({ observed: true });
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
+    return derivedConfidentiality(out.getAsNormalizedFullLink().id);
+  };
+
+  // The generic-route mint itself, pinned: a pure-link value write mints
+  // the three `*`-child templates beside the container-anchored stamps,
+  // identical in shape to the declared route's.
+  it("hand-built pure-link container mints the three `*`-child class templates", async () => {
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-m", { n: 1 }, []);
+    const criteriaId = await seedDoc(rt, "gp-criteria-m", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-m", criteriaId, [
+      "gp-el-m",
+    ]);
+
+    const structure = entriesOf(listId).filter((e) => e.origin === "structure");
+    const container = structure.filter((e) => e.path.length === 0);
+    expect([...new Set(container.map((e) => e.observes))].sort()).toEqual(
+      ["enumerate", "shape"],
+    );
+    const templates = structure.filter((e) => e.path.length === 1);
+    expect(templates.map((e) => e.path)).toEqual([["*"], ["*"], ["*"]]);
+    expect(templates.map((e) => e.observes).sort()).toEqual(
+      ["followRef", "shape", "value"],
+    );
+    for (const entry of structure) {
+      expect(entry.label.confidentiality).toEqual(["memb-secret"]);
+      expect(entry.label.integrity).toBeUndefined();
+    }
+  });
+
+  // §1.1 on a non-coordinator container (RED before the generic route): a
+  // genuine application probe — "is /0 present?" — consumes the membership
+  // J of the hand-built container.
+  it("per-child existence probe consumes the membership J on a hand-built container", async () => {
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-a", { n: 1 }, [
+      { path: [], label: { confidentiality: ["el-label"] } },
+    ]);
+    const criteriaId = await seedDoc(rt, "gp-criteria-a", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-a", criteriaId, [
+      "gp-el-a",
+    ]);
+
+    const join = await flowJoinOf(rt, "gp-probe-a-out", (tx) => {
+      tx.readOrThrow(readAddress(listId, ["0"]), { nonRecursive: true });
+    });
+    expect(join).toContainEqual("memb-secret");
+    expect(join).not.toContainEqual("el-label");
+  });
+
+  // §1.2 on a non-coordinator container (RED before the generic route): a
+  // standalone slot followRef probe consumes the assignment J.
+  it("slot followRef probe consumes the assignment J on a hand-built container", async () => {
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-b", { n: 2 }, [
+      { path: [], label: { confidentiality: ["el-label"] } },
+    ]);
+    const criteriaId = await seedDoc(rt, "gp-criteria-b", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-b", criteriaId, [
+      "gp-el-b",
+    ]);
+
+    const join = await flowJoinOf(rt, "gp-probe-b-out", (tx) => {
+      tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
+    });
+    expect(join).toContainEqual("memb-secret");
+  });
+
+  // The machinery-read boundary, pinned as a consumed-set asymmetry: the
+  // exact read set that consumes the membership J as an application
+  // observation consumes NOTHING when it carries the machineryRead marker —
+  // the wiring reads (slot probe, slot scalar, existence probe, `length`)
+  // keep their ordinary consumption (none here: the elements are unlabeled,
+  // so templates are the only consumable below the root) and skip the
+  // templates. This is what keeps the generic route from re-importing the
+  // pointwise smear.
+  it("machineryRead-marked wiring reads consume no templates; the same reads unmarked consume the J", async () => {
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-mach", { n: 1 }, []);
+    const criteriaId = await seedDoc(rt, "gp-criteria-mach", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-mach", criteriaId, [
+      "gp-el-mach",
+    ]);
+
+    const wiringReads = (tx: ReturnType<Runtime["edit"]>) => {
+      tx.readOrThrow(readAddress(listId, ["0"]), { nonRecursive: true });
+      tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
+      tx.readOrThrow(readAddress(listId, ["0"]));
+      tx.readOrThrow(readAddress(listId, ["length"]));
+    };
+
+    const marked = await flowJoinOf(rt, "gp-mach-out", (tx) => {
+      tx.runWithAmbientReadMeta(machineryRead, () => wiringReads(tx));
+    });
+    // Consumed-set equality with a read-free transaction: the marked wiring
+    // reads contribute NOTHING to the join.
+    expect(marked).toEqual([]);
+
+    const unmarked = await flowJoinOf(rt, "gp-app-out", (tx) => {
+      wiringReads(tx);
+    });
+    expect(unmarked).toContainEqual("memb-secret");
   });
 });
 

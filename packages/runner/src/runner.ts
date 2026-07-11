@@ -73,7 +73,10 @@ import type {
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { schedulerDependencyRead } from "./storage/reactivity-log.ts";
+import {
+  machineryRead,
+  schedulerDependencyRead,
+} from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
@@ -225,11 +228,19 @@ const recordOutputSchemaPolicyInputs = (
 
   if (isWriteRedirectLink(outputBinding)) {
     const bindingLink = parseLink(outputBinding, resultCell);
-    const link = resolveLink(
-      runtime,
-      tx,
-      bindingLink,
-      "writeRedirect",
+    // Output-redirect resolution is result-plumbing machinery
+    // (machineryRead, same family as sendValueToBinding's walk): its reads
+    // must not consume `*`-path membership templates (bot review on this
+    // PR — these resolve the SAME redirects immediately before the send).
+    const link = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        resolveLink(
+          runtime,
+          tx,
+          bindingLink,
+          "writeRedirect",
+        ),
     );
     const schema = schemaPath.length === 0
       ? resultSchema
@@ -308,11 +319,16 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
 ): void => {
   if (isWriteRedirectLink(outputBinding)) {
     const bindingLink = parseLink(outputBinding, processCell);
-    const link = resolveLink(
-      runtime,
-      tx,
-      bindingLink,
-      "writeRedirect",
+    // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
+    const link = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        resolveLink(
+          runtime,
+          tx,
+          bindingLink,
+          "writeRedirect",
+        ),
     );
     const schema = bindingLink.schema ?? link.schema;
     recordSchemaPolicyInputForLink(tx, bindingLink, schema);
@@ -354,11 +370,16 @@ const schemaForRawBuiltinRootOutputBinding = (
     return undefined;
   }
   const bindingLink = parseLink(outputBinding, processCell);
-  const link = resolveLink(
-    runtime,
-    tx,
-    bindingLink,
-    "writeRedirect",
+  // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
+  const link = tx.runWithAmbientReadMeta(
+    machineryRead,
+    () =>
+      resolveLink(
+        runtime,
+        tx,
+        bindingLink,
+        "writeRedirect",
+      ),
   );
   return bindingLink.schema ?? link.schema;
 };
@@ -2738,28 +2759,32 @@ export class Runner {
       return [];
     }
 
-    const targets: NormalizedFullLink[] = [];
-    for (const output of outputCells) {
-      if (output.overwrite !== "redirect") continue;
-      try {
-        const { overwrite: _overwrite, ...target } = resolveLink(
-          this.runtime,
-          tx,
-          output,
-          "writeRedirect",
-        );
-        targets.push(target);
-      } catch (error) {
-        // Some setup paths have not fully materialized metadata redirects
-        // yet. Leave those to runtime dependency collection after the action
-        // has run, but keep debug context for unexpected resolution failures.
-        logger.debug("static-redirect-write-target", () => [
-          "Unable to resolve static redirect write target",
-          { output, error },
-        ]);
+    // Redirect-target resolution is op-wiring machinery (machineryRead):
+    // its reads must not consume `*`-path membership templates.
+    return tx.runWithAmbientReadMeta(machineryRead, () => {
+      const targets: NormalizedFullLink[] = [];
+      for (const output of outputCells) {
+        if (output.overwrite !== "redirect") continue;
+        try {
+          const { overwrite: _overwrite, ...target } = resolveLink(
+            this.runtime,
+            tx,
+            output,
+            "writeRedirect",
+          );
+          targets.push(target);
+        } catch (error) {
+          // Some setup paths have not fully materialized metadata redirects
+          // yet. Leave those to runtime dependency collection after the action
+          // has run, but keep debug context for unexpected resolution failures.
+          logger.debug("static-redirect-write-target", () => [
+            "Unable to resolve static redirect write target",
+            { output, error },
+          ]);
+        }
       }
-    }
-    return dedupeNormalizedLinks(targets);
+      return dedupeNormalizedLinks(targets);
+    });
   }
 
   private populateDeclaredSchedulerReads(
@@ -4191,12 +4216,20 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const io = this.bindNodeIO(
-      inputBindings,
-      outputBindings,
-      resultCell,
-      processCell,
-      pattern,
+    // Binding resolution is op-wiring machinery: the write-redirect walk
+    // reads alias shells and plumbing containers' child paths, and those
+    // reads must not consume `*`-path membership templates (machineryRead;
+    // template-population §6 — the SC-8 machinery-read boundary).
+    const io = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        this.bindNodeIO(
+          inputBindings,
+          outputBindings,
+          resultCell,
+          processCell,
+          pattern,
+        ),
     );
     const { fn, name } = this.resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {

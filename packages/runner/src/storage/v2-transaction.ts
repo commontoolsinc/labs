@@ -1518,6 +1518,19 @@ export class V2StorageTransaction implements IStorageTransaction {
         allowArrayLength: true,
       }) as FabricValue,
     ) as FabricValue | undefined;
+    // Pre-write slot presence (distinct from value: a slot holding
+    // `undefined` is present) for the write details — also read BEFORE the
+    // in-place mutation below. `hasValueAtPath` is vacuously true for the
+    // empty path, so root presence is the root's own definedness (the
+    // root IS the value — it has no present-but-undefined state).
+    const presentBeforeWrite = (path: readonly string[]): boolean =>
+      path.length === 0
+        ? current.value !== undefined
+        : hasValueAtPath(current.value, path, { allowArrayLength: true });
+    const previousPresent = presentBeforeWrite(address.path);
+    const previousActivityPresent = activityPath === address.path
+      ? previousPresent
+      : presentBeforeWrite(activityPath);
 
     const result = applyMutablePathWrite(
       current.value,
@@ -1547,6 +1560,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }),
       cloneIfNecessary(result.ok.previousValue) as FabricValue | undefined,
       doc,
+      previousPresent,
     );
     this.recordWriteActivity(
       space,
@@ -1556,6 +1570,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }),
       previousActivityValue,
       doc,
+      previousActivityPresent,
     );
 
     return { ok: collapsedNext };
@@ -1639,6 +1654,20 @@ export class V2StorageTransaction implements IStorageTransaction {
           allowArrayLength: true,
         }) as FabricValue,
       ) as FabricValue | undefined;
+      // Pre-write slot presence for the write details (see
+      // `writeWithinBranch`; empty path = root definedness, since
+      // `hasValueAtPath` is vacuously true there) — read before
+      // `applyMutablePathWrite` mutates `nextRoot` in place.
+      const previousPresent = address.path.length === 0
+        ? nextRoot !== undefined
+        : present;
+      const previousActivityPresent = activityPath === address.path
+        ? previousPresent
+        : activityPath.length === 0
+        ? nextRoot !== undefined
+        : hasValueAtPath(nextRoot, activityPath, {
+          allowArrayLength: true,
+        });
       const result = applyMutablePathWrite(
         nextRoot,
         address,
@@ -1673,6 +1702,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         }),
         cloneIfNecessary(previousValue) as FabricValue | undefined,
         doc,
+        previousPresent,
       );
       this.recordWriteActivity(
         space,
@@ -1682,6 +1712,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         }),
         previousActivityValue,
         doc,
+        previousActivityPresent,
       );
     }
 
@@ -1707,6 +1738,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     value: FabricValue | undefined,
     previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
+    previousPresent?: boolean,
   ): void {
     recordWriteStackTrace(
       {
@@ -1727,6 +1759,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       address,
       value,
       previousValue,
+      previousPresent,
     );
     this.invalidateReactivityLog();
   }
@@ -1737,6 +1770,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     value: FabricValue | undefined,
     previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
+    previousPresent?: boolean,
   ): void {
     // The per-attempt order stamp. recordPatchIntent runs once per applied
     // write in both the single-write and batch paths, with the EXACT write
@@ -1759,6 +1793,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       address,
       value,
       previousValue,
+      previousPresent,
     );
   }
 
@@ -1768,6 +1803,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: IMemoryAddress,
     value: FabricValue | undefined,
     previousValue: FabricValue | undefined,
+    previousPresent?: boolean,
   ): void {
     const writeActivity = {
       space,
@@ -1778,9 +1814,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const key = encodePointer(address.path);
     const existing = details.get(key);
     if (existing) {
-      // Only update the latest value — previousValue intentionally stays as the
-      // pre-transaction state so that journal.history() reports the correct
-      // before-snapshot for reverts and conflict detection.
+      // Only update the latest value — previousValue (and its presence
+      // flag) intentionally stays as the pre-transaction state so that
+      // journal.history() reports the correct before-snapshot for reverts
+      // and conflict detection.
       existing.value = value;
       return;
     }
@@ -1789,6 +1826,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       address: writeActivity,
       value,
       previousValue,
+      ...(previousPresent !== undefined ? { previousPresent } : {}),
     });
   }
 

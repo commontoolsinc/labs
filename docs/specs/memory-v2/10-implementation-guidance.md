@@ -23,6 +23,12 @@ target. In particular:
   audience, current connection challenge, and short validity window
 - the memory server ACL policy gates session opens and commands when enabled;
   route-level `Origin` enforcement remains deferred
+- fresh-space writes require an ACL-only genesis by the space identity or a
+  configured service DID; storage performs named-space genesis in a temporary
+  space-authenticated session and then remounts as the active user
+- populated spaces that never had an ACL are temporarily authenticated-public
+  READ/WRITE (never OWNER), except that the home identity claims its own
+  ACL-less space; malformed, ownerless, and retracted ACLs fail closed
 - session resume still uses caller-provided `sessionId` values; principal
   binding and server-issued session ids remain deferred
 - one-shot `graph.query` now honors `branch` and `atSeq`
