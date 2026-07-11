@@ -166,12 +166,17 @@ list — is the authoritative source. As of this writing it recognizes:
   with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
 - `wish`
-- `generateObject` and `generateText`
+- default generation calls `generateObject` and `generateText`, plus the
+  advanced `generateObjectStream` and `generateTextStream` forms
+- availability predicates `isPending`, `hasError`, `isSyncing`, and
+  `hasSchemaMismatch`; the transparent aliases `resultOf` and
+  `observeAvailability`
 - the `runtime-call` family — tagged-call / function runtime origins: `str`,
-  `llm`, `llmDialog`, `fetchJson`, `fetchProgram`, `streamData`,
-  `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
-  `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
-  schema injection)
+  `llm`, `llmDialog`, `fetchBinary`, `fetchText`, `fetchJson`,
+  `fetchJsonUnchecked`, `fetchProgram`, `streamData`, `compileAndRun`,
+  `navigateTo`, `inspectConfLabel`, and the SQLite builtins `sqliteDatabase` /
+  `sqliteQuery` (`fetchJson<T>` and `sqliteQuery<Row>` additionally get
+  dedicated type-argument schema injection)
 - `patternTool` — recognized, but explicitly **not** a reactive origin
   (`reactiveOrigin: false`)
 

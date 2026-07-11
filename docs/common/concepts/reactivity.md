@@ -11,6 +11,33 @@ reads are tracked as dependencies (in computed/lift). Derive data with
 [computed()](./computed/computed.md) and gate UI with plain ternaries
 ([Conditional Rendering](../patterns/conditional.md)).
 
+## Availability Is Reactive Control Flow
+
+Single-result fetch and generation calls produce an `AsyncResult<T>`. Keep the
+request when code needs to inspect loading or failure, and derive the ordinary
+usable value with the zero-node `resultOf()` projection:
+
+```tsx
+// Shown for illustration only.
+const repoRequest = fetchJson<Repo>({ url });
+const repo = resultOf(repoRequest);
+const title = computed(() => `${repo.owner}/${repo.name}`);
+
+return isPending(repoRequest)
+  ? <div>Loading…</div>
+  : hasError(repoRequest)
+    ? <div>{repoRequest.error.message}</div>
+    : <h1>{title}</h1>;
+```
+
+While `repoRequest` is unavailable, computations which only consume `repo` do
+not run; the same unavailable state propagates through their outputs. Once the
+request contains a `Repo`, those computations resume with the non-optional
+usable type. Guards opt only their own computation boundary into the reasons
+they test, so code can render an error while continuing to wait through other
+states. See [Fetching Data](../capabilities/fetch.md) and
+[LLM Generation](../capabilities/llm.md) for the complete APIs.
+
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
 **The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.

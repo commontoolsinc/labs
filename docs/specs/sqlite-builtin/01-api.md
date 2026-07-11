@@ -21,17 +21,19 @@ read).
 > path. A free `sqliteQuery<Row>({ db, sql, ... })` function still exists and is
 > equivalent to `db.query<Row>(sql, ...)`.
 
-The runtime's reactive I/O — `fetchJson`, `generateText`, `streamData` — is
-expressed as built-ins registered in
+The runtime's reactive I/O — `fetchJson`, `generateText`, `streamData`, and
+SQLite queries — is expressed as built-ins registered in
 [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts)
 and surfaced as builder factories in
 [`packages/runner/src/builder/built-in.ts`](../../../packages/runner/src/builder/built-in.ts).
-A reactive read returns a `Reactive<{ pending, result, error }>` and re-runs
-when its inputs change. `db.query` is the same shape and slots into the same
-machinery — read-tracking, scheduler subscription, post-commit effects, request
-hashing — but is invoked as a method on the `SqliteDb` cell rather than as a free
-factory. Writes do **not** use that machinery at all: `db.exec` records a SQLite
-op directly onto the caller's transaction (Section
+A SQLite reactive read returns `Reactive<{ pending, result, error }>` and
+re-runs when its inputs change. The default fetch and generation APIs now
+return `AsyncResult<T>` directly; their explicit stateful/streaming variants
+remain separate. `db.query` retains the state object while sharing the same
+read-tracking, scheduler subscription, post-commit effect, and request-hashing
+machinery. It is invoked as a method on the `SqliteDb` cell rather than as a
+free factory. Writes do **not** use that machinery at all: `db.exec` records a
+SQLite op directly onto the caller's transaction (Section
 [04](./04-server-execution-and-transactions.md)).
 
 The "database type" the author cares about is expressed two ways:

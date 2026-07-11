@@ -1,0 +1,842 @@
+# Data Unavailability Values and Propagation
+
+## Status
+
+Implemented. The separately specified `latestComplete()` snapshot helper
+remains planned work.
+
+## Summary
+
+The runtime represents temporarily or permanently unavailable data with the
+`DataUnavailable` FabricType instead of overloading `undefined`.
+
+`DataUnavailable` has four discriminated reasons:
+
+- `"pending"`
+- `"error"`
+- `"syncing"`
+- `"schema-mismatch"`
+
+Single-result asynchronous built-ins such as `fetchJson<T>` and
+`generateObject<T>` expose an explicit `AsyncResult<T>` union: either the
+usable `T` or one of the four `DataUnavailable` variants. Authors inspect that
+union with the guard helpers or project its usable view with the zero-node
+`resultOf()` helper. `resultOf()` removes the unavailable variants from the
+TypeScript type while leaving the reactive runtime value untouched, so a
+computation which expects `T` still waits for usable data.
+
+Before invoking a computation, the runner inspects its inputs. An unavailable
+input which the computation did not explicitly opt into is copied to the
+computation's output and the implementation is not called. A normal schema
+failure becomes a `"schema-mismatch"` value instead of `undefined`.
+
+Patterns explicitly observe unavailable states with type guards such as
+`hasError()`. A guard over an `AsyncResult<T>` is already type-correct inside
+an explicit `computed()` or `lift()`; the transformer uses the guard and
+visible union to emit the corresponding runner input policy. The existing
+`observeAvailability()` cast remains an escape hatch when an unavailable
+runtime value has flowed through an API whose static type is only `T`.
+
+## Goals
+
+- Stop using `undefined` as an implicit pending, error, syncing, or invalid
+  input signal.
+- Make the unavailable union explicit at asynchronous request boundaries while
+  letting ordinary dataflow project a required `T` once with `resultOf()`.
+- Propagate unavailable values through computations without invoking code on
+  inputs that do not satisfy its authored contract.
+- Let patterns selectively observe error, pending, syncing, or schema mismatch
+  states with normal TypeScript narrowing.
+- Preserve unavailable states across cells, spaces, storage, and runtime
+  boundaries using the FabricType codec protocol.
+- Make selection deterministic when more than one input is unavailable.
+
+## Non-goals
+
+- Accumulating every unavailable input or attaching argument positions to a
+  combined error.
+- Replacing thrown programming errors inside a computation. Exceptions thrown
+  by invoked code keep their existing error behavior.
+- Changing the meaning of authored `undefined`. It remains a first-class
+  `FabricValue` and is valid whenever the declared schema admits it.
+- Converting interactive or multi-channel APIs such as `llmDialog` in the first
+  migration.
+- Converting `streamData` in the first migration. It is a long-lived,
+  multi-result subscription rather than a single-result asynchronous operation;
+  replacing its state object requires a separate contract for initial pending,
+  successive usable values, end-of-stream, reconnect, and terminal failure.
+- Defining a general JSON Schema vocabulary for every FabricType. This design
+  uses a narrower, path-scoped runner policy for control signals.
+- Implementing the stateful `latestComplete()` snapshot helper in the first
+  asynchronous built-in cutover. Its intended contract is specified here so a
+  follow-up can share the same type, schema, and propagation model.
+
+## System Model
+
+The design spans four behaviors.
+
+1. The data model has an explicit FabricType protocol. `FabricInstance`
+   subclasses own a class-level codec and can be stored and transported as
+   `FabricValue`s.
+2. Default fetch and generation built-ins return `AsyncResult<T>`. Explicit
+   advanced generation APIs retain state objects for partial and metadata
+   consumers.
+3. A JavaScript action whose input does not match its `argumentSchema` is not
+   invoked; its output becomes `DataUnavailable("schema-mismatch")`.
+4. `computed()` is lowered to a lift with generated argument and result
+   schemas. Captured values therefore have a concrete schema boundary even
+   though authored `Reactive<T>` is represented as `T` in TypeScript.
+
+There is one important FabricType constraint. Schema traversal currently
+treats a `FabricSpecialObject` as an opaque object leaf. It does not inspect a
+`FabricInstance`'s codec state to distinguish one class or discriminator from
+another. Consequently, a structural object schema alone cannot decide whether
+a `DataUnavailable` input should be propagated or observed. The runner policy
+specified below is authoritative for that decision.
+
+## The `DataUnavailable` FabricType
+
+### One class, discriminated state
+
+`DataUnavailable` is one concrete `FabricInstance`, not a subclass hierarchy.
+Its encoded state is a discriminated union.
+
+```typescript
+// Shown for illustration only.
+type DataUnavailableReason =
+  | "pending"
+  | "error"
+  | "syncing"
+  | "schema-mismatch";
+
+type DataUnavailableState =
+  | { reason: "pending" }
+  | { reason: "error"; error: FabricError }
+  | { reason: "syncing" }
+  | { reason: "schema-mismatch" };
+```
+
+The wire tag is `DataUnavailable@1`. Its codec encodes and decodes the state
+above. The class extends `BaseFabricInstance`, participates in deep freeze,
+clone, equality, hashing, and JSON codec behavior, and is included in the
+curated `fabric-instances` codec list.
+
+The non-error variants should be immutable interned instances. Error variants
+carry a `FabricError` and need not be interned. Consumers propagate the same
+instance rather than constructing a new marker, preserving the original error
+and avoiding needless value churn.
+
+The v1 `"schema-mismatch"` state intentionally carries no expected schema,
+actual value, or input path. Those details are large, can contain sensitive
+data, and are not useful until an API can report multiple positions. Existing
+runner diagnostics continue to record debugging detail out of band.
+
+### Pattern-visible shape
+
+The pattern API exposes the type but not a public constructor. Runtime-owned
+factory methods create the values, which prevents a plain object or authored
+data value from forging a control signal.
+
+```typescript
+// Shown for illustration only.
+interface DataUnavailable extends FabricInstance {
+  readonly reason: DataUnavailableReason;
+  readonly pending?: true;
+  readonly syncing?: true;
+  readonly schemaMismatch?: true;
+  readonly error?: Error;
+}
+
+type IsPending = DataUnavailable & {
+  readonly reason: "pending";
+  readonly pending: true;
+};
+
+type HasError = DataUnavailable & {
+  readonly reason: "error";
+  readonly error: Error;
+};
+
+type IsSyncing = DataUnavailable & {
+  readonly reason: "syncing";
+  readonly syncing: true;
+};
+
+type HasSchemaMismatch = DataUnavailable & {
+  readonly reason: "schema-mismatch";
+  readonly schemaMismatch: true;
+};
+
+type DataUnavailableVariant =
+  | IsPending
+  | HasError
+  | IsSyncing
+  | HasSchemaMismatch;
+
+type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
+  DataUnavailableVariant,
+  { reason: K }
+>;
+```
+
+The boolean properties are ergonomic projections of `reason`; `reason` is the
+wire discriminator. The runtime error value is a `FabricError`, whose public
+surface structurally satisfies the relevant `Error` fields, including
+`message`, `name`, and optional `stack`.
+
+Only an actual decoded or runtime-created `DataUnavailable` instance is a
+control signal. A plain object such as `{ reason: "pending" }` is ordinary user
+data.
+
+## Authoring Contract
+
+### Explicit asynchronous results
+
+The pattern API names the union at asynchronous request boundaries:
+
+```typescript
+// Shown for illustration only.
+type AsyncResult<T> = T | DataUnavailableVariant;
+```
+
+The final public signatures of single-result built-ins are:
+
+| Built-in | Authored return type |
+|----------|----------------------|
+| `fetchBinary(...)` | `AsyncResult<FetchBinaryResult>` |
+| `fetchText(...)` | `AsyncResult<string>` |
+| `fetchJson<T>(...)` | `AsyncResult<T>` |
+| `fetchJsonUnchecked(...)` | `AsyncResult<any>` |
+| `fetchProgram(...)` | `AsyncResult<FetchedProgram>` |
+| `generateText(...)` | `AsyncResult<string>` |
+| `generateObject<T>(...)` | `AsyncResult<T>` |
+
+TypeScript reduces `any | X` to `any` and `unknown | X` to `unknown`.
+Consequently, `fetchJsonUnchecked()` and unconstrained generic helpers cannot
+preserve visible union members through their static type alone. Transformer
+analysis retains resolved built-in and `resultOf()` source provenance for those
+cases; authors should prefer typed `fetchJson<T>()` when narrowing matters.
+
+The explicit union makes guard calls, editor completion, generic helpers, and
+function boundaries honest about the current value. It does not require every
+consumer to handle every state. The zero-node `resultOf()` helper projects the
+usable member:
+
+```typescript
+// Shown for illustration only.
+type ResultValue<R> = Exclude<R, DataUnavailableVariant>;
+declare function resultOf<R>(value: R): ResultValue<R>;
+```
+
+Typing the whole argument and excluding marker members avoids generic inference
+re-inferring a marker arm as part of `T`; it also works for aliases and wider
+unions. Semantically, `resultOf()`:
+
+- is a pure runtime identity and allocates no graph node;
+- removes all `DataUnavailableVariant` members from the static type;
+- does not accept or consume an unavailable runtime value; and
+- leaves downstream runner preflight to propagate the marker without invoking
+  a computation which expects the usable type.
+
+An ordinary pattern establishes separate state and usable views:
+
+```tsx
+// Shown for illustration only.
+const repoState = fetchJson<Repo>({ url });
+const repo = resultOf(repoState);
+const title = computed(() => `${repo.owner.login}/${repo.name}`);
+```
+
+While the fetch is pending, the title computation is not called. Its output is
+also pending. Once `repoState` contains a `Repo`, `repo` is that same value and
+the computation runs.
+
+`resultOf()` is a transparent reactive alias. If both aliases are used by one
+generated computation, the transformer must canonicalize them to the same
+reactive source, or otherwise share their availability policy. It must not
+serialize the same marker as an accepted `repoState` input and an unaccepted
+second `repo` input. This common pattern must work:
+
+```tsx
+// Shown for illustration only.
+const repoState = fetchJson<Repo>({ url });
+const repo = resultOf(repoState);
+
+return isPending(repoState)
+  ? <div>Loading repository...</div>
+  : hasError(repoState)
+    ? <div>Error: {repoState.error.message}</div>
+    : <RepoCard url={repo.url} name={repo.name} />;
+```
+
+This computation accepts only pending and error. Syncing and schema mismatch
+continue to propagate without rendering any branch.
+
+### Type guards
+
+The public guard helpers are pure predicates:
+
+```typescript
+// Shown for illustration only.
+declare function isPending(value: unknown): value is IsPending;
+declare function hasError(value: unknown): value is HasError;
+declare function isSyncing(value: unknown): value is IsSyncing;
+declare function hasSchemaMismatch(
+  value: unknown,
+): value is HasSchemaMismatch;
+```
+
+They check both the concrete `DataUnavailable` brand and its `reason`. They do
+not accept structurally similar plain objects.
+
+In pattern-owned reactive code, the transformer lifts a guard call when
+necessary and records that the synthesized node accepts the corresponding
+reason. Other reasons still propagate through that node.
+
+```tsx
+// Shown for illustration only.
+const repoState = fetchJson<Repo>({ url });
+
+return hasError(repoState)
+  ? <div class="error">Error: {repoState.error.message}</div>
+  : <RepoCard repo={resultOf(repoState)} />;
+```
+
+The guard computation runs for a usable `Repo` and for an error. It returns
+`false` for the former and `true` for the latter. If the value is pending,
+syncing, or a schema mismatch, that state propagates instead of being turned
+into `false`.
+
+### Explicit observation inside `computed()` and `lift()`
+
+An `AsyncResult<T>` already carries its unavailable variants in TypeScript.
+When a guard over that union appears inside an explicit computation, the
+transformer widens no type: it preserves the union in the outer callback
+argument schema and emits exact policy for the reasons tested by the guards.
+
+```tsx
+// Shown for illustration only.
+const repoState = fetchJson<Repo>({ url });
+
+const content = computed(() =>
+  isPending(repoState)
+    ? <div>Loading repository...</div>
+    : hasError(repoState)
+      ? <div>Error: {repoState.error.message}</div>
+      : <RepoCard repo={resultOf(repoState)} />
+);
+```
+
+The computation accepts pending and error because both are visible union
+members and both have explicit guards. Syncing and schema mismatch still
+propagate at its outer boundary.
+
+A value may nevertheless be statically plain `T` while carrying an unavailable
+runtime value. This happens deliberately after `resultOf()` and can also happen
+after propagation through a computation whose ordinary result type is `T`.
+Widening only a guard expression inside another explicit computation is then
+too late: the outer computation would be skipped before its body could call the
+guard.
+
+`observeAvailability()` is a zero-node, identity cast used outside that
+boundary. It widens the TypeScript type and records the exact unavailable
+reasons accepted at that captured input path.
+
+```typescript
+// Shown for illustration only.
+declare function observeAvailability<T>(
+  value: T,
+): T | DataUnavailable;
+
+declare function observeAvailability<
+  T,
+  K extends DataUnavailableReason,
+>(value: T, ...reasons: K[]): T | DataUnavailableFor<K>;
+```
+
+For example, a computation can observe errors while continuing to wait for
+pending data:
+
+```tsx
+// Shown for illustration only.
+const repoState = fetchJson<Repo>({ url });
+const repo = resultOf(repoState);
+const label = computed(() => repo.name.toUpperCase());
+const labelOrError = observeAvailability(label, "error");
+
+const content = computed(() =>
+  hasError(labelOrError)
+    ? <div>Error: {labelOrError.error.message}</div>
+    : <div>{labelOrError}</div>
+);
+```
+
+Here the generated computation accepts `string | HasError`. A pending, syncing,
+or schema-mismatch value is still propagated without invoking the callback.
+
+Calling `observeAvailability(value)` without reasons accepts all four variants.
+Callers should prefer a reason list when they only need selected states.
+
+`observeAvailability()` must be outside the explicit `computed()` or `lift()`
+whose boundary it changes. The transformer reports an authoring diagnostic if
+it appears inside that callback. It also reports a targeted diagnostic when a
+guard inside a callback refers to an input that was not widened outside:
+
+```text
+hasError() observes an unavailable input inside computed(), but this input
+is statically usable data. Guard the original AsyncResult, or move
+observeAvailability(value, "error") outside the computed() and capture the
+widened value.
+```
+
+The guard is the policy signal when its operand visibly includes the requested
+variant. Observation provenance is the policy signal when the operand is
+statically plain data. Both survive aliases and later transformer-generated
+computed blocks and keep runtime policy reviewable in the serialized module.
+
+### Guards are not factories
+
+The guard helpers are regular, pure functions at execution time. They are not
+node factories themselves. Pattern-context lowering may synthesize a lift
+around a reactive guard expression, just as it does for other reactive
+expressions, but a guard encountered inside an existing compute remains the
+same pure call.
+
+Purity alone is not sufficient. If the source operand is an `AsyncResult<T>`,
+the generated lift must preserve that union in its capture schema. If the
+source operand is statically only `T`, calling a type predicate does not widen
+the generated lift's capture, so the transformer must attach
+`T | <probed variant>` before capture-schema generation. The latter case
+conceptually lowers to:
+
+```typescript
+// Shown for illustration only.
+lift<{ value: Repo | HasError }, boolean>(
+  ({ value }) => hasError(value),
+)({ value: repo });
+```
+
+The concrete lowering also supplies the generated argument and result schemas
+and the path policy. Whether the union came from `AsyncResult<T>` or synthetic
+widening, all three artifacts must agree:
+
+- the lift input type includes `Repo | HasError`;
+- the input schema can materialize that union; and
+- the path policy authorizes only the `"error"` marker at `value`.
+
+Without the widened lift input type and schema, runner preflight would reach
+ordinary argument materialization and reject the error before the pure
+predicate could run. The widening applies only to the probed operand path, not
+to every capture of the synthesized lift.
+
+This removes the need to rewrite a factory call to a differently named runtime
+predicate inside `computed()`. The transformer still gives the guard calls a
+dedicated classification so it can attach availability policy and diagnostics.
+
+## Transformer and Serialized Graph Contract
+
+### Path-scoped unavailable input policy
+
+Modules gain serialized, path-scoped metadata describing which unavailable
+reasons their implementations may observe.
+
+```typescript
+// Shown for illustration only.
+type UnavailableInputPolicy = readonly {
+  path: readonly string[];
+  reasons: readonly DataUnavailableReason[];
+}[];
+```
+
+For a computation which tests `hasError(repoState)`, the generated lift
+contains policy equivalent to:
+
+```json
+[
+  { "path": ["repoState"], "reasons": ["error"] }
+]
+```
+
+Paths are relative to the module argument. A policy applies to the exact value
+at that path; it does not implicitly accept markers anywhere below a container.
+This avoids accidentally swallowing an unavailable list element because a
+caller observed the list itself.
+
+The policy, not a structural schema match, authorizes the callback to receive a
+control value. Generated schemas still include the widened TypeScript union so
+the accepted FabricType can be materialized. For v1, the schema generator may
+represent the `DataUnavailable` arm as an opaque object branch; the runner
+checks the concrete class and reason before schema traversal.
+
+### Transformer behavior
+
+The transformer must:
+
+1. Classify the four guards, `resultOf()`, and `observeAvailability()` by
+   resolved `commonfabric` symbol, including aliased imports.
+2. Preserve TypeScript's original type-predicate narrowing in both branches.
+3. Treat `resultOf()` as an identity reactive alias which removes unavailable
+   members only from the static usable view. It emits no node and no input
+   policy by itself.
+4. Canonicalize a `resultOf(source)` alias with `source` when both appear in one
+   generated computation. A guard policy on `source` must not be defeated by a
+   duplicate unaccepted capture introduced for the usable alias.
+5. When a guard inside an existing compute probes an operand whose static type
+   includes that variant, preserve the union in the outer argument schema and
+   emit exact policy for the guard reason.
+6. Treat `observeAvailability()` as an identity reactive alias and retain its
+   source reactive path. For a statically plain input, widen the captured type
+   and schema for the selected variants before schema injection.
+7. For a guard expression in pattern context over a statically plain `T`,
+   attach `T | <probed variant>` to only the probed capture of the synthesized
+   computation.
+8. Emit exact-path unavailable input policy on the owning module and verify
+   that captured type, generated schema, and policy describe the same variants.
+9. Leave every guard as the same pure runtime call; no factory-to-predicate
+   rewrite is needed.
+10. Preserve alias provenance, types, and policy through closure hoisting,
+    module serialization, reload, and nested transformer-generated computed
+    blocks.
+
+The transformer must not widen every input or every computation merely because
+one availability helper appears somewhere in a pattern.
+
+## Runner Semantics
+
+### Input preflight
+
+Availability preflight occurs after node bindings can be resolved but before
+the implementation argument is materialized through `argumentSchema`.
+
+For every value-producing node run, the runner performs these steps:
+
+1. Walk the bound inputs in deterministic argument order, following the same
+   links the argument read would follow.
+2. Record every concrete `DataUnavailable` value and its argument-relative
+   path.
+3. Remove from consideration only markers whose exact path policy accepts
+   their reason.
+4. If any unaccepted markers remain, select one by the precedence rule below,
+   write that same value to the node output, and do not invoke the
+   implementation.
+5. Otherwise materialize the argument against `argumentSchema`, retaining the
+   exact accepted marker values and paths from preflight.
+6. If materialization fails for a locally complete value, write the interned
+   `DataUnavailable.schemaMismatch()` value and do not invoke the
+   implementation.
+7. If the argument is valid, restore each accepted branded marker at its exact
+   path in the materialized argument, then invoke the implementation normally.
+   Accepted unavailable values are now ordinary inputs to that implementation.
+
+This preflight must happen before ordinary object schema matching. Otherwise an
+object-shaped `T` could accidentally accept the opaque FabricType leaf and run
+without an explicit policy.
+
+The restoration in step 7 is required even when the generated capture schema
+contains a structural marker arm. JSON Schema cannot authenticate or recreate
+the FabricInstance brand and may materialize that opaque leaf as `undefined`.
+The path policy is authoritative: schema traversal validates the surrounding
+usable shape, while the already-validated concrete marker instance is carried
+across that traversal out of band.
+
+The result write caused by propagation must perform the same scope and CFC
+bookkeeping as a normal computation result. In particular, an error message is
+data derived from the input and must not bypass input label propagation merely
+because the callback was skipped.
+
+### Syncing versus schema mismatch
+
+A value that is known not to be locally available yet produces `"syncing"`,
+not `"schema-mismatch"`. A value that is locally complete but does not satisfy
+the declared schema produces `"schema-mismatch"`.
+
+The runner therefore needs a readiness result which distinguishes:
+
+- a covered, present `undefined` value;
+- a missing or invalid value after synchronization; and
+- a value whose required storage coverage is still synchronizing.
+
+Existing first-run deferral may prevent many syncing values from being
+observable, but it is not a substitute for this distinction at every read
+boundary.
+
+### Precedence and tie-breaking
+
+When more than one unaccepted input is unavailable, the selected reason is:
+
+```text
+error > pending > syncing > schema-mismatch
+```
+
+Accepted markers do not participate in selection. Among markers with the same
+reason, the first marker in deterministic argument order wins.
+
+Argument order is the serialized input-binding order. Arrays are visited by
+increasing index and object bindings by their serialized property order. The
+walk is depth-first and cycle-safe. This is deterministic across reloads and
+matches the author's visible argument construction more closely than sorting
+paths alphabetically.
+
+V1 does not accumulate markers. If later usage shows that callers need every
+failure, a separate aggregate variant can include paths and positions without
+changing the deterministic single-marker rule.
+
+### Nodes with no value output
+
+An event handler or effect with no value output is not invoked while it has an
+unaccepted unavailable input. It has nowhere to propagate the value and keeps
+the existing gated behavior.
+
+An effect which also owns a data result, including a fetch or generation
+built-in, does propagate an unavailable input to that result while suppressing
+the external effect. Scheduler classification as an effect must not by itself
+disable value propagation.
+
+Container operators apply the rule at their actual compute boundary. If the
+entire list input is unavailable, the entire output is unavailable. If a
+mapped element is unavailable, that element's sub-computation propagates the
+marker to the corresponding result position.
+
+## Asynchronous Built-in State Machines
+
+### Direct output transitions
+
+A single-result asynchronous built-in owns one direct value output. Its
+observable transitions are:
+
+| Situation | Output |
+|-----------|--------|
+| Required stored state is still loading | `DataUnavailable("syncing")` |
+| A valid request is scheduled or in flight | `DataUnavailable("pending")` |
+| The operation succeeds | `T` |
+| Network, HTTP, provider, or execution failure | `DataUnavailable("error")` |
+| A response does not match its declared result schema | `DataUnavailable("schema-mismatch")` |
+| An input is unavailable | Propagated input marker |
+| A locally complete input fails its schema | `DataUnavailable("schema-mismatch")` |
+
+When inputs change, the built-in must replace any stale successful result with
+the new pending or propagated state in the same logical transition. Consumers
+must never observe the old `T` as the result for new inputs.
+
+`pending` and `syncing` are serializable so they can cross cells and replicas,
+but they are not terminal cache hits. On resume, the producer reconciles a
+persisted transient marker against its request and synchronization state.
+`error` remains stable until inputs change or the operation is retried.
+
+### Auxiliary generation state
+
+The advanced generation state objects also expose values which are not simple
+availability states, notably streaming `partial` text and grounding sources.
+Those capabilities must not be silently discarded by the direct-result
+cutover.
+
+The value-returning `generateText()` and `generateObject<T>()` APIs are the
+default APIs governed by this spec. Streaming or metadata-aware use gets an
+explicit advanced API: `generateTextStream()` and
+`generateObjectStream<T>()`, backed by the same internal operation state as
+their direct counterparts. The text state exposes `pending`,
+`result: AsyncResult<string>`, `error`, `partial`, and `groundingSources`. The
+object state exposes `pending`, `result: AsyncResult<T>`, `error`, `partial`,
+and `messages`. These are the auxiliary fields the runtime implements. Internal
+request hashes are omitted, and the object state does not expose the former
+declared-only `cancelGeneration` member because its result schema and
+implementation do not create that stream.
+
+`llmDialog` remains stateful and is outside this direct-result migration. Its
+implemented cancellation stream is unchanged.
+
+## Planned `latestComplete()` Snapshot Helper
+
+`resultOf()` is stateless: whenever its source is unavailable, an ordinary
+consumer also becomes unavailable. A later `latestComplete()` built-in will
+provide the complementary continuity primitive. It publishes atomic snapshots
+only when its entire schema-declared input is usable, then retains the most
+recent complete snapshot while any current input is unavailable.
+
+```typescript
+// Shown for illustration only.
+const repo = latestComplete(repoRequest);
+
+const { repo, ticket, variable } = latestComplete({
+  repo: repoRequest,
+  ticket: ticketRequest,
+  variable: regularReactiveCell,
+});
+```
+
+The second form is an availability join. A new value of
+`regularReactiveCell` is not copied while either request is unavailable. Once
+all three fields are usable, the built-in publishes one new object containing
+values from that same coherent read. It never constructs a snapshot by mixing
+fields from different complete moments.
+
+The state transitions are:
+
+| Situation | Output |
+|-----------|--------|
+| No complete snapshot has been published | Interned pending marker |
+| The complete input materializes against its usable schema | Atomically copied schema-materialized value |
+| Any current input is unavailable or does not materialize | Prior output remains unchanged |
+| Inputs later become complete again | Entire snapshot is replaced atomically |
+
+This helper intentionally retains the prior snapshot for every unavailable
+reason, including error and schema mismatch. Code which needs the current
+failure continues to inspect the original request values. Before the first
+complete snapshot, those details are intentionally collapsed to pending.
+
+`latestComplete()` is stateful and creates a built-in node; it is not an
+identity cast. Its authored return type is the recursively usable input shape,
+which permits direct property access and destructuring. The runtime output may
+carry the initial pending marker, and ordinary runner propagation gates its
+consumers until the first snapshot.
+
+The transformer injects one schema derived from the TypeScript input type. It
+recursively removes `DataUnavailable` and all four concrete unavailable
+variants from unions at every schema path. The same stripped schema governs:
+
+- the built-in's schema-aware input read;
+- the exact value copied to the snapshot output; and
+- the authored usable return type and output schema.
+
+At runtime the implementation performs a status-bearing read through that
+schema. On success it writes the materialized value to the existing output
+cell with normal scope and CFC derivation. On unavailable, synchronizing, or
+schema-invalid input it performs no write once a snapshot exists. A valid
+authored `undefined` must remain distinguishable from a failed read when the
+stripped schema admits `undefined`.
+
+The output cell is the persisted snapshot; the implementation should not mint
+a duplicate hidden snapshot cell. Rehydration distinguishes an absent output
+from a stored valid `undefined` with the runtime's status-bearing presence
+read, or with the smallest explicit initialization sentinel if the storage
+boundary cannot expose that distinction.
+
+`latestComplete()` remains unimplemented. Its
+[separate live implementation plan](../plans/latest-complete.md) builds on the
+now-shipped `AsyncResult<T>`, `resultOf()`, status-bearing reads, and unavailable
+union schema handling.
+
+## Error Semantics
+
+`DataUnavailable("error")` represents a failed producer or effect. Its
+`error` is a `FabricError` value and preserves the native error's name,
+message, stack, cause, and supported custom properties.
+
+A result-schema verification failure is `"schema-mismatch"`, not `"error"`.
+This lets patterns distinguish an unavailable service from a violated data
+contract without parsing an error string.
+
+An implementation that is actually invoked and throws still follows the
+runner's exception path. Automatically converting arbitrary thrown exceptions
+into data would hide programming errors and is not part of this design.
+
+## Compatibility and Versioning
+
+This is a source-breaking API migration for patterns that read `.result`,
+`.pending`, or `.error` from fetch and generation state objects. The repository
+must migrate those uses as part of the public-name cutover. Ordinary consumers
+now call `resultOf(request)` once to obtain a statically usable value; consumers
+which render availability states keep the `AsyncResult<T>` and use guards.
+
+Internal operation-state containers remain implementation details. Direct
+built-ins project their output from the result cell while advanced generation
+APIs retain access to partial state.
+
+Serialized modules gain unavailable input policy metadata. Runtimes that do
+not understand the metadata must not execute those modules as if the policy
+were absent. Likewise, an older data-model registry decodes
+`DataUnavailable@1` as an unknown value and cannot implement propagation.
+The transformer therefore emits a policy-bearing JavaScript computation with
+the serialized module kind `javascript-availability`. A supporting runtime
+validates its policy and executes it with JavaScript-node semantics. An older
+runtime reaches its existing unknown-module failure path instead of silently
+executing the callback without the policy. Deployment still uses the normal
+runtime/compiler version gate before patterns emit the new type or policy.
+
+## Implemented Layers
+
+### FabricType and policy plumbing
+
+- `DataUnavailable`, its codec, factories, guards, public type mirrors, and
+  builder/runtime wiring.
+- Serialized path-scoped unavailable input policy on modules.
+- Transformer classification, `observeAvailability()`, type widening, and
+  diagnostics.
+- Runner preflight which selects concrete unavailable inputs before schema
+  materialization.
+
+### Computation propagation
+
+- JavaScript value computations propagate unaccepted markers.
+- Invalid-input output is `"schema-mismatch"`, not `undefined`.
+- Syncing is distinct from complete invalid data.
+- Equivalent behavior applies to conditionals, container operators, and raw
+  built-ins with data outputs.
+
+### Explicit asynchronous results
+
+- Fetch and generation built-ins write direct values or unavailable
+  markers.
+- Explicit advanced generation APIs cover streaming and metadata use.
+- `AsyncResult<T>` and the transparent zero-node `resultOf()` helper are public.
+- Public signatures use `AsyncResult<T>`; repository patterns, tests, examples,
+  prompts, and live documentation use the same contract.
+- Sibling pending/error fields remain private operation state except on the
+  explicitly advanced APIs.
+
+## Testing Requirements
+
+### Data model
+
+- Round-trip every reason through the default JSON codec.
+- Preserve `FabricError` fields, deep freeze, clone, equality, and hash
+  behavior.
+- Reject structural lookalikes as control values.
+- Verify unknown-runtime decoding follows the normal unknown-type path.
+
+### Transformer and schema generation
+
+- Type-predicate narrowing in true and false branches.
+- Direct pattern-context guard lowering with reason-specific policy.
+- Explicit computed guards over visible `AsyncResult<T>` unions without an
+  observation cast.
+- `resultOf()` remains a zero-node alias and canonicalizes with its source when
+  both are captured by one guarded computation.
+- Explicit computed over a statically plain propagated value with a correctly
+  externalized observation cast.
+- Diagnostics for a plain unobserved guard and for an observation cast inside
+  the compute.
+- Selective reasons, aliases, destructuring, generic `T`, nested generated
+  computed blocks, hoisting, serialization, and reload.
+- Exact-path policy: accepting an outer value must not accept a nested marker.
+
+### Runner
+
+- Callback suppression and unchanged-marker propagation.
+- `error > pending > syncing > schema-mismatch` precedence and stable
+  same-reason tie-breaking.
+- Accepted reasons reach the callback while other reasons propagate.
+- Object-shaped `T` never accepts a marker without policy.
+- Valid authored `undefined`, syncing, missing data, and schema mismatch remain
+  distinct.
+- Result scope, CFC labels, policy inputs, pull scheduling, and durable
+  observation behavior match a normal result write.
+- Per-element propagation through map-like operators.
+
+### Built-ins
+
+- Initial, pending, success, error, result-schema mismatch, input-change, retry,
+  and rehydration transitions.
+- No stale successful value after inputs change.
+- Direct APIs and advanced streaming APIs share one operation rather than
+  issuing duplicate requests.
+- End-to-end patterns demonstrate a default `resultOf()` projection, a
+  pending/error/success expression using both state and usable aliases, and a
+  computation which observes only errors while other reasons still propagate.
+
+## Advanced Generation API Decision
+
+The advanced names and state fields are fixed in
+[Auxiliary generation state](#auxiliary-generation-state). They preserve the
+implemented partial and metadata surfaces without carrying forward the
+declared-but-absent object cancellation stream.

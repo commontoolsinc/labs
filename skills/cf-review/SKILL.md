@@ -182,8 +182,8 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
   graph wiring the transformers would do, imperative escapes from the target
   language);
 - async escapes in patterns (`async/await` in handlers; awaiting `generateText`
-  / `generateObject` instead of using `.result`; `new Stream()` /
-  `.subscribe()`).
+  / `generateObject` instead of projecting the request with `resultOf()`;
+  `new Stream()` / `.subscribe()`).
 
 When a transformer behavior is in doubt, read the **emitted output** before
 reasoning from source:

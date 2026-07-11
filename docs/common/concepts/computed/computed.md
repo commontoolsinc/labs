@@ -20,6 +20,34 @@ const filteredItems = computed(() => {
 rendering or other simple conditional values in normal pattern code, use plain
 ternaries — see [Conditional Rendering](../../patterns/conditional.md).
 
+## Availability Inside a Computation
+
+An explicit computation can inspect unavailable states when it captures the
+visible `AsyncResult<T>` request. Keep the usable `resultOf()` alias outside so
+the request and result remain one reactive source:
+
+```typescript
+// Shown for illustration only.
+const repoRequest = fetchJson<Repo>({ url });
+const repo = resultOf(repoRequest);
+
+const label = computed(() =>
+  isPending(repoRequest)
+    ? "Loading…"
+    : hasError(repoRequest)
+      ? `Error: ${repoRequest.error.message}`
+      : repo.name
+);
+```
+
+The computation runs for the reasons it explicitly guards. Other unavailable
+states propagate without invoking its body. A derived value after `resultOf()`
+is statically just its usable type; if a later computation deliberately needs
+to inspect a propagated state from that plain value, call
+`observeAvailability(value, "error")` outside the later `computed()` boundary.
+Ordinary computations should omit that escape hatch and simply wait for usable
+data.
+
 ## When NOT to Use computed()
 
 **Never inside JSX for interpolation or property access** — reactivity is

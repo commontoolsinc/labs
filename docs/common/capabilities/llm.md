@@ -1,8 +1,10 @@
 # LLM Generation
 
-LLM calls are reactive nodes, not promises: never `await` them. Call them in
-the pattern body and check `pending` / `error` / `result` reactively, as shown
-below.
+LLM calls are reactive nodes, not promises: never `await` them. `generateText`
+and `generateObject` return an `AsyncResult<T>` directly: either the usable
+result or a runtime-owned unavailable state. Keep the request value for loading
+and error guards, then call `resultOf(request)` once for the ordinary usable
+value.
 
 ## generateText
 
@@ -10,17 +12,17 @@ Free-form text generation.
 
 ```typescript
 // Shown for illustration only.
-const response = generateText({
+const responseRequest = generateText({
   prompt: userInput,
   system: "You are a helpful assistant.",  // optional
 });
+const response = resultOf(responseRequest);
 
-// Response: { result: string, error: string, pending: boolean }
-{response.pending
+{isPending(responseRequest)
   ? <span>Generating...</span>
-  : response.error
-  ? <span>Error: {response.error}</span>
-  : <div>{response.result}</div>}
+  : hasError(responseRequest)
+  ? <span>Error: {responseRequest.error.message}</span>
+  : <div>{response}</div>}
 ```
 
 ---
@@ -37,22 +39,22 @@ interface ProductIdea {
   price: number;
 }
 
-const idea = generateObject<ProductIdea>({
+const ideaRequest = generateObject<ProductIdea>({
   prompt: userInput,
   system: "Generate a product idea.",
   model: "anthropic:claude-sonnet-4-5",
 });
+const idea = resultOf(ideaRequest);
 
-// Response: { result: ProductIdea, error: string, pending: boolean }
-{idea.pending
+{isPending(ideaRequest)
   ? <span>Generating...</span>
-  : idea.error
-  ? <span>Error: {idea.error}</span>
+  : hasError(ideaRequest)
+  ? <span>Error: {ideaRequest.error.message}</span>
   : (
     <div>
-      <h3>{idea.result?.name}</h3>
-      <p>{idea.result?.description}</p>
-      <p>${idea.result?.price}</p>
+      <h3>{idea.name}</h3>
+      <p>{idea.description}</p>
+      <p>${idea.price}</p>
     </div>
   )}
 ```
@@ -65,20 +67,32 @@ Map over items - caching is automatic per-item:
 // Shown inside a pattern body.
 const summaries = articles.map((article) => ({
   article,
-  summary: generateText({
+  request: generateText({
     prompt: computed(() => `Summarize: ${article.title}\n${article.content}`),
   }),
 }));
 
-{summaries.map(({ article, summary }) => (
+{summaries.map(({ article, request }) => (
   <div>
     <h3>{article.title}</h3>
-    {summary.pending
+    {isPending(request)
       ? <em>Summarizing...</em>
-      : <p>{summary.result}</p>}
+      : <p>{resultOf(request)}</p>}
   </div>
 ))}
 ```
+
+The guards `isPending`, `hasError`, `isSyncing`, and `hasSchemaMismatch`
+narrow the request to the corresponding state. A computation that only uses
+`resultOf(request)` does not need guards: unavailability propagates until the
+result exists.
+
+## Partial and metadata state
+
+Use `generateTextStream` or `generateObjectStream<T>` when a pattern needs
+partial output or generation metadata. These advanced forms return a state
+object whose `result` field is itself an `AsyncResult<T>`; the ordinary
+`generateText` and `generateObject` calls remain the concise default.
 
 ### Valid Model Names
 
@@ -113,8 +127,9 @@ distinct input):
 
 ```typescript
 // Shown for illustration only.
-const result = generateObject({
+const request = generateObject({
   prompt,
   cache: false,  // Forces fresh generation
 });
+const result = resultOf(request);
 ```
