@@ -166,13 +166,51 @@ const logger = getLogger("scheduler", {
 });
 
 type FilterStatsState = { filtered: number; executed: number };
+
+const schedulerContextRank = (contextKey: string): number =>
+  contextKey === "space"
+    ? 0
+    : contextKey.startsWith("user:")
+    ? 1
+    : contextKey.startsWith("session:")
+    ? 2
+    : -1;
+
+const observationMinimumContextRank = (
+  observation: SchedulerActionObservation,
+): number => {
+  const summary = observation.completeActionScopeSummary;
+  if (!summary) return 2;
+  const pieceScope = summary.piece.scope ?? "space";
+  if (
+    summary.piece.space !== observation.ownerSpace ||
+    `${pieceScope}:${summary.piece.id}` !== observation.pieceId
+  ) {
+    return 2;
+  }
+  let rank = pieceScope === "session" ? 2 : pieceScope === "user" ? 1 : 0;
+  for (
+    const address of [
+      ...summary.reads,
+      ...summary.writes,
+      ...summary.materializerWriteEnvelopes,
+      ...summary.directOutputs,
+    ]
+  ) {
+    if (address.space !== summary.piece.space) return 2;
+    const scope = address.scope ?? "space";
+    rank = Math.max(rank, scope === "session" ? 2 : scope === "user" ? 1 : 0);
+  }
+  return rank;
+};
+
 type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
   & {
     space: MemorySpace;
     snapshotsByActionId?: ReadonlyMap<
       string,
-      PersistedSchedulerObservationSnapshot
+      readonly PersistedSchedulerObservationSnapshot[]
     >;
     addressesCurrentAtOrBelow?: (
       addresses: readonly IMemorySpaceAddress[],
@@ -788,12 +826,41 @@ export class Scheduler {
   // Returns whether the action actually rehydrated from its snapshot; a miss
   // (no snapshot for this actionId, fingerprint mismatch, malformed payload)
   // leaves the action on the normal initial-run path.
+  private selectSchedulerSnapshotCandidate(
+    action: Action,
+    candidates: readonly PersistedSchedulerObservationSnapshot[],
+  ): PersistedSchedulerObservationSnapshot | undefined {
+    let selected: PersistedSchedulerObservationSnapshot | undefined;
+    let selectedRank = -1;
+    for (const candidate of candidates) {
+      const observation = candidate.observation;
+      if (
+        !isSchedulerActionObservation(observation) ||
+        !this.observationMatchesCurrentAction(action, observation)
+      ) {
+        continue;
+      }
+      const contextRank = schedulerContextRank(
+        candidate.executionContextKey,
+      );
+      if (
+        contextRank < observationMinimumContextRank(observation) ||
+        contextRank <= selectedRank
+      ) {
+        continue;
+      }
+      selected = candidate;
+      selectedRank = contextRank;
+    }
+    return selected;
+  }
+
   private applyPreloadedInitialActionRehydration(
     action: Action,
     rehydration: SchedulerStorageRehydrationOptions & {
       snapshotsByActionId: ReadonlyMap<
         string,
-        PersistedSchedulerObservationSnapshot
+        readonly PersistedSchedulerObservationSnapshot[]
       >;
     },
   ): boolean {
@@ -802,16 +869,19 @@ export class Scheduler {
     // seed may promote this resuming action before its status is restored.
     this.initialRehydrationInFlight++;
     try {
-      const snapshot = rehydration.snapshotsByActionId.get(
+      const candidates = rehydration.snapshotsByActionId.get(
         this.getActionId(action),
+      ) ?? [];
+      const snapshot = this.selectSchedulerSnapshotCandidate(
+        action,
+        candidates,
       );
-      if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+      if (!snapshot) {
         logger.debug("rehydrate/fallback-run/no-match", () => []);
         return false;
       }
       const addresses = observationAdoptionAddresses(snapshot.observation);
       if (
-        this.observationMatchesCurrentAction(action, snapshot.observation) &&
         rehydration.addressesCurrentAtOrBelow?.(
             addresses,
             snapshot.observation.observedAtSeq,
@@ -860,21 +930,13 @@ export class Scheduler {
       ): boolean;
     },
   ): number {
-    let adopted = 0;
+    const candidatesByAction = new Map<
+      Action,
+      PersistedSchedulerObservationSnapshot[]
+    >();
     for (const snapshot of snapshots) {
       const observation = snapshot.observation;
       if (!isSchedulerActionObservation(observation)) continue;
-      // Live adoption applies only clean successful runs: a dirty or failed
-      // row must not wake or re-run work on receivers (marker semantics
-      // belong to the reload path).
-      if (
-        observation.status !== "success" ||
-        snapshot.directDirtySeq !== undefined ||
-        snapshot.staleSeq !== undefined ||
-        snapshot.unknownReason !== undefined
-      ) {
-        continue;
-      }
       // Computations only: effects render locally, and event handlers only
       // run at their origin.
       if (observation.actionKind !== "computation") continue;
@@ -893,7 +955,32 @@ export class Scheduler {
         logger.debug("adopt/miss/always-run", () => [observation.actionId]);
         continue;
       }
-      if (!this.observationMatchesCurrentAction(action, observation)) {
+      let candidates = candidatesByAction.get(action);
+      if (!candidates) {
+        candidates = [];
+        candidatesByAction.set(action, candidates);
+      }
+      candidates.push(snapshot);
+    }
+
+    let adopted = 0;
+    for (const [action, candidates] of candidatesByAction) {
+      const snapshot = this.selectSchedulerSnapshotCandidate(
+        action,
+        candidates,
+      );
+      if (!snapshot) {
+        continue;
+      }
+      const observation = snapshot.observation;
+      // A dirty/failed narrower row wins candidate selection and forces the
+      // receiver to run normally; never fall back to a clean broader row.
+      if (
+        observation.status !== "success" ||
+        snapshot.directDirtySeq !== undefined ||
+        snapshot.staleSeq !== undefined ||
+        snapshot.unknownReason !== undefined
+      ) {
         continue;
       }
       const addresses = observationAdoptionAddresses(observation);
@@ -1833,6 +1920,7 @@ export class Scheduler {
       // Payload validation happens inside adoptRemoteObservations.
       this.adoptRemoteObservations(
         notification.observations.map((row) => ({
+          executionContextKey: row.executionContextKey,
           observation: row.observation as SchedulerActionObservation,
           ...(row.directDirtySeq !== undefined
             ? { directDirtySeq: row.directDirtySeq }

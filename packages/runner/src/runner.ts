@@ -591,7 +591,7 @@ type SchedulerRehydrationSubscriptionOptions = {
     awaitSync?: boolean;
     snapshotsByActionId?: ReadonlyMap<
       string,
-      PersistedSchedulerObservationSnapshot
+      readonly PersistedSchedulerObservationSnapshot[]
     >;
     addressesCurrentAtOrBelow?: NonNullable<
       IStorageProviderWithReplica["areSchedulerAddressesCurrentAtOrBelow"]
@@ -679,7 +679,7 @@ export class Runner {
     MemorySpace,
     ReadonlyMap<
       string,
-      ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
     >
   >();
   private resumeSnapshotLoads = new Map<
@@ -687,7 +687,7 @@ export class Runner {
     Promise<
       | ReadonlyMap<
         string,
-        ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+        ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
       >
       | undefined
     >
@@ -2107,7 +2107,7 @@ export class Runner {
     resultCell: Cell<any>,
     snapshotsByActionId?: ReadonlyMap<
       string,
-      PersistedSchedulerObservationSnapshot
+      readonly PersistedSchedulerObservationSnapshot[]
     >,
     awaitSync?: boolean,
   ): SchedulerRehydrationSubscriptionOptions {
@@ -2158,7 +2158,7 @@ export class Runner {
     resultCell: Cell<any>,
     lifecycleEpoch: number,
   ): Promise<
-    | ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+    | ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
     | undefined
   > {
     if (!getPersistentSchedulerStateConfig()) {
@@ -2184,7 +2184,7 @@ export class Runner {
   ): Promise<
     | ReadonlyMap<
       string,
-      ReadonlyMap<string, PersistedSchedulerObservationSnapshot>
+      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
     >
     | undefined
   > {
@@ -2200,7 +2200,7 @@ export class Runner {
     const load = (async () => {
       const byPiece = new Map<
         string,
-        Map<string, PersistedSchedulerObservationSnapshot>
+        Map<string, PersistedSchedulerObservationSnapshot[]>
       >();
       // A transient listing failure must degrade to "resume fresh" rather
       // than hard-failing start(): returning undefined runs the boot without
@@ -2230,7 +2230,9 @@ export class Runner {
               byAction = new Map();
               byPiece.set(pieceId, byAction);
             }
-            byAction.set(actionId, {
+            const candidates = byAction.get(actionId) ?? [];
+            candidates.push({
+              executionContextKey: snapshot.executionContextKey,
               observation: snapshot.observation,
               ...(snapshot.directDirtySeq !== undefined
                 ? { directDirtySeq: snapshot.directDirtySeq }
@@ -2242,6 +2244,7 @@ export class Runner {
                 ? { unknownReason: snapshot.unknownReason }
                 : {}),
             });
+            byAction.set(actionId, candidates);
           }
           cursor = page.nextCursor;
         } while (cursor !== undefined);

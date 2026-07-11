@@ -2,6 +2,7 @@ import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
+import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
 import { isCellScope } from "../scope.ts";
 
 export type SchedulerActionKind =
@@ -71,6 +72,7 @@ export interface SchedulerActionObservation {
 }
 
 export interface PersistedSchedulerObservationSnapshot {
+  executionContextKey: SchedulerExecutionContextKey;
   observation: SchedulerActionObservation;
   directDirtySeq?: number;
   staleSeq?: number;
