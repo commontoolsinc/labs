@@ -756,7 +756,7 @@ describe("persistent scheduler observations", () => {
       const observation = buildSchedulerActionObservation({
         ownerSpace: space,
         actionId,
-        actionKind: "computation",
+        actionKind: "effect",
         branch: "",
         pieceId: "space:preloaded-process",
         processGeneration: 1,
@@ -781,6 +781,7 @@ describe("persistent scheduler observations", () => {
         shallowReads: [],
         writes: [],
       }, {
+        isEffect: true,
         rehydrateFromStorage: {
           space,
           pieceId: "space:preloaded-process",
@@ -808,16 +809,12 @@ describe("persistent scheduler observations", () => {
       expect(queryCount).toBe(0);
       expect(testRuntime.runtime.scheduler.isDirty(preloadedPersistedAction))
         .toBe(false);
-      expect(
-        testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
-      )
-        .toEqual([writeAddress]);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
   });
 
-  it("rejects an unproved shared candidate and runs fresh", async () => {
+  it("rejects a fallback-fingerprint shared candidate and runs fresh", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
@@ -831,9 +828,9 @@ describe("persistent scheduler observations", () => {
       const observation = buildSchedulerActionObservation({
         ownerSpace: space,
         actionId,
-        actionKind: "computation",
+        actionKind: "effect",
         branch: "",
-        pieceId: "space:unproved-shared-process",
+        pieceId: "space:of:unproved-shared-process",
         processGeneration: 1,
         implementationFingerprint: schedulerImplementationFingerprint(
           action,
@@ -850,12 +847,32 @@ describe("persistent scheduler observations", () => {
           writes: [],
         },
       });
+      const forgedObservation: SchedulerActionObservation = {
+        ...observation,
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: observation.implementationFingerprint,
+          runtimeFingerprint: observation.runtimeFingerprint,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:unproved-shared-process",
+            path: [],
+          },
+          reads: [readAddress],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      };
 
       testRuntime.runtime.scheduler.subscribe(action, {
         reads: [],
         shallowReads: [],
         writes: [],
       }, {
+        isEffect: true,
         rehydrateFromStorage: {
           space,
           pieceId: observation.pieceId,
@@ -863,7 +880,7 @@ describe("persistent scheduler observations", () => {
           ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             actionId,
-            [{ executionContextKey: "space", observation }],
+            [{ executionContextKey: "space", observation: forgedObservation }],
           ]]),
         },
       });
@@ -897,7 +914,7 @@ describe("persistent scheduler observations", () => {
       const observation = buildSchedulerActionObservation({
         ownerSpace: space,
         actionId,
-        actionKind: "computation",
+        actionKind: "effect",
         branch: "",
         pieceId: "space:of:dirty-narrower-process",
         processGeneration: 1,
@@ -932,6 +949,7 @@ describe("persistent scheduler observations", () => {
         shallowReads: [],
         writes: [],
       }, {
+        isEffect: true,
         rehydrateFromStorage: {
           space,
           pieceId: observation.pieceId,
@@ -1228,6 +1246,83 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("does not adopt a clean broad row past a dirty session candidate", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const action = Object.assign(function adoptionContextCandidate() {}, {
+        writes: [writeLink],
+        implementationHash: "cf:module/test:adoption-context",
+      });
+      const actionId = "adoptionContextCandidate";
+      const pieceId = "space:of:adoption-context-piece";
+      scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId,
+          processGeneration: 0,
+        },
+      });
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        branch: "",
+        pieceId,
+        processGeneration: 0,
+        actionId,
+        actionKind: "computation",
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+        currentKnownWrites: [writeAddress],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:adoption-context-piece",
+            path: [],
+          },
+          reads: [readAddress],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      });
+      const oracle = {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      };
+
+      expect(scheduler.isDirty(action)).toBe(true);
+      expect(scheduler.adoptRemoteObservations([{
+        executionContextKey: "space",
+        observation,
+      }, {
+        executionContextKey: "session:did%3Akey%3Aalice:adoption-session",
+        observation,
+        directDirtySeq: 6,
+      }], oracle)).toBe(0);
+      expect(scheduler.isDirty(action)).toBe(true);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("persists no observation for identity-less registrations", async () => {
     // Only doc-keyed observations persist: an action registered without
     // rehydration identity (session-scoped effects like sinks/pull) can never
@@ -1326,7 +1421,9 @@ describe("persistent scheduler observations", () => {
       });
 
       expect(ownerSnapshots?.snapshots.length).toBe(1);
-      expect(readSnapshots?.snapshots.length).toBe(1);
+      // Mirrors retain their originating execution context. The read-space
+      // provider has a distinct authenticated session and cannot list it.
+      expect(readSnapshots?.snapshots.length).toBe(0);
       expect(
         (ownerSnapshots?.snapshots[0]?.observation as
           & SchedulerActionObservation

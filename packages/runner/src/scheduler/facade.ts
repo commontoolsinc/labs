@@ -176,11 +176,30 @@ const schedulerContextRank = (contextKey: string): number =>
     ? 2
     : -1;
 
+const schedulerAddressScopeRank = (address: IMemorySpaceAddress): number =>
+  (address.scope ?? "space") === "session"
+    ? 2
+    : (address.scope ?? "space") === "user"
+    ? 1
+    : 0;
+
+const schedulerEnvelopeCovers = (
+  envelope: IMemorySpaceAddress,
+  address: IMemorySpaceAddress,
+): boolean =>
+  envelope.space === address.space &&
+  envelope.id === address.id &&
+  (envelope.scope ?? "space") === (address.scope ?? "space") &&
+  envelope.path.length <= address.path.length &&
+  envelope.path.every((segment, index) => segment === address.path[index]);
+
 const observationMinimumContextRank = (
   observation: SchedulerActionObservation,
 ): number => {
   const summary = observation.completeActionScopeSummary;
-  if (!summary) return 2;
+  if (!summary || !observation.implementationFingerprint.startsWith("impl:")) {
+    return 2;
+  }
   const pieceScope = summary.piece.scope ?? "space";
   if (
     summary.piece.space !== observation.ownerSpace ||
@@ -198,8 +217,47 @@ const observationMinimumContextRank = (
     ]
   ) {
     if (address.space !== summary.piece.space) return 2;
-    const scope = address.scope ?? "space";
-    rank = Math.max(rank, scope === "session" ? 2 : scope === "user" ? 1 : 0);
+    rank = Math.max(rank, schedulerAddressScopeRank(address));
+  }
+
+  const runtimeGroups: Array<[
+    readonly IMemorySpaceAddress[],
+    readonly IMemorySpaceAddress[],
+  ]> = [
+    [
+      [...observation.reads, ...observation.shallowReads],
+      summary.reads,
+    ],
+    [
+      [
+        ...observation.actualChangedWrites,
+        ...observation.currentKnownWrites,
+        ...(observation.declaredWrites ?? []),
+        ...(observation.ignoredSchedulingWrites ?? []),
+      ],
+      [
+        ...summary.writes,
+        ...summary.materializerWriteEnvelopes,
+        ...summary.directOutputs,
+      ],
+    ],
+    [
+      observation.materializerWriteEnvelopes,
+      summary.materializerWriteEnvelopes,
+    ],
+  ];
+  for (const [observed, envelopes] of runtimeGroups) {
+    for (const address of observed) {
+      if (
+        address.space !== summary.piece.space ||
+        !envelopes.some((envelope) =>
+          schedulerEnvelopeCovers(envelope, address)
+        )
+      ) {
+        return 2;
+      }
+      rank = Math.max(rank, schedulerAddressScopeRank(address));
+    }
   }
   return rank;
 };
