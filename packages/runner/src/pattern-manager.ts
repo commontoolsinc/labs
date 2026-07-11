@@ -288,6 +288,16 @@ export class PatternManager {
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
   private failedCompileCacheRecoveries = new Set<string>();
+  // `${entryIdentity}\0${space}` closure replications already kicked off this
+  // session (see `replicatePatternToSpace`). An entry is removed on failure so
+  // the next child creation retries.
+  private replicatedClosures = new Set<string>();
+  // Exact-space durability authority for Factory@1 writers. A live artifact
+  // index proves only that code evaluated in this session; it says nothing
+  // about which space can cold-load the content-addressed source closure. This
+  // map is populated only after an awaited persistence succeeds or a complete
+  // storage-backed source closure is verified in that exact space.
+  private availableArtifactIdentities = new Map<MemorySpace, Set<string>>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -305,6 +315,85 @@ export class PatternManager {
     byIdentityHits: number;
   } {
     return { ...this.esmCacheStats };
+  }
+
+  /**
+   * Whether `identity` has a verified durable source closure in
+   * `artifactSpace`. This is runner-owned provenance: neither Factory@1 wire
+   * state nor a pattern's execution `spaceSelector` can populate it.
+   */
+  isArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): boolean {
+    return this.availableArtifactIdentities.get(artifactSpace)?.has(identity) ??
+      false;
+  }
+
+  /** Fail closed unless the exact containing space can cold-load `identity`. */
+  assertArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): void {
+    if (!this.isArtifactAvailableInSpace(identity, artifactSpace)) {
+      throw new Error(
+        `Factory artifact ${identity} is not available in space ${artifactSpace}`,
+      );
+    }
+  }
+
+  private noteArtifactClosureAvailable(
+    artifactSpace: MemorySpace,
+    identities: Iterable<string>,
+  ): void {
+    let available = this.availableArtifactIdentities.get(artifactSpace);
+    if (available === undefined) {
+      available = new Set<string>();
+      this.availableArtifactIdentities.set(artifactSpace, available);
+    }
+    for (const identity of identities) available.add(identity);
+  }
+
+  /**
+   * Load and verify the complete source closure that can back one artifact in
+   * `artifactSpace`, including pinned Fabric imports. Source documents omit
+   * Fabric edges deliberately, so verifying only the entry's linked closure
+   * would miss separately rooted imported artifacts that compiled-cache
+   * closures include. Every such root must itself verify in the same space.
+   */
+  private async loadVerifiedArtifactSourceClosure(
+    artifactSpace: MemorySpace,
+    entryIdentity: string,
+    tx: IExtendedStorageTransaction,
+  ): Promise<Map<string, SourceDoc> | undefined> {
+    const verified = new Map<string, SourceDoc>();
+    const visitedRoots = new Set<string>();
+    const pendingRoots = [entryIdentity];
+
+    while (pendingRoots.length > 0) {
+      const rootIdentity = pendingRoots.shift()!;
+      if (visitedRoots.has(rootIdentity)) continue;
+      visitedRoots.add(rootIdentity);
+
+      const closure = await loadVerifiedSourceClosure(
+        this.runtime,
+        artifactSpace,
+        rootIdentity,
+        tx,
+      );
+      if (closure === undefined) return undefined;
+
+      for (const [identity, doc] of closure) {
+        if (!verified.has(identity)) verified.set(identity, doc);
+        for (const imp of fabricImportRefsFromSource(doc)) {
+          if (!visitedRoots.has(imp.targetIdentity)) {
+            pendingRoots.push(imp.targetIdentity);
+          }
+        }
+      }
+    }
+
+    return verified;
   }
 
   /** Resolve once all in-flight compiled-cache write-backs have settled. */
@@ -872,13 +961,19 @@ export class PatternManager {
               !patternCoverage ||
               cacheEntriesIncludePatternCoverage(bodies.values())
             ) {
-              const sourceClosure = await loadVerifiedSourceClosure(
-                this.runtime,
+              const sourceClosure = await this.loadVerifiedArtifactSourceClosure(
                 space,
                 entryIdentity,
                 readTx,
               );
-              if (sourceClosure?.has(entryIdentity)) {
+              if (
+                sourceClosure !== undefined &&
+                identities.every((identity) => sourceClosure.has(identity))
+              ) {
+                this.noteArtifactClosureAvailable(
+                  space,
+                  sourceClosure.keys(),
+                );
                 warmHit = true;
                 return bodies;
               }
@@ -1005,20 +1100,20 @@ export class PatternManager {
         cacheOpts,
         readTx,
       );
+      logger.time(readStart, "compile-cache", "read-by-identity");
       if (closure.has(entryIdentity)) {
-        sourceClosure = await loadVerifiedSourceClosure(
-          this.runtime,
+        sourceClosure = await this.loadVerifiedArtifactSourceClosure(
           space,
           entryIdentity,
           readTx,
         );
       }
-      logger.time(readStart, "compile-cache", "read-by-identity");
     } finally {
       readTx.abort?.("compile-cache by-identity read complete");
     }
     if (
-      !closure.has(entryIdentity) || !sourceClosure?.has(entryIdentity) ||
+      !closure.has(entryIdentity) || sourceClosure === undefined ||
+      ![...closure.keys()].every((identity) => sourceClosure.has(identity)) ||
       (patternCoverage !== undefined &&
         !cacheEntriesIncludePatternCoverage(closure.values()))
     ) {
@@ -1072,7 +1167,13 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      return this.patternFromEvaluation(result, program, entryIdentity);
+      const pattern = this.patternFromEvaluation(
+        result,
+        program,
+        entryIdentity,
+      );
+      this.noteArtifactClosureAvailable(space, sourceClosure.keys());
+      return pattern;
     } catch (error) {
       // Incomplete/invalid cached closure — fall back to recompile.
       logger.warn("compile-cache-by-identity-miss", () => [
@@ -1183,6 +1284,7 @@ export class PatternManager {
 
     const readTx = this.runtime.edit();
     let closure;
+    let sourceClosure;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(
@@ -1193,6 +1295,13 @@ export class PatternManager {
         readTx,
       );
       logger.time(readStart, "compile-cache", "load-pattern-by-identity");
+      if (closure.has(entryIdentity)) {
+        sourceClosure = await this.loadVerifiedArtifactSourceClosure(
+          space,
+          entryIdentity,
+          readTx,
+        );
+      }
     } finally {
       readTx.abort?.("load-pattern-by-identity read complete");
     }
@@ -1204,6 +1313,20 @@ export class PatternManager {
       this.persistedCompileCacheClosures.delete(
         compileCachePersistenceSlotKey(space, entryIdentity, cacheOpts),
       );
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+      );
+    }
+    if (
+      sourceClosure === undefined ||
+      ![...closure.keys()].every((identity) => sourceClosure!.has(identity))
+    ) {
+      // Compiled-only cache entries are runtime-version-specific and cannot
+      // authorize a durable Factory value. Fall back to verified source; if it
+      // is absent too, fail closed instead of indexing an unloadable artifact.
       return await this.tryColdLoadByIdentity(
         entryIdentity,
         symbol,
@@ -1257,6 +1380,7 @@ export class PatternManager {
       this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
+      this.noteArtifactClosureAvailable(space, sourceClosure.keys());
       this.esmCacheStats.byIdentityHits++;
       return pattern;
     } catch (error) {
@@ -1288,6 +1412,7 @@ export class PatternManager {
     const harness = this.runtime.harness;
     const readTx = this.runtime.edit();
     let sourceDocs;
+    let artifactSourceDocs;
     try {
       sourceDocs = await loadVerifiedSourceClosure(
         this.runtime,
@@ -1295,10 +1420,19 @@ export class PatternManager {
         entryIdentity,
         readTx,
       );
+      if (sourceDocs !== undefined) {
+        artifactSourceDocs = await this.loadVerifiedArtifactSourceClosure(
+          space,
+          entryIdentity,
+          readTx,
+        );
+      }
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
+    if (sourceDocs === undefined || artifactSourceDocs === undefined) {
+      return undefined;
+    }
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
@@ -1347,6 +1481,7 @@ export class PatternManager {
         },
       );
       const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.noteArtifactClosureAvailable(space, artifactSourceDocs.keys());
       if (cacheOpts !== undefined) {
         const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
         const repair = this.persistCompileCacheTracked(
@@ -1702,6 +1837,10 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(persistence);
     try {
       await persistence;
+      this.noteArtifactClosureAvailable(
+        space,
+        modules.map((module) => module.identity),
+      );
     } finally {
       const current = this.inProgressCompileCacheWrites.get(
         persistenceSlotKey,
@@ -1780,6 +1919,10 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
+      this.noteArtifactClosureAvailable(
+        space,
+        modules.map((module) => module.identity),
+      );
     } finally {
       this.compileCacheWrites.delete(writeBack);
       this.pendingCacheWriteBacks.delete(writeBack);
