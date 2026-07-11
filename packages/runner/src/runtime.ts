@@ -1291,6 +1291,19 @@ export class Runtime {
   >();
 
   /**
+   * Establish selector coverage for a link followed only for its reference
+   * identity. Reference-only resolution is already reactive to the source link;
+   * it does not consume the target value and therefore must not subscribe the
+   * executing action to target-settlement wakeups.
+   *
+   * A later availability-aware target read reuses the same in-flight load and
+   * registers its waiter through {@link ensureLinkedDocLoaded}.
+   */
+  prefetchLinkedDoc(link: NormalizedFullLink): void {
+    this.ensureLinkedDocLoad(link, false);
+  }
+
+  /**
    * Asynchronously establish selector coverage for a linked target that a read
    * found absent from the local replica. This is required across spaces and
    * after same-space dynamic retargets to a document outside prior coverage.
@@ -1305,8 +1318,17 @@ export class Runtime {
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,
   ): "pending" | "settled" {
+    return this.ensureLinkedDocLoad(link, true);
+  }
+
+  private ensureLinkedDocLoad(
+    link: NormalizedFullLink,
+    observeSettlement: boolean,
+  ): "pending" | "settled" {
     const key = missingDocLoadKey(link);
-    const token = this.scheduler.getExecutingActionToken();
+    const token = observeSettlement
+      ? this.scheduler.getExecutingActionToken()
+      : undefined;
     const existing = this.missingDocLoads.get(key);
     if (existing !== undefined) {
       if (existing.status !== "settled" && token !== undefined) {

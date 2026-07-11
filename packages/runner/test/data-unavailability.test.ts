@@ -8,6 +8,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import { type Cell, createCell } from "../src/cell.ts";
 import { getDerivedInternalCell, parseLink } from "../src/link-utils.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { trustExecutable, trustModule } from "./support/trusted-builder.ts";
 
@@ -630,6 +631,67 @@ describe("JavaScript-node data unavailability", () => {
     } finally {
       for (const release of releases) release();
       await storageManager.crossSpaceSettled();
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
+  it("prefetches cross-space link targets without registering an action waiter", async () => {
+    const source = runtime.getCell(
+      space,
+      `reference-only prefetch source ${nextResultId++}`,
+    );
+    const target = runtime.getCell(
+      remoteSpace,
+      `reference-only prefetch target ${nextResultId++}`,
+    );
+    const seedTx = runtime.edit();
+    source.withTx(seedTx).setRaw(target.getAsLink());
+    await seedTx.commit();
+
+    const targetId = target.getAsNormalizedFullLink().id;
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
+      if (cell.getAsNormalizedFullLink().id === targetId) {
+        started.resolve();
+        await release.promise;
+        return cell;
+      }
+      return await originalSyncCell(cell);
+    };
+
+    const scheduler = runtime.scheduler;
+    const originalSchedule = scheduler.scheduleExternalDependencySettlement;
+    let settlementSchedules = 0;
+    scheduler.scheduleExternalDependencySettlement = (token) => {
+      settlementSchedules++;
+      return originalSchedule.call(scheduler, token);
+    };
+
+    try {
+      const readTx = runtime.edit();
+      const action = (() => {}) as Parameters<
+        typeof scheduler.withExecutingAction
+      >[0];
+      const resolved = scheduler.withExecutingAction(
+        action,
+        () =>
+          resolveLink(
+            runtime,
+            readTx,
+            source.getAsNormalizedFullLink(),
+          ),
+      );
+
+      expect(resolved.space).toBe(remoteSpace);
+      await started.promise;
+      release.resolve();
+      await storageManager.crossSpaceSettled();
+      expect(settlementSchedules).toBe(0);
+    } finally {
+      release.resolve();
+      scheduler.scheduleExternalDependencySettlement = originalSchedule;
       storageManager.syncCell = originalSyncCell;
     }
   });

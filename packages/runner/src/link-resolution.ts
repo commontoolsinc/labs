@@ -319,8 +319,11 @@ export function resolveLink(
       }
       // If we're crossing spaces, establish target coverage explicitly: the
       // original space's server query cannot push another space's document.
+      // This resolves only reference topology, not target content, so do not
+      // subscribe the executing action to target-settlement wakeups. A later
+      // schema-aware target read registers that waiter if it needs one.
       if (crossSpace) {
-        runtime.ensureLinkedDocLoaded(link);
+        runtime.prefetchLinkedDoc(link);
       }
     } else {
       break;
