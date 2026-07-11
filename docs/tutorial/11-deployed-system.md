@@ -135,8 +135,9 @@ Common Fabric.
   scheduler (`packages/runner/src/scheduler.ts`) and the v2 engine
   (`packages/memory/v2/engine.ts`) are the two files most worth reading
   end to end.
-- **Areas to watch in the code**: per-space ACL enforcement recently landed
-  behind a default-off dial (`MEMORY_ACL_MODE`, Ch. 10); branch
+- **Areas to watch in the code**: per-space ACL enforcement is enabled by
+  default through `MEMORY_ACL_MODE` (Ch. 10), with explicit `observe` and `off`
+  rollout overrides; branch
   infrastructure exists in the storage engine's schema while merge remains
   open (Ch. 9); and the CFC flow-control layer is evolving quickly
   (`packages/runner/src/cfc/`, specs in `docs/specs/cfc-*.md`, demo
