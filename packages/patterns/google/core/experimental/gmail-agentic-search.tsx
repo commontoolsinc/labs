@@ -27,8 +27,8 @@ import {
   computed,
   Default,
   generateObject,
+  generateObjectStream,
   handler,
-  isPending,
   type JSONSchema,
   NAME,
   navigateTo,
@@ -1393,7 +1393,7 @@ When you're done searching, STOP calling tools and produce your final structured
     });
 
     // Create the agent
-    const agentRequest = generateObject<Record<string, any>>({
+    const agentState = generateObjectStream<Record<string, any>>({
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
@@ -1417,8 +1417,9 @@ When you're done searching, STOP calling tools and produce your final structured
         };
       }),
     });
+    const agentRequest = agentState.result;
     const agentResult = resultOf(agentRequest);
-    const agentPending = isPending(agentRequest);
+    const agentPending = agentState.pending;
 
     // Detect when agent completes
     const scanCompleted = isScanning && !agentPending && !!agentResult;
