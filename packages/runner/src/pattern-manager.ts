@@ -31,6 +31,7 @@ import type {
 } from "./storage/interface.ts";
 import {
   buildSourceDocs,
+  type CompiledDoc,
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
@@ -42,6 +43,7 @@ import {
   type SourceDoc,
   sourceDocKey,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
+  writeCompiledDocs,
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -208,6 +210,12 @@ function uniqueCacheableImports(
   return out;
 }
 
+interface VerifiedArtifactClosure {
+  readonly sourceDocs: Map<string, SourceDoc>;
+  readonly compiledDocs?: Map<string, CompiledDoc>;
+  readonly runtimeVersion?: string;
+}
+
 export class PatternManager {
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
@@ -294,10 +302,19 @@ export class PatternManager {
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
   private failedCompileCacheRecoveries = new Set<string>();
-  // `${entryIdentity}\0${space}` closure replications already kicked off this
-  // session (see `replicatePatternToSpace`). An entry is removed on failure so
-  // the next child creation retries.
+  // `${entryIdentity}\0${space}` fire-and-forget compatibility replications
+  // already kicked off this session (see `replicatePatternToSpace`). An entry
+  // is removed on failure so the next child creation retries.
   private replicatedClosures = new Set<string>();
+  // Single-flight awaited artifact-closure ensures. The source participates in
+  // the key: two trusted source spaces may race to repair the same destination,
+  // but callers naming the exact same transport share one verification/copy.
+  // Settled entries are always removed. Successful calls subsequently hit the
+  // exact-space availability map; failed calls remain retryable.
+  private inProgressArtifactClosureReplications = new Map<
+    string,
+    Promise<void>
+  >();
   // Exact-space durability authority for Factory@1 writers. A live artifact
   // index proves only that code evaluated in this session; it says nothing
   // about which space can cold-load the content-addressed source closure. This
@@ -497,11 +514,15 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
-    const replication = this.replicateClosures(
+    const dedupeKey = `${entryRef.identity}\0${toSpace}`;
+    if (this.replicatedClosures.has(dedupeKey)) return;
+    this.replicatedClosures.add(dedupeKey);
+    const replication = this.ensureArtifactClosureInSpace(
       entryRef.identity,
       fromSpace,
       toSpace,
     ).catch((error) => {
+      this.replicatedClosures.delete(dedupeKey);
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
         `from=${fromSpace}`,
@@ -514,89 +535,191 @@ export class PatternManager {
   }
 
   /**
-   * Copy the closures reachable from `entryIdentity` out of `fromSpace` into
-   * `toSpace`, rebuilding the emitted-module shape the write functions expect.
-   * All-or-nothing: a partial compiled closure can never be served (the loaders
-   * require a full, integrity-valid hit), so an incomplete origin set throws
-   * instead of persisting an unservable copy. Delegation metadata is deliberately
-   * not copied across spaces: it carries writer authority and is valid only in
-   * the space whose cache documents attest it. The ordinary save path still
-   * preserves any authenticated delegation already present in `toSpace`.
+   * Await exact-space durability for one content-addressed builder artifact.
+   * Concurrent calls for the same `(identity, source, destination)` share one
+   * flight. A successful cross-space call either verifies an already-complete
+   * destination closure or copies source first, then the runtime-versioned
+   * compiled set, and verifies the complete destination before granting any
+   * availability. Same-space calls verify and mark without writing.
+   *
+   * Failures never grant availability and settled flights are removed, so a
+   * caller can repair missing storage and retry the same operation.
+   */
+  ensureArtifactClosureInSpace(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+  ): Promise<void> {
+    // A prior successful cross-space ensure is already the required proof.
+    // Same-space calls deliberately re-enter verification: this public seam is
+    // also how a fresh manager learns authority for pre-existing storage.
+    if (
+      fromSpace !== toSpace &&
+      this.isArtifactAvailableInSpace(entryIdentity, toSpace)
+    ) {
+      return Promise.resolve();
+    }
+
+    const dedupeKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
+    const inProgress = this.inProgressArtifactClosureReplications.get(
+      dedupeKey,
+    );
+    if (inProgress !== undefined) return inProgress;
+
+    const replication = this.replicateClosures(
+      entryIdentity,
+      fromSpace,
+      toSpace,
+    );
+    this.inProgressArtifactClosureReplications.set(dedupeKey, replication);
+    const clearReplication = () => {
+      if (
+        this.inProgressArtifactClosureReplications.get(dedupeKey) ===
+          replication
+      ) {
+        this.inProgressArtifactClosureReplications.delete(dedupeKey);
+      }
+    };
+    void replication.then(clearReplication, clearReplication);
+    return replication;
+  }
+
+  /**
+   * Verify or copy one complete artifact closure. Fabric-import source edges
+   * are deliberately not persisted as ordinary source links, so
+   * `loadVerifiedArtifactClosure` roots each pinned dependency separately and
+   * validates that the compiled graph covers that entire combined source set.
    */
   private async replicateClosures(
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
-    visited = new Set<string>(),
   ): Promise<void> {
-    const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
-    if (visited.has(visitKey)) return;
-    visited.add(visitKey);
-
-    // The origin-space closure may still have an in-flight cache write. Reading
-    // before it commits would make this replication fail even though the source
-    // is about to become available. Await write-backs first. Use their own set,
-    // not flushCompileCacheWrites: this replication promise is tracked there and
-    // would await itself.
+    // The origin-space closure may have been produced by THIS session's cold
+    // compile, whose write-back is itself fire-and-forget and may not have
+    // committed yet. A lost race would throw here — and for a handler-created
+    // child (one space per profile) nothing re-fires the released dedupe key,
+    // leaving that child permanently unloadable. Await the in-flight
+    // write-backs first. (Their own set, not flushCompileCacheWrites: this
+    // replication promise is tracked there and would await itself.)
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    // Replicate the same cached variant the compile path uses — the coverage
-    // suffix keeps an instrumented closure from being served under an ordinary
-    // key (and vice versa).
     const runtimeVersion = moduleByteCacheRuntimeVersion(
       await getCompileCacheRuntimeVersion(),
       { patternCoverage: this.runtime.patternCoverage !== undefined },
     );
+    const existing = await this.loadVerifiedArtifactClosure(
+      toSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (existing !== undefined) {
+      this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
+      return;
+    }
+
+    if (fromSpace === toSpace) {
+      throw new Error(
+        `Artifact closure ${entryIdentity} is unavailable in space ${toSpace}`,
+      );
+    }
+
+    const origin = await this.loadVerifiedArtifactClosure(
+      fromSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (origin === undefined) {
+      throw new Error(
+        `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
+      );
+    }
+    const modules = this.modulesFromVerifiedArtifactClosure(origin);
+
+    // Source is the runtime-version-independent recovery authority. Make the
+    // complete source set durable before attempting the compiled cache so a
+    // compiled-write failure leaves a safe, retryable source-first partial
+    // copy, never a compiled-only destination.
+    await this.writeBackSourceCache(toSpace, modules, entryIdentity);
+    if (runtimeVersion !== undefined) {
+      await this.writeBackCompiledCache(
+        toSpace,
+        modules,
+        entryIdentity,
+        { runtimeVersion },
+      );
+    }
+
+    const copied = await this.loadVerifiedArtifactClosure(
+      toSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (
+      copied === undefined ||
+      [...origin.sourceDocs.keys()].some((identity) =>
+        !copied.sourceDocs.has(identity)
+      )
+    ) {
+      throw new Error(
+        `Artifact closure ${entryIdentity} failed verification in destination space ${toSpace}`,
+      );
+    }
+    this.noteArtifactClosureAvailable(toSpace, copied.sourceDocs.keys());
+  }
+
+  private async loadVerifiedArtifactClosure(
+    artifactSpace: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+  ): Promise<VerifiedArtifactClosure | undefined> {
     const readTx = this.runtime.edit();
-    let sourceDocs;
-    let compiledDocs;
     try {
-      // Verification recomputes module identities with the default ("")
-      // runtimeFingerprint — the same default every compile path in the tree
-      // uses today. If a non-empty fingerprint is ever threaded into
-      // compilation, it must be threaded here too or verification will
-      // reject every closure (logged as replication failures).
-      sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
-        fromSpace,
+      // Source verification recomputes module identities with the default ("")
+      // runtimeFingerprint — the same default every compile path uses today.
+      // If a non-empty fingerprint is threaded into compilation, it must also
+      // be threaded through this verifier.
+      const sourceDocs = await this.loadVerifiedArtifactSourceClosure(
+        artifactSpace,
         entryIdentity,
         readTx,
       );
-      if (runtimeVersion === undefined) {
-        compiledDocs = undefined;
-      } else {
-        const cacheOpts = { runtimeVersion };
-        compiledDocs = await loadCompiledClosure(
-          this.runtime,
-          fromSpace,
-          entryIdentity,
-          cacheOpts,
-          readTx,
-        );
+      if (sourceDocs === undefined || !sourceDocs.has(entryIdentity)) {
+        return undefined;
       }
+      if (runtimeVersion === undefined) return { sourceDocs };
+
+      const compiledDocs = await loadCompiledClosure(
+        this.runtime,
+        artifactSpace,
+        entryIdentity,
+        { runtimeVersion },
+        readTx,
+      );
+      if (
+        !compiledDocs.has(entryIdentity) ||
+        [...sourceDocs.keys()].some((identity) =>
+          !compiledDocs.has(identity)
+        ) ||
+        [...compiledDocs.keys()].some((identity) => !sourceDocs.has(identity)) ||
+        (isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+          !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
+      ) {
+        return undefined;
+      }
+      return { sourceDocs, compiledDocs, runtimeVersion };
     } finally {
-      readTx.abort?.("closure-replication read complete");
+      readTx.abort?.("artifact-closure verification complete");
     }
-    if (!sourceDocs?.has(entryIdentity)) {
-      throw new Error("source closure unavailable in origin space");
-    }
-    if (
-      runtimeVersion !== undefined &&
-      isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
-      (compiledDocs === undefined ||
-        !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
-    ) {
-      throw new Error("coverage spans unavailable in origin space");
-    }
+  }
+
+  private modulesFromVerifiedArtifactClosure(
+    closure: VerifiedArtifactClosure,
+  ): CacheableModule[] {
     const modules: CacheableModule[] = [];
-    const fabricDependencies = new Set<string>();
-    for (const [identity, doc] of sourceDocs) {
-      const compiled = compiledDocs?.get(identity);
-      if (runtimeVersion !== undefined && !compiled) {
+    for (const [identity, doc] of closure.sourceDocs) {
+      const compiled = closure.compiledDocs?.get(identity);
+      if (closure.runtimeVersion !== undefined && compiled === undefined) {
         throw new Error(`compiled doc missing for ${identity}`);
-      }
-      const fabricImports = fabricImportRefsFromSource(doc);
-      for (const imp of fabricImports) {
-        fabricDependencies.add(imp.targetIdentity);
       }
       modules.push({
         identity,
@@ -612,8 +735,8 @@ export class PatternManager {
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
-        // The write functions re-derive the entry's root links; keep only the
-        // real import edges.
+        // Rebuild real internal and pinned Fabric import edges. Synthetic cache
+        // root links are recomputed by the write functions for the complete set.
         imports: uniqueCacheableImports([
           ...doc.imports
             .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
@@ -621,33 +744,11 @@ export class PatternManager {
               specifier: imp.specifier,
               targetIdentity: imp.identity,
             })),
-          ...fabricImports,
+          ...fabricImportRefsFromSource(doc),
         ]),
       });
     }
-    if (runtimeVersion === undefined) {
-      await this.persistSourceCacheTracked(
-        toSpace,
-        modules,
-        entryIdentity,
-      );
-    } else {
-      await this.persistCompileCacheTracked(
-        toSpace,
-        modules,
-        entryIdentity,
-        { runtimeVersion },
-      );
-    }
-
-    for (const dependencyIdentity of fabricDependencies) {
-      await this.replicateClosures(
-        dependencyIdentity,
-        fromSpace,
-        toSpace,
-        visited,
-      );
-    }
+    return modules;
   }
 
   private async loadPreviousSourceClosure(
@@ -1949,6 +2050,34 @@ export class PatternManager {
   }
 
   /**
+   * Persist only the runtime-versioned compiled half of an already-durable
+   * source-first artifact copy. The caller still verifies both halves together
+   * before granting exact-space availability.
+   */
+  private async writeBackCompiledCache(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
+    const writebackStart = performance.now();
+    await this.syncCompiledCacheWriteTargets(space, modules, opts);
+    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
+    const writebackMaxRetries = Math.max(16, importEdges + 8);
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
+    }, writebackMaxRetries);
+    logger.time(writebackStart, "compile-cache", "compiled-writeback");
+    if (error) {
+      logger.error("compiled-cache-writeback-failed", () => [
+        `entry=${entryIdentity}`,
+        error.message,
+      ]);
+      throw throwableStorageError(error);
+    }
+  }
+
+  /**
    * Write the source + compiled document sets for an emitted module set into
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
@@ -2031,19 +2160,25 @@ export class PatternManager {
     modules: readonly CacheableModule[],
     opts: { runtimeVersion: string },
   ): Promise<void> {
+    await Promise.all([
+      this.syncSourceCacheWriteTargets(space, modules),
+      this.syncCompiledCacheWriteTargets(space, modules, opts),
+    ]);
+  }
+
+  private async syncCompiledCacheWriteTargets(
+    space: MemorySpace,
+    modules: readonly CacheableModule[],
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
     await Promise.all(
-      modules.flatMap((module) => [
-        this.runtime.getCell(
-          space,
-          sourceDocKey(module.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync(),
+      modules.map((module) =>
         this.runtime.getCell(
           space,
           compiledDocKey(opts.runtimeVersion, module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync(),
-      ]),
+        ).sync()
+      ),
     );
   }
 

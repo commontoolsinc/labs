@@ -482,7 +482,7 @@ Expected files and tests:
 
 ### WP1.7 — Prove context-free and runner-aware round trips
 
-- [ ] Add an awaited `ensureArtifactClosureInSpace(identity, source,
+- [x] Add an awaited `ensureArtifactClosureInSpace(identity, source,
   destination)` primitive that copies or verifies the complete source and
   compiled closure, including Fabric-import dependencies, before a by-value
   writer commits in another space. This implementation item is explicit here
