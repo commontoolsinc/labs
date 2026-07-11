@@ -559,10 +559,13 @@ current `main`). This stage is exercised by `test/cfc-authoring.test.ts`,
 
 `ts-transformers` also re-exports the canonical CFC alias-name set
 (`CFC_CANONICAL_ALIAS_NAMES`, from `@commonfabric/api/cfc`) via
-`src/cfc-authoring.ts` — `Cfc`, `Confidential`, `Integrity`, `OpaqueInput`,
+`src/cfc-authoring.ts` — `Cfc`, `Confidential`, `Integrity`,
 `WriteAuthorizedBy`, the `TrustedAction*` family, the projection aliases, etc.
-These names are recognized as CFC vocabulary but, apart from `WriteAuthorizedBy`
-validation above, are not yet lowered.
+(The former collection/opaque helpers — `OpaqueInput`, `SubsetOf`,
+`FilteredFrom`, `LengthPreservedFrom`, `PermutationOf` — were removed: the
+runner rejects their lowered `ifc` keys fail-closed.) These names are
+recognized as CFC vocabulary but, apart from `WriteAuthorizedBy` validation
+above, are not yet lowered.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 

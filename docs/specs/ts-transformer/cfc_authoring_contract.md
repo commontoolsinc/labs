@@ -78,19 +78,25 @@ Canonical alias set:
 - `AddIntegrity`
 - `RequiresIntegrity`
 - `MaxConfidentiality`
-- `OpaqueInput`
 - `WriteAuthorizedBy`
 - `ExactCopy`
 - `ProjectionPath`
 - `ProjectionOf`
 - `Projection`
-- `LengthPreservedFrom`
-- `FilteredFrom`
-- `SubsetOf`
-- `PermutationOf`
 
 Friendly aliases may expand to those forms, but the formatter contract is keyed
 to this canonical set.
+
+The former `OpaqueInput`, `LengthPreservedFrom`, `FilteredFrom`, `SubsetOf`,
+and `PermutationOf` aliases were removed: they lowered to `ifc.opaque` /
+`ifc.collection`, which the runner rejects fail-closed as unsupported
+trust-sensitive claims, so the authoring surface advertised capabilities that
+could only ever fail at commit. Reintroduce them together with the runner
+enforcement for the spec's §8.5 collection and §8.13 opaque-input transitions.
+A raw `Cfc<T, { opaque: ... }>` / `Cfc<T, { collection: ... }>` payload still
+lowers verbatim through the base-carrier rule below (and still fails closed at
+commit) — the carrier copies any payload; only the canonical promises are
+gone.
 
 ## Lowering Rules
 
@@ -112,41 +118,6 @@ These aliases lower to direct `ifc` keys:
 - `RequiresIntegrity<T, X>` -> `ifc.requiredIntegrity = X`
 - `MaxConfidentiality<T, X>` -> `ifc.maxConfidentiality = X`
 - `ExactCopy<T, P>` -> `ifc.exactCopyOf = P`
-- `LengthPreservedFrom<T, P>` -> `ifc.collection = { sourceCollection: P, lengthPreserved: true }`
-- `FilteredFrom<T, P>` -> `ifc.collection = { filteredFrom: P }`
-- `SubsetOf<T, P>` -> `ifc.collection = { subsetOf: P }`
-- `PermutationOf<T, P>` -> `ifc.collection = { permutationOf: P }`
-
-### Opaque Inputs
-
-Opaque inputs are part of the CFC authoring surface even though they are not
-ordinary label-transition sugar.
-
-The canonical form is:
-
-```ts
-// Shown at module scope.
-type OpaqueInput<
-  T,
-  Spec extends true | {
-    schema?: unknown;
-    allowPassThrough?: boolean;
-  } = true,
-> = Cfc<Reactive<T>, { opaque: Spec }>;
-```
-
-Normative behavior:
-
-- `Reactive<T>` supplies the handler-side reference/read restriction shape.
-- `Reactive<T>` by itself does not emit `ifc.opaque`.
-- `Cfc<Reactive<T>, { opaque: Spec }>` emits the base schema of `T` plus
-  `ifc.opaque = Spec`.
-- `Spec = true` means the field is opaque with default runtime handling.
-- `Spec = { schema, allowPassThrough? }` lowers that object verbatim into
-  `ifc.opaque`.
-- Because the emitted schema still describes `T`, opaque inputs remain
-  type-checkable for pass-through and schema validation, but they are not
-  authoring sugar for readable value access.
 
 ### Projection Helpers
 
@@ -225,12 +196,14 @@ Required capabilities:
 - substitute type parameters through alias expansion
 - evaluate literal, tuple, array, and type-literal payloads
 - preserve the base type when stripping the `Cfc` carrier intersection
-- preserve wrapper erasure rules for `Reactive<T>` so `OpaqueInput<T, ...>`
-  lowers to the schema shape of `T` rather than inventing a separate opaque
+- preserve wrapper erasure rules for `Reactive<T>` so a `Cfc<Reactive<T>, ...>`
+  carrier lowers to the schema shape of `T` rather than inventing a separate
   runtime value shape
 
 If alias expansion cannot resolve back to a supported form, lowering must fall
 back to ordinary schema generation rather than inventing partial metadata.
+Non-canonical aliases resolve only through explicit type arguments — defaulted
+type parameters are not recovered outside the canonical set.
 
 ## Diagnostics
 
