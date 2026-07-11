@@ -13,6 +13,8 @@ import type { FabricValue } from "@/fabric-value.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import { factoryStateOf, registerFabricFactory } from "@/fabric-factory.ts";
 import type { FabricFactory } from "@/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { isDeepFrozen } from "@/deep-freeze.ts";
 
 const FACTORY_REF = {
   identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -65,6 +67,34 @@ describe("json-encoding", () => {
       "factory requires runner materialization",
     );
     expect(() => plainObjectFromJson(encoded)).toThrow(/primitive/);
+  });
+
+  it("round-trips an unknown tagged value in factory params without a context", () => {
+    const wire = `fvj1:${
+      JSON.stringify({
+        "/Factory@1": {
+          kind: "pattern",
+          ref: FACTORY_REF,
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: {
+            future: { "/FutureFactoryParam@7": { value: [1, 2, 3] } },
+          },
+        },
+      })
+    }`;
+
+    const decoded = valueFromJson(wire) as FabricFactory<[]>;
+    const state = factoryStateOf(decoded);
+    const future = state.kind === "pattern"
+      ? (state.params as Record<string, FabricValue> | undefined)?.future
+      : null;
+    expect(future).toBeInstanceOf(UnknownValue);
+    expect(isDeepFrozen(future)).toBe(true);
+    expect(JSON.parse(jsonFromValue(decoded).slice("fvj1:".length))).toEqual(
+      JSON.parse(wire.slice("fvj1:".length)),
+    );
   });
 
   it("round-trips `undefined`", () => {

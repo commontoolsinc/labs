@@ -254,7 +254,7 @@ export function deepFreeze<T>(value: T): T {
       if (inProgress.has(obj)) return value;
       inProgress.add(obj);
 
-      const state = sealFactoryState(value);
+      const state = sealFactoryState(value, freeze);
       freeze(state);
       if (!Object.isFrozen(value)) Object.freeze(value);
       addToDeepFrozenCache(obj);

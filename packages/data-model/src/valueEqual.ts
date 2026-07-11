@@ -1,5 +1,5 @@
 import { isPlainObject } from "@commonfabric/utils/types";
-import { isDeepFrozen } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import {
   type FabricArray,
   type FabricPlainObject,
@@ -8,6 +8,7 @@ import {
 } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
 import { toCompactDebugString } from "./value-debug.ts";
+import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.
@@ -28,6 +29,29 @@ import { toCompactDebugString } from "./value-debug.ts";
  * named properties on arrays: those are not representable as `FabricValue`s.)
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
+  // Validate and compare callable factories before the same-reference fast
+  // path. Otherwise `valueEqual(fn, fn)` would silently admit an arbitrary
+  // function, and a live pre-ref factory would bypass its sealing failure.
+  if (typeof a === "function" || typeof b === "function") {
+    const aIsFactory = isAdmittedFabricFactory(a);
+    const bIsFactory = isAdmittedFabricFactory(b);
+    if (typeof a === "function" && !aIsFactory) {
+      throw new Error("Cannot compare an arbitrary function value.");
+    }
+    if (typeof b === "function" && !bIsFactory) {
+      throw new Error("Cannot compare an arbitrary function value.");
+    }
+
+    const aState = aIsFactory
+      ? sealFactoryState(a, deepFreeze) as FabricValue
+      : undefined;
+    const bState = bIsFactory
+      ? sealFactoryState(b, deepFreeze) as FabricValue
+      : undefined;
+    if (aState === undefined || bState === undefined) return false;
+    return valueEqual(aState, bState);
+  }
+
   if (Object.is(a, b)) return true;
 
   switch (typeof a) {

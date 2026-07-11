@@ -4,10 +4,11 @@ import type { ReconstructionContext } from "./interface.ts";
 
 import {
   createFactoryShell,
+  isAdmittedFabricFactory,
   sealFactoryState,
-  tryFactoryState,
 } from "@/fabric-factory.ts";
 import type { FabricValue } from "@/interface.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 
 /** Codec for directly callable, serializable Fabric factories. */
 export class FactoryCodec extends BaseFabricCodec {
@@ -16,11 +17,11 @@ export class FactoryCodec extends BaseFabricCodec {
   }
 
   override canEncode(value: FabricValue): boolean {
-    return tryFactoryState(value) !== undefined;
+    return isAdmittedFabricFactory(value);
   }
 
   override encode(value: FabricValue): FabricValue {
-    return sealFactoryState(value) as FabricValue;
+    return sealFactoryState(value, deepFreeze) as FabricValue;
   }
 
   override decode(
@@ -28,6 +29,6 @@ export class FactoryCodec extends BaseFabricCodec {
     state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
-    return createFactoryShell(state) as FabricValue;
+    return createFactoryShell(state, deepFreeze) as FabricValue;
   }
 }

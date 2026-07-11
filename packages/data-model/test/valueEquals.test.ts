@@ -8,8 +8,74 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { createFactoryShell, registerFabricFactory } from "@/fabric-factory.ts";
+import type { FactoryStateV1 } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 
 describe("valueEqual()", () => {
+  describe("Fabric factories", () => {
+    const states: FactoryStateV1[] = [
+      {
+        kind: "pattern",
+        ref: FACTORY_REF,
+        argumentSchema: true,
+        resultSchema: true,
+      },
+      { kind: "module", ref: FACTORY_REF },
+      { kind: "handler", ref: FACTORY_REF },
+    ];
+
+    it("compares independent inert shells by canonical state for every kind", () => {
+      for (const state of states) {
+        const a = createFactoryShell(state);
+        const b = createFactoryShell(state);
+        expect(valueEqual(a, b)).toBe(true);
+      }
+
+      expect(
+        valueEqual(
+          createFactoryShell({ kind: "module", ref: FACTORY_REF }),
+          createFactoryShell({
+            kind: "module",
+            ref: { ...FACTORY_REF, symbol: "__cfFactory_2" },
+          }),
+        ),
+      ).toBe(false);
+    });
+
+    it("seals before the same-reference shortcut and fails pre-ref", () => {
+      const factory = registerFabricFactory(() => undefined, {
+        kind: "module",
+        rootToken: {},
+      });
+      expect(() => valueEqual(factory, factory)).toThrow(
+        "artifact ref is not available",
+      );
+      expect(() => valueEqual(factory, 1)).toThrow(
+        "artifact ref is not available",
+      );
+      expect(() => valueEqual(1, factory)).toThrow(
+        "artifact ref is not available",
+      );
+    });
+
+    it("rejects the same arbitrary function reference", () => {
+      const fn = (() => undefined) as unknown as FabricValue;
+      expect(() => valueEqual(fn, fn)).toThrow("function");
+
+      const factory = createFactoryShell({
+        kind: "module",
+        ref: FACTORY_REF,
+      });
+      expect(() => valueEqual(factory, fn)).toThrow("function");
+      expect(() => valueEqual(fn, factory)).toThrow("function");
+    });
+  });
+
   it("returns `true` for equal primitives", () => {
     expect(valueEqual(1, 1)).toBe(true);
     expect(valueEqual("a", "a")).toBe(true);

@@ -106,6 +106,11 @@ export type FactoryStateView = LiveFactoryState | FactoryStateV1;
 type Callable = (...args: never[]) => unknown;
 type FactoryStateAccessor = () => FactoryStateView;
 
+/** Callback used to harden Fabric values encountered while sealing state. */
+export type FactoryStateValueHardener = (
+  value: FabricValue,
+) => FabricValue;
+
 interface FactoryAdmission {
   readonly stateAccessor: FactoryStateAccessor;
   canonicalState?: FactoryStateV1;
@@ -255,8 +260,9 @@ function isCanonicallyDeepFrozenValue(
     case "function":
       if (!factoryAdmissions.has(value as Callable)) return false;
       try {
-        canonicalFactoryStateOf(value, visiting);
-        return true;
+        const state = canonicalFactoryStateOf(value, visiting);
+        return Object.isFrozen(value) &&
+          isCanonicallyDeepFrozenValue(state, visiting);
       } catch {
         return false;
       }
@@ -303,6 +309,7 @@ function canonicalFabricValue(
   value: unknown,
   path: string,
   visiting: Set<object>,
+  hardenValue?: FactoryStateValueHardener,
 ): FabricValue {
   switch (typeof value) {
     case "undefined":
@@ -321,7 +328,16 @@ function canonicalFabricValue(
       if (admission === undefined) {
         validationError(path, "arbitrary functions are not Fabric values");
       }
-      canonicalFactoryStateOf(value, visiting);
+      canonicalFactoryStateOf(value, visiting, hardenValue);
+      if (hardenValue !== undefined) {
+        const hardened = hardenValue(value as FabricFactory);
+        if (hardened !== value) {
+          validationError(path, "factory hardening must preserve identity");
+        }
+      }
+      if (!isCanonicallyDeepFrozenValue(value, visiting)) {
+        validationError(path, "factories must be deeply frozen");
+      }
       return value as FabricFactory;
     }
     case "object":
@@ -336,15 +352,16 @@ function canonicalFabricValue(
     return value as FabricValue;
   }
   if (value instanceof FabricInstance) {
-    // Generic decode deep-freezes codec results before FactoryCodec sees the
-    // outer state. Live/mutable Fabric instances are sealed by the shared
-    // Fabric operations in WP1.3; accepting one here would make an allegedly
-    // canonical state mutable without importing deep-freeze back into this
-    // dependency-light protocol module.
+    if (hardenValue !== undefined) {
+      const hardened = hardenValue(value as FabricValue);
+      if (hardened !== value) {
+        validationError(path, "Fabric hardening must preserve identity");
+      }
+    }
     if (!isCanonicallyDeepFrozenValue(value, visiting)) {
       validationError(
         path,
-        "Fabric instances must already be deeply frozen",
+        "Fabric instances must be deeply frozen",
       );
     }
     return value as FabricValue;
@@ -366,6 +383,7 @@ function canonicalFabricValue(
             value[i],
             `${path}[${i}]`,
             visiting,
+            hardenValue,
           );
         }
       }
@@ -382,6 +400,7 @@ function canonicalFabricValue(
           (value as Record<string, unknown>)[key],
           `${path}.${key}`,
           visiting,
+          hardenValue,
         ),
       ]);
     }
@@ -456,6 +475,7 @@ function optionalCanonical<T>(
 function canonicalFactoryState(
   value: unknown,
   visiting: Set<object>,
+  hardenValue?: FactoryStateValueHardener,
 ): FactoryStateV1 {
   const path = "state";
   if (!isPlainObject(value)) {
@@ -515,6 +535,7 @@ function canonicalFactoryState(
               item,
               itemPath,
               visiting,
+              hardenValue,
             ) as FabricPlainObject;
           },
         );
@@ -534,7 +555,8 @@ function canonicalFactoryState(
           state,
           "spaceSelector",
           path,
-          (item, itemPath) => canonicalFabricValue(item, itemPath, visiting),
+          (item, itemPath) =>
+            canonicalFabricValue(item, itemPath, visiting, hardenValue),
         );
         return Object.freeze({
           kind,
@@ -629,13 +651,14 @@ function canonicalFactoryState(
 function canonicalFactoryStateView(
   value: unknown,
   visiting: Set<object>,
+  hardenValue?: FactoryStateValueHardener,
 ): FactoryStateV1 {
   if (!isPlainObject(value)) {
     validationError("state", "expected a plain object");
   }
   const state = value as Record<string, unknown>;
   if (!Object.hasOwn(state, "rootToken")) {
-    return canonicalFactoryState(value, visiting);
+    return canonicalFactoryState(value, visiting, hardenValue);
   }
   if (
     state.rootToken === null || typeof state.rootToken !== "object"
@@ -652,7 +675,11 @@ function canonicalFactoryStateView(
     for (const key of ownEnumerableStringKeys(value as object, "state")) {
       if (key !== "rootToken") entries.push([key, state[key]]);
     }
-    return canonicalFactoryState(Object.fromEntries(entries), visiting);
+    return canonicalFactoryState(
+      Object.fromEntries(entries),
+      visiting,
+      hardenValue,
+    );
   } finally {
     finish();
   }
@@ -734,13 +761,17 @@ export function factoryStateOf(value: unknown): FactoryStateView {
 }
 
 /** Validate and deeply freeze an alleged canonical wire state. */
-export function validateFactoryStateV1(value: unknown): FactoryStateV1 {
-  return canonicalFactoryState(value, new Set<object>());
+export function validateFactoryStateV1(
+  value: unknown,
+  hardenValue?: FactoryStateValueHardener,
+): FactoryStateV1 {
+  return canonicalFactoryState(value, new Set<object>(), hardenValue);
 }
 
 function canonicalFactoryStateOf(
   value: unknown,
   visiting: Set<object>,
+  hardenValue?: FactoryStateValueHardener,
 ): FactoryStateV1 {
   if (typeof value !== "function") {
     throw new TypeError("Value is not an admitted FabricFactory");
@@ -759,6 +790,7 @@ function canonicalFactoryStateOf(
     const canonical = canonicalFactoryStateView(
       admission.stateAccessor(),
       visiting,
+      hardenValue,
     );
     admission.canonicalState = canonical;
     return canonical;
@@ -768,15 +800,19 @@ function canonicalFactoryStateOf(
 }
 
 /** Return the memoized canonical codec state of an admitted factory. */
-export function sealFactoryState(value: unknown): FactoryStateV1 {
-  return canonicalFactoryStateOf(value, new Set<object>());
+export function sealFactoryState(
+  value: unknown,
+  hardenValue?: FactoryStateValueHardener,
+): FactoryStateV1 {
+  return canonicalFactoryStateOf(value, new Set<object>(), hardenValue);
 }
 
 /** Create a context-free, data-admitted shell from validated canonical state. */
 export function createFactoryShell(
   state: unknown,
+  hardenValue?: FactoryStateValueHardener,
 ): FabricFactory<never[], never> {
-  const canonicalState = validateFactoryStateV1(state);
+  const canonicalState = validateFactoryStateV1(state, hardenValue);
   const shell = registerFabricFactory(
     (..._args: never[]): never => {
       throw new Error("factory requires runner materialization");

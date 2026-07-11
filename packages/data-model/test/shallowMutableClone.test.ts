@@ -6,8 +6,29 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfModule_1",
+} as const;
 
 describe("shallowMutableClone()", () => {
+  it("preserves a factory atom by identity while hardening it", () => {
+    const factory = registerFabricFactory(() => undefined, {
+      kind: "module",
+      rootToken: {},
+      ref: FACTORY_REF,
+    });
+
+    expect(shallowMutableClone(factory)).toBe(factory);
+    expect(Object.isFrozen(factory)).toBe(true);
+
+    const outer = shallowMutableClone({ factory }) as { factory: unknown };
+    expect(Object.isFrozen(outer)).toBe(false);
+    expect(outer.factory).toBe(factory);
+  });
+
   it("returns a fresh, mutable, top-level object copy", () => {
     const input = deepFreeze({ a: 1, b: 2 });
     const out = shallowMutableClone(input);

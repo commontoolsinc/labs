@@ -15,8 +15,68 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 
 describe("cloneIfNecessary", () => {
+  describe("Fabric factories", () => {
+    it("preserves one hardened factory atom for mutable and frozen requests", () => {
+      const factories = [
+        registerFabricFactory(() => undefined, {
+          kind: "pattern",
+          rootToken: {},
+          ref: FACTORY_REF,
+          argumentSchema: true,
+          resultSchema: true,
+        }),
+        registerFabricFactory(() => undefined, {
+          kind: "module",
+          rootToken: {},
+          ref: FACTORY_REF,
+        }),
+        registerFabricFactory(() => undefined, {
+          kind: "handler",
+          rootToken: {},
+          ref: FACTORY_REF,
+        }),
+      ];
+
+      for (const factory of factories) {
+        expect(cloneIfNecessary(factory)).toBe(factory);
+        expect(Object.isFrozen(factory)).toBe(true);
+        expect(cloneIfNecessary(factory, { frozen: false })).toBe(factory);
+        expect(
+          cloneIfNecessary(factory, {
+            frozen: false,
+            deep: false,
+            force: true,
+          }),
+        ).toBe(factory);
+      }
+    });
+
+    it("fails before cloning a live factory whose artifact ref is unavailable", () => {
+      const factory = registerFabricFactory(() => undefined, {
+        kind: "handler",
+        rootToken: {},
+      });
+
+      expect(() => cloneIfNecessary(factory)).toThrow(
+        "artifact ref is not available",
+      );
+      expect(Object.isFrozen(factory)).toBe(false);
+    });
+
+    it("rejects an arbitrary function even when it is the same reference", () => {
+      const fn = (() => undefined) as unknown as FabricValue;
+      expect(() => cloneIfNecessary(fn)).toThrow("function");
+    });
+  });
+
   describe(`error cases`, () => {
     it("throws for `frozen=true`, `force=true`", () => {
       const value = { a: 1 } as FabricValue;

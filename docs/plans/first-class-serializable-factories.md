@@ -276,23 +276,23 @@ Expected implementation and test files:
 - [x] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
   shortcut that treats functions as already frozen.
-- [ ] Update `packages/data-model/src/value-clone.ts` so canonical factories are
+- [x] Update `packages/data-model/src/value-clone.ts` so canonical factories are
   immutable logical atoms and both mutable/frozen clone requests preserve the
   same canonical factory.
-- [ ] Update `packages/data-model/src/valueEqual.ts` to compare canonical codec
+- [x] Update `packages/data-model/src/valueEqual.ts` to compare canonical codec
   state rather than function identity, before any same-reference shortcut that
   could accidentally admit an arbitrary function.
-- [ ] Update `packages/data-model/src/value-hash.ts` to hash the `Factory@1` tag
+- [x] Update `packages/data-model/src/value-hash.ts` to hash the `Factory@1` tag
   and recursively hashed canonical state.
 - [x] Ensure the native conversion, type/compatibility, codec, and deep-freeze
   paths use shared admission/state helpers rather than independently
   enumerating hidden fields.
-- [ ] Extend that shared-helper invariant to clone, equality, and hash.
+- [x] Extend that shared-helper invariant to clone, equality, and hash.
 - [x] Make encode and Fabric deep-freeze fail before a live factory's artifact
   ref can be sealed.
-- [ ] Make hash and equality fail before that artifact ref can be sealed.
+- [x] Make hash and equality fail before that artifact ref can be sealed.
 - [x] Verify sealing memoizes one immutable canonical state.
-- [ ] Verify the canonical state produces a stable hash.
+- [x] Verify the canonical state produces a stable hash.
 
 Focused tests:
 

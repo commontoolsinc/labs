@@ -24,7 +24,11 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
-import { factoryStateOf, registerFabricFactory } from "@/fabric-factory.ts";
+import {
+  factoryStateOf,
+  type FactoryStateV1,
+  registerFabricFactory,
+} from "@/fabric-factory.ts";
 
 const FACTORY_REF = {
   identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -138,6 +142,26 @@ function fromWireFormat(data: JsonWireValue): FabricValue {
 
 describe("JsonEncodingContext", () => {
   describe("Factory@1", () => {
+    it("round-trips every factory kind through the callable codec", () => {
+      const states: FactoryStateV1[] = [
+        {
+          kind: "pattern",
+          ref: FACTORY_REF,
+          argumentSchema: true,
+          resultSchema: true,
+        },
+        { kind: "module", ref: FACTORY_REF },
+        { kind: "handler", ref: FACTORY_REF },
+      ];
+
+      for (const state of states) {
+        const factory = registerFabricFactory(() => undefined, state);
+        const decoded = roundTrip(factory) as FabricFactory<[]>;
+        expect(factoryStateOf(decoded)).toEqual(state);
+        expect(Object.isFrozen(decoded)).toBe(true);
+      }
+    });
+
     it("round-trips exact state to a frozen inert callable", () => {
       const factory = testPatternFactory({ prefix: "hello" });
       expect(toWireFormat(factory)).toEqual({
@@ -175,6 +199,26 @@ describe("JsonEncodingContext", () => {
         runtime,
       );
       expect(typeof fromBytes).toBe("function");
+    });
+
+    it("round-trips a factory inside another factory's params", () => {
+      const child = registerFabricFactory(() => undefined, {
+        kind: "module",
+        ref: { ...FACTORY_REF, symbol: "__cfModule_1" },
+      });
+      const parent = testPatternFactory({ child });
+
+      const decoded = roundTrip(parent) as FabricFactory<[]>;
+      const decodedState = factoryStateOf(decoded);
+      const decodedChild = decodedState.kind === "pattern"
+        ? (decodedState.params as FabricPlainObject | undefined)?.child
+        : undefined;
+      expect(typeof decodedChild).toBe("function");
+      expect(factoryStateOf(decodedChild)).toEqual({
+        kind: "module",
+        ref: { ...FACTORY_REF, symbol: "__cfModule_1" },
+      });
+      expect(Object.isFrozen(decodedChild)).toBe(true);
     });
 
     it("rejects arbitrary and copy-branded functions", () => {

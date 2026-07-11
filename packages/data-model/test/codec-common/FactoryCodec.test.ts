@@ -11,6 +11,8 @@ import {
 } from "@/fabric-factory.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import type { FabricFactory } from "@/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { isDeepFrozen } from "@/deep-freeze.ts";
 
 const REF = {
   identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -117,6 +119,26 @@ describe("FactoryCodec", () => {
 
     expect(sealFactoryState(factory)).toBe(sealed);
     expect(factoryStateOf(factory)).toBe(sealed);
+  });
+
+  it("hardens and preserves a mutable unknown instance nested in params", () => {
+    const unknown = new UnknownValue("FutureParam@2", {
+      nested: [1, 2, 3],
+    });
+    const factory = registerFabricFactory(() => undefined, {
+      kind: "pattern",
+      rootToken: {},
+      ref: REF,
+      argumentSchema: true,
+      resultSchema: true,
+      paramsSchema: true,
+      params: { unknown },
+    });
+
+    const state = new FactoryCodec().encode(factory) as FactoryStateV1;
+    const preserved = state.kind === "pattern" ? state.params?.unknown : null;
+    expect(preserved).toBe(unknown);
+    expect(isDeepFrozen(unknown)).toBe(true);
   });
 
   it("seals live state once its artifact ref exists and rejects it before then", () => {
@@ -269,23 +291,28 @@ describe("FactoryCodec", () => {
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
-  it("rejects shallow-frozen Fabric instances in canonical state", () => {
+  it("recursively hardens shallow-frozen Fabric instances in canonical state", () => {
     const link = new FabricLink({ nested: { mutable: true } });
     Object.freeze(link);
 
-    expect(() =>
-      new FactoryCodec().decode(
-        "Factory@1",
-        {
-          kind: "pattern",
-          ref: REF,
-          argumentSchema: true,
-          resultSchema: true,
-          paramsSchema: true,
-          params: { link },
-        },
-        EMPTY_RECONSTRUCTION_CONTEXT,
-      )
-    ).toThrow("Fabric instances must already be deeply frozen");
+    const decoded = new FactoryCodec().decode(
+      "Factory@1",
+      {
+        kind: "pattern",
+        ref: REF,
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: { link },
+      },
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    ) as FabricFactory<[]>;
+    const state = factoryStateOf(decoded) as Extract<
+      FactoryStateV1,
+      { kind: "pattern" }
+    >;
+    const preserved = state.params?.link;
+    expect(preserved).toBe(link);
+    expect(isDeepFrozen(link)).toBe(true);
   });
 });
