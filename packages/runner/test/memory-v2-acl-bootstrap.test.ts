@@ -15,17 +15,26 @@ const TEST_AUDIENCE = "did:key:z6Mk-runner-acl-bootstrap-audience";
 class RecordingLoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
   readonly principals: string[] = [];
+  readonly sessions: Array<{
+    space: MemorySpace;
+    requested: MemoryV2Client.MountOptions;
+    actualSessionId: string;
+  }> = [];
 
   constructor(private readonly server: MemoryV2Server.Server) {}
 
-  async create(space: MemorySpace, signer?: Signer) {
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    requested: MemoryV2Client.MountOptions = {},
+  ) {
     this.principals.push(signer?.did() ?? "<anonymous>");
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.server),
     });
     const session = await client.mount(
       space,
-      {},
+      requested,
       (_space, _session, context) => ({
         invocation: {
           aud: context.audience,
@@ -34,6 +43,11 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
         authorization: { principal: signer?.did() },
       }),
     );
+    this.sessions.push({
+      space,
+      requested: { ...requested },
+      actualSessionId: session.sessionId,
+    });
     return { client, session };
   }
 }
@@ -69,6 +83,57 @@ const createServer = (
     subscriptionRefreshDelayMs: 0,
   });
 
+Deno.test("storage manager uses one session id across spaces and isolates managers", async () => {
+  const alice = await Identity.fromPassphrase("manager session alice");
+  const bob = await Identity.fromPassphrase("manager session bob");
+  const firstSpace = "did:key:z6Mk-manager-session-first" as MemorySpace;
+  const secondSpace = "did:key:z6Mk-manager-session-second" as MemorySpace;
+  const server = createServer("runner-manager-session-id", { mode: "off" });
+  const aliceFactory = new RecordingLoopbackSessionFactory(server);
+  const bobFactory = new RecordingLoopbackSessionFactory(server);
+  const aliceManager = TestStorageManager.overServer(
+    { as: alice },
+    aliceFactory,
+  );
+  const bobManager = TestStorageManager.overServer({ as: bob }, bobFactory);
+
+  try {
+    assert(aliceManager.id !== bobManager.id);
+    for (const targetSpace of [firstSpace, secondSpace]) {
+      const sync = await aliceManager.open(targetSpace).sync(
+        "of:manager-session-probe" as URI,
+      );
+      assert(!sync.error, sync.error?.message);
+    }
+    const bobSync = await bobManager.open(firstSpace).sync(
+      "of:manager-session-probe" as URI,
+    );
+    assert(!bobSync.error, bobSync.error?.message);
+
+    assertEquals(
+      aliceFactory.sessions.map((entry) => ({
+        space: entry.space,
+        requestedSessionId: entry.requested.sessionId,
+        actualSessionId: entry.actualSessionId,
+      })),
+      [firstSpace, secondSpace].map((targetSpace) => ({
+        space: targetSpace,
+        requestedSessionId: aliceManager.id,
+        actualSessionId: aliceManager.id,
+      })),
+    );
+    assertEquals(bobFactory.sessions, [{
+      space: firstSpace,
+      requested: { sessionId: bobManager.id },
+      actualSessionId: bobManager.id,
+    }]);
+  } finally {
+    await aliceManager.close();
+    await bobManager.close();
+    await server.close();
+  }
+});
+
 Deno.test("storage ACL bootstrap uses the named-space identity then returns to the user", async () => {
   const user = await Identity.fromPassphrase("acl bootstrap user");
   const spaceIdentity = await Identity.fromPassphrase(
@@ -95,6 +160,17 @@ Deno.test("storage ACL bootstrap uses the named-space identity then returns to t
       spaceIdentity.did(),
       user.did(),
     ]);
+    assertEquals(factory.sessions.length, 3);
+    assertEquals(factory.sessions[0].actualSessionId, manager.id);
+    assertEquals(factory.sessions[0].requested, { sessionId: manager.id });
+    assert(factory.sessions[1].actualSessionId !== manager.id);
+    assertEquals(
+      factory.sessions[1].requested.sessionId,
+      factory.sessions[1].actualSessionId,
+    );
+    assertEquals(factory.sessions[2].actualSessionId, manager.id);
+    assertEquals(factory.sessions[2].requested.sessionId, manager.id);
+    assertExists(factory.sessions[2].requested.sessionToken);
 
     const guest = await Identity.fromPassphrase("acl bootstrap named guest");
     const guestConnection = await new RecordingLoopbackSessionFactory(server)

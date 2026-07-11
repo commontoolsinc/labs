@@ -816,7 +816,10 @@ export class StorageManager implements IStorageManager {
         subscription: this.#subscription,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? () => this.#createInitializedSession(space, signer)
-          : () => this.#sessionFactory.create(space, signer),
+          : () =>
+            this.#sessionFactory.create(space, signer, {
+              sessionId: this.id,
+            }),
       });
       this.#providers.set(space, provider);
     }
@@ -844,7 +847,9 @@ export class StorageManager implements IStorageManager {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }> {
-    const normal = await this.#sessionFactory.create(space, signer);
+    const normal = await this.#sessionFactory.create(space, signer, {
+      sessionId: this.id,
+    });
     if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
     const isHomeSpace = signer.did() === space;
     const spaceIdentity = isHomeSpace
@@ -869,8 +874,26 @@ export class StorageManager implements IStorageManager {
     // Do not reuse the bootstrap session for replica work: both it and the
     // replica allocate localSeq from 1, and named spaces must switch back from
     // the space signer to the active user before any user-scoped operation.
+    // Preserve the normal session token before detaching it so the final user
+    // mount resumes the construction-wide manager session instead of trying to
+    // replace that still-live id without its token.
+    const resumeNormal: MemoryV2Client.MountOptions = {
+      sessionId: normal.session.sessionId,
+      seenSeq: normal.session.serverSeq,
+      ...(normal.session.sessionToken !== undefined
+        ? { sessionToken: normal.session.sessionToken }
+        : {}),
+    };
     await normal.client.close();
-    const bootstrap = await this.#sessionFactory.create(space, spaceIdentity);
+    let bootstrapSessionId = crypto.randomUUID();
+    while (bootstrapSessionId === this.id) {
+      bootstrapSessionId = crypto.randomUUID();
+    }
+    const bootstrap = await this.#sessionFactory.create(
+      space,
+      spaceIdentity,
+      { sessionId: bootstrapSessionId },
+    );
     try {
       const current = await bootstrap.session.queryGraph({
         roots: [{ id: aclId, selector: { path: [], schema: false } }],
@@ -919,7 +942,7 @@ export class StorageManager implements IStorageManager {
       await bootstrap.client.close();
     }
 
-    return await this.#sessionFactory.create(space, signer);
+    return await this.#sessionFactory.create(space, signer, resumeNormal);
   }
 
   async close(): Promise<void> {

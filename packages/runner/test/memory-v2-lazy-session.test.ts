@@ -209,6 +209,42 @@ describe("Memory v2 lazy session creation", () => {
 });
 
 describe("Memory v2 lazy emulated server creation", () => {
+  it("uses the manager id for every emulated space session", async () => {
+    const opened: Array<{ space: string; sessionId?: string }> = [];
+    const managerId = "runner-emulated-construction-session";
+    const storage = TestEmulatedStorageManager.emulateWithServerFactory(
+      { as: signer, id: managerId },
+      () =>
+        new MemoryV2Server.Server({
+          authorizeSessionOpen(message) {
+            opened.push({
+              space: message.space,
+              sessionId: message.session.sessionId,
+            });
+            return signer.did();
+          },
+          sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+          acl: { mode: "off" },
+        }),
+    );
+    const otherSpace = "did:key:z6Mk-emulated-manager-session" as MemorySpace;
+
+    try {
+      for (const targetSpace of [space, otherSpace]) {
+        const result = await storage.open(targetSpace).sync(
+          "of:emulated-manager-session" as URI,
+        );
+        expect(result.error).toBeUndefined();
+      }
+      expect(opened).toEqual([
+        { space, sessionId: managerId },
+        { space: otherSpace, sessionId: managerId },
+      ]);
+    } finally {
+      await storage.close();
+    }
+  });
+
   it("does not create an emulated server for local-only transaction work", async () => {
     let serverCreates = 0;
     const storage = TestEmulatedStorageManager.emulateWithServerFactory(
