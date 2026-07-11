@@ -154,11 +154,18 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
 
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
-    // Exotic `Error` subclasses (e.g. `DOMException`).
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
-
-    // `FabricInstance` values (object-like protocol types).
+    // Fabric protocol values are already valid and must be recognized before
+    // consulting realm-specific native helpers. SES supplies its own Error
+    // constructor, which does not currently implement Error.isError().
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
+
+    // Exotic `Error` subclasses (e.g. `DOMException`).
+    const errorIsError = (Error as typeof Error & {
+      isError?: (candidate: unknown) => boolean;
+    }).isError;
+    if (typeof errorIsError === "function" && errorIsError(value)) {
+      return NATIVE_TAGS.Error;
+    }
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;

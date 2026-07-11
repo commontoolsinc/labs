@@ -1,0 +1,243 @@
+import { assertEquals } from "@std/assert";
+import type {
+  AsyncResult,
+  AvailableResult,
+  DataUnavailable,
+  DataUnavailableFor,
+  DataUnavailableVariant,
+  FetchBinaryFunction,
+  FetchBinaryResult,
+  FetchJsonFunction,
+  FetchJsonUncheckedFunction,
+  FetchProgramFunction,
+  FetchTextFunction,
+  GenerateObjectFunction,
+  GenerateObjectStreamFunction,
+  GenerateTextFunction,
+  GenerateTextStreamFunction,
+  HasError,
+  HasErrorFunction,
+  HasSchemaMismatch,
+  IsPending,
+  IsPendingFunction,
+  IsSyncing,
+  Module,
+  ObserveAvailabilityFunction,
+  ResultOfFunction,
+  UnavailableInputPolicy,
+  UnavailableInputPolicyEntry,
+} from "@commonfabric/api";
+
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
+  (<T>() => T extends B ? 1 : 2) ? true : false;
+
+interface Repo {
+  owner: string;
+  name: string;
+}
+
+function guardNarrowingTypecheck(
+  value: Repo,
+  isPending: IsPendingFunction,
+  hasError: HasErrorFunction,
+): string | true | undefined {
+  if (hasError(value)) {
+    const narrowed: HasError = value;
+    return narrowed.error.message;
+  }
+  if (isPending(value)) {
+    const narrowed: IsPending = value;
+    return narrowed.pending;
+  }
+  return value.name;
+}
+
+function asyncResultNarrowingTypecheck(
+  request: AsyncResult<Repo>,
+  hasError: HasErrorFunction,
+  resultOf: ResultOfFunction,
+): string {
+  if (hasError(request)) {
+    return request.error.message;
+  }
+
+  const result = resultOf(request);
+  const resultIsUsable: Equal<typeof result, Repo> = true;
+  void resultIsUsable;
+  return result.name;
+}
+
+function observationTypecheck(
+  value: Repo,
+  observe: ObserveAvailabilityFunction,
+): void {
+  const errorOnly = observe(value, "error");
+  const errorOnlyIsExact: Equal<typeof errorOnly, Repo | HasError> = true;
+
+  const selected = observe(value, "pending", "syncing");
+  const selectedIsExact: Equal<
+    typeof selected,
+    Repo | IsPending | IsSyncing
+  > = true;
+
+  const all = observe(value);
+  const allIsExact: Equal<typeof all, Repo | DataUnavailable> = true;
+
+  const extracted: Equal<
+    DataUnavailableFor<"error" | "schema-mismatch">,
+    HasError | HasSchemaMismatch
+  > = true;
+
+  void errorOnlyIsExact;
+  void selectedIsExact;
+  void allIsExact;
+  void extracted;
+}
+
+function modulePolicyTypecheck(): void {
+  const policy = [{
+    path: ["repo", "owner"],
+    reasons: ["error", "pending"],
+  }] as const satisfies UnavailableInputPolicy;
+
+  const module: Module = {
+    type: "javascript-availability",
+    unavailableInputPolicy: policy,
+  };
+
+  const fieldIsExact: Equal<
+    NonNullable<Module["unavailableInputPolicy"]>,
+    UnavailableInputPolicy
+  > = true;
+  const pathIsReadonly: Equal<
+    UnavailableInputPolicyEntry["path"],
+    readonly string[]
+  > = true;
+  const reasonsAreExact: Equal<
+    UnavailableInputPolicyEntry["reasons"],
+    readonly (
+      | "pending"
+      | "error"
+      | "syncing"
+      | "schema-mismatch"
+    )[]
+  > = true;
+
+  void module;
+  void fieldIsExact;
+  void pathIsReadonly;
+  void reasonsAreExact;
+}
+
+function directAsyncBuiltinTypecheck(
+  fetchBinary: FetchBinaryFunction,
+  fetchText: FetchTextFunction,
+  fetchJson: FetchJsonFunction,
+  fetchJsonUnchecked: FetchJsonUncheckedFunction,
+  fetchProgram: FetchProgramFunction,
+  generateText: GenerateTextFunction,
+  generateObject: GenerateObjectFunction,
+  generateTextStream: GenerateTextStreamFunction,
+  generateObjectStream: GenerateObjectStreamFunction,
+  resultOf: ResultOfFunction,
+): void {
+  const binary = fetchBinary({ url: "/binary" });
+  const text = fetchText({ url: "/text" });
+  const json = fetchJson<Repo>({ url: "/repo" });
+  const unchecked = fetchJsonUnchecked({ url: "/unchecked" });
+  const program = fetchProgram({ url: "/pattern.tsx" });
+  const generatedText = generateText({ prompt: "hello" });
+  const generatedObject = generateObject<Repo>({ prompt: "repo" });
+
+  const binaryIsAsync: Equal<
+    typeof binary,
+    AsyncResult<FetchBinaryResult>
+  > = true;
+  const textIsAsync: Equal<typeof text, AsyncResult<string>> = true;
+  const jsonIsAsync: Equal<typeof json, AsyncResult<Repo>> = true;
+  const uncheckedIsAsync: Equal<typeof unchecked, AsyncResult<any>> = true;
+  const programIsAsync: Equal<
+    typeof program,
+    AsyncResult<{
+      files: Array<{ name: string; contents: string }>;
+      main: string;
+    }>
+  > = true;
+  const generatedTextIsAsync: Equal<
+    typeof generatedText,
+    AsyncResult<string>
+  > = true;
+  const generatedObjectIsAsync: Equal<
+    typeof generatedObject,
+    AsyncResult<Repo>
+  > = true;
+
+  const availableBinary = resultOf(binary);
+  const availableText = resultOf(text);
+  const availableJson = resultOf(json);
+  const availableProgram = resultOf(program);
+  const availableGeneratedText = resultOf(generatedText);
+  const availableGeneratedObject = resultOf(generatedObject);
+
+  const binaryIsDirect: Equal<typeof availableBinary, FetchBinaryResult> = true;
+  const textIsDirect: Equal<typeof availableText, string> = true;
+  const jsonIsDirect: Equal<typeof availableJson, Repo> = true;
+  const programIsDirect: Equal<
+    typeof availableProgram,
+    { files: Array<{ name: string; contents: string }>; main: string }
+  > = true;
+  const generatedTextIsDirect: Equal<
+    typeof availableGeneratedText,
+    string
+  > = true;
+  const generatedObjectIsDirect: Equal<
+    typeof availableGeneratedObject,
+    Repo
+  > = true;
+
+  const availableAliasIsExact: Equal<
+    AvailableResult<Repo | DataUnavailableVariant>,
+    Repo
+  > = true;
+
+  const textState = generateTextStream({ prompt: "hello" });
+  const objectState = generateObjectStream<Repo>({ prompt: "repo" });
+  const textStateResult: Equal<
+    typeof textState.result,
+    AsyncResult<string>
+  > = true;
+  const objectStateResult: Equal<
+    typeof objectState.result,
+    AsyncResult<Repo>
+  > = true;
+  const objectStateHasNoSyntheticCancel: Equal<
+    "cancelGeneration" extends keyof typeof objectState ? true : false,
+    false
+  > = true;
+
+  void binaryIsAsync;
+  void textIsAsync;
+  void jsonIsAsync;
+  void uncheckedIsAsync;
+  void programIsAsync;
+  void generatedTextIsAsync;
+  void generatedObjectIsAsync;
+  void binaryIsDirect;
+  void textIsDirect;
+  void jsonIsDirect;
+  void programIsDirect;
+  void generatedTextIsDirect;
+  void generatedObjectIsDirect;
+  void availableAliasIsExact;
+  void textStateResult;
+  void objectStateResult;
+  void objectStateHasNoSyntheticCancel;
+}
+
+Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
+  assertEquals(typeof guardNarrowingTypecheck, "function");
+  assertEquals(typeof asyncResultNarrowingTypecheck, "function");
+  assertEquals(typeof observationTypecheck, "function");
+  assertEquals(typeof modulePolicyTypecheck, "function");
+  assertEquals(typeof directAsyncBuiltinTypecheck, "function");
+});

@@ -54,6 +54,87 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
+/** Reasons why a runtime value is not currently usable by a computation. */
+export type DataUnavailableReason =
+  | "pending"
+  | "error"
+  | "syncing"
+  | "schema-mismatch";
+
+/**
+ * Pattern-visible surface of a runtime-owned unavailable-data marker.
+ *
+ * There is intentionally no public constructor. Plain objects with the same
+ * fields are ordinary authored data and are rejected by the guard helpers.
+ */
+export interface DataUnavailable extends FabricInstance {
+  readonly reason: DataUnavailableReason;
+  readonly pending?: true;
+  readonly error?: Error;
+  readonly syncing?: true;
+  readonly schemaMismatch?: true;
+}
+
+/** A pending unavailable value. */
+export type IsPending = DataUnavailable & {
+  readonly reason: "pending";
+  readonly pending: true;
+};
+
+/** An unavailable value carrying a producer error. */
+export type HasError = DataUnavailable & {
+  readonly reason: "error";
+  readonly error: Error;
+};
+
+/** An unavailable value whose storage coverage is still synchronizing. */
+export type IsSyncing = DataUnavailable & {
+  readonly reason: "syncing";
+  readonly syncing: true;
+};
+
+/** An unavailable value which failed its declared schema. */
+export type HasSchemaMismatch = DataUnavailable & {
+  readonly reason: "schema-mismatch";
+  readonly schemaMismatch: true;
+};
+
+/** All concrete unavailable variants. */
+export type DataUnavailableVariant =
+  | IsPending
+  | HasError
+  | IsSyncing
+  | HasSchemaMismatch;
+
+/**
+ * A single-result asynchronous value before availability has been filtered.
+ *
+ * Use the availability guards to inspect control states and `resultOf()` to
+ * obtain the usable `T` view. There is no runtime wrapper around this union.
+ */
+export type AsyncResult<T> = T | DataUnavailableVariant;
+
+/** Removes unavailable control variants from an asynchronous result type. */
+export type AvailableResult<R> = Exclude<R, DataUnavailableVariant>;
+
+/** Selects unavailable variants by their reason discriminator. */
+export type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
+  DataUnavailableVariant,
+  { readonly reason: K }
+>;
+
+/**
+ * Exact argument-relative path at which a computation may observe selected
+ * unavailable-data reasons.
+ */
+export type UnavailableInputPolicyEntry = Readonly<{
+  path: readonly string[];
+  reasons: readonly DataUnavailableReason[];
+}>;
+
+/** Ordered exact-path unavailable-data observation policy for one module. */
+export type UnavailableInputPolicy = readonly UnavailableInputPolicyEntry[];
+
 /** Abstract base class for fabric primitive types. */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
@@ -1458,8 +1539,16 @@ export interface Pattern {
   defaultScope?: CellScope;
 }
 export interface Module {
-  type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  type:
+    | "ref"
+    | "javascript"
+    | "javascript-availability"
+    | "pattern"
+    | "raw"
+    | "isolated"
+    | "passthrough";
   defaultScope?: CellScope;
+  readonly unavailableInputPolicy?: UnavailableInputPolicy;
 }
 
 export type toJSON = {
@@ -1912,13 +2001,13 @@ export interface BuiltInLLMState {
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
-export interface BuiltInLLMGenerateObjectState<T> {
+/** Advanced state for structured generation, including partial progress. */
+export interface BuiltInGenerateObjectStreamState<T> {
   pending: boolean;
-  result?: T;
+  result: AsyncResult<T>;
   messages?: BuiltInLLMMessage[];
   partial?: string;
   error?: string;
-  cancelGeneration: Stream<void>;
   // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
   // improve the structured result), but does NOT surface `groundingSources` —
   // its JSON-mode path returns only the object, not the grounded response. Use
@@ -1954,8 +2043,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from `generateTextStream` / `llm` state;
+     * structured generation does not surface them.
      */
     search?: boolean;
     /**
@@ -1981,8 +2070,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from `generateTextStream` / `llm` state;
+     * structured generation does not surface them.
      */
     search?: boolean;
     /**
@@ -2005,8 +2094,7 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from `generateTextStream` / `llm` state.
      */
     search?: boolean;
     /**
@@ -2027,8 +2115,7 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from `generateTextStream` / `llm` state.
      */
     search?: boolean;
     /**
@@ -2039,12 +2126,12 @@ export type BuiltInGenerateTextParams =
     queue?: string;
   };
 
-export interface BuiltInGenerateTextState {
+/** Advanced state for text generation, including partial and grounding data. */
+export interface BuiltInGenerateTextStreamState {
   pending: boolean;
-  result?: string;
+  result: AsyncResult<string>;
   error?: string;
   partial?: string;
-  requestHash?: string;
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
@@ -2275,11 +2362,21 @@ export type LLMDialogFunction = (
 
 export type GenerateObjectFunction = <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => Reactive<BuiltInLLMGenerateObjectState<T>>;
+) => Reactive<AsyncResult<T>>;
+
+/** Advanced structured-generation API with partial and message state. */
+export type GenerateObjectStreamFunction = <T = any>(
+  params: FactoryInput<BuiltInGenerateObjectParams>,
+) => Reactive<BuiltInGenerateObjectStreamState<T>>;
 
 export type GenerateTextFunction = (
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => Reactive<BuiltInGenerateTextState>;
+) => Reactive<AsyncResult<string>>;
+
+/** Advanced text-generation API with partial and grounding state. */
+export type GenerateTextStreamFunction = (
+  params: FactoryInput<BuiltInGenerateTextParams>,
+) => Reactive<BuiltInGenerateTextStreamState>;
 
 export type FetchOptions = {
   body?: JSONValue;
@@ -2304,31 +2401,25 @@ export type FetchBinaryResult = {
 };
 
 /**
- * Fetch a URL and expose the response body as binary data.
- *
- * `result` holds the body as `{ bytes, mediaType }` where `bytes` is a
- * `FabricBytes` byte buffer. `pending` is true while the request is in
- * flight; failures land on `error`.
+ * Fetch a URL and return the response body as binary data. The computation
+ * waits while data is unavailable unless availability is explicitly observed.
  */
 export type FetchBinaryFunction = (
   params: FactoryInput<{
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: FetchBinaryResult; error?: any }>;
+) => Reactive<AsyncResult<FetchBinaryResult>>;
 
 /**
- * Fetch a URL and expose the response body as text.
- *
- * `result` holds the body decoded as UTF-8. `pending` is true while the
- * request is in flight; failures land on `error`.
+ * Fetch a URL and return the response body decoded as UTF-8.
  */
 export type FetchTextFunction = (
   params: FactoryInput<{
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: string; error?: any }>;
+) => Reactive<AsyncResult<string>>;
 
 /**
  * Fetch a URL and expose the response body as parsed JSON.
@@ -2337,8 +2428,8 @@ export type FetchTextFunction = (
  * fetchJson without one is a compile error — use fetchJsonUnchecked for JSON
  * whose shape isn't declared as a type. The compiler derives a JSON schema
  * from `T` and injects it as the `schema` parameter; the response is verified
- * against that schema at fetch time, and a verification failure lands on
- * `error` with `result` left undefined. Verification follows standard JSON
+ * against that schema at fetch time. A verification failure becomes an
+ * explicit schema-mismatch availability state. Verification follows standard JSON
  * Schema semantics: object properties not named in the schema are allowed
  * unless the schema declares `additionalProperties` itself. A schema passed
  * explicitly takes precedence over the derived one.
@@ -2350,7 +2441,7 @@ export type FetchJsonFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<AsyncResult<T>>;
 
 /**
  * Fetch a URL and expose the response body as parsed JSON, without any
@@ -2365,18 +2456,16 @@ export type FetchJsonUncheckedFunction = (
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: any; error?: any }>;
+) => Reactive<AsyncResult<any>>;
+
+export type FetchProgramResult = {
+  files: Array<{ name: string; contents: string }>;
+  main: string;
+};
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
-) => Reactive<{
-  pending: boolean;
-  result: {
-    files: Array<{ name: string; contents: string }>;
-    main: string;
-  } | undefined;
-  error?: any;
-}>;
+) => Reactive<AsyncResult<FetchProgramResult>>;
 
 export type StreamDataFunction = <T>(
   params: FactoryInput<{
@@ -2892,6 +2981,32 @@ export interface PatternEnvironment {
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type NonPrivateRandomFunction = () => number;
 export type SafeDateNowFunction = () => number;
+export type IsPendingFunction = (value: unknown) => value is IsPending;
+export type HasErrorFunction = (value: unknown) => value is HasError;
+export type IsSyncingFunction = (value: unknown) => value is IsSyncing;
+export type HasSchemaMismatchFunction = (
+  value: unknown,
+) => value is HasSchemaMismatch;
+
+/**
+ * Runtime identity cast which opts an outer computation boundary into
+ * observing selected unavailable reasons.
+ */
+export interface ObserveAvailabilityFunction {
+  <T>(value: T): T | DataUnavailable;
+  <T, K extends DataUnavailableReason>(
+    value: T,
+    ...reasons: K[]
+  ): T | DataUnavailableFor<K>;
+}
+
+/**
+ * Returns the usable view of an asynchronous result without creating a node.
+ * The runner filters unavailable variants at the next computation boundary.
+ */
+export type ResultOfFunction = <R>(
+  result: R,
+) => Reactive<AvailableResult<R>>;
 export type ToCompactDebugStringFunction = (
   value: unknown,
   maxLength?: number,
@@ -2945,6 +3060,8 @@ export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
+export declare const generateObjectStream: GenerateObjectStreamFunction;
+export declare const generateTextStream: GenerateTextStreamFunction;
 export declare const fetchBinary: FetchBinaryFunction;
 export declare const fetchText: FetchTextFunction;
 export declare const fetchJson: FetchJsonFunction;
@@ -2982,6 +3099,12 @@ export function getPatternEnvironment(): PatternEnvironment {
 }
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
+export declare const isPending: IsPendingFunction;
+export declare const hasError: HasErrorFunction;
+export declare const isSyncing: IsSyncingFunction;
+export declare const hasSchemaMismatch: HasSchemaMismatchFunction;
+export declare const observeAvailability: ObserveAvailabilityFunction;
+export declare const resultOf: ResultOfFunction;
 export declare const toCompactDebugString: ToCompactDebugStringFunction;
 export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
 
