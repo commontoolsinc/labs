@@ -4,6 +4,12 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  CODEC,
+  CODEC_TYPE_TAGS,
+  EmptyReconstructionContext,
+} from "@commonfabric/data-model/codec-common";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
@@ -29,6 +35,14 @@ export interface ProgramResult {
   main: string;
 }
 
+type FetchErrorState = Record<string, FabricValue> & {
+  type: string;
+  name: string | null;
+  message: string;
+  stack?: string;
+  cause?: FabricValue;
+};
+
 // State machine for fetch lifecycle
 type FetchState =
   | { type: "idle" }
@@ -36,13 +50,27 @@ type FetchState =
   | { type: "success"; data: ProgramResult }
   | {
     type: "error";
-    error: {
-      type: string;
-      name: string;
-      message: string;
-      stack?: string;
-    };
+    error: FetchErrorState;
   };
+
+function encodeFetchError(error: FabricError): FetchErrorState {
+  return FabricError[CODEC].encode(error) as FetchErrorState;
+}
+
+function decodeFetchError(state: FetchErrorState): FabricError {
+  const decoded = FabricError[CODEC].decode(
+    CODEC_TYPE_TAGS.Error,
+    state,
+    new EmptyReconstructionContext(
+      true,
+      "fetchProgram durable error cache",
+    ),
+  );
+  if (!(decoded instanceof FabricError)) {
+    throw new TypeError("Invalid FabricError in fetchProgram cache");
+  }
+  return decoded;
+}
 
 // Single source of truth for fetch status
 interface FetchCacheEntry {
@@ -137,11 +165,15 @@ const cacheSchema = internSchema(
                   type: "object",
                   properties: {
                     type: { type: "string" },
-                    name: { type: "string" },
+                    name: {
+                      anyOf: [{ type: "string" }, { type: "null" }],
+                    },
                     message: { type: "string" },
                     stack: { type: "string" },
+                    cause: true,
                   },
                   required: ["type", "name", "message"],
+                  additionalProperties: true,
                 },
               },
               required: ["type", "error"],
@@ -503,16 +535,14 @@ export function fetchProgram(
         break;
       case "error": {
         const currentResult = result.withTx(tx).getRaw();
+        const rawCachedState = cache.withTx(tx).getRaw()?.[inputHash]?.state;
+        if (rawCachedState?.type !== "error") {
+          throw new TypeError("Missing raw fetchProgram error cache state");
+        }
         const unavailable = isDataUnavailable(currentResult) &&
             currentResult.reason === "error"
           ? currentResult
-          : DataUnavailable.error(
-            new FabricError({
-              ...currentState.error,
-              stack: currentState.error.stack,
-              cause: undefined,
-            }),
-          );
+          : DataUnavailable.error(decodeFetchError(rawCachedState.error));
         writeUnavailableFetchResult(
           tx,
           pending,
@@ -630,6 +660,7 @@ async function startFetch(
 
     const nativeError = err instanceof Error ? err : new Error(String(err));
     const unavailable = DataUnavailable.error(nativeError);
+    const fabricError = unavailable.error;
 
     // CAS: Only write error if we're still the active request
     await runtime.editWithRetry((tx) => {
@@ -653,14 +684,7 @@ async function startFetch(
             inputHash,
             state: {
               type: "error",
-              error: {
-                type: nativeError.constructor.name,
-                name: nativeError.name,
-                message: nativeError.message,
-                ...(nativeError.stack !== undefined && {
-                  stack: nativeError.stack,
-                }),
-              },
+              error: encodeFetchError(fabricError),
             },
           },
         });

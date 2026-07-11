@@ -1,6 +1,11 @@
 import { expect } from "@std/expect";
 
-import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  DataUnavailable,
+  FabricError,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -61,6 +66,7 @@ const PROGRAM: RuntimeProgram = {
       "export default pattern(() => ({",
       "  text: fetchText({ url: 'https://fetch.test/value.txt' }),",
       "  program: fetchProgram({ url: 'https://fetch.test/program.ts' }),",
+      "  failedProgram: fetchProgram({ url: 'https://fetch.test/failure.ts' }),",
       "}));",
     ].join("\n"),
   }],
@@ -81,6 +87,10 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
   let phase: "create" | "reload" = "create";
   let createFetches = 0;
   let reloadFetches = 0;
+  const failure = new TypeError("durable program resolution failure");
+  failure.stack = "durable program resolver stack";
+  failure.cause = { code: "ECONNRESET" };
+  (failure as TypeError & { retryable: boolean }).retryable = true;
   globalThis.fetch = (
     input: string | URL | Request,
   ): Promise<Response> => {
@@ -91,6 +101,9 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
       : input instanceof URL
       ? input.toString()
       : input.url;
+    if (url.endsWith("failure.ts")) {
+      return Promise.reject(failure);
+    }
     return Promise.resolve(
       url.endsWith("program.ts")
         ? new Response("export const durable = true;\n", { status: 200 })
@@ -130,7 +143,22 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
         files?: Array<{ contents?: string }>;
       }).files?.[0]?.contents,
     ).toContain("durable = true");
-    expect(createFetches).toBe(2);
+    const createdError = resultA.key("failedProgram").resolveAsCell()
+      .getRaw() as DataUnavailable;
+    expect(createdError.reason).toBe("error");
+    expect(createdError.error?.cause).toEqual({ code: "ECONNRESET" });
+    expect(createdError.error?.getExtra("retryable")).toBe(true);
+    expect(createFetches).toBe(3);
+
+    // Force the cold runtime to recover the terminal value from fetchProgram's
+    // durable cache rather than the separately-persisted result child.
+    runtimeA.runner.stop(resultA);
+    const clearResultTx = runtimeA.edit();
+    resultA.key("failedProgram").withTx(clearResultTx).resolveAsCell().setRaw(
+      undefined,
+    );
+    await clearResultTx.commit();
+    await storageA.synced();
     runtimeA.scheduler.dispose();
 
     phase = "reload";
@@ -154,6 +182,9 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
     const cancelProgram = resultB.key("program").sink((value) => {
       reloadValues.push(value);
     });
+    const cancelFailedProgram = resultB.key("failedProgram").sink((value) => {
+      reloadValues.push(value);
+    });
     try {
       expect(await runtimeB.start(resultB)).toBe(true);
       for (let index = 0; index < 6; index++) {
@@ -164,6 +195,7 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
     } finally {
       cancelText();
       cancelProgram();
+      cancelFailedProgram();
     }
 
     expect(resultB.key("text").getAsQueryResult()).toBe("durable text");
@@ -172,13 +204,26 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
         files?: Array<{ contents?: string }>;
       }).files?.[0]?.contents,
     ).toContain("durable = true");
+    const reloadedError = resultB.key("failedProgram").resolveAsCell()
+      .getRaw() as DataUnavailable;
+    expect(reloadedError.reason).toBe("error");
+    expect(reloadedError.error).toBeInstanceOf(FabricError);
+    expect(reloadedError.error?.type).toBe("TypeError");
+    expect(reloadedError.error?.message).toBe(
+      "durable program resolution failure",
+    );
+    expect(reloadedError.error?.stack).toBe("durable program resolver stack");
+    expect(reloadedError.error?.cause).toEqual({ code: "ECONNRESET" });
+    expect(reloadedError.error?.getExtra("retryable")).toBe(true);
+    expect(isDeepFrozen(reloadedError.error!)).toBe(true);
     expect(reloadFetches).toBe(0);
     // A cold replica may briefly publish pending while the builtin's private
-    // cache/result cells load. It must not surface a false error/mismatch or
-    // issue another request, and it must converge to the durable success.
+    // cache/result cells load. It must not surface a false mismatch or issue
+    // another request, and each field must converge to its durable terminal
+    // success/error value.
     expect(
       reloadValues.filter(isDataUnavailable).every((value) =>
-        value.reason === "pending"
+        value.reason === "pending" || value.reason === "error"
       ),
     ).toBe(true);
   } finally {
