@@ -656,8 +656,10 @@ semantics explicit.
 
 Requirements: invariant I10 (launched work survives only if the launching
 commit succeeds, and descendants of a failed attempt are never retried) and
-invariant I11 (events are handled at most once system-wide; the
-result-cell receipt is the witness — default-on, decision 14).
+invariant I11 (events are handled at most once system-wide; the result-cell
+receipt is the witness — default-on, decision 14). The canonical parent
+handling satisfies that requirement, but child-first cross-space
+materialization is a non-atomic phase with the current I11 gap described below.
 
 Implemented behavior:
 
@@ -672,7 +674,8 @@ Implemented behavior:
   origin confirms.
 - Every handling derives a create-only result-cell receipt from the durable
   event id. Redelivery therefore collides on the receipt and becomes a
-  permanent, non-retried rejection rather than a second handling.
+  permanent, non-retried rejection rather than a second canonical parent
+  handling commit.
 - Navigation uses the success-only post-commit outbox and its async callback is
   tracked by `runtime.settled()`; a rejected commit resets the navigation
   attempt instead of releasing the effect.
@@ -755,8 +758,10 @@ writes at least the receipt (default-on). The outbox remains the
 right tool for what it was built for: external side effects that *want*
 server confirmation.
 
-**Receipts (exactly-once handling).** Needed for CFC: certain events must
-be handled at most once system-wide, not once per runtime that sees them.
+**Receipts (exactly-once handling).** Needed for CFC: certain events must be
+handled at most once system-wide, not once per runtime that sees them. The
+receipt provides that guarantee for the canonical parent handling; the
+cross-space child-phase limitation is explicit below.
 
 The receipt is not a new document kind: **the receipt is the handling's
 result cell.** Every event handling conceptually owns one result document —
@@ -766,22 +771,39 @@ the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
 exactly-once witness.
 
+For an inline, non-navigation handler result, an `inSpace` child does not move
+that canonical handler-result wrapper into the child space. The result/receipt
+stays in the handler's originating space, while each child node materializes its
+own deterministic result in its target space. The multi-space transaction
+commits those child nodes first and the canonical handler result plus parent
+effects last. If a stale-basis rejection lands after a child commit, the
+accepted orphan child may remain (§7.6 speculation lineage), but the handler
+receipt did not commit, so retrying the event cannot collide with its own
+partial attempt. A result pattern containing `navigateTo` remains success-gated:
+its child work starts only after the handler's parent commit succeeds.
+
+An already-materialized local receipt short-circuits result-pattern
+materialization on an ordinary same-runtime redelivery, while the create-only
+precondition still makes the parent commit lose permanently. This is a local
+containment optimization, not a cross-space atomicity proof. If a stale retry
+partially committed a child before the parent receipt, or two runtimes race the
+same event, an attempt can write the deterministic child id before it loses the
+parent receipt race. The id prevents a second child identity, but it does not
+freeze the child's value or roll the child phase back. Strict exactly-once
+semantics for those child phases require a durable per-event/per-space phase
+protocol (open question 3).
+
 Each event is handled by **exactly one handler** (decided; multi-handler
 dispatch is a future opt-in feature — if it lands, the handler id joins the
-result-cell derivation). Today's `queueSchedulerEvent` silently queues one
-event per matching handler; registration is tightened to enforce one
-handler per stream link instead.
+result-cell derivation). Registration enforces one handler per stream link.
 
-1. The result cell's id is causally derived from the **event id**. Today's
-   handler-result cause is per-invocation but *random*
-   (`{ ...inputs, $event: crypto.randomUUID() }`, `runner.ts:2995-2998`);
-   substituting the durable event id (§7.5) for the random UUID is the
-   whole bridge. It also makes every id minted inside the handler frame
-   event-causal (the frame cause feeds id derivation for objects the
-   handler creates): per-gesture uniqueness is preserved because event ids
-   are unique per send, retries of the same event reuse the same ids
-   instead of minting fresh ones per attempt, and duplicate handlings
-   elsewhere derive the same ids — colliding exactly where intended.
+1. The result cell's id is causally derived from the **event id**. The handler
+   result cause uses the durable dispatched event id (§7.5), which also makes
+   every id minted inside the handler frame event-causal (the frame cause feeds
+   id derivation for objects the handler creates): per-gesture uniqueness is
+   preserved because event ids are unique per send, retries of the same event
+   reuse the same ids instead of minting fresh ones per attempt, and duplicate
+   handlings elsewhere derive the same ids — colliding exactly where intended.
 2. **Default-on for all events** (no class machinery for now): every
    handling transaction creates its result cell **unconditionally**, under
    a create-only commit precondition. If it already exists, the commit
@@ -793,16 +815,22 @@ handler per stream link instead.
    gesture-scale). Layering — per-class refinements, receipt retention,
    alignment with the CFC exactly-once scope — is deliberately deferred
    (open question 2).
-3. Retryable conflicts on other documents re-run the handler as usual; the
-   re-run derives the same result-cell id from the same event id, so a
-   handler's own retries never collide with themselves (the losing attempt
-   never committed).
+3. Retryable stale-basis failures on other documents re-run the handler as
+   usual; the re-run derives the same result-cell id from the same event id, so
+   a handler's own retries never collide with themselves. The losing attempt
+   never committed the canonical result/receipt. A child-first cross-space
+   attempt may have committed deterministic child data, but that is an accepted
+   orphan rather than the handler's terminal witness; a retry can reuse or
+   update that child phase before the parent handling succeeds.
 4. Receipts compose with non-durable event queues: delivery may be
    at-least-once (redelivery after restart, multi-runtime fanout); receipts
-   make *handling* exactly-once, including across process restarts, without
-   making queues durable. And because the receipt is the result cell, a
-   redelivered pattern-launching event cannot create a second piece — the
-   collision is on the very document the piece would live at.
+   make the *canonical parent handling commit* exactly-once, including across
+   process restarts, without making queues durable. And because the receipt is
+   the handler's result cell, a redelivery cannot create a second
+   handler-result piece. Cross-space child nodes use deterministic ids, so a
+   partial attempt and the winner address the same child identity; absent the
+   deferred phase protocol, this does not guarantee which attempted child value
+   wins before the parent receipt commits.
 
 Lineage and receipts are deliberately the same shape — commit-time
 precondition, permanent rejection, no-retry client behavior, ids derived
@@ -1021,12 +1049,14 @@ are cancelled client-side or permanently rejected at commit, and are never
 retried. A retried parent emits fresh launches under its new attempt. See
 §7.6.
 
-**I11 — Events are handled at most once.** At most one handling
-transaction system-wide ever commits for a given event id: the create of
-the handling's result cell (whose id is causal to the event id) is the
-witness; receipts are on for all events. A receipt-exists rejection is
-permanent: the losing client does not retry. Each event has exactly one
-handler. See §7.6.
+**I11 — Events are handled at most once.** At most one handling transaction
+system-wide ever commits for a given event id: the create of the handling's
+result cell (whose id is causal to the event id) is the witness; receipts are on
+for all events. A receipt-exists rejection is permanent: the losing client does
+not retry. Each event has exactly one handler. **Current implementation gap:**
+child-first cross-space materialization can durably write before the parent
+receipt race is decided, so strict I11 for those child-phase values still needs
+the protocol in open question 3. See §7.6.
 
 ---
 
@@ -1188,12 +1218,17 @@ Summary table; the full per-mechanism walkthrough with file references is in
 13. **The receipt is the handler's result cell.** Every handling owns one
     result document — the `{ resultFor: cause }` cell that hosts a
     launched pattern when there is one, and is just the receipt when there
-    was nothing to launch. Implementation bridge: replace the random
-    per-invocation `$event: crypto.randomUUID()` in the handler-result
-    cause (`runner.ts:2995-2998`) with the durable event id, making the
-    result cell and all handler-frame-minted ids event-causal (retries
-    reuse ids; duplicates collide; per-gesture uniqueness preserved since
-    event ids are unique per send).
+    was nothing to launch. For inline non-navigation results, an `inSpace`
+    child has its own target-space result, but the canonical handler
+    result/receipt stays in the originating space and commits with the parent
+    effects after the child. Navigation results remain success-gated and start
+    child work after that parent commit. The handler-result cause uses the
+    durable dispatched event id, making the result cell and all
+    handler-frame-minted ids event-causal (retries reuse ids; duplicates
+    collide; per-gesture uniqueness is preserved because event ids are unique
+    per send). Deterministic child identity does not make the preceding
+    cross-space child phase atomic with the parent receipt; closing that current
+    I11 gap is deferred to open question 3.
 14. **Receipts default-on for everything.** Every event handling creates
     its result cell under the create-only precondition — no class
     machinery for now. UI-local events cannot race (the precondition is
@@ -1424,3 +1459,10 @@ Summary table; the full per-mechanism walkthrough with file references is in
    weaker/stronger guarantees, retention/GC policy for receipt cells, and
    whether any class should ever opt out (high-frequency programmatic
    event streams being the plausible candidate).
+3. **Durable cross-space child phases.** Closing the current I11 gap for an
+   inline child that commits before the parent receipt needs a durable phase
+   guard keyed by event and child space, an intent-equality or first-writer rule
+   for competing values, and fenced ownership/cancellation (or true cross-space
+   atomicity). Deterministic ids and the local receipt fast path contain common
+   retries but cannot resolve simultaneous runtimes or roll back a partial child
+   commit. This is a separate protocol-sized change.

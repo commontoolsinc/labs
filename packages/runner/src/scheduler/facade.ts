@@ -701,12 +701,16 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): void {
+    const record = this.nodes.get(action);
+    const wasLiveBeforeRootRegistration = record !== undefined &&
+      isLive(this.dependencyGraphState, record);
     this.updateMaterializerRegistration(action);
     resubscribePullSchedulerAction(
       this.subscribeActionState,
       action,
       log,
       options,
+      { wasLiveBeforeRootRegistration },
     );
   }
 
@@ -1958,7 +1962,6 @@ export class Scheduler {
       isThrottled: (action) => this.gates.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
-      isInvalid: (action) => this.isInvalidAction(action),
       markInvalid: (action) => this.markAndScheduleInvalidAction(action),
       updateDependents: (action, log) => this.updateDependents(action, log),
       registerWriterDependents: (action, writes) =>

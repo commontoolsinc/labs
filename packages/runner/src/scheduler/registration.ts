@@ -6,6 +6,7 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
 import {
   type DependencyGraphState,
+  hasInvalidUpstream,
   isLive,
   notifyNodeLivenessChange,
   recomputeLiveRefs,
@@ -71,6 +72,10 @@ export interface SchedulerResubscribeOptions {
   changeGroup?: ChangeGroup;
 }
 
+interface SchedulerResubscribeLiveness {
+  readonly wasLiveBeforeRootRegistration?: boolean;
+}
+
 export interface SchedulerSubscribeActionState {
   readonly subscriptionState: SchedulerSubscriptionState;
   readonly dependencyUpdateState: DependencyUpdateState;
@@ -88,7 +93,6 @@ export interface SchedulerSubscribeActionState {
   ) => readonly IMemorySpaceAddress[] | undefined;
   readonly isThrottled: (action: Action) => boolean;
   readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-  readonly isInvalid: (action: Action) => boolean;
   readonly markInvalid: (action: Action) => void;
   readonly updateDependents: (action: Action, log: ReactivityLog) => void;
   readonly registerWriterDependents: (
@@ -237,9 +241,16 @@ export function resubscribePullSchedulerAction(
   action: Action,
   log: ReactivityLog,
   options: SchedulerResubscribeOptions = {},
+  liveness: SchedulerResubscribeLiveness = {},
 ): void {
   const { isEffect } = options;
   const existingRecord = state.subscriptionState.nodes.get(action);
+  const wasLive = liveness.wasLiveBeforeRootRegistration ??
+    (existingRecord !== undefined &&
+      isLive(
+        state.subscriptionState.dependencyGraphState,
+        existingRecord,
+      ));
 
   updateSchedulerActionChangeGroup(
     state.subscriptionState,
@@ -259,7 +270,7 @@ export function resubscribePullSchedulerAction(
     isEffect,
   );
   const record = state.subscriptionState.nodes.get(action);
-  if (!existingRecord && record?.status === "never-ran") {
+  if (record?.status === "never-ran") {
     state.subscriptionState.nodes.setStatus(action, "clean");
   }
   const actionId = state.getActionId(action);
@@ -287,6 +298,25 @@ export function resubscribePullSchedulerAction(
     state.triggerSubscriptionState,
     action,
   );
+
+  // Resubscribe can make a dormant action live by turning it into an effect or
+  // materializer root, or by restoring computation demand through its updated
+  // edges. No later value change remains to wake work invalidated while it was
+  // dormant, so queue the false-to-true transition when either this action or
+  // one of its upstream dependencies is already invalid. Preserve an invalid
+  // status observed between the completed run and this resubscribe; only the
+  // never-ran sentinel above is normalized to clean.
+  if (
+    !wasLive && record !== undefined &&
+    isLive(state.subscriptionState.dependencyGraphState, record) &&
+    (record.status === "invalid" ||
+      hasInvalidUpstream(
+        state.subscriptionState.dependencyGraphState,
+        action,
+      ))
+  ) {
+    state.queueExecution();
+  }
 }
 
 export function updateSchedulerActionType(

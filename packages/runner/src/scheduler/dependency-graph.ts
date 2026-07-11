@@ -91,21 +91,47 @@ export function hasDependentPath(
   dependentsByAction: WeakMap<Action, Set<Action>>,
   from: Action,
   to: Action,
-  visited = new Set<Action>(),
 ): boolean {
-  if (from === to) return true;
-  if (visited.has(from)) return false;
-  visited.add(from);
+  const visited = new Set<Action>([from]);
+  const pending = [from];
 
-  const dependents = dependentsByAction.get(from);
-  if (!dependents) return false;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (current === to) return true;
 
-  for (const dependent of dependents) {
-    if (hasDependentPath(dependentsByAction, dependent, to, visited)) {
-      return true;
+    const dependents = dependentsByAction.get(current);
+    if (!dependents) continue;
+    for (const dependent of dependents) {
+      if (visited.has(dependent)) continue;
+      visited.add(dependent);
+      pending.push(dependent);
     }
   }
 
+  return false;
+}
+
+/**
+ * True when an invalid/never-ran node is transitively upstream of `action`.
+ *
+ * Seed from the maintained invalid-node set rather than walking `action`'s
+ * whole upstream cone. {@link hasDependentPath} supplies the cycle-safe
+ * downstream reachability check over the canonical writer-to-reader edges.
+ * `action` itself is excluded: a resubscribe records a run that just completed,
+ * so callers use this to decide whether newly-live upstream work needs a wake.
+ */
+export function hasInvalidUpstream(
+  state: Pick<DependencyGraphState, "dependents" | "nodes">,
+  action: Action,
+): boolean {
+  for (const candidate of state.nodes.getInvalidNodes()) {
+    if (
+      candidate !== action &&
+      hasDependentPath(state.dependents, candidate, action)
+    ) {
+      return true;
+    }
+  }
   return false;
 }
 

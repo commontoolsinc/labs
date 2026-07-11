@@ -236,17 +236,207 @@ Deno.test("stop invalidates a held snapshot listing for that piece", async () =>
     const result = runtime.getCellFromLink(
       seeded.result.getAsNormalizedFullLink(),
     ) as Cell<{ doubled: number }>;
-    const start = runtime.start(result);
+    const lifecycleState = runtime.runner as unknown as {
+      startGenerationByDoc: Map<string, number>;
+      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
+    };
+    const starts = [runtime.start(result), runtime.start(result)];
     await listingStarted.promise;
+    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(1);
+    expect(
+      [...lifecycleState.activeStartAttemptsByDoc.values()][0]?.size,
+    ).toBe(2);
     runtime.runner.stop(result);
+    expect(lifecycleState.startGenerationByDoc.size).toBe(1);
+    const editsAfterStop = editCalls;
+    heldList.resolve(seededPage);
+
+    expect(await Promise.all(starts)).toEqual([false, false]);
+    expect(runtime.runner.cancels.size).toBe(0);
+    expect(editCalls).toBe(editsAfterStop);
+    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
+    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
+  } finally {
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("stopping a target before link resolution invalidates the held start", async () => {
+  const seeded = await seedReloadablePiece("pre-resolution-target-stop-race");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  try {
+    const { runtime } = reloaded;
+    const provider = runtime.storageManager.open(space);
+    const originalList = provider.listSchedulerActionSnapshots!.bind(provider);
+    let snapshotListingCalls = 0;
+    provider.listSchedulerActionSnapshots = (options) => {
+      snapshotListingCalls++;
+      return originalList(options);
+    };
+    const target = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<{ doubled: number }>;
+    const link = runtime.getCell<unknown>(
+      space,
+      "pre-resolution-target-stop-alias",
+    );
+    const syncStarted = Promise.withResolvers<void>();
+    const releaseSync = Promise.withResolvers<void>();
+    const targetLink = target.getAsLink();
+    let resolved = false;
+    link.getRaw = (() =>
+      resolved ? targetLink : undefined) as typeof link.getRaw;
+    link.sync = (() => {
+      syncStarted.resolve();
+      return releaseSync.promise.then(() => {
+        resolved = true;
+        return link;
+      });
+    }) as typeof link.sync;
+
+    const runnerHarness = runtime.runner as unknown as {
+      startCore(resultCell: Cell<unknown>, options?: unknown): void;
+    };
+    const originalStartCore = runnerHarness.startCore.bind(runtime.runner);
+    let startCoreCalls = 0;
+    runnerHarness.startCore = (resultCell, options) => {
+      startCoreCalls++;
+      originalStartCore(resultCell, options);
+    };
+    const lifecycleState = runtime.runner as unknown as {
+      startGenerationByDoc: Map<string, number>;
+      activeStartAttempts: Set<{ preResolutionStopKeys: Set<string> }>;
+    };
+
+    const start = runtime.start(link);
+    await syncStarted.promise;
+    expect(lifecycleState.activeStartAttempts.size).toBe(1);
+    runtime.runner.stop(target);
+    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
+    expect(
+      [...lifecycleState.activeStartAttempts][0]?.preResolutionStopKeys.size,
+    ).toBe(1);
+    releaseSync.resolve();
+
+    expect(await start).toBe(false);
+    expect(runtime.runner.cancels.size).toBe(0);
+    expect(startCoreCalls).toBe(0);
+    expect(lifecycleState.activeStartAttempts.size).toBe(0);
+
+    // `stop(target)` above only invalidated the unresolved attempt; target was
+    // never locally running. A later explicit start must therefore take the
+    // storage-resume path instead of being misclassified as a cheap local
+    // restart that skips dependency sync and snapshot rehydration.
+    expect(await runtime.start(target)).toBe(true);
+    expect(snapshotListingCalls).toBe(1);
+    expect(startCoreCalls).toBe(1);
+    runtime.runner.stop(target);
+  } finally {
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("stopping a link target invalidates its held start", async () => {
+  const seeded = await seedReloadablePiece("snapshot-link-target-stop-race");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  try {
+    const { runtime } = reloaded;
+    const provider = runtime.storageManager.open(space);
+    const originalList = provider.listSchedulerActionSnapshots!.bind(provider);
+    const seededPage = await originalList({
+      ownerSpace: space,
+      processGeneration: 0,
+    });
+    const listingStarted = Promise.withResolvers<void>();
+    const heldList = Promise.withResolvers<SchedulerSnapshotListResult>();
+    provider.listSchedulerActionSnapshots = () => {
+      listingStarted.resolve();
+      return heldList.promise;
+    };
+
+    const target = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<{ doubled: number }>;
+    const linkTx = runtime.edit();
+    const link = runtime.getCell<unknown>(
+      space,
+      "snapshot-link-target-stop-alias",
+      undefined,
+      linkTx,
+    );
+    link.withTx(linkTx).setRaw(target.getAsLink());
+    expect((await linkTx.commit()).error).toBeUndefined();
+
+    const originalEdit = runtime.edit.bind(runtime);
+    let editCalls = 0;
+    runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+      editCalls++;
+      return originalEdit(...args);
+    }) as typeof runtime.edit;
+
+    const lifecycleState = runtime.runner as unknown as {
+      startGenerationByDoc: Map<string, number>;
+      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
+    };
+    const start = runtime.start(link);
+    await listingStarted.promise;
+    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(2);
+    runtime.runner.stop(target);
+    expect(lifecycleState.startGenerationByDoc.size).toBe(1);
     const editsAfterStop = editCalls;
     heldList.resolve(seededPage);
 
     expect(await start).toBe(false);
     expect(runtime.runner.cancels.size).toBe(0);
     expect(editCalls).toBe(editsAfterStop);
+    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
+    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("completed and stopped start churn releases lifecycle state", async () => {
+  const env = createSchedulerTestRuntime(import.meta.url, {});
+  try {
+    const { runtime, tx } = env;
+    const lifecycleState = env.runtime.runner as unknown as {
+      startGenerationByDoc: Map<string, number>;
+      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
+      activeStartAttempts: Set<unknown>;
+      allCancels: Set<unknown>;
+    };
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
+    const results: Cell<{ doubled: number }>[] = [];
+
+    for (let index = 0; index < 32; index++) {
+      const result = runtime.getCell<{ doubled: number }>(
+        space,
+        `start-lifecycle-churn-${index}`,
+        undefined,
+        tx,
+      );
+      await runtime.setup(tx, compiled, { value: index }, result);
+      results.push(result);
+    }
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    for (const result of results) {
+      expect(await runtime.start(result)).toBe(true);
+      runtime.runner.stop(result);
+    }
+
+    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
+    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
+    expect(lifecycleState.activeStartAttempts.size).toBe(0);
+    expect(runtime.runner.cancels.size).toBe(0);
+    expect(lifecycleState.allCancels.size).toBe(0);
+  } finally {
+    await disposeSchedulerTestRuntime(env);
   }
 });
 

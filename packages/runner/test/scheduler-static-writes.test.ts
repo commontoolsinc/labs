@@ -2,6 +2,7 @@ import {
   getLogger,
   getLoggerCountsBreakdown,
 } from "@commonfabric/utils/logger";
+import { hasDependentPath } from "../src/scheduler/dependency-graph.ts";
 import {
   afterEach,
   beforeEach,
@@ -13,12 +14,48 @@ import {
   Runtime,
   space,
   toMemorySpaceAddress,
+  txToReactivityLog,
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
   IExtendedStorageTransaction,
+  ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+
+const SCHEDULER_SIGNAL_TIMEOUT_MS = 5_000;
+
+async function waitForSchedulerSignal<T>(
+  signal: Promise<T>,
+  message: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      signal,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(message)),
+          SCHEDULER_SIGNAL_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+async function runActionOnce(
+  runtime: Runtime,
+  action: Action,
+): Promise<ReactivityLog> {
+  const actionTx = runtime.edit();
+  action(actionTx);
+  const log = txToReactivityLog(actionTx);
+  runtime.prepareTxForCommit(actionTx);
+  expect((await actionTx.commit()).error).toBeUndefined();
+  return log;
+}
 
 describe("static write surface demand", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -132,14 +169,397 @@ describe("static write surface demand", () => {
     await runtime.scheduler.idle();
     expect(runs).toBe(0);
 
-    const cancel = output.withTx(tx).sink(() => {});
+    const observed = Promise.withResolvers<number>();
+    const cancel = output.withTx(tx).sink((value) => {
+      if (value === 30) observed.resolve(value);
+    });
     try {
+      const value = await waitForSchedulerSignal(
+        observed.promise,
+        "sink did not wake its dirty writer",
+      );
       await runtime.scheduler.idle();
 
+      expect(value).toBe(30);
       expect(runs).toBe(1);
       expect(output.get()).toBe(30);
     } finally {
       cancel();
+    }
+  });
+
+  it("wakes a dirty transitive writer when demand returns through a clean writer", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-transitive-source",
+      undefined,
+      tx,
+    );
+    const middle = runtime.getCell<number>(
+      space,
+      "static-writes-transitive-middle",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "static-writes-transitive-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    middle.set(0);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let sourceWriterRuns = 0;
+    let outputWriterRuns = 0;
+    const middleLink = middle.getAsNormalizedFullLink();
+    const outputLink = output.getAsNormalizedFullLink();
+    const sourceWriter = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        sourceWriterRuns++;
+        middle.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      { writes: [middleLink] },
+    );
+    const outputWriter = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        outputWriterRuns++;
+        output.withTx(actionTx).send(middle.withTx(actionTx).get());
+      }) as Action,
+      { writes: [outputLink] },
+    );
+
+    runtime.scheduler.subscribe(sourceWriter, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(middleLink)],
+    }, {});
+    runtime.scheduler.subscribe(outputWriter, {
+      reads: [toMemorySpaceAddress(middleLink)],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(outputLink)],
+    }, {});
+
+    const firstObserved = Promise.withResolvers<number>();
+    const cancelFirst = output.withTx(tx).sink((value) => {
+      if (value === 10) firstObserved.resolve(value);
+    });
+    try {
+      await waitForSchedulerSignal(
+        firstObserved.promise,
+        "initial transitive demand did not settle",
+      );
+      await runtime.scheduler.idle();
+    } finally {
+      cancelFirst();
+    }
+    expect(sourceWriterRuns).toBe(1);
+    expect(outputWriterRuns).toBe(1);
+
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    source.withTx(tx).send(2);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+    expect(sourceWriterRuns).toBe(1);
+    expect(outputWriterRuns).toBe(1);
+    expect(output.get()).toBe(10);
+
+    const redemanded = Promise.withResolvers<number>();
+    const cancelSecond = output.withTx(tx).sink((value) => {
+      if (value === 20) redemanded.resolve(value);
+    });
+    try {
+      const value = await waitForSchedulerSignal(
+        redemanded.promise,
+        "transitive dirty writer did not wake when demand returned",
+      );
+      await runtime.scheduler.idle();
+
+      expect(value).toBe(20);
+      expect(sourceWriterRuns).toBe(2);
+      expect(outputWriterRuns).toBe(2);
+      expect(output.get()).toBe(20);
+    } finally {
+      cancelSecond();
+    }
+  });
+
+  it("wakes a dirty writer when an unsubscribed effect is reactivated", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-reactivate-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "static-writes-reactivate-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let writerRuns = 0;
+    let effectRuns = 0;
+    let expected = 10;
+    let observed = Promise.withResolvers<number>();
+    const outputLink = output.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        writerRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      { writes: [outputLink] },
+    );
+    const effect = ((actionTx: IExtendedStorageTransaction) => {
+      effectRuns++;
+      const value = output.withTx(actionTx).get();
+      if (value === expected) observed.resolve(value);
+    }) as Action;
+
+    runtime.scheduler.subscribe(writer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(outputLink)],
+    }, {});
+
+    let effectLog = await runActionOnce(runtime, effect);
+    runtime.scheduler.resubscribe(effect, effectLog, { isEffect: true });
+    try {
+      await waitForSchedulerSignal(
+        observed.promise,
+        "initial effect activation did not wake its writer",
+      );
+      await runtime.scheduler.idle();
+      expect(writerRuns).toBe(1);
+      expect(effectRuns).toBe(2);
+      runtime.scheduler.unsubscribe(effect);
+
+      expect((await tx.commit()).error).toBeUndefined();
+      tx = runtime.edit();
+      source.withTx(tx).send(2);
+      expect((await tx.commit()).error).toBeUndefined();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+      expect(writerRuns).toBe(1);
+      expect(output.get()).toBe(10);
+
+      expected = 20;
+      observed = Promise.withResolvers<number>();
+      effectLog = await runActionOnce(runtime, effect);
+      runtime.scheduler.resubscribe(effect, effectLog, { isEffect: true });
+      const value = await waitForSchedulerSignal(
+        observed.promise,
+        "reactivated effect did not wake its dirty writer",
+      );
+      await runtime.scheduler.idle();
+
+      expect(value).toBe(20);
+      expect(writerRuns).toBe(2);
+      expect(effectRuns).toBe(4);
+      expect(output.get()).toBe(20);
+    } finally {
+      runtime.scheduler.unsubscribe(effect);
+    }
+  });
+
+  it("wakes an invalid dormant computation when it is promoted to an effect", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-promote-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "static-writes-promote-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const promotedObserved = Promise.withResolvers<number>();
+    const outputLink = output.getAsNormalizedFullLink();
+    const computation = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        computationRuns++;
+        const value = source.withTx(actionTx).get() * 10;
+        output.withTx(actionTx).send(value);
+        if (value === 30) promotedObserved.resolve(value);
+      }) as Action,
+      { writes: [outputLink] },
+    );
+
+    runtime.scheduler.subscribe(computation, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(outputLink)],
+    }, {});
+
+    const initial = Promise.withResolvers<number>();
+    const cancel = output.withTx(tx).sink((value) => {
+      if (value === 10) initial.resolve(value);
+    });
+    try {
+      await waitForSchedulerSignal(
+        initial.promise,
+        "initial computation demand did not settle",
+      );
+      await runtime.scheduler.idle();
+    } finally {
+      cancel();
+    }
+    expect(computationRuns).toBe(1);
+
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    source.withTx(tx).send(2);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+    expect(computationRuns).toBe(1);
+    expect(output.get()).toBe(10);
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+
+    const computationLog = await runActionOnce(runtime, computation);
+    expect(output.get()).toBe(20);
+    tx = runtime.edit();
+
+    // The direct dependency changes after the manual run produced its log.
+    // Resubscribe must preserve the concurrent invalid status and use the
+    // action's false-to-true liveness transition to schedule another run.
+    source.withTx(tx).send(3);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+
+    runtime.scheduler.resubscribe(computation, computationLog, {
+      isEffect: true,
+    });
+    try {
+      const value = await waitForSchedulerSignal(
+        promotedObserved.promise,
+        "promoted effect did not wake itself after concurrent invalidation",
+      );
+      await runtime.scheduler.idle();
+
+      expect(value).toBe(30);
+      expect(computationRuns).toBe(3);
+      expect(output.get()).toBe(30);
+    } finally {
+      runtime.scheduler.unsubscribe(computation);
+    }
+  });
+
+  it("wakes dirty upstream work when an annotated materializer is restored", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "static-writes-materializer-source",
+      undefined,
+      tx,
+    );
+    const intermediate = runtime.getCell<number>(
+      space,
+      "static-writes-materializer-intermediate",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "static-writes-materializer-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    intermediate.set(0);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let writerRuns = 0;
+    let materializerRuns = 0;
+    const observed = Promise.withResolvers<number>();
+    const intermediateLink = intermediate.getAsNormalizedFullLink();
+    const outputLink = output.getAsNormalizedFullLink();
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        writerRuns++;
+        intermediate.withTx(actionTx).send(
+          source.withTx(actionTx).get() * 10,
+        );
+      }) as Action,
+      { writes: [intermediateLink] },
+    );
+    const materializer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        const value = intermediate.withTx(actionTx).get();
+        output.withTx(actionTx).send(value);
+        if (value === 20) observed.resolve(value);
+      }) as Action,
+      { materializerWriteEnvelopes: [outputLink] },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof output.getAsNormalizedFullLink
+      >[];
+    };
+
+    runtime.scheduler.subscribe(writer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(intermediateLink)],
+    }, {});
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(intermediateLink)],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(outputLink)],
+    }, {});
+    await runtime.scheduler.idle();
+    expect(writerRuns).toBe(1);
+    expect(materializerRuns).toBe(1);
+    expect(output.get()).toBe(10);
+
+    runtime.scheduler.unsubscribe(materializer);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    source.withTx(tx).send(2);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+    expect(writerRuns).toBe(1);
+    expect(intermediate.get()).toBe(10);
+    expect(runtime.scheduler.isDirty(writer)).toBe(true);
+
+    const materializerLog = await runActionOnce(runtime, materializer);
+    expect(output.get()).toBe(10);
+    tx = runtime.edit();
+
+    runtime.scheduler.resubscribe(materializer, materializerLog);
+    try {
+      const value = await waitForSchedulerSignal(
+        observed.promise,
+        "restored materializer did not wake its dirty upstream writer",
+      );
+      await runtime.scheduler.idle();
+
+      expect(value).toBe(20);
+      expect(writerRuns).toBe(2);
+      expect(materializerRuns).toBe(3);
+      expect(output.get()).toBe(20);
+    } finally {
+      runtime.scheduler.unsubscribe(materializer);
     }
   });
 
@@ -283,5 +703,25 @@ describe("static write surface demand", () => {
       cancel();
       getLogger("scheduler").resetCounts();
     }
+  });
+});
+
+describe("dependency graph reachability", () => {
+  it("handles a 20k-deep cyclic graph without recursive stack growth", () => {
+    const depth = 20_000;
+    const actions = Array.from(
+      { length: depth + 1 },
+      () => (() => {}) as Action,
+    );
+    const unreachable = (() => {}) as Action;
+    const dependents = new WeakMap<Action, Set<Action>>();
+
+    for (let index = 0; index < depth; index++) {
+      dependents.set(actions[index], new Set([actions[index + 1]]));
+    }
+    dependents.set(actions[depth], new Set([actions[depth / 2]]));
+
+    expect(hasDependentPath(dependents, actions[0], actions[depth])).toBe(true);
+    expect(hasDependentPath(dependents, actions[0], unreachable)).toBe(false);
   });
 });

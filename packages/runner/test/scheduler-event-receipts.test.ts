@@ -284,6 +284,333 @@ describe("scheduler event receipts", () => {
     }
   });
 
+  it("keeps a same-space launched winner live after a sequential receipt loser", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { cell, handler, lift, pattern } = commonfabric;
+    const Child = pattern(() => {
+      const state = cell({ value: 1 });
+      const doubled = lift(({ value }: { value: number }) => value * 2)(state);
+      return { state, doubled };
+    });
+    let handlerInvocations = 0;
+    const launchChild = handler<unknown, Record<string, never>>(
+      () => {
+        handlerInvocations++;
+        return Child({});
+      },
+      { proxy: true },
+    );
+    const Root = pattern(() => ({ stream: launchChild({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "same-space receipt winner liveness root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, Root, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const commitTelemetry = collectEventCommitMarkers(runtime);
+    const eventId = "evt:same-space-winner-live:0:root";
+    let cancelDoubled: (() => void) | undefined;
+    try {
+      const streamLink = resolvedStreamLink(root.key("stream"), runtime);
+      runtime.scheduler.queueEvent(
+        streamLink,
+        {},
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSchedulerCondition(
+        runtime,
+        () =>
+          handlerInvocations === 1 &&
+          commitTelemetry.markers.some((marker) =>
+            marker.type === "scheduler.event.commit" &&
+            marker.error === undefined
+          ),
+        "same-space winner did not commit",
+      );
+
+      const resultCell = receiptCellForEvent<{
+        state: { value: number };
+        doubled: number;
+      }>(runtime, eventId);
+      cancelDoubled = resultCell.key("doubled").withTx(tx).sink(() => {});
+      await runtime.idle();
+      expect(resultCell.key("doubled").get()).toBe(2);
+
+      // Redeliver only after the first receipt is confirmed. The duplicate may
+      // invoke its handler, but it does not own the already-running wrapper and
+      // must not register failure compensation that stops the winner.
+      runtime.scheduler.queueEvent(
+        streamLink,
+        {},
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSchedulerCondition(
+        runtime,
+        () =>
+          handlerInvocations === 2 &&
+          commitTelemetry.markers.some((marker) =>
+            permanentRejection(marker) === "receipt-exists"
+          ),
+        "same-space duplicate did not lose its receipt",
+      );
+
+      const updateTx = runtime.edit();
+      resultCell.key("state", "value").withTx(updateTx).set(3);
+      runtime.prepareTxForCommit(updateTx);
+      expect((await updateTx.commit()).error).toBeUndefined();
+      await waitForSchedulerCondition(
+        runtime,
+        () => resultCell.key("doubled").get() === 6,
+        "receipt loser stopped the same-space winner",
+      );
+      expect(resultCell.key("doubled").get()).toBe(6);
+    } finally {
+      cancelDoubled?.();
+      commitTelemetry.dispose();
+    }
+  });
+
+  it("uses one canonical handler-result cell for a cross-space launch receipt", async () => {
+    const targetSpace = (await Identity.fromPassphrase(
+      "cross-space receipt target",
+    )).did();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    const Child = pattern<{ value: number }>(({ value }) => ({ value }));
+    let handlerInvocations = 0;
+    const launchChild = handler<
+      { value: number },
+      Record<string, never>
+    >(
+      (event) => {
+        handlerInvocations++;
+        Child.inSpace(targetSpace)({ value: event.value });
+      },
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => ({ stream: launchChild({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "cross-space receipt root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const commitTelemetry = collectEventCommitMarkers(runtime);
+    const eventId = "evt:cross-space-receipt:0:cross-space-receipt-root";
+    try {
+      const streamLink = resolvedStreamLink(root.key("stream"), runtime);
+      runtime.scheduler.queueEvent(
+        streamLink,
+        { value: 11 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      runtime.scheduler.queueEvent(
+        streamLink,
+        { value: 11 },
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+
+      await waitForSchedulerCondition(
+        runtime,
+        () => handlerInvocations === 2 && commitTelemetry.markers.length >= 2,
+        "cross-space redelivery did not settle",
+      );
+      await runtime.storageManager.synced();
+
+      const canonicalResult = receiptCellForEvent<unknown>(runtime, eventId);
+      await canonicalResult.sync();
+      const duplicateChildWrapper = runtime.getCell<unknown>(
+        targetSpace,
+        { resultFor: { $ctx: {}, $event: eventId } },
+      );
+      await duplicateChildWrapper.sync();
+
+      // Decision 13: the create-only receipt is the result cell that hosts the
+      // handler's launched pattern, not a separate empty witness beside a
+      // second same-cause wrapper in the child space.
+      expect(canonicalResult.getMetaRaw("patternIdentity")).toBeDefined();
+      expect(
+        duplicateChildWrapper.getMetaRaw("patternIdentity"),
+      ).toBeUndefined();
+      expect(
+        commitTelemetry.markers.some((marker) =>
+          permanentRejection(marker) === "receipt-exists"
+        ),
+      ).toBe(true);
+    } finally {
+      commitTelemetry.dispose();
+    }
+  });
+
+  it("does not rematerialize a live cross-space winner on sequential redelivery", async () => {
+    const targetSpace = (await Identity.fromPassphrase(
+      "cross-space sequential receipt winner target",
+    )).did();
+    const target = runtime.getCell<unknown>(
+      targetSpace,
+      "cross-space sequential receipt winner link",
+      undefined,
+      tx,
+    );
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { cell, handler, lift, pattern } = commonfabric;
+    const Child = pattern<{ launchedValue: number }>(({ launchedValue }) => {
+      const ticks = cell({ value: 1 });
+      const doubled = lift(({ value }: { value: number }) => value * 2)(ticks);
+      return { launchedValue, ticks, doubled };
+    });
+    let handlerInvocations = 0;
+    const launchChild = handler<
+      Record<string, never>,
+      { current: { value: number }; target: Cell<unknown> }
+    >(
+      { type: "object", properties: {} },
+      {
+        type: "object",
+        properties: {
+          current: {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+          target: { asCell: ["cell"] },
+        },
+        required: ["current", "target"],
+      },
+      (_event, { current, target }) => {
+        handlerInvocations++;
+        target.set(
+          Child.inSpace(targetSpace)({ launchedValue: current.value }),
+        );
+      },
+    );
+    const Root = pattern<{ target: Cell<unknown> }>(({ target }) => {
+      const current = cell({ value: 1 });
+      return { current, stream: launchChild({ current, target }) };
+    }, {
+      type: "object",
+      properties: { target: { asCell: ["cell"] } },
+      required: ["target"],
+    });
+    const rootCell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "cross-space sequential receipt winner root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, Root, { target }, rootCell);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await root.pull();
+
+    const commitTelemetry = collectEventCommitMarkers(runtime);
+    const eventId = "evt:cross-space-sequential-winner:0:root";
+    let cancelChildDoubled: (() => void) | undefined;
+    try {
+      const streamLink = resolvedStreamLink(root.key("stream"), runtime);
+      runtime.scheduler.queueEvent(
+        streamLink,
+        {},
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSchedulerCondition(
+        runtime,
+        () =>
+          handlerInvocations === 1 &&
+          commitTelemetry.markers.some((marker) =>
+            marker.type === "scheduler.event.commit" &&
+            marker.error === undefined
+          ),
+        "cross-space winner did not commit",
+      );
+      await runtime.storageManager.synced();
+      await target.sync();
+      const firstChild = target.resolveAsCell();
+      await firstChild.key("launchedValue").pull();
+      cancelChildDoubled = firstChild.key("doubled").withTx(tx).sink(() => {});
+      await runtime.idle();
+      expect(firstChild.key("launchedValue").get()).toBe(1);
+      expect(firstChild.key("doubled").get()).toBe(2);
+      const firstChildLink = firstChild.getAsNormalizedFullLink();
+
+      const contextTx = runtime.edit();
+      root.key("current", "value").withTx(contextTx).set(2);
+      runtime.prepareTxForCommit(contextTx);
+      expect((await contextTx.commit()).error).toBeUndefined();
+
+      // The same event id now observes different captured context. Because the
+      // first receipt is already confirmed and its wrapper is live locally,
+      // the duplicate must not run its newly-built result pattern into the
+      // shared wrapper before the create-only guard rejects its parent commit.
+      runtime.scheduler.queueEvent(
+        streamLink,
+        {},
+        undefined,
+        undefined,
+        false,
+        { eventId },
+      );
+      await waitForSchedulerCondition(
+        runtime,
+        () =>
+          handlerInvocations === 2 &&
+          commitTelemetry.markers.some((marker) =>
+            permanentRejection(marker) === "receipt-exists"
+          ),
+        "cross-space duplicate did not lose its receipt",
+      );
+      await runtime.storageManager.synced();
+      await target.sync();
+
+      const survivingChild = target.resolveAsCell();
+      await survivingChild.key("launchedValue").pull();
+      expect(survivingChild.getAsNormalizedFullLink()).toEqual(firstChildLink);
+      expect(survivingChild.key("launchedValue").get()).toBe(1);
+
+      // The duplicate also must not stop the shared canonical wrapper: its
+      // child computations remain live after the receipt-exists rejection.
+      const tickTx = runtime.edit();
+      survivingChild.key("ticks", "value").withTx(tickTx).set(3);
+      runtime.prepareTxForCommit(tickTx);
+      expect((await tickTx.commit()).error).toBeUndefined();
+      await waitForSchedulerCondition(
+        runtime,
+        () => Number(survivingChild.key("doubled").get()) === 6,
+        "cross-space receipt loser stopped the winner's child",
+      );
+      expect(survivingChild.key("doubled").get()).toBe(6);
+    } finally {
+      cancelChildDoubled?.();
+      commitTelemetry.dispose();
+    }
+  });
+
   it("retries transient conflicts with the same receipt id", async () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { cell, handler, lift, pattern } = commonfabric;
