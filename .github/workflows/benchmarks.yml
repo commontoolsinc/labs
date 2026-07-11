@@ -1,10 +1,10 @@
 name: Benchmarks
 
-# Benchmarks feed the trend analysis in tasks/perf-regression.ts, which itself
-# runs every four hours, so per-push samples add no resolution beyond a
-# four-hourly cadence. Scheduled runs stay on the dedicated runner group so
-# results remain comparable across runs; use the manual trigger to measure a
-# specific commit.
+# The bench-results artifacts feed the benchmark trend charts on the team ops
+# dashboard (its /bench page), which samples one run per four-hour window, so
+# per-push samples add no resolution beyond a four-hourly cadence. Scheduled
+# runs stay on the dedicated runner group so results remain comparable across
+# runs; use the manual trigger to measure a specific commit.
 on:
   schedule:
     - cron: "0 */4 * * *" # Every 4 hours

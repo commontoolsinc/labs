@@ -643,3 +643,116 @@ this file is the single tracking place:
   landed** (declared list-coordinator containers), and the generic
   pure-link-write slice **closed in #4674** via the machinery-read marker
   — see the SC-8 note and the design's §6 implementation note.
+
+## From the exchange-rules pattern-authoring design (2026-07-11)
+
+Companion design: [`cfc-exchange-rules-authoring.md`](./cfc-exchange-rules-authoring.md).
+All `open`.
+
+**SC-29 [normative] Module-identity-addressed policy references — §4.4.2 +
+§15.3.** Policy principals today are `{name, subject, hash}` with a
+name→hash discovery step (§4.4.1). For rule sets declared in pattern code,
+the reference should be the SC-22 identity pair — `{module identity, symbol}`
+(content-addressed entry-module identity + exported name), the same reference
+form the runtime uses for patterns/lifts/handlers. The pair is content-derived,
+so §4.4.2's hash-binding requirement is inherent in the reference and no
+separate discovery hop exists to fail; rebinding semantics are SC-22's (any
+code change ⇒ new identity ⇒ new policy version; migration per §4.4.4 rides
+the ordinary pattern-upgrade story). Proposed edit: add the pair-addressed
+`Policy` form to §4.4.2 and the §15.3 table alongside the name-addressed form,
+and state that home-clause locality (§4.4.5) and clause-local authority
+(§5.3.3) apply identically.
+
+**SC-30 [normative] Concept-scoped owner policy records (user defaults) —
+§4.3/§4.4.1 + new §13 worked example.** Define the indirect-raise mechanism:
+a **concept id** (well-known URI per §4.8.1/§5.7.1, or `{identity, symbol}`
+per SC-29) crossed with an **owner subject** selects the owner's policy record
+for that concept — the home of user default policies. Normative content
+needed: (a) atom shape — extend `Context` with a `concept` field (or a
+sibling atom; decide), keyed `(concept, subject)`; (b) the
+**stable-kernel-plus-grants** profile: the record is a hash-stable kernel of
+generic grant-guarded rules; user defaults are §4.3.5 grant records (reserved
+kind `ConceptGrant {concept, owner, audience, requiredIntent, expires?,
+singleUse?}`) so default edits are grant CRUD (no label migration), revocation
+is grant deletion, one-shot release rides single-use grants; (c) bootstrap —
+raising to an unconfigured concept resolves the substrate-shipped kernel
+(covered by attested deployment configuration, SC-28) with zero grants:
+owner-only until granted. This discharges the open questions recorded in
+`notes/WORKING_GOVERNANCE_EXAMPLES.md` (how "Alice's medical policy at the
+time" is represented; what changes automatically for future vs existing data).
+Runtime prerequisites already shipped: grant records with `policyState`
+guards, reserved-path storage and single-use commit-precondition receipts
+(`packages/runner/src/cfc/grants.ts`, #4627/#4649), and label-carried
+`referenced` record selection with home-clause locality (CT-1874, #4652) —
+SC-30 is the spec-side profile plus the reserved grant kind.
+
+**SC-31 [registry] `ConsumerIntent` integrity atom — §15.** Runtime-minted
+evidence that a consuming pattern's module statically declares an intent for
+what flows in (`{intent, surface, pattern}`); matched by concept-kernel grant
+rules' `requiredIntent`. Evidence, not authorable in schemas — same posture
+as `UserSurfaceInput`/`LlmDerived`. Needs a registry row and a minting rule.
+
+**SC-32 [clarify] Concept identity coordination — §4.8.1 + §5.7.1.** State
+that concept ids have exactly two forms — well-known URIs (ecosystem
+coordination) and pattern-relative `{identity, symbol}` (no registration;
+globally referencable once deployed, resolvable via `cf:` imports per the
+labs pattern-imports design) — and that bare string names are not a
+coordination form. Note the same concept id may appear in confidentiality
+position (context principal selecting an owner's record, SC-30), in integrity
+guards (trust-closure satisfaction, §4.8.9), and in caveat kinds; position
+selects the machinery. §5.7.1's "public concept directory" should say who
+mints well-known URIs or point to the process.
+
+**SC-33 [normative] Adoption paths for third-party-authored rules — new §13
+worked example.** Publishing a pattern that declares exchange rules is not
+adoption. Enumerate the three adoption paths and their evidence: (a)
+**instantiation** — owner instantiates the pattern; its rules govern only
+clauses the pattern itself raises (authoring authority bound; conjunctive-join
+rule); (b) **grant** — owner accepts a standing concept default via the
+trusted review surface: state-scoped intent → trusted policy writer → grant
+record (§13.4.3 + §4.3.5 write gate); (c) **verifier trust statement**
+(§4.8.2) for concept-guard satisfaction. Add the parameter-integrity rule:
+the policy writer MUST source grant parameters (audience, requiredIntent,
+expiry) from endorsed intent evidence minted at the review surface, never
+from the proposing pattern's data — this is §3.8.4 applied to adoption, and
+it is what makes "propose" safe as a pure out-of-code workflow.
+
+**SC-34 [normative] Bulk migration for concept kernels — §4.4.4.** §4.4.4
+defines per-label migration only. Grants make kernel changes rare, not never
+(kernel bugs, new guard families). Define the owner-initiated sweep: re-pin
+every value carrying `(concept, owner)` from kernel hash A to B, as an
+intent-gated batch declassification event with an auditable record (the
+§8.12.7 route-2b shape, batched).
+
+**SC-35 [clarify] Grant-set recombination — §14.3.2 pointer from SC-30.**
+Multiple grants on one concept are multiple declassification paths; the
+§14.3.2 recombination attack applies directly to user defaults. No mechanism
+proposed; require that owner-facing surfaces can enumerate a concept's active
+grants (the precondition for any future budget mechanism) and cross-reference
+§14.3.2 from the SC-30 text.
+
+**SC-36 [normative] Pattern-requested execution-policy envelopes — §5.5.2.**
+§5.5.2 says patterns don't request certification — it's a consequence of the
+execution environment — but never says how a pattern comes to execute under
+policy P in the first place. Add the request surface: a pattern MAY declare an
+execution-policy envelope (by policy reference, SC-29 pair form); the runtime
+either enforces P for that pattern's execution (outputs then gain
+`PolicyCertified(P)` exactly as §5.5.2 already specifies) or refuses to run
+the pattern — never runs it unenforced. State the monotonicity: a
+pattern-requested envelope can only constrain its own execution; it adds no
+authority, and the attestation remains runtime-minted (§5.5.7's trust model
+unchanged). Authoring sketch:
+`cfc-exchange-rules-authoring-extensions.md` §5.
+
+**SC-37 [registry] Reserved `ConsentEvidence` integrity family — §5.3.4 +
+§15.** §5.3.4 requires consent evidence to "bind scope, audience, and purpose
+strongly enough that the shared-result rewrite is clause-local and
+reviewable," while deliberately not privileging a payload. Reserve the family
+shape so profiles interoperate: `ConsentEvidence {participant, scope,
+audience, purpose?, expires?}`, minted only by trusted consent surfaces (the
+§13.4.3 state-scoped-intent shape per participant), matched per participant
+clause by ordinary rules (each participant's evidence rewrites only that
+participant's clause; the multi-party conjunction dissolves exactly when all
+are present — §5.3.3 stated operationally). Registry row + a note in §5.3.4
+pointing at the reserved shape. Authoring sketch:
+`cfc-exchange-rules-authoring-extensions.md` §4.
