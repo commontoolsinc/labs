@@ -63,9 +63,14 @@ import { sendValueToBinding } from "./pattern-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
+  IAttestation,
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
   IStorageSubscription,
   MemorySpace,
+  ReadError,
+  Result,
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
@@ -151,11 +156,13 @@ type InternalCellDescriptor = {
 type UnavailableInput = Readonly<{
   value: DataUnavailable;
   path: readonly string[];
+  overlayTarget?: NormalizedFullLink;
 }>;
 
 type AvailabilityPreflight = Readonly<{
   unavailable?: UnavailableInput;
   accepted: readonly UnavailableInput[];
+  requiresObservingScan?: boolean;
 }>;
 
 const AVAILABILITY_PREFLIGHT_PROBE_READ = {
@@ -167,6 +174,82 @@ const AVAILABILITY_PREFLIGHT_PROBE_READ = {
 const AVAILABILITY_DEFINED_VALUE_SCHEMA = {
   not: { type: "undefined" },
 } as const satisfies JSONSchema;
+
+function availabilityOverlayKey(address: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    address.space,
+    address.scope ?? "space",
+    address.id,
+    address.path,
+  ]);
+}
+
+/** Presents policy-authorized readiness markers while validating the rest. */
+class AvailabilityOverlayTransaction extends TransactionWrapper {
+  readonly #source: IExtendedStorageTransaction;
+  readonly #overlays = new Map<string, DataUnavailable>();
+
+  constructor(
+    source: IExtendedStorageTransaction,
+    accepted: readonly UnavailableInput[],
+  ) {
+    super(source);
+    this.#source = source;
+    for (const input of accepted) {
+      if (input.overlayTarget !== undefined) {
+        this.#overlays.set(
+          availabilityOverlayKey(toMemorySpaceAddress(input.overlayTarget)),
+          input.value,
+        );
+      }
+    }
+  }
+
+  #overlayFor(address: IMemorySpaceAddress): DataUnavailable | undefined {
+    return this.#overlays.get(availabilityOverlayKey(address));
+  }
+
+  #recordOverlayRead(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): void {
+    this.#source.read(address, {
+      ...options,
+      trackReadWithoutLoad: true,
+    });
+  }
+
+  override read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<IAttestation, ReadError> {
+    const overlay = options?.trackReadWithoutLoad === true
+      ? undefined
+      : this.#overlayFor(address);
+    if (overlay === undefined) return super.read(address, options);
+
+    this.#recordOverlayRead(address, options);
+    const { space: _space, ...resolvedAddress } = address;
+    return { ok: { address: resolvedAddress, value: overlay } };
+  }
+
+  override readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): FabricValue {
+    const overlay = this.#overlayFor(address);
+    if (overlay === undefined) return super.readOrThrow(address, options);
+    this.#recordOverlayRead(address, options);
+    return overlay;
+  }
+
+  override readValueOrThrow(
+    address: NormalizedFullLink,
+    options?: IReadOptions,
+  ): FabricValue {
+    return this.readOrThrow(toMemorySpaceAddress(address), options);
+  }
+}
 
 function pathsEqual(
   left: readonly string[],
@@ -211,6 +294,7 @@ function scanUnavailableInputs(
   let selectedIsSyntheticSyncing = false;
   let sawConcreteUnaccepted = false;
   const accepted: UnavailableInput[] = [];
+  let requiresObservingScan = false;
 
   const visit = (
     value: unknown,
@@ -243,19 +327,17 @@ function scanUnavailableInputs(
     }
 
     if (isCellLink(value)) {
-      const target = observeReadiness
-        ? source.withTx(tx).resolveAsCell()
-        : runtime.getCellFromLink(
-          resolveLink(
-            runtime,
-            tx,
-            parseLink(value, source),
-            "value",
-            { prefetch: false },
-          ),
-          undefined,
+      const target = runtime.getCellFromLink(
+        resolveLink(
+          runtime,
           tx,
-        );
+          parseLink(value, source),
+          "value",
+          observeReadiness ? {} : { prefetch: false },
+        ),
+        undefined,
+        tx,
+      );
       const link = target.getAsNormalizedFullLink();
       const linkKey = JSON.stringify([
         link.space,
@@ -272,6 +354,9 @@ function scanUnavailableInputs(
         if (resolved.ok === undefined) {
           // A later observing pass or ordinary schema materialization
           // distinguishes syncing from a locally complete mismatch.
+          if (policyAcceptsUnavailableInput(policy, path, "syncing")) {
+            requiresObservingScan = true;
+          }
           return;
         }
         activeLinks.add(linkKey);
@@ -289,8 +374,10 @@ function scanUnavailableInputs(
         source.asSchema(AVAILABILITY_DEFINED_VALUE_SCHEMA).withTx(tx),
       );
       if ("error" in status && status.unavailableReason === "syncing") {
-        if (!policyAcceptsUnavailableInput(policy, path, "syncing")) {
-          const syncing = DataUnavailable.syncing();
+        const syncing = DataUnavailable.syncing();
+        if (policyAcceptsUnavailableInput(policy, path, "syncing")) {
+          accepted.push({ value: syncing, path, overlayTarget: link });
+        } else {
           if (
             selected === undefined ||
             dataUnavailableReasonPrecedes(
@@ -347,6 +434,7 @@ function scanUnavailableInputs(
   return {
     unavailable: deferSyntheticSyncingToSchema ? undefined : selected,
     accepted,
+    ...(requiresObservingScan ? { requiresObservingScan: true } : {}),
   };
 }
 
@@ -384,6 +472,7 @@ function preflightUnavailableInputs(
   if (
     probe.unavailable === undefined &&
     probe.accepted.length === 0 &&
+    probe.requiresObservingScan !== true &&
     argumentSchema !== undefined &&
     argumentSchema !== false
   ) {
@@ -3109,8 +3198,14 @@ export class Runner {
       };
     }
 
-    const schemaCell = options.bindTxToSchema
-      ? inputsCell.asSchema(module.argumentSchema).withTx(tx)
+    const hasOverlay = availability.accepted.some((input) =>
+      input.overlayTarget !== undefined
+    );
+    const schemaTx = hasOverlay
+      ? new AvailabilityOverlayTransaction(tx, availability.accepted)
+      : tx;
+    const schemaCell = options.bindTxToSchema || hasOverlay
+      ? inputsCell.asSchema(module.argumentSchema).withTx(schemaTx)
       : inputsCell.asSchema(module.argumentSchema);
     const transformed = getCellWithStatus(schemaCell);
     if ("error" in transformed) {

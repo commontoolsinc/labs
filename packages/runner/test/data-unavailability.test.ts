@@ -790,6 +790,78 @@ describe("JavaScript-node data unavailability", () => {
     expect(output).toBe(DataUnavailable.schemaMismatch());
   });
 
+  it("passes policy-accepted readiness syncing to the callback", async () => {
+    const missingRemote = runtime.getCell(
+      remoteSpace,
+      `accepted syncing remote ${nextResultId++}`,
+    );
+    const writes: unknown[] = [];
+    let calls = 0;
+
+    const output = await runValueNode({
+      argument: { value: missingRemote.getAsLink() },
+      moduleType: "javascript-availability",
+      argumentSchema: {
+        anyOf: [{ type: "number" }, { type: "object" }],
+      },
+      unavailableInputPolicy: [{ path: [], reasons: ["syncing"] }],
+      implementation: (value) => {
+        calls++;
+        expect(value).toBe(DataUnavailable.syncing());
+        return "observed syncing";
+      },
+      captureWrittenResult: (value) => writes.push(value),
+    });
+
+    expect(calls).toBe(1);
+    expect(writes[0]).toBe("observed syncing");
+    expect(output).toBe(DataUnavailable.schemaMismatch());
+  });
+
+  it("still rejects a sibling mismatch beside accepted readiness syncing", async () => {
+    const missingRemote = runtime.getCell(
+      remoteSpace,
+      `accepted nested syncing remote ${nextResultId++}`,
+    );
+    const writes: unknown[] = [];
+    let calls = 0;
+
+    const output = await runValueNode({
+      argument: {
+        missing: missingRemote.getAsLink(),
+        invalid: "not a number",
+      },
+      nodeInputs: {
+        missing: { $alias: { cell: "argument", path: ["missing"] } },
+        invalid: { $alias: { cell: "argument", path: ["invalid"] } },
+      },
+      moduleType: "javascript-availability",
+      argumentSchema: {
+        type: "object",
+        properties: {
+          missing: {
+            anyOf: [{ type: "number" }, { type: "object" }],
+          },
+          invalid: { type: "number" },
+        },
+        required: ["missing", "invalid"],
+      },
+      unavailableInputPolicy: [{
+        path: ["missing"],
+        reasons: ["syncing"],
+      }],
+      implementation: () => {
+        calls++;
+        return "should not run";
+      },
+      captureWrittenResult: (value) => writes.push(value),
+    });
+
+    expect(calls).toBe(0);
+    expect(writes[0]).toBe(DataUnavailable.schemaMismatch());
+    expect(output).toBe(DataUnavailable.schemaMismatch());
+  });
+
   it("tracks missing-link readiness by full selector identity", async () => {
     type Link = Parameters<Runtime["ensureLinkedDocLoaded"]>[0];
     const originalSyncCell = storageManager.syncCell.bind(storageManager);
