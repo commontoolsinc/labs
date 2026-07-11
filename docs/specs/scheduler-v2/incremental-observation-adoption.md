@@ -75,20 +75,16 @@ read set does the rest. Adoption is allowed only when ALL hold:
   empirically: lunch-poll's deposed-host assertion — the receiver adopted
   the other user's `isAdmin`-family run, which cleared exactly the dirt the
   writer's own `adminName` commit had just caused, so the receiver's
-  per-user derivation never recomputed. The server therefore gates rows by
-  the writer's commit session key (persisted per observation row): rows
-  touching session-scope addresses ship to no other session; rows touching
-  user-scope addresses ship only to sessions of the writer's principal
-  (the second-tab case that makes same-user adoption valuable), failing
-  closed when the writer is unknown. The gate applies to BOTH deliveries —
-  the live attach fan-out and the boot snapshot listing. The reload flavor
-  matters because the store keeps one row per actionId and each new
-  observation clears the shared dirty markers: whichever principal ran
-  last would otherwise hand its clean row to every other principal's
-  reload, marking their (possibly stale) per-user rows clean. The receiver
-  cannot check this itself — observations do not carry the writer's
-  principal on the wire — which is acceptable on the same trust basis as
-  the doc diff: the server already scopes every pushed byte per reader.
+  per-user derivation never recomputed. Durable scheduler rows are therefore
+  owned by a server-derived execution-context key. Before pagination, the
+  server intersects listings with `space`, `user:<authenticated-principal>`,
+  and the caller's exact `session:<principal>:<session-id>` key. Only a trusted
+  complete structural summary may create a shared space/user row; unknown or
+  dynamic surfaces remain exact-session rows. The same filter applies to BOTH
+  deliveries — live attach fan-out and boot listing — so another principal or
+  session's clean row cannot overwrite or clear this reader's state. The
+  persisted writer session remains provenance and echo-suppression metadata;
+  it is not the ownership boundary.
 - **C7 — no child-starting coordinators (`resumeMode: "always-run"`).** A
   `map`/`filter`/`flatMap` coordinator's run is not a pure recomputation:
   its reconcile is what (re)registers the per-element child actions. Its
@@ -165,11 +161,11 @@ sequence, including an otherwise-empty catch-up.
     inputs or outputs, so it could never verify such a row current (C2) — and
     pre-filter, the row poisoned the receiver into the C2 deadlock (the flag-ON
     multiUserTest stall).
-  - **Reader-scoped (C6):** rows touching session-scope addresses are
-    dropped; rows touching user-scope addresses ship only when the row's
-    persisted writer session key carries the receiving session's
-    principal. `scheduler_observation.session_id` now stores the writer's
-    commit session key for this purpose.
+  - **Reader-scoped (C6):** the snapshot query is pre-filtered to the shared
+    space row, the authenticated principal's user row, and the exact receiving
+    session row. A different principal/session row is never returned. The
+    observation's writer session key is used only to suppress an echo back to
+    the writer of the selected context row.
   - Dropped rows degrade to the receiver running the action itself —
     adoption stays an optimization, never a correctness dependency.
 - **Client:** zero memory-client changes — the field rides `SessionSync`

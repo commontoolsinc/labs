@@ -207,16 +207,14 @@ rehydrating it on reload would. `Scheduler.adoptRemoteObservations` refuses
   restart-stable, never match, degrade per node. Unchanged.
 - **Effects**: session-scoped effects (sinks, pull) re-register fresh by
   design; with the §2 persist tightening they no longer pollute the store.
-- **Reader-isolated rows** (`incremental-observation-adoption.md` C6): the
-  store keeps one row per actionId, but a shared derivation over
-  user/session-scope docs computes DIFFERENT data per reader, and each new
-  observation clears the shared dirty markers — so the last writer's clean
-  row must not rehydrate another reader's copy. The server's boot-listing
-  response drops rows touching user-scope addresses unless the row's
-  persisted writer session key carries the listing session's principal, and
-  drops session-scope-touching rows always (a reloaded runtime is a new
-  session). Affected actions degrade per node: fresh run over the reader's
-  own rows.
+- **Reader-isolated rows** (`incremental-observation-adoption.md` C6): active
+  rows are qualified by the server-derived execution context, so principals
+  and sessions no longer overwrite one action slot. Boot listing returns the
+  shared `space` candidate plus only the authenticated caller's user and exact
+  session candidates. Unknown/dynamic actions are session-owned and therefore
+  run fresh in a new session; a trusted complete summary is required before a
+  row can be shared at user or space scope. `writerSessionId` remains
+  provenance/echo metadata, not an ownership substitute.
 
 ## 5. Store cost and retention
 
