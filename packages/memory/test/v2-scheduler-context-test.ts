@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import { encodeMemoryBoundary } from "../v2.ts";
@@ -6,6 +6,7 @@ import {
   applyCommit,
   close,
   type Engine,
+  findSchedulerReadersForWrite,
   getSchedulerActionState,
   listSchedulerActionSnapshots,
   markSchedulerReadersDirtyForWrites,
@@ -68,6 +69,7 @@ const schedulerAddress = (
 type ObservationOptions = {
   actionId: string;
   summaryScope?: "space" | "user" | "session";
+  summarySpace?: string;
   runtimeScope?: "space" | "user" | "session";
   runtimeSpace?: string;
   includeSummary?: boolean;
@@ -79,13 +81,14 @@ const observationFor = (
   options: ObservationOptions,
 ): SchedulerActionObservation => {
   const summaryScope = options.summaryScope ?? "space";
+  const summarySpace = options.summarySpace ?? OWNER_SPACE;
   const runtimeScope = options.runtimeScope ?? summaryScope;
   const runtimeSpace = options.runtimeSpace ?? OWNER_SPACE;
   const implementationFingerprint = options.implementationFingerprint ??
     `impl:${options.actionId}`;
   const runtimeFingerprint = options.runtimeFingerprint ?? "runtime:v1";
-  const summaryRead = schedulerAddress("input", summaryScope);
-  const summaryWrite = schedulerAddress("output", summaryScope);
+  const summaryRead = schedulerAddress("input", summaryScope, summarySpace);
+  const summaryWrite = schedulerAddress("output", summaryScope, summarySpace);
   const runtimeRead = schedulerAddress("input", runtimeScope, runtimeSpace);
   const runtimeWrite = schedulerAddress("output", runtimeScope, runtimeSpace);
 
@@ -722,6 +725,44 @@ Deno.test("scheduler context accepts writes covered by a certified materializer 
     const result = storeObservation(engine, materializerObservation, ALICE_A);
     assertEquals(result.executionContextKey, SPACE_KEY);
     assertOwnedContexts(engine, actionId, [SPACE_KEY]);
+  });
+});
+
+Deno.test("scheduler context shares certified cross-space PerUser actions only within one principal", async () => {
+  await withEngine((engine) => {
+    const userAction = "context:cross-space:user";
+    const userObservation = observationFor({
+      actionId: userAction,
+      summaryScope: "user",
+      summarySpace: OTHER_SPACE,
+      runtimeScope: "user",
+      runtimeSpace: OTHER_SPACE,
+    });
+
+    assertEquals(
+      storeObservation(engine, userObservation, ALICE_A).executionContextKey,
+      ALICE_USER_KEY,
+    );
+    assertEquals(
+      storeObservation(engine, userObservation, ALICE_B).executionContextKey,
+      ALICE_USER_KEY,
+    );
+    assertEquals(
+      storeObservation(engine, userObservation, BOB).executionContextKey,
+      BOB_USER_KEY,
+    );
+    assertOwnedContexts(engine, userAction, [ALICE_USER_KEY, BOB_USER_KEY]);
+
+    const spaceAction = "context:cross-space:space";
+    const spaceObservation = observationFor({
+      actionId: spaceAction,
+      summarySpace: OTHER_SPACE,
+      runtimeSpace: OTHER_SPACE,
+    });
+    assertEquals(
+      storeObservation(engine, spaceObservation, ALICE_A).executionContextKey,
+      ALICE_A_SESSION_KEY,
+    );
   });
 });
 
@@ -1444,7 +1485,7 @@ Deno.test("scheduler context read lookup keeps its target index at 10k rows", as
           read_space: OWNER_SPACE,
           read_id: `input-${index.toString().padStart(5, "0")}`,
           read_scope_key: ALICE_USER_KEY,
-          read_path: JSON.stringify(["value"]),
+          read_path: encodeMemoryBoundary(["value"]),
           piece_id: PIECE_ID,
           action_id: actionId,
           execution_context_key: stored.executionContextKey,
@@ -1461,9 +1502,38 @@ Deno.test("scheduler context read lookup keeps its target index at 10k rows", as
       `).get({ action_id: actionId }),
       { count: 10_000 },
     );
+    assertEquals(
+      findSchedulerReadersForWrite(engine, {
+        branch: "",
+        write: {
+          space: OWNER_SPACE,
+          id: "input-09999",
+          scope: "user",
+          scopeKey: ALICE_USER_KEY,
+          path: ["value"],
+        },
+      }),
+      [{
+        branch: "",
+        ownerSpace: OWNER_SPACE,
+        pieceId: PIECE_ID,
+        processGeneration: 1,
+        actionId,
+        executionContextKey: stored.executionContextKey,
+        observationId: stored.observationId,
+        readKind: "recursive",
+        read: {
+          space: OWNER_SPACE,
+          id: "input-09999",
+          scope: "user",
+          scopeKey: ALICE_USER_KEY,
+          path: ["value"],
+        },
+      }],
+    );
     const plan = engine.database.prepare(`
       EXPLAIN QUERY PLAN
-      SELECT *
+      SELECT observation_id
       FROM scheduler_read_index
       WHERE branch = ''
         AND read_space = :read_space
@@ -1476,11 +1546,18 @@ Deno.test("scheduler context read lookup keeps its target index at 10k rows", as
     }) as Array<{ detail: string }>;
     assert(
       plan.some((row) =>
-        row.detail.includes("USING INDEX idx_scheduler_read_index_lookup")
+        row.detail.includes("idx_scheduler_read_index_lookup")
       ),
       `expected indexed target lookup, got ${JSON.stringify(plan)}`,
     );
-    assertMatch(plan.map((row) => row.detail).join("\n"), /read_scope_key/);
+    assertEquals(
+      (engine.database.prepare(`
+        PRAGMA index_info('idx_scheduler_read_index_lookup')
+      `).all() as Array<{ seqno: number; name: string }>)
+        .sort((left, right) => left.seqno - right.seqno)
+        .map((row) => row.name),
+      ["branch", "read_space", "read_id", "read_scope_key"],
+    );
   });
 });
 

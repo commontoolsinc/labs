@@ -3465,9 +3465,9 @@ function schedulerStaticContextFloor(
   const addresses = schedulerSummaryAddresses(summary).map(
     normalizeSchedulerAddress,
   );
-  if (addresses.some((address) => address.space !== ownerSpace)) {
-    return "session";
-  }
+  const crossesSpace = addresses.some((address) =>
+    address.space !== ownerSpace
+  );
   if (
     addresses.some((address) =>
       normalizeSchedulerScope(address.scope) === "session"
@@ -3482,7 +3482,7 @@ function schedulerStaticContextFloor(
   ) {
     return "user";
   }
-  return "space";
+  return crossesSpace ? "session" : "space";
 }
 
 function schedulerRuntimeContextFloor(
@@ -3495,7 +3495,8 @@ function schedulerRuntimeContextFloor(
     ownerSpace === undefined ||
     (summary !== undefined &&
       schedulerRuntimeExceedsSummary(observation, summary)) ||
-    addresses.some((address) => address.space !== ownerSpace) ||
+    (summary === undefined &&
+      addresses.some((address) => address.space !== ownerSpace)) ||
     addresses.some((address) =>
       normalizeSchedulerScope(address.scope) === "session"
     )
