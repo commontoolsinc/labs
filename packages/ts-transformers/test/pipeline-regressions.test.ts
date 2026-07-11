@@ -72,6 +72,27 @@ function liftSchemasFor(
   return { argSchema: schemas[0]!, resSchema: schemas[1]! };
 }
 
+function schedulerOptionsFor(
+  call: ts.CallExpression,
+): Record<string, unknown> | undefined {
+  for (const argument of [...call.arguments].reverse()) {
+    if (
+      !ts.isObjectLiteralExpression(argument) &&
+      !ts.isSatisfiesExpression(argument)
+    ) {
+      continue;
+    }
+    const value = literalToValue(argument) as Record<string, unknown>;
+    if (
+      "completeSchedulerScopeSummary" in value ||
+      "materializerWriteInputPaths" in value
+    ) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 /**
  * The input (argument) schema of the first hoisted lift emitted in `root` — the
  * lift a lone `computed()` capture lowers to.
@@ -1644,6 +1665,60 @@ export default pattern<Input>(({ departments }) => {
     );
     const options = literalToValue(optionsArg) as Record<string, unknown>;
     assertEquals(options.materializerWriteInputPaths, [["departments"]]);
+  },
+);
+
+Deno.test(
+  "Pipeline regression: complete source lifts emit scheduler scope proof including proven-empty",
+  async () => {
+    const source = `import { computed, pattern } from "commonfabric";
+
+export default pattern<{ value: number }>(({ value }) => {
+  const incremented = computed(() => value + 1);
+  const constant = computed(() => 42);
+  return { incremented, constant };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "incremented"))
+        ?.completeSchedulerScopeSummary,
+      true,
+    );
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "constant"))
+        ?.completeSchedulerScopeSummary,
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: uncertain source lifts do not emit scheduler scope proof",
+  async () => {
+    const source = `import { computed, pattern } from "commonfabric";
+
+export default pattern<{ value: Record<string, string>; key: string }>(
+  ({ value, key }) => {
+    const dynamic = computed(() => value[key]);
+    return { dynamic };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "dynamic"))
+        ?.completeSchedulerScopeSummary,
+      undefined,
+    );
   },
 );
 

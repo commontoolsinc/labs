@@ -40,10 +40,9 @@ const CLEAN_RESTART_PROGRAM: RuntimeProgram = {
   files: [{
     name: "/main.tsx",
     contents: [
-      "import { pattern, lift } from 'commonfabric';",
-      "const double = lift((input: number) => input * 2);",
+      "import { computed, pattern } from 'commonfabric';",
       "export default pattern<{ value: number }>(({ value }) => {",
-      "  const doubled = double(value);",
+      "  const doubled = computed(() => value * 2);",
       "  return { doubled };",
       "});",
     ].join("\n"),
@@ -235,6 +234,63 @@ describe("persistent scheduler observations", () => {
     expect("currentKnownWrites" in observation).toBe(true);
     expect("declaredWrites" in observation).toBe(false);
     expect(isSchedulerActionObservation(observation)).toBe(true);
+  });
+
+  it("binds complete structural summaries to observation fingerprints", () => {
+    const summaryReads = [{ ...readAddress, path: [...readAddress.path] }];
+    const observation = buildSchedulerActionObservation({
+      ownerSpace: "did:key:space",
+      actionId: "pattern.tsx:computed:complete",
+      actionKind: "computation",
+      branch: "",
+      pieceId: "space:of:piece",
+      processGeneration: 0,
+      implementationFingerprint: "impl:complete",
+      runtimeFingerprint: "runtime:complete",
+      observedAtSeq: 7,
+      transactionKind: "action-run",
+      transactionLog: {
+        reads: [readAddress],
+        shallowReads: [],
+        writes: [writeAddress],
+        attemptedWrites: [],
+      },
+      currentKnownWrites: [writeAddress],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        piece: {
+          space: "did:key:space",
+          scope: "space",
+          id: "of:piece",
+          path: ["value"],
+        },
+        reads: summaryReads,
+        writes: [writeAddress],
+        materializerWriteEnvelopes: [materializerEnvelope],
+        directOutputs: [writeAddress],
+      },
+    });
+
+    expect(observation.completeActionScopeSummary).toMatchObject({
+      version: 1,
+      complete: true,
+      implementationFingerprint: "impl:complete",
+      runtimeFingerprint: "runtime:complete",
+      reads: [readAddress],
+    });
+    summaryReads[0]!.path.push("mutated-after-build");
+    expect(observation.completeActionScopeSummary?.reads).toEqual([
+      readAddress,
+    ]);
+    expect(isSchedulerActionObservation(observation)).toBe(true);
+    expect(isSchedulerActionObservation({
+      ...observation,
+      completeActionScopeSummary: {
+        ...observation.completeActionScopeSummary!,
+        runtimeFingerprint: "runtime:forged",
+      },
+    })).toBe(false);
   });
 
   it("rejects persisted observations missing required scheduler metadata", () => {
@@ -1834,6 +1890,26 @@ describe("persistent scheduler observations", () => {
 
       expect(await result.pull()).toEqual({ doubled: 10 });
       await runtimeA.storageManager.synced();
+      const persisted = await persistedSchedulerSnapshots(
+        runtimeA,
+        resultCellPieceId(resultCellA),
+      );
+      const completeObservation = persisted.find((snapshot) =>
+        snapshot.observation.completeActionScopeSummary !== undefined
+      )?.observation;
+      expect(completeObservation?.completeActionScopeSummary).toMatchObject({
+        version: 1,
+        complete: true,
+        implementationFingerprint: completeObservation
+          ?.implementationFingerprint,
+        runtimeFingerprint: completeObservation?.runtimeFingerprint,
+        piece: {
+          space,
+          scope: "space",
+          id: resultCellA.getAsNormalizedFullLink().id,
+          path: ["value"],
+        },
+      });
       runtimeA.scheduler.dispose();
 
       const server = (storageManager as unknown as {

@@ -2376,10 +2376,25 @@ function prependSchemaArguments(
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
     if (isSingleEmptyObjectInput(node.arguments)) {
+      const completeSchedulerScopeSummary = context.factory
+        .createObjectLiteralExpression([
+          context.factory.createPropertyAssignment(
+            "completeSchedulerScopeSummary",
+            context.factory.createTrue(),
+          ),
+        ], false);
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,
-        [...calleeArgs, context.factory.createFalse(), ...trailingInnerArgs],
+        [
+          ...calleeArgs,
+          context.factory.createFalse(),
+          // Keep the trusted scheduler options in lift's fourth parameter;
+          // the no-input form intentionally has no result schema.
+          context.factory.createIdentifier("undefined"),
+          completeSchedulerScopeSummary,
+          ...trailingInnerArgs,
+        ],
       );
       // The inner lift is fully schema-injected now; mark it so the re-descent
       // (which re-enters the rebuilt tree to reach the callback body) self-skips

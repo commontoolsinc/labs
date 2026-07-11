@@ -19,6 +19,31 @@ export interface SchedulerActionOptions {
   throttleMs?: number;
 }
 
+/**
+ * Trusted, exhaustive structural surface for one source-backed action.
+ *
+ * The transformer supplies only a completeness marker. The runner fills the
+ * concrete addresses from the instantiated graph and the observation builder
+ * binds the proof to the exact implementation/runtime fingerprints. Runtime
+ * observations without this object are deliberately incomplete.
+ */
+export interface CompleteActionScopeSummary {
+  version: 1;
+  complete: true;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  piece: IMemorySpaceAddress;
+  reads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
+  materializerWriteEnvelopes: IMemorySpaceAddress[];
+  directOutputs: IMemorySpaceAddress[];
+}
+
+export type CompleteActionScopeSummaryInput = Omit<
+  CompleteActionScopeSummary,
+  "implementationFingerprint" | "runtimeFingerprint"
+>;
+
 export interface SchedulerActionObservation {
   version: 1 | 2;
   ownerSpace?: string;
@@ -39,6 +64,7 @@ export interface SchedulerActionObservation {
   declaredWrites?: IMemorySpaceAddress[];
   materializerWriteEnvelopes: IMemorySpaceAddress[];
   ignoredSchedulingWrites?: IMemorySpaceAddress[];
+  completeActionScopeSummary?: CompleteActionScopeSummary;
   actionOptions?: SchedulerActionOptions;
   status: "success" | "failed";
   errorFingerprint?: string;
@@ -67,6 +93,7 @@ export interface BuildSchedulerActionObservationOptions {
   currentKnownWrites: readonly IMemorySpaceAddress[];
   materializerWriteEnvelopes?: readonly IMemorySpaceAddress[];
   ignoredSchedulingWrites?: readonly IMemorySpaceAddress[];
+  completeActionScopeSummary?: CompleteActionScopeSummaryInput;
   actionOptions?: SchedulerActionOptions;
   status?: "success" | "failed";
   errorFingerprint?: string;
@@ -108,6 +135,25 @@ export function buildSchedulerActionObservation(
         ignoredSchedulingWrites: cloneAddresses(
           options.ignoredSchedulingWrites,
         ),
+      }
+      : {}),
+    ...(options.completeActionScopeSummary
+      ? {
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: options.implementationFingerprint,
+          runtimeFingerprint: options.runtimeFingerprint,
+          piece: cloneAddress(options.completeActionScopeSummary.piece),
+          reads: cloneAddresses(options.completeActionScopeSummary.reads),
+          writes: cloneAddresses(options.completeActionScopeSummary.writes),
+          materializerWriteEnvelopes: cloneAddresses(
+            options.completeActionScopeSummary.materializerWriteEnvelopes,
+          ),
+          directOutputs: cloneAddresses(
+            options.completeActionScopeSummary.directOutputs,
+          ),
+        },
       }
       : {}),
     ...(options.actionOptions ? { actionOptions: options.actionOptions } : {}),
@@ -153,11 +199,38 @@ export function isSchedulerActionObservation(
     isAddressArray(candidate.materializerWriteEnvelopes) &&
     (candidate.ignoredSchedulingWrites === undefined ||
       isAddressArray(candidate.ignoredSchedulingWrites)) &&
+    (candidate.completeActionScopeSummary === undefined ||
+      (version === 2 &&
+        isCompleteActionScopeSummary(
+          candidate.completeActionScopeSummary,
+          candidate.implementationFingerprint,
+          candidate.runtimeFingerprint,
+        ))) &&
     (candidate.actionOptions === undefined ||
       isSchedulerActionOptions(candidate.actionOptions)) &&
     isSchedulerObservationStatus(candidate.status) &&
     (candidate.errorFingerprint === undefined ||
       typeof candidate.errorFingerprint === "string");
+}
+
+function isCompleteActionScopeSummary(
+  value: unknown,
+  implementationFingerprint: string,
+  runtimeFingerprint: string,
+): value is CompleteActionScopeSummary {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<CompleteActionScopeSummary>;
+  return candidate.version === 1 &&
+    candidate.complete === true &&
+    candidate.implementationFingerprint === implementationFingerprint &&
+    candidate.runtimeFingerprint === runtimeFingerprint &&
+    isMemorySpaceAddress(candidate.piece) &&
+    isAddressArray(candidate.reads) &&
+    isAddressArray(candidate.writes) &&
+    isAddressArray(candidate.materializerWriteEnvelopes) &&
+    isAddressArray(candidate.directOutputs);
 }
 
 function isAddressArray(value: unknown): value is IMemorySpaceAddress[] {
@@ -175,6 +248,13 @@ function isMemorySpaceAddress(value: unknown): value is IMemorySpaceAddress {
     (candidate.type === undefined || typeof candidate.type === "string") &&
     Array.isArray(candidate.path) &&
     candidate.path.every((segment) => typeof segment === "string");
+}
+
+function cloneAddress(address: IMemorySpaceAddress): IMemorySpaceAddress {
+  return {
+    ...address,
+    path: [...address.path],
+  };
 }
 
 function isSchedulerActionOptions(

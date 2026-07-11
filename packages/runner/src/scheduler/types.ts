@@ -18,6 +18,19 @@ export interface TelemetryAnnotations {
   writes: NormalizedFullLink[];
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+  /**
+   * Concrete structural surface for a transformer-proven complete source lift.
+   * This is runner-owned metadata; raw modules, handlers, and unresolved
+   * redirect surfaces leave it absent and therefore remain fail-closed.
+   */
+  completeSchedulerScopeSummary?: {
+    complete: true;
+    piece: NormalizedFullLink;
+    reads: NormalizedFullLink[];
+    writes: NormalizedFullLink[];
+    materializerWriteEnvelopes: NormalizedFullLink[];
+    directOutputs: NormalizedFullLink[];
+  };
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 
