@@ -957,23 +957,23 @@ until Stage 4 migrates those writers; no failure is waived.
 
 ### WP3.1 — Add the compiler-only params-schema carrier
 
-- [ ] Add internal `withPatternParamsSchema(callback, schema)` next to the
+- [x] Add internal `withPatternParamsSchema(callback, schema)` next to the
   builder helpers, backed by a private callback WeakMap or equally unforgeable
   protocol.
-- [ ] Return the original callback so the helper can wrap the first argument of
+- [x] Return the original callback so the helper can wrap the first argument of
   `pattern()` without changing public arity.
-- [ ] Make `pattern()` and `patternFromFrame()` read the schema synchronously
+- [x] Make `pattern()` and `patternFromFrame()` read the schema synchronously
   before eager callback invocation.
-- [ ] Create a second symbolic root only when compiler metadata declares a
+- [x] Create a second symbolic root only when compiler metadata declares a
   params slot, and call the transformed callback as `callback(argument,
   params)`.
-- [ ] Persist the trusted params schema in the base pattern's internal factory
+- [x] Persist the trusted params schema in the base pattern's internal factory
   state.
-- [ ] Carry that trusted schema through the internal Pattern/factory metadata
+- [x] Carry that trusted schema through the internal Pattern/factory metadata
   used by cold resolution without exposing it as public input schema.
 - [ ] Reject an authored second callback parameter that lacks compiler-created
   metadata.
-- [ ] Keep the public callback type one-parameter and keep the public
+- [x] Keep the public callback type one-parameter and keep the public
   `PatternFactory` type free of `.curry`.
 
 Expected files/tests:
@@ -984,32 +984,71 @@ Expected files/tests:
 - `packages/runner/test/factory-input-types.test.ts`
 - a compile-time API test proving authored `.curry` is unavailable
 
+WP3.1 implementation audit (2026-07-11): the carrier is available only under
+the transformer-owned `__cfHelpers` namespace; the authored runtime export
+object and public API contain no carrier or curry member. Its private WeakMap
+association is read before eager callback execution, creates a distinct params
+root only for marked callbacks, and persists only `paramsSchema` in canonical
+base factory state. Warm and cold materialization validate that private schema
+against the resolved trusted artifact. The SES verifier accepts the carrier
+only in pattern callback position and rejects its result as a standalone
+module-scope value.
+
+The builder serialization half of WP3.4's params alias vocabulary was pulled
+forward deliberately: without `{ $alias: { cell: "params" } }`, a marked
+callback could not preserve argument-1 references for WP3.3. Runtime resolution
+and ownership of that pseudo-root remain in WP3.4. Ordinary authored two-arg
+callbacks now fail closed at runtime, but `Function.length` cannot detect a
+defaulted or rest second parameter. The corresponding checkbox remains open
+until WP3.3 adds the complete source-level diagnostic; it is not being treated
+as passed by the partial runtime guard.
+
 ### WP3.2 — Implement the internal one-shot curry derivation
 
-- [ ] Attach `.curry(params)` only to the internal transformed-code view of a
+- [x] Attach `.curry(params)` only to the internal transformed-code view of a
   pattern factory.
-- [ ] Require exactly one argument and always bind callback argument 1.
-- [ ] During graph construction, validate the complete symbolic params record's
+- [x] Require exactly one argument and always bind callback argument 1.
+- [x] During graph construction, validate the complete symbolic params record's
   keys and alias/factory shapes against the trusted schema without prematurely
   materializing reactive captures. Validate concrete values and links again
   when WP3.4 populates the hidden params cell.
-- [ ] Keep factory-valued params that originate from Cells/links as symbolic
+- [x] Keep factory-valued params that originate from Cells/links as symbolic
   aliases with their original link parent/artifact source; curry must not bind
   the currently selected `Factory@1` snapshot.
-- [ ] Return a new branded pattern factory with identical public
+- [x] Return a new branded pattern factory with identical public
   `argumentSchema`/`resultSchema` and canonical hidden `params`.
-- [ ] Make `materializeFactory()` reapply canonical params from a decoded bound
+- [x] Make `materializeFactory()` reapply canonical params from a decoded bound
   factory, validate them against trusted base metadata, and still reject an
   unbound closure-bearing base. Reconstruct the one-shot bound derivation for
   both direct setup and dynamic dispatch.
-- [ ] Preserve the root token/ref and any scope/space derivations regardless of
+- [x] Preserve the root token/ref and any scope/space derivations regardless of
   modifier order.
-- [ ] Throw on a second curry, including an equal/empty value.
-- [ ] Throw when the base pattern has no compiler-declared params slot.
-- [ ] Never merge, remove, override, or narrow public input fields.
-- [ ] Test zero- and two-argument internal curry calls, missing/extra keys,
+- [x] Throw on a second curry, including an equal/empty value.
+- [x] Throw when the base pattern has no compiler-declared params slot.
+- [x] Never merge, remove, override, or narrow public input fields.
+- [x] Test zero- and two-argument internal curry calls, missing/extra keys,
   wrong concrete values, symbolic Cells/links, second curry, and curry on a
   capture-free pattern.
+
+WP3.2 implementation audit (2026-07-11): `.curry` exists on the runner-private
+factory view while the authored `PatternFactory` type remains unchanged. It is
+a one-shot derivation over canonical factory state, validates one complete
+plain symbolic params record, preserves Cell/link/factory bindings without
+reading them, rejects ordinary functions and kind/schema mismatches, and keeps
+the root token, durable artifact ref, scope, and space selector across either
+modifier order. Serializing a curry whose factory param comes from public input
+produces an argument alias in hidden state rather than snapshotting the current
+selected Factory value.
+
+Warm and cold materialization compare the private schema with the resolved
+trusted base, reapply curry before scope/space modifiers, reject malformed
+params through the same validator, and reject a closure-bearing unbound base
+before it can reach authored code. WP3.2 intentionally proves reconstructible
+bound callable state, not executed closure semantics: invocation-owned params
+cell creation and callback argument-1 binding at runtime remain WP3.4.
+The complete runner task after WP3.2 reached `882 passed (4749 steps), 24
+failed (118 steps), 0 ignored (10 steps)` in 3m25s; the same audited Stage 4
+canonical-writer migration cluster accounts for every failure.
 
 ### WP3.3 — Generalize nested-pattern hoisting
 

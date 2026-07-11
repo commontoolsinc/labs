@@ -915,6 +915,7 @@ function verifyTrustedBuilderCall(
     }
     const callbackIndexes = callbackIndexesForBuilder(
       source,
+      filename,
       builderName,
       args,
       env,
@@ -931,7 +932,13 @@ function verifyTrustedBuilderCall(
     for (let index = 0; index < args.length; index++) {
       const argument = args[index];
       if (callbackIndexes.includes(index)) {
-        const callback = resolveTrustedBuilderCallback(source, argument, env);
+        const callback = resolveTrustedBuilderCallback(
+          source,
+          filename,
+          argument,
+          env,
+          builderName === "pattern" && index === 0,
+        );
         if (!callback) {
           throw verificationErrorAt(
             source,
@@ -957,6 +964,7 @@ function verifyTrustedBuilderCall(
 
 function callbackIndexesForBuilder(
   source: string,
+  filename: string,
   builderName: string,
   args: Array<{ start: number; end: number }>,
   env: Map<string, BindingInfo>,
@@ -979,7 +987,9 @@ function callbackIndexesForBuilder(
       // computations to a module-scope const; previously these only appeared
       // inline inside a handler/pattern body, unverified here.)
       for (let i = 0; i < Math.min(args.length, 3); i++) {
-        if (resolveTrustedBuilderCallback(source, args[i]!, env)) {
+        if (
+          resolveTrustedBuilderCallback(source, filename, args[i]!, env)
+        ) {
           return [i];
         }
       }
@@ -991,7 +1001,7 @@ function callbackIndexesForBuilder(
     case "handler":
       if (
         args.length >= 1 &&
-        !!resolveTrustedBuilderCallback(source, args[0], env)
+        !!resolveTrustedBuilderCallback(source, filename, args[0], env)
       ) {
         return [0];
       }
@@ -1107,14 +1117,40 @@ function isLocalCallableExpression(
 
 function resolveTrustedBuilderCallback(
   source: string,
+  filename: string,
   argument: { start: number; end: number },
   env: Map<string, BindingInfo>,
+  allowPatternParamsCarrier = false,
 ): { start: number; end: number } | undefined {
   const trimmed = trimRange(source, argument.start, argument.end);
   const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
   const directFunction = tryParseDirectFunction(source, inner.start, inner.end);
   if (directFunction) {
     return { start: directFunction.start, end: directFunction.end };
+  }
+
+  if (allowPatternParamsCarrier) {
+    const call = tryParseCallExpression(source, inner.start, inner.end);
+    if (
+      call?.args.length === 2 &&
+      isPatternParamsSchemaCarrier(stripJsTrivia(call.callee), env)
+    ) {
+      const callback = resolveTrustedBuilderCallback(
+        source,
+        filename,
+        call.args[0],
+        env,
+      );
+      if (!callback) return undefined;
+      verifyTrustedValueExpression(
+        source,
+        filename,
+        call.args[1].start,
+        call.args[1].end,
+        env,
+      );
+      return callback;
+    }
   }
 
   const normalized = stripJsTrivia(source, inner.start, inner.end);
@@ -1131,6 +1167,21 @@ function resolveTrustedBuilderCallback(
   }
 
   return binding.functionRange;
+}
+
+function isPatternParamsSchemaCarrier(
+  normalizedCallee: string,
+  env: Map<string, BindingInfo>,
+): boolean {
+  const ref = parseNormalizedCallReference(normalizedCallee);
+  if (!ref || ref.kind === "identifier") return false;
+  const binding = env.get(ref.root);
+  const properties = ref.properties ?? (ref.property ? [ref.property] : []);
+  return binding?.namespaceImport === true &&
+    binding.trustedRuntimeName !== undefined &&
+    properties.length === 2 &&
+    properties[0] === "__cfHelpers" &&
+    properties[1] === "withPatternParamsSchema";
 }
 
 function resolveTrustedCallName(

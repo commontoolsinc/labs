@@ -49,6 +49,7 @@ import type {
   Module,
   NavigateToFunction,
   Pattern,
+  PatternFactory,
   PatternToolFunction,
   Reactive,
   schema as schemaFunction,
@@ -484,6 +485,23 @@ export interface BuilderFunctionsAndConstants {
   toIndentedDebugString:
     typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
 }
+
+/**
+ * Runtime-only helpers emitted by the transformer. This surface is available
+ * through the private `__cfHelpers` namespace and is deliberately absent from
+ * the authored Common Fabric API.
+ */
+export type InternalBuilderHelpers = BuilderFunctionsAndConstants & {
+  withPatternParamsSchema<T extends (...args: any[]) => unknown>(
+    callback: T,
+    schema: JSONSchema,
+  ): T;
+};
+
+/** Transformer-only callable view; `.curry` is intentionally not public API. */
+export type InternalPatternFactory<T, R> = PatternFactory<T, R> & {
+  curry(params: unknown): InternalPatternFactory<T, R>;
+};
 
 // Runtime interface needed by createCell
 export interface BuilderRuntime {

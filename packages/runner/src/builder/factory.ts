@@ -3,6 +3,7 @@
  */
 import type {
   BuilderFunctionsAndConstants,
+  InternalBuilderHelpers,
   ToSchemaFunction,
 } from "./types.ts";
 import {
@@ -26,7 +27,7 @@ import {
   WebhookConfigSchema,
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
-import { pattern } from "./pattern.ts";
+import { pattern, withPatternParamsSchema } from "./pattern.ts";
 import { invokeFactory } from "./invoke-factory.ts";
 import {
   action,
@@ -299,9 +300,13 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     toCompactDebugString,
     toIndentedDebugString,
   } as BuilderFunctionsAndConstants & {
-    __cfHelpers?: BuilderFunctionsAndConstants;
+    __cfHelpers?: InternalBuilderHelpers;
   };
-  commonfabric.__cfHelpers = commonfabric;
+  const internalHelpers: InternalBuilderHelpers = {
+    ...commonfabric,
+    withPatternParamsSchema,
+  };
+  commonfabric.__cfHelpers = internalHelpers;
 
   return {
     commonfabric,

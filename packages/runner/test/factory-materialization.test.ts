@@ -8,10 +8,18 @@ import {
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 
-import type { JSONSchema } from "../src/builder/types.ts";
+import type {
+  InternalPatternFactory,
+  JSONSchema,
+} from "../src/builder/types.ts";
 import { byRef, handler, lift } from "../src/builder/module.ts";
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
-import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import {
+  pattern,
+  popFrame,
+  pushFrame,
+  withPatternParamsSchema,
+} from "../src/builder/pattern.ts";
 import type { Frame } from "../src/builder/types.ts";
 import {
   type FactoryContract,
@@ -43,6 +51,12 @@ const CONTEXT_SCHEMA = {
   properties: { prefix: { type: "string" } },
 } as const satisfies JSONSchema;
 const EVENT_SCHEMA = { type: "number" } as const satisfies JSONSchema;
+const PARAMS_SCHEMA = {
+  type: "object",
+  properties: { offset: { type: "number" } },
+  required: ["offset"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
 
 const REFS = {
   pattern: { identity: "A".repeat(43), symbol: "patternFactory" },
@@ -405,22 +419,79 @@ describe("runner-owned factory materialization", () => {
     );
   });
 
-  it("rejects decoded pattern params until Stage 3", () => {
-    const { bases } = makeFactories();
-    const state = sealFactoryState(bases[0]);
-    for (
-      const shell of [
-        createFactoryShell({ ...state, paramsSchema: { type: "object" } }),
-        createFactoryShell({
-          ...state,
-          paramsSchema: { type: "object" },
-          params: {},
-        }),
-      ]
-    ) {
-      expect(() => materializeFactory(shell, { runtime, artifactSpace }))
-        .toThrow("Factory materialization does not support pattern params yet");
-    }
+  it("reconstructs bound pattern params through warm and cold loads", async () => {
+    const base = pattern(
+      withPatternParamsSchema(
+        ((argument: any, _params: any) => ({
+          result: argument.value,
+        })) as any,
+        PARAMS_SCHEMA,
+      ) as any,
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    const unboundState = sealFactoryState(base);
+    const bound = (base as InternalPatternFactory<unknown, unknown>).curry({
+      offset: 2,
+    });
+    const state = sealFactoryState(bound);
+    const shell = createFactoryShell(state);
+    const expected = contractOf(state);
+
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+    const warmValue = materializeFactory(shell, {
+      runtime,
+      artifactSpace,
+      expected,
+    });
+    expect(sealFactoryState(warmValue)).toEqual(state);
+    expect(() => materializeFactory(base, { runtime, artifactSpace, expected }))
+      .toThrow("Pattern factory requires bound params");
+    expect(() =>
+      materializeFactory(createFactoryShell(unboundState), {
+        runtime,
+        artifactSpace,
+        expected,
+      })
+    ).toThrow("Pattern factory requires bound params");
+
+    warm.clear();
+    cold.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+    const coldValue = await prepareFactory(shell, {
+      runtime,
+      artifactSpace,
+      expected,
+    });
+    expect(sealFactoryState(coldValue)).toEqual(state);
+    expect(loads).toEqual([{ ...REFS.pattern, artifactSpace }]);
+
+    const forged = createFactoryShell({
+      ...state,
+      paramsSchema: { type: "object", additionalProperties: true },
+    });
+    expect(() => materializeFactory(forged, { runtime, artifactSpace }))
+      .toThrow("Factory materialization schema mismatch: pattern paramsSchema");
+  });
+
+  it("rejects malformed decoded params through the trusted curry validator", () => {
+    const base = pattern(
+      withPatternParamsSchema(
+        ((argument: any, _params: any) => ({ result: argument.value })) as any,
+        PARAMS_SCHEMA,
+      ) as any,
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    const state = sealFactoryState(base);
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+    const shell = createFactoryShell({
+      ...state,
+      params: {},
+    });
+    expect(() => materializeFactory(shell, { runtime, artifactSpace }))
+      .toThrow("missing required property offset");
   });
 
   it("rereads and fences a stale cold selection after the load warms cache", async () => {

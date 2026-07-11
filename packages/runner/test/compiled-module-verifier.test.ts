@@ -91,6 +91,37 @@ exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
     expect(() => verify(body)).not.toThrow();
   });
 
+  it("accepts the compiler-only params-schema carrier only as a pattern callback", () => {
+    const body = `
+${IMPORT}
+const __cfPattern_1 = (0, commonfabric_1.pattern)(
+  (0, commonfabric_1.__cfHelpers.withPatternParamsSchema)(
+    (argument, params) => ({ publicValue: argument.value, capturedValue: params.value }),
+    { type: "object", properties: { value: { type: "string" } }, required: ["value"] }
+  ),
+  { type: "object", properties: { value: { type: "number" } }, required: ["value"] },
+  true
+);
+exports.default = __cfPattern_1;
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("rejects exporting the compiler-only params-schema carrier result", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.__cfHelpers.withPatternParamsSchema)(
+  (argument, params) => ({ publicValue: argument.value, capturedValue: params.value }),
+  true
+);
+`;
+
+    expect(() => verify(body)).toThrow(
+      "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
+    );
+  });
+
   it("accepts compiled dependencies from the shared runtime-module policy", () => {
     const body = `
 const _schema = require("commonfabric/schema");

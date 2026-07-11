@@ -13,6 +13,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isTrustedBuilderArtifact } from "./builder/pattern-metadata.ts";
 import type {
   HandlerFactory,
+  InternalPatternFactory,
   Module,
   ModuleFactory,
   PatternFactory,
@@ -218,6 +219,25 @@ function assertCarriedSchemas(
       `Factory materialization schema mismatch: ${carried.kind} ${field}`,
     );
   }
+  if (carried.kind === "pattern") {
+    const carriedHasParamsSchema = Object.hasOwn(carried, "paramsSchema");
+    const trustedHasParamsSchema = Object.hasOwn(
+      trustedState,
+      "paramsSchema",
+    );
+    const trustedParamsSchema = (trustedState as {
+      paramsSchema?: JSONSchema;
+    }).paramsSchema;
+    if (
+      carriedHasParamsSchema !== trustedHasParamsSchema ||
+      carriedHasParamsSchema &&
+        !factorySchemasEqual(carried.paramsSchema, trustedParamsSchema)
+    ) {
+      throw new Error(
+        "Factory materialization schema mismatch: pattern paramsSchema",
+      );
+    }
+  }
 }
 
 function inspectTrustedFactory(
@@ -259,14 +279,13 @@ function inspectTrustedFactory(
   return { value: factory, state, contract };
 }
 
-function assertDecodedPatternHasNoParams(state: FactoryStateV1): void {
+function assertPatternFactoryReady(state: FactoryStateView): void {
   if (
     state.kind === "pattern" &&
-    (Object.hasOwn(state, "paramsSchema") || Object.hasOwn(state, "params"))
+    Object.hasOwn(state, "paramsSchema") &&
+    !Object.hasOwn(state, "params")
   ) {
-    throw new Error(
-      "Factory materialization does not support pattern params yet",
-    );
+    throw new Error("Pattern factory requires bound params");
   }
 }
 
@@ -276,9 +295,31 @@ function applyModifiers(
 ): MaterializedFactory {
   let materialized = base;
   if (state.kind === "pattern") {
-    const patternFactory = materialized as PatternFactory<unknown, unknown>;
+    let patternFactory = materialized as InternalPatternFactory<
+      unknown,
+      unknown
+    >;
+    const baseState = factoryStateOf(patternFactory);
+    if (Object.hasOwn(state, "params")) {
+      if (baseState.kind !== "pattern") {
+        throw new Error("Factory materialization resolved a non-pattern base");
+      }
+      if (Object.hasOwn(baseState, "params")) {
+        if (!deepEqual(baseState.params, state.params)) {
+          throw new Error(
+            "Factory materialization resolved an already-bound base",
+          );
+        }
+      } else {
+        patternFactory = patternFactory.curry(state.params);
+      }
+      materialized = patternFactory;
+    } else if (Object.hasOwn(state, "paramsSchema")) {
+      throw new Error("Pattern factory requires bound params");
+    }
     if (state.defaultScope !== undefined) {
-      materialized = patternFactory.asScope(state.defaultScope);
+      materialized = (materialized as PatternFactory<unknown, unknown>)
+        .asScope(state.defaultScope);
     }
     if (Object.hasOwn(state, "spaceSelector")) {
       materialized = (materialized as PatternFactory<unknown, unknown>).inSpace(
@@ -369,12 +410,12 @@ export function materializeFactory(
   if (inspected.trusted) {
     const trusted = inspectTrustedFactory(value, context.runtime);
     assertExpectedContract(trusted.contract, context.expected);
+    assertPatternFactoryReady(trusted.state);
     return trusted.value;
   }
 
   const ref = requireRef(inspected.state);
   const carried = inspected.state as FactoryStateV1;
-  assertDecodedPatternHasNoParams(carried);
   const resolved = context.runtime.patternManager.isArtifactAvailableInSpace(
       ref.identity,
       context.artifactSpace,
@@ -420,12 +461,12 @@ export async function prepareFactory(
   if (inspected.trusted) {
     const trusted = inspectTrustedFactory(value, context.runtime);
     assertExpectedContract(trusted.contract, context.expected);
+    assertPatternFactoryReady(trusted.state);
     return trusted.value;
   }
 
   const ref = requireRef(inspected.state);
   const carried = inspected.state as FactoryStateV1;
-  assertDecodedPatternHasNoParams(carried);
   const warm = context.runtime.patternManager.isArtifactAvailableInSpace(
       ref.identity,
       context.artifactSpace,
