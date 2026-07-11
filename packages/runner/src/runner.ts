@@ -215,11 +215,19 @@ const recordOutputSchemaPolicyInputs = (
 
   if (isWriteRedirectLink(outputBinding)) {
     const bindingLink = parseLink(outputBinding, resultCell);
-    const link = resolveLink(
-      runtime,
-      tx,
-      bindingLink,
-      "writeRedirect",
+    // Output-redirect resolution is result-plumbing machinery
+    // (machineryRead, same family as sendValueToBinding's walk): its reads
+    // must not consume `*`-path membership templates (bot review on this
+    // PR — these resolve the SAME redirects immediately before the send).
+    const link = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        resolveLink(
+          runtime,
+          tx,
+          bindingLink,
+          "writeRedirect",
+        ),
     );
     const schema = schemaPath.length === 0
       ? resultSchema
@@ -298,11 +306,16 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
 ): void => {
   if (isWriteRedirectLink(outputBinding)) {
     const bindingLink = parseLink(outputBinding, processCell);
-    const link = resolveLink(
-      runtime,
-      tx,
-      bindingLink,
-      "writeRedirect",
+    // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
+    const link = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        resolveLink(
+          runtime,
+          tx,
+          bindingLink,
+          "writeRedirect",
+        ),
     );
     const schema = bindingLink.schema ?? link.schema;
     recordSchemaPolicyInputForLink(tx, bindingLink, schema);
@@ -344,11 +357,16 @@ const schemaForRawBuiltinRootOutputBinding = (
     return undefined;
   }
   const bindingLink = parseLink(outputBinding, processCell);
-  const link = resolveLink(
-    runtime,
-    tx,
-    bindingLink,
-    "writeRedirect",
+  // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
+  const link = tx.runWithAmbientReadMeta(
+    machineryRead,
+    () =>
+      resolveLink(
+        runtime,
+        tx,
+        bindingLink,
+        "writeRedirect",
+      ),
   );
   return bindingLink.schema ?? link.schema;
 };
