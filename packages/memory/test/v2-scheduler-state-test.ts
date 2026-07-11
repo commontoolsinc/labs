@@ -144,6 +144,95 @@ Deno.test("memory v2 migrates scheduler read indexes to include owner space", as
   }
 });
 
+Deno.test("memory v2 migrates legacy scheduler write and snapshot metadata", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const legacyDb = new Database(path, { create: true });
+  try {
+    legacyDb.exec(`
+      CREATE TABLE scheduler_write_index (
+        branch              TEXT    NOT NULL DEFAULT '',
+        write_space         TEXT    NOT NULL,
+        write_id            TEXT    NOT NULL,
+        write_scope         TEXT    NOT NULL,
+        write_path          JSON    NOT NULL,
+        write_kind          TEXT    NOT NULL,
+        piece_id            TEXT    NOT NULL,
+        process_generation  INTEGER NOT NULL,
+        action_id           TEXT    NOT NULL,
+        observation_id      INTEGER NOT NULL
+      );
+      CREATE TABLE scheduler_action_snapshot (
+        branch              TEXT    NOT NULL DEFAULT '',
+        owner_space         TEXT    NOT NULL DEFAULT '',
+        piece_id            TEXT    NOT NULL,
+        process_generation  INTEGER NOT NULL,
+        action_id           TEXT    NOT NULL,
+        observation_id      INTEGER NOT NULL,
+        payload             JSON    NOT NULL,
+        PRIMARY KEY (
+          branch,
+          owner_space,
+          piece_id,
+          process_generation,
+          action_id
+        )
+      );
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  const engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    const writeColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_write_index")`,
+    ).all() as Array<{ name: string; dflt_value: string | null }>;
+    assertEquals(
+      writeColumns.find((column) => column.name === "owner_space")?.dflt_value,
+      "''",
+    );
+
+    const snapshotColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_action_snapshot")`,
+    ).all() as Array<{
+      name: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+    assertEquals(
+      snapshotColumns.filter((column) =>
+        column.name === "commit_seq" || column.name === "observed_at_seq"
+      ).map(({ name, notnull, dflt_value }) => ({
+        name,
+        notnull,
+        dflt_value,
+      })),
+      [
+        { name: "commit_seq", notnull: 0, dflt_value: null },
+        { name: "observed_at_seq", notnull: 1, dflt_value: "0" },
+      ],
+    );
+
+    const stored = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation,
+    });
+    assertExists(stored.observationId);
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.observation,
+      observation,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 stores no-op scheduler observations without semantic commits", async () => {
   const { engine, path } = await createEngine();
 
