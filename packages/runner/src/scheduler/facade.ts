@@ -248,15 +248,13 @@ const observationMinimumContextRank = (
       summary.materializerWriteEnvelopes,
     ],
   ];
-  for (const [groupIndex, [observed, envelopes]] of runtimeGroups.entries()) {
+  for (const [observed, envelopes] of runtimeGroups) {
     for (const address of observed) {
-      const covered = envelopes.some((envelope) =>
-        schedulerEnvelopeCovers(envelope, address)
-      );
-      const trustedSameSpaceFrameworkRead = groupIndex === 0 &&
-        address.space === summary.piece.space &&
-        schedulerAddressScopeRank(address) === 0;
-      if (!covered && !trustedSameSpaceFrameworkRead) {
+      if (
+        !envelopes.some((envelope) =>
+          schedulerEnvelopeCovers(envelope, address)
+        )
+      ) {
         return 2;
       }
       rank = Math.max(rank, schedulerAddressScopeRank(address));

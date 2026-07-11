@@ -2866,6 +2866,38 @@ export class Runner {
     });
   }
 
+  private collectStaticReadTargetsWithCompleteness(
+    tx: IExtendedStorageTransaction,
+    inputCells: readonly NormalizedFullLink[],
+  ): { targets: NormalizedFullLink[]; complete: boolean } {
+    // Declared inputs can point through their argument-slot redirect and then
+    // through an ordinary link to the effective source cell. Resolve the full
+    // static chain so the completeness certificate covers the same target the
+    // action transaction will record at runtime.
+    return tx.runWithAmbientReadMeta(machineryRead, () => {
+      const targets: NormalizedFullLink[] = [];
+      let complete = true;
+      for (const input of inputCells) {
+        try {
+          const { overwrite: _overwrite, ...target } = resolveLink(
+            this.runtime,
+            tx,
+            input,
+            "value",
+          );
+          targets.push(target);
+        } catch (error) {
+          complete = false;
+          logger.debug("static-read-target", () => [
+            "Unable to resolve static read target",
+            { input, error },
+          ]);
+        }
+      }
+      return { targets: dedupeNormalizedLinks(targets), complete };
+    });
+  }
+
   private populateDeclaredSchedulerReads(
     reads: readonly NormalizedFullLink[],
     depTx: IExtendedStorageTransaction,
@@ -4294,6 +4326,9 @@ export class Runner {
         module.completeSchedulerScopeSummary === true)
       ? this.collectStaticRedirectWriteTargetsWithCompleteness(tx, writes)
       : { targets: [], complete: true };
+    const redirectReadTargets = module.completeSchedulerScopeSummary === true
+      ? this.collectStaticReadTargetsWithCompleteness(tx, reads)
+      : { targets: [], complete: true };
     const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []
       : redirectWriteTargets.targets;
@@ -4320,19 +4355,20 @@ export class Runner {
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       ...(module.completeSchedulerScopeSummary === true &&
-          redirectWriteTargets.complete
+          redirectWriteTargets.complete && redirectReadTargets.complete
         ? {
           completeSchedulerScopeSummary: {
             complete: true as const,
             piece: patternResultCell.getAsNormalizedFullLink(),
             // The callback's declared reads are only part of the action's
-            // structurally fixed read surface. The runner also materializes
-            // the immutable argument container and reads direct output cells
-            // while diffing/writing their values. Include those framework
-            // reads in the trusted certificate so a complete space-only lift
-            // is not mistaken for a runtime contradiction.
+            // structurally fixed read surface. Reads follow static redirects;
+            // the runner also materializes the immutable argument container
+            // and reads direct output cells while diffing/writing their values.
+            // Include those framework reads in the trusted certificate so a
+            // complete space-only lift is not mistaken for a contradiction.
             reads: dedupeNormalizedLinks([
               ...reads,
+              ...redirectReadTargets.targets,
               inputsCell.getAsNormalizedFullLink(),
               processCell.getAsNormalizedFullLink(),
               ...structuralMetaLinks,
