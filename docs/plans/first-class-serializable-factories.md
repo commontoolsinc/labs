@@ -447,28 +447,28 @@ Focused tests:
   single-flight behavior keyed by source space plus identity, `__cfReg` symbol
   resolution, and CFC verification.
 - [x] Keep a pattern-specific wrapper temporarily for existing callers.
-- [ ] Implement the runner chokepoint with an explicit trusted context carrying
+- [x] Implement the runner chokepoint with an explicit trusted context carrying
   runtime, artifact source space, expected kind/schemas, and optional
   owner/generation. Provide a warm synchronous materializer and an async-ready
   cold form rather than weakening one return type.
-- [ ] Return live factories unchanged when their trusted kind/state already
+- [x] Return live factories unchanged when their trusted kind/state already
   match.
-- [ ] For decoded shells, resolve the trusted base artifact, compare kind and
+- [x] For decoded shells, resolve the trusted base artifact, compare kind and
   normalized schemas, reapply scope/space modifiers, retain canonical codec
   state, and return a callable builder factory.
-- [ ] Keep schema-light module factories unresolved until a trusted
+- [x] Keep schema-light module factories unresolved until a trusted
   `ModuleRegistry` entry supplies schemas; never promote wire or call-site
   hints to execution authority.
-- [ ] Keep artifact loading space distinct from a pattern factory's
+- [x] Keep artifact loading space distinct from a pattern factory's
   `spaceSelector`; apply the latter only after trusted base resolution as the
   child execution target.
-- [ ] Fence async materialization by owner/selection generation and require
+- [x] Fence async materialization by owner/selection generation and require
   callers to reread reactive selection after an await. A completed load may
   warm a cache but must not authorize a stale factory to execute.
-- [ ] Until Stage 3 lands, fail materialization closed for decoded pattern state
+- [x] Until Stage 3 lands, fail materialization closed for decoded pattern state
   containing `paramsSchema` or `params`; Stage 1 may validate and re-encode that
   state but cannot yet reconstruct its runtime binding semantics.
-- [ ] Reject missing refs, wrong kinds, schema mismatches, forged metadata, and
+- [x] Reject missing refs, wrong kinds, schema mismatches, forged metadata, and
   non-factory values with stable diagnostics.
 
 Expected files and tests:
