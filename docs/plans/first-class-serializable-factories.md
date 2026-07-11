@@ -434,14 +434,14 @@ Focused tests:
 
 ### WP1.6 — Add runner-owned factory materialization and generic resolution
 
-- [ ] Generalize `PatternManager.loadPatternByIdentity()` into, or layer it on,
+- [x] Generalize `PatternManager.loadPatternByIdentity()` into, or layer it on,
   a generic source-space-aware
   `loadArtifactByIdentity(identity, symbol, artifactSpace)` path that returns
   only trusted indexed builder artifacts.
-- [ ] Preserve warm artifact-index lookup, storage-backed cold loading,
+- [x] Preserve warm artifact-index lookup, storage-backed cold loading,
   single-flight behavior keyed by source space plus identity, `__cfReg` symbol
   resolution, and CFC verification.
-- [ ] Keep a pattern-specific wrapper temporarily for existing callers.
+- [x] Keep a pattern-specific wrapper temporarily for existing callers.
 - [ ] Implement the runner chokepoint with an explicit trusted context carrying
   runtime, artifact source space, expected kind/schemas, and optional
   owner/generation. Provide a warm synchronous materializer and an async-ready
