@@ -1203,6 +1203,16 @@ const valueWriteTargets = (
     // Last written value per path (pathKey), for flow-label value-shape
     // classification (pure link structure is not stamped).
     valuesByPath: Map<string, unknown>;
+    // Pre-transaction snapshot per path (pathKey), first write wins — the
+    // same before-state `upsertWriteDetail` preserves per recorded path,
+    // deduped here across raw aliases of one logical path (a document-root
+    // write and a `["value"]` write both land at logical `[]`). Recorded
+    // writes land at the deepest still-existing ancestor (the
+    // materialization point), so probing this snapshot at a RELATIVE
+    // sub-path recovers whether that path existed before the transaction.
+    // Consumed by the §8.12.8 re-mint-on-recreation arm of the frozen
+    // existence carry.
+    previousValuesByPath: Map<string, unknown>;
   }
 > => {
   const result = new Map<
@@ -1214,6 +1224,7 @@ const valueWriteTargets = (
       type: MediaType;
       paths: (readonly string[])[];
       valuesByPath: Map<string, unknown>;
+      previousValuesByPath: Map<string, unknown>;
     }
   >();
   const log = tx.getReactivityLog?.();
@@ -1261,11 +1272,26 @@ const valueWriteTargets = (
           ? (write.value as { value?: unknown }).value
           : undefined)
         : write.value;
+      // The creation signal unwraps the envelope like `writtenValue`: a
+      // document-root write's `previousValue` is the prior RAW envelope, so
+      // the logical root existed before only if that envelope carried a
+      // `value` member.
+      const previousWrittenValue = rawPath.length === 0
+        ? (isRecord(write.previousValue)
+          ? (write.previousValue as { value?: unknown }).value
+          : undefined)
+        : write.previousValue;
       const key = targetKey(write.address);
       const existing = result.get(key);
       if (existing !== undefined) {
         existing.paths.push(writePath);
         existing.valuesByPath.set(pathKey(writePath), writtenValue);
+        if (!existing.previousValuesByPath.has(pathKey(writePath))) {
+          existing.previousValuesByPath.set(
+            pathKey(writePath),
+            previousWrittenValue,
+          );
+        }
       } else {
         result.set(key, {
           space: write.address.space,
@@ -1274,6 +1300,10 @@ const valueWriteTargets = (
           type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
           valuesByPath: new Map([[pathKey(writePath), writtenValue]]),
+          previousValuesByPath: new Map([[
+            pathKey(writePath),
+            previousWrittenValue,
+          ]]),
         });
       }
     }
@@ -4804,9 +4834,14 @@ export const prepareBoundaryCommit = (
         entry.schema,
       ]),
     );
-    const flowWrittenPaths = flowPersist
-      ? flowTargets?.get(key)?.paths ?? []
-      : [];
+    const flowTarget = flowPersist ? flowTargets?.get(key) : undefined;
+    const flowWrittenPaths = flowTarget?.paths ?? [];
+    const flowWrittenValues = flowTarget?.valuesByPath;
+    // Pre-transaction snapshots per written path, for the §8.12.8
+    // re-mint-on-recreation probe below. Gated on flowPersist like the
+    // written paths: with nothing re-minting, refusing a frozen entry's
+    // carry would erase the existence history rather than replace it.
+    const flowPreviousValues = flowTarget?.previousValuesByPath;
     // The Wave 2 grow-only ratchet stood in for the missing default
     // transition: with flow labels persisting, taint rides the derived
     // component instead, and only legacy (untagged) entries keep the
@@ -4960,6 +4995,37 @@ export const prepareBoundaryCommit = (
     const poolsExistence = (entry: LabelMapEntry): boolean =>
       entry.observes === undefined &&
       (entry.origin === "derived" || entry.origin === "structure");
+    // §8.12.8 re-mint-on-recreation: delete + re-create is a FRESH creation
+    // event — the frozen existence entry does not survive it, and carrying
+    // the stale creation join would UNDERSTATE the re-created path's
+    // existence channel (the direction the spec forbids; the deletion arm
+    // alone merely over-taints, the fail-safe direction). A path was
+    // re-created by this transaction when some recorded write covering it
+    // shows the per-path TRANSITION absent-before → present-after: recorded
+    // writes land at the deepest still-existing ancestor (the
+    // materialization point), so a deep write into a deleted subtree
+    // reports there and the relative probes recover the transition at the
+    // entry's own path. Absent-before alone is not enough — a covering
+    // overwrite that still omits the path leaves it deleted, which is the
+    // deletion arm (the frozen entry stays, over-tainting until a
+    // re-creation).
+    const recreatedExistencePaths: (readonly string[])[] = [];
+    const recreatedAt = (entryPath: readonly string[]): boolean =>
+      flowWrittenPaths.some((written) => {
+        if (!isPrefix(written, entryPath)) {
+          return false;
+        }
+        const rel = entryPath.slice(written.length);
+        const writtenKey = pathKey(written);
+        if (
+          getValueAtPath(flowPreviousValues?.get(writtenKey), rel) !==
+            undefined
+        ) {
+          return false;
+        }
+        return getValueAtPath(flowWrittenValues?.get(writtenKey), rel) !==
+          undefined;
+      });
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
@@ -4986,23 +5052,31 @@ export const prepareBoundaryCommit = (
       // shape-class membership template records CURRENT shape under
       // replace-from-criteria (template-population §3.1/§3.2.1), so
       // freezing it here would both unhinge it from the criteria and
-      // accumulate stale J forever through the coalesce join. Known
-      // residual: deletion leaves the frozen entry in place (over-taint)
-      // and re-creation keeps it instead of re-minting at the re-creating
-      // join — re-mint-on-recreation needs per-path previousValue
-      // plumbing.
+      // accumulate stale J forever through the coalesce join.
+      // RE-CREATION does not carry (§8.12.8, normative): a frozen entry
+      // on a path this transaction deleted-and-re-created (`recreatedAt`
+      // above) records a destroyed incarnation — the entry falls through
+      // to the flow-clear (shape-class entries never pool) and a
+      // replacement mints below at this attempt's join, REPLACING the
+      // stale one. Known residual: deletion itself leaves the frozen
+      // entry in place until a re-creation (over-taint, the fail-safe
+      // direction).
       if (
         (entry.origin === "derived" || entry.origin === "structure") &&
         entry.observes === "shape" &&
         !isRuntimeMintedTemplate({ origin: entry.origin, path: entryPath })
       ) {
-        persistedLabelEntries.push({
-          path: entryPath,
-          label: cloneLabel(entry.label),
-          ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
-          observes: "shape",
-        });
-        continue;
+        if (recreatedAt(entryPath)) {
+          recreatedExistencePaths.push(entryPath);
+        } else {
+          persistedLabelEntries.push({
+            path: entryPath,
+            label: cloneLabel(entry.label),
+            ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+            observes: "shape",
+          });
+          continue;
+        }
       }
       if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
         // A link write replacing a previously content-labeled path — or a
@@ -5244,7 +5318,6 @@ export const prepareBoundaryCommit = (
       // this tx, so each container node gets an exact-path `structure`
       // stamp with J. Shape observers (reading the container itself,
       // length, enumeration) join it; slot pointer reads below it don't.
-      const flowWrittenValues = flowTargets?.get(key)?.valuesByPath;
       const seenFlowPaths = new Set<string>();
       const derivedStampPaths: (readonly string[])[] = [];
       const structureStampPaths: (readonly string[])[] = [];
@@ -5318,6 +5391,28 @@ export const prepareBoundaryCommit = (
         });
         return foldedUnique(atoms);
       };
+      // §8.12.8 re-mint-on-recreation, mint half: each frozen entry the
+      // carry refused (its path was deleted and re-created this tx) is
+      // REPLACED at its own path with this attempt's join — placed at the
+      // entry's path, not the recorded write's, because a covering write
+      // may re-create a deeper path while still existing itself (its own
+      // frozen entry carries, so no stamp-loop mint would land there).
+      // Pushed before the stamp loops so their exact-path existence checks
+      // see the replacement and do not double-mint. An empty join mints
+      // nothing (confidentiality-only encoding): a cleanly re-created
+      // path's existence is public, and pre-deletion observations stay
+      // protected by the reads journaled while the path existed.
+      for (const path of recreatedExistencePaths) {
+        const replacement = frozenConfidentialityFor(path);
+        if (replacement.length > 0) {
+          persistedLabelEntries.push(markFlowStampEntry({
+            path,
+            label: { confidentiality: replacement },
+            origin: "derived",
+            observes: "shape",
+          }));
+        }
+      }
       // (S16) A declared list-coordinator container re-derives its MEMBERSHIP
       // stamp (origin structure, observes enumerate — replace-from-criteria,
       // §8.12.8-normative per #4546) from J this reconcile even with no value
@@ -5424,9 +5519,11 @@ export const prepareBoundaryCommit = (
         }
         // Freeze-at-creation: mint the existence entry only when the path
         // has none (creation / legacy migration); a carried frozen entry
-        // pushed above wins, and later writes to a still-existing path add
-        // no existence information (a writer conditional on existence
-        // journals that observation itself, §8.10.1/§8.9.2).
+        // pushed above wins — as does a re-creation replacement minted
+        // above at the entry's own path — and later writes to a
+        // still-existing path add no existence information (a writer
+        // conditional on existence journals that observation itself,
+        // §8.10.1/§8.9.2).
         // Only a runtime-minted existence entry suppresses the mint: a
         // DECLARED observes:"shape" entry is store policy for the shape
         // channel, not a record that creation happened — both coexist as
@@ -5525,13 +5622,15 @@ export const prepareBoundaryCommit = (
             }));
           }
         }
-        // FROZEN existence entry (freeze-at-creation, spec branch
-        // cfc/existence-freeze-at-creation): minted once — at the first
-        // labeled stamping of this container (creation, or migration of
-        // pre-existing data, over-attributing conservatively) — carrying
-        // the creating attempt's join plus any cleared legacy covering
-        // structure confidentiality at-or-below (the one-time migration
-        // absorb). Never grown, never cleared; a carried entry above wins.
+        // FROZEN existence entry (freeze-at-creation, §8.12.8): minted
+        // once — at the first labeled stamping of this container
+        // (creation, or migration of pre-existing data, over-attributing
+        // conservatively) — carrying the creating attempt's join plus any
+        // cleared legacy covering structure confidentiality at-or-below
+        // (the one-time migration absorb). Never grown, replaced only by
+        // re-creation after deletion (a fresh creation event — the carry
+        // refuses the stale entry and the replacement above re-mints at
+        // this attempt's join); a carried entry above wins.
         const hasFrozenExistence = persistedLabelEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "structure") &&
           entry.observes === "shape" && pathKey(entry.path) === pathKey(path)

@@ -235,6 +235,159 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     }
   });
 
+  // §8.12.8 (freeze-at-creation, normative since the 2026-07-10 spec
+  // landing): deleting a path and re-creating it is a FRESH creation event —
+  // the existence entry re-mints at the re-creating attempt's join, and the
+  // new entry REPLACES the frozen one. Carrying the stale creation join
+  // would UNDERSTATE the re-created path's existence channel, the direction
+  // the spec forbids (the deletion arm above merely over-taints).
+  it("re-creation after deletion re-mints existence at the re-creating join", async () => {
+    const rt = makeRuntime();
+    const secretOne = await seedDoc(rt, "ec-remint-one", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret-one"] } },
+    ]);
+    const secretTwo = await seedDoc(rt, "ec-remint-two", { n: 2 }, [
+      { path: [], label: { confidentiality: ["secret-two"] } },
+    ]);
+    // Create the doc first (clean tx, no stamps), then CREATE the child
+    // under secret-one's influence: frozen existence at ["child"] = J1.
+    const outId = await writeTainted(rt, undefined, "ec-remint-out", {
+      other: 1,
+    });
+    const create = rt.edit();
+    create.readOrThrow(readAddress(secretOne, []));
+    create.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { deep: true },
+    );
+    create.prepareCfc();
+    expect((await create.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["child"])[0]?.label.confidentiality)
+      .toEqual(["secret-one"]);
+
+    // DELETE the child: clean ancestor overwrite without it. The frozen
+    // entry survives the deletion itself (the documented over-taint arm).
+    const del = rt.edit();
+    del.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { other: 2 },
+    );
+    del.prepareCfc();
+    expect((await del.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["child"])[0]?.label.confidentiality)
+      .toEqual(["secret-one"]);
+
+    // RE-CREATE the child under secret-two's influence: a fresh creation
+    // event — the existence entry must now carry J2 alone, not J1, and
+    // not the join of the two.
+    const recreate = rt.edit();
+    recreate.readOrThrow(readAddress(secretTwo, []));
+    recreate.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { back: true },
+    );
+    recreate.prepareCfc();
+    expect((await recreate.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["child"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toEqual(["secret-two"]);
+  });
+
+  // The same fresh-creation event reached through a DEEPER write: writing
+  // below the deleted child records at its materialization point (the
+  // highest missing node — the child itself), so the stale frozen entry
+  // there re-mints at the re-creating join, at creation granularity.
+  it("re-creation via a deeper write re-mints at the materialization point", async () => {
+    const rt = makeRuntime();
+    const secretOne = await seedDoc(rt, "ec-remint-deep-one", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret-one"] } },
+    ]);
+    const secretTwo = await seedDoc(rt, "ec-remint-deep-two", { n: 2 }, [
+      { path: [], label: { confidentiality: ["secret-two"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-remint-deep-out", {
+      other: 1,
+    });
+    const create = rt.edit();
+    create.readOrThrow(readAddress(secretOne, []));
+    create.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { deep: true },
+    );
+    create.prepareCfc();
+    expect((await create.commit()).ok).toBeDefined();
+
+    const del = rt.edit();
+    del.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { other: 2 },
+    );
+    del.prepareCfc();
+    expect((await del.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["child"]).length).toBe(1);
+
+    const recreate = rt.edit();
+    recreate.readOrThrow(readAddress(secretTwo, []));
+    recreate.writeOrThrow(
+      {
+        space,
+        scope: "space",
+        id: uri(outId),
+        path: ["value", "child", "deep"],
+      },
+      true,
+    );
+    recreate.prepareCfc();
+    expect((await recreate.commit()).ok).toBeDefined();
+
+    const shape = shapeEntriesAt(outId, ["child"]);
+    expect(shape.length).toBe(1);
+    expect(shape[0].label.confidentiality).toEqual(["secret-two"]);
+  });
+
+  // A CLEAN re-creation (nothing labeled read) is a fresh creation event
+  // under an empty join: the stale frozen entry must not survive it, and
+  // with nothing to record the confidentiality-only encoding mints no
+  // replacement — pre-deletion observations stay protected by the reads
+  // journaled while the path existed (§8.12.8).
+  it("clean re-creation replaces the frozen entry with the empty creating join", async () => {
+    const rt = makeRuntime();
+    const secretOne = await seedDoc(rt, "ec-remint-clean-one", { n: 1 }, [
+      { path: [], label: { confidentiality: ["secret-one"] } },
+    ]);
+    const outId = await writeTainted(rt, undefined, "ec-remint-clean-out", {
+      other: 1,
+    });
+    const create = rt.edit();
+    create.readOrThrow(readAddress(secretOne, []));
+    create.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { deep: true },
+    );
+    create.prepareCfc();
+    expect((await create.commit()).ok).toBeDefined();
+
+    const del = rt.edit();
+    del.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { other: 2 },
+    );
+    del.prepareCfc();
+    expect((await del.commit()).ok).toBeDefined();
+    expect(shapeEntriesAt(outId, ["child"]).length).toBe(1);
+
+    const recreate = rt.edit();
+    recreate.writeOrThrow(
+      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { back: true },
+    );
+    recreate.prepareCfc();
+    expect((await recreate.commit()).ok).toBeDefined();
+
+    expect(shapeEntriesAt(outId, ["child"])).toEqual([]);
+  });
+
   // Pre-C2 covering derived entries carried the existence channel too; a
   // clean overwrite must fold their confidentiality into the new existence
   // entry, not erase it (the same SC-4 leak on legacy data).
