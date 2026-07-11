@@ -219,16 +219,23 @@ field, or provider method — they exist.
    is hardcoded `0` on read and write, so cross-generation invalidation is
    not exercised; per-restart generation bumping is a hibernate/resume
    identity concern deferred to W1.1.
-5. **Pin handler coverage.** Persistence must cover event-handler runs,
-   not only computations/effects: the vocabulary already has
-   `"event-handler"` / `"event-preflight"` kinds
+5. **Pin handler coverage (persistence only — NOT rehydration).**
+   Persistence should cover event-handler runs, not only
+   computations/effects: the vocabulary already has `"event-handler"` /
+   `"event-preflight"` kinds
    (`packages/runner/src/scheduler/persistent-observation.ts:9,14`), but
    `attachSchedulerActionObservation` is wired only at the action-run
-   seam (`packages/runner/src/scheduler/action-run.ts:521`). Determine
-   whether the event dispatch path (`scheduler/events.ts` commit
-   handling, ~:954) attaches observations for handler runs; if it does,
-   pin it with a test; if it does not, wire it (small — the same attach
-   helper at the event-commit seam) and pin it.
+   seam (`packages/runner/src/scheduler/action-run.ts:521`), while
+   handlers dispatch through `dispatchQueuedEvent` with an event payload
+   — a different path. Determine whether that event-commit path attaches
+   observations for handler runs; if it does, pin it with a test; if it
+   does not, wire the attach at the event-commit seam and pin it. Scope
+   note: there is nothing to *rehydrate* for handlers — they run only
+   when an event arrives, and their registration comes from piece
+   instantiation, not from restored scheduler `Action`s. The value of
+   persisting handler observations is (a) their reads populate the
+   readers index (wake/staleness bookkeeping) and (b) run provenance —
+   not skip-on-restart.
 
 **Success criteria (most already pass — this WO proves the DELTA, not the
 substrate):**
@@ -261,11 +268,13 @@ substrate):**
       remains under `docs/specs/server-side-execution/` — only the
       historical rename note (§0.3, this WO's step 1) may mention the old
       name.
-- [ ] **Handler coverage (step 5):** a fixture event-handler run under
-      the flag persists an observation with
-      `actionKind: "event-handler"`, and rehydration restores its
-      registration without re-running the piece; red run first if the
-      event-path wire turns out to be missing.
+- [ ] **Handler coverage (step 5, persistence only):** a fixture
+      event-handler run under the flag persists an observation with
+      `actionKind: "event-handler"` whose reads land in the readers
+      index; red run first if the event-path wire turns out to be
+      missing. Explicitly NOT asserted: any rehydration/registration
+      restore for handlers (no such path exists; see step 5's scope
+      note).
 
 **Review checklist:**
 

@@ -1019,8 +1019,10 @@ Rules that keep this sound:
 - **Fail-open to recompute.** Missing, stale, or corrupt observations
   degrade to re-running actions (the persistent-scheduler-state spec's
   invariant: never incorrect cleanliness, at worst wasted recompute). The
-  live tier is therefore always rebuildable: worker crash → rehydrate from
-  tier 2; tier 2 damaged → cold re-run, i.e. today's behavior.
+  cache tier is therefore always rebuildable, and only from durable
+  state: worker crash → rehydrate from the SQLite primary (tier 1);
+  damaged/missing primary rows → cold re-run, i.e. today's behavior. The
+  cache tier is never a recovery source.
 - **Per-commit work stays memory-resident for hot spaces.** Feed fan-out
   consults in-memory per-session doc-sets; the disk index is consulted
   per-commit only on the cold path (no worker, no sessions — the
