@@ -556,6 +556,31 @@ the intentional shell-returning boundary.
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization.
 
+### Inline document transport
+
+The canonical by-value inline representation is exactly:
+
+```text
+data:application/vnd.commonfabric.fabric-value;charset=utf-8,<percent-encoded fvj1 payload>
+```
+
+The payload is the complete output of the Fabric JSON encoder, including its
+`fvj1:` version prefix. Readers dispatch only from the exact media type:
+`application/json` retains the legacy `JSON.parse` interpretation, while
+`application/vnd.commonfabric.fabric-value` uses context-free Fabric decode.
+Readers never sniff one payload as the other format. In particular, a legacy
+JSON object whose literal key is `/` stays an ordinary object; it is not
+reinterpreted as a Fabric codec envelope. Both percent-encoded and base64
+UTF-8 legacy transports remain readable during migration.
+
+The new decoder therefore returns inert callable shells for `Factory@1`, just
+like direct context-free `valueFromJson()`. Inline transport never grants code
+loading or execution authority. Dual-format readers land before canonical
+writers switch. A canonical writer may emit a nested factory only after the
+complete artifact closure is durably available in the exact containing space;
+an awaited cross-space by-value copy replicates that closure before commit,
+while a synchronous writer without that proof rejects the value.
+
 ### Immutability, cloning, equality, and hashing
 
 Canonical factories are immutable functional values:

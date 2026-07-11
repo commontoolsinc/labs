@@ -3,14 +3,41 @@ import { expect } from "@std/expect";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
+  createFactoryShell,
+  factoryStateOf,
+  type FactoryStateV1,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import {
   entityRefFrom,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { fromURI, toURI } from "../src/uri-utils.ts";
+import {
+  decodeDataURIValue,
+  encodeFabricValueDataURI,
+  FABRIC_VALUE_DATA_URI_MEDIA_TYPE,
+  FABRIC_VALUE_DATA_URI_PREFIX,
+  fromURI,
+  getJSONFromDataURI,
+  toURI,
+} from "../src/uri-utils.ts";
 
 const hash = hashOf({ causal: { test: "uri-utils" } });
 const tagged = hash.taggedHashString;
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "factory",
+} as const;
+
+function base64Utf8(value: string): string {
+  return btoa(
+    String.fromCharCode(...new TextEncoder().encode(value)),
+  );
+}
 
 describe("toURI", () => {
   afterEach(() => {
@@ -133,5 +160,93 @@ describe("fromURI", () => {
   it("is one-way for computed: ids (bare hash re-mints as of:)", () => {
     const bare = fromURI(`computed:${tagged}`);
     expect(toURI(FabricHash.fromString(bare))).toBe(`of:${tagged}`);
+  });
+});
+
+describe("Fabric value data URIs", () => {
+  it("keeps legacy JSON slash envelopes literal and never sniffs Fabric encoding", () => {
+    const literal = { "/": { "link@1": { id: "of:literal" } } };
+    const legacy = `data:application/json,${
+      encodeURIComponent(JSON.stringify(literal))
+    }`;
+    expect(decodeDataURIValue(legacy)).toEqual(literal);
+
+    const fabricLooking = `data:application/json,${
+      encodeURIComponent('"fvj1:{\\"/Undefined@1\\":null}"')
+    }`;
+    expect(decodeDataURIValue(fabricLooking)).toBe(
+      'fvj1:{"/Undefined@1":null}',
+    );
+  });
+
+  it("round-trips all three factory kinds as inert context-free shells", () => {
+    const states: FactoryStateV1[] = [
+      {
+        kind: "pattern",
+        ref: { ...FACTORY_REF, symbol: "pattern" },
+        argumentSchema: { type: "object" },
+        resultSchema: true,
+      },
+      {
+        kind: "module",
+        ref: { ...FACTORY_REF, symbol: "module" },
+        argumentSchema: false,
+        resultSchema: { type: "string" },
+      },
+      {
+        kind: "handler",
+        ref: { ...FACTORY_REF, symbol: "handler" },
+        contextSchema: { type: "object" },
+        eventSchema: { type: "number" },
+      },
+    ];
+
+    for (const state of states) {
+      const uri = encodeFabricValueDataURI(createFactoryShell(state));
+      expect(uri.startsWith(FABRIC_VALUE_DATA_URI_PREFIX)).toBe(true);
+      const decoded = decodeDataURIValue(uri);
+      expect(isAdmittedFabricFactory(decoded)).toBe(true);
+      expect(factoryStateOf(decoded)).toEqual(state);
+      expect(isDeepFrozen(decoded)).toBe(true);
+      expect(() => (decoded as () => unknown)()).toThrow(
+        "factory requires runner materialization",
+      );
+      expect(encodeFabricValueDataURI(decoded)).toBe(uri);
+    }
+  });
+
+  it("dispatches only the exact media type and requires a versioned Fabric payload", () => {
+    expect(FABRIC_VALUE_DATA_URI_MEDIA_TYPE).toBe(
+      "application/vnd.commonfabric.fabric-value",
+    );
+    expect(() => decodeDataURIValue("data:application/jsonx,%7B%7D")).toThrow(
+      "Unsupported data URI media type",
+    );
+    expect(() =>
+      decodeDataURIValue(
+        "data:application/vnd.commonfabric.fabric-value,%7B%7D",
+      )
+    ).toThrow();
+    expect(() =>
+      decodeDataURIValue(
+        "data:application/vnd.commonfabric.fabric-value,fvj1%3A",
+      )
+    ).toThrow();
+  });
+
+  it("decodes percent and base64 UTF-8 payloads identically", () => {
+    const value = { message: "Grüße 🌊" };
+    const fabric = jsonFromValue(value);
+    const percent = `data:${FABRIC_VALUE_DATA_URI_MEDIA_TYPE};charset=utf-8,${
+      encodeURIComponent(fabric)
+    }`;
+    const base64 =
+      `data:${FABRIC_VALUE_DATA_URI_MEDIA_TYPE};charset=utf8;base64,${
+        base64Utf8(fabric)
+      }`;
+
+    expect(decodeDataURIValue(percent)).toEqual(value);
+    expect(decodeDataURIValue(base64)).toEqual(value);
+    expect(getJSONFromDataURI(percent)).toEqual(value);
   });
 });

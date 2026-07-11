@@ -5,7 +5,9 @@ import {
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
+  hashOf,
+} from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   entityRefToString,

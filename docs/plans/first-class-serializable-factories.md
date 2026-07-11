@@ -380,6 +380,18 @@ Focused tests:
   `packages/runner/src/storage/v2-transaction.ts`, and
   `packages/memory/v2/patch.ts` treat factories atomically through the shared
   equality/clone protocol.
+- [x] Add one shared data-URI decoder that dispatches only by exact media type:
+  legacy `application/json` remains ordinary JSON, while
+  `application/vnd.commonfabric.fabric-value` requires a versioned `fvj1:`
+  payload and decodes context-free to inert shells. Add the pure canonical
+  Fabric-value URI encoder at the same seam without flipping repository
+  writers yet.
+- [ ] Migrate every data-URI reader to the shared dual-format decoder before
+  the canonical writer changes, retaining percent/base64 UTF-8 compatibility
+  and literal legacy slash-key objects without payload sniffing.
+- [ ] Flip canonical durable inline-document writers to the Fabric-value MIME
+  only after every nested factory is proven available in the exact containing
+  artifact space; a synchronous writer rejects otherwise.
 - [ ] Once canonical factory traversal is available, switch durable
   factory-valued binding from Stage 0's `$patternRef` sentinel to `Factory@1`.
   Constrain `$patternRef` emission to explicitly legacy/internal graph fallback
@@ -389,6 +401,11 @@ Focused tests:
   a pattern node's `module.implementation` and the top-level `op` input of the
   legacy `map`/`filter`/`flatMap` ref modules. Stage 4 removes the list writer
   fallback; arbitrary factory-valued graph data already stays callable.
+  The in-memory binding walks now preserve admitted factories and traverse
+  their hidden state without emitting `$patternRef`. The named list adapter is
+  intentionally limited to a capture-free, unmodified base pattern so it
+  cannot discard params, scope, or space-selection state. This checkbox stays
+  open until the canonical durable data-URI writer also emits `Factory@1`.
 
 ### WP1.6 — Add runner-owned factory materialization and generic resolution
 
@@ -435,6 +452,12 @@ Expected files and tests:
 
 ### WP1.7 — Prove context-free and runner-aware round trips
 
+- [ ] Add an awaited `ensureArtifactClosureInSpace(identity, source,
+  destination)` primitive that copies or verifies the complete source and
+  compiled closure, including Fabric-import dependencies, before a by-value
+  writer commits in another space. This implementation item is explicit here
+  because the original proof-only wording below otherwise had no writer seam
+  capable of satisfying it.
 - [ ] Round-trip pattern, module, and handler factories through context-free
   JSON and confirm decode returns inert callable shells.
 - [ ] Re-encode each shell without a runner and get identical canonical state.
