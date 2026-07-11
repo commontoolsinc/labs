@@ -293,6 +293,45 @@ describe("persistent scheduler observations", () => {
     })).toBe(false);
   });
 
+  it("suppresses complete summaries for fallback action fingerprints", () => {
+    const observation = buildSchedulerActionObservation({
+      ownerSpace: "did:key:space",
+      actionId: "unverified-action",
+      actionKind: "computation",
+      branch: "",
+      pieceId: "space:of:piece",
+      processGeneration: 0,
+      implementationFingerprint: "action:piece:unverified-action",
+      runtimeFingerprint: schedulerRuntimeFingerprint(),
+      observedAtSeq: 1,
+      transactionKind: "action-run",
+      transactionLog: {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+        attemptedWrites: [],
+      },
+      currentKnownWrites: [],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        piece: {
+          space: "did:key:space",
+          scope: "space",
+          id: "of:piece",
+          path: ["value"],
+        },
+        reads: [],
+        writes: [],
+        materializerWriteEnvelopes: [],
+        directOutputs: [],
+      },
+    });
+
+    expect(observation.completeActionScopeSummary).toBeUndefined();
+    expect(isSchedulerActionObservation(observation)).toBe(true);
+  });
+
   it("rejects persisted observations missing required scheduler metadata", () => {
     const observation = buildSchedulerActionObservation({
       actionId: "pattern.tsx:computed:1",

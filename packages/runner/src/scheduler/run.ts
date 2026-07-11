@@ -682,7 +682,7 @@ function attachSchedulerActionObservation(
       (annotated.ignoredSchedulingWrites ?? []).map(toMemorySpaceAddress),
       [],
     ),
-    ...(completeScopeSummary
+    ...(completeScopeSummary && implementationFingerprint.startsWith("impl:")
       ? {
         completeActionScopeSummary: {
           version: 1 as const,
@@ -762,7 +762,7 @@ export function schedulerImplementationFingerprint(
 }
 
 export function schedulerRuntimeFingerprint(): string {
-  return "runner:scheduler:v2";
+  return "runner:scheduler:v3";
 }
 
 function schedulerActionOptions(

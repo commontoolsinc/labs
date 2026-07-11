@@ -137,7 +137,8 @@ export function buildSchedulerActionObservation(
         ),
       }
       : {}),
-    ...(options.completeActionScopeSummary
+    ...(options.completeActionScopeSummary &&
+        options.implementationFingerprint.startsWith("impl:")
       ? {
         completeActionScopeSummary: {
           version: 1,
