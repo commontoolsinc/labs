@@ -395,6 +395,9 @@ Focused tests:
 - [ ] Migrate every data-URI reader to the shared dual-format decoder before
   the canonical writer changes, retaining percent/base64 UTF-8 compatibility
   and literal legacy slash-key objects without payload sniffing.
+- [x] Route the storage attestation loader through that shared decoder while
+  preserving its invalid-vs-unsupported error taxonomy and legacy empty
+  payload rejection; base64 input is decoded as UTF-8 for both formats.
 - [ ] Flip canonical durable inline-document writers to the Fabric-value MIME
   only after every nested factory is proven available in the exact containing
   artifact space; a synchronous writer rejects otherwise.
