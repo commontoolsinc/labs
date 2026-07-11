@@ -6,9 +6,15 @@ reference** whose governing rules the data's owner keeps as defaults.
 
 ## Status
 
-Design proposal. No runtime or spec edits applied. Companion spec-change items
-are SC-29..SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md); companion
-syntax sketches for the remaining surfaces are in
+Design proposal. No runtime or spec edits applied. A critical implementation
+review found unresolved identity, artifact-resolution, subject-binding, and
+concept-grant contracts; do not treat the sketches below as an implementation
+contract yet. The dependency-ordered corrections and first shipping slice are
+tracked in the
+[`cfc-exchange-rule-authoring` implementation plan](../plans/cfc-exchange-rule-authoring.md).
+Companion spec-change items are SC-29..SC-37 in
+[`cfc-spec-changes.md`](./cfc-spec-changes.md); companion syntax sketches for
+the remaining surfaces are in
 [`cfc-exchange-rules-authoring-extensions.md`](./cfc-exchange-rules-authoring-extensions.md).
 
 The evaluator half already shipped: `packages/runner/src/cfc/exchange-eval.ts`
@@ -18,7 +24,7 @@ records — `policyState` guards, reserved-path storage, single-use
 commit-precondition receipts (`grants.ts`, #4627 / #4649). But policy records
 enter evaluation only through deployment configuration
 (`RuntimeOptions.cfcPolicyRecords`, `policy.ts`); this design is the missing
-authoring half — pattern modules declaring rules, and labels referencing them.
+authoring half — authored modules declaring rules, and labels referencing them.
 
 ## Last Updated
 
@@ -59,13 +65,13 @@ means the same thing everywhere):
   §5.7.1 form and the existing `CFC_CONCEPT_KIND` convention
   (`https://commonfabric.org/cfc/concepts/prompt-influence`). Right for
   concepts whose meaning many independent parties must agree on.
-- **Pattern-relative: `{ identity, symbol }`** — the exported symbol of a
-  pattern module, where `identity` is the content-addressed entry-module
+- **Module-relative: `{ identity, symbol }`** — the exported symbol of an
+  authored module, where `identity` is the content-addressed module
   identity. This is the same pair the runtime already uses for patterns,
   lifts, and handlers (`content-addressed-action-identity.md`; owner decision
   SC-22: implementation identity = content hash of the code artifact +
-  symbol). A pattern-local concept or rule set needs no registration step:
-  deployment gives it a global address, and other patterns reference it by
+  symbol). A module-local concept or rule set gets a global address during
+  compilation/publishing, and other patterns reference it by
   importing from the deployed piece or published pattern
   (`pattern-imports/README.md` — `import { health } from "cf:/wellness/commons"`
   pins to the exporting module's identity at compile time).
@@ -87,13 +93,19 @@ evaluates rules; trusted boundaries do.
 
 ```ts
 // Shown for illustration only.
-import { cfcAtom, exchangeRule, exchangeRules, SELF, v } from "commonfabric";
+import {
+  cfcAtom,
+  exchangeRule,
+  exchangeRules,
+  THIS_POLICY,
+  v,
+} from "commonfabric";
 
 // "The owner may release a drift flag to an audience they picked in the
 //  trusted share surface." Endorsed intent is the guard (spec §3.8.4);
 //  the audience variable binds from the intent evidence (§4.3.3).
 export const releaseFlagToChosenAudience = exchangeRule({
-  appliesTo: SELF, // target: the clause this rule set governs
+  appliesTo: THIS_POLICY, // target: the clause this rule set governs
   pre: {
     integrity: [{
       type: "https://commonfabric.org/cfc/atom/EndorsedIntent",
@@ -111,16 +123,18 @@ export const driftFlagRules = exchangeRules([
 ]);
 ```
 
-- **Identity is free.** A rule set's identity is `{ identity, symbol }` —
-  the module's content-addressed identity plus the exported name, exactly like
-  every other pattern-referenced artifact. No `name` field is needed for
-  identity (an optional `label` stays for diagnostics); no registry; changing
-  a rule changes the module identity and is therefore automatically a new
-  policy version (spec §4.4.4 migration semantics fall out of the ordinary
-  pattern-upgrade story).
-- `SELF` is the placeholder for the policy principal being defined, which
-  cannot be named before the module is hashed. It always occupies the
-  `appliesTo` (target-pattern) position.
+- **Identity has three roles.** `{ identity, symbol }` content-addresses the
+  defining module export. A canonical `policyDigest` content-addresses its
+  smaller, subject-independent lowered manifest so another space can copy and
+  evaluate the policy without copying the module's whole source closure. The
+  concrete `subject` is bound by each invoking piece at label creation.
+  Changing a rule creates a new pair and digest for future labels; old labels
+  keep their old reference until explicit migration. Upgrading the module alone
+  never extends the release paths of data that is already labeled.
+- `THIS_POLICY` is the placeholder for the policy principal being defined, which
+  cannot be named before the module is hashed. It resolves relative to the
+  containing exported `exchangeRules` artifact—not to the module as a
+  singleton—and always occupies the `appliesTo` (target-pattern) position.
 - `v("X")` is the `{ var: "X" }` placeholder of spec §4.3.3.
 - Field names follow the **shipped evaluator dialect**
   (`packages/runner/src/cfc/policy.ts`, which documents its mapping to spec
@@ -131,14 +145,12 @@ export const driftFlagRules = exchangeRules([
   `allowedPaths`), and `policyState` (grants); `post` is exactly one of
   `addAlternatives` / `dropClause`. `preConfScope` defaults to
   `"targetClause"`.
-- Lowering rejects a rule with no guard at all. Admissible guard forms: a
-  `pre.integrity` pattern, a `pre.policyState` grant guard, `pre.boundary`
-  sink/path scoping (§5.2.1's structural authorization), or the
-  **owner-self binding** — the target's subject constrained to the acting
-  principal with release only to that same principal (the §5.4.2
-  `$actingUser` shape; safe by construction, since it can only ever hand the
-  clause's own subject their own access). A rule with none of these is a
-  standing leak (invariant 3).
+- Lowering rejects a general-surface rule unless it has a `pre.integrity`
+  pattern or `pre.policyState` grant guard. A `pre.boundary` pattern may narrow
+  where an otherwise-authorized rule applies, but boundary context alone is not
+  release authority; boundary-only authoring remains extensions-gated. If the
+  owner-self case is approved, it ships as a narrow trusted standard-profile
+  rule rather than a generic authoring exemption.
 
 ### 2a. Raising, direct
 
@@ -149,16 +161,36 @@ import type { Confidential, PolicyOf } from "commonfabric";
 type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
 ```
 
-Lowering: the schema-time atom is a policy principal addressed by the pair —
-`Policy{ module: <identity>, symbol: "driftFlagRules", subject: <owning
-space> }`. Because the pair is content-derived, the hash binding that spec
-§4.4.2 requires is inherent in the reference; there is no separate
-name→hash discovery step for pattern-declared rules (SC-29). At deploy the
-runtime registers the derived policy record content-addressed; at label
-creation the principal is bound. The record lands as a
+Lowering: the schema-time atom is a policy principal addressed by the module
+export, its portable manifest digest, and the invocation-relative subject —
+`Policy{ module: <identity>, symbol: "driftFlagRules", policyDigest:
+<digest>, subject: <owning space> }`. The pair binds the authored source export;
+the digest binds the proposed module-policy variant's canonical,
+subject-independent manifest body. The complete tuple binds the exact policy
+instance while letting another space evaluate without retaining or recompiling
+the source. A trusted compiler/verifier first proves that the source closure
+and exported symbol lower to that manifest; digest verification alone proves
+only copied-byte integrity. At label creation the subject is bound. Before any
+space commits a persisted reference, it atomically stores or confirms a
+verified local copy of the small manifest keyed by `policyDigest`.
+
+Under cross-space label-metadata protection, `Policy.subject` may be represented
+by a self-describing `{ digestOf: <hash> }` field commitment rather than
+plaintext; see
+[`cfc-label-metadata-confidentiality.md`](./cfc-label-metadata-confidentiality.md#5-staging)
+and SC-25. The resolver seeds `THIS_POLICY.subject` from that represented value
+before matching. Existing commitment-aware equality can then compare concrete
+evidence without opening or disclosing the committed subject.
+
+The record lands as a
 `selection: "referenced"` policy record — the shipped label-carried,
 home-clause-local selection mode (CT-1874) — with the `{ identity, symbol }`
-pair extending the shipped `{ id, digest }` reference form (SC-29).
+pair, manifest digest, and invocation-relative subject added alongside the
+legacy label reference `{ name, subject, hash }` (SC-29). Stage 1's
+representation adapter validates the subject-independent manifest and maps its
+canonical rules into the shipped
+`PolicyRecord { id, digest, rules, selection: "referenced" }`; the resolver
+separately supplies home-clause and pre-seeded subject context during evaluation.
 
 Semantics, all inherited rather than invented:
 
@@ -171,9 +203,11 @@ Semantics, all inherited rather than invented:
 - Raising is label creation, not rewrite — store monotonicity (§8.12) is
   unaffected.
 
-This also makes the developer-guide static check (§11.2.4.3) computable from
-the pattern module alone: an egress output whose label no declared or
-concept-kernel rule can rewrite is a compile-time violation.
+The compiler can check local declaration/reference coherence: every direct
+policy reference resolves to a static exported rule set, and every locally
+authored rule is well formed. Whether a rule can actually rewrite an egress
+label remains a runtime decision because it depends on input labels, integrity
+evidence, grants, and boundary context.
 
 ### 2b. Raising, indirect — concept references
 
@@ -331,13 +365,14 @@ parameters only from endorsed intent evidence.
 1. Rules and concepts referenced from `PolicyOf` / `ConceptOf` must be
    module-level exports (or `cf:` imports); the compiler lowers them
    statically and rejects runtime-computed rule content (other than `v()`
-   variables and `SELF`).
+   variables and `THIS_POLICY`).
 2. All rule firing happens in trusted boundaries (render boundary, sink gate,
    gated writes) via the fuelled fixpoint of spec §4.4.5, fail-closed.
 3. Observing contexts (preview/diagnostics) must not consume single-use
    grants (§4.3.5) — "would release" chrome renders without spending.
 4. Concept records resolve through owner-space discovery and fail closed on
-   hash mismatch; pattern-declared records are pinned by module identity.
+   hash mismatch; module-declared records are pinned by module identity plus
+   their canonical manifest digest.
 
 ## Companion extensions
 
