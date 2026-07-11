@@ -446,3 +446,47 @@ Deno.test("navigateTo async callback is tracked by runtime.settled", async () =>
     await storageManager.close();
   }
 });
+
+Deno.test("navigateTo contains a rejected async callback", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const failure = new Error("shell navigation failed");
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => logged.push(args);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    navigateCallback: () => Promise.reject(failure),
+  });
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "rejected target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => navigateTo(Target({})),
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+    const setupTx = runtime.edit();
+    const rootCell = runtime.getCell(
+      space,
+      "navigateTo rejected callback root",
+      undefined,
+      setupTx,
+    );
+    const root = runtime.run(setupTx, Root, {}, rootCell);
+    await setupTx.commit();
+    await root.pull();
+
+    root.key("openTarget").send({});
+    await runtime.settled();
+
+    assertEquals(logged, [["navigateTo callback failed:", failure]]);
+  } finally {
+    console.error = originalConsoleError;
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

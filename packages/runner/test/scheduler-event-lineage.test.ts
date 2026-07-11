@@ -1112,6 +1112,19 @@ describe("scheduler event lineage", () => {
 });
 
 describe("cancel group lifecycle", () => {
+  it("hands an installed cleanup through an already-cancelled owner once", () => {
+    let calls = 0;
+    const installedCancel = () => calls++;
+    const ownership = useDeferredCancelOwnership((installed) => installed());
+
+    ownership.cancel();
+    expect(ownership.isCancelled()).toBe(true);
+    expect(ownership.markInstalled(installedCancel)).toBe(true);
+    ownership.cancel();
+
+    expect(calls).toBe(1);
+  });
+
   it("cancels each registered cleanup at most once", () => {
     const [cancel, addCancel] = useCancelGroup();
     let firstCalls = 0;
@@ -1168,5 +1181,31 @@ describe("cancel group lifecycle", () => {
     // Cancellation remains latched even when it reports a cleanup failure.
     cancel();
     expect(calls).toEqual(["throwing", "sibling"]);
+  });
+
+  it("aggregates multiple cleanup failures after running every cleanup", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    const first = new Error("first cleanup failed");
+    const second = new Error("second cleanup failed");
+    const calls: string[] = [];
+    addCancel(() => {
+      calls.push("first");
+      throw first;
+    });
+    addCancel(() => {
+      calls.push("second");
+      throw second;
+    });
+
+    let thrown: unknown;
+    try {
+      cancel();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(calls).toEqual(["first", "second"]);
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([first, second]);
   });
 });

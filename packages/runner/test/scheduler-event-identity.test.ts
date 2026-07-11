@@ -7,7 +7,10 @@ import {
   space,
 } from "./scheduler-test-utils.ts";
 import { mintEventId } from "../src/scheduler/event-identity.ts";
-import { queueSchedulerEvent } from "../src/scheduler/events.ts";
+import {
+  dropQueuedEvent,
+  queueSchedulerEvent,
+} from "../src/scheduler/events.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { Runtime } from "../src/runtime.ts";
 import type { QueuedEvent } from "../src/scheduler/types.ts";
@@ -165,5 +168,45 @@ describe("scheduler event identity", () => {
     expect(eventQueue).toEqual([]);
     expect(callbackCount).toBe(1);
     expect(callbackStatus).toBe("error");
+  });
+
+  it("does not resurrect an event dropped while its handler is loading", async () => {
+    const eventQueue: QueuedEvent[] = [];
+    const backgroundTasks = new Set<Promise<unknown>>();
+    const pieceLoad = Promise.withResolvers<boolean>();
+    let callbackCount = 0;
+    const droppedTx = {
+      abort: () => {},
+      status: () => ({ status: "error" }),
+    } as unknown as IExtendedStorageTransaction;
+    const state = {
+      runtime: { edit: () => droppedTx } as unknown as Runtime,
+      eventHandlers: [],
+      eventQueue,
+      backgroundTasks,
+      loadPieceForEvent: () => pieceLoad.promise,
+      queueExecution: () => {},
+      recordLineageEvent: () => {},
+      releaseLineageEvent: () => {},
+    };
+
+    queueSchedulerEvent(state, {
+      eventLink,
+      event: "payload",
+      retries: true,
+      doNotLoadPieceIfNotRunning: false,
+      onCommit: () => callbackCount++,
+    });
+    const queued = eventQueue[0];
+    expect(queued.handlerLoadPending).toBe(true);
+
+    dropQueuedEvent(state, queued, "lineage failed while loading");
+    dropQueuedEvent(state, queued, "duplicate terminal notification");
+    pieceLoad.resolve(true);
+    await Promise.all([...backgroundTasks]);
+
+    expect(eventQueue).toEqual([]);
+    expect(callbackCount).toBe(1);
+    expect(queued.handlerLoadPending).toBe(true);
   });
 });

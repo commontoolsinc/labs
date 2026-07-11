@@ -20,6 +20,7 @@ function makeState(opts: {
   rehydrationsPending: boolean;
   nodes: NodeRegistry;
   materializers?: ReadonlySet<Action>;
+  pending?: Set<Action>;
 }): PullSchedulingState {
   const demandedState = {
     effects: opts.nodes.effects,
@@ -30,7 +31,7 @@ function makeState(opts: {
   };
   return {
     nodes: opts.nodes,
-    pending: new Set<Action>(),
+    pending: opts.pending ?? new Set<Action>(),
     effects: opts.nodes.effects,
     materializerIndex: {
       isMaterializer: (action: Action) =>
@@ -120,4 +121,115 @@ Deno.test("an exhausted subgraph cannot release idle for unrelated convergence",
 
   assertEquals(assessment.runnableNow, false);
   assertEquals(assessment.deferredIdleBlocking, true);
+});
+
+Deno.test("pending work assessment classifies each source independently", () => {
+  const wakeAt = performance.now() + 30_000;
+  const cases: Array<{
+    name: string;
+    kind?: "effect" | "computation";
+    demanded?: boolean;
+    materializer?: boolean;
+    deferred?: boolean;
+    expected: {
+      runnableNow: boolean;
+      nextWakeAt?: number;
+      deferredIdleBlocking: boolean;
+    };
+  }> = [
+    {
+      name: "live effect",
+      kind: "effect",
+      expected: {
+        runnableNow: true,
+        nextWakeAt: undefined,
+        deferredIdleBlocking: false,
+      },
+    },
+    {
+      name: "materializer",
+      kind: "computation",
+      materializer: true,
+      expected: {
+        runnableNow: true,
+        nextWakeAt: undefined,
+        deferredIdleBlocking: false,
+      },
+    },
+    {
+      name: "demanded computation",
+      kind: "computation",
+      demanded: true,
+      expected: {
+        runnableNow: true,
+        nextWakeAt: undefined,
+        deferredIdleBlocking: false,
+      },
+    },
+    {
+      name: "irrelevant computation",
+      kind: "computation",
+      expected: {
+        runnableNow: false,
+        nextWakeAt: undefined,
+        deferredIdleBlocking: false,
+      },
+    },
+    {
+      name: "stale unregistered action",
+      expected: {
+        runnableNow: false,
+        nextWakeAt: undefined,
+        deferredIdleBlocking: false,
+      },
+    },
+    {
+      name: "deferred effect",
+      kind: "effect",
+      deferred: true,
+      expected: {
+        runnableNow: false,
+        nextWakeAt: wakeAt,
+        deferredIdleBlocking: true,
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const nodes = new NodeRegistry();
+    const action: Action = function pendingAction() {};
+    if (scenario.kind) nodes.register(action, scenario.kind);
+    const state = makeState({
+      rehydrationsPending: false,
+      nodes,
+      materializers: scenario.materializer ? new Set([action]) : undefined,
+      pending: new Set([action]),
+    });
+    const runnableState = {
+      effects: nodes.effects,
+      isDemandedPullComputation: (candidate: Action) =>
+        scenario.demanded === true && candidate === action,
+      shouldRunFirstPullComputationInDemandContext: () => false,
+      isThrottled: () => false,
+      isDebouncedComputationWaiting: () => false,
+    };
+    const assessment = assessPullWork({
+      ...state,
+      pendingPullRunnableState: runnableState,
+      dirtyPullRunnableState: runnableState,
+      dirtyPullRunnableStateWithDebounce: runnableState,
+      getNextEligibleRunTime: (candidate) =>
+        scenario.deferred && candidate === action ? wakeAt : undefined,
+    });
+
+    assertEquals(
+      {
+        runnableNow: assessment.runnableNow,
+        nextWakeAt: assessment.nextWakeAt,
+        deferredIdleBlocking: assessment.deferredIdleBlocking,
+      },
+      scenario.expected,
+      scenario.name,
+    );
+  }
 });

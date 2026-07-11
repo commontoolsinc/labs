@@ -7,12 +7,131 @@ import {
 } from "../src/scheduler/event-preflight-dependencies.ts";
 import type { SchedulerSettleLoopState } from "../src/scheduler/execution.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
+import { SchedulerMaterializers } from "../src/scheduler/materializers.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import { runPullSchedulerSettleLoop } from "../src/scheduler/settle.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 describe("event preflight convergence demand", () => {
+  it("finds an invalid materializer through a transitive reader closure", () => {
+    const nodes = new NodeRegistry();
+    const materializer: Action = function invalidMaterializer() {};
+    const bridge: Action = function materializerBridge() {};
+    const closureWriter: Action = function handlerClosureWriter() {};
+    const unloggedReader: Action = function unloggedMaterializerReader() {};
+    const nonOverlappingReader: Action = function nonOverlappingReader() {};
+    nodes.register(materializer, "computation");
+    nodes.register(bridge, "computation");
+    nodes.register(closureWriter, "computation");
+    nodes.register(nonOverlappingReader, "computation");
+    nodes.setStatus(materializer, "invalid");
+    nodes.setStatus(bridge, "clean");
+    nodes.setStatus(closureWriter, "clean");
+    nodes.setStatus(nonOverlappingReader, "clean");
+
+    const materialized: IMemorySpaceAddress = {
+      space: "did:key:event-materializer-preflight",
+      scope: "space",
+      id: "of:materialized",
+      path: ["value"],
+    };
+    const handlerInput: IMemorySpaceAddress = {
+      space: materialized.space,
+      scope: "space",
+      id: "of:handler-input",
+      path: ["value"],
+    };
+    const nonOverlappingRead: IMemorySpaceAddress = {
+      ...materialized,
+      path: ["other"],
+    };
+
+    const dependencies = new WeakMap([
+      [bridge, { reads: [materialized], shallowReads: [], writes: [] }],
+      [
+        nonOverlappingReader,
+        { reads: [nonOverlappingRead], shallowReads: [], writes: [] },
+      ],
+    ]);
+    const dependents = new WeakMap<Action, Set<Action>>([
+      [bridge, new Set([closureWriter])],
+    ]);
+    const writes = new WeakMap<Action, IMemorySpaceAddress[]>([
+      [closureWriter, [handlerInput]],
+    ]);
+    const materializerIndex = new SchedulerMaterializers(nodes.effects);
+    materializerIndex.registerAddresses(materializer, [materialized]);
+    const candidates = new Set([
+      materializer,
+      unloggedReader,
+      nonOverlappingReader,
+      bridge,
+    ]);
+    const state = {
+      getTrace: () => undefined,
+      nodes,
+      pending: new Set<Action>(),
+      reverseDependencies: new WeakMap<Action, Set<Action>>(),
+      dependents,
+      dependencies,
+      writersByEntity: new Map([
+        [entityKey(handlerInput), new Set([closureWriter])],
+      ]),
+      effects: nodes.effects,
+      materializerIndex,
+      triggerIndex: {
+        collectReadersForWrite: (write: IMemorySpaceAddress) =>
+          entityKey(write) === entityKey(materialized)
+            ? candidates
+            : new Set<Action>(),
+      },
+      getSchedulingWrites: (action: Action) => writes.get(action),
+      getActionId: (action: Action) => action.name,
+    } satisfies EventPreflightDependencyState;
+    const demand = new Set<Action>();
+
+    const found = collectInvalidUpstreamForLog(
+      state,
+      { reads: [handlerInput], shallowReads: [], writes: [] },
+      demand,
+    );
+
+    expect(found).toBe(true);
+    expect([...demand]).toEqual([materializer]);
+
+    // A trigger-index candidate without a dependency log must not become a
+    // materializer reader. Give it an otherwise-valid path to the closure so
+    // an erroneous admission would turn this into a false positive.
+    candidates.clear();
+    candidates.add(unloggedReader);
+    dependents.set(unloggedReader, new Set([closureWriter]));
+    const unloggedDemand = new Set<Action>();
+    expect(
+      collectInvalidUpstreamForLog(
+        state,
+        { reads: [handlerInput], shallowReads: [], writes: [] },
+        unloggedDemand,
+      ),
+    ).toBe(false);
+    expect([...unloggedDemand]).toEqual([]);
+
+    // Likewise, a logged reader of a disjoint path must not create the
+    // materializer edge even when it could otherwise reach the closure.
+    candidates.clear();
+    candidates.add(nonOverlappingReader);
+    dependents.set(nonOverlappingReader, new Set([closureWriter]));
+    const nonOverlappingDemand = new Set<Action>();
+    expect(
+      collectInvalidUpstreamForLog(
+        state,
+        { reads: [handlerInput], shallowReads: [], writes: [] },
+        nonOverlappingDemand,
+      ),
+    ).toBe(false);
+    expect([...nonOverlappingDemand]).toEqual([]);
+  });
+
   it("keeps an alternating event-only cycle under one pass's budgets", async () => {
     const nodes = new NodeRegistry();
     const actionA: Action = function eventOnlyCycleA() {};

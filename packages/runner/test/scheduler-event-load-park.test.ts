@@ -156,6 +156,30 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(handlerRuns, "handler must not dispatch while the load is in flight")
       .toBe(0);
 
+    // An unrelated scheduler wake while the load is still pending must observe
+    // the parked head rather than re-running its dependency preflight or
+    // dispatching through it.
+    const schedulerHarness = runtime.scheduler as unknown as {
+      execute(): Promise<void>;
+    };
+    const originalExecute = schedulerHarness.execute.bind(runtime.scheduler);
+    const rerunCompleted = Promise.withResolvers<void>();
+    schedulerHarness.execute = async () => {
+      try {
+        await originalExecute();
+      } finally {
+        rerunCompleted.resolve();
+      }
+    };
+    try {
+      runtime.scheduler.queueExecution();
+      await rerunCompleted.promise;
+    } finally {
+      schedulerHarness.execute = originalExecute;
+    }
+    expect(handlerRuns, "a scheduler re-tick must keep the parked head blocked")
+      .toBe(0);
+
     // Load completes (absent counts as complete) → the park wakes and the
     // handler dispatches exactly once.
     release();

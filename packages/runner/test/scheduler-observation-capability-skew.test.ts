@@ -275,6 +275,18 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
     });
     assertEquals(writeResult, { ok: {} });
 
+    // The session is now established and its negotiated flag is known. A
+    // later observation must take the synchronous established-session fast
+    // path rather than entering (and then flushing) another batch.
+    const laterObservationResult = await replica.commitNative({
+      operations: [],
+      schedulerObservation: {
+        ...schedulerObservation,
+        actionId: "action:skew:after-handshake",
+      },
+    });
+    assertEquals(laterObservationResult, { ok: {} });
+
     // Exactly one transact reached the wire (the semantic write), and no
     // scheduler payload of any kind rode along on an observation-only commit.
     assertEquals(

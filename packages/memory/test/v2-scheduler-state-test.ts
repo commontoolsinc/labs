@@ -13,6 +13,8 @@ import {
   listSchedulerActionSnapshots,
   markSchedulerReadersDirtyForWrites,
   open as openEngine,
+  principalOfSessionKey,
+  resolveCommitSessionKey,
   type SchedulerActionObservation,
   serverSeq,
   upsertSchedulerObservation,
@@ -86,6 +88,26 @@ const observationForAction = (
   ...observation,
   actionId,
   ...overrides,
+});
+
+Deno.test("memory v2 parses only well-formed principal session keys", () => {
+  const principal = "did:key:alice/with spaces";
+  const sessionId = "session:id/with spaces";
+  assertEquals(
+    principalOfSessionKey(resolveCommitSessionKey(sessionId, principal)),
+    principal,
+  );
+
+  for (
+    const malformed of [
+      "bare-session-id",
+      sessionId,
+      "session:principal:session:extra",
+      "session:%:session-id",
+    ]
+  ) {
+    assertEquals(principalOfSessionKey(malformed), undefined);
+  }
 });
 
 Deno.test("memory v2 migrates scheduler read indexes to include owner space", async () => {
@@ -179,6 +201,68 @@ Deno.test("memory v2 rejects v2 scheduler observations without a write surface",
       })
     );
     assertEquals(countRows(engine, "scheduler_write_index"), 0);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 indexes legacy declared writes and accepts their v2 omission", async () => {
+  const { engine, path } = await createEngine();
+  const declaredWrite = {
+    ...targetWrite,
+    id: "of:legacy-declared-write",
+  };
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("pattern.tsx:computed:legacy", {
+        currentKnownWrites: [],
+        declaredWrites: [declaredWrite],
+      }),
+    });
+
+    const {
+      declaredWrites: _declaredWrites,
+      ...withoutDeclaredWrites
+    } = observationForAction("pattern.tsx:computed:v2-omitted", {
+      version: 2,
+      currentKnownWrites: [targetWrite],
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: withoutDeclaredWrites,
+    });
+
+    const rows = engine.database.prepare(`
+      SELECT action_id, write_id, write_kind
+      FROM scheduler_write_index
+      WHERE action_id IN (
+        'pattern.tsx:computed:legacy',
+        'pattern.tsx:computed:v2-omitted'
+      )
+      ORDER BY action_id
+    `).all();
+    assertEquals(rows, [{
+      action_id: "pattern.tsx:computed:legacy",
+      write_id: declaredWrite.id,
+      write_kind: "declared",
+    }, {
+      action_id: "pattern.tsx:computed:v2-omitted",
+      write_id: targetWrite.id,
+      write_kind: "current-known",
+    }]);
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: "pattern.tsx:computed:v2-omitted",
+      })?.observation.declaredWrites,
+      undefined,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -603,6 +687,59 @@ Deno.test("memory v2 namespaces scheduler mirrors by owner space", async () => {
         7,
       );
     }
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 drops and replays observations whose pending read is missing", async () => {
+  const { engine, path } = await createEngine();
+  const commit = {
+    localSeq: 1,
+    reads: {
+      confirmed: [],
+      pending: [{
+        id: sourceRead.id,
+        scope: sourceRead.scope,
+        path: toDocumentPath(sourceRead.path),
+        localSeq: 404,
+      }],
+    },
+    operations: [],
+    schedulerObservation: observationForAction(
+      "pattern.tsx:computed:missing-pending-read",
+    ),
+  };
+
+  try {
+    const first = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-pending-missing",
+      commit,
+    });
+    assertEquals(first.schedulerObservationResults, [{
+      localSeq: 1,
+      status: "dropped",
+      reason: "pending-read-missing",
+    }]);
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: "pattern.tsx:computed:missing-pending-read",
+      }),
+      undefined,
+    );
+
+    const replay = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-pending-missing",
+      commit,
+    });
+    assertEquals(
+      replay.schedulerObservationResults,
+      first.schedulerObservationResults,
+    );
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 1);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1342,24 +1479,56 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
     ...observation,
     reads: [mirroredRead],
   } satisfies SchedulerActionObservation;
+  const droppedActionId = "pattern.tsx:computed:mirror-dropped";
+  const keptActionId = "pattern.tsx:computed:mirror-kept";
 
   try {
     const applied = await owner.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservationBatch: [{
-        localSeq: 2,
-        reads: { confirmed: [], pending: [] },
-        schedulerObservation: mirroredObservation,
-      }],
+      schedulerObservationBatch: [
+        {
+          localSeq: 2,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: mirroredRead.id,
+              scope: mirroredRead.scope,
+              path: toDocumentPath(mirroredRead.path),
+              localSeq: 404,
+            }],
+          },
+          schedulerObservation: {
+            ...mirroredObservation,
+            actionId: droppedActionId,
+          },
+        },
+        {
+          localSeq: 3,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: {
+            ...mirroredObservation,
+            actionId: keptActionId,
+          },
+        },
+      ],
     });
     assertEquals(
       applied.schedulerObservationResults?.map((entry) => ({
         localSeq: entry.localSeq,
         status: entry.status,
+        reason: entry.reason,
       })),
-      [{ localSeq: 2, status: "kept" }],
+      [{
+        localSeq: 2,
+        status: "dropped",
+        reason: "pending-read-missing",
+      }, {
+        localSeq: 3,
+        status: "kept",
+        reason: undefined,
+      }],
     );
 
     await reader.transact({
@@ -1375,10 +1544,68 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
     const listed = await reader.listSchedulerActionSnapshots({
       pieceId: observation.pieceId,
       processGeneration: observation.processGeneration,
-      actionId: observation.actionId,
     });
     assertEquals(listed.snapshots.length, 1);
+    assertEquals(
+      (listed.snapshots[0]?.observation as SchedulerActionObservation).actionId,
+      keptActionId,
+    );
     assertEquals(listed.snapshots[0]?.directDirtySeq, 1);
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server fails closed for a user-scoped mirror without writer identity", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-writerless-owner-space";
+  const readSpace = "did:key:scheduler-writerless-read-space";
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
+  const reader = await client.mount(readSpace, {}, testSessionOpenAuthFactory);
+  const actionId = "pattern.tsx:computed:writerless-user-mirror";
+  const userRead = {
+    ...sourceRead,
+    space: readSpace,
+    scope: "user" as const,
+  };
+
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationForAction(actionId, {
+        reads: [userRead],
+      }),
+    });
+
+    const listed = await reader.listSchedulerActionSnapshots({ actionId });
+    assertEquals(listed.snapshots, []);
+
+    await client.close();
+    await server.close();
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const raw = listSchedulerActionSnapshots(readEngine, { actionId });
+      assertEquals(raw.snapshots.length, 1);
+      assertEquals(raw.snapshots[0]?.writerSessionId, undefined);
+      assertEquals(raw.snapshots[0]?.observation.reads, [userRead]);
+    } finally {
+      close(readEngine);
+    }
   } finally {
     await client.close().catch(() => {});
     await server.close().catch(() => {});

@@ -26,6 +26,7 @@ import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
   type DependencyGraphState,
   isLive,
+  recomputeLiveRefs,
   registerDependentEdge,
   unregisterDependentEdge,
 } from "../src/scheduler/dependency-graph.ts";
@@ -1250,6 +1251,41 @@ describe("scheduler v2 cutover fixtures", () => {
     expect(isLive(state, nodes.get(writer)!)).toBe(false);
   });
 
+  it("rejects self-dependencies without mutating the graph", () => {
+    const nodes = new NodeRegistry();
+    const action: Action = function selfDependentAction() {};
+    nodes.register(action, "computation");
+    const state = {
+      nodes,
+      dependents: new WeakMap<Action, Set<Action>>(),
+      reverseDependencies: new WeakMap<Action, Set<Action>>(),
+      materializerIndex: { isMaterializer: () => false },
+      getSchedulingWrites: () => undefined,
+    } as unknown as DependencyGraphState;
+
+    expect(registerDependentEdge(state, action, action)).toBe(false);
+    expect(state.dependents.get(action)).toBeUndefined();
+    expect(state.reverseDependencies.get(action)).toBeUndefined();
+  });
+
+  it("ignores stale dependency edges while rebuilding liveness", () => {
+    const nodes = new NodeRegistry();
+    const root: Action = function staleEdgeRoot() {};
+    const removedWriter: Action = function removedDependencyWriter() {};
+    nodes.register(root, "effect");
+    const state = {
+      nodes,
+      reverseDependencies: new WeakMap<Action, Set<Action>>([
+        [root, new Set([removedWriter])],
+      ]),
+      materializerIndex: { isMaterializer: () => false },
+    };
+
+    recomputeLiveRefs(state);
+
+    expect(isLive(state, nodes.get(root)!)).toBe(true);
+  });
+
   it("escalates convergence backoff for consecutive exhaustion", () => {
     const nodes = new NodeRegistry();
     const action: Action = function nonSettlingAction() {};
@@ -1277,6 +1313,53 @@ describe("scheduler v2 cutover fixtures", () => {
       first.backoffUntil! + BACKOFF_BASE_MS * 2,
     );
     expect(record.gate.backoffStreak).toBe(2);
+  });
+
+  it("does not back off undemanded, debounced, or already-gated work", () => {
+    const now = 10_000;
+    const cases = [
+      {
+        name: "undemanded",
+        isLive: false,
+        isDebounced: false,
+        nextEligibleAt: undefined,
+      },
+      {
+        name: "debounced",
+        isLive: true,
+        isDebounced: true,
+        nextEligibleAt: undefined,
+      },
+      {
+        name: "already gated",
+        isLive: true,
+        isDebounced: false,
+        nextEligibleAt: now + 1_000,
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const nodes = new NodeRegistry();
+      const action: Action = function rejectedBackoffCandidate() {};
+      const record = nodes.register(action, "computation");
+
+      const plan = planBudgetBackoff({
+        workSet: new Set([action]),
+        nodes,
+        pending: new Set<Action>(),
+        isLiveAction: () => testCase.isLive,
+        getNextEligibleRunTime: () => testCase.nextEligibleAt,
+        isDebouncedComputationWaiting: () => testCase.isDebounced,
+        reason: "iteration-cap",
+        now,
+      });
+
+      expect(plan.actions, testCase.name).toEqual([]);
+      expect(plan.backoffUntil, testCase.name).toBeUndefined();
+      expect(record.gate.backoffStreak, testCase.name).toBe(0);
+      expect(record.gate.convergenceHoldPasses, testCase.name).toBe(0);
+      expect(record.gate.backoffUntil, testCase.name).toBeUndefined();
+    }
   });
 
   it("plans wake times for invalidation-armed debounced computations", () => {

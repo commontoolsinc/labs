@@ -3,6 +3,9 @@ import {
   getLoggerCountsBreakdown,
 } from "@commonfabric/utils/logger";
 import { hasDependentPath } from "../src/scheduler/dependency-graph.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
+import { forEachOverlappingWriter } from "../src/scheduler/scheduling-writes.ts";
+import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 import {
   afterEach,
   beforeEach,
@@ -707,6 +710,42 @@ describe("static write surface demand", () => {
 });
 
 describe("dependency graph reachability", () => {
+  it("stops overlapping-writer scans early for recursive and shallow reads", () => {
+    const first: Action = function firstOverlappingWriter() {};
+    const second: Action = function secondOverlappingWriter() {};
+    const address: IMemorySpaceAddress = {
+      space: "did:key:overlapping-writer-scan",
+      scope: "space",
+      id: "of:shared",
+      path: ["value"],
+    };
+    const writes = new WeakMap<Action, IMemorySpaceAddress[]>([
+      [first, [address]],
+      [second, [address]],
+    ]);
+    const state = {
+      writersByEntity: new Map([[
+        entityKey(address),
+        new Set([first, second]),
+      ]]),
+      getSchedulingWrites: (action: Action) => writes.get(action),
+    };
+
+    for (const shallow of [false, true]) {
+      const visited: Action[] = [];
+      forEachOverlappingWriter(
+        state,
+        shallow ? [] : [address],
+        shallow ? [address] : [],
+        (writer) => {
+          visited.push(writer);
+          return true;
+        },
+      );
+      expect(visited).toEqual([first]);
+    }
+  });
+
   it("handles a 20k-deep cyclic graph without recursive stack growth", () => {
     const depth = 20_000;
     const actions = Array.from(

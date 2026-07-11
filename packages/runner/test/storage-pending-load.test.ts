@@ -116,6 +116,132 @@ describe("storage pending-load generations", () => {
     expect(storage.pendingLoadGeneration(key)).toBeUndefined();
   });
 
+  it("releases the pending generation when syncCell rejects", async () => {
+    const { runtime } = env;
+    const storage = runtime.storageManager as any;
+    const id = "of:pending-sync-rejection";
+    const cell = runtime.getCell(space, id);
+    const originalOpen = storage.open.bind(storage);
+    storage.open = (openSpace: string) => {
+      const provider = originalOpen(openSpace);
+      return new Proxy(provider, {
+        get(target, property, receiver) {
+          if (property === "sync") {
+            return () => Promise.reject(new Error("provider sync rejected"));
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    };
+
+    try {
+      const address = cell.getAsNormalizedFullLink();
+      const key = `${address.space}/${address.scope}/${address.id}`;
+      const sync = storage.syncCell(cell);
+      const settled = storage.loadsSettled([key]);
+      await expect(sync).rejects.toThrow("provider sync rejected");
+      await expect(settled).rejects.toThrow("provider sync rejected");
+      expect(storage.pendingLoadGeneration(key)).toBeUndefined();
+    } finally {
+      storage.open = originalOpen;
+    }
+  });
+
+  it("releases linked-document loads when provider sync throws synchronously", () => {
+    const storage = env.runtime.storageManager as any;
+    const targetId = "of:pending-linked-sync-throw";
+    const originalOpen = storage.open.bind(storage);
+    storage.open = (openSpace: string) => {
+      const provider = originalOpen(openSpace);
+      return new Proxy(provider, {
+        get(target, property, receiver) {
+          if (property === "sync") {
+            return () => {
+              throw new Error("linked provider sync threw");
+            };
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    };
+
+    try {
+      const base: NormalizedLink = {
+        space,
+        id: "of:throwing-data-root" as any,
+        scope: "space",
+        path: [],
+      };
+      const value = {
+        "/": { "link@1": { id: targetId, path: [], space } },
+      };
+      expect(() =>
+        storage.collectLinkedCellSyncs(
+          value,
+          base,
+          undefined,
+          new ContextualFlowControl(),
+          [],
+          new Set(),
+        )
+      ).toThrow("linked provider sync threw");
+      expect(storage.pendingLoadGeneration(`${space}/space/${targetId}`))
+        .toBeUndefined();
+    } finally {
+      storage.open = originalOpen;
+    }
+  });
+
+  it("rejects linked-document loads when provider sync rejects", async () => {
+    const storage = env.runtime.storageManager as any;
+    const targetId = "of:pending-linked-sync-rejection";
+    const originalOpen = storage.open.bind(storage);
+    storage.open = (openSpace: string) => {
+      const provider = originalOpen(openSpace);
+      return new Proxy(provider, {
+        get(target, property, receiver) {
+          if (property === "sync") {
+            return () => Promise.reject(new Error("linked provider rejected"));
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    };
+
+    try {
+      const base: NormalizedLink = {
+        space,
+        id: "of:rejecting-data-root" as any,
+        scope: "space",
+        path: [],
+      };
+      const value = {
+        "/": { "link@1": { id: targetId, path: [], space } },
+      };
+      const promises: Promise<unknown>[] = [];
+      storage.collectLinkedCellSyncs(
+        value,
+        base,
+        undefined,
+        new ContextualFlowControl(),
+        promises,
+        new Set(),
+      );
+      const key = `${space}/space/${targetId}`;
+      const settled = storage.loadsSettled([key]);
+      await expect(Promise.all(promises)).rejects.toThrow(
+        "linked provider rejected",
+      );
+      await expect(settled).rejects.toThrow("linked provider rejected");
+      expect(storage.pendingLoadGeneration(key)).toBeUndefined();
+    } finally {
+      storage.open = originalOpen;
+    }
+  });
+
   it("rejects failed generations and gives a later load a new identity", async () => {
     const storage = env.runtime.storageManager as any;
     const address = { space, scope: "space", id: "of:generation" };

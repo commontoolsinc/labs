@@ -165,6 +165,107 @@ Deno.test("reload degrades a torn multi-page snapshot listing to fresh runs", as
   }
 });
 
+Deno.test("reload buckets valid snapshot metadata and ignores invalid observations", async () => {
+  const seeded = await seedReloadablePiece("snapshot-bucket-metadata");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  try {
+    const { runtime } = reloaded;
+    const provider = runtime.storageManager.open(space);
+    const originalList = provider.listSchedulerActionSnapshots!.bind(provider);
+    const seededPage = await originalList({
+      ownerSpace: space,
+      processGeneration: 0,
+    });
+    const valid = seededPage.snapshots.find((snapshot) =>
+      isSchedulerActionObservation(snapshot.observation)
+    );
+    expect(valid).toBeDefined();
+    if (!valid || !isSchedulerActionObservation(valid.observation)) {
+      throw new Error("seeded piece produced no scheduler observation");
+    }
+
+    provider.listSchedulerActionSnapshots = () =>
+      Promise.resolve({
+        serverSeq: seededPage.serverSeq,
+        snapshots: [
+          { ...valid, observation: { not: "a scheduler observation" } },
+          {
+            ...valid,
+            directDirtySeq: 17,
+            staleSeq: 18,
+            unknownReason: "snapshot metadata fidelity",
+          },
+        ],
+      });
+
+    const runnerHarness = runtime.runner as unknown as {
+      lifecycleEpoch: number;
+      loadResumeSnapshotsForSpace(
+        targetSpace: string,
+        lifecycleEpoch: number,
+      ): Promise<
+        | ReadonlyMap<
+          string,
+          ReadonlyMap<
+            string,
+            {
+              observation: SchedulerActionObservation;
+              directDirtySeq?: number;
+              staleSeq?: number;
+              unknownReason?: string;
+            }
+          >
+        >
+        | undefined
+      >;
+    };
+    const byPiece = await runnerHarness.loadResumeSnapshotsForSpace(
+      space,
+      runnerHarness.lifecycleEpoch,
+    );
+    expect(byPiece?.size).toBe(1);
+    expect([...byPiece?.keys() ?? []]).toEqual([valid.observation.pieceId]);
+    const bucket = byPiece?.get(valid.observation.pieceId);
+    expect(bucket?.size).toBe(1);
+    expect(bucket?.get(valid.observation.actionId)).toEqual({
+      observation: valid.observation,
+      directDirtySeq: 17,
+      staleSeq: 18,
+      unknownReason: "snapshot metadata fidelity",
+    });
+  } finally {
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("reload resumes fresh when the provider cannot list scheduler snapshots", async () => {
+  const seeded = await seedReloadablePiece("snapshot-list-unsupported");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  const { runtime } = reloaded;
+  const provider = runtime.storageManager.open(space);
+  const originalList = provider.listSchedulerActionSnapshots;
+  try {
+    runtime.scheduler.setActionRunTraceEnabled(true);
+    provider.listSchedulerActionSnapshots = undefined;
+    const result = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<{ doubled: number }>;
+
+    expect(await runtime.start(result)).toBe(true);
+    const cancelSink = result.sink(() => {});
+    try {
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(result.getAsQueryResult()).toEqual({ doubled: 10 });
+      expect(runtime.scheduler.getActionRunTrace().length).toBeGreaterThan(0);
+    } finally {
+      cancelSink();
+    }
+  } finally {
+    provider.listSchedulerActionSnapshots = originalList;
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
 Deno.test("dispose invalidates a held snapshot listing before it can register work", async () => {
   const seeded = await seedReloadablePiece("snapshot-dispose-race");
   const reloaded = await reloadRuntime(seeded.env.storageManager);
@@ -258,6 +359,31 @@ Deno.test("stop invalidates a held snapshot listing for that piece", async () =>
     expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("stop invalidates a start while its root cell sync is held", async () => {
+  const env = createSchedulerTestRuntime(import.meta.url, {});
+  try {
+    const { runtime } = env;
+    const result = runtime.getCell<unknown>(space, "held-root-cell-sync");
+    const syncStarted = Promise.withResolvers<void>();
+    const releaseSync = Promise.withResolvers<void>();
+    result.getRaw = (() => undefined) as typeof result.getRaw;
+    result.sync = (() => {
+      syncStarted.resolve();
+      return releaseSync.promise.then(() => result);
+    }) as typeof result.sync;
+
+    const start = runtime.start(result);
+    await syncStarted.promise;
+    runtime.runner.stop(result);
+    releaseSync.resolve();
+
+    expect(await start).toBe(false);
+    expect(runtime.runner.cancels.size).toBe(0);
+  } finally {
+    await disposeSchedulerTestRuntime(env);
   }
 });
 
@@ -440,6 +566,94 @@ Deno.test("completed and stopped start churn releases lifecycle state", async ()
   }
 });
 
+Deno.test("stop invalidates a resume while dependency pre-sync is held", async () => {
+  const seeded = await seedReloadablePiece("dependency-sync-stop-race");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  const releaseSync = Promise.withResolvers<void>();
+  try {
+    const { runtime } = reloaded;
+    const syncStarted = Promise.withResolvers<void>();
+    const runnerHarness = runtime.runner as unknown as {
+      syncCellsForRunningPattern: (...args: unknown[]) => Promise<boolean>;
+    };
+    const originalSync = runnerHarness.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let calls = 0;
+    runnerHarness.syncCellsForRunningPattern = async (...args) => {
+      if (calls++ === 0) {
+        syncStarted.resolve();
+        await releaseSync.promise;
+      }
+      return await originalSync(...args);
+    };
+
+    const result = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<{ doubled: number }>;
+    const start = runtime.start(result);
+    await syncStarted.promise;
+    runtime.runner.stop(result);
+    releaseSync.resolve();
+
+    expect(await start).toBe(false);
+    expect(runtime.runner.cancels.size).toBe(0);
+  } finally {
+    releaseSync.resolve();
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("resume restarts pattern resolution when identity changes during dependency pre-sync", async () => {
+  const seeded = await seedReloadablePiece("dependency-sync-pattern-swap-race");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  const releaseSync = Promise.withResolvers<void>();
+  try {
+    const { runtime } = reloaded;
+    const replacement = await runtime.patternManager.compilePattern(
+      HOT_SWAP_PROGRAM,
+    );
+    const replacementRef = runtime.patternManager.getArtifactEntryRef(
+      replacement,
+    );
+    expect(replacementRef).toBeDefined();
+    if (!replacementRef) throw new Error("replacement pattern has no identity");
+
+    const syncStarted = Promise.withResolvers<void>();
+    const runnerHarness = runtime.runner as unknown as {
+      syncCellsForRunningPattern: (...args: unknown[]) => Promise<boolean>;
+    };
+    const originalSync = runnerHarness.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let calls = 0;
+    runnerHarness.syncCellsForRunningPattern = async (...args) => {
+      if (calls++ === 0) {
+        syncStarted.resolve();
+        await releaseSync.promise;
+      }
+      return await originalSync(...args);
+    };
+
+    const result = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<Record<string, number>>;
+    const start = runtime.start(result);
+    await syncStarted.promise;
+    const swapTx = runtime.edit();
+    result.withTx(swapTx).setMetaRaw("patternIdentity", replacementRef);
+    expect((await swapTx.commit()).error).toBeUndefined();
+    releaseSync.resolve();
+
+    expect(await start).toBe(true);
+    expect(await result.pull()).toEqual({ doubled: 15 });
+    expect(calls).toBeGreaterThanOrEqual(2);
+  } finally {
+    releaseSync.resolve();
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
 Deno.test("resume restarts pattern resolution when identity changes during snapshot listing", async () => {
   const seeded = await seedReloadablePiece("snapshot-pattern-swap-race");
   const reloaded = await reloadRuntime(seeded.env.storageManager);
@@ -485,6 +699,67 @@ Deno.test("resume restarts pattern resolution when identity changes during snaps
     expect(await result.pull()).toEqual({ doubled: 15 });
     await runtime.scheduler.idleWithPendingCommits();
   } finally {
+    await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("stop invalidates a held initial pattern load", async () => {
+  const seeded = await seedReloadablePiece("initial-pattern-load-stop-race");
+  const reloaded = await reloadRuntime(seeded.env.storageManager);
+  const heldLoad = Promise.withResolvers<
+    Awaited<
+      ReturnType<
+        typeof reloaded.runtime.patternManager.loadPatternByIdentity
+      >
+    >
+  >();
+  try {
+    const { runtime } = reloaded;
+    const result = runtime.getCellFromLink(
+      seeded.result.getAsNormalizedFullLink(),
+    ) as Cell<{ doubled: number }>;
+    await result.sync();
+    const ref = result.getMetaRaw("patternIdentity") as
+      | { identity: string; symbol: string }
+      | undefined;
+    expect(ref).toBeDefined();
+    if (!ref) throw new Error("result has no pattern identity");
+
+    const patternManager = runtime.patternManager;
+    const originalArtifact = patternManager.artifactFromIdentitySync.bind(
+      patternManager,
+    );
+    const loaded = originalArtifact(ref.identity, ref.symbol);
+    expect(loaded).toBeDefined();
+    const loadStarted = Promise.withResolvers<void>();
+    patternManager.artifactFromIdentitySync = ((identity, symbol) =>
+      identity === ref.identity && symbol === ref.symbol
+        ? undefined
+        : originalArtifact(
+          identity,
+          symbol,
+        )) as typeof patternManager.artifactFromIdentitySync;
+    patternManager.loadPatternByIdentity = (async (identity, symbol) => {
+      if (identity === ref.identity && symbol === ref.symbol) {
+        loadStarted.resolve();
+        return await heldLoad.promise;
+      }
+      return originalArtifact(identity, symbol);
+    }) as typeof patternManager.loadPatternByIdentity;
+
+    const start = runtime.start(result);
+    await loadStarted.promise;
+    runtime.runner.stop(result);
+    heldLoad.resolve(
+      loaded as Awaited<
+        ReturnType<typeof patternManager.loadPatternByIdentity>
+      >,
+    );
+
+    expect(await start).toBe(false);
+    expect(runtime.runner.cancels.size).toBe(0);
+  } finally {
+    heldLoad.resolve(undefined);
     await disposeSchedulerTestRuntime(reloaded);
   }
 });

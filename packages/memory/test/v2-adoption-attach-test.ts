@@ -26,7 +26,12 @@ import {
   type SessionOpenAuthFactory,
   type Transport,
 } from "../v2/client.ts";
-import type { SchedulerActionObservation } from "../v2/engine.ts";
+import {
+  close as closeEngine,
+  open as openEngine,
+  type SchedulerActionObservation,
+} from "../v2/engine.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
   decodeMemoryBoundary,
   resetPersistentSchedulerStateConfig,
@@ -316,6 +321,50 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
       }),
     );
 
+    // Observation-only runs reserve the next semantic sequence for delivery.
+    // When that carrying commit dirties an upstream action, downstream stale
+    // state must ride the same adoption row instead of looking clean remotely.
+    const intermediateWrite: SchedulerActionObservation["reads"][number] = {
+      space: SPACE,
+      scope: "user",
+      id: USER_OUT,
+      path: ["value"],
+    };
+    await writer.transact({
+      localSeq: ++writerSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationFor("stale-upstream", {
+        currentKnownWrites: [intermediateWrite],
+      }),
+    });
+    await writer.transact({
+      localSeq: ++writerSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationFor("stale-downstream", {
+        reads: [intermediateWrite],
+      }),
+    });
+    const staleWindowStart = aliceSyncs.length;
+    const aliceStaleNext = aliceUpdates.next();
+    const bobStaleNext = bobUpdates.next();
+    await write(9);
+    await aliceStaleNext;
+    await bobStaleNext;
+    const staleDownstream = aliceSyncs.slice(staleWindowStart)
+      .flatMap((sync) => sync.observations ?? [])
+      .find((row) =>
+        (row.observation as SchedulerActionObservation).actionId ===
+          "stale-downstream"
+      );
+    assert(
+      staleDownstream?.staleSeq !== undefined,
+      `stale state missing from adoption row: ${
+        JSON.stringify(staleDownstream)
+      }`,
+    );
+
     const aliceAttached = attachedActionIds(aliceSyncs);
     const bobAttached = attachedActionIds(bobSyncs);
 
@@ -388,6 +437,100 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
     await writerClient.close().catch(() => {});
     await aliceClient.close().catch(() => {});
     await bobClient.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 sync survives an adoption observation query failure", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const writerClient = await connect({ transport: loopback(server) });
+  const receiverSyncs: SessionSync[] = [];
+  const receiverClient = await connect({
+    transport: teeSyncs(loopback(server), receiverSyncs),
+  });
+
+  try {
+    const writer = await writerClient.mount(SPACE, {}, authFactoryFor(ALICE));
+    const receiver = await receiverClient.mount(
+      SPACE,
+      {},
+      authFactoryFor(ALICE),
+    );
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SHARED_DOC,
+        value: { value: { count: 0 } },
+      }],
+    });
+    const view = await receiver.watchSet([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: SHARED_DOC,
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    const updates = view.subscribe();
+
+    const corruptActionId = "adoption-query-failure";
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationFor(corruptActionId),
+    });
+    const engine = await openEngine({
+      url: resolveSpaceStoreUrl(store, SPACE),
+    });
+    try {
+      engine.database.prepare(`
+        UPDATE scheduler_action_snapshot
+        SET payload = '{'
+        WHERE action_id = :action_id
+      `).run({ action_id: corruptActionId });
+    } finally {
+      closeEngine(engine);
+    }
+
+    const syncStart = receiverSyncs.length;
+    const next = updates.next();
+    await writer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SHARED_DOC,
+        value: { value: { count: 1 } },
+      }],
+    });
+    assertEquals((await next).done, false);
+    const pushed = receiverSyncs.slice(syncStart).find((sync) =>
+      sync.upserts.length > 0
+    );
+    assert(pushed, "watched document sync was lost after observation failure");
+    assertEquals(pushed.observations, undefined);
+  } finally {
+    await writerClient.close().catch(() => {});
+    await receiverClient.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
     resetPersistentSchedulerStateConfig();
