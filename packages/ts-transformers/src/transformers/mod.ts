@@ -18,4 +18,5 @@ export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-e
 export { ReactiveVariableForTransformer } from "./reactive-variable-for.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";
+export { SymbolicFactoryCallTransformer } from "./symbolic-factory-call.ts";
 export { WriteAuthorizedByValidationTransformer } from "./write-authorized-by-validation.ts";

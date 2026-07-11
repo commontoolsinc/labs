@@ -776,7 +776,10 @@ function shouldPreserveStructuralCallArgumentReferences(
   call: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  return isPatternFactoryCalleeExpression(call.expression, context.checker) ||
+  return isPatternFactoryCalleeExpression(
+    call.expression,
+    context.checker,
+  ) ||
     isPatternFactoryHelperExpression(call.expression, context.checker);
 }
 

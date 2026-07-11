@@ -36,6 +36,14 @@ export {
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
+  classifyFactoryCallee,
+  classifyFactoryCallExposure,
+  type FactoryCalleeClassification,
+  type FactoryCallExposure,
+  type FactoryValueOrigin,
+  isInsideFactoryMaterializationBoundary,
+} from "./factory-callee.ts";
+export {
   classifyReactiveContext,
   findEnclosingCallbackContext,
   isInRestrictedReactiveContext,

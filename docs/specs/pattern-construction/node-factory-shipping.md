@@ -853,12 +853,26 @@ that argument before invoking authored code. A factory captured from an eager
 pattern root remains symbolic unless it is explicitly delivered through such
 an `asFactory` runtime argument boundary.
 
+Exposure follows the nearest decisive execution boundary. Transparent nested
+callbacks such as array methods do not hide an enclosing scheduled
+`computed`/`lift`/handler boundary, so a captured factory there stays a direct
+materialized callable. A nested eager `pattern()` boundary is decisive in the
+other direction: a factory delivered live to an outer scheduled callback and
+then captured by that nested pattern becomes a symbolic closure-param binding
+and its call is lowered through `invokeFactory`.
+
 The type-directed detector follows local aliases, property access, and
 statically typed element access, so `const f = inputs.factory; f(value)` and
 `inputs.factories[key](value)` use the same lowering. Version 1 rejects a
 callable union spanning factory kinds, because the builder must choose
 `Reactive` versus `Stream` before runtime resolution. Same-kind unions are
 allowed only when their normalized public schemas agree.
+
+A symbolic factory invocation uses one explicit public input argument. Version
+1 rejects tuple/rest spread at such a call site: expanding it would require an
+eager synchronous read of reactive graph input and could shift the internal
+expected-contract argument. Direct calls on live factories retain ordinary
+JavaScript call semantics.
 
 At instantiation, the runner subscribes to the binding before its first value.
 Initial absence means that the node is pending and has no child. Once a value

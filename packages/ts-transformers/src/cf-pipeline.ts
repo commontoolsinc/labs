@@ -19,6 +19,7 @@ import {
   ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  SymbolicFactoryCallTransformer,
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
@@ -77,6 +78,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "AssertDiagnosticsTransformer",
     create: (options) => new AssertDiagnosticsTransformer(options),
+  },
+  {
+    name: "SymbolicFactoryCallTransformer",
+    create: (options) => new SymbolicFactoryCallTransformer(options),
   },
   {
     name: "LiftLoweringTransformer",

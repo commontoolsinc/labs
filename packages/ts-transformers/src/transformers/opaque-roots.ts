@@ -5,7 +5,7 @@ import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type { PathSegment } from "./destructuring-lowering.ts";
-import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
+import { isFirstClassFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 export interface OpaqueAccessInfo {
   root?: string;
@@ -148,7 +148,7 @@ export function isOpaqueOriginCall(
   // values by construction. Treat their invocations as opaque-origin so
   // bindings initialized from them (e.g. `const row = EntryRow({...})`)
   // participate in the same late `.key()` lowering as direct cell sources.
-  return isPatternFactoryCalleeExpression(
+  return isFirstClassFactoryCalleeExpression(
     expression.expression,
     context.checker,
   );

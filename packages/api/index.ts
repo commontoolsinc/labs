@@ -2273,6 +2273,7 @@ export interface LiftFunction {
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
   : T extends SqliteDb<any> ? T
+  : T extends FabricFactory<any, any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;

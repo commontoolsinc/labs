@@ -18,6 +18,7 @@ import {
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
 import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
+import { detectFactoryType } from "@commonfabric/schema-generator";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -2883,9 +2884,10 @@ export function analyzeFunctionCapabilities(
       ) {
         if (isTopmostMemberNode(node)) {
           const parent = node.parent;
+          const isCallCallee = parent && ts.isCallExpression(parent) &&
+            parent.expression === node;
           if (
-            !(parent && ts.isCallExpression(parent) &&
-              parent.expression === node) &&
+            (!isCallCallee || isFirstClassFactoryExpression(node, checker)) &&
             !isOptionalAliasInitializerMemberUsage(node) &&
             // A member-access argument (e.g. `state.auth`) whose callee parameter
             // type already supplied the capability is accounted for, same as a
@@ -3474,5 +3476,22 @@ export function analyzeFunctionCapabilities(
     return result;
   } finally {
     inProgress.delete(fn);
+  }
+}
+
+function isFirstClassFactoryExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker | undefined,
+): boolean {
+  if (!checker) return false;
+  try {
+    const type = checker.getTypeAtLocation(expression);
+    const members = type.isUnion() ? type.types : [type];
+    return members.length > 0 &&
+      members.every((member) =>
+        detectFactoryType(member, checker) !== undefined
+      );
+  } catch {
+    return false;
   }
 }

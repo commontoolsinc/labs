@@ -6,6 +6,7 @@ import type {
   FabricValue,
   FactoryInput,
   HandlerFactory,
+  HandlerState as ScheduledHandlerState,
   JSONSchema,
   ModuleFactory,
   PatternFactory,
@@ -223,6 +224,30 @@ const _explicitCellFactory: MustBeTrue<
   >
 > = true;
 
+type ScheduledFactoryContext = ScheduledHandlerState<{
+  pattern: PatternFactory<{ query: string }, { count: number }>;
+  module: ModuleFactory<{ value: number }, string>;
+  handler: HandlerFactory<{ prefix: string }, { value: number }>;
+}>;
+const _scheduledPatternRemainsCallable: MustBeTrue<
+  AssertAssignable<
+    ScheduledFactoryContext["pattern"],
+    PatternFactory<{ query: string }, { count: number }>
+  >
+> = true;
+const _scheduledModuleRemainsCallable: MustBeTrue<
+  AssertAssignable<
+    ScheduledFactoryContext["module"],
+    ModuleFactory<{ value: number }, string>
+  >
+> = true;
+const _scheduledHandlerRemainsCallable: MustBeTrue<
+  AssertAssignable<
+    ScheduledFactoryContext["handler"],
+    HandlerFactory<{ prefix: string }, { value: number }>
+  >
+> = true;
+
 function assertFactoryCallBoundaries(factory: InferredPatternFactory) {
   factory({ query: "weather" });
   // @ts-expect-error PatternFactory input generics must reject the wrong type.
@@ -251,6 +276,9 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       _factoryIsFabricValue,
       _nestedDirectFactory,
       _explicitCellFactory,
+      _scheduledPatternRemainsCallable,
+      _scheduledModuleRemainsCallable,
+      _scheduledHandlerRemainsCallable,
       typeof assertFactoryCallBoundaries,
     ],
     [
@@ -266,6 +294,9 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       true,
       true,
       false,
+      true,
+      true,
+      true,
       true,
       true,
       true,

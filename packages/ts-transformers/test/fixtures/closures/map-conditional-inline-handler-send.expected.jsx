@@ -76,7 +76,48 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "object",
     properties: {
         castVote: {
-            asCell: ["stream"]
+            asFactory: {
+                kind: "handler",
+                contextSchema: {
+                    type: "object",
+                    properties: {
+                        votes: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/VoteEvent"
+                            },
+                            asCell: ["cell"]
+                        }
+                    },
+                    required: ["votes"],
+                    $defs: {
+                        VoteEvent: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string"
+                                },
+                                step: {
+                                    "enum": ["single", "double"]
+                                }
+                            },
+                            required: ["id", "step"]
+                        }
+                    }
+                },
+                eventSchema: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "string"
+                        },
+                        step: {
+                            "enum": ["single", "double"]
+                        }
+                    },
+                    required: ["id", "step"]
+                }
+            }
         },
         state: {
             type: "object",

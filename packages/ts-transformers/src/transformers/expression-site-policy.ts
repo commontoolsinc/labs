@@ -34,7 +34,7 @@ import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 import {
-  isPatternFactoryCalleeExpression,
+  isFirstClassFactoryCalleeExpression,
   isStructuralReactiveFactoryExpression,
   returnsReactiveResult,
 } from "./structural-reactive-factory.ts";
@@ -258,7 +258,7 @@ function classifyCallExpressionRoot(
   }
 
   if (
-    isPatternFactoryCalleeExpression(expression.expression, context.checker)
+    isFirstClassFactoryCalleeExpression(expression.expression, context.checker)
   ) {
     return "other";
   }

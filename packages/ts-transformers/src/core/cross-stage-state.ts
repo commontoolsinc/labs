@@ -51,15 +51,16 @@ export interface NodeTypeLinks {
  *   2. `nodeLinks` — the NodeLinks-shaped side table for the internal,
  *      non-cache-invalidating per-node channels (capabilitySummary,
  *      schemaInjected), reached only through the record/lookup/mark/is methods.
- *   3. The marker family — node/symbol-keyed WeakSets whose mutators are
- *      coupled to the context's reactive-analysis cache invalidation.
+ *   3. The marker family — node/symbol-keyed WeakSets. Reactive-analysis
+ *      marker mutators are coupled to context cache invalidation; late
+ *      emission markers such as live factory derivations are not.
  *
  * Division of responsibility with `TransformationContext`:
  *   - CrossStageState owns the DATA and exposes pure data operations
  *     (record/lookup/mark/is). It performs NO cache invalidation — it has no
  *     knowledge of the context's analysis caches.
  *   - TransformationContext keeps the public mark/record methods. For the
- *     four marker-set mutators it delegates to CrossStageState AND then calls
+ *     four reactive marker-set mutators it delegates to CrossStageState AND then calls
  *     its own `invalidateReactiveAnalysisCaches()`. Invalidation stays a
  *     context concern; this object stays a pure data holder. (This is why the
  *     `mark*` methods here do not invalidate — the context wrapper does.)
@@ -108,6 +109,7 @@ export class CrossStageState {
   readonly mapCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeOwnedNodeRegistry = new WeakSet<ts.Node>();
+  readonly liveFactoryDerivationRegistry = new WeakSet<ts.Node>();
   readonly syntheticReactiveCollectionRegistry:
     SyntheticReactiveCollectionRegistry = new WeakSet();
 
@@ -154,6 +156,16 @@ export class CrossStageState {
 
   isSyntheticComputeOwnedNode(node: ts.Node): boolean {
     return this.#hasWithOriginal(this.syntheticComputeOwnedNodeRegistry, node);
+  }
+
+  // --- liveFactoryDerivationRegistry ---
+
+  markLiveFactoryDerivation(node: ts.Node): void {
+    this.liveFactoryDerivationRegistry.add(node);
+  }
+
+  isLiveFactoryDerivation(node: ts.Node): boolean {
+    return this.#hasWithOriginal(this.liveFactoryDerivationRegistry, node);
   }
 
   // --- syntheticReactiveCollectionRegistry (keyed by ts.Symbol) ---

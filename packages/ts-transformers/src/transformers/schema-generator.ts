@@ -256,7 +256,7 @@ function normalizeSourceFilePath(fileName: string): string {
   return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
 
-function createSchemaAst(
+export function createSchemaAst(
   schema: unknown,
   factory: ts.NodeFactory,
 ): ts.Expression {

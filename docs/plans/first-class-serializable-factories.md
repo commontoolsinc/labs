@@ -551,7 +551,7 @@ logically-equivalent replay goldens are regenerated; it is not waived.
   `asFactory` definition for `pattern`, `module`, and `handler`.
 - [x] Use `argumentSchema`/`resultSchema` for pattern and module kinds and
   `contextSchema`/`eventSchema` for handler kind.
-- [ ] Document and test the two execution-context exposures of the one schema
+- [x] Document and test the two execution-context exposures of the one schema
   form: an eager pattern root produces a symbolic binding, while a scheduled
   `lift`/handler argument is runner-materialized to a live callable. API typing
   alone must not make a symbolic proxy executable.
@@ -615,25 +615,25 @@ Expected tests:
 
 ### WP2.3 — Lower symbolic factory calls
 
-- [ ] Add a type-directed callee classifier in `packages/ts-transformers` that
+- [x] Add a type-directed callee classifier in `packages/ts-transformers` that
   distinguishes live imported/module-scoped factories, eager symbolic/reactive
   factory bindings, and runtime-materialized callback arguments.
-- [ ] Follow local aliases, property access, and statically typed element access
+- [x] Follow local aliases, property access, and statically typed element access
   such as `const f = inputs.operation; f(x)` and
   `inputs.operations[key](x)`.
-- [ ] Leave calls to live imported or module-scoped factories on the direct
+- [x] Leave calls to live imported or module-scoped factories on the direct
   builder call path.
-- [ ] Lower factory calls originating from eager pattern argument/params roots,
+- [x] Lower factory calls originating from eager pattern argument/params roots,
   including captures used inside nested authored callbacks. Leave calls on
   `asFactory` parameters inside `lift` implementations and handler
   context/event callbacks direct; the runner prepares those arguments first.
-- [ ] Lower symbolic calls to internal `__cfHelpers.invokeFactory(factory,
+- [x] Lower symbolic calls to internal `__cfHelpers.invokeFactory(factory,
   input, expectedSchema)`.
-- [ ] Emit a pattern/module result as `Reactive` and a handler result as
+- [x] Emit a pattern/module result as `Reactive` and a handler result as
   `Stream`, preserving handler `$ctx`/`$event` wiring.
-- [ ] Reject a cross-kind union before graph construction and require normalized
+- [x] Reject a cross-kind union before graph construction and require normalized
   schema agreement for same-kind unions.
-- [ ] Add a compile-time diagnostic for an untransformed symbolic factory proxy
+- [x] Add a compile-time diagnostic for an untransformed symbolic factory proxy
   call.
 
 Expected transformer seams:
@@ -665,6 +665,38 @@ callable as non-plain data. The Stage 1 round-trip proof therefore derives
 modifiers from an already verified base artifact. WP2.3 must add a focused red
 fixture and classify these live factory-modifier chains as direct factory
 values; do not weaken the plain-data sandbox to accept arbitrary functions.
+
+WP2.3 execution-context audit: factory exposure is decided by the nearest
+materializing or eager boundary, not permanently by the declaration site. A
+factory captured from an eager root into `computed`/`lift` is direct after the
+runner-materialized scheduled boundary; transparent nested array callbacks do
+not hide that boundary. Conversely, a factory parameter delivered live to a
+lift becomes symbolic again when captured by a nested eager `pattern()`
+callback. The early lowering now records that symbolic call; WP2.6 still owns
+rewriting the capture itself onto callback argument 1. `HandlerState<T>` also
+preserves `FabricFactory` call signatures instead of recursively mapping them
+to readonly data objects, so handler context delivery has the same direct-call
+typing as lift delivery.
+
+WP2.3 compatibility audit: broadening structural-call recognition for public
+module/handler factories initially suppressed the existing `.for(...)` cause
+assignment for internal and legacy node factories. The final classifier keeps
+that established pattern-shaped path and uses branded Factory@1 detection only
+for the new public kinds. Canonical `asFactory` output replaced two legacy
+handler-as-stream transformer goldens. Live `.asScope()`/`inSpace()` derivations
+are carried through a cross-stage marker so the late module-data pass does not
+wrap callable factories in `__cf_data`. Symbolic tuple/rest spread is rejected
+with a source diagnostic because spreading would require synchronously reading
+reactive graph input and would otherwise shift the helper contract argument.
+
+WP2.3 validation: the new origin/scheduled-context/diagnostic suites, a
+multi-file imported-factory regression, schema-light `byRef()` and all-kind
+goldens, modifier-chain golden, and pipeline regression are green. Complete
+`packages/ts-transformers` task: `1041 passed (737 steps), 0 failed`; complete
+`packages/schema-generator` task: `28 passed (248 steps), 0 failed`; complete
+`packages/api` task: `16 passed, 0 failed` (with explicit API type-check also
+green). Representative transformed output was inspected directly for both
+symbolic and scheduled/direct factory calls.
 
 ### WP2.4 — Build the internal dynamic factory node
 

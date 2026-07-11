@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { dirname, join } from "@std/path";
+import { dirname, extname, join, resolve as resolvePath } from "@std/path";
 import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonFabricTransformerPipeline,
@@ -206,19 +206,11 @@ export async function batchTypeCheckFixtures(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (transformedFiles[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(
+          name,
+          containingFile,
+          transformedFiles,
+        );
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -456,19 +448,7 @@ export async function transformFiles(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (files[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(name, containingFile, files);
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -815,19 +795,7 @@ export async function validateFiles(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (files[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(name, containingFile, files);
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -932,6 +900,36 @@ async function loadEnvironmentTypes(): Promise<Record<EnvTypeKey, string>> {
     ),
   );
   return Object.fromEntries(entries) as Record<EnvTypeKey, string>;
+}
+
+function resolveVirtualSourceModule(
+  specifier: string,
+  containingFile: string,
+  files: Readonly<Record<string, string>>,
+) {
+  if (!specifier.startsWith(".")) return undefined;
+
+  const base = resolvePath(dirname(containingFile), specifier);
+  const candidates = extname(base)
+    ? [base]
+    : [`${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`];
+  const resolvedFileName = candidates.find((candidate) =>
+    files[candidate] !== undefined
+  );
+  if (!resolvedFileName) return undefined;
+
+  const extension = resolvedFileName.endsWith(".tsx")
+    ? ts.Extension.Tsx
+    : resolvedFileName.endsWith(".js")
+    ? ts.Extension.Js
+    : resolvedFileName.endsWith(".jsx")
+    ? ts.Extension.Jsx
+    : ts.Extension.Ts;
+  return {
+    resolvedFileName,
+    extension,
+    isExternalLibraryImport: false,
+  };
 }
 
 function baseNameFromPath(path: string): string | undefined {

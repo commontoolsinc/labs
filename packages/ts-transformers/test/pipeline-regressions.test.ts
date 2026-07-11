@@ -244,6 +244,7 @@ Deno.test(
       "CfcPolicyOfValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
       "AssertDiagnosticsTransformer",
+      "SymbolicFactoryCallTransformer",
       "LiftLoweringTransformer",
       "ClosureTransformer",
       "PatternOwnedExpressionSiteLoweringTransformer",
@@ -837,6 +838,33 @@ Deno.test(
         JSON.stringify(schema.required) === JSON.stringify(wholeBranchRequired)
       ),
       "expected shopping-list sorted branch to stay pattern-lowered instead of wrapping the whole branch in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: symbolic factory calls survive later passes without a compute wrapper",
+  async () => {
+    const source = `import { pattern, type PatternFactory } from "commonfabric";
+
+type Operation = PatternFactory<{ value: number }, { result: number }>;
+
+export default pattern<{ operation: Operation; value: number }>((input) => ({
+  result: input.operation({ value: input.value }),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    const calls = callsNamed(root, "invokeFactory");
+    assertEquals(calls.length, 1);
+    assert(
+      !calls.some((call) =>
+        isInsideCallNamed(call, "lift") || isInsideCallNamed(call, "derive")
+      ),
+      "invokeFactory must remain a structural builder call through every later pipeline stage",
     );
   },
 );

@@ -193,6 +193,15 @@ export class TransformationContext {
     return this.options.state?.isSyntheticComputeOwnedNode(node) ?? false;
   }
 
+  /** Preserve trusted callable derivations through late module-data lowering. */
+  markLiveFactoryDerivation(node: ts.Node): void {
+    this.options.state?.markLiveFactoryDerivation(node);
+  }
+
+  isLiveFactoryDerivation(node: ts.Node): boolean {
+    return this.options.state?.isLiveFactoryDerivation(node) ?? false;
+  }
+
   /**
    * Mark a builder call/new node that SchemaInjection has finalized, so a
    * later re-traversal of the transformer's own output skips re-injection.

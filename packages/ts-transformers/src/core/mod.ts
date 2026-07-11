@@ -17,10 +17,12 @@
  *      transformer-internal, non-cache-invalidating per-node channels:
  *      `capabilitySummary` and `schemaInjected`. Reached only through the
  *      record/lookup/mark/is methods on CrossStageState.
- *   3. The marker family — node/symbol-keyed WeakSets whose context-level
- *      mutators are coupled to reactive-analysis cache invalidation
+ *   3. The marker family — node/symbol-keyed WeakSets. Reactive-analysis
+ *      markers have context-level mutators coupled to cache invalidation
  *      (mapCallbackRegistry, syntheticComputeCallbackRegistry,
- *      syntheticComputeOwnedNodeRegistry, syntheticReactiveCollectionRegistry).
+ *      syntheticComputeOwnedNodeRegistry, syntheticReactiveCollectionRegistry);
+ *      liveFactoryDerivationRegistry is a late-emission marker and does not
+ *      affect those caches.
  *
  * (Former members no longer exist: `syntheticLiftAppliedCallRegistry`, removed
  * after being verified functionally inert (see
@@ -82,6 +84,13 @@
  *   Writers: context.markSyntheticReactiveCollectionDeclaration()
  *            (called by reactive-variable-for transformer)
  *   Readers: ast/call-kind.ts, closures/strategies/array-method-policy.ts
+ *
+ * liveFactoryDerivationRegistry (WeakSet<ts.Node>)
+ *   Preserves branded callable `.asScope()` / `.inSpace()` derivations from
+ *   the early factory classifier through the late module-data pass. Uses
+ *   getOriginalNode fallback because intervening stages may update the call.
+ *   Writers: context.markLiveFactoryDerivation()
+ *   Readers: context.isLiveFactoryDerivation() (module-scope-cf-data)
  *
  * SchemaHints (WeakMap<ts.Node, SchemaHint>)
  *   Overrides default schema generation behavior (e.g., array items: false).

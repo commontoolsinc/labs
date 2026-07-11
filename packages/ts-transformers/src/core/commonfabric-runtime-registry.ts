@@ -84,6 +84,12 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: false,
   },
   {
+    exportName: "invokeFactory",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
     exportName: "render",
     category: "builder",
     builderName: "render",
