@@ -660,7 +660,7 @@ the reference should carry the SC-22 identity pair —
 — plus a canonical `policyDigest` and concrete `subject`. The pair names the
 defining source export. The digest is canonical `hashStringOf` over `{ domain:
 "cfc/policy-manifest/v1", manifest: {formatVersion, moduleIdentity, symbol,
-subjectIndependentTemplate} }`; an envelope may repeat the digest but excludes
+template} }`; an envelope may repeat the digest but excludes
 it from its own hash projection.
 The subject is bound relative to each invoking piece. A trusted compiler or
 verifier must attest the source-closure→export→manifest lowering; checking the

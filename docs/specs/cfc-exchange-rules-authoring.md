@@ -195,9 +195,11 @@ Semantics, all inherited rather than invented:
 - Raising is label creation, not rewrite — store monotonicity (§8.12) is
   unaffected.
 
-This also makes the developer-guide static check (§11.2.4.3) computable from
-the authored module alone: an egress output whose label no declared or
-concept-kernel rule can rewrite is a compile-time violation.
+The compiler can check local declaration/reference coherence: every direct
+policy reference resolves to a static exported rule set, and every locally
+authored rule is well formed. Whether a rule can actually rewrite an egress
+label remains a runtime decision because it depends on input labels, integrity
+evidence, grants, and boundary context.
 
 ### 2b. Raising, indirect — concept references
 
