@@ -1010,6 +1010,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
     assertEquals(committed.ok?.seq, 1);
     assertEquals(committed.ok?.revisions, [{
       id: "of:doc:1",
+      scopeKey: "space",
       branch: "",
       seq: 1,
       opIndex: 0,
