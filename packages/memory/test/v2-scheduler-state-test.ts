@@ -2089,6 +2089,311 @@ Deno.test("memory v2 server preserves scoped mirror context and provenance", asy
   }
 });
 
+Deno.test("memory v2 server preserves an origin-narrowed scheduler mirror context", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const principal = "did:key:scheduler-narrowed-mirror-principal";
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const authorized = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof authorized === "string" ? authorized : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-narrowed-mirror-owner";
+  const readSpace = "did:key:scheduler-narrowed-mirror-read";
+  const owner = await client.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(principal),
+  );
+  await client.mount(readSpace, {}, schedulerAuthFactoryFor(principal));
+  const actionId = "pattern.tsx:computed:narrowed-mirror";
+  const implementationFingerprint = `impl:${actionId}`;
+  const piece = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:piece",
+    path: [],
+  };
+  const ownerSessionRead = {
+    space: ownerSpace,
+    scope: "session" as const,
+    id: "of:session-input",
+    path: ["value"],
+  };
+  const userRead = {
+    space: readSpace,
+    scope: "user" as const,
+    id: "of:user-input",
+    path: ["value"],
+  };
+  const userWrite = {
+    space: ownerSpace,
+    scope: "user" as const,
+    id: "of:user-output",
+    path: ["value"],
+  };
+  const firstObservation = {
+    ...observation,
+    version: 2 as const,
+    ownerSpace,
+    pieceId: "space:of:piece",
+    actionId,
+    implementationFingerprint,
+    reads: [ownerSessionRead],
+    currentKnownWrites: [],
+  } satisfies SchedulerActionObservation;
+  const provenUserObservation = {
+    ...firstObservation,
+    reads: [userRead],
+    currentKnownWrites: [userWrite],
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint,
+      runtimeFingerprint: firstObservation.runtimeFingerprint,
+      piece,
+      reads: [userRead],
+      writes: [userWrite],
+      materializerWriteEnvelopes: [],
+      directOutputs: [userWrite],
+    },
+  } satisfies SchedulerActionObservation;
+  const expectedContext = `session:${encodeURIComponent(principal)}:${
+    encodeURIComponent(owner.sessionId)
+  }`;
+
+  try {
+    // The first run establishes a monotonic PerSession floor only in the owner
+    // database. The next, fully-certified PerUser run introduces the read-space
+    // mirror for the first time; that mirror must inherit the owner's already-
+    // narrowed effective context rather than independently broadening to user.
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: firstObservation,
+    });
+    await owner.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: provenUserObservation,
+    });
+
+    await client.close();
+    await server.close();
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const mirrored = listSchedulerActionSnapshots(readEngine, { actionId });
+      assertEquals(
+        mirrored.snapshots.map((snapshot) => snapshot.executionContextKey),
+        [expectedContext],
+      );
+      const readRow = readEngine.database.prepare(`
+        SELECT read_scope_key
+        FROM scheduler_read_index
+        WHERE action_id = :action_id
+      `).get({ action_id: actionId }) as { read_scope_key: string };
+      const writeRow = readEngine.database.prepare(`
+        SELECT write_scope_key
+        FROM scheduler_write_index
+        WHERE action_id = :action_id
+      `).get({ action_id: actionId }) as { write_scope_key: string };
+      assertEquals(
+        readRow.read_scope_key,
+        `user:${encodeURIComponent(principal)}`,
+      );
+      assertEquals(
+        writeRow.write_scope_key,
+        `user:${encodeURIComponent(principal)}`,
+      );
+    } finally {
+      close(readEngine);
+    }
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server isolates PerSession scheduler mirrors and dirty state", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const principal = "did:key:scheduler-session-mirror-principal";
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const authorized = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof authorized === "string" ? authorized : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const clientA = await connect({ transport: loopback(server) });
+  const clientB = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-session-mirror-owner";
+  const readSpace = "did:key:scheduler-session-mirror-read";
+  const sessionA = "scheduler-session-mirror-a";
+  const sessionB = "scheduler-session-mirror-b";
+  const ownerA = await clientA.mount(
+    ownerSpace,
+    { sessionId: sessionA },
+    schedulerAuthFactoryFor(principal),
+  );
+  const readerA = await clientA.mount(
+    readSpace,
+    { sessionId: sessionA },
+    schedulerAuthFactoryFor(principal),
+  );
+  const ownerB = await clientB.mount(
+    ownerSpace,
+    { sessionId: sessionB },
+    schedulerAuthFactoryFor(principal),
+  );
+  await clientB.mount(
+    readSpace,
+    { sessionId: sessionB },
+    schedulerAuthFactoryFor(principal),
+  );
+  const actionId = "pattern.tsx:computed:session-mirror-isolation";
+  const implementationFingerprint = `impl:${actionId}`;
+  const sessionRead = {
+    space: readSpace,
+    scope: "session" as const,
+    id: "of:session-input",
+    path: ["value"],
+  };
+  const sessionWrite = {
+    space: ownerSpace,
+    scope: "session" as const,
+    id: "of:session-output",
+    path: ["value"],
+  };
+  const sessionObservation = {
+    ...observation,
+    version: 2 as const,
+    ownerSpace,
+    pieceId: "space:of:piece",
+    actionId,
+    implementationFingerprint,
+    reads: [sessionRead],
+    currentKnownWrites: [sessionWrite],
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint,
+      runtimeFingerprint: observation.runtimeFingerprint,
+      piece: {
+        space: ownerSpace,
+        scope: "space" as const,
+        id: "of:piece",
+        path: [],
+      },
+      reads: [sessionRead],
+      writes: [sessionWrite],
+      materializerWriteEnvelopes: [],
+      directOutputs: [sessionWrite],
+    },
+  } satisfies SchedulerActionObservation;
+  const contextFor = (sessionId: string) =>
+    `session:${encodeURIComponent(principal)}:${encodeURIComponent(sessionId)}`;
+
+  try {
+    await ownerA.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: sessionObservation,
+    });
+    await ownerB.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: sessionObservation,
+    });
+
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const rows = readEngine.database.prepare(`
+        SELECT execution_context_key, read_scope_key, write_scope_key
+        FROM scheduler_read_index
+        JOIN scheduler_write_index USING (
+          branch,
+          owner_space,
+          piece_id,
+          process_generation,
+          action_id,
+          execution_context_key,
+          observation_id
+        )
+        WHERE action_id = :action_id
+        ORDER BY execution_context_key
+      `).all({ action_id: actionId }) as Array<{
+        execution_context_key: string;
+        read_scope_key: string;
+        write_scope_key: string;
+      }>;
+      const expected = [
+        contextFor(ownerA.sessionId),
+        contextFor(ownerB.sessionId),
+      ].toSorted();
+      assertEquals(
+        rows.map((row) => row.execution_context_key),
+        expected,
+      );
+      assertEquals(rows.map((row) => row.read_scope_key), expected);
+      assertEquals(rows.map((row) => row.write_scope_key), expected);
+    } finally {
+      close(readEngine);
+    }
+
+    await readerA.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sessionRead.id,
+        scope: sessionRead.scope,
+        value: { value: 1 },
+      }],
+    });
+
+    const snapshotsA = await ownerA.listSchedulerActionSnapshots({ actionId });
+    const snapshotsB = await ownerB.listSchedulerActionSnapshots({ actionId });
+    assertEquals(snapshotsA.snapshots.length, 1);
+    assertEquals(
+      snapshotsA.snapshots[0]?.executionContextKey,
+      contextFor(ownerA.sessionId),
+    );
+    assertEquals(snapshotsA.snapshots[0]?.directDirtySeq, 1);
+    assertEquals(snapshotsB.snapshots.length, 1);
+    assertEquals(
+      snapshotsB.snapshots[0]?.executionContextKey,
+      contextFor(ownerB.sessionId),
+    );
+    assertEquals(snapshotsB.snapshots[0]?.directDirtySeq, undefined);
+  } finally {
+    await clientA.close().catch(() => {});
+    await clientB.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();

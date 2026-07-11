@@ -3183,6 +3183,7 @@ export class Server {
   private async mirrorSchedulerObservation(
     ownerSpace: string,
     observation: Engine.SchedulerActionObservation,
+    originExecutionContextKey: SchedulerExecutionContextKey,
     commit: Engine.AppliedCommit,
     previousReadSpaces: ReadonlySet<string>,
     session: SessionState | undefined,
@@ -3204,7 +3205,7 @@ export class Server {
         continue;
       }
       const engine = await this.openEngine(space);
-      Engine.upsertSchedulerObservation(engine, {
+      Engine.upsertMirroredSchedulerObservation(engine, {
         branch: commit.branch,
         ownerSpace,
         observedAtSeq: commit.seq,
@@ -3216,6 +3217,7 @@ export class Server {
           session.id,
           session.principal,
         ),
+        originExecutionContextKey,
         observation,
       });
     }
@@ -3234,23 +3236,34 @@ export class Server {
 
     try {
       await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
-      const keptObservationLocalSeqs = commit.schedulerObservationResults
-        ? new Set(
-          commit.schedulerObservationResults
-            .filter((result) => result.status === "kept")
-            .map((result) => result.localSeq),
+      const observationResults = commit.schedulerObservationResults
+        ? new Map(
+          commit.schedulerObservationResults.map((result) => [
+            result.localSeq,
+            result,
+          ]),
         )
         : undefined;
+      // A semantic commit replay can outlive an observation that was removed by
+      // later context narrowing. There is no active owner context to mirror in
+      // that case; replaying the stale payload would resurrect invalid state.
+      if (observations.length > 0 && observationResults === undefined) {
+        return;
+      }
       for (const { localSeq, observation } of observations) {
-        if (
-          keptObservationLocalSeqs &&
-          !keptObservationLocalSeqs.has(localSeq)
-        ) {
+        const result = observationResults?.get(localSeq);
+        if (result?.status === "dropped") {
           continue;
+        }
+        if (result?.executionContextKey === undefined) {
+          throw new Error(
+            `kept scheduler observation ${localSeq} missing owner execution context`,
+          );
         }
         await this.mirrorSchedulerObservation(
           ownerSpace,
           observation,
+          result.executionContextKey,
           commit,
           previousReadSpaces.get(localSeq) ?? new Set(),
           session,

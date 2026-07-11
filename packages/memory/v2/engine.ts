@@ -832,6 +832,8 @@ export interface AppliedSchedulerObservationResult {
   localSeq: number;
   status: "kept" | "dropped";
   schedulerObservationId?: number;
+  /** Effective owner-derived context; emitted metadata, never client input. */
+  executionContextKey?: SchedulerExecutionContextKey;
   reason?:
     | "stale-confirmed-read"
     | "stale-pending-read"
@@ -2232,9 +2234,29 @@ export const upsertSchedulerObservation = (
     options,
   );
 
+/**
+ * Persist a server-side cross-space mirror using the effective context already
+ * selected by the authoritative owner-space transaction. This is deliberately
+ * separate from the protocol-facing observation path: clients never select an
+ * execution context, while trusted server fan-out must not independently
+ * broaden or narrow ownership in each mirror database.
+ */
+export const upsertMirroredSchedulerObservation = (
+  engine: Engine,
+  options: UpsertSchedulerObservationOptions & {
+    originExecutionContextKey: SchedulerExecutionContextKey;
+  },
+): UpsertSchedulerObservationResult =>
+  engine.database.transaction(upsertSchedulerObservationTransaction).immediate(
+    engine,
+    options,
+  );
+
 const upsertSchedulerObservationTransaction = (
   engine: Engine,
-  options: UpsertSchedulerObservationOptions,
+  options:
+    & UpsertSchedulerObservationOptions
+    & { originExecutionContextKey?: SchedulerExecutionContextKey },
 ): UpsertSchedulerObservationResult => {
   const branch = options.branch ?? options.observation.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
@@ -2246,15 +2268,21 @@ const upsertSchedulerObservationTransaction = (
     options.ownerSpace,
   );
   const payload = encodeSchedulerDependencySnapshot(observation);
-  const {
-    executionContextKey,
-    invalidatedExecutionContextKeys,
-  } = resolveSchedulerExecutionContext(engine, {
-    branch,
-    ownerSpace: observation.ownerSpace,
-    observation,
-    scopeContext: options.scopeContext,
-  });
+  const { executionContextKey, invalidatedExecutionContextKeys } =
+    options.originExecutionContextKey === undefined
+      ? resolveSchedulerExecutionContext(engine, {
+        branch,
+        ownerSpace: observation.ownerSpace,
+        observation,
+        scopeContext: options.scopeContext,
+      })
+      : preserveMirroredSchedulerExecutionContext(engine, {
+        branch,
+        ownerSpace: observation.ownerSpace,
+        observation,
+        scopeContext: options.scopeContext,
+        originExecutionContextKey: options.originExecutionContextKey,
+      });
   invalidateSchedulerExecutionContexts(engine, {
     branch,
     ownerSpace: observation.ownerSpace,
@@ -3458,6 +3486,100 @@ function schedulerSnapshotMatchesFingerprint(
   }
 }
 
+function schedulerContextScopeForCanonicalKey(
+  executionContextKey: SchedulerExecutionContextKey,
+  scopeContext: SchedulerScopeContext,
+): SchedulerContextScope {
+  if (executionContextKey === "space") return "space";
+  if (executionContextKey === resolveScopeKey("user", scopeContext)) {
+    return "user";
+  }
+  if (executionContextKey === resolveScopeKey("session", scopeContext)) {
+    return "session";
+  }
+  throw new ProtocolError(
+    "mirrored scheduler execution context does not match the authenticated scope context",
+  );
+}
+
+function invalidatedSchedulerExecutionContexts(
+  engine: Engine,
+  floorKey: SchedulerContextFloorKey,
+  effectiveFloor: SchedulerContextScope,
+  scopeContext: SchedulerScopeContext,
+): SchedulerExecutionContextKey[] {
+  const invalidated: SchedulerExecutionContextKey[] = [];
+  if (schedulerContextRank(effectiveFloor) > schedulerContextRank("space")) {
+    const spaceKey = resolveScopeKey(
+      "space",
+      scopeContext,
+    ) as SchedulerExecutionContextKey;
+    if (schedulerSnapshotMatchesFingerprint(engine, floorKey, spaceKey)) {
+      invalidated.push(spaceKey);
+    }
+  }
+  if (effectiveFloor === "session") {
+    const userKey = resolveScopeKey(
+      "user",
+      scopeContext,
+    ) as SchedulerExecutionContextKey;
+    if (schedulerSnapshotMatchesFingerprint(engine, floorKey, userKey)) {
+      invalidated.push(userKey);
+    }
+  }
+  return invalidated;
+}
+
+function preserveMirroredSchedulerExecutionContext(
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    ownerSpace?: string;
+    observation: SchedulerActionObservation;
+    scopeContext: SchedulerScopeContext;
+    originExecutionContextKey: SchedulerExecutionContextKey;
+  },
+): {
+  executionContextKey: SchedulerExecutionContextKey;
+  invalidatedExecutionContextKeys: SchedulerExecutionContextKey[];
+} {
+  const floorKey: SchedulerContextFloorKey = {
+    branch: options.branch,
+    ownerSpace: options.ownerSpace,
+    pieceId: options.observation.pieceId,
+    processGeneration: options.observation.processGeneration,
+    actionId: options.observation.actionId,
+    implementationFingerprint: options.observation.implementationFingerprint,
+    runtimeFingerprint: options.observation.runtimeFingerprint,
+  };
+  const effectiveFloor = schedulerContextScopeForCanonicalKey(
+    options.originExecutionContextKey,
+    options.scopeContext,
+  );
+  // Retain the owner's narrowing evidence so an accidental non-mirror write to
+  // this ownership tuple cannot broaden it later. PerSession evidence stays on
+  // the authenticated principal lineage; PerUser evidence is globally safe.
+  if (effectiveFloor === "user") {
+    upsertSchedulerContextFloor(engine, floorKey, "", "user");
+  } else if (effectiveFloor === "session") {
+    upsertSchedulerContextFloor(
+      engine,
+      floorKey,
+      resolveScopeKey("user", options.scopeContext),
+      "session",
+    );
+  }
+  return {
+    executionContextKey: options.originExecutionContextKey,
+    invalidatedExecutionContextKeys: invalidatedSchedulerExecutionContexts(
+      engine,
+      floorKey,
+      effectiveFloor,
+      options.scopeContext,
+    ),
+  };
+}
+
 function resolveSchedulerExecutionContext(
   engine: Engine,
   options: {
@@ -3513,25 +3635,12 @@ function resolveSchedulerExecutionContext(
     scopeContext,
   ) as SchedulerExecutionContextKey;
 
-  const invalidatedExecutionContextKeys: SchedulerExecutionContextKey[] = [];
-  if (schedulerContextRank(effectiveFloor) > schedulerContextRank("space")) {
-    const spaceKey = resolveScopeKey(
-      "space",
-      scopeContext,
-    ) as SchedulerExecutionContextKey;
-    if (schedulerSnapshotMatchesFingerprint(engine, floorKey, spaceKey)) {
-      invalidatedExecutionContextKeys.push(spaceKey);
-    }
-  }
-  if (effectiveFloor === "session") {
-    const userKey = resolveScopeKey(
-      "user",
-      scopeContext,
-    ) as SchedulerExecutionContextKey;
-    if (schedulerSnapshotMatchesFingerprint(engine, floorKey, userKey)) {
-      invalidatedExecutionContextKeys.push(userKey);
-    }
-  }
+  const invalidatedExecutionContextKeys = invalidatedSchedulerExecutionContexts(
+    engine,
+    floorKey,
+    effectiveFloor,
+    scopeContext,
+  );
 
   return { executionContextKey, invalidatedExecutionContextKeys };
 }
@@ -3831,15 +3940,24 @@ function getSchedulerObservationReplay(
   status: AppliedSchedulerObservationResult["status"];
   reason: AppliedSchedulerObservationResult["reason"] | null;
   observation_id: number | null;
+  execution_context_key: SchedulerExecutionContextKey | null;
   observed_at_seq: number;
   payload: string;
 } | undefined {
   return engine.database.prepare(`
-    SELECT status, reason, observation_id, observed_at_seq, payload
-    FROM scheduler_observation_replay
-    WHERE branch = :branch
-      AND session_id = :session_id
-      AND local_seq = :local_seq
+    SELECT
+      replay.status,
+      replay.reason,
+      replay.observation_id,
+      observation.execution_context_key,
+      replay.observed_at_seq,
+      replay.payload
+    FROM scheduler_observation_replay replay
+    LEFT JOIN scheduler_observation observation
+      ON observation.observation_id = replay.observation_id
+    WHERE replay.branch = :branch
+      AND replay.session_id = :session_id
+      AND replay.local_seq = :local_seq
   `).get({
     branch: options.branch,
     session_id: options.sessionId,
@@ -3848,6 +3966,7 @@ function getSchedulerObservationReplay(
     status: AppliedSchedulerObservationResult["status"];
     reason: AppliedSchedulerObservationResult["reason"] | null;
     observation_id: number | null;
+    execution_context_key: SchedulerExecutionContextKey | null;
     observed_at_seq: number;
     payload: string;
   } | undefined;
@@ -4498,10 +4617,32 @@ const applyCommitTransaction = (
         `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
       );
     }
+    const observationReplay = schedulerObservation
+      ? getSchedulerObservationReplay(engine, {
+        branch: existing.branch,
+        sessionId: sessionKey,
+        localSeq: commit.localSeq,
+      })
+      : undefined;
+    const observationResult = observationReplay &&
+        (observationReplay.status === "dropped" ||
+          observationReplay.observation_id !== null &&
+            observationReplay.execution_context_key !== null)
+      ? replayedSchedulerObservationResult(
+        commit.localSeq,
+        observationReplay,
+      )
+      : undefined;
     return {
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
+      ...(observationResult?.schedulerObservationId !== undefined
+        ? { schedulerObservationId: observationResult.schedulerObservationId }
+        : {}),
+      ...(observationResult
+        ? { schedulerObservationResults: [observationResult] }
+        : {}),
     };
   }
 
@@ -4623,8 +4764,8 @@ const applyCommitTransaction = (
     });
   }
 
-  if (schedulerObservation) {
-    upsertSchedulerObservationTransaction(engine, {
+  const schedulerObservationResult = schedulerObservation
+    ? upsertSchedulerObservationTransaction(engine, {
       branch,
       ownerSpace: space ?? schedulerObservation.ownerSpace,
       commitSeq: seq,
@@ -4633,13 +4774,24 @@ const applyCommitTransaction = (
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
       observation: schedulerObservation,
-    });
-  }
+    })
+    : undefined;
 
   return {
     seq,
     branch,
     revisions,
+    ...(schedulerObservationResult
+      ? {
+        schedulerObservationId: schedulerObservationResult.observationId,
+        schedulerObservationResults: [{
+          localSeq: commit.localSeq,
+          status: "kept" as const,
+          schedulerObservationId: schedulerObservationResult.observationId,
+          executionContextKey: schedulerObservationResult.executionContextKey,
+        }],
+      }
+      : {}),
     ...(schedulerDirtiedReaders && schedulerDirtiedReaders.length > 0
       ? { schedulerDirtiedReaders }
       : {}),
@@ -5106,6 +5258,7 @@ const replayedSchedulerObservationResult = (
     status: AppliedSchedulerObservationResult["status"];
     reason: AppliedSchedulerObservationResult["reason"] | null;
     observation_id: number | null;
+    execution_context_key: SchedulerExecutionContextKey | null;
   },
 ): AppliedSchedulerObservationResult => {
   if (replay.status === "dropped") {
@@ -5115,15 +5268,18 @@ const replayedSchedulerObservationResult = (
       reason: replay.reason ?? "stale-confirmed-read",
     };
   }
-  if (replay.observation_id === null) {
+  if (
+    replay.observation_id === null || replay.execution_context_key === null
+  ) {
     throw new ProtocolError(
-      `kept scheduler observation replay missing observation id for localSeq ${localSeq}`,
+      `kept scheduler observation replay missing active context for localSeq ${localSeq}`,
     );
   }
   return {
     localSeq,
     status: "kept",
     schedulerObservationId: replay.observation_id,
+    executionContextKey: replay.execution_context_key,
   };
 };
 
@@ -5253,6 +5409,7 @@ const applySchedulerObservationOnlyCommit = (
       localSeq,
       status: "kept",
       schedulerObservationId: observationResult.observationId,
+      executionContextKey: observationResult.executionContextKey,
     }],
   };
 };
