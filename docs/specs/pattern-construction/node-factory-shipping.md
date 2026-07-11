@@ -71,8 +71,17 @@ protocol. An inline pattern closes over the values to bind, and the resulting
   pattern callback argument 1.
 - **Bound pattern**: a derived `PatternFactory` whose hidden factory state
   contains closure params.
-- **Symbolic factory**: a factory-valued pattern input or captured value that is
-  represented by a reactive cell while the enclosing graph is built.
+- **Symbolic factory binding**: a builder-time reactive alias or link to a Cell
+  that contains the current factory value. It is not a second factory wire
+  representation, and the graph stores the binding rather than snapshotting
+  the currently selected factory ref.
+- **Materialized factory argument**: the ordinary live callable supplied by the
+  runner when an `asFactory` value crosses a scheduled runtime callback
+  boundary, such as a `lift` implementation or handler invocation.
+- **Artifact source space**: trusted runner provenance identifying the space
+  from which a cold factory artifact may be loaded. It is distinct from a
+  pattern factory's `spaceSelector`, which chooses the child's execution
+  target.
 
 ## Current State and Gaps
 
@@ -181,6 +190,36 @@ const useFactories = pattern<FactoryInputs>(({
 Calling a received factory constructs a normal graph node. It does not execute
 the referenced implementation synchronously and does not fetch source during
 the call.
+
+The callable exposure depends on where the value is consumed:
+
+- During eager `pattern()` construction, public inputs and closure params do
+  not yet have values. A factory-typed value from either root is therefore a
+  symbolic factory binding. The transformer lowers its call to a dynamic node
+  that subscribes to that binding.
+- When the runner invokes a `lift()` implementation, each `asFactory` input is
+  read as part of that scheduled computation and supplied as the current,
+  fully materialized ordinary factory function. The callback never receives a
+  decoded shell or a promise. The lift's existing dependency and rerun
+  lifecycle owns later input changes.
+- When the runner invokes a handler, factory values in bound context and event
+  data are materialized before that event's callback runs. Context is read for
+  each event, so a context change affects later events but does not invoke the
+  handler by itself. A factory carried by value in an event is that event's
+  snapshot; an explicit `Cell<Factory>` retains normal Cell semantics.
+
+These rules are based on value origin, not merely lexical nesting. A factory
+delivered as a schema-driven `lift` or handler callback argument is live and
+directly callable. A pattern-root or closure-param value remains a symbolic
+binding until it crosses such a runner-owned materialization boundary.
+
+Cold readiness is local to the consuming dynamic node, lift attempt, or
+handler event. A cold nested factory does not delay construction or startup of
+the whole parent pattern. Whole-parent prewarming is allowed only as a
+cache optimization; making it semantic could deadlock when another node in the
+same parent graph produces the factory value. The root factory passed to setup
+is the exception: its code is intrinsically required before the parent graph
+can be constructed.
 
 ### Nested patterns close over values
 
@@ -461,23 +500,49 @@ round-trippable, but its call body throws "factory requires runner
 materialization" and it does not claim the full behavioral
 `PatternFactory`/`ModuleFactory`/`HandlerFactory` surface.
 
-The runner owns one chokepoint:
+The runner owns one chokepoint, shown conceptually in warm and cold forms:
 
 ```ts
 // Shown for illustration only.
-materializeFactory(value: FabricFactory, runtime: Runtime): BuilderFactory;
+interface FactoryMaterializationContext {
+  runtime: Runtime;
+  artifactSpace: MemorySpace;
+  expected?: FactoryContract;
+  ownerGeneration?: number;
+}
+
+materializeFactory(
+  value: FabricFactory,
+  context: FactoryMaterializationContext,
+): BuilderFactory;
+
+prepareFactory(
+  value: FabricFactory,
+  context: FactoryMaterializationContext,
+): Promise<BuilderFactory>;
 ```
 
-The hook returns an existing live builder factory or resolves the shell's
-factory artifact ref, reconstructs the correct callable builder factory, and
-reapplies params and modifiers. Sync and async forms may share this contract;
-cold source loading uses the async form.
+The warm hook returns an existing live builder factory or synchronously
+resolves an indexed shell. The async-ready form may cold-load the artifact,
+then reconstruct the correct callable builder factory and reapply params and
+modifiers. Owner/generation information fences an async result from reviving a
+stopped or superseded consumer. Authored code receives only the completed live
+callable; a decoded shell is never used as a lazy executable wrapper.
 
-Every runner exposure path uses this chokepoint: schema-driven `asFactory`
-reads, recursive Cell/query result materialization, graph binding and dynamic
-module dispatch, and CLI/FUSE/tool adapters. Transformed symbolic invocation
-may pass a cell to the same hook after resolving its value. Context-free
-`valueFromJson()` remains the intentional shell-returning boundary.
+`artifactSpace` is trusted boundary provenance, not a field accepted from
+`Factory@1`. It identifies where the content-addressed source closure is
+available. A pattern's serialized `spaceSelector` is applied later and chooses
+where the child executes. When a factory is copied rather than linked across
+spaces, the canonical writer/transport must replicate its artifact closure or
+retain runner-owned source provenance; wire data cannot grant either authority.
+
+Every executable runner exposure path uses this chokepoint: schema-driven
+`asFactory` reads, recursive Cell/query result materialization, dynamic module
+dispatch, and CLI/FUSE/tool adapters. Dependency-only traversal and graph
+binding preserve symbolic aliases without loading code. Transformed symbolic
+invocation passes the binding to the dynamic node, which reads its current
+value before calling the materializer. Context-free `valueFromJson()` remains
+the intentional shell-returning boundary.
 
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization.
@@ -512,7 +577,10 @@ view of factory state.
 When a parent pattern is built, traversal recursively maps `params` and
 `spaceSelector`. Captured cells become normal aliases, captured factory state
 recurses, and a derived branded factory is returned with the mapped hidden
-state. No public or enumerable `curried` property is required.
+state. A captured factory Cell/link remains a symbolic binding with its link
+parent and artifact-source provenance intact; traversal never reads it merely
+to snapshot the currently selected ref. No public or enumerable `curried`
+property is required.
 
 ## Pattern Closure Transformation
 
@@ -614,6 +682,12 @@ Before child nodes instantiate, setup resolves the bound factory state's params
 against the parent binding context, writes or links them into this cell while
 preserving CFC labels, and supplies the cell to alias resolution.
 
+Factory-valued entries in params follow the same exposure rules as public
+input. During graph construction their aliases remain bindings; neither curry
+nor params-cell population snapshots the selected factory ref. When a
+scheduled runtime callback later consumes an `asFactory` leaf, the runner reads
+and materializes its then-current value from the preserved link/source space.
+
 The alias vocabulary gains `{ $alias: { cell: "params", path, ... } }`.
 `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct sub-pattern setup
 accept that pseudo-root only when the invocation has a params cell. Nested
@@ -688,6 +762,13 @@ The `module` form uses `argumentSchema` / `resultSchema`. The `handler` form
 uses `contextSchema` / `eventSchema`. A `HandlerFactory` must not be mistaken
 for an `asCell: ["stream"]` merely because calling it returns a stream.
 
+`asFactory` has one schema meaning and two execution-context exposures. In an
+eager pattern-building root it describes a symbolic binding. In a scheduled
+`lift` or handler argument it instructs the runner to supply a materialized
+ordinary callable. Schema inspection, dependency tracking, and CFC traversal
+may inspect or subscribe to the `Factory@1` atom without loading code; authored
+runtime callback delivery may not expose the value until it is executable.
+
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
 Schema variance is deferred. The resolved trusted artifact is authoritative;
@@ -705,8 +786,9 @@ behavior.
 ### Type-directed call lowering
 
 Calls on imported or module-scoped live factories continue using the existing
-direct builder call path. Calls whose callee is a symbolic/reactive factory are
-lowered to an internal builder helper:
+direct builder call path. Calls whose callee originates from an eager pattern
+argument/params root are symbolic and are lowered to an internal builder
+helper:
 
 ```ts
 // Shown for illustration only.
@@ -724,10 +806,18 @@ __cfHelpers.invokeFactory(
 );
 ```
 
-The helper records a dynamic node whose module input is the symbolic factory.
-It returns a `Reactive` output for pattern/module factories and a `Stream` for
-handler factories. Handler application retains its existing `$ctx` and
-`$event` node wiring.
+The helper records a dynamic node containing the symbolic factory binding, the
+call input, and the expected trusted contract. It does not read or serialize
+the factory currently selected by that binding. It returns a `Reactive` output
+for pattern/module factories and a `Stream` for handler factories. Handler
+application retains its existing `$ctx` and `$event` node wiring.
+
+The transformer classifier is execution-context aware. A factory-typed value
+delivered as a `lift` implementation parameter or handler context/event
+parameter remains an ordinary direct call, because the runner materializes
+that argument before invoking authored code. A factory captured from an eager
+pattern root remains symbolic unless it is explicitly delivered through such
+an `asFactory` runtime argument boundary.
 
 The type-directed detector follows local aliases, property access, and
 statically typed element access, so `const f = inputs.factory; f(value)` and
@@ -736,29 +826,81 @@ callable union spanning factory kinds, because the builder must choose
 `Reactive` versus `Stream` before runtime resolution. Same-kind unions are
 allowed only when their normalized public schemas agree.
 
-At instantiation, the runner reads the Factory value, validates kind and
+At instantiation, the runner subscribes to the binding before its first value.
+Initial absence means that the node is pending and has no child. Once a value
+exists, the runner reads it in the consuming transaction, validates kind and
 schemas, resolves the trusted base artifact, applies modifier and pattern-param
 state, and tail-calls the existing pattern, JavaScript-module, or handler
-instantiation path. It does not call code during value resolution.
+instantiation path. It does not call authored code during decode, selection, or
+cold loading.
 
-The dynamic node is a supervisor for one materialized child/action/handler. It
-owns that instance's cancellation scope, result-owned internal cells, and
-handler subscription. The factory cell is a reactive dependency. On change,
-the supervisor:
+The direct dynamic node is a switch-latest supervisor for one materialized
+child/action/handler. It owns that instance's cancellation scope, result-owned
+internal cells, and handler subscription. The factory binding is a reactive
+dependency. On a different canonical factory state, the supervisor:
 
 1. increments a generation token and cancels the prior instance;
 2. fences late async writes/results from older generations;
 3. tears down the prior child internals and stream subscription while retaining
    the call site's output binding;
-4. resolves and validates the replacement, including cross-space modifiers;
-   and
-5. instantiates the replacement under the new generation.
+4. resolves and validates the replacement, including artifact-source
+   provenance and cross-space execution modifiers; and
+5. rereads the binding after any await and instantiates only the still-current
+   replacement under the new generation.
+
+Replaying the same canonical `Factory@1` state is a no-op. If A is cold and B
+is selected before A finishes loading, A may populate the trusted artifact
+cache but can never instantiate; completion is fenced by owner and selection
+generation, and the resumed attempt rereads the binding. A deterministic
+missing/forged/wrong-kind/schema failure fails the current generation closed
+but a later valid selection may recover. A transient source failure remains a
+pending/retry condition under the existing scheduler policy.
 
 The stable output spot remains the cause/identity anchor, matching existing
-sub-pattern and list-builtin invariants. The factory ref is a reactive
-dependency and dispatch fingerprint, not an input to result-cell identity;
-changing a factory must not churn the output cell merely because its program
-changed. Distinct call sites already have distinct output bindings.
+sub-pattern and list-builtin invariants. The binding and selected canonical
+state are dispatch dependencies, not inputs to result-cell identity; changing
+a factory must not churn the output cell merely because its program changed.
+Previously committed output may remain readable while the replacement is
+pending, but the canceled generation has no live subscription and cannot write
+again. Initial absence produces no fabricated output or authored error value;
+diagnostics use the runner's node failure channel. Distinct call sites already
+have distinct output bindings.
+
+### Scheduled callback readiness
+
+`lift` and handler callbacks use the same materialization chokepoint but not the
+direct dynamic node's replacement lifecycle. Before authored code runs, the
+runner performs schema-directed input preparation:
+
+1. read each `asFactory` leaf in the action/event transaction, preserving its
+   dependency, link provenance, and CFC labels;
+2. if every value is live or warm-resolvable, supply ordinary callable
+   factories and invoke the callback synchronously as today;
+3. if any value is cold, invoke no authored callback code and commit no authored
+   result; arrange a single-flight load outside that authored transaction; and
+4. when loading completes, verify the owner/generation is still live, retry the
+   same computation/event, and reread every factory value rather than using the
+   value that initiated the load.
+
+For a lift, ordinary reactive input changes schedule the retry/rerun. Its last
+successfully committed value or result-owned child remains live until a
+successful rerun atomically publishes a replacement; the direct dynamic
+node's immediate teardown rule does not silently change general lift
+semantics.
+
+For a handler, bound context is reread per event and a context change alone
+does not run the handler or replace children produced by earlier events. A cold
+event is delayed/requeued with the same durable event identity. Transient
+loading failure retries that event under existing delivery policy;
+deterministic missing/forged/wrong-kind/schema failure is terminal and
+fail-closed. No handler body, normal success receipt/result graph, or handler
+subscription is created before readiness. Owner teardown cancels preparation
+so a late load cannot resurrect either a lift attempt or handler event.
+
+The selection reads above occur in the consuming action/event transaction so
+CFC authority and reactive dependencies flow from the actual current value.
+Prewarming outside that transaction is cache-only and cannot authorize later
+execution.
 
 ## Resolution
 
@@ -768,7 +910,9 @@ Warm resolution uses the existing generic artifact index:
 factory.ref -> trusted builder artifact -> verify kind -> instantiate
 ```
 
-Cold resolution generalizes the existing pattern-only loader:
+Cold resolution generalizes the existing pattern-only loader. The loader key
+includes the trusted artifact source space as well as content identity; it does
+not use the pattern's execution `spaceSelector`:
 
 1. Load the source document for `ref.identity`.
 2. Verify and evaluate the content-addressed module.
@@ -779,6 +923,15 @@ Cold resolution generalizes the existing pattern-only loader:
 This generalized `loadArtifactByIdentity()` path serves pattern, module, and
 handler factories. A legacy `$patternRef` may adapt to a pattern
 `FactoryStateV1` because it names the pattern factory artifact.
+
+There are three cold entry paths: async root setup, a direct dynamic node, and
+scheduled `lift`/handler input readiness. Root setup waits because the parent
+graph cannot be built without its root artifact. The other paths delay only
+the consuming node/attempt/event and always reread current state after loading.
+Canonical copy/transport writers ensure the content-addressed artifact closure
+is available in the destination space; links retain their source space. The
+bare `Factory@1` wire state remains only `{ identity, symbol }` and never names
+or grants an artifact source space.
 
 A legacy `$implRef` does not feed this resolver as a factory ref. It may name
 only an implementation function and omits module/handler configuration. Its
@@ -821,6 +974,10 @@ an internal materializer must call it to create a derived shell.
   source loading. It cannot supply implementation source.
 - The resolved artifact kind, schemas, and compiler params schema must match
   the decoded state before invocation.
+- The current factory selection is read in the consuming transaction. A
+  cache-warming load outside that transaction cannot substitute for the read,
+  dependency, CFC provenance, or trusted-contract validation that authorizes
+  execution.
 - CFC and alias traversal descend into params, so hiding params from the public
   object shape does not hide their labels or dependencies.
 - A factory's schema, ref, description, or debug preview is never an authority
@@ -844,6 +1001,11 @@ transitive forwarding.
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity
 is unavailable, invocation fails closed.
+
+The same rule applies when the call occurs in a materialized `lift` or handler
+callback: required paths come from trusted compiler/artifact metadata resolved
+for the base factory, never from `Factory@1`, authored event/context data, or a
+closure capture.
 
 Closure conversion rejects a capture that attempts to freeze a
 framework-provided field into `params`. Captured ordinary values remain graph
@@ -940,6 +1102,11 @@ coupled to #4514. Cover patterns nested anywhere in bindings and direct
 setup/sub-pattern resolution. Do not take a dependency on the reactive-
 interpreter stack.
 
+The compatibility split follows the existing APIs: synchronous `run()` and
+transaction-bound setup resolve only warm indexed sentinels and fail clearly
+when the ref is cold. Promise-based `setup(undefined, ...)` may load cold source
+and re-enter setup. Stage 0 does not make `run()` async.
+
 ### Stage 1: Branded factory Fabric values
 
 Add the narrow callable Fabric protocol, `Factory@1`, canonical factory state,
@@ -949,7 +1116,9 @@ factory-state traversal. Brand every trusted pattern/module/handler factory.
 ### Stage 2: Factory schemas and dynamic invocation
 
 Generate `asFactory` schemas, lower symbolic calls, complete the runner's
-dynamic-module arm, and generalize cold artifact loading across factory kinds.
+dynamic-module arm, materialize runtime `lift`/handler arguments with node-local
+cold readiness, and generalize source-space-aware artifact loading across
+factory kinds.
 
 ### Stage 3: Pattern closure conversion
 
@@ -982,7 +1151,8 @@ Each stage is independently testable and revertible.
   root-token provenance, and live-to-canonical protocol traversal.
 - `packages/runner`: params pseudo-alias types and binding functions, hidden
   params-cell metadata/lifecycle, dynamic-module supervision, generic artifact
-  resolution/loading, runner materialization, and compatibility adapters.
+  resolution/loading, runner materialization, scheduled action/event readiness
+  and retry ownership, artifact-source context, and compatibility adapters.
 - `packages/schema-generator`: recognize all factory kinds before generic
   callable handling and emit public factory schemas.
 - `packages/ts-transformers`: capture analysis, nested-pattern closure rewrite,
@@ -1028,8 +1198,25 @@ Each stage is independently testable and revertible.
 
 ### Runtime
 
-- Invoke stored pattern, module, and handler factories through symbolic inputs.
-- Change a factory-valued cell and verify teardown/re-instantiation.
+- Invoke stored pattern, module, and handler factories through symbolic inputs;
+  verify initial absence subscribes before the first value and equal canonical
+  replay is a no-op.
+- Change a direct symbolic factory binding and verify switch-latest teardown,
+  stable output identity, last-committed output behavior, and stale async-write
+  fencing.
+- Deliver every factory kind as a warm and genuinely cold `lift` argument,
+  handler context value, and handler event value. Assert authored callbacks see
+  ordinary callables and never shells/promises.
+- Gate cold load deterministically and cover A-loading then B-selected, owner
+  teardown during load, invalid-then-valid recovery, and a factory produced by
+  another node in the same parent graph without parent-start deadlock.
+- Verify a lift keeps its normal last-successful result/child until a successful
+  rerun atomically replaces it; do not apply direct-node immediate teardown to
+  general lift semantics.
+- Requeue a cold handler event with the same durable event identity; assert no
+  body or normal receipt before readiness, transient retry, terminal
+  deterministic rejection, per-event context reread, and by-value event
+  snapshot behavior.
 - Bind closure params through the separate params root and preserve public
   argument fields with the same names.
 - Resume and tear down the deterministic hidden params cell, including nested
@@ -1039,7 +1226,12 @@ Each stage is independently testable and revertible.
   `$implRef`, and exercise schema-light `byRef()` resolution.
 - Preserve `asScope()` and every `inSpace()` selector form across round-trip.
 - Resume all factory kinds cold by content-addressed identity.
-- Preserve CFC labels and fail closed on forged refs or metadata.
+- Resolve a cross-space linked factory from its artifact source while applying
+  `spaceSelector` only as the child execution target; verify by-value transport
+  replicates the artifact closure without adding source authority to the wire.
+- Preserve CFC labels on the selection read and fail closed on forged refs or
+  metadata.
+- Pin Stage 0's warm synchronous `run()` and cold asynchronous `setup()` split.
 
 ### Tool migration
 
@@ -1059,7 +1251,10 @@ This proposal is complete when:
    and round-trips through a runner as a callable `Factory@1` value; keyless and
    session-only factories fail durable encoding.
 2. Arbitrary functions remain rejected.
-3. Factory-valued pattern inputs and captures invoke through one dynamic path.
+3. Factory-valued eager pattern inputs and captures invoke through one dynamic
+   supervisor path; factory values delivered to `lift` and handler callbacks
+   pass through the same runner materialization chokepoint and then use the
+   ordinary direct callable path.
 4. Nested patterns preserve lexical semantics through callback argument 1 and
    exactly one transformer-only `.curry(params)` operation.
 5. Public pattern inputs are never merged with closure params.
