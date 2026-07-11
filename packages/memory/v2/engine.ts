@@ -1026,8 +1026,8 @@ export interface SchedulerObservationSnapshotWithState
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
-  // Session that persisted the observation — the adoption fan-out needs it
-  // to gate reader-isolated (user/session-scope) rows by writer principal.
+  // Session that persisted the observation. Execution-context filtering owns
+  // isolation; this remains replay provenance and live-adoption echo metadata.
   writerSessionId?: string;
 }
 
@@ -2233,10 +2233,8 @@ const upsertSchedulerObservationTransaction = (
   } else if (latest) {
     // Identical-payload coalesce (a later re-run of the same observation, and
     // possibly from a DIFFERENT writer): refresh ONLY the writer session key.
-    // That key gates reader-isolated adoption (C6,
-    // incremental-observation-adoption.md), so it must name the LATEST writer,
-    // not whoever created the row first — else a user-scope row is offered to
-    // the wrong principal or withheld from the actual latest writer.
+    // Context-qualified ownership handles isolation; the latest writer remains
+    // useful for replay provenance and live-adoption echo suppression.
     //
     // Deliberately does NOT touch the observation row's commit_seq. Snapshot
     // commit_seq carries the latest delivery slot; preserving the observation
@@ -3201,7 +3199,11 @@ function schedulerRuntimeExceedsSummary(
   observation: SchedulerActionObservation,
   summary: CompleteActionScopeSummary,
 ): boolean {
-  const writeEnvelopes = [...summary.writes, ...summary.directOutputs];
+  const writeEnvelopes = [
+    ...summary.writes,
+    ...summary.materializerWriteEnvelopes,
+    ...summary.directOutputs,
+  ];
   return [...observation.reads, ...observation.shallowReads].some((address) =>
     !schedulerAddressCoveredBy(address, summary.reads)
   ) ||
@@ -3585,8 +3587,8 @@ function insertSchedulerObservationRow(
     commitSeq: number | null;
     observedAtSeq: number;
     executionContextKey: SchedulerExecutionContextKey;
-    // Commit session key of the writer (resolveCommitSessionKey) — the
-    // adoption fan-out gates reader-isolated rows by its principal segment.
+    // Commit session key of the writer (resolveCommitSessionKey), retained as
+    // replay provenance and live-adoption echo metadata only.
     writerSessionId: string | null;
     observation: SchedulerActionObservation;
     payload: string;
@@ -3678,7 +3680,7 @@ function updateSchedulerObservationRow(
 }
 
 // Refresh ONLY the writer session key of an existing observation row. Used on
-// the identical-payload coalesce path so the C6 adoption gate names the latest
+// the identical-payload coalesce path so echo suppression names the latest
 // writer WITHOUT disturbing commit_seq (the adoption-window carrier — see the
 // coalesce branch in upsertSchedulerObservationTransaction).
 function updateSchedulerObservationWriterSession(
