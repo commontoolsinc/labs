@@ -27,7 +27,9 @@ export function ifElse(
       // already-resolved target loses the information that a missing document
       // was reached through a link, which is what distinguishes syncing from
       // authoritative undefined.
-      value: readAvailabilityAwareCell(tx, sourceCondition),
+      value: readAvailabilityAwareCell(tx, sourceCondition, {
+        surfaceReplicaSyncing: true,
+      }),
     };
   };
 

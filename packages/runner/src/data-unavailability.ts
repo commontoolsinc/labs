@@ -184,11 +184,15 @@ export function selectUnavailableInput(
  *
  * The initial raw read is only a link-topology probe. A concrete marker is then
  * read normally so it remains a real data dependency; otherwise the ordinary
- * schema-aware read supplies the usable value.
+ * schema-aware read supplies the usable value. Lazy control builtins opt into
+ * surfacing unresolved replica coverage as `syncing`; list coordinators leave
+ * an unmaterialized child as undefined so their existing settle-and-republish
+ * machinery can distinguish it from an explicit unavailable marker.
  */
 export function readAvailabilityAwareCell<T>(
   tx: IExtendedStorageTransaction,
   cell: Cell<T>,
+  options: { surfaceReplicaSyncing?: boolean } = {},
 ): T | DataUnavailableVariant | undefined {
   const resolved = cell.withTx(tx).resolveAsCell();
   const raw = tx.runWithAmbientReadMeta(
@@ -199,7 +203,7 @@ export function readAvailabilityAwareCell<T>(
     return resolved.withTx(tx).getRaw() as DataUnavailableVariant;
   }
 
-  if (raw === undefined) {
+  if (raw === undefined && options.surfaceReplicaSyncing) {
     // A raw miss is ambiguous: it can be an authored/authoritative undefined,
     // or a linked selector whose local replica coverage is still loading.
     // Probe the source position through a schema which admits every defined

@@ -37,6 +37,7 @@ export function when(
     const condition = readAvailabilityAwareCell(
       tx,
       inputsWithLog.key("condition"),
+      { surfaceReplicaSyncing: true },
     );
 
     if (isDataUnavailable(condition)) {
