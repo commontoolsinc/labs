@@ -418,7 +418,7 @@ CREATE TABLE IF NOT EXISTS execution_lease (
   host_id                 TEXT    NOT NULL,
   on_behalf_of            TEXT    NOT NULL,
   state                   TEXT    NOT NULL,
-  expires_at              INTEGER NOT NULL,
+  expires_at              REAL    NOT NULL,
   CHECK (lease_generation > 0),
   CHECK (state IN ('active', 'draining', 'revoked')),
   FOREIGN KEY (branch) REFERENCES branch(name)
@@ -1582,6 +1582,52 @@ COMMIT;
 `);
 };
 
+const migrateExecutionLeaseExpiry = (database: Database): void => {
+  const column = (database.prepare(`PRAGMA table_info("execution_lease")`)
+    .all() as Array<{ name: string; type: string }>).find((row) =>
+      row.name === "expires_at"
+    );
+  if (column?.type.toUpperCase() === "REAL") return;
+  database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE execution_lease RENAME TO execution_lease_expiry_migration;
+
+CREATE TABLE execution_lease (
+  branch                 TEXT NOT NULL PRIMARY KEY,
+  lease_generation       INTEGER NOT NULL,
+  host_id                 TEXT NOT NULL,
+  on_behalf_of            TEXT NOT NULL,
+  state                   TEXT NOT NULL,
+  expires_at              REAL NOT NULL,
+  CHECK (lease_generation > 0),
+  CHECK (state IN ('active', 'draining', 'revoked')),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
+INSERT INTO execution_lease (
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+)
+SELECT
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  CAST(expires_at AS REAL)
+FROM execution_lease_expiry_migration;
+
+DROP TABLE execution_lease_expiry_migration;
+
+COMMIT;
+`);
+};
+
 const migrateSchedulerReadIndexOwnerSpace = (database: Database): void => {
   if (hasColumn(database, "scheduler_read_index", "owner_space")) {
     return;
@@ -2430,6 +2476,7 @@ export const open = async (
     LIMIT 1
   `).get() !== undefined;
   database.exec(INIT(!schedulerSchemaExists));
+  migrateExecutionLeaseExpiry(database);
   migrateScopedEntityTables(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
@@ -2632,7 +2679,7 @@ VALUES (
   :host_id,
   :on_behalf_of,
   :state,
-  :expires_at
+  CAST(:expires_at AS REAL)
 )
 ON CONFLICT (branch) DO UPDATE SET
   lease_generation = excluded.lease_generation,
@@ -2645,7 +2692,7 @@ ON CONFLICT (branch) DO UPDATE SET
 const UPDATE_EXECUTION_LEASE = `
 UPDATE execution_lease
 SET state = :state,
-    expires_at = :expires_at
+    expires_at = CAST(:expires_at AS REAL)
 WHERE branch = :branch
   AND lease_generation = :lease_generation
   AND host_id = :host_id
@@ -2773,7 +2820,7 @@ const acquireExecutionLeaseTransaction = (
     host_id: options.hostId,
     on_behalf_of: options.onBehalfOf,
     state: "active",
-    expires_at: expiresAt,
+    expires_at: String(expiresAt),
   });
   return {
     version: 1,
@@ -2842,7 +2889,7 @@ const renewExecutionLeaseTransaction = (
     host_id: current.host_id,
     on_behalf_of: current.on_behalf_of,
     state: "active",
-    expires_at: expiresAt,
+    expires_at: String(expiresAt),
   });
   return {
     ...toExecutionLease(options.lease.space, current),
@@ -2880,7 +2927,7 @@ const beginExecutionLeaseDrainTransaction = (
     host_id: current.host_id,
     on_behalf_of: current.on_behalf_of,
     state: "draining",
-    expires_at: expiresAt,
+    expires_at: String(expiresAt),
   });
   return {
     ...toExecutionLease(options.lease.space, current),
@@ -2916,7 +2963,7 @@ const revokeExecutionLeaseTransaction = (
     host_id: current.host_id,
     on_behalf_of: current.on_behalf_of,
     state: "revoked",
-    expires_at: expiresAt,
+    expires_at: String(expiresAt),
   });
   return {
     ...toExecutionLease(options.lease.space, current),
@@ -2956,7 +3003,7 @@ const expireExecutionLeaseTransaction = (
       host_id: current.host_id,
       on_behalf_of: current.on_behalf_of,
       state: "revoked",
-      expires_at: current.expires_at,
+      expires_at: String(current.expires_at),
     });
   }
   return {
