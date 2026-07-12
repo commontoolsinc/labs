@@ -25,6 +25,8 @@ import {
   type ExecutionLease,
   type InputBasisSeq,
   isEntityDocument,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionStatus,
   type Operation,
   type PatchOp,
   type Reference,
@@ -421,6 +423,16 @@ CREATE TABLE IF NOT EXISTS execution_lease (
   expires_at              REAL    NOT NULL,
   CHECK (lease_generation > 0),
   CHECK (state IN ('active', 'draining', 'revoked')),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
+CREATE TABLE IF NOT EXISTS legacy_background_exclusion (
+  branch                 TEXT    NOT NULL PRIMARY KEY,
+  exclusion_generation   INTEGER NOT NULL,
+  holder_id              TEXT    NOT NULL,
+  service_principal      TEXT    NOT NULL,
+  expires_at             REAL    NOT NULL,
+  CHECK (exclusion_generation > 0),
   FOREIGN KEY (branch) REFERENCES branch(name)
 );
 
@@ -877,6 +889,38 @@ export interface RevokeExecutionLeaseOptions {
 export interface ExpireExecutionLeaseOptions {
   /** Expiry may revoke only this exact owner/generation. */
   lease: ExecutionLease;
+  nowMs: number | (() => number);
+}
+
+export interface AcquireLegacyBackgroundExclusionOptions {
+  space: string;
+  branch: BranchName;
+  holderId: string;
+  servicePrincipal: string;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
+  ttlMs: number;
+  drainTtlMs: number;
+  /** Canonical service-principal check inside the IMMEDIATE transaction. */
+  authorizeService?: (engine: Engine) => boolean;
+}
+
+export interface CurrentLegacyBackgroundExclusionOptions {
+  space: string;
+  branch: BranchName;
+  nowMs: number | (() => number);
+}
+
+export interface RenewLegacyBackgroundExclusionOptions {
+  exclusion: LegacyBackgroundExclusion;
+  nowMs: number | (() => number);
+  ttlMs: number;
+  drainTtlMs: number;
+  authorizeService?: (engine: Engine) => boolean;
+}
+
+export interface ReleaseLegacyBackgroundExclusionOptions {
+  exclusion: LegacyBackgroundExclusion;
   nowMs: number | (() => number);
 }
 
@@ -1356,6 +1400,14 @@ type ExecutionLeaseRow = {
   host_id: string;
   on_behalf_of: string;
   state: ExecutionLease["state"];
+  expires_at: number;
+};
+
+type LegacyBackgroundExclusionRow = {
+  branch: string;
+  exclusion_generation: number;
+  holder_id: string;
+  service_principal: string;
   expires_at: number;
 };
 
@@ -2705,6 +2757,48 @@ WHERE branch = :branch
   AND on_behalf_of = :on_behalf_of
 `;
 
+const SELECT_LEGACY_BACKGROUND_EXCLUSION = `
+SELECT
+  branch,
+  exclusion_generation,
+  holder_id,
+  service_principal,
+  expires_at
+FROM legacy_background_exclusion
+WHERE branch = :branch
+`;
+
+const UPSERT_LEGACY_BACKGROUND_EXCLUSION = `
+INSERT INTO legacy_background_exclusion (
+  branch,
+  exclusion_generation,
+  holder_id,
+  service_principal,
+  expires_at
+)
+VALUES (
+  :branch,
+  :exclusion_generation,
+  :holder_id,
+  :service_principal,
+  CAST(:expires_at AS REAL)
+)
+ON CONFLICT (branch) DO UPDATE SET
+  exclusion_generation = excluded.exclusion_generation,
+  holder_id = excluded.holder_id,
+  service_principal = excluded.service_principal,
+  expires_at = excluded.expires_at
+`;
+
+const UPDATE_LEGACY_BACKGROUND_EXCLUSION = `
+UPDATE legacy_background_exclusion
+SET expires_at = CAST(:expires_at AS REAL)
+WHERE branch = :branch
+  AND exclusion_generation = :exclusion_generation
+  AND holder_id = :holder_id
+  AND service_principal = :service_principal
+`;
+
 const assertLeaseClock = (name: string, value: number): void => {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new TypeError(`${name} must be a non-negative integer`);
@@ -2796,6 +2890,109 @@ const leaseIsLive = (row: ExecutionLeaseRow, nowMs: number): boolean =>
   (row.state === "active" || row.state === "draining") &&
   row.expires_at > nowMs;
 
+const assertLegacyBackgroundExclusion = (
+  exclusion: LegacyBackgroundExclusion,
+): void => {
+  if (exclusion.version !== 1) {
+    throw new TypeError("unsupported legacy background exclusion version");
+  }
+  for (
+    const [name, value] of [
+      ["space", exclusion.space],
+      ["holder id", exclusion.holderId],
+      ["service principal", exclusion.servicePrincipal],
+    ] as const
+  ) {
+    if (value.length === 0) {
+      throw new TypeError(`legacy background exclusion ${name} is required`);
+    }
+  }
+  if (
+    !Number.isSafeInteger(exclusion.exclusionGeneration) ||
+    exclusion.exclusionGeneration <= 0
+  ) {
+    throw new TypeError(
+      "legacy background exclusion generation must be a positive integer",
+    );
+  }
+  assertLeaseClock(
+    "legacy background exclusion expiry",
+    exclusion.expiresAt,
+  );
+};
+
+const backgroundExclusionExpiry = (nowMs: number, ttlMs: number): number => {
+  assertLeaseClock("legacy background exclusion server time", nowMs);
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
+    throw new TypeError(
+      "legacy background exclusion TTL must be a positive integer",
+    );
+  }
+  const expiresAt = nowMs + ttlMs;
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new TypeError("legacy background exclusion expiry must be safe");
+  }
+  return expiresAt;
+};
+
+const selectLegacyBackgroundExclusionRow = (
+  engine: Engine,
+  branch: BranchName,
+): LegacyBackgroundExclusionRow | null =>
+  (engine.database.prepare(SELECT_LEGACY_BACKGROUND_EXCLUSION).get({
+    branch,
+  }) as LegacyBackgroundExclusionRow | undefined) ?? null;
+
+const toLegacyBackgroundExclusion = (
+  space: string,
+  row: LegacyBackgroundExclusionRow,
+): LegacyBackgroundExclusion => ({
+  version: 1,
+  space,
+  branch: row.branch,
+  exclusionGeneration: row.exclusion_generation,
+  holderId: row.holder_id,
+  servicePrincipal: row.service_principal,
+  expiresAt: row.expires_at,
+});
+
+const backgroundExclusionOwnerMatches = (
+  row: LegacyBackgroundExclusionRow,
+  expected: Pick<
+    LegacyBackgroundExclusion,
+    "exclusionGeneration" | "holderId" | "servicePrincipal"
+  >,
+): boolean =>
+  row.exclusion_generation === expected.exclusionGeneration &&
+  row.holder_id === expected.holderId &&
+  row.service_principal === expected.servicePrincipal;
+
+const backgroundExclusionIsLive = (
+  row: LegacyBackgroundExclusionRow,
+  nowMs: number,
+): boolean => row.expires_at > nowMs;
+
+const drainClientLeaseForBackground = (
+  engine: Engine,
+  branch: BranchName,
+  nowMs: number,
+  drainTtlMs: number,
+): number | undefined => {
+  const current = selectExecutionLeaseRow(engine, branch);
+  if (current === null || !leaseIsLive(current, nowMs)) return undefined;
+  const drainDeadline = leaseExpiry(nowMs, drainTtlMs);
+  const expiresAt = Math.min(current.expires_at, drainDeadline);
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "draining",
+    expires_at: String(expiresAt),
+  });
+  return expiresAt;
+};
+
 const branchIsActive = (engine: Engine, branch: BranchName): boolean => {
   const row = engine.statements.selectBranchStatus.get({ branch }) as
     | { status: string }
@@ -2817,6 +3014,17 @@ const acquireExecutionLeaseTransaction = (
     options.nowMs,
   );
   const expiresAt = leaseExpiry(nowMs, options.ttlMs);
+
+  const backgroundExclusion = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.branch,
+  );
+  if (
+    backgroundExclusion !== null &&
+    backgroundExclusionIsLive(backgroundExclusion, nowMs)
+  ) {
+    return null;
+  }
 
   const current = selectExecutionLeaseRow(engine, options.branch);
   if (current !== null && leaseIsLive(current, nowMs)) {
@@ -2901,6 +3109,16 @@ const renewExecutionLeaseTransaction = (
     options.nowMs,
   );
   const expiresAt = leaseExpiry(nowMs, options.ttlMs);
+  const backgroundExclusion = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.lease.branch,
+  );
+  if (
+    backgroundExclusion !== null &&
+    backgroundExclusionIsLive(backgroundExclusion, nowMs)
+  ) {
+    return null;
+  }
   const current = selectExecutionLeaseRow(engine, options.lease.branch);
   if (
     current === null || current.state !== "active" ||
@@ -3059,6 +3277,199 @@ export const expireExecutionLease = (
     engine,
     options,
   );
+
+const acquireLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: AcquireLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null => {
+  assertLeaseIdentityPart("space", options.space);
+  if (options.holderId.length === 0) {
+    throw new TypeError("legacy background exclusion holder id is required");
+  }
+  if (options.servicePrincipal.length === 0) {
+    throw new TypeError(
+      "legacy background exclusion service principal is required",
+    );
+  }
+  ensureActiveBranch(engine, options.branch);
+  if (options.authorizeService?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const expiresAt = backgroundExclusionExpiry(nowMs, options.ttlMs);
+  const current = selectLegacyBackgroundExclusionRow(engine, options.branch);
+  let exclusion: LegacyBackgroundExclusion;
+  if (current !== null && backgroundExclusionIsLive(current, nowMs)) {
+    if (
+      current.holder_id !== options.holderId ||
+      current.service_principal !== options.servicePrincipal
+    ) {
+      return null;
+    }
+    exclusion = toLegacyBackgroundExclusion(options.space, current);
+  } else {
+    const exclusionGeneration = (current?.exclusion_generation ?? 0) + 1;
+    if (!Number.isSafeInteger(exclusionGeneration)) {
+      throw new TypeError(
+        "legacy background exclusion generation exhausted",
+      );
+    }
+    engine.database.prepare(UPSERT_LEGACY_BACKGROUND_EXCLUSION).run({
+      branch: options.branch,
+      exclusion_generation: exclusionGeneration,
+      holder_id: options.holderId,
+      service_principal: options.servicePrincipal,
+      expires_at: String(expiresAt),
+    });
+    exclusion = {
+      version: 1,
+      space: options.space,
+      branch: options.branch,
+      exclusionGeneration,
+      holderId: options.holderId,
+      servicePrincipal: options.servicePrincipal,
+      expiresAt,
+    };
+  }
+  const blockedUntil = drainClientLeaseForBackground(
+    engine,
+    options.branch,
+    nowMs,
+    options.drainTtlMs,
+  );
+  return {
+    exclusion,
+    ready: blockedUntil === undefined,
+    ...(blockedUntil === undefined ? {} : { blockedUntil }),
+  };
+};
+
+/** Reserve one lane for legacy background execution and drain any client. */
+export const acquireLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: AcquireLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null =>
+  engine.database.transaction(acquireLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const currentLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: CurrentLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null => {
+  assertLeaseIdentityPart("space", options.space);
+  if (!branchIsActive(engine, options.branch)) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const current = selectLegacyBackgroundExclusionRow(engine, options.branch);
+  return current !== null && backgroundExclusionIsLive(current, nowMs)
+    ? toLegacyBackgroundExclusion(options.space, current)
+    : null;
+};
+
+export const currentLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: CurrentLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null =>
+  engine.database.transaction(currentLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const renewLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: RenewLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null => {
+  assertLegacyBackgroundExclusion(options.exclusion);
+  if (!branchIsActive(engine, options.exclusion.branch)) return null;
+  if (options.authorizeService?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const expiresAt = backgroundExclusionExpiry(nowMs, options.ttlMs);
+  const current = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.exclusion.branch,
+  );
+  if (
+    current === null || !backgroundExclusionIsLive(current, nowMs) ||
+    !backgroundExclusionOwnerMatches(current, options.exclusion)
+  ) {
+    return null;
+  }
+  engine.database.prepare(UPDATE_LEGACY_BACKGROUND_EXCLUSION).run({
+    branch: current.branch,
+    exclusion_generation: current.exclusion_generation,
+    holder_id: current.holder_id,
+    service_principal: current.service_principal,
+    expires_at: String(expiresAt),
+  });
+  const exclusion = {
+    ...toLegacyBackgroundExclusion(options.exclusion.space, current),
+    expiresAt,
+  };
+  const blockedUntil = drainClientLeaseForBackground(
+    engine,
+    current.branch,
+    nowMs,
+    options.drainTtlMs,
+  );
+  return {
+    exclusion,
+    ready: blockedUntil === undefined,
+    ...(blockedUntil === undefined ? {} : { blockedUntil }),
+  };
+};
+
+/** Refresh one exact background reservation and report client-drain state. */
+export const renewLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: RenewLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null =>
+  engine.database.transaction(renewLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const releaseLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: ReleaseLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null => {
+  assertLegacyBackgroundExclusion(options.exclusion);
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const current = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.exclusion.branch,
+  );
+  if (
+    current === null ||
+    !backgroundExclusionOwnerMatches(current, options.exclusion)
+  ) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, nowMs);
+  engine.database.prepare(UPDATE_LEGACY_BACKGROUND_EXCLUSION).run({
+    branch: current.branch,
+    exclusion_generation: current.exclusion_generation,
+    holder_id: current.holder_id,
+    service_principal: current.service_principal,
+    expires_at: String(expiresAt),
+  });
+  return {
+    ...toLegacyBackgroundExclusion(options.exclusion.space, current),
+    expiresAt,
+  };
+};
+
+/** Release only the exact holder/generation named by the trusted host. */
+export const releaseLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: ReleaseLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null =>
+  engine.database.transaction(releaseLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
 
 const assertExecutionLeaseFenceTransaction = (
   engine: Engine,

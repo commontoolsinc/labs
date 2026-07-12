@@ -20,6 +20,7 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "snapshot",
   "branch",
   "execution_lease",
+  "legacy_background_exclusion",
   "blob_store",
   "authorization",
   "invocation",

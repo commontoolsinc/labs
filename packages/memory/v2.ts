@@ -413,6 +413,29 @@ export interface ExecutionLease {
   expiresAt: number;
 }
 
+/**
+ * Durable reservation for the legacy Background Piece Service. While live it
+ * excludes client-sponsored execution leases for the same space/branch.
+ */
+export interface LegacyBackgroundExclusion {
+  version: 1;
+  space: string;
+  branch: BranchName;
+  exclusionGeneration: number;
+  holderId: string;
+  servicePrincipal: string;
+  /** Unix milliseconds assigned from the server clock. */
+  expiresAt: number;
+}
+
+export interface LegacyBackgroundExclusionStatus {
+  exclusion: LegacyBackgroundExclusion;
+  /** True only when no live client execution lease remains in the lane. */
+  ready: boolean;
+  /** Deadline of the draining client lease when `ready` is false. */
+  blockedUntil?: number;
+}
+
 declare const inputBasisSeqBrand: unique symbol;
 declare const acceptedCommitSeqBrand: unique symbol;
 

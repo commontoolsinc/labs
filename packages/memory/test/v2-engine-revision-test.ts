@@ -30,6 +30,7 @@ Deno.test("memory v2 engine bootstraps the revision schema", async () => {
         "execution_lease",
         "head",
         "invocation",
+        "legacy_background_exclusion",
         "revision",
         "scheduler_action_snapshot",
         "scheduler_action_state",
