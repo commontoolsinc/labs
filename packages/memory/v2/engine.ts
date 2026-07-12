@@ -1085,6 +1085,7 @@ export interface SchedulerWriterCandidate {
   implementationFingerprint: string;
   runtimeFingerprint: string;
   status: SchedulerActionObservation["status"];
+  errorFingerprint?: string;
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
@@ -3103,7 +3104,12 @@ export const writersForTargets = (
 
     for (const row of rows) {
       if (!isSchedulerWriteIndexKind(row.write_kind)) continue;
-      const writePath = decodeSchedulerPath(row.write_path);
+      let writePath: string[];
+      try {
+        writePath = decodeSchedulerPath(row.write_path);
+      } catch {
+        continue;
+      }
       if (!schedulerPathsOverlap(writePath, target.path, false)) continue;
 
       let observation: SchedulerActionObservation | undefined;
@@ -3154,6 +3160,9 @@ export const writersForTargets = (
             implementationFingerprint: observation.implementationFingerprint,
             runtimeFingerprint: observation.runtimeFingerprint,
             status: observation.status,
+            ...(observation.errorFingerprint !== undefined
+              ? { errorFingerprint: observation.errorFingerprint }
+              : {}),
             ...(row.direct_dirty_seq !== null
               ? { directDirtySeq: row.direct_dirty_seq }
               : {}),
@@ -5122,10 +5131,13 @@ function encodeSchedulerPath(path: readonly string[]): string {
 
 function decodeSchedulerPath(payload: string): string[] {
   const path = decodeMemoryBoundary(payload);
-  if (!Array.isArray(path)) {
-    throw new Error("scheduler paths must be arrays");
+  if (
+    !Array.isArray(path) ||
+    !path.every((part): part is string => typeof part === "string")
+  ) {
+    throw new Error("scheduler paths must be arrays of strings");
   }
-  return path.map((part) => String(part));
+  return path;
 }
 
 function schedulerPathsOverlap(
