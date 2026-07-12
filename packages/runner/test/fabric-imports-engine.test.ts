@@ -183,6 +183,70 @@ describe("Engine fabric imports", () => {
     });
   });
 
+  it("binds PolicyOf to the defining identity of a pinned cf import", async () => {
+    const dependency = await publish({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import {
+            cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+          } from "commonfabric/cfc";
+          export const release = exchangeRule({
+            appliesTo: THIS_POLICY,
+            pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+            post: { addAlternatives: [cfcPattern.user(v("user"))] },
+          });
+          export const rules = exchangeRules([release]);
+        `,
+      }],
+    });
+    const specifier = `cf:pattern:${dependency.entryIdentity}`;
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { Confidential, toSchema } from "commonfabric";
+          import type { PolicyOf } from "commonfabric/cfc";
+          import { rules } from "${specifier}";
+          export const schema = toSchema<
+            Confidential<string, [PolicyOf<typeof rules>]>
+          >();
+        `,
+      }],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+    });
+    const definingModule = compiled.modules.find((module) =>
+      module.identity === dependency.entryIdentity
+    );
+    expect(definingModule?.policyManifests).toHaveLength(1);
+    const artifact = definingModule?.policyManifests?.[0] as
+      | { policyDigest: string }
+      | undefined;
+
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const reference = (evaluated.main?.schema as {
+      ifc?: { confidentiality?: Record<string, unknown>[] };
+    }).ifc?.confidentiality?.[0];
+    expect(reference).toMatchObject({
+      policyRefKind: "module",
+      moduleIdentity: dependency.entryIdentity,
+      symbol: "rules",
+      policyDigest: artifact?.policyDigest,
+      subject: { __ctOwningSpace: true },
+    });
+    expect(reference?.moduleIdentity).not.toBe(compiled.entryIdentity);
+  });
+
   it("uses the mounted source for TypeScript diagnostics", async () => {
     const dependency = await publish(dependencyProgram(1));
     const specifier = `cf:pattern:${dependency.entryIdentity}`;
