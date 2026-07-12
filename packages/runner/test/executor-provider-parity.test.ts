@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import type {
@@ -275,8 +275,10 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     serverPrimaryExecutionClaimRoutingV1: true,
     serverPrimaryExecutionBuiltinPassivityV1: true,
   } as const;
+  let sessionAuthorizationCalls = 0;
   const server = new Server({
     authorizeSessionOpen(message) {
+      sessionAuthorizationCalls++;
       const value = (message.authorization as { principal?: unknown })
         ?.principal;
       return typeof value === "string" ? value : undefined;
@@ -307,6 +309,13 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     {},
     authorizeSessionOpen,
   );
+  assertEquals(sessionAuthorizationCalls, 1);
+  const actionId = "action:executor-provenance";
+  const baseObservation = schedulerObservationFor(space, actionId);
+  await observer.setExecutionDemand("", [baseObservation.pieceId]);
+  const lease = await server.acquireExecutionLease(space, "");
+  assertExists(lease);
+  assertEquals(lease.onBehalfOf, principal.did());
   await observer.transact({
     localSeq: 1,
     reads: { confirmed: [], pending: [] },
@@ -327,8 +336,6 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     },
   }]);
 
-  const actionId = "action:executor-provenance";
-  const baseObservation = schedulerObservationFor(space, actionId);
   const claim = server.setExecutionClaim({
     branch: "",
     space,
@@ -338,13 +345,12 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     actionKind: "computation",
     implementationFingerprint: baseObservation.implementationFingerprint,
     runtimeFingerprint: baseObservation.runtimeFingerprint,
-    leaseGeneration: 23,
+    leaseGeneration: lease.leaseGeneration,
   });
   const channel = createHostProviderChannel({
     server,
     space,
-    authorizeSessionOpen,
-    executionLeaseGeneration: claim.leaseGeneration,
+    executionLease: lease,
   });
   const storage = HostStorageManager.connect({
     port: channel.port,
@@ -360,6 +366,13 @@ Deno.test("executor host provider binds accepted action provenance to its authen
   });
 
   try {
+    const signing = await storage.as.sign(new Uint8Array() as never);
+    assert(signing.error instanceof Error);
+    assertEquals(
+      signing.error.message,
+      "executor provider principal has no Worker signing key",
+    );
+
     const replica = storage.open(space).replica;
     assert(replica.commitNative);
     const result = await replica.commitNative({
@@ -388,6 +401,7 @@ Deno.test("executor host provider binds accepted action provenance to its authen
       },
     });
     assertEquals(result.error, undefined);
+    assertEquals(sessionAuthorizationCalls, 1);
 
     const snapshots = await observer.listSchedulerActionSnapshots({
       actionId,

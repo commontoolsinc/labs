@@ -25,6 +25,7 @@ import {
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type AcceptedCommitEvent,
+  type ExecutionLeaseHandle,
   parseClientMessage,
   type Server,
 } from "@commonfabric/memory/v2/server";
@@ -53,17 +54,29 @@ type ProviderPortMessage =
   | { type: "accepted-commit"; notice: AcceptedCommitNotice }
   | { type: "close"; message?: string };
 
-export interface HostProviderChannelOptions {
+interface HostProviderChannelBaseOptions {
   server: Server;
   space: MemorySpace;
   branch?: BranchName;
+}
+
+interface UnleasedHostProviderChannelOptions {
   /** Host-owned grant creation. This callback and its credentials never cross
    *  the MessagePort into the Worker. */
   authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory;
-  /** Host-only lease generation for canonical action provenance. W1.1 binds
-   * this to the durable fenced ExecutionLease before creating the channel. */
-  executionLeaseGeneration?: number;
+  executionLease?: never;
 }
+
+interface LeasedHostProviderChannelOptions {
+  /** Exact host-only authority bound before the memory handshake. The handle
+   * remains in this realm and is never encoded onto the MessagePort. */
+  executionLease: ExecutionLeaseHandle;
+  authorizeSessionOpen?: never;
+}
+
+export type HostProviderChannelOptions =
+  & HostProviderChannelBaseOptions
+  & (UnleasedHostProviderChannelOptions | LeasedHostProviderChannelOptions);
 
 export interface HostProviderChannel {
   /** Opaque endpoint transferred to the executor Worker. */
@@ -159,7 +172,9 @@ const pinBranch = (
  * Create the host half of an executor provider. All memory frames still enter
  * through Server.connect/Connection.receive, preserving handshake ordering,
  * session ownership, ACL/CFC/conflict checks, and post-commit hooks. The host
- * overwrites session.open authorization with its own grant callback.
+ * Unleased compatibility channels overwrite session.open authorization with
+ * their host-owned grant callback. Lease-bound executor channels instead bind
+ * exact host authority before the handshake and never request a Worker grant.
  */
 export function createHostProviderChannel(
   options: HostProviderChannelOptions,
@@ -171,7 +186,6 @@ export function createHostProviderChannel(
   let disposed = false;
   let receiving = Promise.resolve();
   let unsubscribeAcceptedCommits = () => {};
-  let unbindExecutionSession = () => {};
 
   const connection = options.server.connect((message) => {
     if (disposed) return;
@@ -181,20 +195,6 @@ export function createHostProviderChannel(
         authContext = hello.sessionOpen;
       }
     }
-    if (
-      options.executionLeaseGeneration !== undefined &&
-      message.type === "response" && "ok" in message &&
-      typeof message.ok === "object" && message.ok !== null &&
-      "sessionId" in message.ok &&
-      typeof message.ok.sessionId === "string"
-    ) {
-      unbindExecutionSession();
-      unbindExecutionSession = options.server.bindExecutionSession(
-        options.space,
-        message.ok.sessionId,
-        { leaseGeneration: options.executionLeaseGeneration },
-      );
-    }
     hostPort.postMessage(
       {
         type: "memory",
@@ -202,13 +202,14 @@ export function createHostProviderChannel(
       } satisfies ProviderPortMessage,
     );
   });
+  if (options.executionLease !== undefined) {
+    connection.bindExecutionLease(options.executionLease);
+  }
 
   const closeHost = (message?: string) => {
     if (disposed) return;
     disposed = true;
     unsubscribeAcceptedCommits();
-    unbindExecutionSession();
-    unbindExecutionSession = () => {};
     connection.close();
     try {
       hostPort.postMessage(
@@ -258,6 +259,10 @@ export function createHostProviderChannel(
       return;
     }
     if (parsed.type === "session.open") {
+      if (options.executionLease !== undefined) {
+        await connection.receive(encodeMemoryBoundary(parsed));
+        return;
+      }
       if (authContext === null) {
         sendError(parsed.requestId, {
           name: "ProtocolError",
