@@ -441,7 +441,10 @@ class HostReplicaSession implements ReplicaSession {
       this.#mutation = refresh.catch((error) => {
         if (
           !(error instanceof Error) ||
-          !error.message.includes("memory session closed")
+          (!error.message.includes("memory session closed") &&
+            !error.message.includes("memory client closed") &&
+            !error.message.includes("memory client is closed") &&
+            !error.message.includes("transport closed"))
         ) {
           console.warn("executor accepted-commit refresh failed", error);
         }
@@ -461,8 +464,31 @@ class HostReplicaSession implements ReplicaSession {
     return this.session.serverSeq;
   }
 
-  transact(commit: ClientCommit) {
-    return this.session.transact({ ...commit, branch: this.branch });
+  async transact(commit: ClientCommit) {
+    try {
+      return await this.session.transact({ ...commit, branch: this.branch });
+    } catch (error) {
+      const readyToRetry = (error as { readyToRetry?: unknown })
+        ?.readyToRetry;
+      if (
+        error instanceof Error && error.name === "ConflictError" &&
+        typeof readyToRetry === "function"
+      ) {
+        (error as Error & { readyToRetry: () => Promise<void> }).readyToRetry =
+          async () => {
+            await Promise.resolve(readyToRetry.call(error));
+            this.#view?.applySync({
+              type: "sync",
+              fromSeq: this.session.serverSeq,
+              toSeq: this.session.serverSeq,
+              caughtUpLocalSeq: commit.localSeq,
+              upserts: [],
+              removes: [],
+            }, true);
+          };
+      }
+      throw error;
+    }
   }
 
   queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
