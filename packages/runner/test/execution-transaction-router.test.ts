@@ -8,6 +8,7 @@ import {
   type Options,
   type SessionFactory,
   StorageManager,
+  toCanonicalExecutionUnservedCommit,
 } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -161,4 +162,59 @@ Deno.test("claimed rerun can discard only its earlier executor-shadow writes", a
       );
     },
   );
+});
+
+Deno.test("canonical unserved settlement strips rejected write and merge metadata", () => {
+  const schedulerObservation = {
+    actionId: "action:unserved-shape",
+    executionClaimAssertion: {
+      contextKey: "space",
+      leaseGeneration: 3,
+      claimGeneration: 5,
+    },
+  };
+  const commit = toCanonicalExecutionUnservedCommit(
+    {
+      localSeq: 4,
+      reads: {
+        confirmed: [{ id: "of:input", path: "/value", seq: 7 }],
+        pending: [],
+      },
+      operations: [{
+        op: "set",
+        id: "of:output",
+        value: { value: "must-not-land" },
+      }],
+      preconditions: [{ kind: "entity-absent", id: "of:output" }],
+      schedulerObservation,
+      schedulerObservationBatch: [{
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: { actionId: "batched" },
+      }],
+      merge: {
+        sourceBranch: "source",
+        sourceSeq: 6,
+        baseBranch: "",
+        baseSeq: 5,
+      },
+    },
+    9,
+    "dynamic-branch-merge",
+  );
+
+  assertEquals(commit, {
+    localSeq: 9,
+    reads: {
+      confirmed: [{ id: "of:input", path: "/value", seq: 7 }],
+      pending: [],
+    },
+    operations: [],
+    schedulerObservation: {
+      ...schedulerObservation,
+      executionUnservedAttempt: {
+        diagnosticCode: "dynamic-branch-merge",
+      },
+    },
+  });
 });
