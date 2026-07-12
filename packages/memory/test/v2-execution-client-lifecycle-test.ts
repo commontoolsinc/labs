@@ -21,6 +21,8 @@ const POLICY_SPACE = "did:key:z6Mk-execution-reopen-policy";
 const CLIENT_PRIMARY_SPACE = "did:key:z6Mk-execution-reopen-client-primary";
 const OWNER = "did:key:z6Mk-execution-reopen-owner";
 const READER = "did:key:z6Mk-execution-reopen-reader";
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
 
 const executionProtocolFlags = {
   serverPrimaryExecutionV1: true,
@@ -214,16 +216,16 @@ class GatedReconnectTransport implements MemoryClient.Transport {
 }
 
 const withTimeout = async <T>(promise: Promise<T>, message: string) => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof realSetTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), 1_000);
+        timer = realSetTimeout(() => reject(new Error(message)), 1_000);
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    realClearTimeout(timer);
   }
 };
 
