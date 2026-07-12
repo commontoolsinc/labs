@@ -412,6 +412,11 @@ scheduler rehydration without transferring authority.
 3. Async builtins can be exercised in test/opt-in spaces, but authority is
    not transferred until the corresponding action claim is live.
 
+Raw authenticated demand remains available while the durable execution policy
+is absent or false: Phase 1 needs it to drive observe-only shadow work. That
+policy gates positive claims, not discovery of work clients currently care
+about.
+
 **Identity/CFC.** Unchanged for clients. The worker runs on behalf of an
 eligible requesting user, selected as described in §6.1, rather than an
 anonymous deployment executor. Background-only work keeps its distinct
@@ -487,8 +492,13 @@ The implemented opt-in is the default-branch, space-scoped document
 `{ version: 1, serverPrimaryExecution: boolean }`. It is owner-managed through
 whole-document set/delete policy-only commits. Absent, deleted, disabled, or
 malformed state is client-primary; direct host writes cannot bypass owner
-authorization. The runtime flag remains the higher-priority rollback, so a
-true policy is inert when `serverPrimaryExecution` is off.
+authorization. OWNER is enforced for this authority switch even when ordinary
+ACL enforcement is configured `off` or `observe`. Positive claims require an
+enabled policy; disabling or deleting it revokes every live claim while leaving
+shadow demand intact. The runtime flag remains the higher-priority rollback,
+so a true policy is inert when `serverPrimaryExecution` is off. Deployment flag
+changes take effect on new negotiated connections (normally after host
+restart/redeploy).
 
 The fields from `branch` through `runtimeFingerprint` form the shared
 `ActionClaimKey` that both client and server can derive. `leaseGeneration`
@@ -611,7 +621,9 @@ A no-op must still settle; otherwise a correct local overlay can wait forever
 for a derived patch that will never exist. Failure settles the attempt;
 `session.execution.claim.revoke` separately names and removes the currently
 live claimGeneration and dirties the client action. A later claim issuance
-gets the next generation. Cross-space execution, when admitted later, requires
+gets the next generation. Host-authored expiry performs the same revoke,
+removes the claim from reconnect snapshots, and rejects delayed settlements.
+Cross-space execution, when admitted later, requires
 an input-basis vector rather than this scalar. A successful
 settlement is published only after the normal confirmed-read validation has
 accepted the data or observation-only transaction; `inputBasisSeq` is not an
@@ -714,7 +726,7 @@ and is separately attributable. It never signs client-pulled work.
 #### B.8 Failure modes
 
 - **Executor down / space not served:** its lease expires or is revoked and
-  claims disappear. Clients dirty those actions and commit them normally.
+  claims actively expire/revoke. Clients dirty those actions and commit them normally.
   No mutable config flip or negative exception propagation is required.
 - **Competing/replaced worker:** every claim and commit is fenced by
   `ExecutionLease.leaseGeneration`; the provider rejects a stale generation.
