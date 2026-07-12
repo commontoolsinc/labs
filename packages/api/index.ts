@@ -365,11 +365,13 @@ export interface IReadable<T> {
 export type MetaLinkField =
   | "pattern"
   | "argument"
+  | "params"
   | "result";
 
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
+ * The `params` field links a result cell to compiler-owned closure params
  * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,

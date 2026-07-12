@@ -60,6 +60,151 @@ const FACTORY_REF = {
   symbol: "factory",
 };
 
+describe("params pseudo-alias runtime seam", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("writes through params pseudo-aliases only when the result owns a params cell", () => {
+    const resultCell = runtime.getCell<{ publicValue: number }>(
+      space,
+      "params pseudo-alias write result",
+      undefined,
+      tx,
+    );
+    resultCell.set({ publicValue: 7 });
+    const argumentCellLink = getMetaCell(resultCell, "argument", tx)
+      .getAsNormalizedFullLink();
+    const binding = {
+      $alias: {
+        cell: "params",
+        path: ["capture"],
+        schema: { type: "number" },
+      },
+    } as const;
+
+    expect(() =>
+      sendValueToBinding(
+        tx,
+        resultCell,
+        argumentCellLink,
+        binding,
+        42,
+      )
+    ).toThrow("Invalid pseudo-alias path");
+
+    // These casts keep the regression focused on the missing runtime seam.
+    // WP3.4 widens the public metadata vocabulary in the green change.
+    const paramsCell = getMetaCell(
+      resultCell,
+      "params" as Parameters<typeof getMetaCell>[1],
+      tx,
+      {
+        type: "object",
+        properties: { capture: { type: "number" } },
+        required: ["capture"],
+        additionalProperties: false,
+      },
+    );
+    paramsCell.set({ capture: 1 });
+    resultCell.setMetaRaw(
+      "params" as Parameters<typeof resultCell.setMetaRaw>[0],
+      paramsCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      }),
+    );
+
+    sendValueToBinding(
+      tx,
+      resultCell,
+      argumentCellLink,
+      binding,
+      42,
+    );
+
+    expect(paramsCell.key("capture").get()).toBe(42);
+    expect(resultCell.getAsQueryResult()).toEqual({ publicValue: 7 });
+  });
+
+  it("resolves params pseudo-aliases only when the result owns a params cell", () => {
+    const resultCell = runtime.getCell(
+      space,
+      "params pseudo-alias resolution result",
+      undefined,
+      tx,
+    );
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const binding = {
+      $alias: {
+        cell: "params",
+        path: ["capture"],
+        schema: { type: "number" },
+      },
+    } as const;
+
+    expect(() =>
+      unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      )
+    ).toThrow("Invalid pseudo-alias cell: params");
+
+    // These casts keep the regression focused on the missing runtime seam.
+    // WP3.4 widens the public metadata vocabulary in the green change.
+    const paramsCell = getMetaCell(
+      resultCell,
+      "params" as Parameters<typeof getMetaCell>[1],
+      tx,
+      {
+        type: "object",
+        properties: { capture: { type: "number" } },
+        required: ["capture"],
+        additionalProperties: false,
+      },
+    );
+    paramsCell.set({ capture: 7 });
+    resultCell.setMetaRaw(
+      "params" as Parameters<typeof resultCell.setMetaRaw>[0],
+      paramsCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      }),
+    );
+
+    const resolved = unwrapOneLevelAndBindtoDoc(
+      runtime.cfc,
+      binding,
+      argumentCell.getAsNormalizedFullLink(),
+      resultCell,
+    );
+    const resolvedLink = parseLink(resolved, resultCell)!;
+    const paramsLink = paramsCell.getAsNormalizedFullLink();
+
+    expect(resolvedLink.id).toBe(paramsLink.id);
+    expect(resolvedLink.space).toBe(paramsLink.space);
+    expect(resolvedLink.path).toEqual(["capture"]);
+    expect(resolvedLink.overwrite).toBe("redirect");
+  });
+});
+
 describe("pattern-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;

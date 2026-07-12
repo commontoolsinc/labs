@@ -78,6 +78,7 @@ type UnwrapOneLevelOptions = {
    */
   sourceSchemas?: {
     argument?: JSONSchema;
+    params?: JSONSchema;
   };
 };
 
@@ -384,6 +385,8 @@ function sendValueToBindingInner<T>(
           ? argumentCellLink
           : alias.cell === "result"
           ? cell.getAsNormalizedFullLink()
+          : alias.cell === "params"
+          ? getMetaLink(cell as Cell<unknown>, "params")
           : undefined;
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias path: " + alias.path);
@@ -639,6 +642,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           ? argumentCellLink
           : alias.cell === "result"
           ? resultCellLink
+          : alias.cell === "params"
+          ? getMetaLink(resultCell as Cell<unknown>, "params")
           : undefined;
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias cell: " + alias.cell);
@@ -653,6 +658,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           : undefined;
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
+          : alias.cell === "params"
+          ? options?.sourceSchemas?.params
           : undefined;
         return createSigilLinkFromParsedLink(
           foldDeclaredScopeIntoLinkSchema(

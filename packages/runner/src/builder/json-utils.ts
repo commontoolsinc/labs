@@ -225,7 +225,7 @@ export function toJSONWithAliasBindings(
       // values and take the factory-first branch above.
       const valueForTraversal = key === "implementation" &&
           isModule(valueToProcess) && valueToProcess.type === "pattern" &&
-          isPattern(nestedValue)
+          isPattern(nestedValue) && !isAdmittedFabricFactory(nestedValue)
         ? serializePatternGraph(nestedValue)
         : nestedValue;
       const jsonValue = toJSONWithAliasBindings(
@@ -433,6 +433,16 @@ export function moduleToJSON(module: Module) {
     bind?: unknown;
   };
   let implementation = module.implementation;
+
+  if (isAdmittedFabricFactory(implementation)) {
+    implementation = toJSONWithLegacyAliases(
+      implementation,
+      undefined,
+      false,
+      ["implementation"],
+    ) as FabricFactory;
+    return { ...rest, implementation };
+  }
 
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
   //

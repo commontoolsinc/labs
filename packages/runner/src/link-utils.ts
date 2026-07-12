@@ -843,7 +843,7 @@ function removeStrippedStreamPropertiesFromRequired(
 /** Get or create a cell using the resultCell as the cause. */
 export function getMetaCell(
   resultCell: AnyCell<unknown>,
-  type: "internal" | "argument",
+  type: "internal" | "argument" | "params",
   tx: IExtendedStorageTransaction,
   schema?: JSONSchema,
 ): Cell {

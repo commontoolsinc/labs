@@ -1179,7 +1179,7 @@ containing `asFactory` schemas.
 
 ### WP3.4 — Add the hidden params root and invocation-owned cell
 
-- [ ] Extend the alias vocabulary with `{ $alias: { cell: "params", ... } }`
+- [x] Extend the alias vocabulary with `{ $alias: { cell: "params", ... } }`
   without treating `params` as piece input.
 - [ ] Give each bound-pattern invocation one immutable hidden params cell with a
   deterministic result-relative cause and `paramsSchema`.
@@ -1226,6 +1226,17 @@ Expected runtime seams/tests:
 - `packages/runner/test/pattern-node-alias-schema.test.ts`
 - reload/rehydration, `cfc-boundary.test.ts`, and cross-space CFC-focused runner
   tests
+
+WP3.4 slice audit (2026-07-11): WP3.1 had already emitted the private `params`
+alias spelling, but the public metadata vocabulary and both runtime binding
+directions still rejected it. `MetaLinkField`, deterministic meta-cell minting,
+`unwrapOneLevelAndBindtoDoc`, and `sendValueToBinding` now accept `params` only
+through an owning result's explicit metadata link; absence still fails closed.
+The same slice removes a second mismatch outside the original seam list:
+`builder/json-utils.ts` used to expand every pattern implementation as a legacy
+graph, discarding bound `Factory@1` state. New pattern nodes retain the admitted
+callable directly, while the named legacy graph serialization branches remain
+for unbranded stored readers.
 
 ### WP3.5 — Unify list callback lowering
 

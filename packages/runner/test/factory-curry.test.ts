@@ -207,6 +207,48 @@ describe("transformer-only pattern curry", () => {
     });
   });
 
+  it("keeps an invoked bound factory canonical with symbolic params", () => {
+    const base = curryView(closureBase());
+    const ref = {
+      identity: "E".repeat(43),
+      symbol: "boundFactory",
+    };
+    setDurableArtifactEntryRef(base, ref);
+
+    const parent = pattern(
+      ((input: any) => {
+        const bound = base.curry({ offset: input.offset });
+        return { result: bound({ value: input.value }) };
+      }) as any,
+      {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+          offset: { type: "number" },
+        },
+        required: ["value", "offset"],
+        additionalProperties: false,
+      },
+      RESULT_SCHEMA,
+    );
+
+    expect(parent.nodes).toHaveLength(1);
+    const module = parent.nodes[0]!.module;
+    expect(sealFactoryState(module)).toMatchObject({
+      kind: "pattern",
+      ref,
+      params: {
+        offset: {
+          $alias: { cell: "argument", path: ["offset"] },
+        },
+      },
+    });
+    expect((module as unknown as { type?: unknown }).type).toBeUndefined();
+    expect(
+      (module as unknown as { implementation?: unknown }).implementation,
+    ).toBeUndefined();
+  });
+
   it("preserves canonical state regardless of modifier order", () => {
     const base = curryView(closureBase());
     setDurableArtifactEntryRef(base, {

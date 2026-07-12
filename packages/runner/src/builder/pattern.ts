@@ -2,7 +2,10 @@ import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { registerFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import {
+  isAdmittedFabricFactory,
+  registerFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -44,7 +47,6 @@ import {
 } from "./node-utils.ts";
 import {
   type CellAliasResolver,
-  moduleToJSON,
   patternToJSON,
   serializePatternGraph,
   toJSONWithAliasBindings,
@@ -633,6 +635,7 @@ function factoryFromPattern<T, R>(
       node.module,
       resolveCellAlias,
       false,
+      isAdmittedFabricFactory(node.module) ? ["module"] : [],
     ) as unknown as Module;
     const inputsForSerialization = usesLegacyListPatternOp(node.module) &&
         isRecord(node.inputs) && isPattern(node.inputs.op)
@@ -690,35 +693,16 @@ function factoryFromPattern<T, R>(
     const { defaultScope, spaceSelector, paramsSchema, params } = options;
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
-        // Stage 1 can carry and traverse closure params, but only Stage 3's
-        // callback-argument-1 binding makes them executable. Never silently
-        // run a bound factory while ignoring its captured environment.
-        if (
-          Object.hasOwn(options, "paramsSchema") ||
-          Object.hasOwn(options, "params")
-        ) {
-          throw new Error("Bound pattern params require callback binding");
-        }
-        const module: Module & toJSON = {
-          type: "pattern",
-          implementation: factory,
-          ...(factory.defaultScope !== undefined
-            ? { defaultScope: factory.defaultScope }
-            : {}),
-          toJSON: () => moduleToJSON(module),
-        };
-
         const outputs = reactive<R>();
         const frame = getTopFrame();
         if (spaceSelector !== undefined) {
           const targetSpace = resolveInSpaceTargetSpace(spaceSelector, frame);
           if (targetSpace !== undefined) {
             setCellUnlinkedSpace(outputs, targetSpace);
-            module.targetSpace = targetSpace;
           }
         }
         const node: NodeRef = {
-          module,
+          module: factory,
           inputs,
           outputs,
           frame,
