@@ -42,6 +42,8 @@ class FakeExecutionControl {
   listener: ExecutionDemandListener | undefined;
   current: ExecutionLeaseHandle | null = null;
   acquired = 0;
+  renewals = 0;
+  renewalSucceeds = true;
   drains = 0;
   finished = 0;
 
@@ -65,7 +67,8 @@ class FakeExecutionControl {
   renewExecutionLease(
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
-    return Promise.resolve(current);
+    this.renewals++;
+    return Promise.resolve(this.renewalSucceeds ? current : null);
   }
 
   beginExecutionLeaseDrain(
@@ -196,6 +199,30 @@ Deno.test("shared execution pool updates disjoint roots without restarting", asy
   }
 });
 
+Deno.test("shared execution pool renews authority before reusing a live worker", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    const active = [demand(1, ["piece:a"])];
+    await control.emit(1, active);
+    await pool.idle();
+
+    control.renewalSucceeds = false;
+    await control.emit(2, active);
+    await pool.idle();
+
+    assertEquals(control.renewals, 1);
+    assertEquals(factory.executors[0]?.stopped, 1);
+    assertEquals(factory.starts.length, 2);
+    assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool fails closed while legacy background owns a space", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
@@ -227,7 +254,24 @@ Deno.test("shared execution pool fails closed while legacy background owns a spa
 Deno.test("shared execution pool fences a crashed worker before replacement", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
-  const pool = new SharedExecutionPool({ control, factory });
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number; cleared: boolean }
+  >();
+  let nextTimer = 0;
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: (callback, delayMs) => {
+      const timer = ++nextTimer;
+      timers.set(timer, { callback, delayMs, cleared: false });
+      return timer;
+    },
+    clearTimer: (timer) => {
+      const record = timers.get(timer);
+      if (record !== undefined) record.cleared = true;
+    },
+  });
   pool.start();
 
   try {
@@ -238,6 +282,13 @@ Deno.test("shared execution pool fences a crashed worker before replacement", as
 
     assertEquals(factory.executors[0]?.stopped, 1);
     assertEquals(control.finished, 1);
+    assertEquals(factory.starts.length, 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "backoff");
+    const backoff = [...timers.values()].find((timer) => !timer.cleared);
+    assertEquals(backoff?.delayMs, 1_000);
+
+    backoff?.callback();
+    await pool.idle();
     assertEquals(factory.starts.length, 2);
     assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
   } finally {
