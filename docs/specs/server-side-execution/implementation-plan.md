@@ -661,6 +661,7 @@ generation. Background-only work gets its service identity later.
 
 **Depends on:** W0.6, W1.1, W0.1.
 **Unblocks:** W1.3.
+**Status:** implemented.
 
 **Decision:** never start one runtime per client. Worker cardinality, demand,
 and signing authority are separate.
@@ -697,27 +698,29 @@ and signing authority are separate.
    must rotate. Empty demand begins bounded drain/hibernate.
 6. Isolate Worker crashes, back off, and discard CandidateClaims before retry.
 7. Add a mandatory legacy-background exclusion interlock without refactoring
-   its registry: if background-piece-service has a registration, active
-   controller, or lease for the branch/space, do not launch the new pool slot
-   and publish no claim. Existing background behavior continues. Phase 3
-   imports that demand into the shared slot and removes the exclusion.
+   its registry. Before constructing a Worker, background-piece-service
+   acquires a durable service-owned exclusion; the client-demand pool cannot
+   acquire its lease until that Worker stops and releases the exclusion. A
+   dormant registry entry does not block the pool because it has no competing
+   runtime. Existing background behavior continues. Phase 3 imports that
+   demand into the shared slot and removes the exclusion.
 
 **Success criteria:**
 
-- [ ] Ten clients demanding the same piece produce one Worker, one scheduler
+- [x] Ten clients demanding the same piece produce one Worker, one scheduler
       action run per invalidation, and ten reference-counted demands.
-- [ ] Disjoint roots from two clients run in the same space Worker and only
+- [x] Disjoint roots from two clients run in the same space Worker and only
       demanded closures stay live.
-- [ ] Closing one client does not remove another's demand; closing the last
+- [x] Closing one client does not remove another's demand; closing the last
       drains and terminates.
-- [ ] Commit during spawn buffering is observed without a second wake.
-- [ ] Worker crash discards CandidateClaims (and revokes any test-only claims)
+- [x] Commit during spawn buffering is observed without a second wake.
+- [x] Worker crash discards CandidateClaims (and revokes any test-only claims)
       before restart and leaves other spaces unaffected.
-- [ ] An unrelated document write causes zero pulls/action runs.
-- [ ] Every ordinary shadow pull produces zero server data operations and zero
+- [x] An unrelated document write causes zero pulls/action runs.
+- [x] Every ordinary shadow pull produces zero server data operations and zero
       external builtin calls while still collecting local graph observations.
-- [ ] Concurrent legacy background registration plus client demand starts no
-      second server Worker and publishes no server-primary claim.
+- [x] Concurrent active legacy background execution plus client demand starts
+      no second server Worker and publishes no server-primary claim.
 
 ---
 

@@ -161,9 +161,11 @@ propagate](#how-flags-propagate).
   phased authority rollout, then remove the flag once every supported client
   obeys server-primary claims.
 - **Status on 2026-07-12.** Runtime, environment, browser-worker, background-
-  worker, memory handshake, connection-owned demand, strict owner policy, and
-  ordered reconnectable claim/settlement feed are implemented; off remains
-  client-primary behavior. The narrower
+  worker, memory handshake, connection-owned client root demand, one shared
+  fenced shadow Worker per active branch/space, durable legacy-background
+  exclusion, strict owner policy, and the ordered reconnectable
+  claim/settlement feed are implemented; off remains client-primary behavior.
+  The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities are hardwired false
   in ordinary builds until W2.1 and W2.3. Tests override them only to exercise

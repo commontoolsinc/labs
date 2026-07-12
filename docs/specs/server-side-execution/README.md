@@ -909,14 +909,15 @@ multiple processes; a heartbeat document alone is not sufficient.
 
 Background-only demand is a distinct, lower-priority mode. A background
 generation uses the existing service identity and claims only background work;
-it never signs client-pulled execution. Before the registry is unified, a
-mandatory exclusion interlock makes any branch/space with a legacy background
-registration, controller, or lease ineligible for the new client-demand pool.
-It stays on existing behavior and receives no server-primary claim. Phase 3
-imports that demand into this same slot and removes the exclusion; only then
-may client demand preempt a background generation. Registry cleanup is not a
-prerequisite, but preventing two server runtimes is. A subprocess tier remains
-optional for hard isolation.
+it never signs client-pulled execution. Before the registry is unified,
+background-piece-service must acquire a durable service-owned exclusion before
+constructing a Worker. That makes a branch/space with an active legacy
+controller ineligible for the new client-demand pool until the Worker stops and
+releases it. A dormant registration does not block because it has no competing
+runtime. Phase 3 imports that demand into this same slot and removes the
+exclusion; only then may client demand preempt a background generation.
+Registry cleanup is not a prerequisite, but preventing two server runtimes is.
+A subprocess tier remains optional for hard isolation.
 
 Threading note: the engine's SQLite reads are synchronous FFI on the engine
 thread; executor workers do **not** open the database. They talk to the
@@ -1024,8 +1025,8 @@ user's ordinary session against the other space.
 3. **Async continuation:** an existing claimed request remains in flight.
 4. **Background-only demand (Phase 3):** lower-priority standing registration,
    using the background identity rather than a client sponsor. Until registry
-   import, such a registration triggers the exclusion interlock rather than a
-   second pool Worker.
+   import, its controller acquires the durable exclusion before starting rather
+   than allowing a second pool Worker.
 5. (Future) server-side timers.
 
 **Spawn sequence** (ordered; the order is load-bearing):
@@ -1291,7 +1292,7 @@ means a design doc/decision is required before implementation.
 | --- | --- | --- | --- |
 | G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented, including atomic lease fencing |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
-| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | demand, sticky sponsor selection, and fenced lease implemented; W1.2 owns the shared Worker pool |
+| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | implemented, including client root export, one shared Worker lane, sponsor rotation, and durable legacy-background exclusion |
 | G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | handshake, claim generations, snapshots, revoke protocol implemented and dark; eligibility/routing W1.3/W2.1 |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | producer lookup implemented; parked-reader query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
