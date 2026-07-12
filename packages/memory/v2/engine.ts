@@ -20,6 +20,7 @@ import {
   type EntityDocument,
   type EntityId,
   type ExecutionClaim,
+  type ExecutionClaimAssertion,
   type InputBasisSeq,
   isEntityDocument,
   type Operation,
@@ -950,6 +951,8 @@ export interface SchedulerActionObservation {
   observedAtSeq: number;
   /** Host-derived maximum accepted revision sequence in the commit read set. */
   inputBasisSeq?: InputBasisSeq;
+  /** Transient exact-claim assertion; validated by the bound executor host. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
@@ -973,6 +976,23 @@ const isSchedulerRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isSchedulerExecutionContextKey = (
+  value: unknown,
+): value is SchedulerExecutionContextKey =>
+  value === "space" ||
+  (typeof value === "string" &&
+    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+
+const isExecutionClaimAssertion = (
+  value: unknown,
+): value is ExecutionClaimAssertion =>
+  isSchedulerRecord(value) &&
+  isSchedulerExecutionContextKey(value.contextKey) &&
+  Number.isSafeInteger(value.leaseGeneration) &&
+  Number(value.leaseGeneration) > 0 &&
+  Number.isSafeInteger(value.claimGeneration) &&
+  Number(value.claimGeneration) > 0;
 
 const isSchedulerObservationAddress = (value: unknown): boolean =>
   isSchedulerRecord(value) &&
@@ -1033,6 +1053,8 @@ export const schedulerObservationFromValue = (
     (value.inputBasisSeq !== undefined &&
       (!Number.isSafeInteger(value.inputBasisSeq) ||
         Number(value.inputBasisSeq) < 0)) ||
+    (value.executionClaimAssertion !== undefined &&
+      !isExecutionClaimAssertion(value.executionClaimAssertion)) ||
     (value.observedAtLocalSeq !== undefined &&
       (!Number.isSafeInteger(value.observedAtLocalSeq) ||
         Number(value.observedAtLocalSeq) < 0)) ||
@@ -1538,7 +1560,6 @@ CREATE TABLE scheduler_action_snapshot (
   commit_seq          INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
-  accepted_payload    JSON,
   PRIMARY KEY (
     branch,
     owner_space,
@@ -2326,9 +2347,9 @@ export const open = async (
     migrateSchedulerActionSnapshotOwnerSpaceKey(database);
     migrateSchedulerActionStateOwnerSpaceKey(database);
     migrateSchedulerObservationReplayStatus(database);
-    migrateSchedulerObservationReplayAcceptedPayload(database);
   }
   migrateSchedulerExecutionContextSchema(database);
+  migrateSchedulerObservationReplayAcceptedPayload(database);
   migrateSchedulerWriteLookupIndex(database);
   migrateSchedulerActionIndexes(database);
   return {
@@ -4571,6 +4592,7 @@ function getSchedulerObservationReplay(
   execution_context_key: SchedulerExecutionContextKey | null;
   observed_at_seq: number;
   payload: string;
+  accepted_payload: string | null;
 } | undefined {
   return engine.database.prepare(`
     SELECT
@@ -4578,6 +4600,7 @@ function getSchedulerObservationReplay(
       replay.reason,
       replay.observation_id,
       active_snapshot.execution_context_key,
+      active_snapshot.payload AS accepted_payload,
       replay.observed_at_seq,
       replay.payload
     FROM scheduler_observation_replay replay
@@ -4605,6 +4628,7 @@ function getSchedulerObservationReplay(
     execution_context_key: SchedulerExecutionContextKey | null;
     observed_at_seq: number;
     payload: string;
+    accepted_payload: string | null;
   } | undefined;
 }
 
@@ -5470,6 +5494,15 @@ const applyCommitTransaction = (
       observation: acceptedObservation.observation,
     })
     : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservationResult?.executionContextKey !==
+      acceptedObservation.provenance.claim.contextKey
+  ) {
+    throw new ProtocolError(
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
 
   return {
     seq,
@@ -5903,15 +5936,22 @@ const acceptedSchedulerObservation = (
   observation: SchedulerActionObservation;
   provenance?: ActionExecutionProvenance;
 } => {
+  const assertedClaim = observation.executionClaimAssertion;
   // Reserved fields are host outputs. Strip any wire/Worker assertion before
   // constructing the canonical accepted observation.
   const {
     inputBasisSeq: _assertedBasis,
+    executionClaimAssertion: _assertedClaim,
     executionProvenance: _assertedProvenance,
     ...untrustedObservation
   } = observation;
   const claim = options.executionClaim;
   if (claim === undefined) {
+    if (assertedClaim !== undefined) {
+      throw new ProtocolError(
+        "execution claim incarnation is not live for this action attempt",
+      );
+    }
     return {
       observation: {
         ...untrustedObservation,
@@ -5920,6 +5960,10 @@ const acceptedSchedulerObservation = (
     };
   }
   if (
+    assertedClaim === undefined ||
+    assertedClaim.contextKey !== claim.contextKey ||
+    assertedClaim.leaseGeneration !== claim.leaseGeneration ||
+    assertedClaim.claimGeneration !== claim.claimGeneration ||
     options.principal === undefined || options.space === undefined ||
     claim.branch !== options.branch || claim.space !== options.space ||
     // Initial server execution is deliberately space-scoped. W1.3 owns the
@@ -5930,10 +5974,11 @@ const acceptedSchedulerObservation = (
     claim.actionKind !== observation.actionKind ||
     claim.implementationFingerprint !== observation.implementationFingerprint ||
     claim.runtimeFingerprint !== observation.runtimeFingerprint ||
-    observation.actionKind === "event-handler"
+    observation.actionKind === "event-handler" ||
+    observation.transactionKind !== "action-run"
   ) {
     throw new ProtocolError(
-      "execution claim does not match the accepted scheduler action",
+      "execution claim incarnation does not match the accepted scheduler action",
     );
   }
   const provenance: ActionExecutionProvenance = {
@@ -6083,6 +6128,7 @@ const replayedSchedulerObservationResult = (
     reason: AppliedSchedulerObservationResult["reason"] | null;
     observation_id: number | null;
     execution_context_key: SchedulerExecutionContextKey | null;
+    accepted_payload: string | null;
   },
 ): AppliedSchedulerObservationResult => {
   if (replay.status === "dropped") {
@@ -6097,12 +6143,21 @@ const replayedSchedulerObservationResult = (
       `kept scheduler observation replay missing observation identity for localSeq ${localSeq}`,
     );
   }
+  const accepted = replay.accepted_payload === null
+    ? undefined
+    : decodeSchedulerObservation(replay.accepted_payload);
   return {
     localSeq,
     status: "kept",
     schedulerObservationId: replay.observation_id,
     ...(replay.execution_context_key !== null
       ? { executionContextKey: replay.execution_context_key }
+      : {}),
+    ...(accepted?.inputBasisSeq !== undefined
+      ? { inputBasisSeq: accepted.inputBasisSeq }
+      : {}),
+    ...(accepted?.executionProvenance !== undefined
+      ? { executionProvenance: accepted.executionProvenance }
       : {}),
   };
 };
@@ -6157,22 +6212,14 @@ const applySchedulerObservationOnlyCommit = (
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
-  const inputBasisSeq = acceptedInputBasisSeq(
-    reads.confirmed,
-    resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
-  );
-  const accepted = acceptedSchedulerObservation(schedulerObservation, {
-    branch,
-    space,
-    principal,
-    inputBasisSeq,
-    executionClaim,
-  });
+  // Request replay identity retains the transient exact-claim assertion while
+  // excluding only host-authored acceptance fields. Check it before the live
+  // claim fence so a lost-response replay remains idempotent after revoke.
   const replayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
-    ownerSpace: space ?? accepted.observation.ownerSpace,
-    observation: accepted.observation,
+    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    observation: schedulerObservation,
   });
   const existingReplay = getSchedulerObservationReplay(engine, {
     branch,
@@ -6199,6 +6246,18 @@ const applySchedulerObservationOnlyCommit = (
       schedulerObservationResults: [replayed],
     });
   }
+
+  const inputBasisSeq = acceptedInputBasisSeq(
+    reads.confirmed,
+    resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
+  );
+  const accepted = acceptedSchedulerObservation(schedulerObservation, {
+    branch,
+    space,
+    principal,
+    inputBasisSeq,
+    executionClaim,
+  });
 
   const dropReason = schedulerObservationReadDropReason(engine, {
     sessionKey,
@@ -6246,6 +6305,15 @@ const applySchedulerObservationOnlyCommit = (
     replayPayload,
     observation: accepted.observation,
   });
+  if (
+    accepted.provenance !== undefined &&
+    observationResult.executionContextKey !==
+      accepted.provenance.claim.contextKey
+  ) {
+    throw new ProtocolError(
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
   return {
     seq: observedAtSeq,
     branch,

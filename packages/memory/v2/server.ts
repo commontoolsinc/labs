@@ -43,6 +43,7 @@ import {
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SessionSync,
+  type SessionToken,
   type SqliteDbRef,
   type SqliteParamsWire,
   type SqliteQueryRequest,
@@ -448,7 +449,9 @@ const executionDemandKey = (
 type ExecutionClaimInput = ActionClaimKey & { leaseGeneration: number };
 
 type BoundExecutionSession = {
-  readonly connectionId: string | null;
+  readonly connectionId: string;
+  readonly sessionToken: SessionToken;
+  readonly principal: string;
   readonly leaseGeneration: number;
 };
 
@@ -1645,15 +1648,18 @@ export class Server {
     const session = this.#sessions.get(space, sessionId);
     if (
       session === null || session.principal === undefined ||
-      session.principal === ANYONE_USER
+      session.principal === ANYONE_USER || session.ownerConnectionId === null ||
+      !this.#connections.has(session.ownerConnectionId)
     ) {
       throw new Error(
-        "execution authority requires an authenticated live session",
+        "execution authority requires an authenticated session with a live connection",
       );
     }
     const key = sessionKey(space, sessionId);
     const binding: BoundExecutionSession = Object.freeze({
       connectionId: session.ownerConnectionId,
+      sessionToken: session.sessionToken,
+      principal: session.principal,
       leaseGeneration: authority.leaseGeneration,
     });
     this.#boundExecutionSessions.set(key, binding);
@@ -1871,16 +1877,42 @@ export class Server {
     ) {
       return undefined;
     }
+    if (
+      session.ownerConnectionId === null ||
+      binding.connectionId !== session.ownerConnectionId ||
+      binding.sessionToken !== session.sessionToken ||
+      binding.principal !== session.principal ||
+      !this.#connections.has(binding.connectionId)
+    ) {
+      this.#boundExecutionSessions.delete(sessionKey(space, session.id));
+      throw new Engine.ProtocolError(
+        "execution authority is not bound to this live session connection",
+      );
+    }
     this.expireExecutionClaims();
     const claims = new Map<number, ExecutionClaim>();
     for (const { localSeq, observation } of observations) {
-      // The first server-primary phase admits only space-scoped actions. The
-      // engine independently verifies this exact claim/action match before it
-      // authors provenance.
+      if (
+        observation.actionKind === "event-handler" ||
+        observation.transactionKind !== "action-run"
+      ) {
+        if (observation.executionClaimAssertion !== undefined) {
+          throw new Engine.ProtocolError(
+            "execution claim assertions are valid only for action attempts",
+          );
+        }
+        continue;
+      }
+      const expected = observation.executionClaimAssertion;
+      if (expected === undefined) {
+        throw new Engine.ProtocolError(
+          "bound executor action is missing an execution claim incarnation",
+        );
+      }
       const key: ActionClaimKey = {
         branch,
         space,
-        contextKey: "space",
+        contextKey: expected.contextKey,
         pieceId: observation.pieceId,
         actionId: observation.actionId,
         actionKind: observation.actionKind,
@@ -1890,7 +1922,9 @@ export class Server {
       const live = this.#executionClaims.get(actionClaimMapKey(key));
       if (
         live !== undefined &&
-        live.leaseGeneration === binding.leaseGeneration
+        live.leaseGeneration === binding.leaseGeneration &&
+        live.leaseGeneration === expected.leaseGeneration &&
+        live.claimGeneration === expected.claimGeneration
       ) {
         claims.set(localSeq, live);
       }
@@ -4547,15 +4581,21 @@ export class Server {
     );
     return observations.map(({ localSeq, observation }) => {
       const result = results.get(localSeq);
-      if (result?.status !== "kept" || result.inputBasisSeq === undefined) {
-        return { localSeq, observation };
-      }
+      const {
+        inputBasisSeq: _assertedBasis,
+        executionClaimAssertion: _assertedClaim,
+        executionProvenance: _assertedProvenance,
+        ...requestedObservation
+      } = observation;
       return {
         localSeq,
         observation: {
-          ...observation,
-          inputBasisSeq: result.inputBasisSeq,
-          ...(result.executionProvenance !== undefined
+          ...requestedObservation,
+          ...(result?.status === "kept" &&
+              result.inputBasisSeq !== undefined
+            ? { inputBasisSeq: result.inputBasisSeq }
+            : {}),
+          ...(result?.executionProvenance !== undefined
             ? { executionProvenance: result.executionProvenance }
             : {}),
         },

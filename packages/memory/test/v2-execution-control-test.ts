@@ -185,7 +185,7 @@ const claimKey = (
   branch,
   space,
   contextKey: "space",
-  pieceId: "piece:one",
+  pieceId: "space:piece:one",
   actionId,
   actionKind: "computation",
   implementationFingerprint: "impl:v1",
@@ -205,7 +205,7 @@ const claimedSpaceObservation = (
   actionKind: claim.actionKind,
   implementationFingerprint: claim.implementationFingerprint,
   runtimeFingerprint: claim.runtimeFingerprint,
-  executionClaim: {
+  executionClaimAssertion: {
     contextKey: claim.contextKey,
     leaseGeneration: claim.leaseGeneration,
     claimGeneration: claim.claimGeneration,
@@ -218,7 +218,7 @@ const claimedSpaceObservation = (
     piece: {
       space: claim.space,
       scope: "space" as const,
-      id: claim.pieceId,
+      id: claim.pieceId.slice("space:".length),
       path: [],
     },
     reads: [],
@@ -829,7 +829,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       // This is an executor assertion about the exact claim incarnation under
       // which the attempt started. The host validates it against live control
       // state and never persists it as authority metadata.
-      executionClaim: {
+      executionClaimAssertion: {
         contextKey: claim.contextKey,
         leaseGeneration: claim.leaseGeneration,
         claimGeneration: claim.claimGeneration,
@@ -842,7 +842,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
         piece: {
           space: POLICY_SPACE,
           scope: "space" as const,
-          id: claim.pieceId,
+          id: claim.pieceId.slice("space:".length),
           path: [],
         },
         reads: [{
@@ -1005,7 +1005,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
     const failedObservation = {
       ...observation,
       actionId: failedClaim.actionId,
-      executionClaim: {
+      executionClaimAssertion: {
         contextKey: failedClaim.contextKey,
         leaseGeneration: failedClaim.leaseGeneration,
         claimGeneration: failedClaim.claimGeneration,
@@ -1241,6 +1241,105 @@ Deno.test("detached resumable sessions cannot acquire executor authority", async
       "live connection",
     );
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("an accepted claim replay stays idempotent after revoke", async () => {
+  const server = createControlServer("memory-v2-execution-replay-fence");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const firstClaim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      leaseGeneration: 35,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: firstClaim.leaseGeneration,
+    });
+    const commit = {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set" as const,
+        id: "of:accepted-claim-replay",
+        value: { value: "accepted" },
+      }],
+      schedulerObservation: claimedSpaceObservation(
+        firstClaim,
+        "of:accepted-claim-replay",
+      ),
+    };
+    const accepted = await session.transact(commit);
+    assertEquals(accepted.actionAttempts?.[0]?.claim.claimGeneration, 1);
+    assertEquals(server.revokeExecutionClaim(firstClaim), true);
+
+    const replay = await session.transact(commit);
+    assertEquals(replay.seq, accepted.seq);
+    assertEquals(replay.actionAttempts, undefined);
+
+    const replacement = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      leaseGeneration: firstClaim.leaseGeneration,
+    });
+    await assertRejects(
+      () =>
+        session.transact({
+          ...commit,
+          schedulerObservation: claimedSpaceObservation(
+            replacement,
+            "of:accepted-claim-replay",
+          ),
+        }),
+      Error,
+      "replay mismatch",
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("an unbound client claim assertion cannot create executor provenance", async () => {
+  const server = createControlServer("memory-v2-execution-unbound-assertion");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:unbound-assertion"),
+      leaseGeneration: 36,
+    });
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:unbound-assertion-must-not-land",
+            value: { value: "forged" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            claim,
+            "of:unbound-assertion-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:unbound-assertion-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    await client.close();
     await server.close();
   }
 });

@@ -4,6 +4,7 @@ import type {
 } from "../storage/interface.ts";
 import type {
   ActionExecutionProvenance,
+  ExecutionClaimAssertion,
   InputBasisSeq,
   SchedulerExecutionContextKey,
 } from "@commonfabric/memory/v2";
@@ -66,6 +67,8 @@ export interface SchedulerActionObservation {
    * commit read set; a runner/client value is never authoritative.
    */
   inputBasisSeq?: InputBasisSeq;
+  /** Transient selector for the exact host claim used by this attempt. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
   /** Present only after an authenticated executor commit is accepted. */
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;

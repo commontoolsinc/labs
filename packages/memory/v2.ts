@@ -376,6 +376,18 @@ export interface ExecutionClaim extends ActionClaimKey {
   expiresAt: number;
 }
 
+/**
+ * Transient executor assertion naming the exact live claim incarnation under
+ * which one action attempt started. It is accepted only from a host-bound
+ * executor session, checked against live control state, and stripped before
+ * scheduler observations are persisted. It is not provenance by itself.
+ */
+export interface ExecutionClaimAssertion {
+  contextKey: SchedulerExecutionContextKey;
+  leaseGeneration: number;
+  claimGeneration: number;
+}
+
 declare const inputBasisSeqBrand: unique symbol;
 declare const acceptedCommitSeqBrand: unique symbol;
 
