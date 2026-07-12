@@ -589,6 +589,31 @@ export type ActionTransactionRouter = (
   input: ActionTransactionRouteInput,
 ) => ActionTransactionRoute | Promise<ActionTransactionRoute>;
 
+/**
+ * Reduce a rejected claimed action to the only canonical state needed for an
+ * unserved settlement: its read basis and exact claim observation. Rejected
+ * writes, preconditions, batches, and branch-merge metadata must not get a
+ * second chance to block the observation-only settlement.
+ */
+export function toCanonicalExecutionUnservedCommit(
+  commit: ClientCommit,
+  localSeq: number,
+  diagnosticCode: string,
+): ClientCommit {
+  const observation = commit.schedulerObservation as Record<string, unknown>;
+  return {
+    localSeq,
+    reads: commit.reads,
+    operations: [],
+    ...(commit.branch !== undefined ? { branch: commit.branch } : {}),
+    ...(commit.codeCID !== undefined ? { codeCID: commit.codeCID } : {}),
+    schedulerObservation: {
+      ...observation,
+      executionUnservedAttempt: { diagnosticCode },
+    },
+  };
+}
+
 export interface Options {
   as: Signer;
   /**
@@ -2780,17 +2805,11 @@ class SpaceReplica implements ISpaceReplica {
         ),
       };
     }
-    const unservedCommit: ClientCommit = {
-      ...commit,
-      localSeq: this.#nextLocalSeq++,
-      operations: [],
-      schedulerObservation: {
-        ...observation,
-        executionUnservedAttempt: {
-          diagnosticCode: route.diagnosticCode,
-        },
-      },
-    };
+    const unservedCommit = toCanonicalExecutionUnservedCommit(
+      commit,
+      this.#nextLocalSeq++,
+      route.diagnosticCode,
+    );
     try {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(unservedCommit);

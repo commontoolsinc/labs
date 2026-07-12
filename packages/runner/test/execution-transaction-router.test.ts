@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
+import { toDocumentPath } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { Server } from "@commonfabric/memory/v2/server";
 import {
@@ -177,7 +178,11 @@ Deno.test("canonical unserved settlement strips rejected write and merge metadat
     {
       localSeq: 4,
       reads: {
-        confirmed: [{ id: "of:input", path: "/value", seq: 7 }],
+        confirmed: [{
+          id: "of:input",
+          path: toDocumentPath(["value"]),
+          seq: 7,
+        }],
         pending: [],
       },
       operations: [{
@@ -206,7 +211,11 @@ Deno.test("canonical unserved settlement strips rejected write and merge metadat
   assertEquals(commit, {
     localSeq: 9,
     reads: {
-      confirmed: [{ id: "of:input", path: "/value", seq: 7 }],
+      confirmed: [{
+        id: "of:input",
+        path: toDocumentPath(["value"]),
+        seq: 7,
+      }],
       pending: [],
     },
     operations: [],
