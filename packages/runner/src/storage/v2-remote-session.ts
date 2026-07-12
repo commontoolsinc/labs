@@ -10,6 +10,9 @@ export interface SessionFactory {
    *  by lower-level replica tests omit this because they intentionally model
    *  only the messages under test. */
   readonly supportsAclBootstrap?: boolean;
+  /** Only ordinary authenticated client sessions may originate execution
+   * demand. Host/executor and scripted session factories omit this. */
+  readonly supportsExecutionDemand?: boolean;
   create(
     space: MemorySpace,
     signer?: Signer,
@@ -185,6 +188,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
 
 export class RemoteSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
+  readonly supportsExecutionDemand = true;
 
   constructor(
     private readonly resolveAddress: (space: MemorySpace) => URL,

@@ -370,6 +370,14 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
+  /** Publish the branch-qualified union of client-visible piece roots that
+   * should remain live on the shared server executor. Executor/loopback
+   * providers deliberately omit this client-only capability. */
+  setExecutionDemand?(
+    branch: BranchName,
+    pieces: readonly string[],
+  ): Promise<boolean>;
+
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this
    * so the runner can rebuild scheduler indexes from persisted observations.

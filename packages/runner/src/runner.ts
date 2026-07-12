@@ -153,6 +153,8 @@ type StartAttempt = {
   readonly lifecycleEpoch: number;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
+  /** Final root after resolving any subpath or slug supplied to start(). */
+  startedRoot?: NormalizedFullLink;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -708,6 +710,10 @@ export class Runner {
   // Covers the pre-resolution window where a link attempt does not know its
   // eventual target doc and therefore cannot appear in the per-doc index yet.
   private activeStartAttempts = new Set<StartAttempt>();
+  // Client-visible start() calls export only their final piece roots. Internal
+  // child run()/startCore() registrations stay inside that demanded closure.
+  private executionDemandBySpace = new Map<MemorySpace, Set<string>>();
+  private executionDemandTails = new Map<MemorySpace, Promise<void>>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -1250,9 +1256,16 @@ export class Runner {
     this.activeStartAttempts.add(attempt);
     this.trackStartAttempt(attempt, startKey);
     try {
-      return this.doStart(resultCell, new Set(), attempt).finally(() => {
-        this.finishStartAttempt(attempt);
-      });
+      return this.doStart(resultCell, new Set(), attempt)
+        .then(async (started) => {
+          if (started && attempt.startedRoot !== undefined) {
+            await this.addExecutionDemand(attempt.startedRoot);
+          }
+          return started;
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
     } catch (error) {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
@@ -1531,7 +1544,10 @@ export class Runner {
     const wasStoppedLocally = this.locallyStoppedResults.has(key);
 
     // Step 2: Already started? Return success
-    if (this.cancels.has(key)) return Promise.resolve(true);
+    if (this.cancels.has(key)) {
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
+      return Promise.resolve(true);
+    }
 
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
@@ -1656,6 +1672,7 @@ export class Runner {
         return Promise.reject(err);
       }
 
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
       return Promise.resolve(true);
     }
 
@@ -1691,6 +1708,7 @@ export class Runner {
       }
       // we may already be in the midst of starting this, so don't start again
       if (this.cancels.has(this.getDocKey(rootCell))) {
+        attempt.startedRoot = rootCell.getAsNormalizedFullLink();
         return true;
       }
 
@@ -1715,6 +1733,7 @@ export class Runner {
         logger.time(startCoreStart, "start", "startCoreResume");
       }
 
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
       return true;
     })();
   }
@@ -2105,6 +2124,83 @@ export class Runner {
   private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
     return `${space}/${scope}/${id}`;
+  }
+
+  private queueExecutionDemand(
+    space: MemorySpace,
+    provider: IStorageProviderWithReplica,
+    pieces: readonly string[],
+  ): Promise<void> {
+    const send = async () => {
+      try {
+        await provider.setExecutionDemand?.("", pieces);
+      } catch (error) {
+        // Demand is an optimization/authority offer. A transport or capability
+        // failure must leave today's client execution intact.
+        logger.warn("execution-demand", () => [
+          `Failed to publish execution demand for ${space}`,
+          error,
+        ]);
+      }
+    };
+    // Invoke immediately so successive snapshots enter the connection in
+    // caller order. The tail is only a lifetime barrier; waiting to invoke the
+    // next call until the previous response arrives would leave a stopped root
+    // advertised during that round trip.
+    const update = send();
+    const previous = this.executionDemandTails.get(space);
+    const barrier = previous === undefined
+      ? update
+      : Promise.allSettled([previous, update]).then(() => undefined);
+    this.executionDemandTails.set(space, barrier);
+    void barrier.finally(() => {
+      if (this.executionDemandTails.get(space) === barrier) {
+        this.executionDemandTails.delete(space);
+      }
+    });
+    return update;
+  }
+
+  private addExecutionDemand(link: NormalizedFullLink): Promise<void> {
+    if (this.runtime.experimental.serverPrimaryExecution !== true) {
+      return Promise.resolve();
+    }
+    const provider = this.runtime.storageManager.open(link.space);
+    if (provider.setExecutionDemand === undefined) return Promise.resolve();
+    let roots = this.executionDemandBySpace.get(link.space);
+    if (roots === undefined) {
+      roots = new Set();
+      this.executionDemandBySpace.set(link.space, roots);
+    }
+    if (roots.has(link.id)) return Promise.resolve();
+    roots.add(link.id);
+    return this.queueExecutionDemand(
+      link.space,
+      provider,
+      [...roots].sort(),
+    );
+  }
+
+  private removeExecutionDemand(link: NormalizedFullLink): void {
+    const roots = this.executionDemandBySpace.get(link.space);
+    if (roots === undefined || !roots.delete(link.id)) return;
+    if (roots.size === 0) this.executionDemandBySpace.delete(link.space);
+    const provider = this.runtime.storageManager.open(link.space);
+    if (provider.setExecutionDemand === undefined) return;
+    this.runtime.storageManager.trackUntilSettled(
+      this.queueExecutionDemand(link.space, provider, [...roots].sort()),
+    );
+  }
+
+  private clearExecutionDemand(): void {
+    for (const space of this.executionDemandBySpace.keys()) {
+      const provider = this.runtime.storageManager.open(space);
+      if (provider.setExecutionDemand === undefined) continue;
+      this.runtime.storageManager.trackUntilSettled(
+        this.queueExecutionDemand(space, provider, []),
+      );
+    }
+    this.executionDemandBySpace.clear();
   }
 
   private schedulerRehydrationOptions(
@@ -2582,6 +2678,7 @@ export class Runner {
    * @param resultCell - The result doc or cell to stop.
    */
   stop<T>(resultCell: Cell<T>): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
     const key = this.getDocKey(resultCell);
     if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) {
       this.startGenerationByDoc.set(
@@ -2611,6 +2708,7 @@ export class Runner {
       this.locallyCommittedHandlerResultStarts.delete(key);
       if (cancel !== undefined) {
         this.allCancels.delete(cancel);
+        this.removeExecutionDemand(resultLink);
         // Only a piece that was actually running is safe to restart from its
         // already-assembled local cells. Stopping an unresolved/storage-only
         // target must not bypass dependency sync and snapshot rehydration on a
@@ -2667,6 +2765,7 @@ export class Runner {
     this.lifecycleEpoch++;
     this.resumeSnapshotsBySpace.clear();
     this.resumeSnapshotLoads.clear();
+    this.clearExecutionDemand();
     // Cancel all tracked operations
     for (const cancel of this.allCancels) {
       try {

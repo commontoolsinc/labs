@@ -19,6 +19,7 @@ import {
 import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  type BranchName,
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
@@ -874,6 +875,8 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         shadowWrites: this.#shadowWrites,
+        supportsExecutionDemand:
+          this.#sessionFactory.supportsExecutionDemand === true,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? () => this.#createInitializedSession(space, signer)
           : () =>
@@ -1463,6 +1466,7 @@ type ProviderOptions = {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   shadowWrites: boolean;
+  supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
@@ -1477,12 +1481,20 @@ type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProviderWithReplica {
   readonly replica: SpaceReplica;
+  readonly setExecutionDemand?: (
+    branch: BranchName,
+    pieces: readonly string[],
+  ) => Promise<boolean>;
   #destroyed = false;
 
   constructor(
     readonly options: ProviderOptions,
   ) {
     this.replica = new SpaceReplica(options);
+    if (options.supportsExecutionDemand) {
+      this.setExecutionDemand = (branch, pieces) =>
+        this.replica.setExecutionDemand(branch, pieces);
+    }
   }
 
   send(
@@ -1865,6 +1877,14 @@ class SpaceReplica implements ISpaceReplica {
         path: toDocumentPath([...target.path]),
       })),
     });
+  }
+
+  async setExecutionDemand(
+    branch: BranchName,
+    pieces: readonly string[],
+  ): Promise<boolean> {
+    const { session } = await this.sessionHandle();
+    return await session.setExecutionDemand?.(branch, pieces) ?? false;
   }
 
   areSchedulerAddressesCurrentAtOrBelow(
