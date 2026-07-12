@@ -388,8 +388,8 @@ type DirtyOrigin = {
  * carries rejected-commit catch-up and may coalesce several commits.
  */
 export interface AcceptedCommitEvent {
-  /** Ephemeral per-space callback order. W0.6 replaces this with the durable
-   *  reconnectable execution-feed sequence. */
+  /** Ephemeral per-space host callback order. W0.6 deliberately uses a
+   * separate per-logical-session reconnectable feed sequence on the wire. */
   readonly order: number;
   /** Data/adoption window through which this commit is visible. Metadata-only
    *  scheduler observations may reserve a future delivery slot without

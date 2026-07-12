@@ -31,6 +31,10 @@ rewrite. In particular:
 - the public one-shot read surface is currently `graph.query`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
+- server-primary execution is an optional, default-off capability. Compatible
+  sessions carry connection-owned demand and receive claims/settlements inside
+  the existing ordered logical-session sync stream; no parallel control socket
+  exists
 
 ## 4.1 Transport
 
@@ -51,7 +55,10 @@ The client MUST declare its protocol version in the first WebSocket message:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "schedulerWriterLookup": true
+    "schedulerWriterLookup": true,
+    "serverPrimaryExecutionV1": false,
+    "serverPrimaryExecutionClaimRoutingV1": false,
+    "serverPrimaryExecutionBuiltinPassivityV1": false
   }
 }
 ```
@@ -65,7 +72,10 @@ If the server accepts the protocol, it returns:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "schedulerWriterLookup": true
+    "schedulerWriterLookup": true,
+    "serverPrimaryExecutionV1": false,
+    "serverPrimaryExecutionClaimRoutingV1": false,
+    "serverPrimaryExecutionBuiltinPassivityV1": false
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -137,6 +147,21 @@ discovery. When advertised, an authenticated space session may use
 `scheduler.writer.list`; the server, not the caller, supplies the owner space,
 principal/session execution contexts, and effective target scope keys.
 
+`serverPrimaryExecutionV1` advertises the trusted-client demand and ordered
+control-feed protocol. It is optional and absent means `false`; it is not part
+of global hello equality. When the runtime flag is on and the default-branch,
+space-scoped `of:${space}:execution-policy` document is exactly
+`{ version: 1, serverPrimaryExecution: true }`, `session.open` rejects a peer
+that omitted the capability. With the runtime flag off, the same durable policy
+is inert so operators retain a real client-primary rollback.
+
+The two narrower capabilities are positive promises by the client:
+`serverPrimaryExecutionClaimRoutingV1` says it can route computation writes by
+claim, and `serverPrimaryExecutionBuiltinPassivityV1` says it can keep claimed
+async builtins passive. Both are absent-false and remain false in ordinary
+builds until W2.1 and W2.3 respectively. The server only sends a claim class to
+sessions that advertised the matching promise.
+
 ### 4.1.2 Logical Sessions and Resume
 
 Pending-read resolution, idempotent replay, and live sync are scoped to a
@@ -172,6 +197,7 @@ interface SessionOpenInvocation {
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
+      executionFeedSeq?: number;
       sessionToken?: string;
     };
   };
@@ -207,6 +233,8 @@ Rules:
   present the latest token when resuming an existing session
 - `seenSeq` is the highest canonical seq the client has fully integrated into
   confirmed state
+- `executionFeedSeq` is the highest ordered execution-control frame the client
+  integrated. It is independent of semantic data sequence numbers
 - `resumed: true` means the server found an existing logical session for the
   supplied `(space, sessionId)` pair
 - the server rotates `sessionToken` on every successful `session.open`
@@ -219,9 +247,10 @@ Rules:
 - a stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
-- after reconnect, the client resumes the session, replays retained commits,
-  applies inline catch-up `sync` when present, and only re-establishes the
-  watch set if the session was reopened fresh
+- after reconnect, the client applies the inline catch-up and authoritative
+  claim snapshot barrier first, reissues its connection-owned demand second,
+  then replays retained commits; it only re-establishes the watch set if the
+  session was reopened fresh
 
 ## 4.2 Message Format
 
@@ -243,6 +272,9 @@ interface HelloMessage {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
     schedulerWriterLookup?: boolean;
+    serverPrimaryExecutionV1?: boolean;
+    serverPrimaryExecutionClaimRoutingV1?: boolean;
+    serverPrimaryExecutionBuiltinPassivityV1?: boolean;
   };
 }
 
@@ -253,6 +285,7 @@ interface RequestMessage {
     | "graph.query"
     | "scheduler.snapshot.list"
     | "scheduler.writer.list"
+    | "session.execution.demand.set"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -302,6 +335,12 @@ Live data delivery is not routed through the initiating request id.
 
 ```typescript
 // Shown at module scope.
+interface ExecutionClaim {}
+type ExecutionControlEvent =
+  | { type: "session.execution.claim.set" }
+  | { type: "session.execution.claim.revoke" }
+  | { type: "session.execution.settlement" };
+
 interface SessionSync {
   type: "sync";
   fromSeq: number;
@@ -317,6 +356,12 @@ interface SessionSync {
     branch: BranchId;
     id: EntityId;
   }>;
+  execution?: {
+    fromFeedSeq: number;
+    toFeedSeq: number;
+    snapshot?: { claims: ExecutionClaim[] };
+    events: ExecutionControlEvent[];
+  };
 }
 ```
 
@@ -327,6 +372,13 @@ Semantics:
 - `deleted: true` means the entity is currently tombstoned
 - `removes` are not deletions in storage; they mean the entity is no longer in
   the session's relevant watch-set result
+- negotiated execution batches order data frames, claim set/revoke, and every
+  settlement outcome in one reconnectable per-logical-session sequence. A
+  control-only batch leaves `fromSeq`/`toSeq` unchanged while advancing
+  `fromFeedSeq`/`toFeedSeq`
+- a committed settlement's `acceptedCommitSeq` is an additional data-
+  application barrier: a client buffers it until the corresponding data cursor
+  has reached that sequence
 
 ### 4.2.4 Batching
 
@@ -573,6 +625,62 @@ shared plus applicable user/session action contexts. Callers cannot submit
 bidirectional path-prefix overlap and results are deterministic. Missing,
 disabled, or corrupt scheduler state returns no candidates so the runner can
 fall back to ordinary piece-root discovery.
+
+### 4.3.8 Server-primary execution demand and control
+
+The only client-to-server execution command is connection-owned demand:
+
+```typescript
+type SpaceId = string;
+type SessionId = string;
+type BranchId = string;
+
+interface ExecutionDemandSetRequest {
+  type: "session.execution.demand.set";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  branch: BranchId;
+  pieces: string[];
+}
+```
+
+The authenticated connection and session supply principal and ownership; the
+wire request may not contain a connection id, principal, sponsor, or
+`onBehalfOf`. Setting replaces only that connection/session/branch entry, an
+empty list removes it, and disconnect removes every reference owned by that
+connection. Demand requires READ; later sponsor selection separately requires
+WRITE.
+
+Claims and settlements are server-generated `SessionSync.execution.events`:
+
+```typescript
+type BranchId = string;
+interface ActionClaimKey {}
+interface ExecutionClaim extends ActionClaimKey {}
+interface ActionSettlement {}
+
+type ExecutionControlEvent =
+  | { type: "session.execution.claim.set"; claim: ExecutionClaim }
+  | {
+      type: "session.execution.claim.revoke";
+      branch: BranchId;
+      claim: ActionClaimKey;
+      leaseGeneration: number;
+      claimGeneration: number;
+    }
+  | {
+      type: "session.execution.settlement";
+      settlement: ActionSettlement;
+    };
+```
+
+Every claim is branch-qualified, host-expiring, and has a per-action monotonic
+`claimGeneration` distinct from its worker `leaseGeneration`. Revoke names the
+live generation; a reclaim always mints the next generation. Settlements must
+match the exact branch, lease, and claim generation. `committed` requires
+`acceptedCommitSeq`; `no-op`, `failed`, and `unserved` forbid it. Client frames
+using these server-only message names are rejected by the strict parser.
 
 ## 4.4 Selectors
 

@@ -159,8 +159,13 @@ propagate](#how-flags-propagate).
   phased authority rollout, then remove the flag once every supported client
   obeys server-primary claims.
 - **Status on 2026-07-12.** Runtime, environment, browser-worker, background-
-  worker, and memory-handshake plumbing are implemented; off remains
-  client-primary behavior.
+  worker, memory handshake, connection-owned demand, strict owner policy, and
+  ordered reconnectable claim/settlement feed are implemented; off remains
+  client-primary behavior. The narrower
+  `serverPrimaryExecutionClaimRoutingV1` and
+  `serverPrimaryExecutionBuiltinPassivityV1` capabilities are hardwired false
+  in ordinary builds until W2.1 and W2.3. Tests override them only to exercise
+  the otherwise-dark protocol.
 - **Path to removal.** Complete the shadow, positive-claim, reconciliation,
   and builtin-passivity rollout; confirm every supported deployment and client
   speaks the protocol; make it unconditional; then delete the runtime flag,
@@ -570,9 +575,15 @@ the per-epic implementation notes).
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
 
-> Three neighbours in the same handshake are related but are not runtime-toggleable
+> Five neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
+> - **`serverPrimaryExecutionClaimRoutingV1`** is an absent-false client promise
+>   that computation claim routing is implemented. It stays false until W2.1;
+>   the server publishes computation claims only to peers that advertise it.
+> - **`serverPrimaryExecutionBuiltinPassivityV1`** is the corresponding
+>   absent-false promise for claimed async builtins. It stays false until W2.3;
+>   effect claims are not published to other peers.
 > - **`syncSchemaTable`** is the older, index-keyed predecessor of
 >   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
 >   and has no config function; it is effectively dead and can be deleted from
