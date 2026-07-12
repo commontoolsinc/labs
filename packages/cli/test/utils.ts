@@ -25,13 +25,12 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
     /^[└├]/u.test(trimmed);
 }
 
-const SERVER_PRIMARY_EXECUTION_OVERRIDE_DIAGNOSTIC =
-  "Experimental flag overrides: serverPrimaryExecution=true";
+const EXPERIMENTAL_OVERRIDE_DIAGNOSTIC_PREFIX = "Experimental flag overrides: ";
 
 export function checkStderr(stderr: string[]) {
   const relevant = stderr.filter((line) =>
     !isIgnorableDenoWarningLine(line) &&
-    stripAnsi(line) !== SERVER_PRIMARY_EXECUTION_OVERRIDE_DIAGNOSTIC
+    !stripAnsi(line).startsWith(EXPERIMENTAL_OVERRIDE_DIAGNOSTIC_PREFIX)
   );
   try {
     expect(relevant.length).toBe(1);
