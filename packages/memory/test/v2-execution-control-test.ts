@@ -119,6 +119,7 @@ type ExecutionServer = Server & {
     claim: ActionClaimKey,
   ): Promise<ExecutionClaim>;
   revokeExecutionClaim(claim: ExecutionClaim): boolean;
+  hasLiveExecutionClaim(claim: ExecutionClaim): boolean;
   publishActionSettlement(settlement: ActionSettlement): boolean;
   listExecutionClaims(space: string): readonly ExecutionClaim[];
   expireExecutionClaims(now?: number): number;
@@ -570,12 +571,14 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     );
     assertEquals(main.claimGeneration, 1);
     assertEquals(sibling.claimGeneration, 1);
+    assertEquals(server.hasLiveExecutionClaim(main), true);
     assertEquals(session.executionClaims.map((claim) => claim.actionId), [
       "action:derive",
       "action:sibling",
     ]);
 
     assertEquals(server.revokeExecutionClaim(main), true);
+    assertEquals(server.hasLiveExecutionClaim(main), false);
     const reclaimed = await server.setExecutionClaim(
       lease,
       claimKey(POLICY_SPACE, ""),

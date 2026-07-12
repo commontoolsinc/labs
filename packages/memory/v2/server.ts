@@ -3167,6 +3167,15 @@ export class Server {
     return true;
   }
 
+  /** Read-only host gate for executor broker work and async continuations. */
+  hasLiveExecutionClaim(claim: ExecutionClaim): boolean {
+    this.expireExecutionClaims();
+    const live = this.#executionClaims.get(actionClaimMapKey(claim));
+    return live !== undefined &&
+      live.leaseGeneration === claim.leaseGeneration &&
+      live.claimGeneration === claim.claimGeneration;
+  }
+
   publishActionSettlement(settlement: ActionSettlement): boolean {
     this.expireExecutionClaims();
     if (
