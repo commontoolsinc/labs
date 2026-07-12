@@ -14,9 +14,9 @@ const manifestBody = () => ({
   template: {
     templateVersion: 1 as const,
     exchangeRules: [{
-      id: "releaseToReviewer",
-      appliesTo: { thisPolicy: true },
+      name: "releaseToReviewer",
       preCondition: {
+        confidentiality: [{ thisPolicy: true }],
         integrity: [{
           type: CFC_ATOM_TYPE.HasRole,
           principal: { var: "$reviewer" },
@@ -24,11 +24,12 @@ const manifestBody = () => ({
           role: "reader",
         }],
       },
-      post: {
-        addAlternatives: [{
+      postCondition: {
+        confidentiality: [{
           type: CFC_ATOM_TYPE.User,
           subject: { var: "$reviewer" },
         }],
+        integrity: [],
       },
     }],
     dependencies: { authorityOnly: [], dataBearing: [] },
@@ -81,7 +82,7 @@ describe("CFC module policy templates", () => {
     ).toThrow(/policyDigest mismatch/);
   });
 
-  it("rejects unsupported versions, unknown keys, and duplicate rule ids", () => {
+  it("rejects unsupported versions, unknown keys, and duplicate rule names", () => {
     expect(() =>
       buildCfcPolicyArtifactManifest({
         ...manifestBody(),
@@ -99,7 +100,7 @@ describe("CFC module policy templates", () => {
       duplicate.template.exchangeRules[0],
     );
     expect(() => buildCfcPolicyArtifactManifest(duplicate)).toThrow(
-      /duplicate rule id/,
+      /duplicate rule name/,
     );
   });
 
@@ -107,7 +108,10 @@ describe("CFC module policy templates", () => {
     const body = manifestBody();
     body.template.exchangeRules[0] = {
       ...body.template.exchangeRules[0],
-      preCondition: { boundary: [{ sink: "display" }] },
+      preCondition: {
+        confidentiality: [{ thisPolicy: true }],
+        integrity: [],
+      },
     } as never;
     expect(() => buildCfcPolicyArtifactManifest(body)).toThrow(
       /integrity or policyState guard/,
@@ -118,11 +122,12 @@ describe("CFC module policy templates", () => {
     const body = manifestBody();
     body.template.exchangeRules[0] = {
       ...body.template.exchangeRules[0],
-      post: {
-        addAlternatives: [{
+      postCondition: {
+        confidentiality: [{
           type: CFC_ATOM_TYPE.User,
           subject: { var: "$unbound" },
         }],
+        integrity: [],
       },
     };
     expect(() => buildCfcPolicyArtifactManifest(body)).toThrow(

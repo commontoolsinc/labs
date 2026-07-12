@@ -26,6 +26,7 @@ import {
 } from "./label-representation.ts";
 import {
   type ExchangeRule,
+  lowerCfcPolicyTemplateRules,
   type PolicyArtifactManifestV1,
   type PolicyRecord,
   type PolicySnapshot,
@@ -823,7 +824,9 @@ export const evaluateExchangeRules = (
   }
   for (const policy of resolved.policies) {
     for (
-      const rule of [...policy.artifact.manifest.template.exchangeRules].sort(
+      const rule of [...lowerCfcPolicyTemplateRules(
+        policy.artifact.manifest.template,
+      )].sort(
         (a, b) => utf8Compare(a.id, b.id),
       )
     ) {

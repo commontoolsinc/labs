@@ -24,9 +24,9 @@ const artifact: PolicyArtifactManifestV1 = buildCfcPolicyArtifactManifest({
   template: {
     templateVersion: 1,
     exchangeRules: [{
-      id: "releaseToReviewer",
-      appliesTo: { thisPolicy: true },
+      name: "releaseToReviewer",
       preCondition: {
+        confidentiality: [{ thisPolicy: true }],
         integrity: [{
           type: CFC_ATOM_TYPE.HasRole,
           principal: { var: "$reviewer" },
@@ -34,11 +34,12 @@ const artifact: PolicyArtifactManifestV1 = buildCfcPolicyArtifactManifest({
           role: "reader",
         }],
       },
-      post: {
-        addAlternatives: [{
+      postCondition: {
+        confidentiality: [{
           type: CFC_ATOM_TYPE.User,
           subject: { var: "$reviewer" },
         }],
+        integrity: [],
       },
     }],
     dependencies: { authorityOnly: [], dataBearing: [] },
@@ -108,11 +109,11 @@ describe("module-policy exchange evaluation", () => {
     expect(result.firings).toHaveLength(1);
     expect(result.label.confidentiality?.[0]).toEqual({
       anyOf: [
-        cfcAtom.user(REVIEWER),
         {
           ...ref(ALICE_SPACE),
           subject: commitCfcFieldValue(ALICE_SPACE),
         },
+        cfcAtom.user(REVIEWER),
       ],
     });
   });

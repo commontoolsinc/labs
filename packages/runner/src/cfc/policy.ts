@@ -128,9 +128,25 @@ export type CfcPolicyRecordInput = {
   readonly selection?: CfcPolicySelection;
 };
 
+export type PolicyTemplateExchangeRuleV1 = {
+  readonly name: string;
+  readonly preCondition: {
+    readonly confidentiality: readonly AtomPattern[];
+    readonly integrity: readonly AtomPattern[];
+  };
+  readonly preConfScope?: "targetClause" | "anywhere";
+  readonly postCondition: {
+    readonly confidentiality: readonly AtomPattern[];
+    readonly integrity: readonly AtomPattern[];
+  };
+  readonly guard?: {
+    readonly policyState: readonly AtomPattern[];
+  };
+};
+
 export type PolicyTemplateV1 = {
   readonly templateVersion: 1;
-  readonly exchangeRules: readonly ExchangeRule[];
+  readonly exchangeRules: readonly PolicyTemplateExchangeRuleV1[];
   readonly dependencies: {
     readonly authorityOnly: readonly string[];
     readonly dataBearing: readonly string[];
@@ -182,6 +198,22 @@ const TEMPLATE_KEYS = new Set([
   "dependencies",
   "integrityRequirements",
 ]);
+const TEMPLATE_RULE_KEYS = new Set([
+  "name",
+  "preCondition",
+  "preConfScope",
+  "postCondition",
+  "guard",
+]);
+const TEMPLATE_PRE_CONDITION_KEYS = new Set([
+  "confidentiality",
+  "integrity",
+]);
+const TEMPLATE_POST_CONDITION_KEYS = new Set([
+  "confidentiality",
+  "integrity",
+]);
+const TEMPLATE_GUARD_KEYS = new Set(["policyState"]);
 const DEPENDENCY_KEYS = new Set(["authorityOnly", "dataBearing"]);
 const INTEGRITY_REQUIREMENT_KEYS = new Set(["read", "write", "share"]);
 
@@ -552,6 +584,130 @@ const validateStringArray = (value: unknown, where: string): void => {
   }
 };
 
+const validatePolicyTemplateRule = (
+  input: unknown,
+): PolicyTemplateExchangeRuleV1 => {
+  if (!isPlainRecord(input)) {
+    throw new Error("cfcPolicyManifest: module policy rule must be an object");
+  }
+  rejectUnknownKeys(input, TEMPLATE_RULE_KEYS, "module policy rule");
+  if (typeof input.name !== "string" || input.name.length === 0) {
+    throw new Error("cfcPolicyManifest: module policy rule needs a name");
+  }
+  const where = `module policy rule "${input.name}"`;
+  if (!isPlainRecord(input.preCondition)) {
+    throw new Error(`cfcPolicyManifest: ${where} needs a preCondition`);
+  }
+  rejectUnknownKeys(
+    input.preCondition,
+    TEMPLATE_PRE_CONDITION_KEYS,
+    `${where} preCondition`,
+  );
+  const confidentiality = validatePatternArray(
+    input.preCondition.confidentiality,
+    `${where} preCondition.confidentiality`,
+  );
+  const integrity = validatePatternArray(
+    input.preCondition.integrity,
+    `${where} preCondition.integrity`,
+  );
+  if (
+    confidentiality.length === 0 || !isThisPolicyPattern(confidentiality[0])
+  ) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} must target THIS_POLICY as its first confidentiality pattern`,
+    );
+  }
+  confidentiality.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} preCondition.confidentiality[${index}]`,
+      index === 0,
+    )
+  );
+  integrity.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} preCondition.integrity[${index}]`,
+    )
+  );
+  if (
+    input.preConfScope !== undefined &&
+    input.preConfScope !== "targetClause" &&
+    input.preConfScope !== "anywhere"
+  ) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} preConfScope must be "targetClause" or "anywhere"`,
+    );
+  }
+  if (!isPlainRecord(input.postCondition)) {
+    throw new Error(`cfcPolicyManifest: ${where} needs a postCondition`);
+  }
+  rejectUnknownKeys(
+    input.postCondition,
+    TEMPLATE_POST_CONDITION_KEYS,
+    `${where} postCondition`,
+  );
+  const postConfidentiality = validatePatternArray(
+    input.postCondition.confidentiality,
+    `${where} postCondition.confidentiality`,
+  );
+  const postIntegrity = validatePatternArray(
+    input.postCondition.integrity,
+    `${where} postCondition.integrity`,
+  );
+  if (postIntegrity.length > 0) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} cannot mint integrity in authoring v1`,
+    );
+  }
+  postConfidentiality.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} postCondition.confidentiality[${index}]`,
+    )
+  );
+
+  let policyState: readonly AtomPattern[] = [];
+  if (input.guard !== undefined) {
+    if (!isPlainRecord(input.guard)) {
+      throw new Error(`cfcPolicyManifest: ${where} guard must be an object`);
+    }
+    rejectUnknownKeys(input.guard, TEMPLATE_GUARD_KEYS, `${where} guard`);
+    policyState = validatePatternArray(
+      input.guard.policyState,
+      `${where} guard.policyState`,
+    );
+    validatePolicyStateGuards(policyState, `${where} guard.policyState`);
+    policyState.forEach((pattern, index) =>
+      validateTemplatePattern(
+        pattern,
+        `${where} guard.policyState[${index}]`,
+      )
+    );
+  }
+  if (integrity.length === 0 && policyState.length === 0) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} needs an integrity or policyState guard`,
+    );
+  }
+
+  const bound = new Set<string>();
+  collectPatternVariables(confidentiality, bound);
+  collectPatternVariables(integrity, bound);
+  collectPatternVariables(policyState, bound);
+  const postVariables = new Set<string>();
+  collectPatternVariables(postConfidentiality, postVariables);
+  for (const variable of postVariables) {
+    if (!bound.has(variable)) {
+      throw new Error(
+        `cfcPolicyManifest: ${where} has unbound postcondition variable "${variable}"`,
+      );
+    }
+  }
+  return input as PolicyTemplateExchangeRuleV1;
+};
+
 const validatePolicyTemplate = (input: unknown): PolicyTemplateV1 => {
   if (!isPlainRecord(input)) {
     throw new Error("cfcPolicyManifest: template must be an object");
@@ -563,15 +719,15 @@ const validatePolicyTemplate = (input: unknown): PolicyTemplateV1 => {
   if (!Array.isArray(input.exchangeRules)) {
     throw new Error("cfcPolicyManifest: exchangeRules must be an array");
   }
-  const ruleIds = new Set<string>();
+  const ruleNames = new Set<string>();
   for (const rule of input.exchangeRules) {
-    const validated = validateExchangeRule(rule, "module policy rule", true);
-    if (ruleIds.has(validated.id)) {
+    const validated = validatePolicyTemplateRule(rule);
+    if (ruleNames.has(validated.name)) {
       throw new Error(
-        `cfcPolicyManifest: duplicate rule id "${validated.id}"`,
+        `cfcPolicyManifest: duplicate rule name "${validated.name}"`,
       );
     }
-    ruleIds.add(validated.id);
+    ruleNames.add(validated.name);
   }
   if (!isPlainRecord(input.dependencies)) {
     throw new Error("cfcPolicyManifest: dependencies must be an object");
@@ -615,6 +771,31 @@ const validatePolicyTemplate = (input: unknown): PolicyTemplateV1 => {
   }
   return input as PolicyTemplateV1;
 };
+
+/** Adapts the normative portable template into the runner's clause-local form. */
+export const lowerCfcPolicyTemplateRules = (
+  template: PolicyTemplateV1,
+): readonly ExchangeRule[] =>
+  template.exchangeRules.map((rule) => {
+    const [appliesTo, ...confidentiality] = rule.preCondition.confidentiality;
+    return {
+      id: rule.name,
+      appliesTo: appliesTo!,
+      preCondition: {
+        confidentiality,
+        integrity: rule.preCondition.integrity,
+        ...(rule.guard === undefined
+          ? {}
+          : { policyState: rule.guard.policyState }),
+      },
+      ...(rule.preConfScope === undefined
+        ? {}
+        : { preConfScope: rule.preConfScope }),
+      post: rule.postCondition.confidentiality.length === 0
+        ? { dropClause: true }
+        : { addAlternatives: rule.postCondition.confidentiality },
+    };
+  });
 
 const validatePolicyManifestBody = (
   input: unknown,
