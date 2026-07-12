@@ -1,9 +1,16 @@
+---
+status: historical
+created: 2026-07-10
+archived: 2026-07-12
+reason: "Executed plan; first-class serializable factories shipped through pre-launch compatibility cleanup."
+---
+
 # First-Class Serializable Factories — Implementation Plan
 
-Status: In progress
+Status: Complete
 
 This plan implements
-[First-Class Serializable Factories](../specs/pattern-construction/node-factory-shipping.md).
+[First-Class Serializable Factories](../../specs/pattern-construction/node-factory-shipping.md).
 Read that specification first: it defines the behavior and invariants; this
 document defines the implementation sequence. If the two disagree, update the
 plan or stop for a design decision rather than changing the contract implicitly.
@@ -1878,72 +1885,82 @@ alone authorizes deleting readers for durable values.
 
 ### WP5.1 — Satisfy removal gates
 
-Stage 5 was not executed in this implementation. Stage 4's production-caller
-inventories are green, but the broader supported-tree allowlist/CI gate remains
-part of the separately scheduled cleanup. No deployed-writer compatibility
-window, persistent-store migration/expiry decision, zero-use reader telemetry,
-supported-client rollout evidence, or product/runtime owner removal approval was
-provided. Those gates therefore remain unchecked, and no durable reader is
-eligible for deletion.
+Stage 5 was authorized as a pre-launch cleanup on 2026-07-12. The product/runtime
+owner confirmed there are no supported deployed patterns or durable stores that
+must survive this change and explicitly approved wiping pre-launch data. Because
+there is no supported rollout population, the deployed-writer window and
+zero-reader-telemetry window are not applicable; the only supported client is
+the current pre-launch tree, whose Factory@1 coverage is pinned by the Stage 1-4
+matrix and final package checks. This decision satisfies the durable-reader
+gates without inventing production evidence that does not exist.
 
-- [ ] Confirm all supported source trees contain no `patternTool` caller.
-- [ ] Add a CI/source-inventory assertion with zero `patternTool`,
+- [x] Confirm all supported source trees contain no `patternTool` caller.
+- [x] Add a CI/source-inventory assertion with zero `patternTool`,
   `PatternToolResult`, or writer-side `extraParams` hits outside an allowlist of
   compatibility tests and historical docs.
-- [ ] Confirm deployed writers have emitted only `Factory@1` for at least the
-  agreed compatibility window.
-- [ ] Confirm persistent stores have been migrated, expired, or explicitly
+- [x] Confirm deployed writers have emitted only `Factory@1` for at least the
+  agreed compatibility window. (Pre-launch: no supported deployed writers;
+  owner-approved waiver.)
+- [x] Confirm persistent stores have been migrated, expired, or explicitly
   approved for a wipe; record the evidence and decision in this plan.
-- [ ] Confirm legacy tool and list reader diagnostics show no supported usage
-  for the agreed window.
-- [ ] Confirm every supported client/runtime version can read `Factory@1`.
-- [ ] Obtain an explicit product/runtime owner decision before deleting a
+- [x] Confirm legacy tool and list reader diagnostics show no supported usage
+  for the agreed window. (Pre-launch: no supported runtime population;
+  owner-approved waiver.)
+- [x] Confirm every supported client/runtime version can read `Factory@1`.
+  (The current pre-launch tree is the complete supported client set.)
+- [x] Obtain an explicit product/runtime owner decision before deleting a
   durable compatibility reader.
 
 ### WP5.2 — Remove legacy APIs and readers
 
-- [ ] Remove `patternTool`, `PatternToolFunction`, and `PatternToolResult` from
+- [x] Remove `patternTool`, `PatternToolFunction`, and `PatternToolResult` from
   `packages/api/index.ts`, runner builder exports, and trusted builder factory
   wiring.
-- [ ] Remove transformer `patternTool` call-kind, boundary, validation, and
+- [x] Remove transformer `patternTool` call-kind, boundary, validation, and
   hoisting special cases.
-- [ ] Remove LLM/schema-format/CLI/FUSE `extraParams` compatibility branches.
-- [ ] Remove legacy list overloads and sibling-params readers.
-- [ ] Remove legacy pattern-factory `$patternRef` adaptation only after its own
+- [x] Remove LLM/schema-format/CLI/FUSE `extraParams` compatibility branches.
+- [x] Remove legacy list overloads and sibling-params readers.
+- [x] Remove legacy pattern-factory `$patternRef` adaptation only after its own
   stored-data gate passes.
-- [ ] Leave module/handler `$implRef` descriptor reconstruction intact unless a
-  separately scoped migration proves all of its non-factory users have moved;
-  first-class factories alone do not authorize its removal.
+- [x] Leave `$implRef` reconstruction for instantiated execution-module
+  descriptors intact. It is current graph implementation identity, not a
+  first-class factory-value encoding, and this cleanup does not authorize its
+  removal.
 - [ ] Remove factory-function `toJSON()` compatibility only after every Fabric
-  boundary uses registered codec dispatch.
-- [ ] Keep negative fixtures that prove deleted writers/readers stay deleted.
+  boundary uses registered codec dispatch. Direct `Pattern.toJSON()` therefore
+  retains the full-graph compatibility form; canonical Fabric writers use the
+  Factory@1 codec and no longer emit `$patternRef`.
+- [x] Keep negative fixtures that prove deleted writers/readers stay deleted.
+  The supported-source inventory rejects the removed API/writer tokens, public
+  API types reject the legacy tool shape, and runtime tests reject arbitrary
+  functions and missing durable factory refs.
 
 ### WP5.3 — Update live documentation and archive the plan
 
-- [ ] Update `docs/common/README.md` and the relevant pattern composition,
+- [x] Update `docs/common/README.md` and the relevant pattern composition,
   reactivity, types/schema, LLM, CLI, and FUSE docs for first-class factories.
-- [ ] Update live transformer behavior/inventory docs and
+- [x] Update live transformer behavior/inventory docs and
   `packages/ts-transformers/docs/array-method-callback-pipeline.md` so they show
   bound factories rather than sibling params.
-- [ ] Reconcile `docs/specs/sandboxing/SES_SANDBOXING_SPEC.md`,
+- [x] Reconcile `docs/specs/sandboxing/SES_SANDBOXING_SPEC.md`,
   `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`,
   `docs/specs/ts-transformer/ts_transformers_type_driven_behavior_inventory.md`,
   `docs/specs/ts-transformer/ts_transformers_design_deltas.md`, and
   `packages/ts-transformers/docs/derive-to-lift-design.md` with the shipped
   closure and factory-call behavior.
-- [ ] Update `docs/specs/fuse-filesystem/2-path-scheme.md` and
+- [x] Update `docs/specs/fuse-filesystem/2-path-scheme.md` and
   `packages/fuse/README.md` for direct factory `.tool` projection and tagged
   factory JSON.
-- [ ] Document the author-facing inline-pattern closure model with examples for
+- [x] Document the author-facing inline-pattern closure model with examples for
   passing, returning, storing, and invoking all factory kinds.
-- [ ] Document that `.curry` is not public API and that closure params never
+- [x] Document that `.curry` is not public API and that closure params never
   merge with public input.
-- [ ] Update component/pattern examples whose tool construction changed.
-- [ ] Reconcile the high-level checklist in
+- [x] Update component/pattern examples whose tool construction changed.
+- [x] Reconcile the high-level checklist in
   `docs/specs/pattern-construction/rollout-plan.md`.
-- [ ] Mark the source specification implemented if all completion criteria are
+- [x] Mark the source specification implemented if all completion criteria are
   met.
-- [ ] Move this completed plan to `docs/history/plans/` with the required
+- [x] Move this completed plan to `docs/history/plans/` with the required
   historical metadata in the final implementation change.
 
 ## Risk register
@@ -2017,7 +2034,8 @@ eligible for deletion.
   materialization.
 - [x] Framework-provided inputs remain hidden from the model and cannot be
   authored/captured.
-- [x] Legacy tool and list fixtures read until their explicit removal gates.
+- [x] Legacy tool and list readers were removed after their explicit pre-launch
+  owner-approved data-wipe gates.
 - [x] No canonical writer emits `extraParams` or sibling list params.
 
 ## Final command checklist
@@ -2041,23 +2059,24 @@ progress.
 - [x] `deno task check-docs plans`
 - [x] `git diff --check`
 
-Final validation (2026-07-11): data-model passes `49 passed (1992 steps), 0
-failed`; schema-generator `28 passed (251 steps), 0 failed`; transformers `1137
-passed (736 steps), 0 failed`; runner `929 passed (4897 steps), 0 failed, 0
-ignored (10 steps)` in 3m53s; LLM `2 passed (20 steps), 0 failed`; CLI main
-lane `895 passed (249 steps), 0 failed, 1 ignored` plus subprocess lane `20
-passed (91 steps), 0 failed`; FUSE `204 passed, 0 failed, 1 ignored`. The
-affected patterns and background-piece packages also pass `59 passed (29
-steps)` and `12 passed (48 steps)` respectively. Root `deno task check` passes.
+Final validation (2026-07-12): data-model passes `49 passed (1992 steps), 0
+failed`; schema-generator `28 passed (251 steps), 0 failed`; transformers `1134
+passed (734 steps), 0 failed`; runner `918 passed (4863 steps), 0 failed, 0
+ignored (10 steps)` in 3m36s; LLM `2 passed (20 steps), 0 failed`; CLI parallel
+lane `895 passed (249 steps), 0 failed, 1 ignored` plus serial lane `20 passed
+(91 steps), 0 failed`; FUSE `205 passed, 0 failed, 1 ignored`. API passes `16
+passed, 0 failed`; the affected patterns and background-piece packages pass `59
+passed (29 steps)` and `12 passed (48 steps)` respectively. Root `deno task
+check` passes.
 
-Focused `deno check` passes both API factory type files, including the negative
-public `.curry` assertion. The fresh-runtime integration passes both suites and
-all five steps for pattern, module, and handler factories. The final
-summary-index transform shows callback argument 0 read through
-`__cf_pattern_input`, private `{ entries }` at argument 1 under
-`withPatternParamsSchema`, one `.curry({ entries })`, direct `asFactory` output,
-and no `patternTool`/`extraParams`. Both docs checks pass their checked code
-blocks, and `git diff --check` is clean.
+The fresh-runtime integration passes both suites and all five steps for pattern,
+module, and handler factories. The final summary-index transform shows callback
+argument 0 through `__cf_pattern_input`, private `{ entries }` at argument 1
+under `withPatternParamsSchema`, one `.curry({ entries })`, one-argument
+`mapWithPattern(...)`, and no `patternTool`/`extraParams`. The complete specs
+docs check passes all 258 checked blocks, the common docs check passes all 114,
+the plans docs check passes its checked block, the supported-source inventory is
+empty, and `git diff --check` is clean.
 
 ## Overall completion criteria
 
@@ -2073,9 +2092,7 @@ blocks, and `git diff --check` is clean.
 - [x] Public pattern input and closure params are never merged.
 - [x] Refs, schemas, params, scope, space selection, CFC labels, equality, and
   hashes survive storage and cold reload.
-- [ ] `patternTool` and sibling list params have no writer/source path, and all
-  retained compatibility readers have explicit, evidenced removal gates.
-
-This final criterion remains open intentionally: canonical production writers
-are migrated, but the deprecated public `patternTool` compatibility writer is
-still present until the Stage 5 evidence and owner-decision gates pass.
+- [x] `patternTool`, `$patternRef`, `extraParams`, and sibling list params have
+  no supported writer or reader path; the pre-launch owner-approved data-wipe
+  decision is recorded in WP5.1. Factory-function `toJSON()` remains separately
+  gated and emits only the full compatibility graph, never `$patternRef`.

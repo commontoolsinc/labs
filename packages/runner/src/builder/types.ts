@@ -50,7 +50,6 @@ import type {
   NavigateToFunction,
   Pattern,
   PatternFactory,
-  PatternToolFunction,
   Reactive,
   schema as schemaFunction,
   SELF as SELFSymbol,
@@ -363,7 +362,6 @@ export type Frame = {
 export interface BuilderFunctionsAndConstants {
   // Pattern creation
   pattern: PatternBuilder;
-  patternTool: PatternToolFunction;
 
   // Module creation
   lift: LiftFunction;

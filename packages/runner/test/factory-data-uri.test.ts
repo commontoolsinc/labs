@@ -9,13 +9,10 @@ import {
 
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { patternTool } from "../src/builder/built-in.ts";
-import { pattern } from "../src/builder/pattern.ts";
 import {
   decodeDataURIValue,
   FABRIC_VALUE_DATA_URI_PREFIX,
 } from "../src/uri-utils.ts";
-import { isPatternRefSentinel } from "../src/builtins/op-pattern-ref.ts";
 
 const signer = await Identity.fromPassphrase("factory data URI writer");
 const destinationSpace = signer.did();
@@ -84,7 +81,6 @@ describe("canonical factory data URI writer", () => {
     expect(() => (document.value.direct as () => unknown)()).toThrow(
       "factory requires runner materialization",
     );
-    expect(isPatternRefSentinel(document.value.direct)).toBe(false);
 
     expect(() => runtime.getImmutableCell(otherSpace, factory)).toThrow(
       `is not available in space ${otherSpace}`,
@@ -108,47 +104,6 @@ describe("canonical factory data URI writer", () => {
       .toThrow("no durable artifact ref");
     expect(() => runtime.getImmutableCell(destinationSpace, () => undefined))
       .toThrow("no applicable codec");
-  });
-
-  it("keeps keyless patternTool values on the explicit legacy graph boundary", () => {
-    const keyless = pattern(
-      ({ value }: { value: number }) => ({ value }),
-      {
-        type: "object",
-        properties: { value: { type: "number" } },
-        required: ["value"],
-      },
-      {
-        type: "object",
-        properties: { value: { type: "number" } },
-        required: ["value"],
-      },
-    );
-
-    const tool = patternTool(keyless);
-    expect(typeof tool.pattern).toBe("object");
-    expect((tool.pattern as unknown as { nodes?: readonly unknown[] }).nodes)
-      .toBeDefined();
-
-    const stored = runtime.getImmutableCell(destinationSpace, { tool })
-      .getRaw() as {
-        tool: {
-          pattern: {
-            nodes?: readonly unknown[];
-            result?: { value?: { $alias?: unknown } };
-          };
-        };
-      };
-    expect(typeof stored.tool.pattern).toBe("object");
-    expect(stored.tool.pattern.nodes).toBeDefined();
-    expect(stored.tool.pattern.result?.value?.$alias).toBeDefined();
-
-    // Only the deprecated patternTool writer gets the explicit graph fallback.
-    // An ordinary keyless Factory@1 value still cannot cross a durable
-    // boundary because no cold-loadable artifact closure exists for it.
-    expect(() =>
-      runtime.getImmutableCell(destinationSpace, { direct: keyless })
-    ).toThrow("no durable artifact ref");
   });
 
   it("preserves undefined fields and sparse arrays in canonical inline documents", () => {

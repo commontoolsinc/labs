@@ -68,17 +68,6 @@ export interface SchemaFormatOptions {
  * // → '"open" | "closed"'
  *
  * @example
- * // Legacy PatternToolResult compatibility schemas
- * schemaToTypeString({
- *   type: "object",
- *   properties: {
- *     pattern: { type: "object" },
- *     extraParams: { properties: { content: { type: "string" } } }
- *   }
- * })
- * // → "(e: { content?: string }) => void"
- *
- * @example
  * // With $defs resolution
  * schemaToTypeString(
  *   { $ref: "#/$defs/User" },
@@ -176,19 +165,6 @@ function schemaToTypeStringInner(
       nextOpts,
     );
     return `(e: ${inputType}) => ${outputType}`;
-  }
-
-  // Compatibility reader for stored PatternToolResult objects.
-  // Format as (e: ExtraParamsType) => void for LLM readability
-  if (s.type === "object" || s.properties) {
-    const props = s.properties as Record<string, JSONSchema> | undefined;
-    if (props && "pattern" in props && "extraParams" in props) {
-      // Format the legacy projection as a handler.
-      const extraParamsSchema = props.extraParams;
-      if (depth >= maxDepth) return "(e: {...}) => void";
-      const paramType = schemaToTypeString(extraParamsSchema, nextOpts);
-      return `(e: ${paramType}) => void`;
-    }
   }
 
   // Handle enum - show as union of literals

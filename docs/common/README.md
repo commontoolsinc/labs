@@ -42,6 +42,7 @@ on the Common Fabric runtime.
 - [concepts/computed/computed.md](concepts/computed/computed.md) — `computed()`, `lift()`, derived values
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
+- [concepts/factories.md](concepts/factories.md) — passing, storing, invoking, and closing over first-class factories
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures

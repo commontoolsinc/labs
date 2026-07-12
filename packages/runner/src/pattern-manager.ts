@@ -718,7 +718,9 @@ export class PatternManager {
         [...sourceDocs.keys()].some((identity) =>
           !compiledDocs.has(identity)
         ) ||
-        [...compiledDocs.keys()].some((identity) => !sourceDocs.has(identity)) ||
+        [...compiledDocs.keys()].some((identity) =>
+          !sourceDocs.has(identity)
+        ) ||
         (isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
           !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
       ) {
@@ -861,8 +863,8 @@ export class PatternManager {
    * CLI pattern-test harness and the multi-user worker previously reached for the
    * lower-level `Engine.compileAndEvaluateModules` directly and skipped
    * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
-   * entry ref and fell back to a defer-corrupted embedded graph instead of their
-   * canonical `$patternRef` artifact.
+   * entry ref and could not participate in canonical Factory@1 identity and
+   * cold materialization.
    *
    * Registration is fused with evaluation here on purpose, so it cannot be
    * forgotten — mirroring what the runtime's own `compilePattern` /
@@ -1086,11 +1088,12 @@ export class PatternManager {
               !patternCoverage ||
               cacheEntriesIncludePatternCoverage(bodies.values())
             ) {
-              const sourceClosure = await this.loadVerifiedArtifactSourceClosure(
-                space,
-                entryIdentity,
-                readTx,
-              );
+              const sourceClosure = await this
+                .loadVerifiedArtifactSourceClosure(
+                  space,
+                  entryIdentity,
+                  readTx,
+                );
               if (
                 sourceClosure !== undefined &&
                 identities.every((identity) => sourceClosure.has(identity))
@@ -1174,17 +1177,16 @@ export class PatternManager {
       this.esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
     if (!warmHit || moduleDelegations.size > 0) {
-      // Persist the module set into this space. AWAITED (identity E4): refs-only
-      // pattern JSON makes artifact persistence part of the compilation
-      // contract — a cell can only carry a `$patternRef` after compilePattern
-      // returned, so completing the write here guarantees every persisted ref
-      // has a durable closure behind it (no race against session end). This
+      // Persist the module set into this space. AWAITED: Factory@1 values carry
+      // content-addressed artifact refs, so completing the write here guarantees
+      // every persisted factory has a durable closure behind it (no race against
+      // session end). This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
-      // needs the closure here. A failed write fails the compile: persisted
-      // refs-only pattern JSON would otherwise point at a closure that is not
-      // durable in `space`.
+      // needs the closure here. A failed write fails the compile: a persisted
+      // factory would otherwise point at a closure that is not durable in
+      // `space`.
       await this.persistCompileCacheTracked(
         space,
         modules,
@@ -2106,8 +2108,8 @@ export class PatternManager {
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
    * pattern's own space writes) retries rather than silently dropping the
-   * entry. A final failure throws because persisted refs-only pattern JSON
-   * requires a durable closure behind every `$patternRef`.
+   * entry. A final failure throws because persisted Factory@1 values require a
+   * durable closure behind every artifact ref.
    */
   private async writeBackCompileCache(
     space: MemorySpace,

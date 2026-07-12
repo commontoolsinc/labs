@@ -32,10 +32,6 @@ import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import {
-  inferListOpArgumentUsage,
-  type ListOpArgumentUsage,
-} from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
@@ -48,7 +44,6 @@ import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
@@ -58,8 +53,7 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * Canonical nodes carry a bound PatternFactory in `op` and no sibling params.
- * Stored legacy nodes retain their `{ op, params }` adapter during migration.
+ * Nodes carry a bound PatternFactory in `op` and no sibling params.
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -75,14 +69,12 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  *
  * @param list - A doc containing an array of values to map over.
  * @param op - A pattern to apply to each value.
- * @param params - Optional object containing captured variables from outer scope (closure mode).
  * @returns A doc containing the mapped values.
  */
 export function map(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -202,32 +194,14 @@ export function map(
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
-    const rawInputs = inputsCell.withTx(tx).getRaw();
-    const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
-      Object.hasOwn(rawInputs, "params");
-    let opPattern: Pattern;
-    let factoryGeneration: number | undefined;
-    let factorySelectionLink: NormalizedFullLink | undefined;
-    let argumentUsage: ListOpArgumentUsage;
-    if (legacyInputs) {
-      opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
-      argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
-    } else {
-      const selection = factorySupervisor.materialize(
-        tx,
-        inputsCell.key("op"),
-        "map",
-      );
-      opPattern = selection.pattern;
-      factoryGeneration = selection.generation;
-      factorySelectionLink = selection.factorySelectionLink;
-      argumentUsage = {
-        usesElement: true,
-        usesIndex: true,
-        usesArray: true,
-        usesParams: false,
-      };
-    }
+    const selection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "map",
+    );
+    const opPattern = selection.pattern;
+    const factoryGeneration = selection.generation;
+    const factorySelectionLink = selection.factorySelectionLink;
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);
@@ -266,10 +240,9 @@ export function map(
       .withTx(tx);
 
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: listCell } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: listCell,
     });
 
     // If the result's value is undefined, set it to the empty array.
@@ -388,10 +361,7 @@ export function map(
         const existing = elementRuns.get(elementKey)!;
         const staleFactoryGeneration = factoryGeneration !== undefined &&
           existing.runGeneration !== factoryGeneration;
-        if (
-          staleFactoryGeneration ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
-        ) {
+        if (staleFactoryGeneration || existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
             opPattern,

@@ -99,12 +99,6 @@ import {
 } from "./storage/reactivity-log.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
-import {
-  isPatternRefSentinel,
-  type PatternRefSentinel,
-  resolveStoredPattern,
-  resolveStoredPatternAsync,
-} from "./builtins/op-pattern-ref.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
@@ -127,11 +121,7 @@ import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import {
-  getArtifactEntryRef,
-  isTrustedBuilderArtifact,
-  resolveOriginal,
-} from "./builder/pattern-metadata.ts";
+import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -872,29 +862,6 @@ export class Runner {
     resultCell: Cell<R>,
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
-    if (
-      providedTx === undefined && isPatternRefSentinel(patternOrModule) &&
-      resolveStoredPattern(this.runtime, patternOrModule) === undefined
-    ) {
-      const { identity, symbol } = patternOrModule.$patternRef;
-      return resolveStoredPatternAsync(
-        this.runtime,
-        patternOrModule,
-        resultCell.space,
-      ).then((loaded) => {
-        if (loaded === undefined) {
-          throw new Error(`Unknown pattern: ${identity}#${symbol}`);
-        }
-        // Loading evaluates and indexes the verified module. Re-enter through
-        // the sentinel path so kind and carried schemas are still checked.
-        return this.setup(
-          undefined,
-          patternOrModule,
-          argument,
-          resultCell,
-        );
-      });
-    }
     if (providedTx) {
       this.setupInternal(
         providedTx,
@@ -936,32 +903,6 @@ export class Runner {
     }
   }
 
-  private resolveTrustedPatternRef(
-    sentinel: PatternRefSentinel,
-  ): Pattern | undefined {
-    const { identity, symbol } = sentinel.$patternRef;
-    const resolved = resolveStoredPattern(this.runtime, sentinel);
-    if (resolved === undefined) return undefined;
-    if (!isPattern(resolved) || !isTrustedBuilderArtifact(resolved)) {
-      throw new Error(
-        `Resolved artifact ${identity}#${symbol} is not a trusted pattern`,
-      );
-    }
-    const carried = sentinel as PatternRefSentinel & {
-      argumentSchema?: JSONSchema;
-      resultSchema?: JSONSchema;
-    };
-    if (
-      carried.argumentSchema === undefined ||
-      carried.resultSchema === undefined ||
-      !deepEqual(carried.argumentSchema, resolved.argumentSchema) ||
-      !deepEqual(carried.resultSchema, resolved.resultSchema)
-    ) {
-      throw new Error(`Pattern schema mismatch for ${identity}#${symbol}`);
-    }
-    return resolved;
-  }
-
   private resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
     previousIdentityRef: { identity: string; symbol: string } | undefined,
@@ -973,15 +914,6 @@ export class Runner {
     }
     | undefined {
     let resolvedPatternOrModule = patternOrModule;
-
-    if (isPatternRefSentinel(resolvedPatternOrModule)) {
-      const { identity, symbol } = resolvedPatternOrModule.$patternRef;
-      const resolved = this.resolveTrustedPatternRef(resolvedPatternOrModule);
-      if (resolved === undefined) {
-        throw new Error(`Unknown pattern: ${identity}#${symbol}`);
-      }
-      resolvedPatternOrModule = resolved;
-    }
 
     // No pattern in hand: resolve the previously-stored `{ identity, symbol }`
     // pointer synchronously from the in-session artifact index (the module is
@@ -5036,11 +4968,9 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    // Structural identity must not change merely because a live keyless child
-    // acquired its session-only `$patternRef` during the first run. createRef's
-    // explicit legacy-pattern path hashes the underlying graph in both states;
-    // JSON.stringify would switch from embedded graph to keyless sentinel and
-    // spuriously restart the child on the next identical selection.
+    // Structural identity follows the underlying graph for compatibility
+    // pattern objects and canonical Factory@1 state for admitted factories, so
+    // an identical dynamic selection does not spuriously restart its child.
     const resultPatternAsString = toURI(
       createRef(resultPattern, "returned-pattern-cache"),
     );
@@ -5874,117 +5804,6 @@ export class Runner {
     return runInActionExecution(invoke);
   }
 
-  /**
-   * CT-1623 compatibility reader: for stored legacy list-builtin nodes carrying
-   * sibling `{ op, params }`, annotate `op` with its content-addressed
-   * `{ identity, symbol }` entry ref (when known) so the legacy branch can
-   * resolve the live canonical pattern by identity instead of deserializing the
-   * embedded graph. Canonical nodes have no own `params` and retain their bound
-   * PatternFactory unchanged. On the legacy branch this mutates `inputBindings`
-   * in place: `op` becomes `{ $patternRef }`.
-   *
-   * Only the legacy `op` key is rewritten — it is the sole pattern-valued input
-   * that branch rehydrates (`resolveOpPattern`). Rewriting other inputs (e.g. a
-   * pattern captured in legacy `params`) would leave an unresolved `$patternRef`
-   * object that nothing reads back.
-   *
-   * The sentinel carries NO embedded fallback graph (identity E4): the artifact
-   * index is session-lifetime, and the op's module evaluated in this session by
-   * construction (the sentinel is stamped from its live artifact right here),
-   * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph. `inputBindings` here is
-   * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
-   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`).
-   *
-   * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
-   * — hand-built through the in-process builder DSL, or evaluated through the
-   * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
-   * copy carries a derivation link to its pristine in-memory pattern. It is
-   * minted its content-hash session identity right here (the same pointer
-   * `entryRefForPattern` mints for a keyless ROOT pattern), so it rides a
-   * `$patternRef` to that pristine artifact. Leaving it embedded instead
-   * would send it through the immutable-cell JSON round-trip, which corrupts
-   * a nested sub-pattern's output-alias `defer` levels (CT-1812 — the
-   * CT-1811 corruption, reachable ref-lessly). The trust gate stays intact:
-   * minting BRANDS, so only a value whose original is already a trusted
-   * builder pattern is minted.
-   *
-   * An op with no ref AND no live original — a plain deserialized graph,
-   * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
-   * pinned by stored-pattern-rehydration.test.ts) — is left embedded: there
-   * is no pristine artifact in existence to point at, and re-rooting the
-   * graph bind-free is exactly the defer surgery CT-1812 records as the
-   * residual there. Such an op takes the builtin's legacy graph path.
-   */
-  private substituteOpPatternRefs(
-    moduleRefName: string | undefined,
-    inputBindings: FabricValue,
-  ): void {
-    if (
-      moduleRefName !== "map" && moduleRefName !== "filter" &&
-      moduleRefName !== "flatMap"
-    ) {
-      return;
-    }
-    if (!isRecord(inputBindings)) return;
-    // Canonical list nodes carry a bound PatternFactory directly and have no
-    // sibling `params`. Only stored legacy `{ op, params }` nodes are adapted
-    // to the pattern-ref sentinel consumed by resolveOpPattern().
-    if (!Object.hasOwn(inputBindings, "params")) return;
-    noteLegacyFactoryCompatibilityRead("list");
-    const op = (inputBindings as Record<string, unknown>).op;
-    const opIsFactory = isAdmittedFabricFactory(op);
-    if (!isRecord(op) && !opIsFactory) return;
-    const original = resolveOriginal(op as unknown as object);
-    if (
-      opIsFactory &&
-      (!isTrustedBuilderArtifact(original) || !isPattern(original))
-    ) {
-      throw new Error(
-        `${moduleRefName}: legacy list op requires a trusted live pattern factory`,
-      );
-    }
-    if (opIsFactory) {
-      const state = factoryStateOf(op);
-      if (state.kind !== "pattern") {
-        throw new Error(
-          `${moduleRefName}: legacy list op requires a pattern factory`,
-        );
-      }
-      for (
-        const field of [
-          "paramsSchema",
-          "params",
-          "defaultScope",
-          "spaceSelector",
-        ] as const
-      ) {
-        if (Object.hasOwn(state, field)) {
-          throw new Error(
-            `${moduleRefName}: legacy list op cannot discard factory state field ${field}`,
-          );
-        }
-      }
-    }
-    let ref = this.runtime.patternManager.getArtifactEntryRef(
-      op as unknown as object,
-    );
-    if (!ref) {
-      if (isTrustedBuilderArtifact(original) && isPattern(original)) {
-        ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
-          original as unknown as Pattern,
-        );
-      }
-    }
-    if (ref) {
-      (inputBindings as Record<string, unknown>).op = {
-        $patternRef: { identity: ref.identity, symbol: ref.symbol },
-      };
-    }
-  }
-
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -6022,15 +5841,6 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-
-    // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
-    // with a compact `{ $patternRef }` sentinel when its content-addressed entry
-    // ref is known. This is the post-eval moment where the in-memory op object
-    // (linked to its original via `noteDerivedCopy`, preserved through binding)
-    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
-    // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph.
-    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
 
     // Opaque forwarded references (argument keys the module's schema marks
     // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
@@ -6375,14 +6185,6 @@ export class Runner {
         boundSpaceSelector = state.spaceSelector;
       }
       patternImpl = materialized;
-    } else if (isPatternRefSentinel(boundPatternImpl)) {
-      const resolved = this.resolveTrustedPatternRef(boundPatternImpl);
-      if (resolved !== undefined) {
-        patternImpl = resolved;
-      } else {
-        const { identity, symbol } = boundPatternImpl.$patternRef;
-        throw new Error(`Unknown pattern: ${identity}#${symbol}`);
-      }
     } else if (isPattern(boundPatternImpl)) {
       patternImpl = boundPatternImpl;
     } else {

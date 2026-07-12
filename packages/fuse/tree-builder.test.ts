@@ -10,7 +10,7 @@ import {
   classifyCallableEntry,
   decodeFactoryProjection,
   decodeFactoryProjections,
-  isPatternToolValue,
+  isPatternFactoryValue,
 } from "./callables.ts";
 import {
   buildJsonTree,
@@ -822,15 +822,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
   const tree = new FsTree();
   const data = {
     count: 3,
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactory,
   };
 
   const resultIno = buildJsonTree(
@@ -841,7 +833,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     undefined,
     undefined,
     0,
-    (value) => isPatternToolValue(value),
+    (value) => isPatternFactoryValue(value),
   );
   const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
@@ -871,15 +863,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   const data = {
     count: 3,
     addItem: { $stream: true },
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactory,
   };
 
   buildJsonTree(
@@ -890,10 +874,10 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     undefined,
     undefined,
     0,
-    (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (value) => isHandlerCell(value) || isPatternFactoryValue(value),
     (_key, value) => {
       if (isHandlerCell(value) || isStreamValue(value)) return "handler";
-      return isPatternToolValue(value) ? "tool" : null;
+      return isPatternFactoryValue(value) ? "tool" : null;
     },
   );
 
@@ -1116,18 +1100,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   }
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
-    undefined,
-  );
+  const toolCell = makeCell(patternFactory, undefined);
   const directToolCell = makeCell(patternFactory, undefined);
   const resultCell = makeCell(
     undefined,
@@ -1250,18 +1223,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
 
   const titleCell = makeCell("hello", { type: "string" });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
-    undefined,
-  );
+  const toolCell = makeCell(patternFactory, undefined);
   const resultCell = makeCell(
     { title: "hello" },
     {

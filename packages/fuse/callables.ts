@@ -9,7 +9,6 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { ContextualFlowControl } from "../runner/src/cfc.ts";
 
 const encoder = new TextEncoder();
 
@@ -112,34 +111,6 @@ function isSchemaRecord(schema: JSONSchema | undefined): schema is Record<
     !Array.isArray(schema);
 }
 
-function isPatternSchemaValue(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const pattern = value as Record<string, unknown>;
-  return "argumentSchema" in pattern || "resultSchema" in pattern ||
-    "nodes" in pattern;
-}
-
-function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
-  if (!isSchemaRecord(schema)) return false;
-  if (ContextualFlowControl.getAsCellValues(schema).at(0) === "cell") {
-    return true;
-  }
-
-  const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
-    return false;
-  }
-
-  return "argumentSchema" in properties || "resultSchema" in properties ||
-    "nodes" in properties;
-}
-
 export function isStreamValue(v: unknown): boolean {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const obj = v as Record<string, unknown>;
@@ -159,16 +130,15 @@ export function isHandlerCell(v: unknown): boolean {
   return false;
 }
 
-export function isPatternToolValue(v: unknown): boolean {
-  if (patternFactoryFromCallableEntry(v) !== undefined) return true;
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const obj = v as Record<string, unknown>;
-  return "pattern" in obj && "extraParams" in obj &&
-    isPatternSchemaValue(obj.pattern);
+export function isPatternFactoryValue(v: unknown): boolean {
+  return patternFactoryFromCallableEntry(v) !== undefined;
 }
 
-export function isPatternToolSchema(schema: JSONSchema | undefined): boolean {
+export function isPatternFactorySchema(
+  schema: JSONSchema | undefined,
+): boolean {
   if (!isSchemaRecord(schema)) return false;
+  if (schema.asFactory?.kind === "pattern") return true;
   const properties = schema.properties;
   if (
     typeof properties !== "object" || properties === null ||
@@ -177,8 +147,9 @@ export function isPatternToolSchema(schema: JSONSchema | undefined): boolean {
     return false;
   }
 
-  return "pattern" in properties && "extraParams" in properties &&
-    isPatternSchemaSchema(properties.pattern as JSONSchema | undefined);
+  const pattern = properties.pattern;
+  return isSchemaRecord(pattern) &&
+    pattern.asFactory?.kind === "pattern";
 }
 
 export function classifyCallableEntry(
@@ -188,7 +159,7 @@ export function classifyCallableEntry(
   if (patternFactoryFromCallableEntry(value) !== undefined) {
     return "tool";
   }
-  if (isPatternToolSchema(schema)) {
+  if (isPatternFactorySchema(schema)) {
     return "tool";
   }
 
@@ -196,7 +167,7 @@ export function classifyCallableEntry(
     return "handler";
   }
 
-  if (schema === undefined && isPatternToolValue(value)) {
+  if (schema === undefined && isPatternFactoryValue(value)) {
     return "tool";
   }
 

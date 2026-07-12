@@ -38,8 +38,7 @@ The stages relevant to array-method callbacks are:
                                                 module-scope consts, after schema
                                                 injection (CT-1644/CT-1655; replaced
                                                 the former BuilderCallbackHoisting +
-                                                LiftHoisting pair, #3864); deprecated
-                                                patternTool has no special hoisting path
+                                                LiftHoisting pair, #3864)
 21. SchemaGeneratorTransformer
 22. ReactiveVariableForTransformer
 23. ModuleScopeShadowingTransformer
@@ -70,14 +69,16 @@ That function does, in order:
    downstream consumers) uses to recognize element-param identifiers as opaque
    even when their TS type is plain.
 2. `CaptureCollector.analyzeCurrentAndOriginal(callback)` — finds outer-scope
-   reads to capture as `params: { … }`.
+   reads for the pattern's private callback argument 1.
 3. `analyzeElementBinding` (`array-method-utils.ts`) decides how to surface the
    element parameter. See "Two surface forms" below.
 4. `ts.visitNode(callback.body, visitor)` — recurses into the body before the
    per-callback expression-site lowering runs. Nested array-methods in the body
    get transformed during this recursion (depth-first).
-5. `createPatternCallWithParams` synthesizes the new shape:
-   `array.mapWithPattern(pattern((destructured) => …), capturesObj)`.
+5. `createPatternCallWithParams` synthesizes a pattern whose callback receives
+   public `{ element, index, array }` as argument 0 and captures as argument 1.
+   Capturing sites bind once with the private `.curry(capturesObj)` operation;
+   `mapWithPattern` receives exactly that one bound factory argument.
 6. `rewriteArrayMethodCallbackExpressionSites` (called from `createPattern…` via
    the strategy's `rewriteTransformedBody` option) runs over the transformed
    body to decide which expressions need lift-applied reactive wrapping and

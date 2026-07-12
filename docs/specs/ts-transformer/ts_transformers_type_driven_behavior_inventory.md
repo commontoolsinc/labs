@@ -73,14 +73,12 @@ It does not list pure schema-generation/type-emission code unless that code exis
 - `src/ast/scope-analysis.ts`
   `isFunctionDeclaration(...)` uses initializer type call signatures to decide whether a declaration should count as a plain function for capture/serialization policy.
 
-- `patternTool` capture/boundary classification
-  The former `src/closures/strategies/patternTool-strategy.ts` was removed in
-  CT-1655 (#3862): `patternTool` no longer auto-wraps a bare callback or
-  auto-captures module-scoped values. The type-backed decisions now live in
-  `src/policy/callback-boundary.ts` (recognizing the canonical
-  `patternTool(pattern(cb), extraParams?)` shape and giving the inner pattern a
-  `pattern-tool` boundary) and in `src/closures/capture-collector.ts` (which
-  captures for the authored `pattern(...)`).
+- Nested-pattern factory capture/boundary classification
+  Authored nested `pattern(...)` calls use the `pattern-builder` boundary.
+  Capture analysis produces private callback argument 1, carries its schema via
+  `withPatternParamsSchema`, and emits one private `.curry(params)` at a
+  capturing site. Tool descriptors do not define a separate boundary: direct
+  and metadata-wrapped PatternFactory values use the same path.
 
 ## Behavior-Preserving Type Handoffs
 

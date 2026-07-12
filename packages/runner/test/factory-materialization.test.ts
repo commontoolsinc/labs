@@ -27,9 +27,6 @@ import {
   materializeFactoryForSchema,
   prepareFactory,
 } from "../src/factory-materialization.ts";
-import {
-  legacyFactoryCompatibilityCounts,
-} from "../src/legacy-factory-compat.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -247,30 +244,6 @@ describe("runner-owned factory materialization", () => {
       expect(() => materialized(inputs[index] as never)).not.toThrow();
     }
     expect(loads).toEqual([]);
-  });
-
-  it("adapts a legacy refs-only pattern value to Factory@1", () => {
-    const before = legacyFactoryCompatibilityCounts().patternRef;
-    const { bases } = makeFactories();
-    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), bases[0]);
-    const materialized = materializeFactory({
-      $patternRef: REFS.pattern,
-      argumentSchema: ARGUMENT_SCHEMA,
-      resultSchema: RESULT_SCHEMA,
-    }, {
-      runtime,
-      artifactSpace,
-      expected: {
-        kind: "pattern",
-        argumentSchema: ARGUMENT_SCHEMA,
-        resultSchema: RESULT_SCHEMA,
-      },
-    });
-
-    expect(materialized).toBe(bases[0]);
-    expect(legacyFactoryCompatibilityCounts().patternRef).toBeGreaterThan(
-      before,
-    );
   });
 
   it("cold-loads all kinds through PatternManager using artifactSpace", async () => {

@@ -5,6 +5,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   createFactoryShell,
   factoryStateOf,
+  registerFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import { brandTrustedBuilderArtifact } from "../../runner/src/builder/pattern-metadata.ts";
 import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
 
 const canonicalSearchFactory = createFactoryShell({
@@ -41,6 +43,19 @@ const canonicalSearchFactory = createFactoryShell({
     properties: { echoed: { type: "string" } },
   },
 });
+
+function livePatternFactory(
+  argumentSchema: JSONSchema,
+  resultSchema: JSONSchema,
+): unknown {
+  const factory = brandTrustedBuilderArtifact(() => undefined);
+  return registerFabricFactory(factory, "pattern", {
+    kind: "pattern",
+    rootToken: {},
+    argumentSchema,
+    resultSchema,
+  });
+}
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -1722,7 +1737,7 @@ describe("mounted callable resolution and execution", () => {
     ).rejects.toThrow(/Handler "add" failed: Mounted handler failed/);
   });
 
-  it("dispatches tools with extraParams merged into the runtime input and returns JSON output", async () => {
+  it("dispatches direct factory tools with public input and returns JSON output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
@@ -1760,10 +1775,6 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
-      extraParams: {
-        source: "bound-source",
-        result: "bound-result",
-      },
       toolResult: {
         echoed: "tea",
         source: "bound-source",
@@ -1799,8 +1810,6 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
-      source: "bound-source",
-      result: "bound-result",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       echoed: "tea",
@@ -2031,9 +2040,6 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
-      extraParams: {
-        source: "bound-source",
-      },
       toolResultGetValue: {
         query: "explicit",
         help: "schema-field",
@@ -2063,7 +2069,6 @@ describe("mounted callable resolution and execution", () => {
     expect(harness.tracker.toolRunInput).toEqual({
       query: "explicit",
       help: "schema-field",
-      source: "bound-source",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       query: "explicit",
@@ -2282,9 +2287,6 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
-      extraParams: {
-        source: "bound-source",
-      },
       toolResult: {
         summary: "bound-source:tea",
       },
@@ -2305,7 +2307,6 @@ describe("mounted callable resolution and execution", () => {
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
-      source: "bound-source",
     });
   });
 
@@ -2345,9 +2346,6 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
-      extraParams: {
-        source: "bound-source",
-      },
       toolResult: {
         summary: "bound-source:tea",
       },
@@ -2367,7 +2365,6 @@ describe("mounted callable resolution and execution", () => {
 
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
-      source: "bound-source",
     });
   });
 
@@ -2444,9 +2441,6 @@ describe("mounted callable resolution and execution", () => {
             summary: { type: "string" },
           },
         },
-      },
-      extraParams: {
-        source: "bound-source",
       },
     });
 
@@ -2547,7 +2541,6 @@ function createExecHarness(options: {
   };
   canonicalFactory?: unknown;
   factorySourceSpace?: string;
-  extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
@@ -2569,23 +2562,18 @@ function createExecHarness(options: {
     factoryMaterializationSpace: undefined as string | undefined,
   };
 
-  const callableSchema: JSONSchema = options.canonicalFactory !== undefined
+  const callableSchema: JSONSchema = options.callableKind === "tool"
     ? true
-    : options.callableKind === "tool"
-    ? {
-      type: "object",
-      properties: {
-        pattern: { type: "object" },
-        extraParams: { type: "object" },
-      },
-    }
     : options.inputSchema;
+  const defaultToolFactory = options.callableKind === "tool"
+    ? livePatternFactory(
+      options.inputSchema,
+      options.pattern?.resultSchema ?? true,
+    )
+    : undefined;
   const callableValue = options.canonicalFactory ??
     (options.callableKind === "tool"
-      ? {
-        pattern: options.pattern,
-        extraParams: options.extraParams ?? {},
-      }
+      ? defaultToolFactory
       : options.sparseHandlerCell
       ? undefined
       : { $stream: true });

@@ -492,7 +492,7 @@ Deno.test("detectCallKind classifies imported runtime calls with their export na
 Deno.test("detectCallKind classifies ifElse, when, unless, wish, and generate calls from commonfabric", () => {
   const { sourceFile, checker } = createProgramWithCommonFabric(`
     import {
-      ifElse, when, unless, wish, generateText, generateObject, patternTool,
+      ifElse, when, unless, wish, generateText, generateObject,
     } from "commonfabric";
     const a = ifElse(true, 1, 2);
     const b = when(true, () => 1);
@@ -500,7 +500,6 @@ Deno.test("detectCallKind classifies ifElse, when, unless, wish, and generate ca
     const d = wish({});
     const e = generateText({});
     const f = generateObject({});
-    const g = patternTool({});
   `);
 
   assertEquals(
@@ -526,10 +525,6 @@ Deno.test("detectCallKind classifies ifElse, when, unless, wish, and generate ca
   assertEquals(
     detectCallKind(findCall(sourceFile, "f"), checker)?.kind,
     "generate-object",
-  );
-  assertEquals(
-    detectCallKind(findCall(sourceFile, "g"), checker)?.kind,
-    "legacy-pattern-tool",
   );
 });
 
@@ -658,7 +653,6 @@ Deno.test("detectCallKind recognizes synthetic __cfHelpers runtime and cell-fact
     const strValue = __cfHelpers.str(\`x\`);
     const cellValue = __cfHelpers.cell(1);
     const ifElseValue = __cfHelpers.ifElse(true, 1, 2);
-    const patternToolValue = __cfHelpers.patternTool({});
     const generateTextValue = __cfHelpers.generateText({});
     const generateObjectValue = __cfHelpers.generateObject({});
     const wishValue = __cfHelpers.wish({});
@@ -683,10 +677,6 @@ Deno.test("detectCallKind recognizes synthetic __cfHelpers runtime and cell-fact
   assertEquals(
     detectCallKind(findCall(sourceFile, "ifElseValue"), checker)?.kind,
     "ifElse",
-  );
-  assertEquals(
-    detectCallKind(findCall(sourceFile, "patternToolValue"), checker)?.kind,
-    "legacy-pattern-tool",
   );
   assertEquals(
     detectCallKind(findCall(sourceFile, "generateTextValue"), checker)?.kind,

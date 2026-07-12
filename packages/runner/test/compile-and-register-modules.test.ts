@@ -14,8 +14,8 @@ import type { CompiledModuleArtifact } from "../src/harness/types.ts";
  * Conformance guard for CT-1811.
  *
  * The pattern-load seam `PatternManager.compileAndRegisterModules` must INDEX
- * the evaluated artifacts (so a pattern/op gets a content-addressed entry ref and
- * resolves via its canonical `$patternRef` artifact), while the bare
+ * the evaluated artifacts (so a pattern/op gets a content-addressed entry ref
+ * for canonical Factory@1 materialization), while the bare
  * `Engine.compileAndEvaluateModules` primitive must NOT. This pins the contract
  * that lets harness callers get the full evaluated namespace without silently
  * skipping registration — the divergence that caused CT-1811.
@@ -60,9 +60,8 @@ describe("PatternManager.compileAndRegisterModules", () => {
     const engine = runtime.harness as Engine;
     const result = await engine.compileAndEvaluateModules(program);
     const entry = result.main!["default"] as object;
-    // No registration → no content-addressed entry ref → map/filter/flatMap ops
-    // would fall back to the embedded graph (this is the CT-1811 hazard the seam
-    // exists to remove).
+    // No registration means no content-addressed entry ref, so the value cannot
+    // be materialized through the canonical Factory@1 path.
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeUndefined();
   });
 

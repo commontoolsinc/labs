@@ -14,6 +14,7 @@ Deno.test("BuiltInLLMTool accepts canonical direct and metadata factory shapes",
     useResultSchemaForObservation: true,
   };
   const legacy: BuiltInLLMTool = {
+    // @ts-expect-error Legacy structural tools are no longer public input.
     pattern: legacyPattern,
     extraParams: { source: "stored compatibility value" },
   };

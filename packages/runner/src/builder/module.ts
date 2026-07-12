@@ -116,7 +116,7 @@ const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
   /\blift\b/,
   /\bhandler\b/,
   /\bderive\b/,
-  /\btrusted(?:Pattern|Lift|Handler|Computed|Derive|Str|PatternTool)\b/,
+  /\btrusted(?:Pattern|Lift|Handler|Computed|Derive|Str)\b/,
   /\/packages\/runner\/src\/builder\/factory\.ts:\d+:\d+/,
 ];
 const SYNTHETIC_MAPPED_LINE = 1;

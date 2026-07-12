@@ -55,9 +55,6 @@ describe("generateObject with tools", () => {
   let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
-  let patternTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["patternTool"];
   let generateObject: ReturnType<
     typeof createBuilder
   >["commonfabric"]["generateObject"];
@@ -79,7 +76,6 @@ describe("generateObject with tools", () => {
       handler,
       Cell,
       lift,
-      patternTool,
       str,
     } = commonfabric);
     dummyPattern = installTestPatternArtifact(
@@ -873,7 +869,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle multiple tool calls with patternTool-based tools before presentResult", async () => {
+  it("should handle multiple direct factory tools before presentResult", async () => {
     loadConversationFixture({
       description: "listItems → countItems → presentResult",
       responses: [
@@ -1019,7 +1015,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle mixed handler and patternTool-based tools", async () => {
+  it("should handle mixed handler and pattern factory tools", async () => {
     loadConversationFixture({
       description: "loadData → analyzeData → presentResult",
       responses: [
@@ -1204,13 +1200,16 @@ describe("generateObject with tools", () => {
       properties: { ok: { type: "boolean" } },
       required: ["ok"],
     };
-    const returnLinked = pattern<Record<string, never>>(() => linkedCell);
+    const returnLinked = installTestPatternArtifact(
+      runtime,
+      pattern<Record<string, never>>(() => linkedCell),
+    );
     const testPattern = pattern<Record<string, never>>(() =>
       generateObject({
         prompt: "test-pattern-tool-result-location-link",
         schema: resultSchema,
         tools: {
-          returnLinked: patternTool(returnLinked) as unknown as BuiltInLLMTool,
+          returnLinked: returnLinked as unknown as BuiltInLLMTool,
         },
       })
     );
@@ -1351,74 +1350,6 @@ describe("generateObject with tools", () => {
     expect(result.key("error").get()).toBeUndefined();
     expect(result.key("result").get()).toEqual({
       combined: "A and B",
-    });
-  });
-
-  it("should run fixture-style patternTool bindings with help field and bound source", async () => {
-    const searchTool = pattern(
-      ({ query, help, source }: {
-        query: string;
-        help: string;
-        source: string;
-      }) => {
-        return {
-          query,
-          help,
-          source,
-          summary: str`${source}:${query}:${help}`,
-        };
-      },
-      {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          help: { type: "string" },
-          source: { type: "string" },
-        },
-        required: ["query", "help", "source"],
-      } as const satisfies JSONSchema,
-      {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          help: { type: "string" },
-          source: { type: "string" },
-          summary: { type: "string" },
-        },
-        required: ["query", "help", "source", "summary"],
-      } as const satisfies JSONSchema,
-    );
-
-    const tool = patternTool(searchTool, {
-      source: "bound-source",
-    });
-    const resultCell = runtime.getCell(
-      space,
-      "pattern-tool-bound-source-test",
-      searchTool.resultSchema,
-      tx,
-    );
-
-    const result = runtime.run(
-      tx,
-      tool.pattern,
-      {
-        query: "milk",
-        help: "literal-help",
-        ...tool.extraParams,
-      },
-      resultCell,
-    );
-    tx.commit();
-
-    await result.pull();
-    await runtime.idle();
-
-    expect(resultCell.get()).toEqual({
-      query: "milk",
-      help: "literal-help",
-      source: "bound-source",
-      summary: "bound-source:milk:literal-help",
     });
   });
 

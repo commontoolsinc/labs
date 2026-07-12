@@ -210,7 +210,6 @@ export type CallKind =
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
-  | { kind: "legacy-pattern-tool"; symbol?: ts.Symbol }
   | {
     kind: "runtime-call";
     symbol?: ts.Symbol;
@@ -2252,10 +2251,6 @@ function createNamedCallKind(
       return symbol
         ? { kind: "generate-object", symbol }
         : { kind: "generate-object" };
-    case "legacy-pattern-tool":
-      return symbol
-        ? { kind: "legacy-pattern-tool", symbol }
-        : { kind: "legacy-pattern-tool" };
     case "runtime-call":
       return symbol
         ? {

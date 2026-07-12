@@ -636,7 +636,6 @@ function shouldAddReactiveFor(
       case "runtime-call":
         return options.includeRuntimeCalls && callKind.reactiveOrigin;
       case "cell-for":
-      case "legacy-pattern-tool":
         return false;
     }
   }

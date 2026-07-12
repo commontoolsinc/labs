@@ -527,14 +527,14 @@ export function getNamedTypeKey(
     return undefined;
   }
 
-  // Also check for generic interface/class instantiations (e.g., PatternToolResult<E>)
+  // Also check for generic interface/class instantiations (e.g., Box<E>)
   // Type aliases use aliasTypeArguments (checked above), but interfaces and classes
   // store their type arguments in TypeReference.typeArguments instead.
   //
   // Important: Skip this check if the type has an alias name (like `type ItemTuple = [...]`).
   // The alias provides a unique, user-defined name that should be used for hoisting.
   // We only want to prevent hoisting for anonymous generic interface instantiations
-  // where different instantiations (e.g., PatternToolResult<A> vs PatternToolResult<B>)
+  // where different instantiations (e.g., Box<A> vs Box<B>)
   // would incorrectly collide under the same base name.
   if (objectFlags & ts.ObjectFlags.Reference && !aliasName) {
     const typeRef = type as ts.TypeReference;

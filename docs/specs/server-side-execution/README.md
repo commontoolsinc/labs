@@ -265,8 +265,8 @@ also prove space-only observations continue to coalesce.
 ### 3.3 Producer lookup: durable writer index, not creation provenance
 
 Result cells carry `patternIdentity = {identity, symbol}`
-(`packages/runner/src/runner.ts:1014`); serialized modules/handlers carry
-`$implRef` / `$patternRef` sentinels; verified provenance is a WeakMap keyed
+(`packages/runner/src/runner.ts:1014`); execution-module descriptors carry
+`$implRef` while serializable factories carry Factory@1 artifact refs; verified provenance is a WeakMap keyed
 by the function object; `pattern:<identity>` source docs form a
 Merkle-verified closure with `loadPatternByIdentity` +
 `compileCache:<runtimeVersion>/<identity>` for cold recovery (single-flighted,

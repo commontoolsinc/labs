@@ -2,11 +2,13 @@
 
 ## Status
 
-Proposed. This document specifies intended behavior, not the current
-implementation.
+Implemented through the pre-launch compatibility cleanup on 2026-07-12. The
+only intentionally retained compatibility surface is direct factory-function
+`toJSON()` graph serialization; its removal remains gated on proving that every
+Fabric boundary uses registered codec dispatch.
 
 The ordered execution checklist is
-[First-Class Serializable Factories — Implementation Plan](../../plans/first-class-serializable-factories.md).
+[First-Class Serializable Factories — Executed Plan](../../history/plans/first-class-serializable-factories.md).
 
 The content-addressed identity prerequisite is shipped: every verified,
 module-scoped builder factory is addressable by `{ identity, symbol }`.
@@ -14,15 +16,10 @@ Exports use their export name, while transformed and non-exported factories use
 their `__cfReg` name. See
 [Content-Addressed Action Identity](../content-addressed-action-identity.md).
 
-One prerequisite is not yet on `main`: generic `$patternRef` binding and direct
-setup/sub-pattern resolution. The relevant semantic changes currently live in
-the work behind #4514, including commits `3b028c786`, `39b213e63`, and
-`ede6c5a7d`. This feature must copy or reimplement that small behavior and its
-tests as Stage 0. It must not wait for, or import the unrelated reactive-
-interpreter work in that PR.
-
-This is an independent pattern-construction track. It does not depend on graph
-snapshots or the reactive-interpreter migration.
+Stage 0 reproduced only the generic behavior identified by commits
+`3b028c786`, `39b213e63`, and `ede6c5a7d`; it did not import the unrelated
+reactive-interpreter work from #4514. Factory@1 subsequently replaced that
+temporary `$patternRef` carrier.
 
 ## Summary
 
@@ -83,38 +80,29 @@ protocol. An inline pattern closes over the values to bind, and the resulting
   pattern factory's `spaceSelector`, which chooses the child's execution
   target.
 
-## Current State and Gaps
+## Shipped State
 
-All three factory kinds are already callable function objects with useful
-descriptor state:
+All three factory kinds are directly branded callable Factory@1 values.
+Registered Fabric codecs preserve their kind, content-addressed builder artifact
+ref, schemas, params, scope, and space selector, and context-free decode returns
+an inert callable shell. Runner-owned materialization is the only execution
+chokepoint.
 
-- `PatternFactory.toJSON()` emits `$patternRef`, `argumentSchema`, and
-  `resultSchema` at the storage boundary.
-- `ModuleFactory.toJSON()` and `HandlerFactory.toJSON()` emit module
-  descriptors, using `$implRef` for addressable JavaScript implementations.
-- `asScope()` and `PatternFactory.inSpace()` return derived callable factories.
-- verified exports and `__cfReg` values already enter the generic artifact
-  index, regardless of factory kind.
+Symbolic factory calls lower to reactive dynamic nodes with switch-latest
+replacement and stale-generation fencing. Factories delivered to scheduled
+lift and handler callbacks are materialized to ordinary callables before
+authored code runs, with consumer-local cold readiness.
 
-The existing `toJSON()` path is a one-way conversion. Native conversion calls
-`toJSON()` on a function and replaces the function with inert plain data.
-Generic reads do not recreate a callable factory. Pattern-valued list builtins
-and LLM tools compensate with bespoke `$patternRef` handling.
+Nested patterns use lexical closure conversion: public input is callback
+argument 0, closure params are callback argument 1, and the transformer carries
+the private params schema through `withPatternParamsSchema(callback, schema)`
+before applying its private one-shot `.curry(params)` operation. List lowering
+passes one bound factory and no sibling params.
 
-Serialization alone also does not make a symbolic factory callable. Pattern
-inputs are non-callable reactive proxies. Calling a factory-valued input as
-ordinary JavaScript therefore fails while constructing the outer graph. The
-runner already permits a reactive `NodeRef.module`, but its dynamic-module arm
-is unfinished. This proposal completes that path and adds type-directed call
-lowering.
-
-Pattern construction has two further limitations:
-
-1. `pattern()` currently calls its callback with one symbolic root and only
-   recognizes `argument` and `result` alias roots.
-2. Nested-pattern hoisting is limited to special `*WithPattern` and
-   `patternTool` shapes. There is no general lexical closure conversion for a
-   pattern returned or passed as data.
+Direct factory-function `toJSON()` remains a compatibility graph serializer.
+Canonical Fabric writers dispatch through the Factory@1 codec. `$implRef`
+remains current only inside instantiated execution-module descriptors; it is
+not factory state and is never accepted as a Factory@1 ref.
 
 ## Goals
 
@@ -1033,8 +1021,7 @@ not use the pattern's execution `spaceSelector`:
 5. Cache the artifact in the generic identity index.
 
 This generalized `loadArtifactByIdentity()` path serves pattern, module, and
-handler factories. A legacy `$patternRef` may adapt to a pattern
-`FactoryStateV1` because it names the pattern factory artifact.
+handler factories.
 
 There are three cold entry paths: non-transactional Promise-based root
 `setup(undefined, ...)`, a direct dynamic node, and scheduled `lift`/handler
@@ -1049,12 +1036,11 @@ applies equally to stored Cells, handler event payloads, CLI, and FUSE writes.
 The bare `Factory@1` wire state remains only `{ identity, symbol }` and never
 names or grants an artifact source space.
 
-A legacy `$implRef` does not feed this resolver as a factory ref. It may name
-only an implementation function and omits module/handler configuration. Its
-compatibility reader retains the surrounding serialized module descriptor,
-resolves the implementation through the legacy path, and reconstructs a
-ModuleFactory or HandlerFactory with the corresponding internal descriptor
-constructor.
+An `$implRef` does not feed this resolver as a factory ref. It names only an
+implementation function and omits module/handler configuration. The surrounding
+serialized execution-module descriptor resolves that implementation through
+the current descriptor path; Factory@1 state always uses the complete builder
+artifact ref instead.
 
 For a bound pattern, setup additionally:
 
@@ -1174,40 +1160,20 @@ the same dynamic factory path as ordinary pattern composition.
 
 ## Compatibility and Migration
 
-During the migration, readers accept:
+The repository is pre-launch. On 2026-07-12 the product/runtime owner confirmed
+that deployed patterns and persistent stores need not survive this change and
+approved wiping pre-launch data. The `$patternRef`, `patternTool`,
+`PatternToolResult`, `{ pattern, extraParams }`, two-argument `*WithPattern`, and
+sibling list-params readers and writers were therefore removed together.
 
-- `Factory@1` values;
-- legacy pattern `{ $patternRef, argumentSchema, resultSchema }` values where a
-  PatternFactory is expected;
-- legacy serialized module descriptors carrying `$implRef`; and
-- legacy `{ pattern, extraParams, ...metadata }` tool definitions; and
-- legacy `mapWithPattern` / `filterWithPattern` / `flatMapWithPattern` nodes
-  carrying sibling `{ op, params }` inputs.
+Canonical writers emit Factory@1, and a supported-source inventory prevents the
+removed APIs and writers from returning. `$implRef` remains because it is a
+current execution-module descriptor field, not a legacy factory representation.
 
-New writers emit `Factory@1`. Legacy `extraParams` keep their existing
-tool-boundary merge and precedence rules only in the compatibility reader. They
-are not exposed as `.curry()` and are not redefined as closure params.
-
-During the same dual-read window, list builtins accept either the legacy
-`op + params` shape or a new bound PatternFactory with no sibling params. The
-transformer emits only the new shape, while the old public method overload and
-stored-node reader remain until source usage is gone and stored graphs have
-been migrated or explicitly wiped.
-
-Migration proceeds by changing source callers to inline wrapper patterns. Once
-stored-data and source-usage gates are satisfied, remove:
-
-- `patternTool` and `PatternToolResult`;
-- transformer callback-boundary, validation, and hoisting special cases for
-  `patternTool`;
-- LLM schema-format and invocation special cases for `extraParams`;
-- legacy list-builtin overloads and sibling `params` readers; and
-- factory-function `toJSON()` compatibility once all boundaries use the
-  registered Factory codec.
-
-Current behavior documents remain accurate until the implementation lands;
-they are updated in the same implementation change, not preemptively by this
-proposal.
+Factory-function `toJSON()` compatibility remains until every Fabric boundary
+is proven to dispatch through registered codecs. It emits the full graph, never
+the retired `$patternRef` sentinel. This does not affect canonical Factory@1
+storage, hashing, memory, CLI, FUSE, or LLM boundaries.
 
 ## Delivery Order
 
@@ -1243,11 +1209,17 @@ Add the second callback root, pre-construction
 one-shot internal `.curry(params)`, params binding, and the updated
 `*WithPattern` lowering.
 
-### Stage 4: Remove `patternTool`
+### Stage 4: Migrate `patternTool`
 
-Migrate source callers to inline wrapper patterns, dual-read stored legacy tool
-values, then remove the API and transformer/runtime special cases once the
-compatibility gate is met.
+Migrate source callers to inline wrapper patterns and canonical Factory@1 tool
+values.
+
+### Stage 5: Pre-launch compatibility cleanup
+
+Apply the owner-approved data-wipe decision, remove the retired APIs/readers,
+pin their absence with source inventory, update live docs, and archive the
+execution plan. Retain factory-function `toJSON()` until its separate codec-
+dispatch gate passes.
 
 Each stage is independently testable and revertible.
 
@@ -1275,7 +1247,7 @@ Each stage is independently testable and revertible.
   `withPatternParamsSchema` emission, deterministic hoisting, symbolic call
   lowering, framework-input threading, list callback lowering, and diagnostics.
 - `packages/llm`, CLI, FUSE, and schema formatting: consume Factory values
-  directly and retain legacy reads during migration.
+  directly.
 - pattern sources: replace `patternTool` with inline patterns.
 
 ## Validation Plan
@@ -1355,9 +1327,8 @@ Each stage is independently testable and revertible.
 - Wrap a tool with a framework-provided `sandboxId`; verify synthetic forwarding
   from the wrapper tool identity and reject authored/captured values.
 - Discover and invoke the same tool through runtime, CLI, and FUSE paths.
-- Read legacy `PatternToolResult` values without changing their old precedence.
-- Read legacy list nodes with sibling params and emit only bound-factory nodes.
-- Verify no new source caller or stored writer emits `extraParams`.
+- Reject the removed legacy tool and sibling-list shapes.
+- Verify no source caller or stored writer emits `extraParams`.
 
 ## Completion Criteria
 
@@ -1376,5 +1347,6 @@ This proposal is complete when:
 5. Public pattern inputs are never merged with closure params.
 6. Factory refs, schemas, params, scopes, space selectors, CFC labels, and
    hashes survive storage and cold reload.
-7. `patternTool` and sibling list params have no source writer path, and their
-   compatibility readers have explicit stored-data removal gates.
+7. `patternTool`, `$patternRef`, `extraParams`, and sibling list params have no
+   supported source writer or reader path; their pre-launch removal decision is
+   recorded in the implementation plan.

@@ -46,8 +46,8 @@ const SCOPED_PROGRAM: RuntimeProgram = {
   ],
 };
 
-describe("pattern node $patternRef instantiation", () => {
-  it("resolves a nested pattern ref to its live artifact", async () => {
+describe("nested pattern factory instantiation", () => {
+  it("materializes a nested pattern factory", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

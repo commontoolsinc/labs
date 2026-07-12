@@ -17,10 +17,7 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import {
-  getArtifactEntryRef,
-  noteDerivedCopy,
-} from "./builder/pattern-metadata.ts";
+import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import {
   createFactoryTraversalContext,
   mapFactoryForTraversal,
@@ -697,18 +694,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         );
       }
     } else if (isRecord(binding) && isPattern(binding)) {
-      const ref = getArtifactEntryRef(binding);
-      if (ref !== undefined) {
-        return {
-          $patternRef: { identity: ref.identity, symbol: ref.symbol },
-          argumentSchema: binding.argumentSchema,
-          resultSchema: binding.resultSchema,
-        };
-      }
-
-      // A keyless callable has no cold-resolvable artifact to reference. Keep
-      // the legacy live value intact. Object-shaped legacy pattern graphs still
-      // need their deferred aliases decremented one level below.
+      // Object-shaped compatibility pattern graphs still need their deferred
+      // aliases decremented one level below. First-class factories take the
+      // admitted-factory branch above and remain callable values.
       if (typeof binding !== "object") return binding;
       const copy: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => {

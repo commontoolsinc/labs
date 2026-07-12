@@ -23,6 +23,21 @@ import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 
 const decoder = new TextDecoder();
 
+function testPatternFactory(symbol: string) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol,
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+  });
+}
+
 interface FakeCell {
   schema: Record<string, unknown> | undefined;
   get(): unknown;
@@ -419,15 +434,7 @@ Deno.test("CellBridge derives CFC projection generation for hydrated CFC mounts"
 
   const makeResultCell = (title: string): FakeCell => {
     const searchToolCell = makeCell(
-      {
-        pattern: {
-          argumentSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-          },
-        },
-        extraParams: { title },
-      },
+      testPatternFactory(`search-${title}`),
       undefined,
     );
     return makeCell(
@@ -1127,15 +1134,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   const state = buildTestSpace(bridge, "home", []);
 
   const initialToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "before" },
-    },
+    testPatternFactory("search-before"),
     undefined,
   );
   const initialResultCell = makeCell(
@@ -1186,15 +1185,7 @@ Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuil
   assertEquals(initialToolIno !== undefined, true);
 
   const rebuiltToolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "after" },
-    },
+    testPatternFactory("search-after"),
     undefined,
   );
   const rebuiltResultCell = makeCell(

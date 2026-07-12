@@ -38,9 +38,6 @@ describe("llmDialog", () => {
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
-  let patternTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
   let generateObject: ReturnType<
@@ -63,7 +60,6 @@ describe("llmDialog", () => {
       Cell,
       Writable,
       handler,
-      patternTool,
       generateObject,
     } = commonfabric);
   });
@@ -297,6 +293,7 @@ describe("llmDialog", () => {
       } as const satisfies JSONSchema,
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, getWeatherTool);
 
     const testPattern = pattern(
       () => {
@@ -304,9 +301,7 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(
-              getWeatherTool,
-            ) as unknown as BuiltInLLMTool,
+            getWeather: getWeatherTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -898,6 +893,7 @@ describe("llmDialog", () => {
         additionalProperties: false,
       } as const satisfies JSONSchema,
     );
+    installTestPatternArtifact(runtime, helperTool);
 
     const resultSchema = {
       type: "object",
@@ -920,9 +916,7 @@ describe("llmDialog", () => {
             prompt,
             schema: resultSchema,
             tools: {
-              helperTool: patternTool(
-                helperTool,
-              ) as unknown as BuiltInLLMTool,
+              helperTool: helperTool as unknown as BuiltInLLMTool,
             },
           } as any).result;
         },
@@ -1332,6 +1326,8 @@ describe("llmDialog", () => {
         required: ["ok"],
       } as const satisfies JSONSchema,
     );
+    installTestPatternArtifact(runtime, readInternal);
+    installTestPatternArtifact(runtime, publicOnly);
 
     const testPattern = pattern(
       () => {
@@ -1340,10 +1336,8 @@ describe("llmDialog", () => {
           messages,
           observationMaxConfidentiality: ["internal"],
           tools: {
-            readInternal: patternTool(
-              readInternal,
-            ) as unknown as BuiltInLLMTool,
-            publicOnly: patternTool(publicOnly) as unknown as BuiltInLLMTool,
+            readInternal: readInternal as unknown as BuiltInLLMTool,
+            publicOnly: publicOnly as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1893,6 +1887,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1902,7 +1897,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1982,6 +1977,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1991,7 +1987,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         } as any);
         return {
@@ -2218,6 +2214,7 @@ describe("llmDialog", () => {
     });
     const ceilingTx = ceilingRuntime.edit();
     const { commonfabric } = createTrustedBuilder(ceilingRuntime);
+    installTestPatternArtifact(ceilingRuntime, readInternal);
 
     try {
       const testPattern = commonfabric.pattern(
@@ -2228,9 +2225,7 @@ describe("llmDialog", () => {
             // Generous pattern-supplied bound — would let "internal" ship.
             observationMaxConfidentiality: ["internal"],
             tools: {
-              readInternal: commonfabric.patternTool(
-                readInternal,
-              ) as unknown as BuiltInLLMTool,
+              readInternal: readInternal as unknown as BuiltInLLMTool,
             },
           });
           return {

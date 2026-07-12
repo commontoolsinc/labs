@@ -33,10 +33,6 @@ import {
   setDurableArtifactEntryRef,
 } from "../src/builder/pattern-metadata.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import {
-  isPatternRefSentinel,
-  resolveStoredPattern,
-} from "../src/builtins/op-pattern-ref.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -259,7 +255,6 @@ describe("pattern-binding", () => {
       const stored = testCell.key("factory").getRaw();
       expect(isAdmittedFabricFactory(stored)).toBe(true);
       expect(factoryStateOf(stored)).toEqual(factoryStateOf(factory));
-      expect(isPatternRefSentinel(stored)).toBe(false);
     });
 
     it("should send value to a simple binding", () => {
@@ -751,7 +746,7 @@ describe("pattern-binding", () => {
       }
     });
 
-    it("keeps admitted addressable factories callable and retains the structural legacy ref path", async () => {
+    it("keeps admitted addressable factories callable and binds compatibility graphs structurally", async () => {
       const compiled = await runtime.patternManager.compilePattern(
         ADDRESSABLE_PATTERN_PROGRAM,
       );
@@ -788,17 +783,10 @@ describe("pattern-binding", () => {
       expect(bound.direct).toBe(compiled);
       expect(bound.nested.operations[0]).toBe(compiled);
       expect(isAdmittedFabricFactory(bound.direct)).toBe(true);
-      expect(isPatternRefSentinel(bound.direct)).toBe(false);
 
-      const legacy = bound.nested.operations[1];
-      expect(isPatternRefSentinel(legacy)).toBe(true);
-      expect(legacy).toEqual({
-        $patternRef: entryRef,
-        argumentSchema: compiled.argumentSchema,
-        resultSchema: compiled.resultSchema,
-      });
-      expect((legacy as Record<string, unknown>).nodes).toBeUndefined();
-      expect(resolveStoredPattern(runtime, legacy)).toBe(compiled);
+      const graph = bound.nested.operations[1] as Record<string, unknown>;
+      expect(Array.isArray(graph.nodes)).toBe(true);
+      expect("$patternRef" in graph).toBe(false);
 
       setDurableArtifactEntryRef(compiled, entryRef!);
       const compiledState = factoryStateOf(compiled);
@@ -880,7 +868,6 @@ describe("pattern-binding", () => {
 
         expect(bound).not.toBe(factory);
         expect(isAdmittedFabricFactory(bound)).toBe(true);
-        expect(isPatternRefSentinel(bound)).toBe(false);
         expect(
           parseLink(
             (boundState.params as { fromArgument: unknown }).fromArgument,
@@ -1091,65 +1078,6 @@ describe("pattern-binding", () => {
       expect(bound.nodes[0].module.toJSON).toBe(moduleToJSON);
       expect(bound.nodes[0].module.implementation).toBe(implementation);
       expect(findAllWriteRedirectCells(legacyPattern, resultCell)).toEqual([]);
-    });
-
-    it("keeps admitted list ops on the named legacy sentinel fallback only", async () => {
-      const compiled = await runtime.patternManager.compilePattern(
-        ADDRESSABLE_PATTERN_PROGRAM,
-      );
-      const substitute = runtime.runner as unknown as {
-        substituteOpPatternRefs(
-          moduleRefName: string | undefined,
-          inputBindings: unknown,
-        ): void;
-      };
-
-      const listBindings = { op: compiled, params: {} };
-      substitute.substituteOpPatternRefs("map", listBindings);
-      expect(isPatternRefSentinel(listBindings.op)).toBe(true);
-
-      const ordinaryBindings = { op: compiled };
-      substitute.substituteOpPatternRefs("ifElse", ordinaryBindings);
-      expect(ordinaryBindings.op).toBe(compiled);
-
-      const frame = pushFrame({
-        runtime,
-        tx,
-        space,
-        cause: { test: "keyless admitted list op fallback" },
-      });
-      try {
-        const { pattern } = createTrustedBuilder(runtime).commonfabric;
-        const keyless = pattern(() => ({ value: 1 }));
-        const keylessBindings = { op: keyless, params: {} };
-        substitute.substituteOpPatternRefs("flatMap", keylessBindings);
-        expect(isPatternRefSentinel(keylessBindings.op)).toBe(true);
-        expect(runtime.patternManager.getArtifactEntryRef(keyless)?.identity)
-          .toMatch(/^keyless:/);
-
-        const keylessState = factoryStateOf(keyless);
-        if (keylessState.kind !== "pattern") {
-          throw new Error("expected keyless pattern factory state");
-        }
-        const modified = [
-          keyless.inSpace("child-space"),
-          keyless.asScope("user"),
-          deriveFactoryStateCopy(keyless, {
-            ...keylessState,
-            paramsSchema: true,
-            params: { captured: 1 },
-          }),
-        ];
-        for (const factory of modified) {
-          const modifiedBindings = { op: factory, params: {} };
-          expect(() =>
-            substitute.substituteOpPatternRefs("filter", modifiedBindings)
-          ).toThrow("legacy list op cannot discard factory state");
-          expect(modifiedBindings.op).toBe(factory);
-        }
-      } finally {
-        popFrame(frame);
-      }
     });
   });
 

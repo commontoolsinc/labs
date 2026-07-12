@@ -29,10 +29,6 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import {
-  inferListOpArgumentUsage,
-  type ListOpArgumentUsage,
-} from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   boundPatternFactoryScope,
@@ -42,7 +38,6 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { narrowestScope } from "../scope.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
 import {
@@ -80,7 +75,6 @@ export function flatMap(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -214,40 +208,19 @@ export function flatMap(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const rawInputs = inputsCell.withTx(tx).getRaw();
-    const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
-      Object.hasOwn(rawInputs, "params");
-    let opPattern: Pattern;
-    let factoryGeneration: number | undefined;
-    let factorySelectionLink: NormalizedFullLink | undefined;
-    let factorySourceLink: NormalizedFullLink | undefined;
-    let argumentUsage: ListOpArgumentUsage;
-    if (legacyInputs) {
-      opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
-      argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
-    } else {
-      const selection = factorySupervisor.materialize(
-        tx,
-        inputsCell.key("op"),
-        "flatMap",
-      );
-      opPattern = selection.pattern;
-      factoryGeneration = selection.generation;
-      factorySelectionLink = selection.factorySelectionLink;
-      factorySourceLink = selection.factorySourceLink;
-      argumentUsage = {
-        usesElement: true,
-        usesIndex: true,
-        usesArray: true,
-        usesParams: false,
-      };
-    }
+    const selection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "flatMap",
+    );
+    const opPattern = selection.pattern;
+    const factoryGeneration = selection.generation;
+    const factorySelectionLink = selection.factorySelectionLink;
+    const factorySourceLink = selection.factorySourceLink;
     const outputScope = narrowestScope([
       narrowestCellScope(runtime, tx, [
         inputsCell.key("list"),
-        ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
-        argumentUsage.usesArray ? inputsCell.key("list") : undefined,
-        argumentUsage.usesParams ? inputsCell.key("params") : undefined,
+        ...(Array.isArray(list) ? list : []),
       ]),
       factorySourceLink === undefined ? undefined : boundPatternFactoryScope(
         runtime,
@@ -308,10 +281,9 @@ export function flatMap(
         fn,
       );
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: inputsCell.key("list"),
     });
 
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -416,10 +388,7 @@ export function flatMap(
         const existing = elementRuns.get(elementKey)!;
         const staleFactoryGeneration = factoryGeneration !== undefined &&
           existing.runGeneration !== factoryGeneration;
-        if (
-          staleFactoryGeneration ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
-        ) {
+        if (staleFactoryGeneration || existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
             opPattern,

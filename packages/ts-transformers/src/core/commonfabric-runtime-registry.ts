@@ -17,7 +17,6 @@ export type CommonFabricRuntimeExportSpec =
       | "wish"
       | "generate-text"
       | "generate-object"
-      | "legacy-pattern-tool"
       | "runtime-call";
     reactiveOrigin: boolean;
   }
@@ -136,12 +135,6 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     category: "call",
     callKind: "generate-object",
     reactiveOrigin: true,
-  },
-  {
-    exportName: "patternTool",
-    category: "call",
-    callKind: "legacy-pattern-tool",
-    reactiveOrigin: false,
   },
   {
     exportName: "str",

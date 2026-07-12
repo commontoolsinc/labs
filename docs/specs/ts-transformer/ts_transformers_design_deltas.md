@@ -69,7 +69,7 @@ landed after the snapshot above:
 - Landed:
   - `derive`/`computed` → lift-applied lowering (Phase 1, CT-1615)
   - whole-builder-call hoisting to module scope for `lift` (CT-1644), then
-    `handler`, `pattern`, and `patternTool` (CT-1655), via the single
+    `handler` and `pattern` (CT-1655), via the single
     `BuilderCallHoistingTransformer` (current-behavior spec §11). The former
     lift-only `LiftHoistingTransformer` and the callback-only
     `BuilderCallbackHoistingTransformer` are both gone (the latter deleted in

@@ -56,7 +56,6 @@ import {
   llm,
   llmDialog,
   navigateTo,
-  patternTool,
   sqliteDatabase,
   sqliteQuery,
   str,
@@ -155,11 +154,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
-  const trustedPatternTool = ((...args: any[]) =>
-    trustValue(
-      (patternTool as (...args: any[]) => unknown)(...args),
-    )) as typeof patternTool;
-
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
@@ -179,7 +173,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const commonfabric = {
     // Pattern creation
     pattern: trustedPattern,
-    patternTool: trustedPatternTool,
 
     // Module creation
     lift: trustedLift,

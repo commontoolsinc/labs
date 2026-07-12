@@ -1012,15 +1012,6 @@ export interface IDerivable<T> {
     this: IsThisObject,
     op: PatternFactory<ListPatternCallbackInput<T>, S>,
   ): Reactive<S[]>;
-  /**
-   * @deprecated Bind captures into the PatternFactory and use the one-argument
-   * overload. This overload remains for legacy stored/source compatibility.
-   */
-  mapWithPattern<S>(
-    this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
-  ): Reactive<S[]>;
   reduce<S>(
     this: IsThisObject,
     fn: (
@@ -1051,15 +1042,6 @@ export interface IDerivable<T> {
     this: IsThisObject,
     op: PatternFactory<ListPatternCallbackInput<T>, S>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
-  /**
-   * @deprecated Bind captures into the PatternFactory and use the one-argument
-   * overload. This overload remains for legacy stored/source compatibility.
-   */
-  filterWithPattern<S>(
-    this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
-  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   flatMap<S>(
     this: IsThisObject,
     fn: (
@@ -1071,15 +1053,6 @@ export interface IDerivable<T> {
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<ListPatternCallbackInput<T>, S[]>,
-  ): Reactive<S[]>;
-  /**
-   * @deprecated Bind captures into the PatternFactory and use the one-argument
-   * overload. This overload remains for legacy stored/source compatibility.
-   */
-  flatMapWithPattern<S>(
-    this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
-    params: Record<string, any>,
   ): Reactive<S[]>;
 }
 
@@ -1946,15 +1919,6 @@ export type BuiltInLLMTool =
   | {
     pattern: PatternFactory<any, any>;
     handler?: never;
-    extraParams?: never;
-    description?: string;
-    useResultSchemaForObservation?: boolean;
-  }
-  | {
-    /** @deprecated Stored compatibility shape produced by patternTool(). */
-    pattern: Pattern;
-    handler?: never;
-    extraParams: Record<string, any>;
     description?: string;
     useResultSchemaForObservation?: boolean;
   }
@@ -2231,68 +2195,17 @@ export interface PatternFunction {
   ): PatternFactory<StripCell<T>, R>;
 }
 
-/**
- * Legacy LLM tool definition written by `patternTool()`.
- *
- * @deprecated Pass a `PatternFactory` directly, or use
- * `{ pattern: factory, ...metadata }`. This shape remains readable only for
- * stored compatibility data.
- */
-export interface PatternToolResult<E = Record<PropertyKey, never>> {
-  pattern: Pattern;
-  extraParams: E;
-  useResultSchemaForObservation?: boolean;
-}
-
 // Marker branding a tool-input field as framework-provided: the runtime fills
-// it (e.g. the bash tool's `sandboxId`), and `patternTool` rejects any attempt
-// to pre-fill it through extraParams. Compile-time only; at runtime a
+// it (e.g. the bash tool's `sandboxId`). Compile-time only; at runtime a
 // `FrameworkProvided<T>` value is just a `T`. The brand is a symbol-keyed
 // property, so schema generation emits the inner type's schema unchanged.
 //
 // Shaped as `(T & brand) | T` (like Default<>): the bare `| T` arm keeps the
-// type nameable in emitted declarations, while the branded arm is what
-// FrameworkProvidedKeys<> detects.
+// type nameable in emitted declarations while compiler metadata can still
+// recognize the branded arm.
 export declare const FRAMEWORK_PROVIDED_MARKER: unique symbol;
 type FrameworkProvidedMarker = { readonly [FRAMEWORK_PROVIDED_MARKER]: true };
 export type FrameworkProvided<T> = (T & FrameworkProvidedMarker) | T;
-
-// Distributes over the union members of V (naked param) so it sees the brand in
-// the `(T & brand) | T` shape: `true` for the branded arm, `false` for the bare
-// one, hence `boolean` for the whole union. `any` is excluded — `any extends X`
-// is `boolean`, which would otherwise flag every loosely-typed field.
-type _HasFrameworkBrand<V> = IsAny<V> extends true ? false
-  : V extends FrameworkProvidedMarker ? true
-  : false;
-
-// The keys of T whose value is `FrameworkProvided<...>` — the fields an author
-// must not pre-fill. `NonNullable` lets it see the brand through an optional
-// `field?: FrameworkProvided<...>`.
-type FrameworkProvidedKeys<T> = {
-  [K in keyof T]-?: true extends _HasFrameworkBrand<NonNullable<T[K]>> ? K
-    : never;
-}[keyof T];
-
-/**
- * @deprecated Pass a `PatternFactory` directly, or use a metadata wrapper.
- * This writer remains available until the durable compatibility gates pass.
- */
-export type PatternToolFunction = <
-  T,
-  E extends object = Record<PropertyKey, never>,
->(
-  // CT-1655: the first argument must be an explicit `pattern(...)`. Passing a
-  // bare callback (and letting the runtime wrap it / a transformer auto-capture
-  // its closure) is no longer supported — wrap it yourself:
-  // `patternTool(pattern(fn), extraParams?)`.
-  pattern: PatternFactory<T, any>,
-  // Reject pre-filling a framework-provided field (e.g. the bash tool's
-  // `sandboxId`); otherwise validate that E (after stripping cells) is a subset
-  // of T.
-  extraParams?: [keyof E & FrameworkProvidedKeys<T>] extends [never]
-    ? (StripCell<E> extends Partial<T> ? FactoryInput<E> : never)
-    : never,
-) => PatternToolResult<E>;
 
 // Public (schema-light) surface, matching PatternFunction's index.ts shape: the
 // callback is the only argument and the types come from the callback itself. The
@@ -3103,7 +3016,6 @@ export interface MultiUserTestDescriptor {
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
-export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;

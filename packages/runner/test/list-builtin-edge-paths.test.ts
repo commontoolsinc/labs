@@ -49,10 +49,8 @@ describe("list builtin edge paths", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
-  // An op pattern with no explicit argument schema runs in legacy mode, where
-  // inferListOpArgumentUsage reports every argument (element, index, array,
-  // params) as used. That makes usesIndex true, so a reused element that shifts
-  // position re-runs its op.
+  // An op pattern receives the canonical element, index, and array inputs. A
+  // reused element that shifts position therefore re-runs its op.
   function indexUsingOp(
     // deno-lint-ignore no-explicit-any
     fn: (element: any, index: any) => any,

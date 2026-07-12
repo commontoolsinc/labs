@@ -211,8 +211,6 @@ list — is the authoritative source. As of this writing it recognizes:
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)
-- `patternTool` — recognized, but explicitly **not** a reactive origin
-  (`reactiveOrigin: false`)
 
 Detection is provenance-first:
 
@@ -456,8 +454,8 @@ Diagnostics emitted in all modes:
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
-  - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `lift(...)`, or reactive collection methods on reactive
+  - in standalone functions: `computed(...)`, `lift(...)`, or reactive
+    collection methods on reactive
     receivers
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
@@ -505,17 +503,11 @@ Diagnostics emitted in all modes:
     imperative container roots" unsupported bucket. Guidance: use a supported
     array-method/value call, an event handler, or move the work into
     `computed(() => ...)`, module-scope `lift()`, or a helper.
-- **Error** `pattern-context:patterntool-requires-pattern`
-  - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
-    function expression) rather than a `pattern(...)`. The runtime/transformer
-    auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
-    authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
-    diagnostic is reported on the bare-callback argument.
 - **Error** `ses-callback:callable-capture`
   - a callback at an SES-self-contained boundary captures a **callable**
     declared in an enclosing function scope. The boundary kinds that require
     self-containment are `SES_SELF_CONTAINED_CALLBACK_BOUNDARIES`:
-    `event-handler`, `reactive-array-method`, `pattern-tool`, `pattern-builder`,
+    `event-handler`, `reactive-array-method`, `pattern-builder`,
     `render-builder`, `lift-applied`, `computed-builder`, `action-builder`,
     `lift-builder`, `handler-builder`. (`sqlite-row-label-rule` is deliberately
     excluded — `table()` evaluates its rule callback eagerly at pattern build
@@ -792,11 +784,13 @@ order:
 Strategy rebuilds — and the callbacks `PatternBuilder` assembles for them —
 carry the replaced nodes' source-map ranges (§11.5).
 
-There is no longer a separate patternTool closure strategy (CT-1655, #3862):
-`patternTool` now requires an explicit `pattern(...)` first argument (see
-§6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
-that authored pattern and the call is hoisted by `BuilderCallHoisting` (§11)
-rather than capture-rewritten here.
+There is no `patternTool` closure strategy; that legacy compatibility helper
+has been removed. Tools use `PatternFactory` values directly.
+
+Nested authored `pattern(...)` calls use the pattern-builder boundary. Their
+public input remains callback argument 0; closure conversion emits callback
+argument 1, carries its private schema with `withPatternParamsSchema`, and adds
+one private `.curry(params)` at capturing sites.
 
 ### 9.1 Capture model
 
@@ -898,21 +892,14 @@ The runtime meaning of `materializerWriteInputPaths` is specified in
 
 If no captures are found, the lift-applied call is left unchanged.
 
-### 9.6 patternTool (no closure strategy)
+### 9.6 Pattern factory closure conversion
 
-There is no patternTool closure strategy in the current pipeline. The former
-strategy auto-wrapped a bare callback as `pattern(fn)` and auto-captured
-module-scoped reactive values into the call; both were removed in CT-1655
-(#3862) in favor of an explicit, addressable pattern.
-
-Current behavior:
-
-- `patternTool(...)`'s first argument **must** be an explicit `pattern(...)`; a
-  bare callback reports `pattern-context:patterntool-requires-pattern` (§6.5).
-- the captures live on the authored `pattern(...)` (module-scoped reads are
-  absorbed by the pattern; per-instance values go in `extraParams`).
-- the bare `pattern(...)` inside `patternTool(...)` is hoisted to module scope
-  by `BuilderCallHoisting` (§11, argument-position pattern case).
+Nested patterns are hoisted deterministically and become first-class
+PatternFactory values. Capture-free sites pass the hoisted factory directly;
+capturing sites emit exactly one private `.curry(params)`. `.curry` is absent
+from the public API, takes one argument, and never binds public input fields.
+Tool descriptors use direct or metadata-wrapped PatternFactory values and have
+no separate transformer strategy.
 
 ### 9.7 Pattern callback lowering
 
@@ -1196,7 +1183,8 @@ content-addressing registration. It is the sole module-scope hoisting phase; it
 absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
 deleted `BuilderCallbackHoistingTransformer` (which hoisted builder callbacks
 and caused TDZ double-hoist bugs — #3864). Tickets: CT-1644 (lift), CT-1655
-(handler, pattern, patternTool), CT-1623 (`__cfReg` content addressing).
+(handler, pattern), CT-1623 (`__cfReg` content addressing), and first-class
+factory closure conversion.
 
 ### 11.1 What gets hoisted
 
@@ -1220,14 +1208,14 @@ reference that name. Three builder shapes are registered in
   ```
 
 - **Argument-position builder** (`pattern`): the bare `pattern(...)` call sits
-  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.) or
-  `patternTool(...)`. Hoist argument 0 to `__cfPattern_N` and rewrite only that
-  argument, keeping the enclosing callee and remaining arguments intact. The
+  in argument 0 of an enclosing `*WithPattern` call (`mapWithPattern`, etc.).
+  Hoist argument 0 to `__cfPattern_N` and rewrite only that argument, retaining
+  any private `.curry(params)` tail. The
   top-level `export default pattern(...)` is a direct call, not an argument, so
   it is naturally excluded.
 
 Detection is provenance-driven via `detectCallKind` / `isHandlerAppliedCall` /
-`getWithPatternHoistablePatternCall` / `getPatternToolHoistablePatternCall`.
+`getWithPatternHoistablePatternCall`.
 
 ### 11.2 Why this runs after SchemaInjection
 

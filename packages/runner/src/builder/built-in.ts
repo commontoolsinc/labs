@@ -1,7 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
-import { serializePatternGraph } from "./json-utils.ts";
 import type {
   FactoryInput,
   JSONSchema,
@@ -24,8 +23,6 @@ import type {
   FetchBinaryResult,
   FetchOptions,
   InspectConfLabelResult,
-  PatternToolFunction,
-  PatternToolResult,
   SqliteDatabaseFunction,
   SqliteQueryFunction,
   UIVariantKind,
@@ -515,34 +512,3 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 ): CellType<Schema<S>>;
 
 export type { createCell };
-
-/**
- * Explicit legacy writer for `{ pattern, extraParams }` tool values.
- *
- * @deprecated Pass a direct `PatternFactory` or
- * `{ pattern: factory, ...metadata }`. This writer remains only until the
- * durable compatibility gates pass.
- */
-export const patternTool = (<
-  T,
-  E extends Partial<T> = Record<PropertyKey, never>,
->(
-  // CT-1655: must already be a pattern. Authors wrap callbacks explicitly —
-  // `patternTool(pattern(fn), extraParams?)` — so the unit is addressable and
-  // hoistable; the runtime no longer coerces a bare function into a pattern.
-  pattern: PatternFactory<T, any>,
-  extraParams?: FactoryInput<E>,
-): PatternToolResult<E> => {
-  return {
-    // `patternTool` is an explicitly deprecated compatibility writer. Preserve
-    // its historical structural
-    // Pattern payload here, at the helper boundary, so a keyless/manual tool
-    // pattern does not masquerade as a durably cold-loadable Factory@1 value.
-    // Ordinary factory-valued graph data remains callable and must satisfy the
-    // exact-space artifact-availability proof at a durable boundary.
-    pattern: serializePatternGraph(pattern) as unknown as PatternToolResult<
-      E
-    >["pattern"],
-    extraParams: (extraParams ?? {}) as E,
-  };
-}) as PatternToolFunction;

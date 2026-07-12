@@ -252,7 +252,6 @@ function classifyCallExpressionRoot(
     case "wish":
     case "generate-text":
     case "generate-object":
-    case "legacy-pattern-tool":
     case "runtime-call":
       return "other";
   }

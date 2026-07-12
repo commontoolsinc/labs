@@ -88,7 +88,7 @@ describe("list factory writer shape", () => {
     await storageManager.close();
   });
 
-  it("writes bound factories canonically and preserves the legacy two-argument shape", () => {
+  it("writes bound factories canonically with no sibling params", () => {
     const mappedOp = bind(
       (_input, params) => params.offset,
       { type: "number" },
@@ -125,32 +125,6 @@ describe("list factory writer shape", () => {
       expect(Object.keys(inputs)).toEqual(["list", "op"]);
       expect(isAdmittedFabricFactory(inputs.op)).toBe(true);
       expect(factoryStateOf(inputs.op)).toEqual(factoryStateOf(op));
-    }
-
-    const legacyMap = pattern<number, number>(() => 1);
-    const legacyFilter = pattern<number, boolean>(() => true);
-    const legacyFlatMap = pattern<number, number[]>(() => [1]);
-    const legacyParams = { retained: true };
-    const legacy = pattern<{ list: number[] }>(({ list }) => {
-      const listCell = list as unknown as OpaqueCell<number[]>;
-      return {
-        mapped: listCell.mapWithPattern(legacyMap, legacyParams),
-        filtered: listCell.filterWithPattern(legacyFilter, legacyParams),
-        flattened: listCell.flatMapWithPattern(legacyFlatMap, legacyParams),
-      };
-    });
-
-    for (
-      const [implementation, op] of [
-        ["map", legacyMap],
-        ["filter", legacyFilter],
-        ["flatMap", legacyFlatMap],
-      ] as const
-    ) {
-      const inputs = nodeInputs(legacy, implementation);
-      expect(Object.keys(inputs)).toEqual(["list", "op", "params"]);
-      expect(factoryStateOf(inputs.op)).toEqual(factoryStateOf(op));
-      expect(inputs.params).toEqual(legacyParams);
     }
   });
 });

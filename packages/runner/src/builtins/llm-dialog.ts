@@ -52,7 +52,6 @@ import {
 } from "../cell.ts";
 import { resolveLinkScope } from "../scope.ts";
 import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
-import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { getEntityId } from "../create-ref.ts";
 import {
   entityRefToString,
@@ -114,7 +113,6 @@ import {
   prepareFactory,
 } from "../factory-materialization.ts";
 import { RetryWhenReady } from "../scheduler/retry-when-ready.ts";
-import { noteLegacyFactoryCompatibilityRead } from "../legacy-factory-compat.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -187,7 +185,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   return prepareSchemaForLLM(stripped);
 }
 
-// Tool-input fields the framework fills in (see applyAutoProvidedSandboxId).
+// Tool-input fields the framework fills from trusted compiler metadata.
 // They are removed from the model-facing schema so the model is never asked for
 // a value it cannot set — the runtime owns them.
 const FRAMEWORK_PROVIDED_TOOL_FIELDS: readonly string[] = ["sandboxId"];
@@ -897,20 +895,20 @@ const internalSchema = internSchema(
   },
 );
 
-type LegacyToolEntry = {
+type ToolEntry = {
   name: string;
   tool: any;
   cell: Cell<Schema<typeof LLMToolSchema>>;
 };
 
-type CanonicalPatternToolSelection = {
+type FactoryToolSelection = {
   selection: unknown;
   leafCell: Cell<unknown>;
   metadata: Record<string, unknown>;
 };
 
-type MaterializedCanonicalPatternTool =
-  & CanonicalPatternToolSelection
+type MaterializedFactoryTool =
+  & FactoryToolSelection
   & { factory: MaterializedFactory & Readonly<Pattern> };
 
 function admittedFactoryFromCell(cell: Cell<unknown>): unknown {
@@ -927,10 +925,10 @@ function admittedFactoryFromCell(cell: Cell<unknown>): unknown {
   return undefined;
 }
 
-function canonicalPatternToolSelection(
+function factoryToolSelection(
   toolDef: Cell<unknown>,
   toolValue?: unknown,
-): CanonicalPatternToolSelection | undefined {
+): FactoryToolSelection | undefined {
   if (isAdmittedFabricFactory(toolValue)) {
     return { selection: toolValue, leafCell: toolDef, metadata: {} };
   }
@@ -972,7 +970,7 @@ function canonicalToolMaterializationContext(
   return { runtime, artifactSpace: source.space } as const;
 }
 
-function assertPatternToolFactory(
+function assertToolPatternFactory(
   factory: MaterializedFactory,
 ): MaterializedFactory & Readonly<Pattern> {
   const state = factoryStateOf(factory);
@@ -984,12 +982,12 @@ function assertPatternToolFactory(
   return factory as MaterializedFactory & Readonly<Pattern>;
 }
 
-function materializeCanonicalPatternTool(
+function materializeFactoryTool(
   runtime: Runtime,
   toolDef: Cell<unknown>,
   toolValue?: unknown,
-): MaterializedCanonicalPatternTool | undefined {
-  const selected = canonicalPatternToolSelection(toolDef, toolValue);
+): MaterializedFactoryTool | undefined {
+  const selected = factoryToolSelection(toolDef, toolValue);
   if (!selected) return undefined;
   const context = canonicalToolMaterializationContext(
     runtime,
@@ -998,7 +996,7 @@ function materializeCanonicalPatternTool(
   try {
     return {
       ...selected,
-      factory: assertPatternToolFactory(
+      factory: assertToolPatternFactory(
         materializeFactory(selected.selection, context),
       ),
     };
@@ -1011,16 +1009,16 @@ function materializeCanonicalPatternTool(
   }
 }
 
-async function prepareCanonicalPatternTool(
+async function prepareFactoryTool(
   runtime: Runtime,
   toolDef: Cell<unknown>,
   toolValue?: unknown,
-): Promise<MaterializedCanonicalPatternTool | undefined> {
-  const selected = canonicalPatternToolSelection(toolDef, toolValue);
+): Promise<MaterializedFactoryTool | undefined> {
+  const selected = factoryToolSelection(toolDef, toolValue);
   if (!selected) return undefined;
   return {
     ...selected,
-    factory: assertPatternToolFactory(
+    factory: assertToolPatternFactory(
       await prepareFactory(
         selected.selection,
         canonicalToolMaterializationContext(runtime, selected.leafCell),
@@ -1105,14 +1103,14 @@ function readCellValueForObservation(
 
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
-): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
+): { tools: ToolEntry[]; pieces: PieceToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const rawTools = toolsCell.getRaw();
   const names = new Set(Object.keys(tools));
   if (isRecord(rawTools)) {
     for (const name of Object.keys(rawTools)) names.add(name);
   }
-  const legacy: LegacyToolEntry[] = [];
+  const toolEntries: ToolEntry[] = [];
   const pieces: PieceToolEntry[] = [];
 
   for (const name of names) {
@@ -1131,7 +1129,7 @@ function collectToolEntries(
       continue;
     }
 
-    legacy.push({
+    toolEntries.push({
       name,
       tool,
       cell: toolsCell.key(name) as unknown as Cell<
@@ -1140,7 +1138,7 @@ function collectToolEntries(
     });
   }
 
-  return { legacy, pieces };
+  return { tools: toolEntries, pieces };
 }
 
 const READ_TOOL_NAME = "read";
@@ -1367,10 +1365,10 @@ function flattenTools(
   }
 > {
   const flattened: Record<string, any> = {};
-  const { legacy } = collectToolEntries(toolsCell);
+  const { tools } = collectToolEntries(toolsCell);
 
-  for (const entry of legacy) {
-    const canonical = materializeCanonicalPatternTool(
+  for (const entry of tools) {
+    const canonical = materializeFactoryTool(
       toolsCell.runtime,
       entry.cell as unknown as Cell<unknown>,
       entry.tool,
@@ -1396,6 +1394,7 @@ function flattenTools(
     }
 
     const passThrough: Record<string, unknown> = { ...entry.tool };
+    if (!("handler" in passThrough)) continue;
     if (
       passThrough.inputSchema && typeof passThrough.inputSchema === "object"
     ) {
@@ -1516,7 +1515,7 @@ function buildToolCatalog(
     | Cell<Record<string, BuiltInLLMTool> | undefined>,
   includeBuiltinTools = true,
 ): ToolCatalog {
-  const { legacy } = collectToolEntries(
+  const { tools } = collectToolEntries(
     toolsCell as Cell<Record<string, Schema<typeof LLMToolSchema>>>,
   );
   const llmTools: ToolCatalog["llmTools"] = {};
@@ -1525,8 +1524,8 @@ function buildToolCatalog(
     Cell<Schema<typeof LLMToolSchema>>
   >();
 
-  for (const entry of legacy) {
-    const canonical = materializeCanonicalPatternTool(
+  for (const entry of tools) {
+    const canonical = materializeFactoryTool(
       toolsCell.runtime,
       entry.cell as unknown as Cell<unknown>,
       entry.tool,
@@ -1561,18 +1560,12 @@ function buildToolCatalog(
       ...cellToolValue,
       ...parentToolValue,
     } as Record<string, unknown>;
-    const patternValue = toolValue.pattern ?? cellToolValue.pattern;
-    const pattern = (isCell(patternValue)
-      ? patternValue.resolveAsCell().get()
-      : (patternValue as { get?: () => unknown } | undefined)?.get?.() ??
-        patternValue) as { argumentSchema?: JSONSchema } | undefined;
     const handlerValue = toolValue.handler ?? cellToolValue.handler;
     const handler =
       (isCell(handlerValue) ? handlerValue.resolveAsCell() : undefined) as
         | Cell<any>
         | undefined;
-    const inputSchema = pattern?.argumentSchema ?? toolValue?.inputSchema ??
-      handler?.schema;
+    const inputSchema = toolValue?.inputSchema ?? handler?.schema;
     if (inputSchema === undefined) {
       logger.warn("llm", `No input schema found for tool ${entry.name}`);
       continue;
@@ -1995,9 +1988,8 @@ type ResolvedToolCall =
     type: "invoke";
     call: LLMToolCall;
     // Implementation details for how to invoke the target
-    pattern?: Readonly<Pattern>;
+    toolDef?: Cell<unknown>;
     handler?: Stream<any>;
-    extraParams?: Record<string, unknown>;
     piece?: Cell<any>;
   };
 
@@ -2139,13 +2131,11 @@ function resolveToolCall(
       };
     }
 
-    const pattern = cellRef.key("pattern")
-      .getRaw() as unknown as Readonly<Pattern> | undefined;
-    if (pattern) {
+    const toolValue = cellRef.getRaw();
+    if (factoryToolSelection(cellRef as Cell<unknown>, toolValue)) {
       return {
         type: "invoke",
-        pattern,
-        extraParams: cellRef.key("extraParams").get() ?? {},
+        toolDef: cellRef as Cell<unknown>,
         call: {
           id,
           name,
@@ -2154,7 +2144,9 @@ function resolveToolCall(
       };
     }
 
-    throw new Error("target does not resolve to a handler stream or pattern.");
+    throw new Error(
+      "target does not resolve to a handler stream or PatternFactory.",
+    );
   }
 
   throw new Error("Tool has neither pattern nor handler");
@@ -2413,8 +2405,16 @@ function integrityGateTarget(
   toolCatalog: ToolCatalog,
 ): { schema: unknown; input: unknown } {
   if (resolved.type === "invoke") {
-    const schema = resolved.pattern?.argumentSchema ??
-      (resolved.handler as unknown as { schema?: unknown } | undefined)
+    const selected = resolved.toolDef === undefined
+      ? undefined
+      : factoryToolSelection(resolved.toolDef, resolved.toolDef.getRaw());
+    const state = selected !== undefined &&
+        isAdmittedFabricFactory(selected.selection)
+      ? factoryStateOf(selected.selection)
+      : undefined;
+    const schema = state?.kind === "pattern"
+      ? state.argumentSchema
+      : (resolved.handler as unknown as { schema?: unknown } | undefined)
         ?.schema;
     return { schema, input: resolved.call.input };
   }
@@ -2586,7 +2586,6 @@ export const llmToolExecutionHelpers = {
   toolAllowsObservedConfidentiality,
   effectiveObservationCeiling,
   stripFrameworkProvidedFields,
-  applyAutoProvidedSandboxId,
 };
 
 /**
@@ -2799,68 +2798,6 @@ function handleUpdateArgument(
   };
 }
 
-/**
- * Auto-provides the `sandboxId` input for tools that declare it (the bash tool
- * and anything sharing its contract). The framework OWNS this field: a pattern
- * that declares `sandboxId` never chooses its value, and neither does the model.
- *
- * The value is the content-addressed entity id of the tool's own definition
- * cell. That id is unique to this pattern instance, constant for the life of the
- * instance, and the same for every call the instance makes — so repeated bash
- * calls reuse one persistent server-side sandbox, while two instances (or two
- * users) never land on the same one. The id comes from the instance's identity
- * rather than the clock or randomness.
- *
- * The server names sandboxes by this id (`/v1/sandboxes/<id>`), so any
- * caller-chosen value is a cross-instance leak vector: two patterns that pin the
- * same id would share a sandbox, and a pattern could name another instance's (or
- * another user's). A legacy tool that pre-fills `sandboxId` through
- * `extraParams` is rejected outright — a chosen value can never take effect, so
- * silently dropping it would hide an authoring mistake; this throws instead. A
- * model-supplied value (untrusted, not an authoring mistake) is overwritten. If
- * the pattern declares `sandboxId` but no stable id can be derived, this also
- * throws rather than fall through to an empty, shared name.
- */
-function applyAutoProvidedSandboxId(
-  args: Record<string, unknown>,
-  pattern: Readonly<Pattern> | undefined,
-  extraParams: Record<string, unknown>,
-  identityCell: Cell<any> | undefined,
-): void {
-  const properties = (pattern?.argumentSchema as
-    | { properties?: Record<string, unknown> }
-    | undefined)?.properties;
-  if (!properties || !("sandboxId" in properties)) return;
-  if (extraParams.sandboxId !== undefined) {
-    throw new Error(
-      "sandboxId is framework-provided for tools that declare it; " +
-        "remove it from the legacy tool's extraParams",
-    );
-  }
-  // getEntityId does the heavy lifting the key needs (content-hashing data:
-  // URIs, path-qualifying sub-cell identities so two tools in one document
-  // get distinct sandboxes) but it ERASES the URI scheme — and the scheme is
-  // part of the identity, so a computed: cell's bare hash would alias its
-  // of: sibling's sandbox. Re-apply the sourceURI's entity scheme (of: or
-  // computed:) as a prefix, so the key is the full schemed id. data:-derived
-  // identities have no entity scheme and stay as their bare content hash.
-  const ref = identityCell ? getEntityId(identityCell) : undefined;
-  const bare = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
-  const scheme = entityUriSchemePrefix(identityCell?.sourceURI ?? "") ?? "";
-  const entityId = bare ? scheme + bare : undefined;
-  if (typeof entityId !== "string" || entityId.length === 0) {
-    throw new Error(
-      "Cannot auto-provide sandboxId: tool instance has no stable entity id",
-    );
-  }
-  // The entity id carries URI scheme separators (e.g. "fid1:<hash>",
-  // "computed:fid1:<hash>"). The id names a server-side resource at
-  // `/v1/sandboxes/<id>`, so map the only unsafe character (the colon) to a
-  // hyphen. The hash body is base64url and is preserved exactly, so distinct
-  // entity ids stay distinct.
-  args.sandboxId = entityId.replace(/[^A-Za-z0-9_-]/g, "-");
-}
-
 function applyFrameworkProvidedFactoryInputs(
   args: Record<string, unknown>,
   paths: readonly (readonly string[])[],
@@ -2912,82 +2849,58 @@ async function handleInvoke(
 }> {
   const toolCall = resolved.call;
 
-  // Extract pattern/handler/params based on the resolved type
+  // Resolve the selected first-class factory or handler.
   let pattern: Readonly<Pattern> | undefined;
-  let extraParams: Record<string, unknown> = {};
   let handler: any;
   let useResultSchemaForObservation = false;
-  let frameworkProvidedPaths: readonly (readonly string[])[] | undefined;
-  let canonicalFactory = false;
+  let frameworkProvidedPaths: readonly (readonly string[])[] = [];
   // The cell the tool was resolved from. Its content-addressed entity id is the
   // running instance's identity, used to auto-provide a per-instance sandbox id.
   let identityCell: Cell<any> | undefined;
 
-  if (resolved.type === "external") {
-    const toolValue = resolved.toolDef.getRaw();
-    const canonical = await prepareCanonicalPatternTool(
+  const toolDef = resolved.type === "external"
+    ? resolved.toolDef as unknown as Cell<unknown>
+    : resolved.type === "invoke"
+    ? resolved.toolDef
+    : undefined;
+  if (toolDef !== undefined) {
+    const toolValue = toolDef.getRaw();
+    const canonical = await prepareFactoryTool(
       runtime,
-      resolved.toolDef as unknown as Cell<unknown>,
+      toolDef,
       toolValue,
     );
     if (canonical) {
-      canonicalFactory = true;
       pattern = canonical.factory;
       frameworkProvidedPaths = getFrameworkProvidedPaths(canonical.factory);
       useResultSchemaForObservation = Boolean(
         canonical.metadata.useResultSchemaForObservation,
       );
     } else {
-      noteLegacyFactoryCompatibilityRead("tool");
-      pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
-        | Readonly<Pattern>
-        | undefined;
-      extraParams = resolved.toolDef.key("extraParams").get() ?? {};
-      handler = resolved.toolDef.key("handler");
+      handler = resolved.type === "external"
+        ? resolved.toolDef.key("handler")
+        : resolved.type === "invoke"
+        ? resolved.handler
+        : undefined;
       useResultSchemaForObservation = Boolean(
-        resolved.toolDef.key("useResultSchemaForObservation").get(),
+        resolved.type === "external"
+          ? resolved.toolDef.key("useResultSchemaForObservation").get()
+          : false,
       );
     }
-    identityCell = resolved.toolDef;
+    identityCell = toolDef;
   } else if (resolved.type === "invoke") {
-    pattern = resolved.pattern;
-    extraParams = resolved.extraParams ?? {};
     handler = resolved.handler;
-    // No identity cell for invoke-by-path: a tool that declares `sandboxId` and
-    // is invoked this way fails closed in applyAutoProvidedSandboxId rather than
-    // run with an unprovided id.
-  }
-
-  // A pattern read raw from a cell is the boundary serialization (refs-only
-  // since identity E4): resolve the live canonical pattern via its
-  // $patternRef — sync from the session-lifetime artifact index, async from
-  // the space's persisted compiled artifacts when the module never evaluated
-  // here — with stored graph vintages passing through unchanged.
-  if (!canonicalFactory) {
-    pattern = await resolveStoredPatternAsync(runtime, pattern, space) as
-      | Readonly<Pattern>
-      | undefined;
   }
 
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
-
-  // The model input is the lowest-priority layer; extraParams (author pre-fills)
-  // override it, and the framework-owned sandbox id overrides both.
   let invocationArgs = {
     ...input as Record<string, unknown>,
-    ...extraParams,
   };
-  if (frameworkProvidedPaths !== undefined) {
+  if (pattern !== undefined) {
     invocationArgs = applyFrameworkProvidedFactoryInputs(
       invocationArgs,
       frameworkProvidedPaths,
-      identityCell,
-    );
-  } else {
-    applyAutoProvidedSandboxId(
-      invocationArgs,
-      pattern,
-      extraParams,
       identityCell,
     );
   }

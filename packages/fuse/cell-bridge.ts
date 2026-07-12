@@ -2847,21 +2847,8 @@ export class CellBridge {
         resolvedCandidate = candidate;
       }
 
-      let callableKind = classifyCallableEntry(candidate, childCell.schema) ??
+      const callableKind = classifyCallableEntry(candidate, childCell.schema) ??
         classifyCallableEntry(resolvedCandidate, childCell.schema);
-
-      if (!callableKind) {
-        try {
-          const pattern = childCell.key("pattern").getRaw?.() ??
-            childCell.key("pattern").get?.();
-          const extraParams = childCell.key("extraParams").get?.();
-          if (pattern !== undefined && extraParams !== undefined) {
-            callableKind = "tool";
-          }
-        } catch {
-          // Not a pattern tool-shaped child cell.
-        }
-      }
 
       if (!callableKind) continue;
 

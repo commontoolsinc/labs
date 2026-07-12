@@ -12,7 +12,6 @@ import {
 import { prepareFactory } from "../../runner/src/factory-materialization.ts";
 import type { Runtime } from "../../runner/src/runtime.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { noteLegacyFactoryCompatibilityRead } from "../../runner/src/legacy-factory-compat.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -121,23 +120,6 @@ export interface ExecutedCallable {
   outputText?: string;
 }
 
-interface CallablePatternLike extends Record<string, unknown> {
-  argumentSchema?: JSONSchema;
-  resultSchema?: JSONSchema;
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-function asCallablePattern(value: unknown): CallablePatternLike | undefined {
-  if (!isRecord(value)) return undefined;
-  return value as CallablePatternLike;
-}
-
-function asExtraParams(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
 function canonicalFactorySelection(callableCell: CallableCellLike): {
   factory: unknown;
   leafCell: CallableCellLike;
@@ -192,65 +174,12 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function isSchemaObject(schema: JSONSchema | undefined): schema is Record<
-  string,
-  unknown
-> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
-}
-
-function cloneWithoutBoundToolKeys(
-  schema: JSONSchema,
-  extraParams: Record<string, unknown>,
-): JSONSchema {
-  if (!isSchemaObject(schema)) return schema;
-  if (schema.type !== "object" && !schema.properties) return schema;
-
-  const rawProperties = schema.properties;
-  if (
-    typeof rawProperties !== "object" || rawProperties === null ||
-    Array.isArray(rawProperties)
-  ) {
-    return schema;
-  }
-
-  const properties = {
-    ...(rawProperties as Record<string, JSONSchema>),
-  };
-  delete properties.result;
-  for (const key of Object.keys(extraParams)) {
-    delete properties[key];
-  }
-
-  const required = Array.isArray(schema.required)
-    ? (schema.required as string[]).filter((key) =>
-      key !== "result" && !(key in extraParams)
-    )
-    : undefined;
-
-  return {
-    ...schema,
-    properties,
-    ...(required ? { required } : {}),
-  };
-}
-
-function mergeToolInput(
-  input: unknown,
-  extraParams: Record<string, unknown>,
-): Record<string, unknown> {
-  const base =
-    typeof input === "object" && input !== null && !Array.isArray(input)
-      ? input as Record<string, unknown>
-      : input === undefined
-      ? {}
-      : { value: input };
-
-  return {
-    ...base,
-    ...extraParams,
-  };
+function normalizeToolInput(input: unknown): Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : input === undefined
+    ? {}
+    : { value: input };
 }
 
 async function defaultWaitForResult(
@@ -291,17 +220,6 @@ export function detectCallableKind(
     return callableKind;
   }
 
-  try {
-    const pattern = callableCell.key("pattern").getRaw?.() ??
-      callableCell.key("pattern").get?.();
-    const extraParams = callableCell.key("extraParams").get?.();
-    if (pattern !== undefined && extraParams !== undefined) {
-      return "tool";
-    }
-  } catch {
-    // Not a tool-shaped callable cell.
-  }
-
   return null;
 }
 
@@ -330,23 +248,7 @@ export function callableCommandSpec(
     };
   }
 
-  const pattern = asCallablePattern(
-    callableCell.key("pattern").getRaw?.() ??
-      callableCell.key("pattern").get(),
-  );
-  const extraParams = asExtraParams(
-    callableCell.key("extraParams").get?.(),
-  );
-
-  return {
-    callableKind: "tool",
-    defaultVerb: "run",
-    inputSchema: cloneWithoutBoundToolKeys(
-      pattern?.argumentSchema ?? true,
-      extraParams,
-    ),
-    outputSchemaSummary: pattern?.resultSchema,
-  };
+  throw new TypeError("Mounted tool requires a PatternFactory");
 }
 
 export async function executeResolvedCallable(
@@ -393,38 +295,22 @@ export async function executeResolvedCallable(
   }
 
   const canonical = canonicalFactorySelection(resolved.callableCell);
-  let pattern: unknown;
-  let resultSchema: JSONSchema | undefined;
-  let extraParams: Record<string, unknown> = {};
-  if (canonical) {
-    const schemas = patternFactorySchemas(canonical.factory);
-    if (!schemas) throw new TypeError("Mounted tool requires a PatternFactory");
-    resultSchema = schemas.resultSchema;
-    const sourceCell = canonical.leafCell.resolveAsCell?.() ??
-      canonical.leafCell;
-    const artifactSpace = sourceCell.getAsNormalizedFullLink?.().space ??
-      resolved.space;
-    pattern = await (deps.prepareFactory ??
-      ((factory, context) =>
-        prepareFactory(factory, {
-          runtime: context.runtime as unknown as Runtime,
-          artifactSpace: context.artifactSpace as MemorySpace,
-        })))(canonical.factory, {
-        runtime: resolved.manager.runtime,
-        artifactSpace,
-      });
-  } else {
-    noteLegacyFactoryCompatibilityRead("tool");
-    const legacyPattern = asCallablePattern(
-      resolved.callableCell.key("pattern").getRaw?.() ??
-        resolved.callableCell.key("pattern").get(),
-    );
-    pattern = legacyPattern;
-    resultSchema = legacyPattern?.resultSchema;
-    extraParams = asExtraParams(
-      resolved.callableCell.key("extraParams").get?.(),
-    );
-  }
+  if (!canonical) throw new TypeError("Mounted tool requires a PatternFactory");
+  const schemas = patternFactorySchemas(canonical.factory);
+  if (!schemas) throw new TypeError("Mounted tool requires a PatternFactory");
+  const resultSchema = schemas.resultSchema;
+  const sourceCell = canonical.leafCell.resolveAsCell?.() ?? canonical.leafCell;
+  const artifactSpace = sourceCell.getAsNormalizedFullLink?.().space ??
+    resolved.space;
+  const pattern = await (deps.prepareFactory ??
+    ((factory, context) =>
+      prepareFactory(factory, {
+        runtime: context.runtime as unknown as Runtime,
+        artifactSpace: context.artifactSpace as MemorySpace,
+      })))(canonical.factory, {
+      runtime: resolved.manager.runtime,
+      artifactSpace,
+    });
   const tx = resolved.manager.runtime.edit();
   const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
   const resultCell = resolved.manager.runtime.getCell(
@@ -437,7 +323,7 @@ export async function executeResolvedCallable(
   const running = resolved.manager.runtime.run(
     tx,
     pattern,
-    canonical ? mergeToolInput(input, {}) : mergeToolInput(input, extraParams),
+    normalizeToolInput(input),
     resultCell,
   );
   let sinkValue: unknown;

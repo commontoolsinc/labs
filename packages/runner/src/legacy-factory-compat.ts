@@ -1,14 +1,7 @@
-export type LegacyFactoryCompatibilityKind =
-  | "patternRef"
-  | "implRef"
-  | "tool"
-  | "list";
+export type LegacyFactoryCompatibilityKind = "implRef";
 
 const counts: Record<LegacyFactoryCompatibilityKind, number> = {
-  patternRef: 0,
   implRef: 0,
-  tool: 0,
-  list: 0,
 };
 
 /** Count a compatibility read without retaining user values or parameters. */

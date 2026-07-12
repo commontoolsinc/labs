@@ -138,8 +138,6 @@ export const LLMToolSchema = internSchema(
         required: ["argumentSchema", "resultSchema", "nodes"],
         asCell: ["cell"],
       },
-      // Stored legacy tool reader; canonical tools carry a Factory@1 value.
-      extraParams: { type: "object" },
       useResultSchemaForObservation: { type: "boolean" },
       piece: {
         // Accept whole piece - its own schema defines its handlers

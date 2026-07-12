@@ -103,7 +103,7 @@ Because both come up, and only one is the pin:
   entry-module Merkle hash (authored source + authored path + dep hashes;
   `computeModuleHashes`). Verifiable by re-hashing, entry-point independent,
   and the namespace all existing by-identity machinery keys on
-  (`cf:module/<hash>`, compile cache, `$patternRef`,
+  (`cf:module/<hash>`, compile cache, Factory@1 artifact refs,
   `meta("patternIdentity")`). **This is the pin**, and `cf:pattern:<identity>`
   is its reference spelling.
 

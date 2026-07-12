@@ -102,6 +102,9 @@ One line per archived document; each document's header carries the fuller
 
 ### Executed plans and work orders
 
+- [first-class-serializable-factories.md](plans/first-class-serializable-factories.md)
+  — first-class Factory@1 pattern, module, and handler values, closure
+  conversion, dynamic materialization, and pre-launch compatibility cleanup.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.

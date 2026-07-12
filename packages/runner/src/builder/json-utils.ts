@@ -204,10 +204,8 @@ export function toJSONWithAliasBindings(
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
 
-    // If this is a pattern, serialize it through the INTERNAL graph
-    // serializer (its toJSON under the internal-serialization context): this
-    // function builds the in-memory node representation, so embedded
-    // sub-pattern graphs must stay bare — no boundary `$patternRef`.
+    // If this is a compatibility pattern object, serialize its full graph.
+    // Admitted factories are handled by the factory branch above.
     const valueToProcess = (isPattern(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
       ? serializePatternGraph(value as unknown as Pattern) as Record<
@@ -540,24 +538,10 @@ export function moduleToJSON(module: Module) {
   };
 }
 
-// Ambient context: true while serializing the runtime-INTERNAL graph
-// representation (builder-time node serialization via
-// `toJSONWithAliasBindings`, and through it the `$opFallback` eviction
-// fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
-// JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
-// the content-addressed `$patternRef` on top of the graph; internal
-// serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
-// any sub-pattern whose module is already indexed (e.g. builder calls inside
-// a running action referencing an imported, already-evaluated pattern) and
-// the eviction fallback would silently become a ref (design §7's $opFallback
-// trap). Synchronous push/pop — serialization never awaits.
-let internalGraphSerialization = false;
-
 /**
- * Serialize a pattern's full node-graph — the runtime-internal representation
- * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `toJSONWithAliasBindings` (builder-time node serialization, which the
- * `$opFallback` graphs descend from) and debug tooling.
+ * Serialize a pattern's full node graph for builder internals, debug tooling,
+ * and the retained direct `Pattern.toJSON()` compatibility surface. Fabric
+ * boundaries encode first-class factories through registered codec dispatch.
  *
  * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:
  * factory `toJSON` closures deliberately serialize the ROOT factory (which
@@ -567,16 +551,10 @@ let internalGraphSerialization = false;
 export function serializePatternGraph(
   pattern: Pattern,
 ): Record<string, unknown> {
-  const previous = internalGraphSerialization;
-  internalGraphSerialization = true;
-  try {
-    const withToJSON = pattern as unknown as Partial<toJSON>;
-    return (typeof withToJSON.toJSON === "function"
-      ? withToJSON.toJSON()
-      : patternToJSON(pattern)) as Record<string, unknown>;
-  } finally {
-    internalGraphSerialization = previous;
-  }
+  const withToJSON = pattern as unknown as Partial<toJSON>;
+  return (typeof withToJSON.toJSON === "function"
+    ? withToJSON.toJSON()
+    : patternToJSON(pattern)) as Record<string, unknown>;
 }
 
 export function patternToJSON(pattern: Pattern) {
@@ -609,23 +587,5 @@ export function patternToJSON(pattern: Pattern) {
     nodes: pattern.nodes,
     ...(programIdentity ? { program: programIdentity } : {}),
   };
-  if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, JSON.stringify): REFS-ONLY (design §7,
-  // identity E4). The ref is content-derived, so identical bytes re-emit the
-  // identical ref across sessions. Schemas ride along so consumers can read
-  // them without resolving (llm-dialog tool schemas). Rehydration goes by
-  // identity: the session-lifetime artifact index covers every module
-  // evaluated in the reading session (any authored op, by construction), and
-  // async readers fall back to the storage-backed `loadPatternByIdentity` —
-  // compiled artifacts persist in-space as an expected part of compilation.
-  // A pattern with NO entry ref (manually constructed / dynamic) still
-  // serializes its full graph: nothing could ever resolve its ref.
-  const entryRef = getArtifactEntryRef(pattern);
-  return entryRef
-    ? {
-      $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
-      argumentSchema: pattern.argumentSchema,
-      resultSchema: pattern.resultSchema,
-    }
-    : graph;
+  return graph;
 }
