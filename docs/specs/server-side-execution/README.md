@@ -6,7 +6,10 @@ transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
 sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
-and server egress parity). No implementation in this spec.
+and server egress parity); revised 2026-07-12 as implementation began.
+Completed work-order status is
+recorded inline; unimplemented phases remain design requirements rather than
+descriptions of current behavior.
 
 Related specs: `docs/specs/scheduler-v2/`,
 `docs/specs/persistent-scheduler-state.md`,
@@ -478,6 +481,14 @@ Claims ride the authenticated session/control feed and are not ordinary
 space documents. A durable policy may opt a space into server-primary
 execution, but runtime ownership, liveness, generations, and exceptions do
 not belong in mutable user data.
+
+The implemented opt-in is the default-branch, space-scoped document
+`of:${space}:execution-policy`, whose value is exactly
+`{ version: 1, serverPrimaryExecution: boolean }`. It is owner-managed through
+whole-document set/delete policy-only commits. Absent, deleted, disabled, or
+malformed state is client-primary; direct host writes cannot bypass owner
+authorization. The runtime flag remains the higher-priority rollback, so a
+true policy is inert when `serverPrimaryExecution` is off.
 
 The fields from `branch` through `runtimeFingerprint` form the shared
 `ActionClaimKey` that both client and server can derive. `leaseGeneration`
@@ -1209,7 +1220,9 @@ checklists: [implementation-plan.md](./implementation-plan.md).
 - **Phase 0 — scheduler correctness.** Add
   `SchedulerExecutionContextKey` and effective scope keys across snapshots,
   state, and indexes (G1); enforce the transformer root binding (G6); add
-  writer lookup (G4). Parked-reader wake is Phase 1.
+  writer lookup (G4). The authenticated execution handshake, connection-owned
+  demand, and ordered claim/settlement feed are implemented and remain dark;
+  parked-reader wake is Phase 1.
 - **Phase 1 — shadow client-demand executor.** Add authenticated
   `ExecutionDemand`, one fenced user-sponsored `ExecutionLease` per
   branch/space,
@@ -1245,15 +1258,15 @@ means a design doc/decision is required before implementation.
 | --- | --- | --- | --- |
 | G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented; W1.1 adds atomic lease fencing |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
-| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
-| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
+| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | connection-owned demand implemented; sponsor/lease W1.1–W1.2 |
+| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | handshake, claim generations, snapshots, revoke protocol implemented and dark; eligibility/routing W1.3/W2.1 |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | producer lookup implemented; parked-reader query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
 | G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |
-| G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
+| G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | demand, reconnect snapshot, and ordered data/control barriers implemented; exact closure export remains later |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
-| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | needs-impl; do not reuse `observedAtSeq` |
+| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | settlement protocol and client data gate implemented; actual basis/provenance and run emission are W0.4 |
 | G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | needs-impl; full hardening may follow |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |

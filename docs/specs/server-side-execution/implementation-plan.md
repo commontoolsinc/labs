@@ -481,6 +481,10 @@ provenance, hook, and notification path as a remote client.
 **Depends on:** #4288.
 **Unblocks:** client-driven pool and client authority split.
 
+**Status:** implemented. The base protocol and demand feed are production-dark
+behind `serverPrimaryExecution`; authoritative computation routing and builtin
+passivity remain independently absent-false until W2.1 and W2.3.
+
 **Read first:**
 
 - docs/specs/memory-v2/04-protocol.md
@@ -515,29 +519,36 @@ provenance, hook, and notification path as a remote client.
    for control ordering.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
-7. Add optional executionPolicy owner doc support. It only opts a space into
-   server-primary execution; absent/disabled policy means client-primary. Do
-   not put claims, actor identity, heartbeat, exception lists, or epochs in it.
+7. Add optional executionPolicy owner doc support at
+   `of:${space}:execution-policy`, default branch and space scope, with exact
+   value `{version:1,serverPrimaryExecution:boolean}`. It only opts a space
+   into server-primary execution; absent/deleted/disabled/malformed means
+   client-primary. Mutations are owner-only, whole-document set/delete,
+   policy-only commits; direct host writes cannot bypass that rule. Enabling is
+   rejected while an incompatible session remains attached. Do not put claims,
+   actor identity, heartbeat, exception lists, or epochs in it.
 8. Gate all messages behind serverPrimaryExecution, default off.
-   Negotiate routing and builtin-passivity sub-capabilities while the WOs land;
-   a server publishes only the claim classes the client says it can honor.
+   Negotiate absent-false `serverPrimaryExecutionClaimRoutingV1` and
+   `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities while the WOs
+   land; a server publishes only the claim classes the client says it can
+   honor. Ordinary builds keep them false until W2.1 and W2.3.
 
 **Success criteria:**
 
-- [ ] Compatible client negotiates and round-trips demand/claim/settlement.
-- [ ] Incompatible/stale client is explicitly rejected when the feature is
+- [x] Compatible client negotiates and round-trips demand/claim/settlement.
+- [x] Incompatible/stale client is explicitly rejected when the feature is
       required and works unchanged when it is not.
-- [ ] Two connections demanding the same root produce two references; closing
+- [x] Two connections demanding the same root produce two references; closing
       one leaves the other live; closing both removes demand.
-- [ ] The same piece/action on two branches retains independent demand, claims,
-      revokes, snapshots, and settlements; neither branch can suppress or clear
-      the other's overlay.
-- [ ] Spoofed connection id, principal, claim, or settlement is rejected.
-- [ ] Revoke/re-claim within one lease gets a new claimGeneration, and a
+- [x] The same piece/action on two branches retains independent demand, claims,
+      revokes, snapshots, and settlements. W2.1 consumes this exact branch key
+      for overlay routing; no cross-branch control state is exposed.
+- [x] Spoofed connection id, principal, claim, or settlement is rejected.
+- [x] Revoke/re-claim within one lease gets a new claimGeneration, and a
       reordered old-generation settlement cannot clear the new claim.
-- [ ] A committed settlement delivered before its data frame is buffered until
+- [x] A committed settlement delivered before its data frame is buffered until
       the acceptedCommitSeq patch is applied.
-- [ ] Flag off produces no new protocol messages.
+- [x] Flag off produces no new protocol messages.
 
 ---
 
