@@ -2525,7 +2525,7 @@ export class Runner {
         argumentLink,
         resultCell,
       );
-      let spotLink: NormalizedFullLink | undefined;
+      let spotLink: NormalizedFullLink;
       try {
         spotLink = resolveDirectRootOutputRedirect(
           this.runtime,
@@ -2543,7 +2543,6 @@ export class Runner {
         ]);
         continue;
       }
-      if (spotLink === undefined) continue;
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -4697,13 +4696,11 @@ export class Runner {
     // the builtin a fully-normalized output link carrying that scope + schema.
     // Scope-aware builtins (sqliteDatabase) mint their result container at this
     // scope; the rest ignore the extra argument.
-    const outputBinding = resolvedOutputSpot
-      ? {
-        ...resolvedOutputSpot,
-        scope: schemaCellScope(module.resultSchema) ??
-          module.defaultScope ?? resolvedOutputSpot.scope,
-      }
-      : undefined;
+    const outputBinding = {
+      ...resolvedOutputSpot,
+      scope: schemaCellScope(module.resultSchema) ??
+        module.defaultScope ?? resolvedOutputSpot.scope,
+    };
 
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
@@ -4751,15 +4748,11 @@ export class Runner {
         {
           inputs: inputsCell,
           parents: processCell.entityId,
-          ...(resolvedOutputSpot
-            ? {
-              outputSpot: {
-                space: resolvedOutputSpot.space,
-                id: resolvedOutputSpot.id,
-                path: [...resolvedOutputSpot.path],
-              },
-            }
-            : {}),
+          outputSpot: {
+            space: resolvedOutputSpot.space,
+            id: resolvedOutputSpot.id,
+            path: [...resolvedOutputSpot.path],
+          },
         },
         processCell,
         this.runtime,
