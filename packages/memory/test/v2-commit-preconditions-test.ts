@@ -3,6 +3,7 @@ import { toFileUrl } from "@std/path";
 import {
   applyCommit,
   close,
+  ConflictError,
   type Engine,
   open,
   PreconditionFailedError,
@@ -12,7 +13,11 @@ import {
 } from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
-import { type EntityDocument, toDocumentPath } from "../v2.ts";
+import {
+  commitPreconditionValueHash,
+  type EntityDocument,
+  toDocumentPath,
+} from "../v2.ts";
 import type { FabricValue } from "@commonfabric/api";
 import {
   testSessionOpenAuthFactory,
@@ -216,6 +221,108 @@ Deno.test("entity-absent precondition applies on a fresh entity", async () => {
     assertEquals(read(engine, { id: "entity:receipt" }), {
       value: { receipt: 1 },
     });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-value-hash precondition pins a present value", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    applyCommit(engine, {
+      sessionId: "session:value-hash-writer",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:manifest",
+          value: toEntityDocument({ version: 1 }),
+        }],
+      },
+    });
+    const valueHash = commitPreconditionValueHash({ version: 1 });
+    const pin = (localSeq: number) => ({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      preconditions: [{
+        kind: "entity-value-hash" as const,
+        id: "entity:manifest",
+        valueHash,
+      }],
+      operations: [],
+    });
+    applyCommit(engine, {
+      sessionId: "session:value-hash-reader",
+      commit: pin(1),
+    });
+    applyCommit(engine, {
+      sessionId: "session:value-hash-writer",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:manifest",
+          value: toEntityDocument({ version: 2 }),
+        }],
+      },
+    });
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:value-hash-reader",
+          commit: pin(2),
+        }),
+      ConflictError,
+      "entity-value-hash precondition target changed",
+    );
+    assertEquals(rejected.name, "ConflictError");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("entity-value-hash null pins absence", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    const pin = (localSeq: number) => ({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      preconditions: [{
+        kind: "entity-value-hash" as const,
+        id: "entity:missing-manifest",
+        valueHash: null,
+      }],
+      operations: [],
+    });
+    applyCommit(engine, {
+      sessionId: "session:absent-hash-reader",
+      commit: pin(1),
+    });
+    applyCommit(engine, {
+      sessionId: "session:absent-hash-writer",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:missing-manifest",
+          value: toEntityDocument({ appeared: true }),
+        }],
+      },
+    });
+    const rejected = assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:absent-hash-reader",
+          commit: pin(2),
+        }),
+      ConflictError,
+    );
+    assertEquals(rejected.name, "ConflictError");
   } finally {
     close(engine);
     await Deno.remove(path);

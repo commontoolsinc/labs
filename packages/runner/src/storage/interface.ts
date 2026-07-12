@@ -1066,6 +1066,7 @@ export interface IExtendedStorageTransaction
   resolveCfcPolicyManifest(
     reference: unknown,
     destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
   ): unknown;
 
   /** Whether the exact manifest is installed for a destination space. */

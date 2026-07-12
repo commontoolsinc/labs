@@ -11,6 +11,7 @@ import {
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { createTxCfcModulePolicyResolver } from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -128,6 +129,76 @@ describe("PolicyOf label-time binding", () => {
       }, undefined, { delete: true })
     ).toThrow("immutable reserved policy state");
     deletion.abort();
+  });
+
+  it("rejects a zero-write prepared decision after manifest tampering", async () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const installTx = runtime.edit();
+    runtime.getCell(space, "tamper-policy", schema, installTx).set("secret");
+    installTx.prepareCfc();
+    expect((await installTx.commit()).ok).toBeDefined();
+
+    const reference = {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: artifact.manifest.moduleIdentity,
+      symbol: artifact.manifest.symbol,
+      policyDigest: artifact.policyDigest,
+      subject: space,
+    } as const;
+    const decision = runtime.edit();
+    const resolver = createTxCfcModulePolicyResolver(
+      decision,
+      (candidate) =>
+        decision.resolveCfcPolicyManifest(candidate, space),
+    );
+    expect(resolver(reference)).toBeDefined();
+    decision.markCfcRelevant("manifest-decision");
+    decision.prepareCfc();
+
+    const tamper = storageManager.edit();
+    const tamperResult = tamper.write({
+      space,
+      id: cfcPolicyManifestDocId(artifact.policyDigest),
+      type: "application/json",
+      path: ["value"],
+    }, { forged: true });
+    expect(tamperResult.ok).toBeDefined();
+    expect((await tamper.commit()).ok).toBeDefined();
+
+    expect((await decision.commit()).error).toBeDefined();
+  });
+
+  it("rejects a zero-write prepared miss when the manifest appears", async () => {
+    const missingReference = {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: "sha256:missing-module",
+      symbol: "rules",
+      policyDigest: "sha256:missing-policy",
+      subject: space,
+    } as const;
+    const decision = runtime.edit();
+    const resolver = createTxCfcModulePolicyResolver(
+      decision,
+      (candidate) =>
+        decision.resolveCfcPolicyManifest(candidate, space),
+    );
+    expect(resolver(missingReference)).toBeUndefined();
+    decision.markCfcRelevant("manifest-miss");
+    decision.prepareCfc();
+
+    const writer = storageManager.edit();
+    const writeResult = writer.write({
+      space,
+      id: cfcPolicyManifestDocId(missingReference.policyDigest),
+      type: "application/json",
+      path: ["value"],
+    }, { appeared: true });
+    expect(writeResult.ok).toBeDefined();
+    expect((await writer.commit()).ok).toBeDefined();
+
+    expect((await decision.commit()).error).toBeDefined();
   });
 
   it("rejects a raw module-policy object in authored schema metadata", () => {
@@ -269,7 +340,7 @@ describe("PolicyOf label-time binding", () => {
         coldTx,
       ).set("secret after restart");
       coldTx.prepareCfc();
-      expect((await coldTx.commit()).ok).toBeDefined();
+      expect((await coldTx.commit()).error).toBeUndefined();
     } finally {
       await coldRuntime.dispose();
     }

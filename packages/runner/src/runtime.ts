@@ -98,6 +98,7 @@ import {
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
@@ -640,10 +641,16 @@ export class Runtime {
     reference: unknown,
     tx?: IExtendedStorageTransaction,
     destinationSpace?: MemorySpace,
+    bindCommit = true,
   ): PolicyArtifactManifestV1 | undefined {
     if (tx === undefined) return this.#registeredCfcPolicyManifest(reference);
     if (destinationSpace !== undefined) {
-      return this.#readCfcPolicyManifest(destinationSpace, reference, tx);
+      return this.#readCfcPolicyManifest(
+        destinationSpace,
+        reference,
+        tx,
+        bindCommit,
+      );
     }
     let artifact: PolicyArtifactManifestV1 | undefined;
     const spaces = new Set<MemorySpace>();
@@ -653,7 +660,12 @@ export class Runtime {
     }
     for (const space of spaces) {
       artifact = this.#readCfcPolicyManifest(space, reference, tx);
-      if (artifact !== undefined) break;
+      if (artifact !== undefined) {
+        if (bindCommit) {
+          artifact = this.#readCfcPolicyManifest(space, reference, tx, true);
+        }
+        break;
+      }
     }
     return artifact;
   }
@@ -741,6 +753,7 @@ export class Runtime {
     space: MemorySpace,
     reference: unknown,
     tx: IExtendedStorageTransaction,
+    bindCommit = false,
   ): PolicyArtifactManifestV1 | undefined {
     if (
       !reference || typeof reference !== "object" || Array.isArray(reference)
@@ -755,6 +768,35 @@ export class Runtime {
       tx,
     );
     const stored = snapshotQueryResult(cell.get());
+    if (bindCommit) {
+      const link = cell.getAsNormalizedFullLink();
+      const rawStored = tx.readOrThrow({
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        type: "application/json",
+        path: ["value"],
+      });
+      const alreadyWritten = tx.getReactivityLog?.().writes.some((address) =>
+        address.space === link.space && address.id === link.id &&
+        address.scope === link.scope
+      ) ?? false;
+      if (!alreadyWritten) {
+        if (!tx.addCommitPrecondition) {
+          throw new Error(
+            "cfcPolicyManifest: storage cannot bind manifest consultation",
+          );
+        }
+        tx.addCommitPrecondition(space, {
+          kind: "entity-value-hash",
+          id: link.id,
+          scope: link.scope,
+          valueHash: rawStored === undefined
+            ? null
+            : commitPreconditionValueHash(rawStored),
+        });
+      }
+    }
     if (stored === undefined) return undefined;
     let artifact: PolicyArtifactManifestV1;
     try {
@@ -1121,8 +1163,18 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
-      resolvePolicyManifest: (reference, tx, destinationSpace) =>
-        this.resolveCfcPolicyManifest(reference, tx, destinationSpace),
+      resolvePolicyManifest: (
+        reference,
+        tx,
+        destinationSpace,
+        bindCommit,
+      ) =>
+        this.resolveCfcPolicyManifest(
+          reference,
+          tx,
+          destinationSpace,
+          bindCommit,
+        ),
       hasPolicyManifest: (space, reference, tx) =>
         this.hasCfcPolicyManifest(space, reference, tx),
       installPolicyManifest: (space, reference, tx) =>
