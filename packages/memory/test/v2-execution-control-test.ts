@@ -192,6 +192,76 @@ const claimKey = (
   runtimeFingerprint: "runtime:v1",
 });
 
+const claimedSpaceObservation = (
+  claim: ExecutionClaim,
+  outputId: string,
+) => ({
+  version: 2 as const,
+  ownerSpace: claim.space,
+  branch: claim.branch,
+  pieceId: claim.pieceId,
+  processGeneration: 1,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+  executionClaim: {
+    contextKey: claim.contextKey,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+  },
+  completeActionScopeSummary: {
+    version: 1 as const,
+    complete: true as const,
+    implementationFingerprint: claim.implementationFingerprint,
+    runtimeFingerprint: claim.runtimeFingerprint,
+    piece: {
+      space: claim.space,
+      scope: "space" as const,
+      id: claim.pieceId,
+      path: [],
+    },
+    reads: [],
+    writes: [{
+      space: claim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+    materializerWriteEnvelopes: [],
+    directOutputs: [{
+      space: claim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+  },
+  observedAtSeq: 0,
+  transactionKind: "action-run" as const,
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  currentKnownWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  declaredWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  materializerWriteEnvelopes: [],
+  status: "success" as const,
+});
+
 class ReconnectableExecutionTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -756,6 +826,45 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       actionKind: claim.actionKind,
       implementationFingerprint: claim.implementationFingerprint,
       runtimeFingerprint: claim.runtimeFingerprint,
+      // This is an executor assertion about the exact claim incarnation under
+      // which the attempt started. The host validates it against live control
+      // state and never persists it as authority metadata.
+      executionClaim: {
+        contextKey: claim.contextKey,
+        leaseGeneration: claim.leaseGeneration,
+        claimGeneration: claim.claimGeneration,
+      },
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+        piece: {
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: claim.pieceId,
+          path: [],
+        },
+        reads: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-source",
+          path: ["value", "count"],
+        }],
+        writes: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-output",
+          path: ["value"],
+        }],
+        materializerWriteEnvelopes: [],
+        directOutputs: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-output",
+          path: ["value"],
+        }],
+      },
       observedAtSeq: 0,
       // Both fields are deliberately forged. The host must derive/overwrite
       // them from accepted reads and authenticated session authority.
@@ -896,6 +1005,11 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
     const failedObservation = {
       ...observation,
       actionId: failedClaim.actionId,
+      executionClaim: {
+        contextKey: failedClaim.contextKey,
+        leaseGeneration: failedClaim.leaseGeneration,
+        claimGeneration: failedClaim.claimGeneration,
+      },
       status: "failed" as const,
       errorFingerprint: "error:test",
       actualChangedWrites: [],
@@ -958,6 +1072,175 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
     unbind();
     unsubscribeControl();
     await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("bound executor rejects a delayed attempt after claim replacement", async () => {
+  const server = createControlServer("memory-v2-execution-stale-attempt");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const first = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      leaseGeneration: 31,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: first.leaseGeneration,
+    });
+    assertEquals(server.revokeExecutionClaim(first), true);
+    const replacement = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      leaseGeneration: first.leaseGeneration,
+    });
+    assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:stale-attempt-must-not-land",
+            value: { value: "stale" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            first,
+            "of:stale-attempt-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:stale-attempt-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("bound executor never downgrades a revoked attempt to an ordinary write", async () => {
+  const server = createControlServer("memory-v2-execution-revoked-attempt");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:revoked-attempt"),
+      leaseGeneration: 32,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+    assertEquals(server.revokeExecutionClaim(claim), true);
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:revoked-attempt-must-not-land",
+            value: { value: "revoked" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            claim,
+            "of:revoked-attempt-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:revoked-attempt-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed executor rejects an effective context narrower than its claim", async () => {
+  const server = createControlServer("memory-v2-execution-context-fence");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:context-fence"),
+      leaseGeneration: 33,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+    const incomplete = claimedSpaceObservation(
+      claim,
+      "of:context-fence-must-not-land",
+    );
+    delete (incomplete as { completeActionScopeSummary?: unknown })
+      .completeActionScopeSummary;
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:context-fence-must-not-land",
+            value: { value: "narrower" },
+          }],
+          schedulerObservation: incomplete,
+        }),
+      Error,
+      "execution claim context",
+    );
+    assertEquals(
+      await server.readDocument(POLICY_SPACE, "of:context-fence-must-not-land"),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("detached resumable sessions cannot acquire executor authority", async () => {
+  const server = createControlServer("memory-v2-execution-detached-binding");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const sessionId = session.sessionId;
+  try {
+    await setPolicy(session, true);
+    await client.close();
+    assertThrows(
+      () =>
+        server.bindExecutionSession(POLICY_SPACE, sessionId, {
+          leaseGeneration: 34,
+        }),
+      Error,
+      "live connection",
+    );
+  } finally {
     await server.close();
   }
 });
