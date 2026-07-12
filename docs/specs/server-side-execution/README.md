@@ -596,8 +596,12 @@ in which only the handler's *writes* ship, not the event itself.
 
 `observedAtSeq` is the sequence at which an observation commit was accepted;
 it is not proof of which inputs the action consumed. Each server run instead
-tracks `inputBasisSeq`, the maximum confirmed same-space input sequence
-actually read by that action. Derived patches carry that basis, and every
+tracks `inputBasisSeq`, the maximum same-space confirmed-read sequence accepted
+by the engine, with pending local reads translated to their server-assigned
+global sequence. Reads excluded from the canonical conflict set are excluded
+from the basis; no durable reads yields zero. The engine strips any supplied
+basis/provenance and authors the canonical values only after validation.
+Derived patches carry that basis, and every
 claimed run produces an `ActionSettlement` on the control/feed path:
 
 ```ts
@@ -1280,7 +1284,7 @@ means a design doc/decision is required before implementation.
 | G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | demand, reconnect snapshot, and ordered data/control barriers implemented; exact closure export remains later |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
-| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | settlement protocol and client data gate implemented; actual basis/provenance and run emission are W0.4 |
+| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | accepted-read basis, nominal sequence types, host-derived provenance, committed/no-op/failed run emission, and client data gate implemented; W1.3 emits unserved attempts |
 | G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | needs-impl; full hardening may follow |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |

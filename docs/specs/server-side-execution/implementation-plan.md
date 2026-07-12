@@ -345,6 +345,9 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 
 **Depends on:** #4288.
 **Unblocks:** claim settlement and overlay reconciliation.
+**Status:** implemented. W1.1 replaces the dark generation-only provider
+binding with the durable fenced lease; W1.3 owns cross-space rejection and
+unserved-attempt production.
 
 **Problem:** the accepting commit/head sequence is not proof of which inputs an
 action consumed. A no-op action also produces no ordinary commit to acknowledge
@@ -360,7 +363,11 @@ that it settled.
 
 **Steps:**
 
-1. Track the revision sequence actually observed for every effective read. For
+1. Track the revision sequence actually observed for every effective read. An
+   effective read here means a same-space confirmed read precondition accepted
+   by the engine, plus a pending read translated from local sequence to its
+   accepted global sequence. Reads excluded from the canonical conflict set do
+   not enter the basis. For
    this same-space phase, inputBasisSeq is the maximum consumed same-space
    revision sequence, or zero for no durable reads. Do not substitute current
    head or accepting commit seq.
@@ -369,7 +376,8 @@ that it settled.
    - onBehalfOf user DID;
    - execution lease generation;
    - claimGeneration when the action is claimed;
-   - causedBy source commit sequence(s), when known;
+   - causedBy source commit sequence(s), as a sorted unique list when directly
+     known and an empty list otherwise (never substitute head or input basis);
    - inputBasisSeq.
 3. The host derives onBehalfOf from the authenticated sponsor lease and
    overwrites/rejects any worker- or client-supplied value. It means
@@ -395,20 +403,21 @@ that it settled.
 
 **Success criteria:**
 
-- [ ] An action reading an old revision while unrelated newer commits exist
+- [x] An action reading an old revision while unrelated newer commits exist
       records the old consumed basis, not head.
-- [ ] Two consumed inputs at S1 and S2 record max(S1,S2).
-- [ ] A no-op claimed action emits a settlement with its real basis despite
+- [x] Two consumed inputs at S1 and S2 record max(S1,S2); pending local reads
+      contribute their accepted global sequence and no durable reads yield zero.
+- [x] A no-op claimed action emits a settlement with its real basis despite
       producing no data commit.
-- [ ] A committed settlement cannot clear an overlay before the client has
+- [x] A committed settlement cannot clear an overlay before the client has
       applied the acceptedCommitSeq data patch, including forced reordering.
-- [ ] Commit seq and input basis are independently asserted and cannot be
+- [x] Commit seq and input basis are independently asserted and cannot be
       accidentally interchanged by type/API.
-- [ ] The store/control event records the sponsor user as onBehalfOf.
-- [ ] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
+- [x] The store/control event records the sponsor user as onBehalfOf.
+- [x] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
 - [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
       into this scalar.
-- [ ] Handler execution emits no new scheduler observation in this phase and
+- [x] Handler execution emits no new scheduler observation in this phase and
       preserves existing authenticated event/source provenance.
 
 ---
