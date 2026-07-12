@@ -262,6 +262,12 @@ export class PatternManager {
   // modules — the same order of retention the engine's strong implementation
   // index (E1) already committed to for their implementation functions.
   private addressableByIdentity = new Map<string, Map<string, unknown>>();
+  /**
+   * Explicitly trusted, session-only identities for hand-built patterns.
+   * These have no durable source closure by construction, so exact-space
+   * storage authority does not apply to their in-session resume path.
+   */
+  private sessionOnlyArtifactIdentities = new Set<string>();
   // Successful module evaluations, retained for the session independently of
   // the bounded namespace cache below. This is also the negative-symbol cache:
   // once one evaluation indexed every trusted export and __cfReg binding, an
@@ -475,6 +481,7 @@ export class PatternManager {
     ref: { identity: string; symbol: string },
   ): void {
     brandTrustedPattern(pattern);
+    this.sessionOnlyArtifactIdentities.add(ref.identity);
     this.indexArtifact(ref.identity, ref.symbol, pattern);
   }
 
@@ -1329,8 +1336,9 @@ export class PatternManager {
     // corrupted/private-table value into executable authority.
     const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
     if (
-      sourceAvailable && indexed !== undefined &&
-      isTrustedBuilderArtifact(indexed)
+      (sourceAvailable ||
+        this.sessionOnlyArtifactIdentities.has(entryIdentity)) &&
+      indexed !== undefined && isTrustedBuilderArtifact(indexed)
     ) {
       this.esmCacheStats.byIdentityHits++;
       return indexed as object;

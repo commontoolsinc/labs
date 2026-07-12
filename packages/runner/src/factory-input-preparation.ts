@@ -146,8 +146,14 @@ export function materializeScheduledFactoryInputs(
   const resolvedSchemaFor = (
     candidate: JSONSchema | undefined,
   ): JSONSchema | undefined => {
+    // Factory discovery is an auxiliary schema walk. Some existing schemas
+    // contain unresolved non-factory refs that ordinary CFC handling tolerates;
+    // do not turn those into action failures merely because a scheduled input
+    // might contain a factory elsewhere. Resolvable refs still expose a direct
+    // `asFactory` contract, while an unresolved ref remains opaque here.
     const withRefs = isRecord(candidate) && typeof candidate.$ref === "string"
-      ? ContextualFlowControl.resolveSchemaRefsOrThrow(candidate, fullSchema)
+      ? ContextualFlowControl.resolveSchemaRefs(candidate, fullSchema) ??
+        candidate
       : candidate;
     return resolveSchema(withRefs) ?? withRefs;
   };
