@@ -5075,7 +5075,16 @@ const assertExecutionActionTransaction = (
     }
   }
 
-  const observedReads = [...observation.reads, ...observation.shallowReads];
+  // Framework-owned piece/argument/internal reads are deliberately excluded
+  // from the scheduler's reactive read log, but the trusted complete summary
+  // includes them. Claimed admission therefore accepts a canonical commit
+  // read when either runtime evidence or that exhaustive certificate covers
+  // it; reads outside both remain unobserved and fail closed.
+  const observedReads = [
+    ...observation.reads,
+    ...observation.shallowReads,
+    ...summary.reads,
+  ];
   for (const read of transaction.reads.confirmed) {
     if ((read.branch ?? options.branch) !== options.branch) {
       rejectExecutionAction(

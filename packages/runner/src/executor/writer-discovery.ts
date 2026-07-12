@@ -1,5 +1,5 @@
 import type { Cell } from "../cell.ts";
-import { toMemorySpaceAddress } from "../link-utils.ts";
+import { parseLink, toMemorySpaceAddress } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import type { SchedulerWriterCandidate } from "../scheduler/writer-lookup.ts";
 import type { MemorySpace } from "../storage/interface.ts";
@@ -51,14 +51,27 @@ export async function prepareExecutorDemandPiece(options: {
   target: Cell<unknown>;
   instantiate: () => Promise<unknown>;
 }): Promise<ExecutorWriterDiscovery> {
-  const target = toMemorySpaceAddress(
-    options.target.getAsNormalizedFullLink(),
-  );
+  const targets = (): ReturnType<typeof toMemorySpaceAddress>[] => {
+    const addresses: ReturnType<typeof toMemorySpaceAddress>[] = [];
+    const seen = new Set<string>();
+    let cell = options.target;
+    for (let depth = 0; depth < 8; depth++) {
+      const link = cell.getAsNormalizedFullLink();
+      const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
+      if (seen.has(key)) break;
+      seen.add(key);
+      addresses.push(toMemorySpaceAddress(link));
+      const redirect = parseLink(cell.getRaw(), cell);
+      if (redirect === undefined) break;
+      cell = options.runtime.getCellFromLink(redirect);
+    }
+    return addresses;
+  };
   const lookup = (): Promise<SchedulerWriterCandidate[]> =>
     options.runtime.scheduler.writersForTargets(
       options.branch,
       options.target.space as MemorySpace,
-      [target],
+      targets(),
     ).catch(() => []);
 
   const before = await lookup();
