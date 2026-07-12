@@ -308,10 +308,11 @@ than guessing a producer.
 
 Important patterns now go through the transformer. Enforce that every normal
 computation node has exactly one primary output binding, directly to the
-root path of its target cell. The runner must not recursively search the
+root path of its target cell. The runner does not recursively search the
 emitted static output binding for a redirect to determine result identity.
-This is the `firstResolvedOutputRedirect` path; plain lift/computed result
-identity from `_resultFor` does not recurse and is not being replaced.
+This replaces the former `firstResolvedOutputRedirect` path; plain
+lift/computed result identity from `_resultFor` does not recurse and is not
+being replaced.
 Additional static side writes and materializer envelopes remain explicit write
 surfaces and are indexed separately.
 
