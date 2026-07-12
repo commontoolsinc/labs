@@ -138,6 +138,7 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
       persistentSchedulerState: false,
+      schedulerWriterLookup: true,
       commitPreconditions: false,
       syncSchemaTable: false,
       // Build-inherent capability, not configuration: always advertised.
@@ -153,6 +154,7 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
       persistentSchedulerState: true,
+      schedulerWriterLookup: true,
       commitPreconditions: true,
       syncSchemaTable: false,
       sqliteCommitRowLabelEval: true,
@@ -170,6 +172,7 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         persistentSchedulerState: true,
+        schedulerWriterLookup: true,
         commitPreconditions: true,
         syncSchemaTable: true,
         syncSchemaTableV2: true,
@@ -178,6 +181,7 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         persistentSchedulerState: false,
+        schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
         syncSchemaTableV2: false,
@@ -195,6 +199,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
       persistentSchedulerState: false,
+      schedulerWriterLookup: false,
       commitPreconditions: false,
       syncSchemaTable: false,
       syncSchemaTableV2: false,
@@ -203,6 +208,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
       persistentSchedulerState: false,
+      schedulerWriterLookup: false,
       commitPreconditions: false,
       syncSchemaTable: false,
       syncSchemaTableV2: false,
@@ -218,6 +224,22 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: true,
+        schedulerWriterLookup: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+      },
+    );
+  });
+
+  it("accepts the schedulerWriterLookup capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ schedulerWriterLookup: true }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        schedulerWriterLookup: true,
         commitPreconditions: false,
         syncSchemaTable: false,
         syncSchemaTableV2: false,
@@ -234,6 +256,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        schedulerWriterLookup: false,
         commitPreconditions: true,
         syncSchemaTable: false,
         syncSchemaTableV2: false,
@@ -250,6 +273,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: true,
         syncSchemaTableV2: false,
@@ -266,6 +290,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
         syncSchemaTableV2: true,
@@ -282,6 +307,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
         syncSchemaTableV2: false,
@@ -298,6 +324,10 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTable: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ schedulerWriterLookup: "true" }),
+      null,
+    );
     assertEquals(
       parseMemoryProtocolFlags({ sqliteCommitRowLabelEval: "true" }),
       null,

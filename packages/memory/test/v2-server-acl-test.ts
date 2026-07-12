@@ -1421,9 +1421,9 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
     assertEquals(writers.requestId, bobWriterRequestId);
     assertEquals(writers.ok?.writers, []);
 
-    const carolWriterRequestId = nextRequestId(
-      "acl-scheduler-writers-denied",
-    );
+    // Capabilities are hierarchical: WRITE implies READ, so Carol may use
+    // this READ-class lookup just like Bob.
+    const carolWriterRequestId = nextRequestId("acl-scheduler-writers-write");
     await carol.connection.receive(encodeMemoryBoundary({
       type: "scheduler.writer.list",
       requestId: carolWriterRequestId,
@@ -1434,9 +1434,12 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
         targets: [{ id: "of:output", path: ["value"] }],
       },
     }));
-    const deniedWriters = assertResponse<unknown>(shiftMessage(carol.messages));
-    assertEquals(deniedWriters.requestId, carolWriterRequestId);
-    assertEquals(deniedWriters.error?.name, "AuthorizationError");
+    const carolWriters = assertResponse<{
+      serverSeq: number;
+      writers: unknown[];
+    }>(shiftMessage(carol.messages));
+    assertEquals(carolWriters.requestId, carolWriterRequestId);
+    assertEquals(carolWriters.ok?.writers, []);
 
     const watch = await server.watchAdd({
       type: "session.watch.add",
