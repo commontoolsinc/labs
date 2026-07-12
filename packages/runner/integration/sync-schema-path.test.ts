@@ -116,11 +116,12 @@ async function test() {
       memoryHost: new URL(API_URL),
     }),
   });
+  const runtime2Tx = runtime2.edit();
 
   const addressesArrayCell2 = runtime2.getCellFromLink(
     addressesArrayCellLink1,
     addressesArraySchema,
-    tx,
+    runtime2Tx,
   );
   const newCell = await addressesArrayCell2.sync();
   await runtime2.storageManager.synced();
