@@ -52,6 +52,7 @@ export interface AcceptedCommitNotice {
     seq: number;
   }[];
   schedulerUpdateIds: number[];
+  staleDemandedReaders: AcceptedCommitEvent["staleDemandedReaders"];
 }
 
 type ProviderPortMessage =
@@ -138,6 +139,9 @@ const toAcceptedCommitNotice = (
     seq: revision.seq,
   })),
   schedulerUpdateIds: [...event.schedulerUpdateIds],
+  staleDemandedReaders: event.staleDemandedReaders.map((reader) => ({
+    ...reader,
+  })),
 });
 
 /**

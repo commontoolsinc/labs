@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type {
-  ActionClaimKey,
-  BranchName,
-  ExecutionClaim,
-  WireMemoryProtocolFlags,
+import {
+  type ActionClaimKey,
+  type BranchName,
+  canonicalSchedulerPieceIdForDemandRoot,
+  type ExecutionClaim,
+  type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
   type Action,
@@ -16,7 +17,6 @@ import {
   runtimePresets,
 } from "../index.ts";
 import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
-import type { IStorageNotification } from "../storage/interface.ts";
 import { HostStorageManager } from "../storage/v2-host-provider.ts";
 import {
   isPermanentRejection,
@@ -28,12 +28,14 @@ import {
   type ServerBuiltinBrokerClient,
 } from "./server-builtin-channel.ts";
 import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
+import { SelectiveDemandWakeQueue } from "./selective-demand-wake.ts";
 
 type WorkerRequest = {
   type:
     | "initialize"
     | "set-demand"
     | "wake"
+    | "settle"
     | "stop"
     | "run-claimed-action";
   requestId?: number;
@@ -60,7 +62,7 @@ let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
 const candidateActions = new Map<string, Action>();
 const claimsByAction = new WeakMap<object, ExecutionClaim>();
-let cancelStorageSubscription: (() => void) | null = null;
+let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let work = Promise.resolve();
 let stopped = false;
 
@@ -97,8 +99,18 @@ const invalidatesExecutorClaim = (error: unknown): boolean => {
     isPermanentRejection(named) || isTerminalRejection(named);
 };
 
-const pullDemand = async (): Promise<void> => {
-  for (const cell of demanded.values()) await cell.pull();
+const pullDemand = async (
+  schedulerPieceIds?: ReadonlySet<string>,
+): Promise<void> => {
+  for (const [pieceId, cell] of demanded) {
+    if (
+      schedulerPieceIds !== undefined &&
+      !schedulerPieceIds.has(canonicalSchedulerPieceIdForDemandRoot(pieceId))
+    ) {
+      continue;
+    }
+    await cell.pull();
+  }
 };
 
 const replaceDemand = async (pieces: readonly string[]): Promise<void> => {
@@ -187,6 +199,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
     actionTransactionRouter,
+    onAcceptedCommitIntegrated(notice) {
+      selectiveWake?.push(
+        notice.staleDemandedReaders.map((reader) => reader.pieceId),
+      );
+    },
   });
   builtinBroker = createServerBuiltinBrokerClient({
     port: request.builtinBrokerPort,
@@ -227,16 +244,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       }`,
     });
   });
-  const storageSubscription: IStorageNotification = {
-    next(notification) {
-      if (notification.type === "integrate" && !stopped) {
-        queueMicrotask(() => void enqueue(pullDemand));
-      }
-      return { done: false };
-    },
-  };
-  storage.subscribe(storageSubscription);
-  cancelStorageSubscription = () => storage?.unsubscribe(storageSubscription);
+  selectiveWake = new SelectiveDemandWakeQueue((pieceIds) =>
+    enqueue(() => pullDemand(new Set(pieceIds)))
+  );
   await replaceDemand(request.pieces);
 };
 
@@ -255,24 +265,38 @@ const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
   await runtime.scheduler.run(action);
 };
 
+const settle = async (): Promise<number> => {
+  if (runtime === null || storage === null) return 0;
+  while (true) {
+    await work;
+    const throughSeq = await storage.acceptedCommitsSettled();
+    await selectiveWake?.settled();
+    await work;
+    await runtime.settled();
+    await storage.synced();
+    const confirmedThroughSeq = await storage.acceptedCommitsSettled();
+    await selectiveWake?.settled();
+    await work;
+    if (confirmedThroughSeq === throughSeq) return confirmedThroughSeq;
+  }
+};
+
 const stop = async (): Promise<void> => {
   if (stopped) return;
   stopped = true;
-  cancelStorageSubscription?.();
-  cancelStorageSubscription = null;
-  await work;
-  builtinBroker?.dispose();
-  builtinBroker = null;
+  await settle();
   if (runtime !== null) {
-    await runtime.settled();
     await runtime.dispose();
   } else if (storage !== null) {
     await storage.close();
   }
+  builtinBroker?.dispose();
+  builtinBroker = null;
   runtime = null;
   storage = null;
   space = null;
   branch = "";
+  selectiveWake = null;
   demanded.clear();
   candidateActions.clear();
 };
@@ -302,6 +326,15 @@ const handle = async (request: WorkerRequest): Promise<void> => {
     case "wake":
       await enqueue(pullDemand);
       break;
+    case "settle": {
+      const dataSeq = await settle();
+      worker.postMessage({
+        type: "settled",
+        requestId: request.requestId,
+        dataSeq,
+      });
+      return;
+    }
     case "stop":
       await stop();
       break;
