@@ -138,6 +138,7 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
       persistentSchedulerState: false,
+      serverPrimaryExecutionV1: false,
       schedulerWriterLookup: true,
       commitPreconditions: false,
       syncSchemaTable: false,
@@ -154,6 +155,7 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
       persistentSchedulerState: true,
+      serverPrimaryExecutionV1: false,
       schedulerWriterLookup: true,
       commitPreconditions: true,
       syncSchemaTable: false,
@@ -172,6 +174,7 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         persistentSchedulerState: true,
+        serverPrimaryExecutionV1: true,
         schedulerWriterLookup: true,
         commitPreconditions: true,
         syncSchemaTable: true,
@@ -181,6 +184,7 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
@@ -199,6 +203,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
       persistentSchedulerState: false,
+      serverPrimaryExecutionV1: false,
       schedulerWriterLookup: false,
       commitPreconditions: false,
       syncSchemaTable: false,
@@ -208,6 +213,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
       persistentSchedulerState: false,
+      serverPrimaryExecutionV1: false,
       schedulerWriterLookup: false,
       commitPreconditions: false,
       syncSchemaTable: false,
@@ -224,6 +230,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: true,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
@@ -239,6 +246,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: true,
         commitPreconditions: false,
         syncSchemaTable: false,
@@ -256,6 +264,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: true,
         syncSchemaTable: false,
@@ -273,6 +282,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: true,
@@ -290,6 +300,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,
@@ -307,6 +318,7 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         persistentSchedulerState: false,
+        serverPrimaryExecutionV1: false,
         schedulerWriterLookup: false,
         commitPreconditions: false,
         syncSchemaTable: false,

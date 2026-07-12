@@ -237,6 +237,8 @@ export interface SessionOpenResult {
 export interface MemoryProtocolFlags {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
+  /** Optional server-primary-execution-v1 control/feed protocol. */
+  serverPrimaryExecutionV1: boolean;
   /** Build-inherent support for authenticated scheduler writer lookup. */
   schedulerWriterLookup: boolean;
   commitPreconditions: boolean;
@@ -263,6 +265,7 @@ export interface MemoryProtocolFlags {
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  serverPrimaryExecutionV1?: boolean;
   schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
@@ -737,6 +740,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = true;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let serverPrimaryExecutionEnabled = false;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -753,6 +757,23 @@ export function getPersistentSchedulerStateConfig(): boolean {
 
 export function resetPersistentSchedulerStateConfig(): void {
   persistentSchedulerStateEnabled = true;
+}
+
+/**
+ * Ambient runtime flag for the server-primary execution protocol. The
+ * capability is optional and defaults off; a space policy may require it at
+ * session-open time once both peers advertise support.
+ */
+export function setServerPrimaryExecutionConfig(enabled?: boolean): void {
+  serverPrimaryExecutionEnabled = enabled ?? false;
+}
+
+export function getServerPrimaryExecutionConfig(): boolean {
+  return serverPrimaryExecutionEnabled;
+}
+
+export function resetServerPrimaryExecutionConfig(): void {
+  serverPrimaryExecutionEnabled = false;
 }
 
 /**
@@ -792,6 +813,7 @@ export function resetSyncSchemaTableConfig(): void {
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
+  serverPrimaryExecutionV1: getServerPrimaryExecutionConfig(),
   // Build-inherent capability: older servers omit it and clients fail open to
   // piece-root discovery rather than sending an RPC the peer cannot parse.
   schedulerWriterLookup: true,
@@ -843,6 +865,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const serverPrimaryExecutionV1 = value.serverPrimaryExecutionV1;
+  if (
+    serverPrimaryExecutionV1 !== undefined &&
+    typeof serverPrimaryExecutionV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const commitPreconditions = value.commitPreconditions;
   if (
     commitPreconditions !== undefined &&
@@ -886,6 +916,7 @@ export const parseMemoryProtocolFlags = (
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
+    serverPrimaryExecutionV1: serverPrimaryExecutionV1 === true,
     schedulerWriterLookup: schedulerWriterLookup === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
@@ -904,6 +935,7 @@ export const wireMemoryProtocolFlags = (
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
+  serverPrimaryExecutionV1: flags.serverPrimaryExecutionV1,
   schedulerWriterLookup: flags.schedulerWriterLookup,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
