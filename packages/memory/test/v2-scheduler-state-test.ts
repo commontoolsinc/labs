@@ -1102,6 +1102,13 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
     assertEquals(countRows(engine, "scheduler_observation"), 1);
     assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
     assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...targetWrite, scopeKey: "space" }],
+      }).map((writer) => writer.actionId),
+      [observation.actionId],
+    );
+    assertEquals(
       getSchedulerActionState(engine, {
         branch: "",
         pieceId: observation.pieceId,
@@ -1900,6 +1907,55 @@ Deno.test("memory v2 writer lookup recovers commit sequence from its observation
       targets: [{ ...target, scopeKey: "space" }],
     })[0];
     assertEquals(candidate?.commitSeq, applied.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup uses a distinct snapshot delivery slot", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-delivery-slot";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:delivery-slot-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:delivery-slot";
+
+  try {
+    const semantic = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-delivery-slot",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:semantic-input",
+          value: { value: 1 },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      commitSeq: semantic.seq,
+      deliveryCommitSeq: semantic.seq + 1,
+      observedAtSeq: semantic.seq,
+      observation: observationForAction(actionId, {
+        ownerSpace,
+        currentKnownWrites: [target],
+      }),
+    });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.actionId, actionId);
+    assertEquals(candidate?.commitSeq, semantic.seq + 1);
   } finally {
     close(engine);
     await Deno.remove(path);
