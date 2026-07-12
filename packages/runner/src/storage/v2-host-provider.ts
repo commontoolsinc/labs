@@ -842,6 +842,9 @@ export interface HostStorageManagerOptions {
   id?: string;
   settings?: Options["settings"];
   protocolFlags?: Partial<WireMemoryProtocolFlags>;
+  /** Keep executor-derived writes inside the Worker replica for shadow graph
+   * discovery. No transaction or scheduler operation reaches the host. */
+  shadowWrites?: boolean;
 }
 
 /** StorageManager construction available inside the executor Worker. */
@@ -853,6 +856,7 @@ export class HostStorageManager extends StorageManager {
         as,
         id: options.id,
         settings: options.settings,
+        shadowWrites: options.shadowWrites,
         // The host channel is already pinned to the memory Server.
         memoryHost: new URL("memory://executor-provider"),
       },

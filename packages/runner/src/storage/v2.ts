@@ -581,6 +581,13 @@ export interface Options {
   /** Space authority used only for fresh named-space ACL genesis. The durable
    *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
+  /**
+   * Executor validation mode: keep optimistic document results in this
+   * replica, but never send semantic, scheduler, precondition, or SQLite
+   * operations upstream. HostStorageManager is the production caller; normal
+   * client storage must leave this false.
+   */
+  shadowWrites?: boolean;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -752,6 +759,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
+  readonly #shadowWrites: boolean;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -796,6 +804,7 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
+    this.#shadowWrites = options.shadowWrites === true;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -862,6 +871,7 @@ export class StorageManager implements IStorageManager {
         space,
         settings: this.#settings,
         subscription: this.#subscription,
+        shadowWrites: this.#shadowWrites,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? () => this.#createInitializedSession(space, signer)
           : () =>
@@ -1450,6 +1460,7 @@ type ProviderOptions = {
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
+  shadowWrites: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
@@ -1612,6 +1623,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #createSession: () => Promise<ReplicaSessionHandle>;
+  readonly #shadowWrites: boolean;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -1662,6 +1674,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#shadowWrites = options.shadowWrites;
   }
 
   did(): MemorySpace {
@@ -2454,6 +2467,9 @@ class SpaceReplica implements ISpaceReplica {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
+      if (this.#shadowWrites) {
+        return { ok: {} };
+      }
       return await this.enqueueSchedulerObservationCommit(
         schedulerObservation,
         source,
@@ -2542,6 +2558,16 @@ class SpaceReplica implements ISpaceReplica {
         this.notifySinksForIds(touched);
       }
     });
+
+    // Validation workers need the optimistic values to discover the graph,
+    // but ordinary shadow execution has no authority to mutate shared state.
+    // Keep these versions pending in the private replica so later accepted
+    // input syncs rebase beneath them; the realm is discarded on hibernate or
+    // sponsor rotation. Scheduler observations and folded SQLite operations
+    // are intentionally swallowed with the semantic transaction.
+    if (this.#shadowWrites) {
+      return { ok: {} };
+    }
 
     const promise = withCommitTiming(
       ["commitOperations", "pushCommitStart"],
