@@ -3929,6 +3929,16 @@ const modulePolicyReferencesIn = (value: unknown): unknown[] => {
   return references;
 };
 
+const modulePolicyArtifactKey = (reference: unknown): string | undefined => {
+  if (!isRecord(reference)) return undefined;
+  if (
+    typeof reference.moduleIdentity !== "string" ||
+    typeof reference.symbol !== "string" ||
+    typeof reference.policyDigest !== "string"
+  ) return undefined;
+  return `${reference.moduleIdentity}\0${reference.symbol}\0${reference.policyDigest}`;
+};
+
 const installCarriedPolicyManifests = (
   tx: IExtendedStorageTransaction,
   destination: MemorySpace,
@@ -4393,8 +4403,13 @@ export const loadSchemaDocument = (
 // (docs/specs/cfc-write-prefix-provenance.md §7.4).
 const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
-): { confidentiality: readonly unknown[]; integrity: readonly unknown[] } => {
+): {
+  confidentiality: readonly unknown[];
+  integrity: readonly unknown[];
+  modulePolicySpaces: ReadonlyMap<string, MemorySpace>;
+} => {
   const atoms: unknown[] = [];
+  const modulePolicySpaces = new Map<string, MemorySpace>();
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
   // transaction-global over-approximation as the confidentiality union —
@@ -4448,6 +4463,16 @@ const collectConsumedLabel = (
           (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
       atoms.push(...(entry.label.confidentiality ?? []));
+      for (
+        const reference of modulePolicyReferencesIn(
+          entry.label.confidentiality,
+        )
+      ) {
+        const key = modulePolicyArtifactKey(reference);
+        if (key !== undefined && !modulePolicySpaces.has(key)) {
+          modulePolicySpaces.set(key, read.space);
+        }
+      }
       integrityAtoms.push(...(entry.label.integrity ?? []));
     }
   }
@@ -4465,6 +4490,7 @@ const collectConsumedLabel = (
   return {
     confidentiality: uniqueCfcAtoms(atoms),
     integrity: uniqueCfcAtoms(integrityAtoms),
+    modulePolicySpaces,
   };
 };
 
@@ -4497,7 +4523,9 @@ const evaluateGatedConfidentiality = (
   integrity: readonly unknown[],
   boundary: readonly unknown[],
   consumption: CfcGrantConsumptionContext,
-  destinationSpace?: MemorySpace,
+  destinationSpace?:
+    | MemorySpace
+    | ((reference: unknown) => MemorySpace | undefined),
 ): {
   confidentiality: readonly unknown[];
   exhausted: boolean;
@@ -4526,8 +4554,15 @@ const evaluateGatedConfidentiality = (
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
-        (reference) =>
-          tx.resolveCfcPolicyManifest(reference, destinationSpace),
+        (reference) => {
+          const space = typeof destinationSpace === "function"
+            ? destinationSpace(reference)
+            : destinationSpace;
+          if (typeof destinationSpace === "function" && space === undefined) {
+            return undefined;
+          }
+          return tx.resolveCfcPolicyManifest(reference, space);
+        },
       ),
     },
   );
@@ -4609,6 +4644,12 @@ const verifySinkRequestCeilings = (
         consumed.integrity,
         boundary,
         mode === "enforce" ? "consuming" : "observing",
+        (reference) => {
+          const key = modulePolicyArtifactKey(reference);
+          return key === undefined
+            ? undefined
+            : consumed.modulePolicySpaces.get(key);
+        },
       );
       if (mode === "enforce") {
         if (outcome.exhausted) {

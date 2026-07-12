@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -15,6 +16,8 @@ import {
   createTxCfcModulePolicyResolver,
   evaluateExchangeRules,
 } from "../src/cfc/mod.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -336,14 +339,37 @@ describe("PolicyOf label-time binding", () => {
     });
     try {
       const coldTx = coldRuntime.edit();
-      coldRuntime.getCell(
+      const coldCell = coldRuntime.getCell(
         space,
         "cold-policy",
         emittedSchema,
         coldTx,
-      ).set("secret after restart");
+      );
+      coldCell.set("secret after restart");
       coldTx.prepareCfc();
       expect((await coldTx.commit()).error).toBeUndefined();
+
+      const evaluationTx = coldRuntime.edit();
+      const metadata = readStoredCfcMetadata(
+        evaluationTx,
+        coldCell.getAsNormalizedFullLink(),
+      );
+      const reference = metadata?.labelMap.entries[0]?.label
+        .confidentiality?.[0];
+      expect(reference).toBeDefined();
+      const reader = "did:key:cold-compiled-reader";
+      const evaluated = evaluateExchangeRules(
+        { confidentiality: [reference] },
+        undefined,
+        {
+          integrity: [cfcAtom.hasRole(reader, space, "reader")],
+          modulePolicyResolver: (candidate) =>
+            evaluationTx.resolveCfcPolicyManifest(candidate, space) as never,
+        },
+      );
+      expect(evaluated.resolutionFailures).toEqual([]);
+      expect(evaluated.firings).toHaveLength(1);
+      evaluationTx.abort();
     } finally {
       await coldRuntime.dispose();
     }
@@ -511,6 +537,104 @@ describe("PolicyOf label-time binding", () => {
       coldTx.abort();
     } finally {
       await coldRuntime.dispose();
+    }
+  });
+
+  it("does not let a sink mask a missing destination manifest with another space", async () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const installTx = runtime.edit();
+    runtime.getCell(space, "sink-policy-source", schema, installTx).set(
+      "secret",
+    );
+    installTx.prepareCfc();
+    expect((await installTx.commit()).ok).toBeDefined();
+
+    const destinationSchema = internSchema({
+      type: "object",
+      properties: { secret: { type: "string" } },
+      required: ["secret"],
+    } satisfies JSONSchema, true);
+    const target = runtime.getCell(
+      destinationSpace,
+      "sink-missing-local-manifest",
+      destinationSchema.schema,
+    );
+    const targetLink = target.getAsNormalizedFullLink();
+    const reference = {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: artifact.manifest.moduleIdentity,
+      symbol: artifact.manifest.symbol,
+      policyDigest: artifact.policyDigest,
+      subject: space,
+    } as const;
+    const seed = storageManager.edit();
+    expect(seed.write({
+      space: destinationSpace,
+      id: targetLink.id,
+      scope: targetLink.scope,
+      type: "application/json",
+      path: [],
+    }, {
+      value: { secret: "rosebud" },
+      cfc: {
+        version: 1,
+        schemaHash: destinationSchema.taggedHashString,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: {
+              confidentiality: [reference],
+              integrity: [{ type: "IntegrityEvidence" }],
+            },
+          }],
+        },
+      },
+    }).ok).toBeDefined();
+    expect(seed.write({
+      space: destinationSpace,
+      id: `cid:${destinationSchema.taggedHashString}`,
+      type: "application/json",
+      path: [],
+    }, { value: destinationSchema.schema }).ok).toBeDefined();
+    expect((await seed.commit()).ok).toBeDefined();
+
+    const sinkRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcPolicyEvaluation: "enforce",
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const tx = sinkRuntime.edit();
+      // This unrelated source-space touch used to let the sink's ambient scan
+      // mask the destination's missing local artifact.
+      expect(tx.readOrThrow({
+        space,
+        id: cfcPolicyManifestDocId(artifact.policyDigest),
+        type: "application/json",
+        path: ["value"],
+      })).toBeDefined();
+      expect(target.withTx(tx).key("secret").get()).toBe("rosebud");
+      let flushed = false;
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchJson",
+        "fetchJson:destination-manifest-mask",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {
+          flushed = true;
+        },
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeDefined();
+      expect(flushed).toBe(false);
+    } finally {
+      await sinkRuntime.dispose();
     }
   });
 });
