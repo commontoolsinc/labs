@@ -48,7 +48,8 @@ interface CandidateClaim {
 }
 
 interface CandidateDiagnostic {
-  claim: ExecutionClaim;
+  claim?: ExecutionClaim;
+  claimKey?: ActionClaimKey;
   diagnosticCode: string;
 }
 
@@ -85,6 +86,14 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     this.dispatchEvent(
       new MessageEvent("message", {
         data: { type: "unserved-claim", claim, diagnosticCode },
+      }),
+    );
+  }
+
+  diagnostic(diagnostic: CandidateDiagnostic): void {
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "candidate-diagnostic", diagnostic },
       }),
     );
   }
@@ -223,6 +232,30 @@ Deno.test("canonical unserved attempts revoke the exact test-only claim", async 
       diagnosticCode: "dynamic-non-space-read-scope",
     }]);
     assertEquals(server.revoked, [CLAIM]);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("ordinary shadow rejection reports a host-local candidate diagnostic", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: false,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    worker.diagnostic({
+      claimKey: CLAIM_KEY,
+      diagnosticCode: "non-space-write-scope",
+    });
+    await flushClaimControl();
+
+    assertEquals(diagnostics, [{
+      claimKey: CLAIM_KEY,
+      diagnosticCode: "non-space-write-scope",
+    }]);
+    assertEquals(server.claimRequests, []);
+    assertEquals(crashes, []);
   } finally {
     await executor.stop();
   }

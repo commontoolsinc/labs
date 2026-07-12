@@ -215,6 +215,52 @@ Deno.test("executor action router turns a dynamically invalid live claim into an
   );
 });
 
+Deno.test("executor action router settles a statically invalidated live claim as unserved", async () => {
+  const claim: ExecutionClaim = {
+    ...key,
+    leaseGeneration: 12,
+    claimGeneration: 14,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => claim,
+    onCandidate: () => {
+      throw new Error("a live claim must settle unserved, not re-candidate");
+    },
+  });
+  const scoped = commit();
+  const staticSummary = (scoped.schedulerObservation as ReturnType<
+    typeof observation
+  >).completeActionScopeSummary;
+  (staticSummary.writes as unknown as Array<Record<string, unknown>>)[0] = {
+    ...staticSummary.writes[0],
+    scope: "user",
+  };
+
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: scoped,
+      sourceAction: action,
+    }),
+    {
+      disposition: "unserved",
+      diagnosticCode: "non-space-write-scope",
+    },
+  );
+  assertEquals(
+    (scoped.schedulerObservation as Record<string, unknown>)
+      .executionClaimAssertion,
+    {
+      contextKey: "space",
+      leaseGeneration: 12,
+      claimGeneration: 14,
+    },
+  );
+});
+
 Deno.test("executor action router keeps broker-required effects local", async () => {
   const effectCommit = commit();
   (effectCommit.schedulerObservation as Record<string, unknown>).actionKind =
