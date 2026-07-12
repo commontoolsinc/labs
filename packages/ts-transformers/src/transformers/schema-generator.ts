@@ -129,6 +129,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             writeAuthorizedByIdentity,
           );
         }
+        finalSchema = resolvePolicyOfMarkers(finalSchema, context, node);
         const emittedSchema = typeof finalSchema === "boolean"
           ? finalSchema
           : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
@@ -161,6 +162,67 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;
   }
+}
+
+function resolvePolicyOfMarkers(
+  value: unknown,
+  context: TransformationContext,
+  diagnosticNode: ts.Node,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      resolvePolicyOfMarkers(entry, context, diagnosticNode)
+    );
+  }
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  const marker = record.__ctPolicyIdentityOf;
+  if (marker && typeof marker === "object" && !Array.isArray(marker)) {
+    const identity = marker as { file?: unknown; path?: unknown };
+    const file = typeof identity.file === "string" ? identity.file : undefined;
+    const symbol = Array.isArray(identity.path) &&
+        typeof identity.path[0] === "string"
+      ? identity.path[0]
+      : undefined;
+    const sourceEntry = file === undefined
+      ? undefined
+      : [...(context.options.moduleIdentities?.entries() ?? [])].find(
+        ([sourceName]) => normalizePolicySource(sourceName) === file,
+      );
+    const manifests = sourceEntry === undefined
+      ? undefined
+      : context.options.state?.getPolicyManifests().get(sourceEntry[0]);
+    const artifact = manifests?.find((candidate) =>
+      candidate.manifest.symbol === symbol
+    );
+    if (!sourceEntry || !symbol || !artifact) {
+      context.reportDiagnostic({
+        node: diagnosticNode,
+        type: "cfc-policy-of",
+        message:
+          "PolicyOf requires a direct typeof reference to a compiler-verified exported exchangeRules() binding.",
+      });
+      return value;
+    }
+    const { __ctPolicyIdentityOf: _, ...rest } = record;
+    return {
+      ...rest,
+      moduleIdentity: sourceEntry[1],
+      symbol,
+      policyDigest: artifact.policyDigest,
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entry]) => [
+      key,
+      resolvePolicyOfMarkers(entry, context, diagnosticNode),
+    ]),
+  );
+}
+
+function normalizePolicySource(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
 
 function createSchemaAst(

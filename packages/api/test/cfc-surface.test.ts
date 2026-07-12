@@ -233,6 +233,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
+    "PolicyOf",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",
     "TrustedActionWrite",

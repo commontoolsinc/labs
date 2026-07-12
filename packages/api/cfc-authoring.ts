@@ -46,6 +46,7 @@ export type {
   Integrity,
   MaxConfidentiality,
   PathValue,
+  PolicyOf,
   Projection,
   ProjectionOf,
   ProjectionPath,

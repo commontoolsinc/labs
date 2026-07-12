@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import ts from "typescript";
 import { transformCfDirective } from "../src/mod.ts";
-import { transformSource, validateSource } from "./utils.ts";
+import { transformFiles, transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
 import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
@@ -187,6 +187,7 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
+    "PolicyOf",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",
     "TrustedActionWrite",
@@ -381,6 +382,106 @@ Deno.test("exchange-rule declarations fail closed on invalid export and binding 
       ),
       true,
       testCase.message,
+    );
+  }
+});
+
+Deno.test("PolicyOf lowers a local exported ruleset to an exact schema marker", async () => {
+  const manifests: unknown[] = [];
+  const output = await transformSource(
+    `/// <cts-enable />
+    import { Confidential, toSchema } from "commonfabric";
+    import type { PolicyOf } from "commonfabric/cfc";
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    export const rules = exchangeRules([release]);
+    export const schema = toSchema<
+      Confidential<string, [PolicyOf<typeof rules>]>
+    >();
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      policyManifests: manifests,
+    },
+  );
+  const artifact = manifests[0] as CfcPolicyCompilerManifestV1;
+
+  assertEquals(output.includes('policyRefKind: "module"'), true);
+  assertEquals(output.includes('moduleIdentity: "sha256:module"'), true);
+  assertEquals(output.includes('symbol: "rules"'), true);
+  assertEquals(
+    output.includes(`policyDigest: "${artifact.policyDigest}"`),
+    true,
+  );
+  assertEquals(output.includes("__ctOwningSpace: true"), true);
+  assertEquals(output.includes("__ctPolicyIdentityOf"), false);
+});
+
+Deno.test("PolicyOf retains the defining identity of an imported ruleset", async () => {
+  const outputs = await transformFiles({
+    "/policy.ts": `/// <cts-enable />
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { addAlternatives: [cfcPattern.user(v("user"))] },
+      });
+      export const rules = exchangeRules([release]);
+    `,
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/main.tsx", "sha256:importer"],
+      ["/policy.ts", "sha256:defining-policy"],
+    ]),
+  });
+
+  assertEquals(
+    outputs["/main.tsx"]?.includes(
+      'moduleIdentity: "sha256:defining-policy"',
+    ),
+    true,
+  );
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:importer"'),
+    false,
+  );
+});
+
+Deno.test("PolicyOf rejects non-ruleset and non-typeof bindings", async () => {
+  for (const binding of ["{ forged: true }", "typeof plain"]) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+      import { toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      const plain = { forged: true };
+      export const schema = toSchema<PolicyOf<${binding}>>();
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+    assertEquals(
+      diagnostics.some((diagnostic) => diagnostic.type === "cfc-policy-of"),
+      true,
     );
   }
 });

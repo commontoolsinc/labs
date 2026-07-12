@@ -435,6 +435,7 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
+  "PolicyOf",
   "WriteAuthorizedBy",
   "TrustedActionWriteWithIntegrity",
   "TrustedActionWrite",
@@ -503,6 +504,9 @@ export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
 export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
   maxConfidentiality: X;
 }>;
+export type PolicyOf<Rules> = {
+  readonly __ct_cfc_policy_of__?: Rules;
+};
 export type ExactCopy<T, P extends readonly string[]> = Cfc<T, {
   exactCopyOf: P;
 }>;

@@ -2,6 +2,7 @@ import {
   BuilderCallHoistingTransformer,
   CastValidationTransformer,
   CfcPolicyAuthoringTransformer,
+  CfcPolicyOfValidationTransformer,
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
@@ -59,6 +60,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "CfcPolicyAuthoringTransformer",
     create: (options) => new CfcPolicyAuthoringTransformer(options),
+  },
+  {
+    name: "CfcPolicyOfValidationTransformer",
+    create: (options) => new CfcPolicyOfValidationTransformer(options),
   },
   {
     name: "JsxExpressionSiteRouterTransformer",

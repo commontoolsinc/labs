@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonFabricTransformerPipeline,
@@ -164,7 +164,7 @@ export async function batchTypeCheckFixtures(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
@@ -202,6 +202,18 @@ export async function batchTypeCheckFixtures(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (transformedFiles[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });
@@ -402,7 +414,7 @@ export async function transformFiles(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
@@ -440,6 +452,18 @@ export async function transformFiles(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (files[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });
@@ -756,7 +780,7 @@ export async function validateFiles(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
@@ -785,6 +809,18 @@ export async function validateFiles(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (files[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });

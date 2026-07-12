@@ -24,7 +24,10 @@ import {
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
-import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+} from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -1618,6 +1621,24 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (
         ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
       ) {
+        if (typeNode.typeName.text === "PolicyOf") {
+          const bindingNode = typeNode.typeArguments?.[0];
+          if (
+            bindingNode && ts.isTypeQueryNode(bindingNode) &&
+            ts.isIdentifier(bindingNode.exprName)
+          ) {
+            return {
+              type: CFC_ATOM_TYPE.Policy,
+              policyRefKind: "module",
+              __ctPolicyIdentityOf: this.writeAuthorizedByIdentityForBinding(
+                context,
+                bindingNode.exprName,
+              ),
+              subject: { __ctOwningSpace: true },
+            };
+          }
+          return undefined;
+        }
         const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
           context.typeChecker.getSymbolAtLocation(typeNode.typeName),
           context,
