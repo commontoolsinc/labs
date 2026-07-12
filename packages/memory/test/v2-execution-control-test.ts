@@ -1,8 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
 import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
 import {
+  TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
@@ -83,6 +84,13 @@ type AuthenticatedExecutionDemand = {
   pieces: readonly string[];
 };
 
+type ExecutionDemandSnapshot = {
+  space: string;
+  branch: string;
+  order: number;
+  demands: readonly AuthenticatedExecutionDemand[];
+};
+
 type ExecutionServer = Server & {
   listExecutionDemands(
     space: string,
@@ -90,9 +98,14 @@ type ExecutionServer = Server & {
   ): readonly AuthenticatedExecutionDemand[];
   setExecutionClaim(
     claim: ActionClaimKey & { leaseGeneration: number },
-  ): ExecutionClaim;
+  ): Promise<ExecutionClaim>;
   revokeExecutionClaim(claim: ExecutionClaim): boolean;
   publishActionSettlement(settlement: ActionSettlement): boolean;
+  listExecutionClaims(space: string): readonly ExecutionClaim[];
+  expireExecutionClaims(now?: number): number;
+  subscribeExecutionDemands(
+    listener: (snapshot: ExecutionDemandSnapshot) => void,
+  ): () => void;
 };
 
 const createServer = (
@@ -122,7 +135,10 @@ const connectClient = async (
 
 const createControlServer = (
   name: string,
-  options: { subscriptionRefreshDelayMs?: number } = {},
+  options: {
+    subscriptionRefreshDelayMs?: number;
+    executionControl?: { claimTtlMs?: number; nowMs?: () => number };
+  } = {},
 ): ExecutionServer =>
   new Server(
     {
@@ -134,6 +150,7 @@ const createControlServer = (
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
       },
+      acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
     } as ConstructorParameters<typeof Server>[0],
   ) as ExecutionServer;
 
@@ -228,9 +245,10 @@ const mount = async (
 const setPolicy = async (
   session: MemoryClient.SpaceSession,
   enabled: boolean,
+  localSeq = 1,
 ): Promise<void> => {
   await session.transact({
-    localSeq: 1,
+    localSeq,
     reads: { confirmed: [], pending: [] },
     operations: [{
       op: "set",
@@ -350,6 +368,35 @@ Deno.test("execution demand is connection-owned and reference-counted", async ()
   }
 });
 
+Deno.test("demand snapshots identify a branch after its last reference is removed", async () => {
+  const server = createServer("memory-v2-execution-demand-snapshot-slot", true);
+  const client = await connectClient(server, true);
+  const session = await mount(client);
+  const snapshots: ExecutionDemandSnapshot[] = [];
+  const unsubscribe = server.subscribeExecutionDemands((snapshot) => {
+    snapshots.push(snapshot);
+  });
+  try {
+    await session.setExecutionDemand("feature", ["piece:one"]);
+    await session.setExecutionDemand("feature", []);
+
+    assertEquals(snapshots.length, 2);
+    assertEquals(snapshots[0].space, POLICY_SPACE);
+    assertEquals(snapshots[0].branch, "feature");
+    assertEquals(snapshots[0].demands.length, 1);
+    assertEquals(snapshots[1], {
+      space: POLICY_SPACE,
+      branch: "feature",
+      order: snapshots[0].order + 1,
+      demands: [],
+    });
+  } finally {
+    unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("flag-off clients do not send execution demand messages", async () => {
   const server = createServer("memory-v2-execution-demand-off", false);
   const client = await connectClient(server, false);
@@ -400,11 +447,12 @@ Deno.test("claims are branch-qualified and reclaim mints a fresh generation", as
     events.push(event)
   );
   try {
-    const main = server.setExecutionClaim({
+    await setPolicy(session, true);
+    const main = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, ""),
       leaseGeneration: 7,
     });
-    const feature = server.setExecutionClaim({
+    const feature = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "feature"),
       leaseGeneration: 7,
     });
@@ -416,7 +464,7 @@ Deno.test("claims are branch-qualified and reclaim mints a fresh generation", as
     ]);
 
     assertEquals(server.revokeExecutionClaim(main), true);
-    const reclaimed = server.setExecutionClaim({
+    const reclaimed = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, ""),
       leaseGeneration: 7,
     });
@@ -464,6 +512,99 @@ Deno.test("claims are branch-qualified and reclaim mints a fresh generation", as
   }
 });
 
+Deno.test("positive claims require enabled policy and disabling it revokes authority", async () => {
+  const server = createControlServer("memory-v2-execution-claim-policy");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const events: ExecutionControlEvent[] = [];
+  const unsubscribe = session.subscribeExecutionControl((event) => {
+    events.push(event);
+  });
+  try {
+    await assertRejects(
+      () =>
+        server.setExecutionClaim({
+          ...claimKey(POLICY_SPACE, ""),
+          leaseGeneration: 1,
+        }),
+      Error,
+      "execution policy is not enabled",
+    );
+
+    await setPolicy(session, true);
+    const claim = await server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, ""),
+      leaseGeneration: 1,
+    });
+    assertEquals(session.executionClaims.length, 1);
+
+    await setPolicy(session, false, 2);
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(session.executionClaims, []);
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "",
+        claim,
+        inputBasisSeq: 1,
+        outcome: "no-op",
+      }),
+      false,
+    );
+    assertEquals(
+      events.filter((event) => event.type === "session.execution.claim.revoke")
+        .length,
+      1,
+    );
+  } finally {
+    unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claim expiry revokes clients and rejects stale settlement", async () => {
+  let now = 1_000;
+  const server = createControlServer("memory-v2-execution-claim-expiry", {
+    executionControl: { claimTtlMs: 10, nowMs: () => now },
+  });
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const events: ExecutionControlEvent[] = [];
+  const unsubscribe = session.subscribeExecutionControl((event) => {
+    events.push(event);
+  });
+  try {
+    await setPolicy(session, true);
+    const claim = await server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, ""),
+      leaseGeneration: 2,
+    });
+    now = claim.expiresAt;
+
+    assertEquals(server.expireExecutionClaims(), 1);
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(session.executionClaims, []);
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "",
+        claim,
+        inputBasisSeq: 1,
+        outcome: "no-op",
+      }),
+      false,
+    );
+    assertEquals(
+      events.filter((event) => event.type === "session.execution.claim.revoke")
+        .length,
+      1,
+    );
+  } finally {
+    unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("committed settlement waits for its accepted data patch", async () => {
   const server = createControlServer("memory-v2-execution-settlement-gate", {
     subscriptionRefreshDelayMs: 60_000,
@@ -479,6 +620,7 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
     }
   });
   try {
+    await setPolicy(observer, true);
     await observer.watchSet([{
       id: "derived",
       kind: "graph",
@@ -489,7 +631,7 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
         }],
       },
     }]);
-    const claim = server.setExecutionClaim({
+    const claim = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, ""),
       leaseGeneration: 9,
     });
@@ -568,7 +710,7 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
 Deno.test("host cannot publish claims while the rollout flag is off", async () => {
   const server = createServer("memory-v2-execution-claims-off", false);
   try {
-    assertThrows(
+    await assertRejects(
       () =>
         server.setExecutionClaim({
           ...claimKey(POLICY_SPACE, ""),
@@ -603,15 +745,16 @@ Deno.test("reconnect applies the claim snapshot then restores connection demand"
   const demandRestored = Promise.withResolvers<void>();
   const unsubscribeDemand = server.subscribeExecutionDemands((demands) => {
     if (
-      transport.connectionCount >= 2 && demands.length === 1 &&
-      demands[0].branch === "feature"
+      transport.connectionCount >= 2 && demands.demands.length === 1 &&
+      demands.branch === "feature"
     ) {
       demandRestored.resolve();
     }
   });
   try {
+    await setPolicy(session, true);
     await session.setExecutionDemand("feature", ["piece:one"]);
-    const first = server.setExecutionClaim({
+    const first = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "feature"),
       leaseGeneration: 3,
     });
@@ -619,7 +762,7 @@ Deno.test("reconnect applies the claim snapshot then restores connection demand"
 
     transport.disconnect();
     assertEquals(server.revokeExecutionClaim(first), true);
-    const second = server.setExecutionClaim({
+    const second = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "feature"),
       leaseGeneration: 3,
     });
@@ -656,9 +799,10 @@ Deno.test("control-only claim frames advance one feed sequence without advancing
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   try {
+    await setPolicy(session, true);
     const view = await session.watchSet([]);
     const syncs = view.subscribeSync();
-    const claim = server.setExecutionClaim({
+    const claim = await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, ""),
       leaseGeneration: 11,
     });
@@ -715,11 +859,12 @@ Deno.test("server publishes only claim classes the client advertises", async () 
     computationOnlyClient,
   ) as ExecutionSession;
   try {
-    server.setExecutionClaim({
+    await setPolicy(computationOnly, true);
+    await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "", "action:computation"),
       leaseGeneration: 1,
     });
-    server.setExecutionClaim({
+    await server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "", "action:builtin"),
       actionKind: "effect",
       leaseGeneration: 1,
