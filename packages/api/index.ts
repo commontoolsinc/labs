@@ -1942,16 +1942,27 @@ export interface ImageData {
 }
 
 export type BuiltInLLMTool =
-  & { description?: string }
-  & (
-    | {
-      pattern: Pattern;
-      handler?: never;
-      extraParams?: Record<string, any>;
-      useResultSchemaForObservation?: boolean;
-    }
-    | { handler: Stream<any> | Reactive<any>; pattern?: never }
-  );
+  | PatternFactory<any, any>
+  | {
+    pattern: PatternFactory<any, any>;
+    handler?: never;
+    extraParams?: never;
+    description?: string;
+    useResultSchemaForObservation?: boolean;
+  }
+  | {
+    /** @deprecated Stored compatibility shape produced by patternTool(). */
+    pattern: Pattern;
+    handler?: never;
+    extraParams: Record<string, any>;
+    description?: string;
+    useResultSchemaForObservation?: boolean;
+  }
+  | {
+    handler: Stream<any> | Reactive<any>;
+    pattern?: never;
+    description?: string;
+  };
 
 /**
  * A web source surfaced by a native search/grounding tool (e.g.

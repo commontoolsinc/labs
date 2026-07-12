@@ -1537,7 +1537,7 @@ an open aggregate package gate, not a waived green result.
 
 ### WP4.1 — Teach tools and external adapters the new factory value
 
-- [ ] Update `BuiltInLLMTool` in `packages/api/index.ts` to accept a direct
+- [x] Update `BuiltInLLMTool` in `packages/api/index.ts` to accept a direct
   `PatternFactory` and `{ pattern: PatternFactory, ...metadata }` as canonical
   authored shapes, while retaining the legacy tool object as a deprecated
   compatibility input.
@@ -1586,6 +1586,14 @@ Focused tests:
 - `packages/fuse/callable-path.test.ts`
 - `packages/fuse/tree-builder.test.ts`
 - `packages/fuse/cell-bridge.test.ts`
+
+WP4.1 public type slice (2026-07-11): `BuiltInLLMTool` now accepts a directly
+branded `PatternFactory` and a metadata wrapper whose `pattern` is the factory
+and whose canonical shape has no `extraParams`. The deprecated Pattern graph
+compatibility arm requires `extraParams`, which keeps the old stored shape
+distinguishable without admitting arbitrary functions. The red type check was
+`TS2322` for the direct factory; the API package now passes `17 passed, 0
+failed` and the focused type check is green.
 
 ### WP4.2 — Install explicit compatibility readers
 
