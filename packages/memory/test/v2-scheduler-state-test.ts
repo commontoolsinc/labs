@@ -570,6 +570,8 @@ Deno.test("memory v2 records the exact accepted input basis independently of hea
   const secondId = "of:basis-second";
   const semanticActionId = "basis:semantic";
   const noopActionId = "basis:no-op";
+  const pendingActionId = "basis:pending";
+  const zeroActionId = "basis:zero";
 
   try {
     const source = applyCommit(engine, {
@@ -691,6 +693,76 @@ Deno.test("memory v2 records the exact accepted input basis independently of hea
     );
     assertEquals(noopSnapshot?.observedAtSeq, noop.seq);
     assertEquals(noop.seq, semantic.seq);
+
+    const pendingSource = applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:basis-pending-source",
+          value: { value: 3 },
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:basis-pending-source",
+            path: toDocumentPath(["value"]),
+            localSeq: 1,
+          }],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(pendingActionId, {
+          ownerSpace,
+          actionKind: "effect",
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: "of:basis-pending-source",
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const pendingSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: pendingActionId,
+    });
+    assertEquals(pendingSnapshot?.observation.inputBasisSeq, pendingSource.seq);
+
+    applyCommit(engine, {
+      sessionId: "session:basis-zero",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction(zeroActionId, {
+          ownerSpace,
+          reads: [],
+        }),
+      },
+    });
+    const zeroSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: zeroActionId,
+    });
+    assertEquals(zeroSnapshot?.observation.inputBasisSeq, 0);
   } finally {
     close(engine);
     await Deno.remove(path);
