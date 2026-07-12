@@ -3216,7 +3216,11 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     {},
     schedulerAuthFactoryFor(principal),
   );
-  await client.mount(readSpace, {}, schedulerAuthFactoryFor(principal));
+  const read = await client.mount(
+    readSpace,
+    {},
+    schedulerAuthFactoryFor(principal),
+  );
   const actionId = "pattern.tsx:computed:replay-mirror";
   const implementationFingerprint = `impl:${actionId}`;
   const piece = {
@@ -3254,6 +3258,24 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     pieceId: "space:of:piece",
     actionId,
     implementationFingerprint,
+    inputBasisSeq: 999 as never,
+    executionProvenance: {
+      claim: {
+        branch: "",
+        space: ownerSpace,
+        contextKey: "space" as const,
+        pieceId: "space:of:piece",
+        actionId,
+        actionKind: "computation" as const,
+        implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+      },
+      onBehalfOf: "did:key:forged-replay-principal",
+      leaseGeneration: 999,
+      claimGeneration: 999,
+      causedBy: [999],
+      inputBasisSeq: 999 as never,
+    },
     reads: [userRead],
     currentKnownWrites: [userWrite],
     completeActionScopeSummary: {
@@ -3299,6 +3321,26 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
 
   try {
     await owner.transact(initialCommit);
+    await owner.transact(initialCommit);
+    const activeReplayMirror = await read.listSchedulerActionSnapshots({
+      actionId,
+      pieceId: userObservation.pieceId,
+      processGeneration: userObservation.processGeneration,
+    });
+    assertEquals(activeReplayMirror.snapshots.length, 1);
+    const mirroredObservation = activeReplayMirror.snapshots[0]
+      ?.observation as {
+        inputBasisSeq?: number;
+        executionProvenance?: unknown;
+      };
+    assertEquals(
+      mirroredObservation.inputBasisSeq,
+      0,
+    );
+    assertEquals(
+      mirroredObservation.executionProvenance,
+      undefined,
+    );
     const sessionResult = await owner.transact(sessionCommit);
     const changedSessionResult = await owner.transact({
       localSeq: 3,
