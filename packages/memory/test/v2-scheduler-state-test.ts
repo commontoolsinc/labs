@@ -1849,6 +1849,52 @@ Deno.test("memory v2 writer lookup reports the last failure fingerprint", async 
   }
 });
 
+Deno.test("memory v2 writer lookup recovers commit sequence from its observation", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-commit-seq";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:commit-seq-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:commit-seq";
+
+  try {
+    const applied = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-commit-seq",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: target.id,
+          value: { value: 1 },
+        }],
+        schedulerObservation: observationForAction(actionId, {
+          ownerSpace,
+          currentKnownWrites: [target],
+        }),
+      },
+    });
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET commit_seq = NULL
+      WHERE action_id = :action_id
+    `).run({ action_id: actionId });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.commitSeq, applied.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 writer lookup fails open on corrupt projections", async () => {
   const { engine, path } = await createEngine();
   const ownerSpace = "did:key:scheduler-writer-corruption";
