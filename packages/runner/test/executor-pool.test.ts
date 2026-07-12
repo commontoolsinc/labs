@@ -39,6 +39,7 @@ const demand = (
 });
 
 class FakeExecutionControl {
+  readonly events: string[];
   listener: ExecutionDemandListener | undefined;
   current: ExecutionLeaseHandle | null = null;
   acquired = 0;
@@ -46,6 +47,10 @@ class FakeExecutionControl {
   renewalSucceeds = true;
   drains = 0;
   finished = 0;
+
+  constructor(events: string[] = []) {
+    this.events = events;
+  }
 
   subscribeExecutionDemands(listener: ExecutionDemandListener): () => void {
     this.listener = listener;
@@ -74,6 +79,7 @@ class FakeExecutionControl {
   beginExecutionLeaseDrain(
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
+    this.events.push("begin-drain");
     this.drains++;
     const draining = { ...current, state: "draining" as const };
     this.current = draining as ExecutionLeaseHandle;
@@ -83,6 +89,7 @@ class FakeExecutionControl {
   finishExecutionLeaseDrain(
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLease | null> {
+    this.events.push("finish-drain");
     this.finished++;
     const revoked = { ...current, state: "revoked" as const };
     this.current = null;
@@ -101,11 +108,22 @@ class FakeExecutionControl {
 }
 
 class FakeExecutor implements SpaceExecutor {
+  readonly events: string[];
   demandUpdates: readonly string[][] = [];
   wakes = 0;
+  settled = 0;
+  settleResult = 0;
+  settleError: unknown;
+  settleGate: Promise<void> | undefined;
+  readonly settleStarted = Promise.withResolvers<void>();
   stopped = 0;
+  stopOptions: ({ abrupt?: boolean } | undefined)[] = [];
   stopGate: Promise<void> | undefined;
   readonly stopStarted = Promise.withResolvers<void>();
+
+  constructor(events: string[] = []) {
+    this.events = events;
+  }
 
   setDemand(pieces: readonly string[]): Promise<void> {
     this.demandUpdates = [...this.demandUpdates, [...pieces]];
@@ -117,7 +135,18 @@ class FakeExecutor implements SpaceExecutor {
     return Promise.resolve();
   }
 
-  async stop(): Promise<void> {
+  async settle(): Promise<number> {
+    this.events.push("settle");
+    this.settled++;
+    this.settleStarted.resolve();
+    await this.settleGate;
+    if (this.settleError !== undefined) throw this.settleError;
+    return this.settleResult;
+  }
+
+  async stop(options?: { abrupt?: boolean }): Promise<void> {
+    this.events.push(options?.abrupt ? "stop-abrupt" : "stop-graceful");
+    this.stopOptions.push(options);
     this.stopped++;
     this.stopStarted.resolve();
     await this.stopGate;
@@ -125,14 +154,19 @@ class FakeExecutor implements SpaceExecutor {
 }
 
 class FakeExecutorFactory implements SpaceExecutorFactory {
+  readonly events: string[];
   readonly executors: FakeExecutor[] = [];
   starts: Parameters<SpaceExecutorFactory["start"]>[0][] = [];
+
+  constructor(events: string[] = []) {
+    this.events = events;
+  }
 
   start(
     options: Parameters<SpaceExecutorFactory["start"]>[0],
   ): Promise<SpaceExecutor> {
     this.starts.push(options);
-    const executor = new FakeExecutor();
+    const executor = new FakeExecutor(this.events);
     this.executors.push(executor);
     return Promise.resolve(executor);
   }
@@ -226,6 +260,228 @@ Deno.test("shared execution pool renews authority before reusing a live worker",
   }
 });
 
+Deno.test("shared execution pool settles before fencing a graceful drain", async () => {
+  const events: string[] = [];
+  const control = new FakeExecutionControl(events);
+  const factory = new FakeExecutorFactory(events);
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    const settleGate = Promise.withResolvers<void>();
+    executor.settleGate = settleGate.promise;
+
+    control.emit(2, []);
+    await executor.settleStarted.promise;
+
+    assertEquals(events, ["settle"]);
+    assertEquals(control.current?.state, "active");
+    assertEquals(control.drains, 0);
+    assertEquals(executor.stopped, 0);
+
+    settleGate.resolve();
+    await pool.idle();
+
+    assertEquals(events, [
+      "settle",
+      "begin-drain",
+      "stop-graceful",
+      "finish-drain",
+    ]);
+    assertEquals(executor.stopOptions, [undefined]);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool renews its unfenced lease throughout settle", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number; cleared: boolean }
+  >();
+  let nextTimer = 0;
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    settleTimeoutMs: 60_000,
+    setTimer: (callback, delayMs) => {
+      const timer = ++nextTimer;
+      timers.set(timer, { callback, delayMs, cleared: false });
+      return timer;
+    },
+    clearTimer: (timer) => {
+      const record = timers.get(timer);
+      if (record !== undefined) record.cleared = true;
+    },
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    const settleGate = Promise.withResolvers<void>();
+    executor.settleGate = settleGate.promise;
+
+    control.emit(2, []);
+    await executor.settleStarted.promise;
+    const renewal = [...timers.values()].find((timer) =>
+      !timer.cleared && timer.delayMs < 60_000
+    );
+    renewal?.callback();
+    for (let index = 0; index < 4; index++) await Promise.resolve();
+
+    assertEquals(control.renewals, 1);
+    assertEquals(control.current?.state, "active");
+    assertEquals(control.drains, 0);
+
+    settleGate.resolve();
+    await pool.idle();
+    assertEquals(control.finished, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool hard cap fences and abruptly stops an unsettled worker", async () => {
+  const events: string[] = [];
+  const control = new FakeExecutionControl(events);
+  const factory = new FakeExecutorFactory(events);
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number; cleared: boolean }
+  >();
+  let nextTimer = 0;
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    settleTimeoutMs: 17,
+    setTimer: (callback, delayMs) => {
+      const timer = ++nextTimer;
+      timers.set(timer, { callback, delayMs, cleared: false });
+      return timer;
+    },
+    clearTimer: (timer) => {
+      const record = timers.get(timer);
+      if (record !== undefined) record.cleared = true;
+    },
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    executor.settleGate = new Promise(() => {});
+
+    control.emit(2, []);
+    await executor.settleStarted.promise;
+    const settleTimer = [...timers.values()].find((timer) =>
+      !timer.cleared && timer.delayMs === 17
+    );
+    assertEquals(settleTimer?.delayMs, 17);
+
+    settleTimer?.callback();
+    await pool.idle();
+
+    assertEquals(events, [
+      "settle",
+      "begin-drain",
+      "stop-abrupt",
+      "finish-drain",
+    ]);
+    assertEquals(executor.stopOptions, [{ abrupt: true }]);
+    assertEquals(control.finished, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool fences and abruptly stops a worker that fails to settle", async () => {
+  const events: string[] = [];
+  const control = new FakeExecutionControl(events);
+  const factory = new FakeExecutorFactory(events);
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    factory.executors[0]!.settleError = new Error("settle failed");
+
+    await control.emit(2, []);
+    await pool.idle();
+
+    assertEquals(events, [
+      "settle",
+      "begin-drain",
+      "stop-abrupt",
+      "finish-drain",
+    ]);
+    assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool abruptly fences when settle-time renewal fails", async () => {
+  const events: string[] = [];
+  const control = new FakeExecutionControl(events);
+  const factory = new FakeExecutorFactory(events);
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number; cleared: boolean }
+  >();
+  let nextTimer = 0;
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    settleTimeoutMs: 60_000,
+    setTimer: (callback, delayMs) => {
+      const timer = ++nextTimer;
+      timers.set(timer, { callback, delayMs, cleared: false });
+      return timer;
+    },
+    clearTimer: (timer) => {
+      const record = timers.get(timer);
+      if (record !== undefined) record.cleared = true;
+    },
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    executor.settleGate = new Promise(() => {});
+    control.renewalSucceeds = false;
+
+    control.emit(2, []);
+    await executor.settleStarted.promise;
+    const renewal = [...timers.values()].find((timer) =>
+      !timer.cleared && timer.delayMs < 60_000
+    );
+    renewal?.callback();
+    await pool.idle();
+
+    assertEquals(events, [
+      "settle",
+      "begin-drain",
+      "stop-abrupt",
+      "finish-drain",
+    ]);
+    assertEquals(control.renewals, 1);
+    assertEquals(executor.stopOptions, [{ abrupt: true }]);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool stops a fenced worker before releasing its lease", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
@@ -274,15 +530,20 @@ Deno.test("shared execution pool retains demand that arrives during drain", asyn
     await control.emit(1, active);
     await pool.idle();
     const first = factory.executors[0]!;
-    const stopGate = Promise.withResolvers<void>();
-    first.stopGate = stopGate.promise;
+    const settleGate = Promise.withResolvers<void>();
+    first.settleGate = settleGate.promise;
 
     control.emit(2, []);
-    await first.stopStarted.promise;
-    const redemanded = control.emit(3, active);
+    await first.settleStarted.promise;
+    assertEquals(control.drains, 0);
+    const redemanded = [
+      control.emit(3, active),
+      control.emit(4, [demand(1, ["piece:a", "piece:b"])]),
+      control.emit(5, [demand(1, ["piece:b"])]),
+    ];
 
-    stopGate.resolve();
-    await redemanded;
+    settleGate.resolve();
+    await Promise.all(redemanded);
     await pool.idle();
 
     assertEquals(first.stopped, 1);
@@ -290,13 +551,13 @@ Deno.test("shared execution pool retains demand that arrives during drain", asyn
     assertEquals(pool.snapshot(SPACE, BRANCH), {
       state: "live",
       referenceCount: 1,
-      pieces: ["piece:a"],
+      pieces: ["piece:b"],
       leaseGeneration: 2,
     });
 
     // A later update must still reconcile against the replacement generation,
     // not create a second mapped slot beside an orphaned Worker.
-    await control.emit(4, [demand(1, ["piece:a", "piece:b"])]);
+    await control.emit(6, [demand(1, ["piece:a", "piece:b"])]);
     await pool.idle();
     assertEquals(factory.starts.length, 2);
     assertEquals(factory.executors[1]?.demandUpdates, [[

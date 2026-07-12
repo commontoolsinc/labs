@@ -28,8 +28,10 @@ export interface SpaceExecutor {
   setDemand(pieces: readonly string[]): Promise<void>;
   /** Pull the current demanded roots after an accepted input invalidation. */
   wake(): Promise<void>;
-  /** Settle outstanding local work and tear down the isolated runtime. */
-  stop(): Promise<void>;
+  /** Settle outstanding local work and return its accepted sequence barrier. */
+  settle(): Promise<number>;
+  /** Tear down the isolated runtime, optionally without another settle pass. */
+  stop(options?: { abrupt?: boolean }): Promise<void>;
 }
 
 export interface SpaceExecutorStartOptions {
@@ -59,6 +61,8 @@ export interface SharedExecutionPoolOptions {
   clearTimer?: (timer: number) => void;
   crashBackoffBaseMs?: number;
   crashBackoffMaxMs?: number;
+  /** Maximum graceful-settle window before the generation is fenced. */
+  settleTimeoutMs?: number;
 }
 
 export interface SpaceExecutionSnapshot {
@@ -122,6 +126,7 @@ export class SharedExecutionPool {
   readonly #clearTimer: (timer: number) => void;
   readonly #crashBackoffBaseMs: number;
   readonly #crashBackoffMaxMs: number;
+  readonly #settleTimeoutMs: number;
   readonly #slots = new Map<string, Slot>();
   readonly #tasks = new Set<Promise<void>>();
   #unsubscribe: (() => void) | null = null;
@@ -141,6 +146,7 @@ export class SharedExecutionPool {
         clearTimeout(timer as unknown as ReturnType<typeof setTimeout>));
     this.#crashBackoffBaseMs = options.crashBackoffBaseMs ?? 1_000;
     this.#crashBackoffMaxMs = options.crashBackoffMaxMs ?? 30_000;
+    this.#settleTimeoutMs = options.settleTimeoutMs ?? 60_000;
   }
 
   start(): void {
@@ -391,24 +397,124 @@ export class SharedExecutionPool {
     slot.backoffTimer = null;
   }
 
-  async #shutdown(slot: Slot, _abrupt: boolean): Promise<void> {
+  async #settleWhileRenewing(
+    slot: Slot,
+    executor: SpaceExecutor,
+    initialLease: ExecutionLeaseHandle | null,
+  ): Promise<{
+    graceful: boolean;
+    lease: ExecutionLeaseHandle | null;
+  }> {
+    type Outcome =
+      | { kind: "settled"; sequence: number }
+      | { kind: "settle-error"; error: unknown }
+      | { kind: "renewal-failed" }
+      | { kind: "timeout" };
+
+    let lease = initialLease;
+    let renewalTimer: number | null = null;
+    let timeoutTimer: number | null = null;
+    let renewalTask: Promise<void> | null = null;
+    let renewalFailed = false;
+    let running = true;
+    const generationToken = slot.generationToken;
+    const renewalFailure = Promise.withResolvers<void>();
+
+    const failRenewal = (error?: unknown): void => {
+      if (renewalFailed) return;
+      renewalFailed = true;
+      if (error !== undefined) {
+        console.warn("execution lease renewal failed during settle", error);
+      }
+      renewalFailure.resolve();
+    };
+
+    const scheduleRenewal = (): void => {
+      if (!running || lease === null || lease.state !== "active") return;
+      const remaining = Math.max(1, lease.expiresAt - this.#now());
+      renewalTimer = this.#setTimer(() => {
+        renewalTimer = null;
+        const current = lease;
+        if (!running || current === null || current.state !== "active") return;
+        renewalTask = this.#control.renewExecutionLease(current).then(
+          (renewed) => {
+            if (renewed === null) {
+              failRenewal();
+              return;
+            }
+            lease = renewed;
+            if (
+              slot.generationToken === generationToken &&
+              slot.lease?.leaseGeneration === renewed.leaseGeneration
+            ) {
+              slot.lease = renewed;
+            }
+            scheduleRenewal();
+          },
+          (error) => failRenewal(error),
+        ).finally(() => {
+          renewalTask = null;
+        });
+      }, Math.max(1, Math.floor(remaining / 2)));
+    };
+
+    scheduleRenewal();
+    const settle = executor.settle().then(
+      (sequence): Outcome => ({ kind: "settled", sequence }),
+      (error): Outcome => ({ kind: "settle-error", error }),
+    );
+    const timeout = new Promise<Outcome>((resolve) => {
+      timeoutTimer = this.#setTimer(
+        () => resolve({ kind: "timeout" }),
+        Math.max(0, this.#settleTimeoutMs),
+      );
+    });
+    const failedRenewal = renewalFailure.promise.then<Outcome>(() => ({
+      kind: "renewal-failed",
+    }));
+
+    const outcome = await Promise.race([settle, timeout, failedRenewal]);
+    running = false;
+    if (renewalTimer !== null) this.#clearTimer(renewalTimer);
+    if (timeoutTimer !== null) this.#clearTimer(timeoutTimer);
+    const inFlightRenewal = renewalTask;
+    if (inFlightRenewal !== null) await inFlightRenewal;
+
+    if (outcome.kind === "settle-error") {
+      console.warn("executor Worker failed to settle", outcome.error);
+    } else if (outcome.kind === "timeout") {
+      console.warn(
+        `executor Worker did not settle within ${this.#settleTimeoutMs}ms`,
+      );
+    }
+    return {
+      graceful: outcome.kind === "settled" && !renewalFailed,
+      lease,
+    };
+  }
+
+  async #shutdown(slot: Slot, abrupt: boolean): Promise<void> {
     this.#cancelRenewal(slot);
     this.#cancelBackoff(slot);
     const executor = slot.executor;
     let lease = slot.lease;
-    slot.executor = null;
-    slot.lease = null;
-    slot.generationToken = null;
-    slot.crashToken = null;
     if (executor === null && lease === null) return;
     slot.state = "draining";
 
+    if (!abrupt && executor !== null) {
+      const settled = await this.#settleWhileRenewing(slot, executor, lease);
+      lease = settled.lease;
+      abrupt = !settled.graceful;
+    }
     if (lease !== null && lease.state === "active") {
       lease = await this.#control.beginExecutionLeaseDrain(lease) ?? lease;
+      if (slot.lease?.leaseGeneration === lease.leaseGeneration) {
+        slot.lease = lease;
+      }
     }
     if (executor !== null) {
       try {
-        await executor.stop();
+        await executor.stop(abrupt ? { abrupt: true } : undefined);
       } catch (error) {
         console.warn("executor Worker teardown failed", error);
       }
@@ -416,5 +522,11 @@ export class SharedExecutionPool {
     if (lease !== null) {
       await this.#control.finishExecutionLeaseDrain(lease);
     }
+    if (slot.executor === executor) slot.executor = null;
+    if (slot.lease?.leaseGeneration === lease?.leaseGeneration) {
+      slot.lease = null;
+    }
+    slot.generationToken = null;
+    slot.crashToken = null;
   }
 }
