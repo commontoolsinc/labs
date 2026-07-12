@@ -9,6 +9,10 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type {
+  LegacyBackgroundExclusion,
+  LegacyBackgroundExclusionStatus,
+} from "@commonfabric/memory/v2";
 import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
@@ -540,6 +544,79 @@ describe("BackgroundPieceService", () => {
 });
 
 describe("SpaceManager", () => {
+  it("acquires exclusion before worker construction and releases after shutdown", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const acquired = Promise.withResolvers<
+      LegacyBackgroundExclusionStatus | null | undefined
+    >();
+    const shutdown = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:test",
+      servicePrincipal: identity.did(),
+      expiresAt: 1_100,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      deactivationTimeoutMs: 1,
+      now: () => 100,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: (branch) => {
+          events.push(`acquire:${branch}`);
+          return acquired.promise;
+        },
+        renew: () => Promise.resolve({ exclusion, ready: true }),
+        release: (_branch, generation) => {
+          events.push(`release:${generation}`);
+          return Promise.resolve(exclusion);
+        },
+      },
+      createWorkerController: () => {
+        events.push("worker:create");
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => {
+            events.push("worker:shutdown");
+            return shutdown.promise;
+          },
+          terminateNow: () => events.push("worker:terminate"),
+        } as never;
+      },
+    });
+
+    assertEquals(events, []);
+    manager.start();
+    await Promise.resolve();
+    assertEquals(events, ["acquire:"]);
+    assertEquals(events.includes("worker:create"), false);
+
+    acquired.resolve({ exclusion, ready: true });
+    await manager.idle();
+    assertEquals(events, ["acquire:", "worker:create"]);
+
+    const stopping = manager.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    assertEquals(events.includes("worker:shutdown"), true);
+    assertEquals(events.includes("release:1"), false);
+    shutdown.resolve();
+    await stopping;
+    assertEquals(events.at(-1), "release:1");
+  });
+
   it("schedules, runs, retries, disables, and removes pieces", async () => {
     await withMockWorker(async () => {
       const entry = new FakeEntryCell(pieceEntry());
