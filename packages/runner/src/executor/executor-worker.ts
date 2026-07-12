@@ -133,6 +133,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       );
       worker.postMessage({ type: "candidate-claim", candidate });
     },
+    onDiagnostic: (diagnostic) => {
+      worker.postMessage({ type: "candidate-diagnostic", diagnostic });
+    },
     onUnserved: (claim, sourceAction, diagnosticCode) => {
       claimsByAction.delete(sourceAction);
       worker.postMessage({ type: "unserved-claim", claim, diagnosticCode });

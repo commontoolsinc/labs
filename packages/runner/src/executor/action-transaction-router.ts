@@ -61,19 +61,6 @@ export function createExecutorActionTransactionRouter(
       });
       return local;
     }
-    const staticDecision = classifyStaticActionServability(
-      observation,
-      options.servedSpace,
-    );
-    if (staticDecision.status === "broker-required") {
-      options.onDiagnostic?.({ diagnosticCode: "broker-required" });
-      return local;
-    }
-    if (staticDecision.status === "unservable") {
-      options.onDiagnostic?.({ diagnosticCode: staticDecision.reason });
-      return local;
-    }
-
     const claimKey = actionClaimKey(observation);
     if (input.sourceAction === undefined) {
       options.onDiagnostic?.({
@@ -82,8 +69,9 @@ export function createExecutorActionTransactionRouter(
       });
       return local;
     }
+    const sourceAction = input.sourceAction;
 
-    const liveClaim = options.claimForAction(input.sourceAction);
+    const liveClaim = options.claimForAction(sourceAction);
     if (liveClaim !== undefined && !claimMatchesKey(liveClaim, claimKey)) {
       options.onDiagnostic?.({
         diagnosticCode: "claim-key-mismatch",
@@ -91,35 +79,47 @@ export function createExecutorActionTransactionRouter(
       });
       return local;
     }
-    const dynamicReason = dynamicUnservableReason(input, observation, options);
-    if (dynamicReason !== undefined) {
-      options.onDiagnostic?.({ diagnosticCode: dynamicReason, claimKey });
+    const staticDecision = classifyStaticActionServability(
+      observation,
+      options.servedSpace,
+    );
+    if (staticDecision.status !== "claim-ready") {
+      const diagnosticCode = staticDecision.status === "broker-required"
+        ? "broker-required"
+        : staticDecision.reason;
       if (liveClaim !== undefined) {
         attachClaimAssertion(input.commit, observation, liveClaim);
-        return {
-          disposition: "unserved",
-          diagnosticCode: dynamicReason,
-          ...(options.onUnserved
-            ? {
-              onSettled: () => {
-                reported.delete(input.sourceAction!);
-                options.onUnserved!(
-                  liveClaim,
-                  input.sourceAction!,
-                  dynamicReason,
-                );
-              },
-            }
-            : {}),
-        };
+        return unservedRoute(
+          reported,
+          options,
+          liveClaim,
+          sourceAction,
+          diagnosticCode,
+        );
       }
+      options.onDiagnostic?.({ diagnosticCode, claimKey });
+      return local;
+    }
+    const dynamicReason = dynamicUnservableReason(input, observation, options);
+    if (dynamicReason !== undefined) {
+      if (liveClaim !== undefined) {
+        attachClaimAssertion(input.commit, observation, liveClaim);
+        return unservedRoute(
+          reported,
+          options,
+          liveClaim,
+          sourceAction,
+          dynamicReason,
+        );
+      }
+      options.onDiagnostic?.({ diagnosticCode: dynamicReason, claimKey });
       return local;
     }
     if (liveClaim === undefined) {
       const encoded = JSON.stringify(claimKey);
-      if (reported.get(input.sourceAction) !== encoded) {
-        reported.set(input.sourceAction, encoded);
-        options.onCandidate({ claimKey }, input.sourceAction);
+      if (reported.get(sourceAction) !== encoded) {
+        reported.set(sourceAction, encoded);
+        options.onCandidate({ claimKey }, sourceAction);
       }
       return local;
     }
@@ -130,16 +130,37 @@ export function createExecutorActionTransactionRouter(
       ...(options.onUnserved
         ? {
           onFirewallRejected: (diagnosticCode: string) => {
-            reported.delete(input.sourceAction!);
+            reported.delete(sourceAction);
             options.onUnserved!(
               liveClaim,
-              input.sourceAction!,
+              sourceAction,
               diagnosticCode,
             );
           },
         }
         : {}),
     };
+  };
+}
+
+function unservedRoute(
+  reported: WeakMap<object, string>,
+  options: ExecutorActionTransactionRouterOptions,
+  claim: ExecutionClaim,
+  sourceAction: object,
+  diagnosticCode: string,
+): ActionTransactionRoute {
+  return {
+    disposition: "unserved",
+    diagnosticCode,
+    ...(options.onUnserved
+      ? {
+        onSettled: () => {
+          reported.delete(sourceAction);
+          options.onUnserved!(claim, sourceAction, diagnosticCode);
+        },
+      }
+      : {}),
   };
 }
 

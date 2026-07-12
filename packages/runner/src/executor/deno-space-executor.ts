@@ -43,8 +43,9 @@ export interface CandidateClaim {
 }
 
 export interface CandidateClaimDiagnostic {
-  readonly claim: ExecutionClaim;
   readonly diagnosticCode: string;
+  readonly claimKey?: ActionClaimKey;
+  readonly claim?: ExecutionClaim;
 }
 
 type WorkerResponse = {
@@ -54,10 +55,12 @@ type WorkerResponse = {
     | "complete"
     | "fatal"
     | "candidate-claim"
+    | "candidate-diagnostic"
     | "unserved-claim";
   requestId?: number;
   message?: string;
   candidate?: CandidateClaim;
+  diagnostic?: CandidateClaimDiagnostic;
   claim?: ExecutionClaim;
   diagnosticCode?: string;
 };
@@ -67,16 +70,32 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
   const message = value as Record<string, unknown>;
   return (message.type === "booted" || message.type === "ready" ||
     message.type === "complete" || message.type === "fatal" ||
-    message.type === "candidate-claim" || message.type === "unserved-claim") &&
+    message.type === "candidate-claim" ||
+    message.type === "candidate-diagnostic" ||
+    message.type === "unserved-claim") &&
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
     (message.message === undefined || typeof message.message === "string") &&
     (message.type !== "candidate-claim" ||
       isCandidateClaim(message.candidate)) &&
+    (message.type !== "candidate-diagnostic" ||
+      isCandidateClaimDiagnostic(message.diagnostic)) &&
     (message.type !== "unserved-claim" ||
       (isExecutionClaim(message.claim) &&
         typeof message.diagnosticCode === "string" &&
         message.diagnosticCode.length > 0));
+};
+
+const isCandidateClaimDiagnostic = (
+  value: unknown,
+): value is CandidateClaimDiagnostic => {
+  if (typeof value !== "object" || value === null) return false;
+  const diagnostic = value as Record<string, unknown>;
+  return typeof diagnostic.diagnosticCode === "string" &&
+    diagnostic.diagnosticCode.length > 0 &&
+    (diagnostic.claimKey === undefined ||
+      isCandidateClaim({ claimKey: diagnostic.claimKey })) &&
+    (diagnostic.claim === undefined || isExecutionClaim(diagnostic.claim));
 };
 
 const isCandidateClaim = (value: unknown): value is CandidateClaim => {
@@ -242,6 +261,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
         () => this.#handleCandidate(candidate),
         () => this.#handleCandidate(candidate),
       ).catch((error) => this.#fail(error));
+      return;
+    }
+    if (message.type === "candidate-diagnostic") {
+      this.#onCandidateDiagnostic?.(message.diagnostic!);
       return;
     }
     if (message.type === "unserved-claim") {
