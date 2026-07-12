@@ -307,9 +307,14 @@ export function createHostProviderChannel(
 
   return {
     port: channel.port2,
-    async dispose() {
+    dispose() {
       closeHost();
-      await receiving.catch(() => undefined);
+      // Connection.close detaches the authenticated session and suppresses any
+      // late response. A read already executing inside the Server may still
+      // unwind, but disposal must not wait for that non-cancellable work or a
+      // terminated Worker could strand its host lease/channel indefinitely.
+      void receiving.catch(() => undefined);
+      return Promise.resolve();
     },
   };
 }
