@@ -729,6 +729,13 @@ and signing authority are separate.
 **Depends on:** W0.2, W0.3, W0.4, W1.2.
 **Unblocks:** Phase 2 and async serving.
 
+**Status:** implemented. Ordinary demand-driven Workers remain shadow-only and
+emit host-visible eligibility diagnostics. The explicit test capability proves
+the complete path from writer discovery through exact claim installation,
+sponsor-attributed execution, commit/no-op settlement, and canonical unserved
+revocation. The commit-time memory firewall revalidates trusted static scope,
+observed runtime scope, ACL, and CFC before applying any claimed transaction.
+
 **Decision:** client authority is the default. The server positively claims
 only an action it can serve. Clients need not predict unsupported actions.
 
@@ -771,20 +778,20 @@ only an action it can serve. Clients need not predict unsupported actions.
 
 **Success criteria:**
 
-- [ ] Same-space pure computation becomes claim-ready in ordinary shadow mode
+- [x] Same-space pure computation becomes claim-ready in ordinary shadow mode
       with zero server data commits.
-- [ ] The explicit test capability claims that computation and commits
+- [x] The explicit test capability claims that computation and commits
       server-derived output under its sponsor.
-- [ ] Mixed space+user writes abort as one transaction; zero operations apply;
+- [x] Mixed space+user writes abort as one transaction; zero operations apply;
       claim is absent/revoked; client execution commits the complete result.
-- [ ] Cross-space read or write aborts before apply and remains client-primary.
-- [ ] Dynamic scope change after a claim revokes it and converges via client
+- [x] Cross-space read or write aborts before apply and remains client-primary.
+- [x] Dynamic scope change after a claim revokes it and converges via client
       rerun without data loss.
-- [ ] First-run index miss safely instantiates/discovers the piece.
-- [ ] Pre-existing redirected output is served through writer-index identity,
+- [x] First-run index miss safely instantiates/discovers the piece.
+- [x] Pre-existing redirected output is served through writer-index identity,
       not creation source.
-- [ ] No-op produces settlement and leaves no stuck overlay prerequisite.
-- [ ] CFC/ACL denial is not converted into servability or a trusted shortcut.
+- [x] No-op produces settlement and leaves no stuck overlay prerequisite.
+- [x] CFC/ACL denial is not converted into servability or a trusted shortcut.
 
 ---
 
