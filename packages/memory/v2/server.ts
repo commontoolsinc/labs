@@ -426,8 +426,16 @@ export interface AuthenticatedExecutionDemand {
   readonly pieces: readonly string[];
 }
 
+export interface ExecutionDemandSnapshot {
+  readonly space: string;
+  readonly branch: BranchName;
+  /** Monotonic host-local publication order across all demand slots. */
+  readonly order: number;
+  readonly demands: readonly AuthenticatedExecutionDemand[];
+}
+
 export type ExecutionDemandListener = (
-  demands: readonly AuthenticatedExecutionDemand[],
+  snapshot: ExecutionDemandSnapshot,
 ) => void | Promise<void>;
 
 const executionDemandKey = (
@@ -1067,8 +1075,11 @@ export class Server {
   #acceptedCommitOrderBySpace = new Map<string, number>();
   #executionDemands = new Map<string, AuthenticatedExecutionDemand>();
   #executionDemandListeners = new Set<ExecutionDemandListener>();
+  #executionDemandOrder = 0;
   #executionClaims = new Map<string, ExecutionClaim>();
   #executionClaimGeneration = new Map<string, number>();
+  #executionPolicyEnabledSpaces = new Set<string>();
+  #executionClaimExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1312,6 +1323,23 @@ export class Server {
     );
   }
 
+  /** Execution policy changes authority, so OWNER is an invariant rather than
+   * an ACL-rollout observation. Enforce it even while ordinary ACL checks are
+   * configured off or observe-only. */
+  #authorizeExecutionPolicyOwner(
+    engine: Engine.Engine,
+    space: string,
+    principal: string | undefined,
+  ): V2Error | null {
+    const capability = this.#resolveCapability(engine, space, principal);
+    if (capability !== null && isCapable(capability, "OWNER")) return null;
+    this.aclStats.denied += 1;
+    return toError(
+      "AuthorizationError",
+      `Principal ${principal ?? "<anonymous>"} lacks OWNER on space ${space}`,
+    );
+  }
+
   async #authorizeMessage(
     space: string,
     principal: string | undefined,
@@ -1507,6 +1535,16 @@ export class Server {
       // iterates registered sessions, so removal stops all further watch
       // pushes, and its next message fails closed (Unknown session).
       this.#sessions.remove(space, session.id);
+      if (session.ownerConnectionId !== null) {
+        // Demand is physical-connection authority and must disappear even for
+        // the response-ordering exception below, where no revocation frame is
+        // sent to the writer that removed its own READ access.
+        this.removeExecutionDemandsForSession(
+          session.ownerConnectionId,
+          space,
+          session.id,
+        );
+      }
       if (session.id === writerSessionId) {
         // The writer's own session — it just removed its own access. Removal
         // already stopped its pushes and denies its next message; do NOT also
@@ -1599,7 +1637,12 @@ export class Server {
   }
 
   #publishExecutionDemands(space: string, branch: BranchName): void {
-    const snapshot = this.listExecutionDemands(space, branch);
+    const snapshot: ExecutionDemandSnapshot = Object.freeze({
+      space,
+      branch,
+      order: ++this.#executionDemandOrder,
+      demands: this.listExecutionDemands(space, branch),
+    });
     for (const listener of this.#executionDemandListeners) {
       try {
         const result = listener(snapshot);
@@ -1797,6 +1840,7 @@ export class Server {
   ): SessionSync {
     const session = this.#sessions.get(space, sessionId);
     if (session === null || !session.serverPrimaryExecutionV1) return sync;
+    this.expireExecutionClaims();
     const snapshotFrom = options.snapshotFromFeedSeq;
     const fromFeedSeq = snapshotFrom === undefined
       ? session.executionFeedSeq
@@ -1850,6 +1894,69 @@ export class Server {
     }
   }
 
+  #executionNowMs(): number {
+    return this.options.executionControl?.nowMs?.() ?? Date.now();
+  }
+
+  #publishExecutionClaimRevoke(claim: ExecutionClaim): void {
+    this.#publishExecutionControl(Object.freeze({
+      type: "session.execution.claim.revoke",
+      branch: claim.branch,
+      claim: Object.freeze(actionClaimKey(claim)),
+      leaseGeneration: claim.leaseGeneration,
+      claimGeneration: claim.claimGeneration,
+    }));
+  }
+
+  #scheduleExecutionClaimExpiry(): void {
+    if (this.#executionClaimExpiryTimer !== null) {
+      clearTimeout(this.#executionClaimExpiryTimer);
+      this.#executionClaimExpiryTimer = null;
+    }
+    if (this.#executionClaims.size === 0) return;
+    const nextExpiry = Math.min(
+      ...[...this.#executionClaims.values()].map((claim) => claim.expiresAt),
+    );
+    const delay = Math.min(
+      2_147_483_647,
+      Math.max(0, nextExpiry - this.#executionNowMs()),
+    );
+    this.#executionClaimExpiryTimer = setTimeout(() => {
+      this.#executionClaimExpiryTimer = null;
+      this.expireExecutionClaims();
+    }, delay);
+  }
+
+  /** Expire all claims whose server-authored deadline has passed. Public for
+   * deterministic host lifecycle integration/tests; the server also schedules
+   * the earliest deadline automatically. */
+  expireExecutionClaims(now = this.#executionNowMs()): number {
+    if (!Number.isFinite(now)) {
+      throw new TypeError("execution claim expiry time must be finite");
+    }
+    let expired = 0;
+    for (const [key, claim] of this.#executionClaims) {
+      if (claim.expiresAt > now) continue;
+      this.#executionClaims.delete(key);
+      this.#publishExecutionClaimRevoke(claim);
+      expired += 1;
+    }
+    this.#scheduleExecutionClaimExpiry();
+    return expired;
+  }
+
+  #revokeExecutionClaimsForSpace(space: string): number {
+    let revoked = 0;
+    for (const [key, claim] of this.#executionClaims) {
+      if (claim.space !== space) continue;
+      this.#executionClaims.delete(key);
+      this.#publishExecutionClaimRevoke(claim);
+      revoked += 1;
+    }
+    this.#scheduleExecutionClaimExpiry();
+    return revoked;
+  }
+
   setExecutionClaim(claimInput: ExecutionClaimInput): ExecutionClaim {
     const flags = this.memoryProtocolFlags();
     if (!flags.serverPrimaryExecutionV1) {
@@ -1868,21 +1975,17 @@ export class Server {
     ) {
       throw new Error("server-primary builtin passivity is disabled");
     }
-    const key = actionClaimMapKey(claimInput);
-    const now = this.options.executionControl?.nowMs?.() ?? Date.now();
-    const existing = this.#executionClaims.get(key);
-    if (existing !== undefined && existing.expiresAt > now) {
-      throw new Error("execution claim is already live");
+    if (!this.#executionPolicyEnabledSpaces.has(claimInput.space)) {
+      throw new Error(
+        `server-primary execution policy is not enabled for ${claimInput.space}`,
+      );
     }
+    const key = actionClaimMapKey(claimInput);
+    const now = this.#executionNowMs();
+    this.expireExecutionClaims(now);
+    const existing = this.#executionClaims.get(key);
     if (existing !== undefined) {
-      this.#executionClaims.delete(key);
-      this.#publishExecutionControl(Object.freeze({
-        type: "session.execution.claim.revoke",
-        branch: existing.branch,
-        claim: Object.freeze(actionClaimKey(existing)),
-        leaseGeneration: existing.leaseGeneration,
-        claimGeneration: existing.claimGeneration,
-      }));
+      throw new Error("execution claim is already live");
     }
     const claimGeneration = (this.#executionClaimGeneration.get(key) ?? 0) + 1;
     this.#executionClaimGeneration.set(key, claimGeneration);
@@ -1901,10 +2004,12 @@ export class Server {
       type: "session.execution.claim.set",
       claim,
     }));
+    this.#scheduleExecutionClaimExpiry();
     return claim;
   }
 
   revokeExecutionClaim(claim: ExecutionClaim): boolean {
+    this.expireExecutionClaims();
     const key = actionClaimMapKey(claim);
     const live = this.#executionClaims.get(key);
     if (
@@ -1914,17 +2019,13 @@ export class Server {
       return false;
     }
     this.#executionClaims.delete(key);
-    this.#publishExecutionControl(Object.freeze({
-      type: "session.execution.claim.revoke",
-      branch: live.branch,
-      claim: Object.freeze(actionClaimKey(live)),
-      leaseGeneration: live.leaseGeneration,
-      claimGeneration: live.claimGeneration,
-    }));
+    this.#publishExecutionClaimRevoke(live);
+    this.#scheduleExecutionClaimExpiry();
     return true;
   }
 
   publishActionSettlement(settlement: ActionSettlement): boolean {
+    this.expireExecutionClaims();
     if (
       settlement.branch !== settlement.claim.branch ||
       !Number.isSafeInteger(settlement.inputBasisSeq) ||
@@ -1957,6 +2058,7 @@ export class Server {
   }
 
   listExecutionClaims(space: string): readonly ExecutionClaim[] {
+    this.expireExecutionClaims();
     return Object.freeze(
       [...this.#executionClaims.values()]
         .filter((claim) => claim.space === space)
@@ -1969,6 +2071,10 @@ export class Server {
 
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
+    if (this.#executionClaimExpiryTimer !== null) {
+      clearTimeout(this.#executionClaimExpiryTimer);
+      this.#executionClaimExpiryTimer = null;
+    }
     await this.#refreshing;
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
@@ -1981,6 +2087,7 @@ export class Server {
     this.#executionDemandListeners.clear();
     this.#executionClaims.clear();
     this.#executionClaimGeneration.clear();
+    this.#executionPolicyEnabledSpaces.clear();
     this.#readPool.close();
   }
 
@@ -2647,9 +2754,18 @@ export class Server {
       if (deny) {
         return respondTypedError<SessionOpenResult>(message.requestId, deny);
       }
+      const executionPolicyEnabled = this.#executionPolicyEnabled(
+        engine,
+        message.space,
+      );
+      if (executionPolicyEnabled) {
+        this.#executionPolicyEnabledSpaces.add(message.space);
+      } else {
+        this.#executionPolicyEnabledSpaces.delete(message.space);
+      }
       if (
         this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
-        this.#executionPolicyEnabled(engine, message.space) &&
+        executionPolicyEnabled &&
         !connection.serverPrimaryExecutionV1
       ) {
         return respondTypedError<SessionOpenResult>(
@@ -2865,12 +2981,18 @@ export class Server {
             message.commit.operations,
             message.space,
           );
-          const deny = this.#authorizeMessageWithEngine(
-            engine,
-            message.space,
-            session.principal,
-            aclTouched || executionPolicyTouched ? "OWNER" : "WRITE",
-          );
+          const deny = executionPolicyTouched
+            ? this.#authorizeExecutionPolicyOwner(
+              engine,
+              message.space,
+              session.principal,
+            )
+            : this.#authorizeMessageWithEngine(
+              engine,
+              message.space,
+              session.principal,
+              aclTouched ? "OWNER" : "WRITE",
+            );
           if (deny) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
@@ -2972,6 +3094,14 @@ export class Server {
               message.space,
               message.sessionId,
             );
+          }
+          if (executionPolicyTouched) {
+            if (this.#executionPolicyEnabled(engine, message.space)) {
+              this.#executionPolicyEnabledSpaces.add(message.space);
+            } else {
+              this.#executionPolicyEnabledSpaces.delete(message.space);
+              this.#revokeExecutionClaimsForSpace(message.space);
+            }
           }
           await this.runPostCommitSchedulerSideEffects(
             message.space,

@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
 import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
@@ -98,7 +98,7 @@ type ExecutionServer = Server & {
   ): readonly AuthenticatedExecutionDemand[];
   setExecutionClaim(
     claim: ActionClaimKey & { leaseGeneration: number },
-  ): Promise<ExecutionClaim>;
+  ): ExecutionClaim;
   revokeExecutionClaim(claim: ExecutionClaim): boolean;
   publishActionSettlement(settlement: ActionSettlement): boolean;
   listExecutionClaims(space: string): readonly ExecutionClaim[];
@@ -117,6 +117,7 @@ const createServer = (
       ...testSessionOpenServerOptions,
       store: new URL(`memory://${name}`),
       protocolFlags: { serverPrimaryExecutionV1 },
+      acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
     } as ConstructorParameters<typeof Server>[0],
   ) as ExecutionServer;
 
@@ -521,7 +522,7 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
     events.push(event);
   });
   try {
-    await assertRejects(
+    assertThrows(
       () =>
         server.setExecutionClaim({
           ...claimKey(POLICY_SPACE, ""),
@@ -710,7 +711,7 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
 Deno.test("host cannot publish claims while the rollout flag is off", async () => {
   const server = createServer("memory-v2-execution-claims-off", false);
   try {
-    await assertRejects(
+    assertThrows(
       () =>
         server.setExecutionClaim({
           ...claimKey(POLICY_SPACE, ""),
