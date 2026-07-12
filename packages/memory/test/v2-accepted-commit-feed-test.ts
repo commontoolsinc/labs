@@ -53,6 +53,8 @@ Deno.test("memory v2 accepted-commit feed publishes canonical commits exactly on
     const applied = await session.transact(commit(1, 1));
 
     assertEquals(events, [{
+      order: 1,
+      deliverySeq: applied.seq,
       space: SPACE,
       originSessionId: session.sessionId,
       commit: applied,
@@ -120,8 +122,81 @@ Deno.test("memory v2 accepted-commit feed includes successful direct host writes
       "of:direct:1",
       { direct: true },
     );
-    assertEquals(events, [{ space: SPACE, commit: applied }]);
+    assertEquals(events, [{
+      order: 1,
+      deliverySeq: applied.seq,
+      space: SPACE,
+      commit: applied,
+    }]);
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 accepted-commit feed orders observation-only commits sharing a delivery slot", async () => {
+  const server = new Server({
+    authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const session = await client.mount(
+    SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const events: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    events.push(event);
+  });
+  const observation = (actionId: string) => ({
+    version: 1,
+    branch: "",
+    pieceId: "of:accepted-feed:piece",
+    processGeneration: 1,
+    actionId,
+    actionKind: "computation",
+    implementationFingerprint: "impl:accepted-feed",
+    runtimeFingerprint: "runtime:accepted-feed",
+    observedAtSeq: 0,
+    transactionKind: "action-run",
+    reads: [],
+    shallowReads: [],
+    actualChangedWrites: [],
+    currentKnownWrites: [],
+    declaredWrites: [],
+    materializerWriteEnvelopes: [],
+    status: "success",
+  });
+
+  try {
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observation("action:first"),
+    });
+    await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observation("action:second"),
+    });
+
+    assertEquals(
+      events.map((event) => ({
+        order: event.order,
+        deliverySeq: event.deliverySeq,
+        dataSeq: event.commit.seq,
+      })),
+      [
+        { order: 1, deliverySeq: 1, dataSeq: 0 },
+        { order: 2, deliverySeq: 1, dataSeq: 0 },
+      ],
+    );
+  } finally {
+    await client.close();
     await server.close();
   }
 });
