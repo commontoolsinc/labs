@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 
 import type { Cell } from "./builder/types.ts";
@@ -12,6 +13,7 @@ import {
   prepareFactory,
 } from "./factory-materialization.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { isSigilLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import { resolveSchema } from "./schema.ts";
 import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
@@ -120,6 +122,41 @@ function replaceChild(
     configurable: true,
   });
   return result;
+}
+
+/**
+ * Strengthen the shared conservative branch precheck only for discriminator
+ * values that are already concrete. The general traverser deliberately ignores
+ * const/enum because a link may resolve later; scheduled callback inputs have
+ * already been read, so a non-link discriminator can safely exclude a branch
+ * before its factory contract is enforced.
+ */
+function canFactoryBranchMatch(
+  branch: JSONSchema,
+  value: unknown,
+): boolean {
+  if (!canBranchMatch(branch, value)) return false;
+  if (!isRecord(branch) || isSigilLink(value)) return true;
+
+  if ("const" in branch && !deepEqual(branch.const, value)) return false;
+  if (
+    Array.isArray(branch.enum) &&
+    !branch.enum.some((candidate) => deepEqual(candidate, value))
+  ) {
+    return false;
+  }
+
+  if (isRecord(value) && isRecord(branch.properties)) {
+    for (const [key, childSchema] of Object.entries(branch.properties)) {
+      if (
+        key in value &&
+        !canFactoryBranchMatch(childSchema, value[key])
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -310,7 +347,7 @@ export function materializeScheduledFactoryInputs(
         const resolvedBranch = resolvedSchemaFor(branch);
         if (
           compound !== "allOf" && resolvedBranch !== undefined &&
-          !canBranchMatch(resolvedBranch, result)
+          !canFactoryBranchMatch(resolvedBranch, result)
         ) {
           continue;
         }

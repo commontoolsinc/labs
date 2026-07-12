@@ -437,6 +437,57 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
+  it("selects a discriminated factory branch before enforcing its contract", () => {
+    const selected = selectFactory("pattern", space, true);
+    const unionSchema = {
+      type: "object",
+      properties: {
+        selection: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "pattern" },
+                factory: { asFactory: CONTRACTS.pattern },
+              },
+              required: ["kind", "factory"],
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "module" },
+                factory: { asFactory: CONTRACTS.module },
+              },
+              required: ["kind", "factory"],
+            },
+          ],
+        },
+      },
+      required: ["selection"],
+    } as JSONSchema;
+    const input = {
+      selection: { kind: "pattern", factory: selected.shell },
+    };
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "discriminated-factory-union-input",
+        unionSchema,
+        tx,
+      );
+      const prepared = materializeScheduledFactoryInputs(
+        input,
+        unionSchema,
+        { runtime, tx, inputsCell },
+      ) as typeof input;
+
+      expect(prepared.selection.factory).toBe(selected.live);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
   for (const kind of FACTORY_KINDS) {
     it(`materializes a warm ${kind} factory in lift input`, async () => {
       const selected = selectFactory(kind, space, true);
