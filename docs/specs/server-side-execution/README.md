@@ -881,24 +881,28 @@ engine assumption and keeps WAL discipline in one place.
 
 ### 6.2 Storage transport: in-process, no subscriptions
 
-An initial prototype may connect through the `loopback` transport
-(`packages/memory/v2/client.ts:1299`) to the same `Server`, but authority
-cannot transfer through a raw `Engine` shortcut.
+The implemented **executor-grade provider** gives the Worker an opaque
+`MessagePort`, principal DID, and exact space/branch lane. The host owns the
+real authenticated `Server.connect` session and its grant; neither a private
+key nor raw `Engine` access crosses into the Worker. Reads and commits therefore
+traverse the canonical protocol path, preserving session authentication, ACL
+and CFC validation, conflict handling, scheduler-state updates, and post-commit
+hooks. In-process means transport-efficient, not policy-bypassing.
 
-The production design is an **executor-grade provider** implementing
-`IStorageProviderWithReplica` (`packages/runner/src/storage/interface.ts:264`)
-that (a) reads through the engine's read pool directly
-(`packages/memory/v2/server.ts:711`) with MessageChannel batching, (b)
-commits through the server's canonical validated apply path, and (c) receives
-invalidations from the engine commit stream as a per-space callback — not via
-`session.watch` graph queries. It preserves authenticated `onBehalfOf`, ACL
-checks, CFC preparation/validation, conflict checks, `ExecutionLease`
-fencing, scheduler-state updates, and feed hooks. In-process means
-transport-efficient, not policy-bypassing.
+The provider does not install a `session.watch` graph query. Instead, the
+server's host-only accepted-commit callback reports successful canonical
+commits after their scheduler side effects. The provider tracks the Worker's
+known roots and performs authenticated point queries for affected state, then
+delivers ordinary replica syncs over the port. Rejected transactions and
+catch-up reads do not appear as accepted commits; callback failures are
+contained and disposal unregisters the callback. The callback's per-space
+`order` is process-local wake ordering, not the reconnectable execution-control
+feed defined in §6.4/W0.6.
 
-The executor's scheduler trigger index is its subscription; the engine tells
-it "space S, commit at seq N, docs D1..Dk changed". The provider buffers a
-claimed transaction until whole-action scope validation succeeds (§5.B.2).
+W1.1 adds the `ExecutionLease` record and generation, host-derived
+`onBehalfOf`, and atomic fence validation to this same canonical transaction
+path. The provider buffers a claimed transaction until whole-action scope
+validation succeeds (§5.B.2).
 
 ### 6.3 What runs: demand, not pieces
 
@@ -1236,7 +1240,7 @@ means a design doc/decision is required before implementation.
 
 | # | Gap | Blocks | Status |
 | --- | --- | --- | --- |
-| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | needs-impl; loopback proves the seam |
+| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented; W1.1 adds atomic lease fencing |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
 | G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
 | G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |

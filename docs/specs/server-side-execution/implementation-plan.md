@@ -418,6 +418,10 @@ that it settled.
 **Depends on:** #4288.
 **Unblocks:** leases and executor Workers.
 
+**Status:** provider substrate implemented. Atomic ExecutionLease fencing is a
+W1.1 integration criterion because the lease record and compare-and-swap
+generation do not exist before that work package.
+
 **Decision:** low-overhead server execution may be in-process, but every read
 and commit must traverse the same authenticated authorization, conflict, CFC,
 provenance, hook, and notification path as a remote client.
@@ -441,8 +445,9 @@ provenance, hook, and notification path as a remote client.
 3. Route reads through the authenticated Server read path and commits through
    normal transact validation. Push post-commit invalidations to the Worker;
    do not poll.
-4. Allow the host to attach a current ExecutionLease and fence generation to
-   each commit. W1.1 supplies and validates the lease.
+4. Bind the provider channel to an exact space, branch, and opaque executor
+   principal. W1.1 supplies the current ExecutionLease and fence generation
+   and adds their atomic validation to the canonical commit path.
 5. Preserve remote and in-process behavioral equivalence with a differential
    fixture, including scheduler observations and rejected commits. Compare
    exact user operations/data, then normalize legitimate session ids,
@@ -452,16 +457,19 @@ provenance, hook, and notification path as a remote client.
 
 **Success criteria:**
 
-- [ ] Differential fixture produces identical user operations/data and
+- [x] Differential fixture produces identical user operations/data and
       normalized-equivalent scheduler semantics through remote/loopback and
       host-provider paths; expected session/provenance/fence differences are
       asserted explicitly.
-- [ ] ACL denial, CFC denial, conflict, and revoked/fenced lease each produce
-      the same atomic rejection shape; no partial apply.
-- [ ] An ordinary client commit invalidates and re-settles the Worker without a
+- [x] ACL denial, CFC denial, and conflict produce the same atomic rejection
+      shape with no partial apply.
+- [ ] A revoked/fenced lease produces the same atomic rejection shape with no
+      partial apply. Deferred to W1.1, which defines and validates the lease
+      record and generation in the canonical transaction.
+- [x] An ordinary client commit invalidates and re-settles the Worker without a
       watch/poll loop.
-- [ ] Worker termination releases callbacks and pending requests.
-- [ ] A test guard proves no provider path calls Engine.applyCommit directly.
+- [x] Worker termination releases callbacks and pending requests.
+- [x] A test guard proves no provider path calls Engine.applyCommit directly.
 
 ---
 
