@@ -85,8 +85,10 @@ function registerIdentifiedWriter(
   runtime: Runtime,
   action: Action,
   pieceId = PIECE_ID,
+  isEffect = false,
 ): void {
   runtime.scheduler.register(action, {
+    ...(isEffect ? { isEffect: true } : {}),
     rehydrateFromStorage: {
       space,
       pieceId,
@@ -226,6 +228,37 @@ describe("scheduler writer lookup", () => {
         kind: "materializer",
         write: envelopeAddress,
       }]);
+    } finally {
+      await disposeSchedulerTestRuntime(env);
+    }
+  });
+
+  it("discovers live effect writers for broker servability classification", async () => {
+    const env = createSchedulerTestRuntime(import.meta.url);
+    try {
+      stubDurableWriters(env.runtime, []);
+      const output = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-effect-output",
+        undefined,
+        env.tx,
+      );
+      const outputLink = output.getAsNormalizedFullLink();
+      const actionId = "writer-lookup:effect";
+      const action = createWriterAction(actionId, { writes: [outputLink] });
+      registerIdentifiedWriter(env.runtime, action, PIECE_ID, true);
+
+      const candidates = await writersForTargets(env.runtime, [
+        toMemorySpaceAddress(outputLink),
+      ]);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        actionId,
+        actionKind: "effect",
+        source: "live",
+      });
+      expect(candidates[0]?.live?.action).toBe(action);
     } finally {
       await disposeSchedulerTestRuntime(env);
     }
