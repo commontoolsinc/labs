@@ -56,6 +56,12 @@ export interface SchedulerActionObservation {
   implementationFingerprint: string;
   runtimeFingerprint: string;
   observedAtSeq: number;
+  /**
+   * Maximum durable same-space revision sequence actually consumed by this
+   * action. The memory host overwrites this at acceptance from the validated
+   * commit read set; a runner/client value is never authoritative.
+   */
+  inputBasisSeq?: number;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: IMemorySpaceAddress[];
@@ -186,6 +192,8 @@ export function isSchedulerActionObservation(
     typeof candidate.implementationFingerprint === "string" &&
     typeof candidate.runtimeFingerprint === "string" &&
     isNonNegativeInteger(candidate.observedAtSeq) &&
+    (candidate.inputBasisSeq === undefined ||
+      isNonNegativeInteger(candidate.inputBasisSeq)) &&
     (candidate.observedAtLocalSeq === undefined ||
       isNonNegativeInteger(candidate.observedAtLocalSeq)) &&
     isSchedulerObservationTransactionKind(candidate.transactionKind) &&
