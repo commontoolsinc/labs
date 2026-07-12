@@ -130,6 +130,16 @@ Deno.test("generated cfc types are declaration-only", () => {
   }
 });
 
+Deno.test("generated cfc pattern constructors retain their public types", () => {
+  const generated = Deno.readTextFileSync(GENERATED_URL);
+  assert(
+    generated.includes(
+      "export declare const cfcPattern: CfcPatternConstructors;",
+    ),
+    "cfcPattern must not degrade to any in the in-memory compiler types",
+  );
+});
+
 Deno.test("generateCfcTypes reproduces the checked-in module", async () => {
   const generated = await generateCfcTypes();
   assertEquals(

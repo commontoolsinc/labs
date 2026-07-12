@@ -166,6 +166,14 @@ export type CfcHasRolePattern = CfcAtomObject & {
   readonly space: CfcPatternString;
   readonly role: "owner" | "writer" | "reader" | CfcPatternVariable;
 };
+type CfcPatternConstructors = {
+  readonly user: (subject: CfcPatternString) => CfcUserPattern;
+  readonly hasRole: (
+    principal: CfcPatternString,
+    space: CfcPatternString,
+    role: CfcHasRolePattern["role"],
+  ) => CfcHasRolePattern;
+};
 export type CfcExchangeRuleAuthoringInput = {
   readonly appliesTo: CfcThisPolicyPattern;
   readonly pre?: {
@@ -195,7 +203,7 @@ export type CfcExchangeRulesDeclaration<
 };
 export declare function v(name: string): CfcPatternVariable;
 export declare const THIS_POLICY: CfcThisPolicyPattern;
-export declare const cfcPattern: any;
+export declare const cfcPattern: CfcPatternConstructors;
 export declare function exchangeRule<
   const T extends CfcExchangeRuleAuthoringInput,
 >(input: T): CfcExchangeRuleDeclaration<T>;

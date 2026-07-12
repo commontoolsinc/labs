@@ -294,6 +294,15 @@ export type CfcHasRolePattern = CfcAtomObject & {
   readonly role: "owner" | "writer" | "reader" | CfcPatternVariable;
 };
 
+export type CfcPatternConstructors = {
+  readonly user: (subject: CfcPatternString) => CfcUserPattern;
+  readonly hasRole: (
+    principal: CfcPatternString,
+    space: CfcPatternString,
+    role: CfcHasRolePattern["role"],
+  ) => CfcHasRolePattern;
+};
+
 export type CfcExchangeRuleAuthoringInput = {
   readonly appliesTo: CfcThisPolicyPattern;
   readonly pre?: {
@@ -345,7 +354,7 @@ Object.defineProperty(thisPolicyValue, "subject", {
 export const THIS_POLICY: CfcThisPolicyPattern = deepFreeze(thisPolicyValue);
 
 /** Pattern-only atom constructors, deliberately distinct from concrete mints. */
-export const cfcPattern = deepFreeze({
+export const cfcPattern: CfcPatternConstructors = deepFreeze({
   user(subject: CfcPatternString): CfcUserPattern {
     return deepFreeze({
       type: CFC_ATOM_TYPE.User,
