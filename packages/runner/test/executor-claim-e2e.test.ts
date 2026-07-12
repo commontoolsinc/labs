@@ -143,6 +143,7 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
   let observerClient: MemoryClient.Client | null = null;
   let unsubscribeAccepted = () => {};
   let unsubscribeControl = () => {};
+  let unsubscribeNoOp = () => {};
   const events: string[] = [];
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
@@ -292,9 +293,50 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
       executionProvenance?: { onBehalfOf?: string };
     };
     assertEquals(acceptedObservation.executionProvenance?.onBehalfOf, space);
+
+    const noOpSettled = Promise.withResolvers<ActionSettlement>();
+    let noOpSourceSeq = Number.POSITIVE_INFINITY;
+    unsubscribeNoOp = observer.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.settlement" &&
+        event.settlement.inputBasisSeq >= noOpSourceSeq
+      ) {
+        noOpSettled.resolve(event.settlement);
+      }
+    });
+    const noOpSource = await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 8 },
+      }, {
+        op: "set",
+        id: outputId,
+        value: {
+          ...(await server.readDocument(space, outputId) ?? {}),
+          value: 16,
+        },
+      }],
+    });
+    noOpSourceSeq = noOpSource.seq;
+    const noOpSettlement = await awaitBarrier(
+      noOpSettled.promise,
+      "no-op settlement",
+      events,
+    );
+    assertEquals(noOpSettlement.outcome, "no-op");
+    assertEquals(noOpSettlement.inputBasisSeq >= noOpSource.seq, true);
+    assertEquals(
+      (await server.readDocument(space, outputId) as { value?: unknown })
+        ?.value,
+      16,
+    );
   } finally {
     unsubscribeAccepted();
     unsubscribeControl();
+    unsubscribeNoOp();
     await executor?.stop();
     await seedRuntime.dispose();
     await seedStorage.close();
