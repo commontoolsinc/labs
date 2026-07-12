@@ -103,6 +103,17 @@ describe("TypeScriptCompiler", () => {
 
     expect(modules.get("/main.ts")?.policyManifests).toEqual([manifest]);
     expect(modules.get("/main.ts")?.js).not.toContain("sha256:policy");
+
+    const collected = compiler.compileToModulesCollecting(resolved, {
+      beforeTransformers: () => ({
+        factories: [],
+        getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
+      }),
+    });
+    expect(collected.diagnostics).toEqual([]);
+    expect(collected.modules.get("/main.ts")?.policyManifests).toEqual([
+      manifest,
+    ]);
   });
 
   it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {

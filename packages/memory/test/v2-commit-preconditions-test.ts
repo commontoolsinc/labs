@@ -750,6 +750,7 @@ Deno.test("malformed preconditions are rejected with ProtocolError", async () =>
       { kind: "origin-committed", originLocalSeq: "1" },
       { kind: "origin-committed", originLocalSeq: 1.5 },
       { kind: "origin-committed" },
+      { kind: "entity-value-hash", id: "entity:manifest", valueHash: 42 },
     ];
     for (const precondition of malformed) {
       assertThrows(
