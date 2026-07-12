@@ -31,6 +31,7 @@ import {
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
+  encodeMemoryBoundary,
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
   toDocumentPath,
@@ -1807,6 +1808,85 @@ Deno.test("memory v2 writer lookup ignores target creation provenance", async ()
     });
     assertEquals(candidates.length, 1);
     assertEquals(candidates[0]?.actionId, "writer-lookup:current-producer");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup fails open on corrupt projections", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-corruption";
+  const storeWriter = (actionId: string) => {
+    const target = {
+      space: ownerSpace,
+      scope: "space" as const,
+      id: `of:${actionId}`,
+      path: ["value"],
+    };
+    const storedObservation = observationForAction(actionId, {
+      ownerSpace,
+      currentKnownWrites: [target],
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: storedObservation,
+    });
+    return { target, storedObservation };
+  };
+  const lookup = (
+    target: SchedulerActionObservation["currentKnownWrites"][number],
+  ) =>
+    writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    });
+
+  try {
+    const missingState = storeWriter("writer-corrupt:missing-state");
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_state
+      WHERE action_id = 'writer-corrupt:missing-state'
+    `).run();
+    assertEquals(lookup(missingState.target), []);
+
+    const missingSnapshot = storeWriter("writer-corrupt:missing-snapshot");
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_snapshot
+      WHERE action_id = 'writer-corrupt:missing-snapshot'
+    `).run();
+    assertEquals(lookup(missingSnapshot.target), []);
+
+    const mismatchedPayload = storeWriter("writer-corrupt:mismatched-payload");
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET payload = :payload
+      WHERE action_id = 'writer-corrupt:mismatched-payload'
+    `).run({
+      payload: encodeMemoryBoundary({
+        ...mismatchedPayload.storedObservation,
+        actionId: "writer-corrupt:forged-action",
+      }),
+    });
+    assertEquals(lookup(mismatchedPayload.target), []);
+
+    const invalidPath = storeWriter("writer-corrupt:invalid-path");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_path = :write_path
+      WHERE action_id = 'writer-corrupt:invalid-path'
+    `).run({ write_path: encodeMemoryBoundary([42]) });
+    assertEquals(lookup(invalidPath.target), []);
+
+    const invalidKind = storeWriter("writer-corrupt:invalid-kind");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_kind = 'forged-kind'
+      WHERE action_id = 'writer-corrupt:invalid-kind'
+    `).run();
+    assertEquals(lookup(invalidKind.target), []);
   } finally {
     close(engine);
     await Deno.remove(path);
