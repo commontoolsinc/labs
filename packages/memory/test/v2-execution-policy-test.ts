@@ -228,35 +228,61 @@ Deno.test("execution policy is strict, owner-managed, and cannot be enabled arou
   }
 });
 
-Deno.test("execution policy remains OWNER-only when the general ACL dial is off", async () => {
-  const server = createServer("memory-v2-execution-policy-acl-off", "off");
-  const writerConnection = await connect(server, WRITER, true);
-  const writer = await writerConnection.client.mount(
-    SPACE,
-    {},
-    writerConnection.auth,
-  );
-  try {
-    await assertRejects(
-      () =>
-        writer.transact({
-          localSeq: 1,
-          reads: { confirmed: [], pending: [] },
-          operations: [{
-            op: "set",
-            id: POLICY_ID,
-            value: {
-              value: { version: 1, serverPrimaryExecution: true },
-            },
-          }],
-        }),
-      Error,
-      "lacks OWNER",
+Deno.test("execution policy remains OWNER-only outside ACL enforcement", async () => {
+  for (const aclMode of ["off", "observe"] as const) {
+    const server = createServer(
+      `memory-v2-execution-policy-acl-${aclMode}`,
+      aclMode,
     );
-    assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
-  } finally {
-    await writerConnection.client.close();
-    await server.close();
+    const ownerConnection = await connect(server, OWNER, true);
+    const owner = await ownerConnection.client.mount(
+      SPACE,
+      {},
+      ownerConnection.auth,
+    );
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${SPACE}`,
+        value: {
+          value: {
+            [OWNER]: "OWNER",
+            [WRITER]: "WRITE",
+          },
+        },
+      }],
+    });
+    const writerConnection = await connect(server, WRITER, true);
+    const writer = await writerConnection.client.mount(
+      SPACE,
+      {},
+      writerConnection.auth,
+    );
+    try {
+      await assertRejects(
+        () =>
+          writer.transact({
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: POLICY_ID,
+              value: {
+                value: { version: 1, serverPrimaryExecution: true },
+              },
+            }],
+          }),
+        Error,
+        "lacks OWNER",
+      );
+      assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
+    } finally {
+      await writerConnection.client.close();
+      await ownerConnection.client.close();
+      await server.close();
+    }
   }
 });
 
