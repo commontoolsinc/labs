@@ -993,6 +993,12 @@ export interface IEquatable {
  * The WithPattern variants accept pre-defined patterns for per-element
  * operations.
  */
+type ListPatternCallbackInput<T> = {
+  element: T extends Array<infer U> ? U : T;
+  index: number;
+  array: T;
+};
+
 export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
@@ -1002,6 +1008,14 @@ export interface IDerivable<T> {
       array: Reactive<T>,
     ) => FactoryInput<S>,
   ): Reactive<S[]>;
+  mapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<S[]>;
+  /**
+   * @deprecated Bind captures into the PatternFactory and use the one-argument
+   * overload. This overload remains for legacy stored/source compatibility.
+   */
   mapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
@@ -1035,6 +1049,14 @@ export interface IDerivable<T> {
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  /**
+   * @deprecated Bind captures into the PatternFactory and use the one-argument
+   * overload. This overload remains for legacy stored/source compatibility.
+   */
+  filterWithPattern<S>(
+    this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
@@ -1046,6 +1068,14 @@ export interface IDerivable<T> {
       array: Reactive<T>,
     ) => FactoryInput<S[]>,
   ): Reactive<S[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S[]>,
+  ): Reactive<S[]>;
+  /**
+   * @deprecated Bind captures into the PatternFactory and use the one-argument
+   * overload. This overload remains for legacy stored/source compatibility.
+   */
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,

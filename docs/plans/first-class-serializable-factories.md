@@ -1305,14 +1305,14 @@ complete task must pass after Stage 4 before final handoff.
 - [ ] Change array callback lowering so `map`/`filter`/`flatMap` capture through
   a bound `PatternFactory`, with no sibling params object in newly emitted
   nodes.
-- [ ] Make `mapWithPattern`/`filterWithPattern`/`flatMapWithPattern` accept the
+- [x] Make `mapWithPattern`/`filterWithPattern`/`flatMapWithPattern` accept the
   bound factory as the new canonical shape.
 - [ ] Make the new canonical node carry only `{ list, op }` and invoke the
   pattern with public `{ element, index, array }`; hidden captures flow only
   through the params root.
 - [ ] Keep a dual-read runtime path for stored legacy `{ op, params }` nodes
   during the compatibility window.
-- [ ] Keep old public overloads only until source migration and stored-data
+- [x] Keep old public overloads only until source migration and stored-data
   gates pass; mark them deprecated rather than teaching them new semantics.
 - [ ] Keep `packages/runner/src/builtins/op-pattern-ref.ts` and
   `packages/runner/src/builtins/list-op-argument-usage.ts` only on the named

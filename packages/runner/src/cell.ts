@@ -199,6 +199,12 @@ let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
 
+type ListPatternCallbackInput<T> = {
+  element: T extends Array<infer U> ? U : T;
+  index: number;
+  array: T;
+};
+
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
  * Reactive/Cell. These wrapped the callback in an anonymous inline pattern,
@@ -2469,8 +2475,18 @@ export class CellImpl<T extends FabricValue>
    */
   mapWithPattern<S>(
     this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<S[]>;
+  /** @deprecated Use a bound PatternFactory with the one-argument overload. */
+  mapWithPattern<S>(
+    this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
+  ): Reactive<S[]>;
+  mapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
+    params?: Record<string, any>,
   ): Reactive<S[]> {
     // Create the factory if it doesn't exist
     if (!mapFactory) {
@@ -2480,11 +2496,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    const result = mapFactory({
-      list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
-    });
+    const result = arguments.length === 1
+      ? mapFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+      })
+      : mapFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+        params,
+      });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
   }
@@ -2560,8 +2581,18 @@ export class CellImpl<T extends FabricValue>
    */
   filterWithPattern<S>(
     this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  /** @deprecated Use a bound PatternFactory with the one-argument overload. */
+  filterWithPattern<S>(
+    this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
+    params?: Record<string, any>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
@@ -2570,11 +2601,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    const result = filterFactory({
-      list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
-    });
+    const result = arguments.length === 1
+      ? filterFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+      })
+      : filterFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+        params,
+      });
     result.setSchema(listResultSchema());
     return result;
   }
@@ -2600,8 +2636,18 @@ export class CellImpl<T extends FabricValue>
    */
   flatMapWithPattern<S>(
     this: IsThisObject,
+    op: PatternFactory<ListPatternCallbackInput<T>, S[]>,
+  ): Reactive<S[]>;
+  /** @deprecated Use a bound PatternFactory with the one-argument overload. */
+  flatMapWithPattern<S>(
+    this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
+  ): Reactive<S[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S[]>,
+    params?: Record<string, any>,
   ): Reactive<S[]> {
     if (!flatMapFactory) {
       flatMapFactory = createNodeFactory({
@@ -2610,11 +2656,16 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    const result = flatMapFactory({
-      list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
-    });
+    const result = arguments.length === 1
+      ? flatMapFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+      })
+      : flatMapFactory({
+        list: this as unknown as Reactive<T>,
+        op,
+        params,
+      });
     result.setSchema(listResultSchema());
     return result;
   }
