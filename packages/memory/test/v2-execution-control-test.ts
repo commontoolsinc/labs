@@ -707,11 +707,13 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   const settlements: ActionSettlement[] = [];
   const firstSettlement = Promise.withResolvers<void>();
   const secondSettlement = Promise.withResolvers<void>();
+  const thirdSettlement = Promise.withResolvers<void>();
   const unsubscribeControl = session.subscribeExecutionControl((event) => {
     if (event.type === "session.execution.settlement") {
       settlements.push(event.settlement);
       if (settlements.length === 1) firstSettlement.resolve();
       if (settlements.length === 2) secondSettlement.resolve();
+      if (settlements.length === 3) thirdSettlement.resolve();
     }
   });
   let unbind = () => {};
@@ -885,6 +887,72 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       claim,
       inputBasisSeq: source.seq,
       outcome: "no-op",
+    });
+
+    const failedClaim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:provenance-failed"),
+      leaseGeneration: claim.leaseGeneration,
+    });
+    const failedObservation = {
+      ...observation,
+      actionId: failedClaim.actionId,
+      status: "failed" as const,
+      errorFingerprint: "error:test",
+      actualChangedWrites: [],
+    };
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 5,
+          reads: {
+            confirmed: [{
+              id: "of:provenance-source",
+              path: toDocumentPath(["value", "count"]),
+              seq: source.seq,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:failed-must-not-land",
+            value: { value: true },
+          }],
+          schedulerObservation: failedObservation,
+        }),
+      Error,
+      "failed claimed actions must not include semantic operations",
+    );
+    assertEquals(
+      await server.readDocument(POLICY_SPACE, "of:failed-must-not-land"),
+      null,
+    );
+    await session.transact({
+      localSeq: 6,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: failedObservation,
+    });
+    await Promise.race([
+      thirdSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("failed settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(settlements.at(-1), {
+      branch: "",
+      claim: failedClaim,
+      inputBasisSeq: source.seq,
+      outcome: "failed",
     });
   } finally {
     unbind();
