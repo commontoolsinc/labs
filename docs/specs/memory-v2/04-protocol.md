@@ -50,7 +50,8 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "schedulerWriterLookup": true
   }
 }
 ```
@@ -63,7 +64,8 @@ If the server accepts the protocol, it returns:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "schedulerWriterLookup": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -127,6 +129,13 @@ rows exist in the database. This flag is negotiated as an optional capability:
 a client and server may connect when their scheduler-state flags differ, and
 the server's flag controls the scheduler-observation data plane for that
 connection.
+
+`schedulerWriterLookup` is a build-inherent, optional capability. When it is
+absent it parses as `false`, and a newer runner does not send a request that an
+older memory server cannot parse. It instead fails open to piece-root
+discovery. When advertised, an authenticated space session may use
+`scheduler.writer.list`; the server, not the caller, supplies the owner space,
+principal/session execution contexts, and effective target scope keys.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -233,6 +242,7 @@ interface HelloMessage {
   flags: {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
+    schedulerWriterLookup?: boolean;
   };
 }
 
@@ -241,6 +251,8 @@ interface RequestMessage {
     | "session.open"
     | "transact"
     | "graph.query"
+    | "scheduler.snapshot.list"
+    | "scheduler.writer.list"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -493,6 +505,74 @@ Semantics:
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire
 commands for that surface remain deferred in this pass.
+
+### 4.3.7 `scheduler.writer.list` — Authenticated Producer Lookup
+
+The durable scheduler lookup returns every action whose current-known,
+declared, or materializer write overlaps one of the requested target paths. It
+does not select a winner and does not use document creation provenance.
+
+```typescript
+// Shown at module scope.
+interface SchedulerWriterTarget {
+  id: EntityId;
+  scope?: "space" | "user" | "session";
+  path: Array<string>;
+}
+
+interface SchedulerWriterListRequest {
+  type: "scheduler.writer.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  query: {
+    branch?: BranchId;
+    targets: SchedulerWriterTarget[];
+  };
+}
+
+interface SchedulerWritersForTargetsResult {
+  serverSeq: number;
+  writers: Array<{
+    branch: BranchId;
+    ownerSpace?: SpaceId;
+    pieceId: string;
+    processGeneration: number;
+    actionId: string;
+    executionContextKey: string;
+    observationId: number;
+    commitSeq: number | null;
+    observedAtSeq: number;
+    actionKind: "computation" | "effect" | "event-handler";
+    implementationFingerprint: string;
+    runtimeFingerprint: string;
+    status: "success" | "failed";
+    errorFingerprint?: string;
+    directDirtySeq?: number;
+    staleSeq?: number;
+    unknownReason?: string;
+    matchedWrites: Array<{
+      kind: "current-known" | "declared" | "materializer";
+      write: {
+        space: SpaceId;
+        id: EntityId;
+        scope: "space" | "user" | "session";
+        scopeKey: string;
+        path: Array<string>;
+      };
+    }>;
+  }>;
+}
+```
+
+The request has READ authority. The server requires the exact attached session,
+stamps the request's space onto every target, derives effective scope keys from
+that session's authenticated principal and session id, and returns only the
+shared plus applicable user/session action contexts. Callers cannot submit
+`scopeKey`, an execution-context key, or a different target space. Matching is
+bidirectional path-prefix overlap and results are deterministic. Missing,
+disabled, or corrupt scheduler state returns no candidates so the runner can
+fall back to ordinary piece-root discovery.
 
 ## 4.4 Selectors
 

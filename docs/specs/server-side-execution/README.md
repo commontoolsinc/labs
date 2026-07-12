@@ -208,8 +208,8 @@ fingerprint-gated, fail-open
 rehydration. Restart-skip is proven by `reload-rehydration.test.ts` and
 `v2-scheduler-state-test.ts`.
 
-Still missing (G4): durable dirty markers
-consumed as a **wake query** — the tree marks readers dirty *inline* during
+Still missing from G4: durable dirty markers consumed as a **wake query** — the
+tree marks readers dirty *inline* during
 commit (`findSchedulerReadersForWrite` `engine.ts:1849`,
 `markSchedulerReadersDirtyForWrites` `:1912`) but exposes no named
 `staleReadersFor(space, changedIds, seq)` batched query for a *parked*
@@ -287,15 +287,16 @@ lineage design is separate; creation provenance must not select an executor
 action.
 
 The authoritative producer projection is `scheduler_write_index`, joined to
-`scheduler_action_state` and the durable action snapshot. Lookup is by
+`scheduler_action_state` and the durable action snapshot. The implemented
+`writersForTargets` lookup is by
 effective `(space, scope_key, doc id, path)` with path-overlap semantics and
 returns every candidate writer; it must never choose an arbitrary winner.
 The action snapshot supplies `(pieceId, actionId,
 implementationFingerprint)`, and the piece's `patternIdentity` is the sole
 durable pointer used to load executable code. Implementation-plan W0.3 adds
-target/path lookup over the durable declared, current-known, and materializer
-rows written with scheduler observations. A live worker can also consult its
-registration-time static surface before the first run.
+the named target/path lookup over the durable declared, current-known, and
+materializer rows written with scheduler observations. A live worker can also
+consult its registration-time static surface before the first run.
 
 If a demanded piece has no usable writer row yet, the client interest already
 identifies the piece. The executor instantiates that piece, validates its
@@ -1239,7 +1240,7 @@ means a design doc/decision is required before implementation.
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
 | G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
 | G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
-| G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | indexes exist; query/consumer needs-impl |
+| G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | producer lookup implemented; parked-reader query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
 | G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |
 | G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
