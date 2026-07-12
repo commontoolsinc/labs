@@ -1,0 +1,180 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import type { Engine } from "../src/harness/engine.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+
+const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
+const space = signer.did();
+
+describe("PolicyOf label-time binding", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  const artifact = buildCfcPolicyArtifactManifest({
+    formatVersion: 1,
+    moduleIdentity: "sha256:policy-module",
+    symbol: "rules",
+    template: {
+      templateVersion: 1,
+      exchangeRules: [{
+        name: "release",
+        preCondition: {
+          confidentiality: [{ thisPolicy: true }],
+          integrity: [{ type: "IntegrityEvidence" }],
+        },
+        postCondition: { confidentiality: [], integrity: [] },
+      }],
+      dependencies: { authorityOnly: [], dataBearing: [] },
+      integrityRequirements: {},
+    },
+  });
+
+  const schema = {
+    type: "string",
+    ifc: {
+      confidentiality: [{
+        type: CFC_ATOM_TYPE.Policy,
+        policyRefKind: "module",
+        moduleIdentity: artifact.manifest.moduleIdentity,
+        symbol: artifact.manifest.symbol,
+        policyDigest: artifact.policyDigest,
+        subject: { __ctOwningSpace: true },
+      }],
+    },
+  } as const;
+
+  it("binds the owning space and records the exact installed manifest", async () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, "policy-of-value", schema, tx);
+    cell.set("secret");
+    tx.prepareCfc();
+    expect(tx.getCfcState().consultedPolicyManifests).toHaveLength(1);
+    await tx.commit();
+
+    const readTx = runtime.edit();
+    const link = cell.getAsNormalizedFullLink();
+    const metadata = readStoredCfcMetadata(readTx, link);
+    readTx.abort?.();
+    expect(metadata?.labelMap.entries[0]?.label.confidentiality).toEqual([{
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: artifact.manifest.moduleIdentity,
+      symbol: artifact.manifest.symbol,
+      policyDigest: artifact.policyDigest,
+      subject: space,
+    }]);
+  });
+
+  it("fails closed when the destination lacks the manifest", () => {
+    const tx = runtime.edit();
+    runtime.getCell(space, "missing-policy", schema, tx).set("secret");
+    expect(() => tx.prepareCfc()).toThrow("is not installed");
+    tx.abort?.();
+  });
+
+  it("rejects a raw module-policy object in authored schema metadata", () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const forgedSchema = {
+      ...schema,
+      ifc: {
+        confidentiality: [{
+          type: CFC_ATOM_TYPE.Policy,
+          policyRefKind: "module",
+          moduleIdentity: artifact.manifest.moduleIdentity,
+          symbol: artifact.manifest.symbol,
+          policyDigest: artifact.policyDigest,
+          subject: space,
+        }],
+      },
+    } as const;
+    const tx = runtime.edit();
+    runtime.getCell(space, "forged-policy", forgedSchema, tx).set("secret");
+    expect(() => tx.prepareCfc()).toThrow("compiler-lowered PolicyOf");
+    tx.abort?.();
+  });
+
+  it("compiles, installs, persists, and reloads a direct authored policy", async () => {
+    const program = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { Confidential, toSchema } from "commonfabric";
+          import type { PolicyOf } from "commonfabric/cfc";
+          import {
+            cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+          } from "commonfabric/cfc";
+          export const release = exchangeRule({
+            appliesTo: THIS_POLICY,
+            pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+            post: { addAlternatives: [cfcPattern.user(v("user"))] },
+          });
+          export const rules = exchangeRules([release]);
+          export const schema = toSchema<
+            Confidential<string, [PolicyOf<typeof rules>]>
+          >();
+        `,
+      }],
+    };
+    const engine = runtime.harness as Engine;
+    const compiled = await engine.compileToRecordGraph(program);
+    for (const module of compiled.modules) {
+      runtime.registerCfcPolicyManifests(
+        space,
+        module.policyManifests ?? [],
+      );
+    }
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const emittedSchema = evaluated.main?.schema as JSONSchema;
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      "compiled-policy-of",
+      emittedSchema,
+      tx,
+    );
+    cell.set("secret");
+    tx.prepareCfc();
+    await tx.commit();
+
+    const readTx = runtime.edit();
+    const metadata = readStoredCfcMetadata(
+      readTx,
+      cell.getAsNormalizedFullLink(),
+    );
+    readTx.abort?.();
+    const reference = metadata?.labelMap.entries[0]?.label
+      .confidentiality?.[0] as Record<string, unknown>;
+    expect(reference.moduleIdentity).toBe(compiled.entryIdentity);
+    expect(reference.symbol).toBe("rules");
+    expect(reference.subject).toBe(space);
+    expect(typeof reference.policyDigest).toBe("string");
+  });
+});

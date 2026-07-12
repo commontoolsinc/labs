@@ -128,6 +128,8 @@ type CfcInstrumentationHooks = {
   // one summary per prepared transaction that measured a protected write.
   // When absent — the default — the prepare gate skips all measurement.
   onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
+  resolvePolicyManifest?(reference: unknown): unknown;
+  hasPolicyManifest?(space: MemorySpace, reference: unknown): boolean;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -358,6 +360,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // Read-only view, not the live object — see readOnlyCfcView. Internal
     // code mutates `this.#cfcState` directly and never goes through here.
     return readOnlyCfcView(this.#cfcState);
+  }
+
+  resolveCfcPolicyManifest(reference: unknown): unknown {
+    return this.cfcInstrumentation.resolvePolicyManifest?.(reference);
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.hasPolicyManifest?.(space, reference) ??
+      false;
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
@@ -1947,6 +1958,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     consulted: ConsultedPolicyManifest,
   ): void {
     this.wrapped.recordCfcConsultedPolicyManifest(consulted);
+  }
+
+  resolveCfcPolicyManifest(reference: unknown): unknown {
+    return this.wrapped.resolveCfcPolicyManifest(reference);
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.hasCfcPolicyManifest(space, reference);
   }
 
   recordCfcLabelMetadataObservation(

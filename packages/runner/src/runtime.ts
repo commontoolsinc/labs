@@ -92,6 +92,11 @@ import {
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
+import {
+  type PolicyArtifactManifestV1,
+  validateCfcPolicyArtifactManifest,
+} from "./cfc/policy.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { PatternManager } from "./pattern-manager.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
@@ -599,6 +604,55 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
+  readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
+
+  registerCfcPolicyManifests(
+    space: MemorySpace,
+    inputs: readonly unknown[],
+  ): void {
+    for (const input of inputs) {
+      const artifact = validateCfcPolicyArtifactManifest(input);
+      const existing = this.#policyManifests.get(artifact.policyDigest);
+      if (existing !== undefined && !deepEqual(existing, artifact)) {
+        throw new Error(
+          `cfcPolicyManifest: immutable digest collision for ${artifact.policyDigest}`,
+        );
+      }
+      this.#policyManifests.set(artifact.policyDigest, artifact);
+      let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
+      if (spaces === undefined) {
+        spaces = new Set();
+        this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
+      }
+      spaces.add(space);
+    }
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) {
+      return undefined;
+    }
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const artifact = this.#policyManifests.get(candidate.policyDigest);
+    return artifact !== undefined &&
+        artifact.manifest.moduleIdentity === candidate.moduleIdentity &&
+        artifact.manifest.symbol === candidate.symbol
+      ? artifact
+      : undefined;
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    const artifact = this.resolveCfcPolicyManifest(reference);
+    return artifact !== undefined &&
+      this.#policyManifestSpaces.get(artifact.policyDigest)?.has(space) ===
+        true;
+  }
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -950,6 +1004,10 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
+      resolvePolicyManifest: (reference) =>
+        this.resolveCfcPolicyManifest(reference),
+      hasPolicyManifest: (space, reference) =>
+        this.hasCfcPolicyManifest(space, reference),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
       },
