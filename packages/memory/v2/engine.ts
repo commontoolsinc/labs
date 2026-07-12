@@ -3060,7 +3060,7 @@ export const writersForTargets = (
         w.action_id,
         w.execution_context_key,
         w.observation_id,
-        s.commit_seq,
+        COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
         s.observed_at_seq,
         s.payload,
         a.direct_dirty_seq,
@@ -3075,6 +3075,9 @@ export const writersForTargets = (
         AND s.action_id = w.action_id
         AND s.execution_context_key = w.execution_context_key
         AND s.observation_id = w.observation_id
+      JOIN scheduler_observation o
+        ON o.observation_id = s.observation_id
+        AND o.execution_context_key = s.execution_context_key
       JOIN scheduler_action_state a
         ON a.branch = w.branch
         AND a.owner_space = w.owner_space
