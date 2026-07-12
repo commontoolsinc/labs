@@ -541,6 +541,17 @@ the lease, the server appends trusted `ActionExecutionProvenance` —
 Those server-only fields are not inputs a client must predict to recognize a
 claim.
 
+Each executor action attempt does carry a transient
+`executionClaimAssertion` containing the effective context key and exact
+lease/claim generations captured when that attempt started. It is an untrusted
+selector, not provenance: the authenticated host reconstructs the rest of the
+key from the same scheduler observation, requires an exact live claim on the
+bound connection/session-token/principal, and the memory transaction verifies
+that the derived effective context equals the claim. The assertion is stripped
+from accepted scheduler state but retained in request replay identity. Thus a
+late generation cannot be relabeled onto a replacement claim, while an exact
+already-accepted replay remains idempotent after revoke.
+
 Initial eligibility is deliberately narrow: the complete action transaction
 must read and write only the same space's space-scoped cells. Static output
 bindings, declared reads/writes, materializer envelopes, and the writer index
@@ -734,7 +745,9 @@ and is separately attributable. It never signs client-pulled work.
   `ExecutionLease.leaseGeneration`; the provider rejects a stale generation.
   Within one lease, revoke names the action's live `claimGeneration` and the
   next claim issuance increments it, so delayed settlement cannot target the
-  new incarnation.
+  new incarnation. The attempt's exact assertion also prevents a delayed write
+  from being attributed to that new incarnation or silently becoming an
+  ordinary unclaimed write.
 - **Sponsor disconnect:** the worker finishes a bounded in-flight settle,
   drains, and restarts under another eligible requester. It does not change
   Runtime principal mid-settle.

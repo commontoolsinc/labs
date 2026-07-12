@@ -345,8 +345,9 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 
 **Depends on:** #4288.
 **Unblocks:** claim settlement and overlay reconciliation.
-**Status:** implemented. W1.1 replaces the dark generation-only provider
-binding with the durable fenced lease; W1.3 owns cross-space rejection and
+**Status:** implemented. Each action attempt now carries an exact transient
+claim assertion while W1.1 still replaces the dark generation-only session
+binding with the durable fenced lease. W1.3 owns cross-space rejection and
 unserved-attempt production.
 
 **Problem:** the accepting commit/head sequence is not proof of which inputs an
@@ -383,19 +384,27 @@ that it settled.
    overwrites/rejects any worker- or client-supplied value. It means
    server-executed on behalf of this user, not semantic authorship of every
    input.
-4. Carry provenance through the normal validated transaction path and store it
+4. Capture a transient `executionClaimAssertion` when the action attempt starts:
+   effective context key, leaseGeneration, and claimGeneration. The remaining
+   ActionClaimKey fields come from that same observation. A host-bound executor
+   must match the exact live incarnation; revoke/reclaim, expiry, connection or
+   session-token replacement, and effective-context mismatch reject the whole
+   attempt rather than relabeling or downgrading it. Strip the assertion before
+   persistence, but retain it in request replay identity. An exact accepted
+   replay remains idempotent after revoke.
+5. Carry provenance through the normal validated transaction path and store it
    with scheduler observation/commit diagnostics.
-5. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
-6. Add ActionSettlement emission for committed, no-op, failed, and unserved
+6. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
+7. Add ActionSettlement emission for committed, no-op, failed, and unserved
    attempts. Settlement names the exact leaseGeneration + claimGeneration and
    inputBasisSeq. A committed settlement must carry acceptedCommitSeq; no-op
    has no data commit. Emit either only after the normal confirmed-read
    validation accepts the corresponding data or observation-only transaction.
-7. Co-order data patches and settlements on the session feed. A client may
+8. Co-order data patches and settlements on the session feed. A client may
    apply a committed settlement only after its confirmed/feed cursor reaches
    acceptedCommitSeq. No-op settlement follows the accepted observation-only
    transaction in that ordered stream.
-8. Do not add persistent scheduler observations for handler runs in this phase.
+9. Do not add persistent scheduler observations for handler runs in this phase.
    Handlers remain client-authoritative, their read sets do not participate in
    server-primary wake indexes, and existing event/source commit provenance
    remains unchanged. Phase 5 owns any handler-observation contract; handler
@@ -415,6 +424,14 @@ that it settled.
       accidentally interchanged by type/API.
 - [x] The store/control event records the sponsor user as onBehalfOf.
 - [x] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
+- [x] A delayed attempt cannot be relabeled onto a replacement
+      claimGeneration or downgraded after revoke; exact accepted replays remain
+      idempotent and a changed assertion replay-mismatches.
+- [x] Executor authority is bound to the exact live connection, session token,
+      and principal, and an effective context narrower than the claim rolls the
+      whole transaction back.
+- [x] Replay fan-out reloads the canonical accepted basis/provenance rather than
+      mirroring request-forged host fields.
 - [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
       into this scalar.
 - [x] Handler execution emits no new scheduler observation in this phase and
