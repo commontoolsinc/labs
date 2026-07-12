@@ -8,6 +8,7 @@ import type {
 import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api";
 import type {
   AddIntegrity,
+  AnyOf,
   AuthoredByCurrentUser,
   CanonicalPointer,
   Cfc,
@@ -40,6 +41,7 @@ import { cfcAtom } from "@commonfabric/api/cfc";
 
 Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   const aliasNames = CFC_CANONICAL_ALIAS_NAMES;
+  const explicitAlternative: AnyOf<readonly ["reader-a", "reader-b"]> = {};
   const confidential: Confidential<{ title: string }, readonly ["secret"]> = {
     title: "alpha",
   };
@@ -224,6 +226,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(policyRefs.length, 2);
   assertEquals(ambiguousPolicyRef.name, "named");
   assertEquals(atomValues.length, 9);
+  assertEquals(explicitAlternative, {});
   assertEquals(aliasNames, [
     "Cfc",
     "Confidential",
@@ -233,6 +236,7 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
+    "AnyOf",
     "PolicyOf",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",

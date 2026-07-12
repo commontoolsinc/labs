@@ -4,6 +4,29 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: CFC authoring aliases", () => {
+  it("lowers AnyOf as one explicit confidentiality clause", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
+      type AnyOf<X extends readonly unknown[]> = { readonly __ct_cfc_any_of__?: X };
+
+      interface SchemaRoot {
+        conjunctive: Confidential<string, readonly ["reader-a", "reader-b"]>;
+        disjunctive: Confidential<string, readonly [AnyOf<readonly ["reader-a", "reader-b"]>]>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.conjunctive as any).ifc?.confidentiality)
+      .toEqual(["reader-a", "reader-b"]);
+    expect((schema.properties?.disjunctive as any).ifc?.confidentiality)
+      .toEqual([{ anyOf: ["reader-a", "reader-b"] }]);
+  });
+
   it("lowers Confidential and projection aliases through the canonical Cfc carrier", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };

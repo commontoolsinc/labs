@@ -1621,6 +1621,17 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (
         ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
       ) {
+        if (typeNode.typeName.text === "AnyOf") {
+          const alternativesNode = typeNode.typeArguments?.[0];
+          const alternatives = this.extractLiteralLikeValue(
+            undefined,
+            alternativesNode,
+            context,
+          );
+          return Array.isArray(alternatives)
+            ? { anyOf: alternatives }
+            : undefined;
+        }
         if (typeNode.typeName.text === "PolicyOf") {
           const bindingNode = typeNode.typeArguments?.[0];
           if (

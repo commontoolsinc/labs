@@ -771,6 +771,7 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
+  "AnyOf",
   "PolicyOf",
   "WriteAuthorizedBy",
   "TrustedActionWriteWithIntegrity",
@@ -843,6 +844,11 @@ export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
 export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
   maxConfidentiality: X;
 }>;
+
+/** Explicitly weakens one confidentiality clause to accept any alternative. */
+export type AnyOf<X extends readonly unknown[]> = {
+  readonly __ct_cfc_any_of__?: X;
+};
 
 /** Compile-time reference to one exported exchangeRules() declaration. */
 export type PolicyOf<Rules> = {
