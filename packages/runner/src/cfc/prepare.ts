@@ -3587,6 +3587,11 @@ const verifyInputRequirements = (
                 .length === 0;
         }
         // observe: decide exactly as `off` would, diagnose the divergence.
+        noteModulePolicyResolutionFailures(
+          tx,
+          `input requirement /${entry.path.join("/")}`,
+          outcome.resolutionFailures,
+        );
         const decision = fitsLegacy(confidentiality);
         const rewrittenFits = outcome.exhausted === false &&
           atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
@@ -4443,6 +4448,10 @@ const evaluateGatedConfidentiality = (
   confidentiality: readonly unknown[];
   exhausted: boolean;
   firings: number;
+  resolutionFailures: readonly {
+    readonly reference: unknown;
+    readonly reason: string;
+  }[];
 } => {
   const state = tx.getCfcState();
   const result = evaluateExchangeRules(
@@ -4473,7 +4482,29 @@ const evaluateGatedConfidentiality = (
       : result.label.confidentiality ?? [],
     exhausted: result.exhausted,
     firings: result.firings.length,
+    resolutionFailures: result.resolutionFailures,
   };
+};
+
+const noteModulePolicyResolutionFailures = (
+  tx: IExtendedStorageTransaction,
+  site: string,
+  failures: readonly {
+    readonly reference: unknown;
+    readonly reason: string;
+  }[],
+): void => {
+  for (const failure of failures) {
+    const reference = isRecord(failure.reference)
+      ? failure.reference
+      : undefined;
+    const digest = typeof reference?.policyDigest === "string"
+      ? ` digest ${reference.policyDigest}`
+      : "";
+    tx.noteCfcDiagnostic(
+      `policy-evaluation(observe): module policy ${failure.reason}${digest} at ${site}`,
+    );
+  }
 };
 
 // §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
@@ -4538,6 +4569,11 @@ const verifySinkRequestCeilings = (
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.
+        noteModulePolicyResolutionFailures(
+          tx,
+          `sink-request ${sink}`,
+          outcome.resolutionFailures,
+        );
         const rewrittenOffending = outcome.exhausted
           ? undefined
           : atomsOutsideCeiling(outcome.confidentiality, ceiling);
