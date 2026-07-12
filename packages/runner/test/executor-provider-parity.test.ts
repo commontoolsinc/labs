@@ -353,77 +353,88 @@ Deno.test("executor host provider carries authenticated scheduler observations o
     assertEquals(server.watchAddCount, 0);
 
     const adopted = Promise.withResolvers<StorageNotification>();
+    const readopted = Promise.withResolvers<StorageNotification>();
     const notifications: StorageNotification[] = [];
     storage.subscribe({
       next(notification) {
         notifications.push(notification);
         if (notification.type === "scheduler-observations") {
-          adopted.resolve(notification);
+          const adoptionCount = notifications.filter((candidate) =>
+            candidate.type === "scheduler-observations"
+          ).length;
+          if (adoptionCount === 1) {
+            adopted.resolve(notification);
+          }
+          if (adoptionCount === 2) {
+            readopted.resolve(notification);
+          }
         }
         return { done: false };
       },
     });
 
+    const externalObservation = {
+      version: 2 as const,
+      ownerSpace: space,
+      branch: "",
+      pieceId: "space:of:executor-provider:piece",
+      processGeneration: 1,
+      actionId: "action:external",
+      actionKind: "computation" as const,
+      implementationFingerprint: "impl:executor-provider",
+      runtimeFingerprint: "runtime:executor-provider",
+      observedAtSeq: 0,
+      transactionKind: "action-run" as const,
+      reads: [],
+      shallowReads: [],
+      actualChangedWrites: [],
+      currentKnownWrites: [{
+        space,
+        id: "of:executor-provider:observation-root",
+        scope: "space" as const,
+        path: [],
+      }],
+      declaredWrites: [{
+        space,
+        id: "of:executor-provider:observation-root",
+        scope: "space" as const,
+        path: [],
+      }],
+      materializerWriteEnvelopes: [],
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true,
+        implementationFingerprint: "impl:executor-provider",
+        runtimeFingerprint: "runtime:executor-provider",
+        piece: {
+          space,
+          id: "of:executor-provider:piece",
+          scope: "space" as const,
+          path: [],
+        },
+        reads: [],
+        writes: [{
+          space,
+          id: "of:executor-provider:observation-root",
+          scope: "space" as const,
+          path: [],
+        }],
+        materializerWriteEnvelopes: [],
+        directOutputs: [{
+          space,
+          id: "of:executor-provider:observation-root",
+          scope: "space" as const,
+          path: [],
+        }],
+      },
+      status: "success" as const,
+    };
+
     await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservation: {
-        version: 2,
-        ownerSpace: space,
-        branch: "",
-        pieceId: "space:of:executor-provider:piece",
-        processGeneration: 1,
-        actionId: "action:external",
-        actionKind: "computation",
-        implementationFingerprint: "impl:executor-provider",
-        runtimeFingerprint: "runtime:executor-provider",
-        observedAtSeq: 0,
-        transactionKind: "action-run",
-        reads: [],
-        shallowReads: [],
-        actualChangedWrites: [],
-        currentKnownWrites: [{
-          space,
-          id: "of:executor-provider:observation-root",
-          scope: "space",
-          path: [],
-        }],
-        declaredWrites: [{
-          space,
-          id: "of:executor-provider:observation-root",
-          scope: "space",
-          path: [],
-        }],
-        materializerWriteEnvelopes: [],
-        completeActionScopeSummary: {
-          version: 1,
-          complete: true,
-          implementationFingerprint: "impl:executor-provider",
-          runtimeFingerprint: "runtime:executor-provider",
-          piece: {
-            space,
-            id: "of:executor-provider:piece",
-            scope: "space",
-            path: [],
-          },
-          reads: [],
-          writes: [{
-            space,
-            id: "of:executor-provider:observation-root",
-            scope: "space",
-            path: [],
-          }],
-          materializerWriteEnvelopes: [],
-          directOutputs: [{
-            space,
-            id: "of:executor-provider:observation-root",
-            scope: "space",
-            path: [],
-          }],
-        },
-        status: "success",
-      },
+      schedulerObservation: externalObservation,
     });
     assertEquals(accepted.length, 1);
     assertEquals(accepted[0]?.deliverySeq, 1);
@@ -460,6 +471,54 @@ Deno.test("executor host provider carries authenticated scheduler observations o
         ?.actionId,
       "action:external",
     );
+
+    // Rehydration/listing sees the current version and must not permanently
+    // suppress a later payload-changing re-observation of the same action row.
+    const listed = await provider.listSchedulerActionSnapshots!();
+    assertEquals(
+      listed.snapshots[0]?.observationId,
+      persisted.snapshots[0]?.observationId,
+    );
+
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        ...externalObservation,
+        status: "failed",
+        errorFingerprint: "error:second-observation",
+      },
+    });
+    const readoptionTimer = setTimeout(
+      () =>
+        readopted.reject(
+          new Error(
+            "updated scheduler observation was not adopted; notifications=" +
+              notifications.map((candidate) => candidate.type).join(","),
+          ),
+        ),
+      1_000,
+    );
+    let updatedNotification: StorageNotification;
+    try {
+      updatedNotification = await readopted.promise;
+    } finally {
+      clearTimeout(readoptionTimer);
+    }
+    assert(updatedNotification.type === "scheduler-observations");
+    assertEquals(
+      updatedNotification.observations[0]?.observation as {
+        status?: string;
+        errorFingerprint?: string;
+      },
+      {
+        ...externalObservation,
+        status: "failed",
+        errorFingerprint: "error:second-observation",
+      },
+    );
+    assertEquals(accepted.length, 2);
   } finally {
     await storage.close();
     await channel.dispose();
@@ -1082,10 +1141,6 @@ Deno.test("executor host provider disposal releases callbacks and pending reads"
     );
     await server.graphQueryStarted.promise;
 
-    await storage.close();
-    const readResult = await pendingRead;
-    assert(readResult.error);
-
     disposing = channel.dispose();
     const disposedPromptly = await Promise.race([
       disposing.then(() => true),
@@ -1093,6 +1148,16 @@ Deno.test("executor host provider disposal releases callbacks and pending reads"
     ]);
     assertEquals(disposedPromptly, true);
     assertEquals(server.acceptedCommitSubscriptions, 0);
+
+    const pendingResult = await Promise.race([
+      pendingRead.then((result) => ({ settled: true as const, result })),
+      new Promise<{ settled: false }>((resolve) =>
+        setTimeout(() => resolve({ settled: false }), 100)
+      ),
+    ]);
+    assert(pendingResult.settled, "host-first disposal stranded a Worker read");
+    assert(pendingResult.result.error);
+    await storage.close();
   } finally {
     server.releaseGraphQuery.resolve();
     await disposing;

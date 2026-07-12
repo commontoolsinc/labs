@@ -28,6 +28,26 @@ const commit = (
   }],
 });
 
+const schedulerObservation = (actionId: string) => ({
+  version: 1,
+  branch: "",
+  pieceId: "of:accepted-feed:piece",
+  processGeneration: 1,
+  actionId,
+  actionKind: "computation",
+  implementationFingerprint: "impl:accepted-feed",
+  runtimeFingerprint: "runtime:accepted-feed",
+  observedAtSeq: 0,
+  transactionKind: "action-run",
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [],
+  declaredWrites: [],
+  materializerWriteEnvelopes: [],
+  status: "success",
+});
+
 Deno.test("memory v2 accepted-commit feed publishes canonical commits exactly once", async () => {
   const server = new Server({
     authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
@@ -106,6 +126,94 @@ Deno.test("memory v2 accepted-commit feed contains listener failures and omits r
   }
 });
 
+Deno.test("memory v2 accepted-commit feed isolates listener payload mutation", async () => {
+  const server = new Server({
+    authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const session = await client.mount(
+    SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  let observed: AcceptedCommitEvent | undefined;
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    event.commit.seq = 999;
+    event.commit.revisions.length = 0;
+  });
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    observed = event;
+  });
+
+  try {
+    const applied = await session.transact(commit(1, 1));
+    assertEquals(applied.seq, 1);
+    assertEquals(applied.revisions.length, 1);
+    assertEquals(observed?.commit.seq, 1);
+    assertEquals(observed?.commit.revisions.length, 1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 accepted-commit feed omits data and observation replays", async () => {
+  const server = new Server({
+    authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const session = await client.mount(
+    SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const events: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    events.push(event);
+  });
+
+  try {
+    const dataCommit = commit(1, 1);
+    const firstData = await session.transact(dataCommit);
+    const replayedData = await session.transact(dataCommit);
+    assertEquals(replayedData.seq, firstData.seq);
+
+    const observationCommit: ClientCommit = {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: schedulerObservation("action:replayed"),
+    };
+    const firstObservation = await session.transact(observationCommit);
+    const replayedObservation = await session.transact(observationCommit);
+    assertEquals(
+      replayedObservation.schedulerObservationId,
+      firstObservation.schedulerObservationId,
+    );
+
+    assertEquals(
+      events.map((event) => ({
+        order: event.order,
+        dataSeq: event.commit.seq,
+        observations: event.commit.schedulerObservationResults?.length ?? 0,
+      })),
+      [
+        { order: 1, dataSeq: 1, observations: 0 },
+        { order: 2, dataSeq: 1, observations: 1 },
+      ],
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 accepted-commit feed includes successful direct host writes", async () => {
   const server = new Server({
     authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
@@ -150,38 +258,18 @@ Deno.test("memory v2 accepted-commit feed orders observation-only commits sharin
   server.subscribeAcceptedCommits(SPACE, (event) => {
     events.push(event);
   });
-  const observation = (actionId: string) => ({
-    version: 1,
-    branch: "",
-    pieceId: "of:accepted-feed:piece",
-    processGeneration: 1,
-    actionId,
-    actionKind: "computation",
-    implementationFingerprint: "impl:accepted-feed",
-    runtimeFingerprint: "runtime:accepted-feed",
-    observedAtSeq: 0,
-    transactionKind: "action-run",
-    reads: [],
-    shallowReads: [],
-    actualChangedWrites: [],
-    currentKnownWrites: [],
-    declaredWrites: [],
-    materializerWriteEnvelopes: [],
-    status: "success",
-  });
-
   try {
     await session.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservation: observation("action:first"),
+      schedulerObservation: schedulerObservation("action:first"),
     });
     await session.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservation: observation("action:second"),
+      schedulerObservation: schedulerObservation("action:second"),
     });
 
     assertEquals(
