@@ -92,6 +92,7 @@ import {
 } from "./verified-provenance.ts";
 import { FabricAwareResolver } from "./fabric-resolver.ts";
 import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
 
@@ -558,6 +559,10 @@ export class Engine extends EventTarget implements Harness {
           identityByPath,
           specifierAliases,
         );
+        const policyManifests = validatePolicyManifestsForModule(
+          identity,
+          precompiledPolicyManifests.get(file.name),
+        );
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
@@ -567,9 +572,7 @@ export class Engine extends EventTarget implements Harness {
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
-          ...(precompiledPolicyManifests.get(file.name) === undefined ? {} : {
-            policyManifests: precompiledPolicyManifests.get(file.name),
-          }),
+          ...(policyManifests === undefined ? {} : { policyManifests }),
           imports,
         };
       });
@@ -803,21 +806,24 @@ export class Engine extends EventTarget implements Harness {
     });
     const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
       const out = emitted.get(file.name)!;
+      const identity = identityByPath.get(file.name)!;
       const imports = cacheableImportsFor(
         file.name,
         importEdges,
         identityByPath,
         specifierAliases,
       );
+      const policyManifests = validatePolicyManifestsForModule(
+        identity,
+        out.policyManifests,
+      );
       return {
-        identity: identityByPath.get(file.name)!,
+        identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
-        ...(out.policyManifests === undefined
-          ? {}
-          : { policyManifests: out.policyManifests }),
+        ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
       };
     });
@@ -1490,6 +1496,21 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.sesRuntime;
   }
+}
+
+function validatePolicyManifestsForModule(
+  moduleIdentity: string,
+  inputs: readonly unknown[] | undefined,
+): readonly unknown[] | undefined {
+  return inputs?.map((input) => {
+    const artifact = validateCfcPolicyArtifactManifest(input);
+    if (artifact.manifest.moduleIdentity !== moduleIdentity) {
+      throw new Error(
+        `policy manifest module identity mismatch for '${moduleIdentity}'`,
+      );
+    }
+    return artifact;
+  });
 }
 
 function computeId(program: Program): string {

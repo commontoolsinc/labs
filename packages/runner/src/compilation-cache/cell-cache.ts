@@ -800,7 +800,7 @@ export function writeCompiledDocs(
         return artifact;
       });
       if (policyManifests !== undefined) {
-        runtime.registerCfcPolicyManifests(space, policyManifests);
+        runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
       cell.set({
         kind: "compiled",
@@ -883,7 +883,7 @@ export async function loadCompiledClosure(
       return undefined;
     }
     return doc.policyManifests === undefined ? doc : (() => {
-      runtime.registerCfcPolicyManifests(space, policyManifests);
+      runtime.registerCfcPolicyManifests(undefined, policyManifests);
       return { ...doc, policyManifests };
     })();
   };

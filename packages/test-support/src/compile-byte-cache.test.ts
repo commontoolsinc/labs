@@ -20,6 +20,7 @@ const SPAN = {
   startColumn: 5,
   endColumn: 6,
 };
+const POLICY_MANIFEST = { policyDigest: "sha256:policy", manifest: {} };
 
 describe("ProcessModuleByteCache", () => {
   it("returns stored bytes by identity and reports a full set", () => {
@@ -51,6 +52,7 @@ describe("ProcessModuleByteCache", () => {
         js: "JS_B",
         sourceMap: "MAP_B",
         patternCoverageSpans: [SPAN],
+        policyManifests: [POLICY_MANIFEST],
       },
     ]);
     expect(cache.getCompleteSet(RT, ["a", "b"])?.size).toBe(2);
@@ -58,6 +60,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_B",
       sourceMap: "MAP_B",
       patternCoverageSpans: [SPAN],
+      policyManifests: [POLICY_MANIFEST],
     });
     cache.clear();
     expect(cache.getCompleteSet(RT, ["a", "b"])).toBeUndefined();
@@ -74,6 +77,12 @@ describe("ProcessModuleByteCache", () => {
     expect(cache.get(RT, "c")).toEqual({ js: "ABCDE" });
   });
 
+  it("includes policy manifests in the byte cap", () => {
+    const cache = new ProcessModuleByteCache(10);
+    cache.put(RT, "policy", { js: "x", policyManifests: [POLICY_MANIFEST] });
+    expect(cache.get(RT, "policy")).toBeUndefined();
+  });
+
   it("round-trips through snapshot/restore into a fresh cache", () => {
     const a = new ProcessModuleByteCache();
     a.put(RT, "x", { js: "JS_X" });
@@ -81,6 +90,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_Y",
       sourceMap: "MAP_Y",
       patternCoverageSpans: [SPAN],
+      policyManifests: [POLICY_MANIFEST],
     });
     a.put("v2", "z", { js: "JS_Z" });
 
@@ -93,6 +103,7 @@ describe("ProcessModuleByteCache", () => {
       js: "JS_Y",
       sourceMap: "MAP_Y",
       patternCoverageSpans: [SPAN],
+      policyManifests: [POLICY_MANIFEST],
     });
     expect(b.get("v2", "z")).toEqual({ js: "JS_Z" });
     expect(b.getCompleteSet(RT, ["x", "y"])?.size).toBe(2);
@@ -130,6 +141,7 @@ describe("ProcessModuleByteCache", () => {
       { key: `${RT}\0nojs` }, // missing js
       { key: `${RT}\0badspans`, js: "NO", patternCoverageSpans: ["bad"] },
       { key: `${RT}\0badspanstype`, js: "NO", patternCoverageSpans: "bad" },
+      { key: `${RT}\0badmanifests`, js: "NO", policyManifests: "bad" },
       null,
       "garbage",
     ] as unknown[]);

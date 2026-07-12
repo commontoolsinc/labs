@@ -593,6 +593,11 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       },
     });
     modules[0] = { ...modules[0]!, policyManifests: [artifact] };
+    const reference = {
+      moduleIdentity: artifact.manifest.moduleIdentity,
+      symbol: artifact.manifest.symbol,
+      policyDigest: artifact.policyDigest,
+    };
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const wtx = runtime.edit();
@@ -600,6 +605,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       wtx.prepareCfc();
       await wtx.commit();
     }
+    expect(runtime.hasCfcPolicyManifest(spaceA, reference)).toBe(false);
 
     const rtx = runtime.edit();
     const loaded = await loadCompiledClosure(
@@ -611,6 +617,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
     rtx.abort?.();
     expect(loaded.get(entryIdentity)?.policyManifests).toEqual([artifact]);
+    expect(runtime.hasCfcPolicyManifest(spaceA, reference)).toBe(false);
 
     const tampered = {
       ...artifact,

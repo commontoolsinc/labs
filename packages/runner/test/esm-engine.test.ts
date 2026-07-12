@@ -8,6 +8,7 @@ import { Engine } from "../src/harness/engine.ts";
 import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -257,6 +258,50 @@ describe("Engine.compileToRecordGraph", () => {
         precompiledModules: tagged,
       });
       expect((main as { total(): number }).total()).toBe(42);
+    });
+
+    it("rejects a precompiled policy manifest bound to another module", async () => {
+      const policyProgram: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `
+            import {
+              cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+            } from "commonfabric/cfc";
+            export const release = exchangeRule({
+              appliesTo: THIS_POLICY,
+              pre: {
+                integrity: [cfcPattern.hasRole(
+                  v("reviewer"), THIS_POLICY.subject, "reader",
+                )],
+              },
+              post: { dropClause: true },
+            });
+            export const rules = exchangeRules([release]);
+          `,
+        }],
+      };
+      const first = await engine.compileToRecordGraph(policyProgram);
+      const cached = new Map(first.modules.map((module) => {
+        const inputs = module.policyManifests ?? [];
+        const policyManifests = inputs.map((input) => {
+          const artifact = input as ReturnType<
+            typeof buildCfcPolicyArtifactManifest
+          >;
+          return buildCfcPolicyArtifactManifest({
+            ...artifact.manifest,
+            moduleIdentity: "sha256:substituted-module",
+          });
+        });
+        return [module.identity, { js: module.js, policyManifests }];
+      }));
+
+      await expect(
+        engine.compileToRecordGraph(policyProgram, {
+          precompiledModules: cached,
+        }),
+      ).rejects.toThrow("policy manifest module identity mismatch");
     });
 
     it("ignores precompiled bodies without coverage spans when pattern coverage is enabled", async () => {
