@@ -356,6 +356,22 @@ type DirtyOrigin = {
   seq: number;
 };
 
+/**
+ * Host-only notification emitted after a commit has passed the canonical
+ * server transaction path and its scheduler side effects have run. This is
+ * deliberately distinct from the dirty-session refresh queue: that queue also
+ * carries rejected-commit catch-up and may coalesce several commits.
+ */
+export interface AcceptedCommitEvent {
+  space: string;
+  originSessionId?: string;
+  commit: Engine.AppliedCommit;
+}
+
+export type AcceptedCommitListener = (
+  event: AcceptedCommitEvent,
+) => void | Promise<void>;
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -866,6 +882,7 @@ export class Server {
   // an older mirror cannot land after a newer one.
   #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
+  #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1275,7 +1292,53 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+    this.#acceptedCommitListeners.clear();
     this.#readPool.close();
+  }
+
+  /**
+   * Subscribe to accepted commits for one exact space. The callback is a
+   * host-side execution primitive, not a client protocol surface. Listener
+   * failures are contained because a commit is already durable by the time it
+   * is published and must never be reported as rejected afterward.
+   */
+  subscribeAcceptedCommits(
+    space: string,
+    listener: AcceptedCommitListener,
+  ): () => void {
+    let listeners = this.#acceptedCommitListeners.get(space);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.#acceptedCommitListeners.set(space, listeners);
+    }
+    listeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      const current = this.#acceptedCommitListeners.get(space);
+      current?.delete(listener);
+      if (current?.size === 0) {
+        this.#acceptedCommitListeners.delete(space);
+      }
+    };
+  }
+
+  #publishAcceptedCommit(event: AcceptedCommitEvent): void {
+    for (
+      const listener of this.#acceptedCommitListeners.get(event.space) ?? []
+    ) {
+      try {
+        const result = listener(event);
+        if (result instanceof Promise) {
+          void result.catch((error) => {
+            console.warn("accepted commit listener failed", error);
+          });
+        }
+      } catch (error) {
+        console.warn("accepted commit listener failed", error);
+      }
+    }
   }
 
   /**
@@ -1350,6 +1413,7 @@ export class Server {
       new Map(),
       undefined,
     );
+    this.#publishAcceptedCommit({ space, commit });
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -2121,6 +2185,11 @@ export class Server {
             previousReadSpaces,
             session,
           );
+          this.#publishAcceptedCommit({
+            space: message.space,
+            originSessionId: message.sessionId,
+            commit,
+          });
           this.markSpaceDirty(
             message.space,
             message.commit.operations
