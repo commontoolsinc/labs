@@ -564,6 +564,140 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
   }
 });
 
+Deno.test("memory v2 records the exact accepted input basis independently of head", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-input-basis";
+  const sourceId = "of:basis-source";
+  const secondId = "of:basis-second";
+  const semanticActionId = "basis:semantic";
+  const noopActionId = "basis:no-op";
+
+  try {
+    const source = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: sourceId, value: { value: 1 } }],
+      },
+    });
+    const second = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: secondId, value: { value: 2 } }],
+      },
+    });
+
+    const semantic = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: sourceId,
+            path: toDocumentPath(["value"]),
+            seq: source.seq,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "of:basis-output",
+          value: { value: 10 },
+        }],
+        schedulerObservation: observationForAction(semanticActionId, {
+          ownerSpace,
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: sourceId,
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const semanticSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: semanticActionId,
+    });
+    assertEquals(
+      (semanticSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      source.seq,
+    );
+    assertEquals(semanticSnapshot?.observedAtSeq, semantic.seq);
+    assertEquals(semantic.seq > second.seq, true);
+
+    const noop = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [
+            {
+              id: sourceId,
+              path: toDocumentPath(["value"]),
+              seq: source.seq,
+            },
+            {
+              id: secondId,
+              path: toDocumentPath(["value"]),
+              seq: second.seq,
+            },
+          ],
+          pending: [],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(noopActionId, {
+          ownerSpace,
+          reads: [
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: sourceId,
+              path: ["value"],
+            },
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: secondId,
+              path: ["value"],
+            },
+          ],
+        }),
+      },
+    });
+    const noopSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: noopActionId,
+    });
+    assertEquals(
+      (noopSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      second.seq,
+    );
+    assertEquals(noopSnapshot?.observedAtSeq, noop.seq);
+    assertEquals(noop.seq, semantic.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 delivers first and changed no-op observations in the next commit window", async () => {
   const { engine, path } = await createEngine();
 
