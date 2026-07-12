@@ -389,9 +389,10 @@ that it settled.
    ActionClaimKey fields come from that same observation. A host-bound executor
    must match the exact live incarnation; revoke/reclaim, expiry, connection or
    session-token replacement, and effective-context mismatch reject the whole
-   attempt rather than relabeling or downgrading it. Strip the assertion before
-   persistence, but retain it in request replay identity. An exact accepted
-   replay remains idempotent after revoke.
+   attempt rather than relabeling or downgrading it. Strip the assertion from
+   accepted scheduler-state persistence, but retain it in the raw request's
+   replay/original-commit identity. An exact accepted replay remains idempotent
+   after revoke.
 5. Carry provenance through the normal validated transaction path and store it
    with scheduler observation/commit diagnostics.
 6. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
