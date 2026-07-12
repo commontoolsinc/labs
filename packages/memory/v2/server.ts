@@ -781,9 +781,16 @@ class Connection {
       return;
     }
 
-    for (const { sessionId } of this.#sessions.values()) {
+    for (const { space: sessionSpace, sessionId } of this.#sessions.values()) {
       if (this.#closed) {
         return;
+      }
+      // A construction intentionally reuses one authenticated session id in
+      // every space. Dirty refresh is still space-specific: syncing that id
+      // through a connection mounted in another space would advance the real
+      // target session's cursor, then send its effect down the wrong socket.
+      if (sessionSpace !== space) {
+        continue;
       }
       const effect = await this.server.syncSessionForConnection(
         space,

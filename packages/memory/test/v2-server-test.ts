@@ -514,6 +514,38 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
   }
 });
 
+Deno.test("memory v2 dirty refresh stays on the connection's mounted space", async () => {
+  const server = createServer("memory://memory-v2-server-refresh-space-scope");
+  const first = server.connect(() => {});
+  const second = server.connect(() => {});
+  const firstSpace = "did:key:z6Mk-refresh-space-one";
+  const secondSpace = "did:key:z6Mk-refresh-space-two";
+  const sessionId = "session:shared-across-spaces";
+
+  try {
+    first.addSession(firstSpace, sessionId);
+    second.addSession(secondSpace, sessionId);
+
+    const syncCalls: Array<{ space: string; sessionId: string }> = [];
+    server.syncSessionForConnection = (space, mountedSessionId) => {
+      syncCalls.push({ space, sessionId: mountedSessionId });
+      return Promise.resolve(null);
+    };
+
+    // The server fans a dirty-space refresh to every connection. A connection
+    // mounted only in another space must not consume this session's cursor,
+    // even when both mounts intentionally share one execution-context id.
+    await Promise.all([
+      first.refreshDirty(secondSpace),
+      second.refreshDirty(secondSpace),
+    ]);
+
+    assertEquals(syncCalls, [{ space: secondSpace, sessionId }]);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server direct writes schedule dirty refreshes without connections", async () => {
   const time = new FakeTime();
   const server = createServer(
