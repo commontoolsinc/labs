@@ -2172,7 +2172,7 @@ Deno.test("memory v2 writer lookup derives authenticated action contexts", async
   }
 });
 
-Deno.test("memory v2 server lists only scheduler contexts applicable to the authenticated session", async () => {
+Deno.test("memory v2 server lists and looks up only scheduler contexts applicable to the authenticated session", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
@@ -2304,6 +2304,46 @@ Deno.test("memory v2 server lists only scheduler contexts applicable to the auth
     assertEquals(
       await listedContexts(bob),
       expectedContexts(bobPrincipal, bob.sessionId),
+    );
+
+    const listedWriters = async (
+      session: typeof aliceA,
+      scope: "user" | "session",
+    ) =>
+      (await session.writersForTargets({
+        branch: "",
+        targets: [{
+          id: `of:${scope}-value`,
+          scope,
+          path: toDocumentPath(["value"]),
+        }],
+      })).writers.map((writer) =>
+        `${writer.actionId}@${writer.executionContextKey}`
+      );
+
+    assertEquals(
+      await listedWriters(aliceA, "user"),
+      [`${userAction}@${userKey(alicePrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceB, "user"),
+      [`${userAction}@${userKey(alicePrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(bob, "user"),
+      [`${userAction}@${userKey(bobPrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceA, "session"),
+      [`${sessionAction}@${sessionKey(alicePrincipal, aliceA.sessionId)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceB, "session"),
+      [`${sessionAction}@${sessionKey(alicePrincipal, aliceB.sessionId)}`],
+    );
+    assertEquals(
+      await listedWriters(bob, "session"),
+      [`${sessionAction}@${sessionKey(bobPrincipal, bob.sessionId)}`],
     );
   } finally {
     await aliceAClient.close().catch(() => {});
