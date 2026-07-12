@@ -247,10 +247,11 @@ guessing for computation nodes.
 **Read first:**
 
 - Transformer emission for computation/lift nodes
-- packages/runner/src/runner.ts `firstResolvedOutputRedirect` (:403-431), its
-  sub-pattern output (:1988), map/filter container (:3907), and pattern-node
-  (:4248-4271) call sites; contrast plain lift/computed `_resultFor` identity
-  (:3033-3038), which does not recurse
+- packages/runner/src/runner.ts `directRootOutputRedirect` and
+  `resolveDirectRootOutputRedirect`, which replaced the former recursive
+  `firstResolvedOutputRedirect` path for raw builtins, sub-pattern resume, and
+  pattern-node identity; contrast plain lift/computed `_resultFor` identity,
+  which does not recurse
 - Scheduler-v2 action registration and static write diagnostics
 - Hand-built runner fixtures that construct serialized Pattern objects,
   including `type: "passthrough"` nodes
