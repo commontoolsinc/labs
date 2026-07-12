@@ -5856,16 +5856,18 @@ export class Runner {
   }
 
   /**
-   * CT-1623: for the list builtins (`map`/`filter`/`flatMap`), annotate the `op`
-   * input with its content-addressed `{ identity, symbol }` entry ref (when
-   * known) so the builtin can resolve the live canonical pattern by identity
-   * instead of deserializing the embedded graph. Mutates `inputBindings` in
-   * place: `op` becomes `{ $patternRef }`.
+   * CT-1623 compatibility reader: for stored legacy list-builtin nodes carrying
+   * sibling `{ op, params }`, annotate `op` with its content-addressed
+   * `{ identity, symbol }` entry ref (when known) so the legacy branch can
+   * resolve the live canonical pattern by identity instead of deserializing the
+   * embedded graph. Canonical nodes have no own `params` and retain their bound
+   * PatternFactory unchanged. On the legacy branch this mutates `inputBindings`
+   * in place: `op` becomes `{ $patternRef }`.
    *
-   * Only the `op` key is rewritten — it is the sole pattern-valued input the
-   * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
-   * pattern captured in `params`) would leave an unresolved `$patternRef` object
-   * that nothing reads back.
+   * Only the legacy `op` key is rewritten — it is the sole pattern-valued input
+   * that branch rehydrates (`resolveOpPattern`). Rewriting other inputs (e.g. a
+   * pattern captured in legacy `params`) would leave an unresolved `$patternRef`
+   * object that nothing reads back.
    *
    * The sentinel carries NO embedded fallback graph (identity E4): the artifact
    * index is session-lifetime, and the op's module evaluated in this session by
@@ -5908,6 +5910,10 @@ export class Runner {
       return;
     }
     if (!isRecord(inputBindings)) return;
+    // Canonical list nodes carry a bound PatternFactory directly and have no
+    // sibling `params`. Only stored legacy `{ op, params }` nodes are adapted
+    // to the pattern-ref sentinel consumed by resolveOpPattern().
+    if (!Object.hasOwn(inputBindings, "params")) return;
     const op = (inputBindings as Record<string, unknown>).op;
     const opIsFactory = isAdmittedFabricFactory(op);
     if (!isRecord(op) && !opIsFactory) return;

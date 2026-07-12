@@ -36,8 +36,9 @@ export function isPatternRefSentinel(
 }
 
 /**
- * Resolve the `op` value a list builtin (`map`/`filter`/`flatMap`) reads from
- * its inputs cell into a live `Pattern`.
+ * Resolve the `op` value a stored legacy `{ op, params }` list-builtin node
+ * reads from its inputs cell into a live `Pattern`. Canonical bound
+ * PatternFactory nodes do not use this adapter.
  *
  * - When `op` is a {@link PatternRefSentinel}, resolve it synchronously from
  *   the session-lifetime artifact index via `artifactFromIdentitySync` — the

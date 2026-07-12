@@ -1307,18 +1307,18 @@ complete task must pass after Stage 4 before final handoff.
   nodes.
 - [x] Make `mapWithPattern`/`filterWithPattern`/`flatMapWithPattern` accept the
   bound factory as the new canonical shape.
-- [ ] Make the new canonical node carry only `{ list, op }` and invoke the
+- [x] Make the new canonical node carry only `{ list, op }` and invoke the
   pattern with public `{ element, index, array }`; hidden captures flow only
   through the params root.
-- [ ] Keep a dual-read runtime path for stored legacy `{ op, params }` nodes
+- [x] Keep a dual-read runtime path for stored legacy `{ op, params }` nodes
   during the compatibility window.
 - [x] Keep old public overloads only until source migration and stored-data
   gates pass; mark them deprecated rather than teaching them new semantics.
-- [ ] Keep `packages/runner/src/builtins/op-pattern-ref.ts` and
+- [x] Keep `packages/runner/src/builtins/op-pattern-ref.ts` and
   `packages/runner/src/builtins/list-op-argument-usage.ts` only on the named
   legacy adaptation path; new `Factory@1` nodes go through generic
   materialization.
-- [ ] Isolate the legacy branch in `Runner.substituteOpPatternRefs()` so it
+- [x] Isolate the legacy branch in `Runner.substituteOpPatternRefs()` so it
   cannot remain an accidental writer dependency.
 - [x] Update closure-capture diagnostics to recommend inline patterns, not
   manual sibling params.
@@ -1341,6 +1341,19 @@ Focused runner coverage includes
 filter, and flatMap CFC/identity regression suites. Keep exactly one explicit
 legacy `{ op, params }` fixture per builtin; migrate the remaining fixtures to
 the one-argument form.
+
+WP3.5 canonical writer/runtime slice (2026-07-11): the new one-argument public
+overloads write only `{ list, op }` and the old two-argument overloads remain
+explicitly deprecated writers of `{ list, op, params }`. Runtime dispatch
+branches on ownership of the sibling `params` field, not on whether `op` is
+already branded. Canonical bound factories bypass `$patternRef` substitution,
+materialize through the generic Factory chokepoint, and receive only the fixed
+public list triple; the old resolver and argument-usage inference are confined
+to the stored legacy branch. The initial red failed because substitution tried
+to discard a bound factory's `paramsSchema`; the warm bound-capture and legacy
+matrix now passes `3 passed (27 steps)`, including stable map aggregate and row
+identities. Cold readiness, replacement/resume, CFC/scope, fixture migration,
+and the complete package gates remain in the final WP3.5 slice below.
 
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 

@@ -18,6 +18,9 @@ function hasArgumentSchema(
   return cfc.getSchemaAtPath(pattern.argumentSchema, [...path]) !== undefined;
 }
 
+/** Infer the public `{ element, index, array, params }` projection used only by
+ * stored legacy list nodes. Canonical bound factories receive the fixed public
+ * triple and carry closure params in their invocation-owned params cell. */
 export function inferListOpArgumentUsage(
   cfc: ContextualFlowControl,
   pattern: Pattern,

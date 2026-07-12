@@ -1,4 +1,4 @@
-import { type Pattern } from "../builder/types.ts";
+import { isPattern, type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 const MAP_INPUT_SCHEMA = internSchema({
@@ -32,7 +32,10 @@ import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import {
+  inferListOpArgumentUsage,
+  type ListOpArgumentUsage,
+} from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
@@ -47,6 +50,7 @@ import {
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { materializeFactory } from "../factory-materialization.ts";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -54,9 +58,8 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Canonical nodes carry a bound PatternFactory in `op` and no sibling params.
+ * Stored legacy nodes retain their `{ op, params }` adapter during migration.
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -190,12 +193,31 @@ export function map(
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern. The raw value is either a compact
-    // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
-    // identity) or, on the legacy path, the embedded pattern graph itself.
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const rawInputs = inputsCell.withTx(tx).getRaw();
+    const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
+      Object.hasOwn(rawInputs, "params");
+    const rawOp = op.getRaw();
+    let opPattern: Pattern;
+    let argumentUsage: ListOpArgumentUsage;
+    if (legacyInputs) {
+      opPattern = resolveOpPattern(runtime, rawOp, "map");
+      argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    } else {
+      const materializedOp = materializeFactory(rawOp, {
+        runtime,
+        artifactSpace: op.getAsNormalizedFullLink().space,
+      });
+      if (!isPattern(materializedOp)) {
+        throw new Error("map: canonical op must be a pattern factory");
+      }
+      opPattern = materializedOp;
+      argumentUsage = {
+        usesElement: true,
+        usesIndex: true,
+        usesArray: true,
+        usesParams: false,
+      };
+    }
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);

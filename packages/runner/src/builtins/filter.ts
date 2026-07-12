@@ -1,4 +1,4 @@
-import type { Pattern } from "../builder/types.ts";
+import { isPattern, type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 // Presence probe for the result container: slots resolve as cells, so the
@@ -29,7 +29,10 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import {
+  inferListOpArgumentUsage,
+  type ListOpArgumentUsage,
+} from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
@@ -47,6 +50,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { materializeFactory } from "../factory-materialization.ts";
 
 const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
 
@@ -198,8 +202,31 @@ export function filter(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const rawInputs = inputsCell.withTx(tx).getRaw();
+    const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
+      Object.hasOwn(rawInputs, "params");
+    const rawOp = op.getRaw();
+    let opPattern: Pattern;
+    let argumentUsage: ListOpArgumentUsage;
+    if (legacyInputs) {
+      opPattern = resolveOpPattern(runtime, rawOp, "filter");
+      argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    } else {
+      const materializedOp = materializeFactory(rawOp, {
+        runtime,
+        artifactSpace: op.getAsNormalizedFullLink().space,
+      });
+      if (!isPattern(materializedOp)) {
+        throw new Error("filter: canonical op must be a pattern factory");
+      }
+      opPattern = materializedOp;
+      argumentUsage = {
+        usesElement: true,
+        usesIndex: true,
+        usesArray: true,
+        usesParams: false,
+      };
+    }
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
       ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
