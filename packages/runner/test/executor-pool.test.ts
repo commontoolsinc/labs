@@ -104,6 +104,8 @@ class FakeExecutor implements SpaceExecutor {
   demandUpdates: readonly string[][] = [];
   wakes = 0;
   stopped = 0;
+  stopGate: Promise<void> | undefined;
+  readonly stopStarted = Promise.withResolvers<void>();
 
   setDemand(pieces: readonly string[]): Promise<void> {
     this.demandUpdates = [...this.demandUpdates, [...pieces]];
@@ -115,9 +117,10 @@ class FakeExecutor implements SpaceExecutor {
     return Promise.resolve();
   }
 
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
     this.stopped++;
-    return Promise.resolve();
+    this.stopStarted.resolve();
+    await this.stopGate;
   }
 }
 
@@ -218,6 +221,43 @@ Deno.test("shared execution pool renews authority before reusing a live worker",
     assertEquals(factory.executors[0]?.stopped, 1);
     assertEquals(factory.starts.length, 2);
     assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool stops a fenced worker before releasing its lease", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    const active = [demand(1, ["piece:a"])];
+    await control.emit(1, active);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    const stopGate = Promise.withResolvers<void>();
+    executor.stopGate = stopGate.promise;
+
+    control.renewalSucceeds = false;
+    control.emit(2, active);
+    const reconcile = pool.idle();
+    const stopStarted = await Promise.race([
+      executor.stopStarted.promise.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+    ]);
+    assertEquals(stopStarted, true);
+    const stoppedDuringHandoff = executor.stopped;
+    const leaseStateDuringHandoff = control.current?.state;
+    const finishedDuringHandoff = control.finished;
+
+    stopGate.resolve();
+    await reconcile;
+    assertEquals(stoppedDuringHandoff, 1);
+    assertEquals(leaseStateDuringHandoff, "draining");
+    assertEquals(finishedDuringHandoff, 0);
+    assertEquals(control.finished, 1);
   } finally {
     await pool.close();
   }
