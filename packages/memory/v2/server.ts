@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type BranchName,
   type CellScope,
   type ClientCommit,
   type ClientMessage,
@@ -365,14 +366,27 @@ type DirtyOrigin = {
 export interface AcceptedCommitEvent {
   /** Ephemeral per-space callback order. W0.6 replaces this with the durable
    *  reconnectable execution-feed sequence. */
-  order: number;
+  readonly order: number;
   /** Data/adoption window through which this commit is visible. Metadata-only
    *  scheduler observations may reserve a future delivery slot without
    *  advancing the semantic branch head. */
-  deliverySeq: number;
-  space: string;
-  originSessionId?: string;
-  commit: Engine.AppliedCommit;
+  readonly deliverySeq: number;
+  readonly space: string;
+  readonly originSessionId?: string;
+  readonly branch: BranchName;
+  readonly dataSeq: number;
+  /** Detached scalar revision metadata; document payloads never enter the
+   *  host callback surface. */
+  readonly revisions: readonly Readonly<{
+    branch: BranchName;
+    id: string;
+    scope?: CellScope;
+    seq: number;
+    op: Operation["op"];
+  }>[];
+  /** Scheduler snapshot rows changed by this accepted transaction, whether by
+   *  re-observation or by a semantic write dirtying a reader. */
+  readonly schedulerUpdateIds: readonly number[];
 }
 
 export type AcceptedCommitListener = (
@@ -1330,11 +1344,51 @@ export class Server {
   }
 
   #publishAcceptedCommit(
-    event: Omit<AcceptedCommitEvent, "order">,
+    event: {
+      space: string;
+      originSessionId?: string;
+      deliverySeq: number;
+      commit: Engine.AppliedCommit;
+    },
   ): void {
     const order = (this.#acceptedCommitOrderBySpace.get(event.space) ?? 0) + 1;
     this.#acceptedCommitOrderBySpace.set(event.space, order);
-    const orderedEvent: AcceptedCommitEvent = { ...event, order };
+    const revisions = Object.freeze(
+      event.commit.revisions.map((revision) =>
+        Object.freeze({
+          branch: revision.branch,
+          id: revision.id,
+          ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+          seq: revision.seq,
+          op: revision.op,
+        })
+      ),
+    );
+    const schedulerUpdateIds = Object.freeze([
+      ...new Set([
+        ...(event.commit.schedulerObservationResults ?? []).flatMap((result) =>
+          result.status === "kept" &&
+            result.schedulerObservationId !== undefined
+            ? [result.schedulerObservationId]
+            : []
+        ),
+        ...(event.commit.schedulerDirtiedReaders ?? []).map((reader) =>
+          reader.observationId
+        ),
+      ]),
+    ].sort((left, right) => left - right));
+    const orderedEvent: AcceptedCommitEvent = Object.freeze({
+      order,
+      deliverySeq: event.deliverySeq,
+      space: event.space,
+      ...(event.originSessionId !== undefined
+        ? { originSessionId: event.originSessionId }
+        : {}),
+      branch: event.commit.branch,
+      dataSeq: event.commit.seq,
+      revisions,
+      schedulerUpdateIds,
+    });
     for (
       const listener of this.#acceptedCommitListeners.get(event.space) ?? []
     ) {
@@ -2194,12 +2248,14 @@ export class Server {
             previousReadSpaces,
             session,
           );
-          this.#publishAcceptedCommit({
-            space: message.space,
-            originSessionId: message.sessionId,
-            deliverySeq: acceptedDeliverySeq,
-            commit,
-          });
+          if (!Engine.isAppliedCommitReplay(commit)) {
+            this.#publishAcceptedCommit({
+              space: message.space,
+              originSessionId: message.sessionId,
+              deliverySeq: acceptedDeliverySeq,
+              commit,
+            });
+          }
           this.markSpaceDirty(
             message.space,
             message.commit.operations
