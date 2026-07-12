@@ -1,4 +1,4 @@
-import { isPattern, type Pattern } from "../builder/types.ts";
+import { type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 const MAP_INPUT_SCHEMA = internSchema({
@@ -50,7 +50,7 @@ import {
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { materializeFactory } from "../factory-materialization.ts";
+import { materializeListPatternFactory } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -196,21 +196,18 @@ export function map(
     const rawInputs = inputsCell.withTx(tx).getRaw();
     const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
       Object.hasOwn(rawInputs, "params");
-    const rawOp = op.getRaw();
     let opPattern: Pattern;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
-      opPattern = resolveOpPattern(runtime, rawOp, "map");
+      opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
       argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     } else {
-      const materializedOp = materializeFactory(rawOp, {
+      opPattern = materializeListPatternFactory(
         runtime,
-        artifactSpace: op.getAsNormalizedFullLink().space,
-      });
-      if (!isPattern(materializedOp)) {
-        throw new Error("map: canonical op must be a pattern factory");
-      }
-      opPattern = materializedOp;
+        tx,
+        op,
+        "map",
+      );
       argumentUsage = {
         usesElement: true,
         usesIndex: true,

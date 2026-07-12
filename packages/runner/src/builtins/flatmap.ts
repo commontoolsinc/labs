@@ -1,4 +1,4 @@
-import { isPattern, type Pattern } from "../builder/types.ts";
+import { type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 // Presence probe for the result container: slots resolve as cells, so the
@@ -50,7 +50,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { materializeFactory } from "../factory-materialization.ts";
+import { materializeListPatternFactory } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -206,21 +206,18 @@ export function flatMap(
     const rawInputs = inputsCell.withTx(tx).getRaw();
     const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
       Object.hasOwn(rawInputs, "params");
-    const rawOp = op.getRaw();
     let opPattern: Pattern;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
-      opPattern = resolveOpPattern(runtime, rawOp, "flatMap");
+      opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
       argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     } else {
-      const materializedOp = materializeFactory(rawOp, {
+      opPattern = materializeListPatternFactory(
         runtime,
-        artifactSpace: op.getAsNormalizedFullLink().space,
-      });
-      if (!isPattern(materializedOp)) {
-        throw new Error("flatMap: canonical op must be a pattern factory");
-      }
-      opPattern = materializedOp;
+        tx,
+        op,
+        "flatMap",
+      );
       argumentUsage = {
         usesElement: true,
         usesIndex: true,

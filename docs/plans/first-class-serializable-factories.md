@@ -1374,6 +1374,18 @@ matrix now passes `3 passed (27 steps)`, including stable map aggregate and row
 identities. Cold readiness, replacement/resume, CFC/scope, fixture migration,
 and the complete package gates remain in the final WP3.5 slice below.
 
+WP3.5 cold-list slice (2026-07-11): canonical list coordinators now resolve the
+factory's terminal selector link and use that source space for generic
+materialization. A missing artifact parks only the current coordinator action
+with scheduler-owned readiness; no child callback runs and no authored write
+commits before the artifact is live. The retry rereads the current selector and
+list, while action-generation fencing drops a superseded selection or stopped
+owner. Deterministic coverage passes `2 passed (5 steps)` for source-space
+loading, list mutation during load, cold-A/warm-B replacement, owner teardown,
+and the existing warm bound-list matrix. The aggregate WP3.5 checkbox remains
+open until live replacement/resume, CFC/scope, fixture migration, and the full
+package gates are green.
+
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
 - [ ] Record trusted framework-provided paths in compiler/artifact metadata for
