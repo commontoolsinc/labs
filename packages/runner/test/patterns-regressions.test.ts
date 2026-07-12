@@ -271,7 +271,7 @@ describe("Pattern Runner - Regressions", () => {
     tx = runtime.edit();
   });
 
-  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+  it("rejects arbitrary toJSON function fields before raw runner writes in v2", async () => {
     await commitTx();
     await runtime.dispose();
     await storageManager.close();
@@ -291,11 +291,11 @@ describe("Pattern Runner - Regressions", () => {
         return { name: "initial recipe" };
       },
     });
-    const resultRecipe = Object.assign(() => {}, {
+    const resultRecipe = {
       toJSON() {
         return { name: "result recipe" };
       },
-    });
+    };
 
     const rawValuePattern = {
       argumentSchema: {},
@@ -323,13 +323,8 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const result = runtime.run(tx, rawValuePattern, {}, resultCell);
-    await commitTx();
-
-    const value = await result.pull();
-    expect(value).toMatchObject({
-      internalRecipe: { name: "initial recipe" },
-      resultRecipe: { name: "result recipe" },
-    });
+    expect(() => runtime.run(tx, rawValuePattern, {}, resultCell)).toThrow(
+      "Arbitrary functions are not valid binding values: toJSON",
+    );
   });
 });

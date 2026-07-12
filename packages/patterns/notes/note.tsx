@@ -10,8 +10,7 @@ import {
   NAME,
   navigateTo,
   pattern,
-  patternTool,
-  type PatternToolResult,
+  type PatternFactory,
   SELF,
   type Stream,
   TILE_UI,
@@ -62,8 +61,8 @@ export interface NoteOutput extends NotePiece {
   mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
   isHidden: boolean;
-  grep: PatternToolResult<{ content: string }>;
-  translate: PatternToolResult<{ content: string }>;
+  grep: PatternFactory<{ query: string }, string[]>;
+  translate: PatternFactory<{ language: string }, string | undefined>;
   editContent: Stream<{ detail: { value: string } }>;
   setTitle: Stream<string>;
   appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
@@ -127,7 +126,7 @@ const handleBacklinkClick = handler<
 
 // ===== Utility functions =====
 
-// Grep sub-pattern for patternTool - filters content lines by query
+// Grep sub-pattern - filters content lines by query
 const grepPattern = pattern<
   { query: string; content: string },
   string[]
@@ -137,7 +136,7 @@ const grepPattern = pattern<
   });
 });
 
-// Translate sub-pattern for patternTool - translates content to specified language
+// Translate sub-pattern - translates content to specified language
 const translatePattern = pattern<
   { language: string; content: string },
   string | undefined
@@ -596,8 +595,12 @@ const Note = pattern<NoteInput, NoteOutput>(
       backlinks,
       isHidden,
       parentNotebook,
-      grep: patternTool(grepPattern, { content }),
-      translate: patternTool(translatePattern, { content }),
+      grep: pattern<{ query: string }, string[]>(({ query }) =>
+        grepPattern({ query, content })
+      ),
+      translate: pattern<{ language: string }, string | undefined>(
+        ({ language }) => translatePattern({ language, content }),
+      ),
       editContent,
       setTitle,
       appendLink,

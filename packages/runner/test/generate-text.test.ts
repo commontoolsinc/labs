@@ -10,7 +10,10 @@ import {
 import { LLMClient } from "@commonfabric/llm";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -43,7 +46,10 @@ describe("generateText", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateText } = commonfabric);
-    dummyPattern = pattern(() => ({}), { type: "object" });
+    dummyPattern = installTestPatternArtifact(
+      runtime,
+      pattern(() => ({}), { type: "object" }),
+    );
   });
 
   afterEach(async () => {

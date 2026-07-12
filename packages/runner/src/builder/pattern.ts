@@ -793,16 +793,38 @@ function factoryFromPattern<T, R>(
     const { defaultScope, spaceSelector, paramsSchema, params } = options;
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
+        if (
+          Object.hasOwn(options, "paramsSchema") &&
+          !Object.hasOwn(options, "params")
+        ) {
+          throw new Error("Bound pattern params require callback binding");
+        }
         const outputs = reactive<R>();
         const frame = getTopFrame();
+        let nodeFactory: PatternFactory<T, R> = factory;
         if (spaceSelector !== undefined) {
           const targetSpace = resolveInSpaceTargetSpace(spaceSelector, frame);
           if (targetSpace !== undefined) {
             setCellUnlinkedSpace(outputs, targetSpace);
+            // Named and anonymous selectors resolve during graph construction.
+            // Pin that resolved DID on this invocation's derived factory so the
+            // directly branded node retains the same execution target after
+            // serialization; the authored selector remains on the reusable
+            // base factory.
+            if (
+              typeof spaceSelector === "string" &&
+              !/^did:[^:]+:.+/.test(spaceSelector)
+            ) {
+              nodeFactory = makePatternFactory({
+                ...options,
+                spaceSelector: targetSpace,
+              });
+              noteDerivedCopy(nodeFactory, factory);
+            }
           }
         }
         const node: NodeRef = {
-          module: factory,
+          module: nodeFactory,
           inputs,
           outputs,
           frame,

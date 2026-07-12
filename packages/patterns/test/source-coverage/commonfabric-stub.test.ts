@@ -1,10 +1,15 @@
 export type BuiltInLLMMessage = Record<string, unknown>;
 export type BuiltInLLMTool = Record<string, unknown>;
 export type Default<T> = T;
-export type PatternToolResult<T = Record<string, never>> = {
+export type PatternFactory<T, R> = (input?: Partial<T>) => R;
+/** @deprecated Explicit legacy-writer fixture retained until Stage 5. */
+export type LegacyPatternToolResult<T = Record<string, never>> = {
   pattern: unknown;
   extraParams: T;
 };
+/** @deprecated Compatibility alias for source fixtures that still name it. */
+export type PatternToolResult<T = Record<string, never>> =
+  LegacyPatternToolResult<T>;
 export type Reactive<T> = T;
 export type Stream<T = unknown> = {
   send(event?: T): unknown;
@@ -173,7 +178,7 @@ export const Cell = {
 export function pattern<TInput, TOutput>(
   body: (input: TInput) => TOutput,
   ..._rest: unknown[]
-): (input?: Partial<TInput>) => TOutput {
+): PatternFactory<TInput, TOutput> {
   return (input = {} as Partial<TInput>) => body(input as TInput);
 }
 
@@ -329,7 +334,7 @@ export function llmDialog<T>(
 export function patternTool<T>(
   patternValue: unknown,
   extraParams?: T,
-): PatternToolResult<T> {
+): LegacyPatternToolResult<T> {
   return { pattern: patternValue, extraParams: extraParams as T };
 }
 

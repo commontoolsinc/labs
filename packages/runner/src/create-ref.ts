@@ -90,8 +90,41 @@ export function createRef(
         state.ref === undefined && state.kind === "pattern" &&
         typeof legacyPattern.toJSON === "function"
       ) {
+        const pattern = obj as unknown as {
+          argumentSchema?: unknown;
+          resultSchema?: unknown;
+          derivedInternalCells?: unknown;
+          result?: unknown;
+          nodes?: unknown;
+          defaultScope?: unknown;
+        };
         return traverse(
-          legacyPattern.toJSON(),
+          {
+            argumentSchema: pattern.argumentSchema,
+            resultSchema: pattern.resultSchema,
+            ...(pattern.derivedInternalCells === undefined
+              ? {}
+              : { derivedInternalCells: pattern.derivedInternalCells }),
+            result: pattern.result,
+            nodes: pattern.nodes,
+            ...(pattern.defaultScope === undefined
+              ? {}
+              : { defaultScope: pattern.defaultScope }),
+          },
+          insideFactoryState,
+          false,
+          true,
+        );
+      }
+      // A keyless root pattern's structural graph can also contain keyless
+      // module/handler factories. They are not Fabric values and must never
+      // reach the canonical Factory@1 codec, but the long-standing session
+      // identity fallback still needs to hash their builder descriptors. Keep
+      // this exception scoped to an already-recognized legacy pattern graph;
+      // ordinary factory values continue to require a durable artifact ref.
+      if (state.ref === undefined && insideLegacyPatternGraph) {
+        return traverse(
+          Object.fromEntries(Object.entries(obj)),
           insideFactoryState,
           false,
           true,

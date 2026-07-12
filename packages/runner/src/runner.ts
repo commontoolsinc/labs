@@ -148,6 +148,8 @@ import {
   prepareFactory,
 } from "./factory-materialization.ts";
 import { noteLegacyFactoryCompatibilityRead } from "./legacy-factory-compat.ts";
+import { createRef } from "./create-ref.ts";
+import { toURI } from "./uri-utils.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -828,13 +830,10 @@ export class Runner {
       next: (notification) => {
         const space = notification.space;
         if ("changes" in notification) {
-          for (const change of notification.changes) {
-            this.resultPatternCache.delete(
-              `${space}/${
-                change.address.scope ?? "space"
-              }/${change.address.id}`,
-            );
-          }
+          // Result-cell writes are child execution, not a change to the graph
+          // selected by the parent action. The next parent run compares its
+          // freshly selected structural identity; only a storage reset clears
+          // the in-memory selection cache.
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
           const cacheKeys = [...this.resultPatternCache.keys()];
@@ -3462,6 +3461,29 @@ export class Runner {
     }
   }
 
+  private resolveFactoryExecutionSpace(
+    selector: unknown,
+    baseCell: Cell<unknown>,
+    resolvedSpaces?: ReadonlyMap<string, MemorySpace>,
+    anonymousName?: string,
+  ): MemorySpace | undefined {
+    if (typeof selector === "string" && /^did:[^:]+:.+/.test(selector)) {
+      return selector as MemorySpace;
+    }
+    const selectorLink = parseLink(selector, baseCell);
+    if (selectorLink?.space !== undefined) return selectorLink.space;
+    if (typeof selector !== "string") return undefined;
+
+    const name = selector.length > 0 ? selector : anonymousName;
+    if (name === undefined) return undefined;
+    const named = resolvedSpaces?.get(name) ??
+      this.runtime.resolveSpaceNameSync(name);
+    if (named === undefined) {
+      throw new DynamicFactoryExecutionSpaceUnavailableError(name);
+    }
+    return named;
+  }
+
   /**
    * Supervise one symbolic factory binding. The binding stays the reactive
    * dependency and output bindings stay fixed; selected artifacts are never
@@ -3574,25 +3596,12 @@ export class Runner {
           : { defaultScope: state.defaultScope }),
       };
       if (Object.hasOwn(state, "spaceSelector")) {
-        const selector = state.spaceSelector;
-        if (typeof selector === "string" && /^did:[^:]+:.+/.test(selector)) {
-          dynamicModule.targetSpace = selector as MemorySpace;
-        } else {
-          const selectorLink = parseLink(selector, bindingCell);
-          if (selectorLink?.space !== undefined) {
-            dynamicModule.targetSpace = selectorLink.space;
-          } else if (typeof selector === "string") {
-            const name = selector.length > 0
-              ? selector
-              : anonymousExecutionSpaceName;
-            const named = resolvedExecutionSpaces.get(name) ??
-              this.runtime.resolveSpaceNameSync(name);
-            if (named === undefined) {
-              throw new DynamicFactoryExecutionSpaceUnavailableError(name);
-            }
-            dynamicModule.targetSpace = named;
-          }
-        }
+        dynamicModule.targetSpace = this.resolveFactoryExecutionSpace(
+          state.spaceSelector,
+          bindingCell,
+          resolvedExecutionSpaces,
+          anonymousExecutionSpaceName,
+        );
       }
       return dynamicModule;
     };
@@ -5026,7 +5035,14 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    const resultPatternAsString = JSON.stringify(resultPattern);
+    // Structural identity must not change merely because a live keyless child
+    // acquired its session-only `$patternRef` during the first run. createRef's
+    // explicit legacy-pattern path hashes the underlying graph in both states;
+    // JSON.stringify would switch from embedded graph to keyless sentinel and
+    // spuriously restart the child on the next identical selection.
+    const resultPatternAsString = toURI(
+      createRef(resultPattern, "returned-pattern-cache"),
+    );
     const cacheKey = this.getDocKey(resultCell);
     const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
     const patternUnchanged =
@@ -6041,6 +6057,8 @@ export class Runner {
       mappedInputBindings,
       undefined,
       tx,
+      undefined,
+      "retry",
     );
 
     // CT-1623: the output spot this node writes through is reserved for this
@@ -6335,6 +6353,8 @@ export class Runner {
       },
     );
     let patternImpl: Pattern;
+    let hasBoundSpaceSelector = false;
+    let boundSpaceSelector: unknown;
     if (isAdmittedFabricFactory(boundPatternImpl)) {
       const state = factoryStateOf(boundPatternImpl);
       if (state.kind !== "pattern") {
@@ -6348,6 +6368,10 @@ export class Runner {
       });
       if (!isPattern(materialized)) {
         throw new Error("Materialized static pattern factory is not a pattern");
+      }
+      if (Object.hasOwn(state, "spaceSelector")) {
+        hasBoundSpaceSelector = true;
+        boundSpaceSelector = state.spaceSelector;
       }
       patternImpl = materialized;
     } else if (isPatternRefSentinel(boundPatternImpl)) {
@@ -6400,7 +6424,6 @@ export class Runner {
     } else {
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
-      const targetSpace = module.targetSpace ?? resultCell.space;
       // CT-1623: identify the result cell by the (fully resolved) output spot
       // reserved for this node — a stable, position-derived, program-independent
       // identity — rather than hashing the pattern object (which drags in the
@@ -6436,6 +6459,12 @@ export class Runner {
             "output binding to anchor a reload-stable identity",
         );
       }
+      const targetSpace = hasBoundSpaceSelector
+        ? this.resolveFactoryExecutionSpace(
+          boundSpaceSelector,
+          parentResultCell,
+        ) ?? module.targetSpace ?? outputRedirect.space
+        : module.targetSpace ?? resultCell.space;
       const baseResultCell = this.runtime.getCell(
         targetSpace,
         {

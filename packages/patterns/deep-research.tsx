@@ -6,7 +6,6 @@ import {
   llmDialog,
   NAME,
   pattern,
-  patternTool,
   str,
   type Stream,
   toSchema,
@@ -90,8 +89,12 @@ When done, call presentResult with your structured findings.`,
     system: systemPrompt,
     messages,
     tools: {
-      searchWeb: patternTool(searchWeb),
-      readWebpage: patternTool(readWebpage),
+      searchWeb: pattern<{ query: string }, any>(({ query }) =>
+        searchWeb({ query })
+      ),
+      readWebpage: pattern<{ url: string }, any>(({ url }) =>
+        readWebpage({ url })
+      ),
     },
     model: "anthropic:claude-sonnet-4-5",
     context: computed(() => context ?? {}),

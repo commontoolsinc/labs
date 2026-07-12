@@ -16,9 +16,8 @@ import { resolveStoredPattern } from "../src/builtins/op-pattern-ref.ts";
  * authored case, by construction), or source-free from the space's persisted
  * compiled artifacts via the async net (llm-dialog's cold tool invocation).
  *
- * Patterns with NO entry ref (manually constructed / dynamic / bare-Engine
- * evaluation) still serialize their full graph, and a stored graph still
- * executes via `runtime.run` — that is a live writer path, not a vintage.
+ * The named full-graph case below is a compatibility reader fixture. Canonical
+ * Factory@1 writers reject factories without a durable artifact ref.
  */
 
 const signer = await Identity.fromPassphrase("pre-e3-pattern-value-canary");
@@ -77,7 +76,7 @@ describe("stored pattern-value rehydration", () => {
     return vs;
   };
 
-  it("a stored full graph (no-entry-ref writer) still executes via runtime.run", async () => {
+  it("a legacy stored full graph still executes via runtime.run", async () => {
     setup();
     // The internal graph serializer's output is the same shape a
     // no-entry-ref pattern serializes at the boundary; a stored graph must
@@ -90,6 +89,19 @@ describe("stored pattern-value rehydration", () => {
     ) as Pattern;
     expect("$patternRef" in graph).toBe(false);
     expect(Array.isArray(graph.nodes)).toBe(true);
+    const listNode = graph.nodes.find((node) => {
+      const module = node.module as {
+        type?: unknown;
+        implementation?: unknown;
+      };
+      return module.type === "ref" && module.implementation === "map";
+    });
+    if (!listNode || typeof listNode.inputs !== "object") {
+      throw new Error("expected legacy map fixture node");
+    }
+    // Name the old list reader shape explicitly. A newly serialized graph has
+    // canonical `{ op }`; stored pre-migration graphs carried `{ op, params }`.
+    (listNode.inputs as Record<string, unknown>).params = {};
 
     const vs = await runGraph(graph, "stored-graph-run");
     expect(vs).toEqual([7, 8, 9]);
@@ -102,9 +114,13 @@ describe("stored pattern-value rehydration", () => {
 
     // The module evaluates in this session (the by-construction case: any
     // piece whose pattern mentions this one loads it as part of its bundle).
+    const compileTx = runtime!.edit();
     const compiled = await runtime!.patternManager.compilePattern(
       fixture.program,
+      { space, tx: compileTx },
     );
+    await compileTx.commit();
+    await runtime!.storageManager.synced();
     const resolved = resolveStoredPattern(runtime!, stored);
     expect(resolved).toBe(compiled);
 

@@ -194,7 +194,7 @@ describe("PatternManager exact-space artifact availability", () => {
     }
   });
 
-  it("marks a verified storage load without granting another requested space", async () => {
+  it("keeps a warm artifact executable without granting another requested space", async () => {
     const pattern = await runtime.patternManager.compilePattern(PROGRAM, {
       space: spaceA,
     });
@@ -225,11 +225,11 @@ describe("PatternManager exact-space artifact availability", () => {
         ),
       ).toBe(true);
 
-      // A globally warm index is not source authority for space B. The load
-      // must verify B's closure and fail because none exists there.
+      // A globally warm index is enough for synchronous execution, but is not
+      // source authority for space B and must not grant durable availability.
       const warmInOtherSpace = await coldRuntime.patternManager
         .loadPatternByIdentity(ref.identity, ref.symbol, spaceB);
-      expect(warmInOtherSpace).toBeUndefined();
+      expect(warmInOtherSpace).toBeDefined();
       expect(
         coldRuntime.patternManager.isArtifactAvailableInSpace(
           ref.identity,

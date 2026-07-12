@@ -55,6 +55,7 @@ import {
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
+import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -1790,6 +1791,7 @@ export class Runtime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy?: "assert" | "retry",
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
@@ -1797,6 +1799,7 @@ export class Runtime {
     schema: S,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy?: "assert" | "retry",
   ): Cell<Schema<S>>;
   getImmutableCell(
     space: MemorySpace,
@@ -1804,6 +1807,7 @@ export class Runtime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy: "assert" | "retry" = "assert",
   ): Cell<any> {
     const asDataURI = createDataCellURI(data, undefined, {
       assertFactoryAvailable: (factory) => {
@@ -1813,10 +1817,28 @@ export class Runtime {
             `Factory has no durable artifact ref for space ${space}`,
           );
         }
-        this.patternManager.assertArtifactAvailableInSpace(
-          ref.identity,
-          space,
-        );
+        if (
+          !this.patternManager.isArtifactAvailableInSpace(ref.identity, space)
+        ) {
+          const sourceSpace = this.patternManager.artifactSourceSpace(
+            ref.identity,
+            space,
+          );
+          if (sourceSpace !== undefined && factoryArtifactPolicy === "retry") {
+            throw new RetryWhenReady(
+              this.patternManager.ensureArtifactClosureInSpace(
+                ref.identity,
+                sourceSpace,
+                space,
+              ),
+              `Factory artifact ${ref.identity} is waiting for replication into ${space}`,
+            );
+          }
+          this.patternManager.assertArtifactAvailableInSpace(
+            ref.identity,
+            space,
+          );
+        }
       },
     });
     return createCell(

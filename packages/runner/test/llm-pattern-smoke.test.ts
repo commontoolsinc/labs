@@ -19,7 +19,10 @@ import {
 import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -53,7 +56,10 @@ describe("LLM pattern smoke tests", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateText, generateObject } = commonfabric);
-    dummyPattern = pattern(() => ({}), { type: "object" });
+    dummyPattern = installTestPatternArtifact(
+      runtime,
+      pattern(() => ({}), { type: "object" }),
+    );
   });
 
   afterEach(async () => {

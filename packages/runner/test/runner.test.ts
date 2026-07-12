@@ -1253,7 +1253,7 @@ describe("storage subscription", () => {
     await storageManager?.close();
   });
 
-  it("clears cached patterns when storage notifies of changes", () => {
+  it("retains structural selections across result writes", () => {
     const internals = runtime.runner as unknown as {
       resultPatternCache: Map<string, string>;
       createStorageSubscription(): IStorageSubscription;
@@ -1282,7 +1282,7 @@ describe("storage subscription", () => {
     const subscription = internals.createStorageSubscription();
     subscription.next(notification);
 
-    expect(internals.resultPatternCache.has(key)).toBe(false);
+    expect(internals.resultPatternCache.has(key)).toBe(true);
   });
 });
 

@@ -353,6 +353,17 @@ export class PatternManager {
       false;
   }
 
+  /** Trusted in-session source space for an already-verified artifact. */
+  artifactSourceSpace(
+    identity: string,
+    destination?: MemorySpace,
+  ): MemorySpace | undefined {
+    for (const [space, identities] of this.availableArtifactIdentities) {
+      if (space !== destination && identities.has(identity)) return space;
+    }
+    return undefined;
+  }
+
   /** Fail closed unless the exact containing space can cold-load `identity`. */
   assertArtifactAvailableInSpace(
     identity: string,
@@ -1317,10 +1328,7 @@ export class PatternManager {
     // builder gate. Probe the gate again here so this public API never turns a
     // corrupted/private-table value into executable authority.
     const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
-    if (
-      sourceAvailable && indexed !== undefined &&
-      isTrustedBuilderArtifact(indexed)
-    ) {
+    if (indexed !== undefined && isTrustedBuilderArtifact(indexed)) {
       this.esmCacheStats.byIdentityHits++;
       return indexed as object;
     }

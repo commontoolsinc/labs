@@ -126,9 +126,7 @@ describe("hidden factory-state traversal", () => {
     expect(resolveOriginal(mapped)).toBe(resolveOriginal(factory));
     expect(typeof mapped.asScope).toBe("function");
     expect(typeof mapped.inSpace).toBe("function");
-    expect(() => mapped({})).toThrow(
-      "Bound pattern params require callback binding",
-    );
+    expect(() => mapped({})).not.toThrow();
   });
 
   it("maps nested factories once and reuses the mapped callable", () => {

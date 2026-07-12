@@ -189,6 +189,22 @@ describe("keyless op identity (CT-1812)", () => {
     }
     expect(listOp).not.toBe(wrapperOp);
 
+    // Keep this as an explicitly legacy keyless-list fixture. Canonical list
+    // nodes carry only the bound factory and therefore require its durable
+    // artifact ref; the old sibling `params` shape is the compatibility path
+    // that may still mint a session-only keyless sentinel.
+    const legacyFactory = {
+      ...factory,
+      nodes: (factory as unknown as { nodes: unknown[] }).nodes.map((node) =>
+        node === mapNode
+          ? {
+            ...mapNode,
+            inputs: { ...mapNode!.inputs, params: {} },
+          }
+          : node
+      ),
+    } as unknown as Parameters<Runtime["run"]>[1];
+
     // Bare evaluation indexed nothing: the op is keyless going in.
     expect(runtime.patternManager.getArtifactEntryRef(listOp))
       .toBeUndefined();
@@ -200,10 +216,10 @@ describe("keyless op identity (CT-1812)", () => {
     const resultCell = runtime.getCell<{ rendered: boolean }>(
       space,
       { ct1812: "keyless-op-identity" },
-      (factory as { resultSchema?: never }).resultSchema,
+      (legacyFactory as { resultSchema?: never }).resultSchema,
       tx,
     );
-    const result = runtime.run(tx, factory, {}, resultCell);
+    const result = runtime.run(tx, legacyFactory, {}, resultCell);
     runtime.prepareTxForCommit(tx);
     const commit = await tx.commit();
     expect(commit.error).toBeUndefined();
@@ -225,8 +241,9 @@ describe("keyless op identity (CT-1812)", () => {
       minted!.identity,
       minted!.symbol,
     )).toBe(listOp);
-    expect(runtime.patternManager.getArtifactEntryRef(wrapperOp))
-      .toBeUndefined();
+    const wrapperRef = runtime.patternManager.getArtifactEntryRef(wrapperOp);
+    expect(wrapperRef?.identity).toMatch(/^keyless:/);
+    expect(wrapperRef).not.toEqual(minted);
 
     cancel();
     await runtime.idle();

@@ -5,7 +5,6 @@ import {
   llmDialog,
   NAME,
   pattern,
-  patternTool,
   type Stream,
   toSchema,
   UI,
@@ -102,11 +101,15 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
   const messages = new Writable<BuiltInLLMMessage[]>([]);
 
   const llmTools = {
-    searchSpace: patternTool(summarySearchPattern, {
-      entries: summaryEntries,
-    }),
-    listMentionable: patternTool(listMentionable, { mentionable }),
-    listRecent: patternTool(listRecent, { recentPieces }),
+    searchSpace: pattern(({ query }: { query: string }) =>
+      summarySearchPattern({ query, entries: summaryEntries })
+    ),
+    listMentionable: pattern((_input: Record<string, never>) =>
+      listMentionable({ mentionable })
+    ),
+    listRecent: pattern((_input: Record<string, never>) =>
+      listRecent({ recentPieces })
+    ),
   };
 
   const dialogParams = {

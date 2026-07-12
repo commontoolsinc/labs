@@ -51,12 +51,12 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { pattern, schema } from "commonfabric";',
-            "const model = schema({",
+            'import { pattern } from "commonfabric";',
+            "const model = {",
             '  type: "object",',
             '  properties: { count: { type: "number" } },',
             '  required: ["count"],',
-            "});",
+            "} as const;",
             "export default pattern<{ count: number }>(({ count }) => ({ count }), model, model);",
           ].join("\n"),
         },

@@ -865,7 +865,7 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
   factory, another decodes it, and a runner materializes/invokes it.
 - [x] Add typed factory round trips through Cells, query-result proxies, pieces,
   nested arrays, and nested objects now that `asFactory` exists.
-- [ ] Verify cross-space links remain links, artifact source space is passed to
+- [x] Verify cross-space links remain links, artifact source space is passed to
   loading, and a by-value writer durably replicates the artifact closure into
   the containing space before committing/enqueueing the Factory value.
   `spaceSelector` remains the execution target, and CFC labels survive the
@@ -1718,34 +1718,82 @@ For every caller, replace
 input contains only the caller-supplied fields and whose closure invokes the
 original pattern with `entries`.
 
-- [ ] Migrate `packages/patterns/cfc-agent-prompt-injection-demo/main.tsx`.
-- [ ] Migrate `packages/patterns/deep-research.tsx`.
-- [ ] Migrate `packages/patterns/google/core/gmail-importer.tsx`.
-- [ ] Migrate `packages/patterns/google/core/google-calendar-importer.tsx`.
-- [ ] Migrate `packages/patterns/notes/note.tsx`.
-- [ ] Migrate `packages/patterns/shopping-list.tsx`.
-- [ ] Migrate the affected files under `packages/patterns/system/`, including
+- [x] Migrate `packages/patterns/cfc-agent-prompt-injection-demo/main.tsx`.
+- [x] Migrate `packages/patterns/deep-research.tsx`.
+- [x] Migrate `packages/patterns/google/core/gmail-importer.tsx`.
+- [x] Migrate `packages/patterns/google/core/google-calendar-importer.tsx`.
+- [x] Migrate `packages/patterns/notes/note.tsx`.
+- [x] Migrate `packages/patterns/shopping-list.tsx`.
+- [x] Migrate the affected files under `packages/patterns/system/`, including
   default app, knowledge graph, omnibox, quick capture, space overview,
   suggestion, suggestion history, and summary index.
-- [ ] Migrate `packages/cli/integration/pattern/fuse-exec.tsx` and any current
+- [x] Migrate `packages/cli/integration/pattern/fuse-exec.tsx` and any current
   non-test caller found by the inventory command below.
-- [ ] Replace the old structural `PatternToolResult` type in
+- [x] Replace the old structural `PatternToolResult` type in
   `packages/patterns/examples/summary-index-tester.tsx`, if still present when
   this stage begins.
-- [ ] Update `packages/patterns/index.md` only where generated summaries or
+- [x] Update `packages/patterns/index.md` only where generated summaries or
   public examples change.
-- [ ] Update `packages/patterns/test/source-coverage/commonfabric-stub.test.ts`
+- [x] Update `packages/patterns/test/source-coverage/commonfabric-stub.test.ts`
   so source coverage models the new public API while retaining an explicitly
   named legacy fixture if needed.
-- [ ] Verify every wrapper remains readable at the call site and does not expose
+- [x] Verify every wrapper remains readable at the call site and does not expose
   captured values in the public tool schema.
-- [ ] Run a final source inventory and classify every remaining hit as API,
+- [x] Run a final source inventory and classify every remaining hit as API,
   compatibility reader, migration fixture, or historical documentation:
 
   ```sh
   rg -n "patternTool|PatternToolResult|extraParams" packages docs/common \
     --glob '!packages/patterns/deprecated/**'
   ```
+
+WP4.3 audit (2026-07-11): every supported repository caller now uses a readable
+inline `pattern` closure. Public fields remain callback argument 0; captured
+Cells, lists, configuration, and existing sub-patterns flow through the private
+argument-1 params record emitted by closure conversion. The CLI FUSE fixture and
+summary-index tester now declare direct `PatternFactory` output types. The
+patterns source-coverage stub models direct factories as the public shape and
+keeps its old writer under an explicitly named legacy type/function boundary.
+
+The final inventory has no production `patternTool(...)` call outside the
+deprecated compatibility constructor itself. Remaining hits classify as:
+deprecated API/writer declarations, compatibility readers and diagnostics,
+explicit legacy tests/fixtures, transformer migration work assigned to WP4.4,
+live compatibility documentation, and historical documentation. No production
+patterns caller or CLI integration pattern remains in that set.
+
+Repository migration exposed several real plan/code discrepancies rather than
+ordinary caller edits. Exact factory contracts require static schema artifacts,
+so runtime `schema()` fixture values were replaced with equivalent static
+schemas. Hand-built canonical factories need installed content-addressed refs;
+legacy keyless graphs remain accepted only at their named compatibility
+boundaries. Warm indexed artifacts remain synchronously executable without
+granting durable authority in an unrelated space. Canonical synchronous writers
+still reject unreplicated closures, while the runner-owned raw-node adapter uses
+`RetryWhenReady` to await exact-space replication before retrying its immutable
+input write. This preserves `run()`'s synchronous API and keeps cold loading at
+an explicit runner boundary.
+
+Static and dynamic `.inSpace(...)` coverage also found that a resolved anonymous
+dynamic selector was discarded when the materialized factory still carried its
+empty authored selector. Pattern-node setup now retains the dynamic module's
+resolved target as the fallback. Named, anonymous, link-derived, warm, cold, and
+fresh-runtime cross-space tests pass with the execution selector distinct from
+artifact source provenance.
+
+The full runner migration required deterministic structural identity for
+deprecated keyless pattern graphs before and after their compatibility ref is
+minted. The three affected traverse-replay oracles were regenerated: invocation
+outcomes and read counts are unchanged, while legacy JSON data-URI document ids
+move to the canonical Fabric data-URI identity. The replay suite passes all four
+fixtures and the regeneration left `deno.lock` untouched.
+
+Complete package evidence for this work package: patterns passes `58 passed (29
+steps), 0 failed`; CLI remains green at `895 passed (249 steps), 0 failed, 1
+ignored` plus subprocess `20 passed (91 steps), 0 failed`; runner passes `929
+passed (4897 steps), 0 failed, 0 ignored (10 steps)` in 4m25s. The representative
+summary-index transform shows public input at callback argument 0, closure params
+at argument 1, and exactly one transformer-emitted `.curry(...)`.
 
 ### WP4.4 — Stop canonical production of legacy list and tool shapes
 

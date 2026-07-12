@@ -572,45 +572,61 @@ Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
     ],
   ]);
   const childCells = new Map<string, unknown>();
+  const readTools = () => ({
+    fromInputSchema: {
+      description: "uses a parent schema",
+      inputSchema: {
+        type: "object",
+        properties: {
+          result: { type: "string" },
+          value: { type: "number" },
+        },
+        required: ["result", "value"],
+      },
+    },
+    fromChildPattern: {
+      description: "uses a child pattern schema",
+    },
+    booleanSchema: {
+      description: "uses a boolean schema",
+      inputSchema: true,
+    },
+    missingSchema: {
+      description: "skipped",
+    },
+    pieceTool: {
+      piece: {
+        get: () => ({ name: "piece" }),
+        getAsNormalizedFullLink: () => ({
+          id: "of:piece",
+          path: [],
+          space: "did:test:tools",
+          scope: "space",
+        }),
+      },
+    },
+  });
   const toolsCell = {
-    get: () => ({
-      fromInputSchema: {
-        description: "uses a parent schema",
-        inputSchema: {
-          type: "object",
-          properties: {
-            result: { type: "string" },
-            value: { type: "number" },
-          },
-          required: ["result", "value"],
-        },
-      },
-      fromChildPattern: {
-        description: "uses a child pattern schema",
-      },
-      booleanSchema: {
-        description: "uses a boolean schema",
-        inputSchema: true,
-      },
-      missingSchema: {
-        description: "skipped",
-      },
-      pieceTool: {
-        piece: {
-          get: () => ({ name: "piece" }),
-          getAsNormalizedFullLink: () => ({
-            id: "of:piece",
-            path: [],
-            space: "did:test:tools",
-            scope: "space",
-          }),
-        },
-      },
-    }),
+    get: readTools,
+    getRaw: readTools,
+    runtime: {},
     key(name: string) {
-      const cell = {
-        get: () => childValues.get(name),
-      };
+      const makeCell = (read: () => unknown): any => ({
+        get: read,
+        getRaw: read,
+        resolveAsCell() {
+          return this;
+        },
+        key(field: string) {
+          return makeCell(() => {
+            const value = read();
+            return typeof value === "object" && value !== null
+              ? (value as Record<string, unknown>)[field]
+              : undefined;
+          });
+        },
+      });
+      const cell = makeCell(() => childValues.get(name));
       childCells.set(name, cell);
       return cell;
     },
@@ -653,6 +669,8 @@ Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
 Deno.test("buildToolCatalog adds built-in tools by default", () => {
   const toolsCell = {
     get: () => undefined,
+    getRaw: () => undefined,
+    runtime: {},
     key: () => ({ get: () => undefined }),
   };
 
@@ -733,6 +751,8 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
   const space = "did:test:tools";
   const emptyToolsCell = {
     get: () => undefined,
+    getRaw: () => undefined,
+    runtime: {},
     key: () => ({ get: () => undefined }),
   };
   const catalog = buildToolCatalog(emptyToolsCell as any);

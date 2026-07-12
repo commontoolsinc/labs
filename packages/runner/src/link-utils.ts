@@ -3,7 +3,10 @@ import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -418,6 +421,18 @@ export function createDataCellURI(
     insideLegacyPatternGraph = false,
   ): any {
     if (isAdmittedFabricFactory(value)) {
+      const state = factoryStateOf(value);
+      const legacyPattern = value as unknown as { toJSON?: () => unknown };
+      if (
+        insideLegacyPatternGraph && state.kind === "pattern" &&
+        state.ref === undefined && typeof legacyPattern.toJSON === "function"
+      ) {
+        return traverseAndAddBaseIdToRelativeLinks(
+          legacyPattern.toJSON(),
+          seen,
+          true,
+        );
+      }
       if (!checkedFactories.has(value)) {
         if (!options.assertFactoryAvailable) {
           throw new Error(
@@ -467,7 +482,10 @@ export function createDataCellURI(
         const childIsInsideLegacyPattern = insideLegacyPatternGraph ||
           isPattern(value);
         return Object.fromEntries(
-          Object.entries(value).map((
+          Object.entries(value).filter(([key, child]) =>
+            !(childIsInsideLegacyPattern && key === "toJSON" &&
+              typeof child === "function")
+          ).map((
             [key, value],
           ) => [
             key,

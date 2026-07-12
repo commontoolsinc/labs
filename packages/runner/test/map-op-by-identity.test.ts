@@ -121,7 +121,10 @@ describe("map op passed by identity", () => {
   };
 
   it("resolves the map op by identity and produces correct output", async () => {
-    const compiled = await runtime.patternManager.compilePattern(PROGRAM);
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
 
     // Spy on the synchronous identity resolver to prove the op took the
     // `{ $patternRef }` path (not the embedded-graph fallback).
@@ -159,7 +162,10 @@ describe("map op passed by identity", () => {
   });
 
   it("fails loudly (no fallback output) when the sentinel cannot resolve", async () => {
-    const compiled = await runtime.patternManager.compilePattern(PROGRAM);
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
 
     // The artifact index is session-lifetime (identity E4), so a genuine miss
     // means the op's module never evaluated in this session — a bug, not an
@@ -203,7 +209,10 @@ describe("map op passed by identity", () => {
     // cold source recompile here is the CT-1623 "compiles=0 reload" regression
     // the shell piece test guards. (Without the fix this resolves to undefined /
     // recompiles, because hoists aren't in `modulesByIdentity.exports`.)
-    const compiled = await runtime.patternManager.compilePattern(PROGRAM);
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
     const pm = runtime.patternManager;
     const entryRef = pm.getArtifactEntryRef(compiled);
     expect(entryRef).toBeDefined();

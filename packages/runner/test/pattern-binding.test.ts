@@ -1104,7 +1104,7 @@ describe("pattern-binding", () => {
         ): void;
       };
 
-      const listBindings = { op: compiled };
+      const listBindings = { op: compiled, params: {} };
       substitute.substituteOpPatternRefs("map", listBindings);
       expect(isPatternRefSentinel(listBindings.op)).toBe(true);
 
@@ -1121,7 +1121,7 @@ describe("pattern-binding", () => {
       try {
         const { pattern } = createTrustedBuilder(runtime).commonfabric;
         const keyless = pattern(() => ({ value: 1 }));
-        const keylessBindings = { op: keyless };
+        const keylessBindings = { op: keyless, params: {} };
         substitute.substituteOpPatternRefs("flatMap", keylessBindings);
         expect(isPatternRefSentinel(keylessBindings.op)).toBe(true);
         expect(runtime.patternManager.getArtifactEntryRef(keyless)?.identity)
@@ -1141,7 +1141,7 @@ describe("pattern-binding", () => {
           }),
         ];
         for (const factory of modified) {
-          const modifiedBindings = { op: factory };
+          const modifiedBindings = { op: factory, params: {} };
           expect(() =>
             substitute.substituteOpPatternRefs("filter", modifiedBindings)
           ).toThrow("legacy list op cannot discard factory state");
