@@ -2319,6 +2319,22 @@ describe("persistent scheduler observations", () => {
       const sideWrite = materializer!.materializerWriteEnvelopes[0];
       expect(directOutput.id).not.toBe(sideWrite.id);
 
+      const provider = runtime.storageManager.open(space);
+      const durableWriters = await provider.writersForTargets?.({
+        branch: "",
+        targets: [
+          { ...directOutput, space },
+          { ...sideWrite, space },
+        ],
+      });
+      expect(durableWriters).toBeDefined();
+      expect(durableWriters?.writers).toHaveLength(1);
+      expect(durableWriters?.writers[0]?.actionId).toBe(materializer!.actionId);
+      expect(
+        durableWriters?.writers[0]?.matchedWrites.map((match) => match.kind),
+      )
+        .toEqual(["current-known", "materializer"]);
+
       type SchedulerIndexServer = {
         openEngine(space: string): Promise<{
           database: {
