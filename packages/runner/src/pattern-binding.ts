@@ -54,6 +54,8 @@ import type {
   DerivedInternalCellDescriptor,
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
@@ -64,6 +66,12 @@ type SendValueToBindingOptions = {
 type UnwrapOneLevelOptions = {
   targetSchema?: JSONSchema;
   derivedInternalCells?: readonly DerivedInternalCellDescriptor[];
+  /**
+   * Carry the runner-derived label view on resolved primitive links. This is
+   * used for hidden factory state written in the same transaction as its
+   * parent binding, before that parent's link-origin metadata is durable.
+   */
+  includeCfcLabelView?: boolean;
   /**
    * The containing pattern's authored argument schema, used as the source of
    * declared cell scopes when serializing binding aliases (see
@@ -561,6 +569,25 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   const resultCellLink = resultCell.getAsNormalizedFullLink();
   const factoryContext = createFactoryTraversalContext();
 
+  const createBoundLink = (link: NormalizedFullLink) => {
+    const sigil = createSigilLinkFromParsedLink(
+      link,
+      { includeSchema: true, overwrite: "redirect" },
+    );
+    if (options?.includeCfcLabelView) {
+      const sourceCell = resultCell.runtime.getCellFromLink(
+        link,
+        link.schema,
+        resultCell.tx,
+      );
+      const labelView = cfcLabelViewForCell(sourceCell);
+      if (labelView !== undefined) {
+        setLinkCfcLabelView(sigil, labelView);
+      }
+    }
+    return sigil;
+  };
+
   function convert(
     binding: unknown,
     targetSchema: JSONSchema | undefined,
@@ -632,9 +659,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return createBoundLink(
           scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
-          { includeSchema: true, overwrite: "redirect" },
         );
       } else {
         // Resolve the special values for "argument" and "result".
@@ -661,14 +687,13 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           : alias.cell === "params"
           ? options?.sourceSchemas?.params
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return createBoundLink(
           foldDeclaredScopeIntoLinkSchema(
             cfc,
             scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
           ),
-          { includeSchema: true, overwrite: "redirect" },
         );
       }
     } else if (isRecord(binding) && isPattern(binding)) {

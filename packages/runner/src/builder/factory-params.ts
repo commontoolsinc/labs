@@ -10,6 +10,7 @@ import {
   type FactoryContract,
   factoryContractFromSchema,
 } from "../factory-contract.ts";
+import { isCell } from "../cell.ts";
 import { isCellLink, parseLink } from "../link-utils.ts";
 import { isReactive, type JSONSchema } from "./types.ts";
 
@@ -85,6 +86,13 @@ function factoryContractFailure(
 }
 
 function symbolicSchema(value: unknown): JSONSchema | undefined {
+  // Eager graph construction can hand curry an opaque Cell whose frame has no
+  // runtime space yet. Its authored schema is already available on the Cell;
+  // parsing it as a link would incorrectly force identity/space minting during
+  // compile-time validation.
+  if (isCell(value)) {
+    return value.export().schema;
+  }
   if (isReactive(value)) {
     return value.export().schema;
   }

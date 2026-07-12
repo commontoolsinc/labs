@@ -124,6 +124,7 @@ import {
   type ImplementationIdentity,
 } from "./cfc/types.ts";
 import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
@@ -720,6 +721,8 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  /** Reactive selector whose current Factory@1 state authorizes this graph. */
+  factorySelectionLink?: NormalizedFullLink;
 };
 
 function dedupeNormalizedLinks(
@@ -1678,6 +1681,7 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      factorySelectionLink?: NormalizedFullLink;
     } = {},
   ): Cancel {
     const {
@@ -1757,6 +1761,7 @@ export class Runner {
             schedulerRehydration,
             undefined,
             node.expectedFactory,
+            options.factorySelectionLink,
           );
         }
         if (!doNotUpdateOnPatternChange && schedulePatternUpdate) {
@@ -2172,6 +2177,7 @@ export class Runner {
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      factorySelectionLink: options.factorySelectionLink,
     });
   }
 
@@ -3052,22 +3058,77 @@ export class Runner {
     if (seen.has(key)) return;
     seen.add(key);
 
+    const factoryState = isAdmittedFabricFactory(pattern)
+      ? factoryStateOf(pattern)
+      : undefined;
+    if (
+      factoryState?.kind === "pattern" &&
+      factoryState.paramsSchema !== undefined
+    ) {
+      // A resumed closure-bearing pattern is loaded by its unbound base
+      // identity; its invocation state lives in the deterministic params cell.
+      // Pull that cell before any node subscribes so setup/graph reads cannot
+      // race an absent cold-cache value and later conflict with the durable
+      // capture links.
+      const paramsCell = getMetaCell(
+        resultCell,
+        "params",
+        tx,
+        factoryState.paramsSchema,
+      );
+      out.push(this.runtime.getCellFromLink(
+        paramsCell.getAsNormalizedFullLink(),
+        factoryState.paramsSchema,
+      ));
+    }
+
     for (const descriptor of pattern.derivedInternalCells ?? []) {
       out.push(getDerivedInternalCell(resultCell, descriptor));
     }
 
     for (const node of pattern.nodes) {
       const module = node.module;
-      if (
-        !isModule(module) || module.type !== "pattern" ||
-        !isPattern(module.implementation)
-      ) {
-        continue;
+      let childPattern: Pattern;
+      let targetSpace = resultCell.space;
+      let moduleDefaultScope: CellScope | undefined;
+      if (isAdmittedFabricFactory(module)) {
+        const state = factoryStateOf(module);
+        if (state.kind !== "pattern") continue;
+        let materialized: MaterializedFactory;
+        try {
+          materialized = materializeFactory(module, {
+            runtime: this.runtime,
+            artifactSpace: resultCell.space,
+          });
+        } catch (error) {
+          logger.warn("resume-owned-cells", () => [
+            "skipping a canonical sub-pattern whose artifact is not warm",
+            error,
+          ]);
+          continue;
+        }
+        if (!isPattern(materialized)) continue;
+        childPattern = materialized;
+        moduleDefaultScope = state.defaultScope;
+        if (
+          typeof state.spaceSelector === "string" &&
+          /^did:[^:]+:.+/.test(state.spaceSelector)
+        ) {
+          targetSpace = state.spaceSelector as MemorySpace;
+        }
+      } else {
+        if (
+          !isModule(module) || module.type !== "pattern" ||
+          !isPattern(module.implementation)
+        ) {
+          continue;
+        }
+        childPattern = module.implementation;
+        targetSpace = module.targetSpace ?? resultCell.space;
+        moduleDefaultScope = module.defaultScope;
       }
-      const childPattern = module.implementation;
-      const targetSpace = module.targetSpace ?? resultCell.space;
       const childScope = patternDefaultScope(childPattern) ??
-        module.defaultScope;
+        moduleDefaultScope;
       // Resolve the node's reserved output spot the way instantiatePatternNode
       // does: unwrap one level (so a deferred-alias output is decremented and
       // followed) and follow the write-redirect chain to its resolved end (a
@@ -3348,6 +3409,7 @@ export class Runner {
             addCancel,
             pattern,
             schedulerRehydration,
+            factorySelectionLink,
           );
           break;
         default:
@@ -3375,6 +3437,7 @@ export class Runner {
         addCancel,
         pattern,
         schedulerRehydration,
+        factorySelectionLink,
       );
     } else if (isWriteRedirectLink(module)) {
       if (expectedFactory === undefined) {
@@ -3439,8 +3502,12 @@ export class Runner {
     let currentCanonical: unknown = undefined;
     let currentSelectionLabel: unknown = undefined;
     let hasSelection = false;
+    let selectionGenerationActive = false;
+    let fastPreemptedSelection = false;
     let childCancel: Cancel | undefined;
     let sinkCancel: Cancel | undefined;
+    let selectionSourceLink: NormalizedFullLink | undefined;
+    let fastSelectionQueued = false;
     const resolvedExecutionSpaces = new Map<string, MemorySpace>();
     const callSiteLink = resultCell.getAsNormalizedFullLink();
     const anonymousExecutionSpaceName = "dynamic-factory:" + hashOf({
@@ -3461,6 +3528,8 @@ export class Runner {
     const readCurrent = (): {
       selection: unknown;
       artifactSpace: MemorySpace;
+      sourceLink: NormalizedFullLink;
+      cfcLabel: unknown;
     } => {
       const readTx = this.runtime.readTx();
       const resolved = resolveLink(
@@ -3472,6 +3541,8 @@ export class Runner {
         selection: bindingCell.withTx(readTx)
           .getWithoutFactoryMaterialization(),
         artifactSpace: resolved.space,
+        sourceLink: resolved,
+        cfcLabel: cfcLabelViewForCell(bindingCell.withTx(readTx)),
       };
     };
 
@@ -3570,12 +3641,6 @@ export class Runner {
       }
     };
 
-    let activateSelection!: (
-      selection: unknown,
-      artifactSpace: MemorySpace,
-      selectedGeneration: number,
-    ) => void;
-
     const beginColdPreparation = (
       selection: unknown,
       artifactSpace: MemorySpace,
@@ -3660,10 +3725,10 @@ export class Runner {
       void task;
     };
 
-    activateSelection = (
-      selection,
-      artifactSpace,
-      selectedGeneration,
+    const activateSelection = (
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
     ): void => {
       try {
         instantiateSelection(selection, artifactSpace, selectedGeneration);
@@ -3702,6 +3767,16 @@ export class Runner {
         hasSelection && deepEqual(canonical, currentCanonical) &&
         deepEqual(cfcLabel, currentSelectionLabel)
       ) {
+        if (!fastPreemptedSelection) return;
+        fastPreemptedSelection = false;
+        if (selection === undefined) return;
+        const current = readCurrent();
+        selectionSourceLink = current.sourceLink;
+        activateSelection(
+          selection,
+          current.artifactSpace,
+          generation,
+        );
         return;
       }
 
@@ -3712,10 +3787,34 @@ export class Runner {
       const selectedGeneration = generation;
       childCancel?.();
       childCancel = undefined;
+      selectionGenerationActive = selection !== undefined;
       if (selection === undefined) return;
 
-      const { artifactSpace } = readCurrent();
-      activateSelection(selection, artifactSpace, selectedGeneration);
+      const current = readCurrent();
+      selectionSourceLink = current.sourceLink;
+      activateSelection(selection, current.artifactSpace, selectedGeneration);
+    };
+
+    const preemptSelection = (
+      selection: unknown,
+      cfcLabel?: unknown,
+    ): void => {
+      if (!active || !selectionGenerationActive) return;
+      const canonical = canonicalSelection(selection);
+      if (
+        hasSelection && deepEqual(canonical, currentCanonical) &&
+        deepEqual(cfcLabel, currentSelectionLabel)
+      ) {
+        return;
+      }
+      hasSelection = true;
+      currentCanonical = canonical;
+      currentSelectionLabel = cfcLabel;
+      generation++;
+      childCancel?.();
+      childCancel = undefined;
+      selectionGenerationActive = selection !== undefined;
+      fastPreemptedSelection = true;
     };
 
     sinkCancel = bindingCell.sink(
@@ -3743,10 +3842,55 @@ export class Runner {
         materializeFactories: false,
       },
     );
+
+    // A selector change must be able to cancel an async authored generation
+    // even while the scheduler's ordinary action lane is waiting for that
+    // promise. The scheduled sink above remains the authoritative reactive/CFC
+    // path; this exact-address storage listener is a narrow cancellation fast
+    // lane. It rereads the live selection, and instantiateSelection still
+    // performs the execution-authorizing read in its own transaction.
+    const fastSelectionSubscription: IStorageSubscription = {
+      next: (notification) => {
+        if (!active) return { done: true };
+        const touches = (link: NormalizedFullLink | undefined): boolean => {
+          if (link === undefined || notification.space !== link.space) {
+            return false;
+          }
+          if (notification.type === "reset") return true;
+          if (!("changes" in notification)) return false;
+          return [...notification.changes].some((change) =>
+            change.address.id === link.id &&
+            (change.address.scope ?? "space") === (link.scope ?? "space")
+          );
+        };
+        if (!touches(bindingLink) && !touches(selectionSourceLink)) {
+          return { done: false };
+        }
+        if (!fastSelectionQueued) {
+          fastSelectionQueued = true;
+          queueMicrotask(() => {
+            fastSelectionQueued = false;
+            if (!active) return;
+            try {
+              const current = readCurrent();
+              selectionSourceLink = current.sourceLink;
+              preemptSelection(current.selection, current.cfcLabel);
+            } catch (error) {
+              this.runtime.scheduler.reportError(error, {
+                name: "dynamic-factory-fast-selection",
+              });
+            }
+          });
+        }
+        return { done: false };
+      },
+    };
+    this.runtime.storageManager.subscribe(fastSelectionSubscription);
     addCancel(() => {
       if (!active) return;
       active = false;
       generation++;
+      this.runtime.storageManager.unsubscribe?.(fastSelectionSubscription);
       sinkCancel?.();
       sinkCancel = undefined;
       childCancel?.();
@@ -6154,6 +6298,7 @@ export class Runner {
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -6171,6 +6316,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
+        includeCfcLabelView: true,
         sourceSchemas: {
           argument: pattern.argumentSchema,
           ...(containingParamsSchema === undefined
@@ -6337,6 +6483,7 @@ export class Runner {
       awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
         schedulerRehydration,
       ),
+      ...(factorySelectionLink === undefined ? {} : { factorySelectionLink }),
     });
 
     if (sendToBindings) {

@@ -1187,7 +1187,7 @@ containing `asFactory` schemas.
   owning result for resume/teardown.
 - [x] Resolve bound params against the parent binding context before writing or
   linking them into the hidden cell.
-- [ ] Preserve nested link parents and cross-space links rather than copying
+- [x] Preserve nested link parents and cross-space links rather than copying
   values across spaces.
 - [ ] For factory-valued params, preserve artifact-source provenance separately
   from any selected pattern factory's execution `spaceSelector`; resume must
@@ -1195,20 +1195,20 @@ containing `asFactory` schemas.
 - [x] Update `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct
   sub-pattern setup to accept the params pseudo-root only when the invocation
   owns a params cell.
-- [ ] Populate the same deterministic cell from serialized `Factory@1` state on
+- [x] Populate the same deterministic cell from serialized `Factory@1` state on
   resume before child nodes start.
-- [ ] Pre-sync the params cell during reload before graph execution and factor
+- [x] Pre-sync the params cell during reload before graph execution and factor
   the schema-aware projection currently used for argument updates rather than
   applying public-input defaults to params.
-- [ ] Tear it down with the owning result and never expose it through public
+- [x] Tear it down with the owning result and never expose it through public
   argument projection.
-- [ ] Define teardown in terms of cancellation, subscription ownership, and
+- [x] Define teardown in terms of cancellation, subscription ownership, and
   reachability. If durable owned cells are not physically deleted on ordinary
   stop, prove they cannot be reused or rescheduled by a later generation.
 - [x] Reject invocation of a closure-bearing base factory with absent params.
 - [x] Prove a public field and closure param with the same name remain distinct.
 - [ ] Traverse nested factories and preserve CFC labels inside params.
-- [ ] Add an A-with-params → B-with-different-params → A dynamic replacement
+- [x] Add an A-with-params → B-with-different-params → A dynamic replacement
   test proving a stable output spot, generation-fenced captured writes,
   generation-correct params/CFC labels, and resume of only the active
   generation. Gate A's cold reload and prove stale completion cannot revive its
@@ -1248,6 +1248,31 @@ rejected before setup writes or node execution. Focused coverage proves the
 capture remains a link to the parent argument cell, same-named public/private
 fields remain separate, and the existing nearby binding/serialization/reload
 matrix passes `10 passed (114 steps)`.
+
+WP3.4 reload/lifecycle slice (2026-07-11): transformed symbolic Cells are now
+validated from their declared schema without forcing a link address before a
+runner frame owns a space. Fresh-runtime resume walks canonical bound factory
+nodes as well as legacy pattern modules and awaits each deterministic params
+cell before subscribing child nodes. Nested captures remain parent-relative
+links, including a cross-space second hop; runner-derived CFC label views bridge
+same-transaction parent/params writes and are stripped from the durable link
+after recording policy input.
+
+The A-with-params -> B-with-params -> cold A-with-new-params regression exposed
+an additional scheduler interaction: the reactive selector sink could queue
+behind A's pending authored promise, allowing A to commit before cancellation.
+An exact-source storage-notification fast lane now only rereads and preempts the
+old generation; execution still waits for the normal transactional scheduler
+path. The test proves the stale A value is never observed, B and the final A use
+only their own params, old subscriptions do not rerun, the output identity is
+stable, and cold readiness retains B until the active A generation is ready.
+Each changed result contains the current generation's selector confidentiality
+label; prior confidentiality may remain conservatively joined because CFC
+labels are monotone at the stable durable output identity.
+Durable params cells are deliberately not physically deleted: the deterministic
+address is reused only after cancellation, with one complete immutable Fabric
+value installed atomically for the new generation. The focused regression
+matrix passes `10 passed (58 steps)`.
 
 ### WP3.5 — Unify list callback lowering
 

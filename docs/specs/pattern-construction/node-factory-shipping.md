@@ -734,6 +734,15 @@ the serialized bound `Factory@1` state repopulates the same params cell before
 the graph starts. The cell is torn down with its owning result and is never
 exposed as piece input.
 
+“Immutable” describes each installed Fabric params value, not a write-once
+address. A stable call site reuses its deterministic params-cell address across
+replacement generations. The supervisor cancels the prior owner first, then
+atomically installs the new generation's complete params value; generation
+fences prevent stale work from observing or reviving an earlier value. Ordinary
+stop need not physically delete durable owned cells, but it removes every live
+subscription and scheduling owner, so a later generation can reuse the address
+only through a fresh, generation-owned setup.
+
 An invocation of a closure-bearing base factory without bound params fails.
 Supplying public fields with the same names as closure params has no special
 meaning and creates no collision: the roots are distinct.
@@ -926,6 +935,17 @@ dependency. On a different canonical factory state, the supervisor:
    provenance and cross-space execution modifiers; and
 5. rereads the binding after any await and instantiates only the still-current
    replacement under the new generation.
+
+Selector invalidation is control-plane work and must not queue behind an
+authored promise from the generation it is replacing. The supervisor therefore
+observes the exact resolved selector source at the storage-notification seam,
+rereads that source, and invalidates the old generation immediately. This fast
+lane grants no execution authority and runs no replacement code: normal
+transactional selection, CFC validation, materialization, and instantiation
+remain on the scheduled path. JavaScript promises are not forcibly settled;
+the canceled promise may finish later, but its transaction and subscriptions
+are generation-fenced and cannot commit. The replacement begins when the
+ordinary scheduler lane advances.
 
 Replaying the same canonical `Factory@1` state is a no-op. If A is cold and B
 is selected before A finishes loading, A may populate the trusted artifact
