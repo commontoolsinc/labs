@@ -396,6 +396,23 @@ export interface ExecutionClaimAssertion {
   claimGeneration: number;
 }
 
+/**
+ * Durable, single-owner authority for one server executor generation. The
+ * record lives in the owning space database and is fenced by `branch` plus the
+ * monotonically increasing `leaseGeneration`.
+ */
+export interface ExecutionLease {
+  version: 1;
+  space: string;
+  branch: BranchName;
+  leaseGeneration: number;
+  hostId: string;
+  onBehalfOf: string;
+  state: "active" | "draining" | "revoked";
+  /** Unix milliseconds assigned from the host-provided server clock. */
+  expiresAt: number;
+}
+
 declare const inputBasisSeqBrand: unique symbol;
 declare const acceptedCommitSeqBrand: unique symbol;
 

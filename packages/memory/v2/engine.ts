@@ -22,6 +22,7 @@ import {
   type EntityId,
   type ExecutionClaim,
   type ExecutionClaimAssertion,
+  type ExecutionLease,
   type InputBasisSeq,
   isEntityDocument,
   type Operation,
@@ -411,6 +412,18 @@ CREATE TABLE IF NOT EXISTS branch (
 INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
 VALUES ('', 0, 0, 'active');
 
+CREATE TABLE IF NOT EXISTS execution_lease (
+  branch                 TEXT    NOT NULL PRIMARY KEY,
+  lease_generation       INTEGER NOT NULL,
+  host_id                 TEXT    NOT NULL,
+  on_behalf_of            TEXT    NOT NULL,
+  state                   TEXT    NOT NULL,
+  expires_at              INTEGER NOT NULL,
+  CHECK (lease_generation > 0),
+  CHECK (state IN ('active', 'draining', 'revoked')),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
   data          BLOB    NOT NULL,
@@ -799,6 +812,13 @@ export class ProtocolError extends Error {
   }
 }
 
+export class ExecutionLeaseFenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExecutionLeaseFenceError";
+  }
+}
+
 export interface OpenOptions {
   url: URL;
   snapshotInterval?: number;
@@ -816,6 +836,60 @@ export interface InvocationRecord {
 
 export type AuthorizationRecord = FabricValue;
 
+export interface AcquireExecutionLeaseOptions {
+  space: string;
+  branch: BranchName;
+  hostId: string;
+  onBehalfOf: string;
+  nowMs: number;
+  ttlMs: number;
+  /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
+  authorizeWrite?: (engine: Engine) => boolean;
+}
+
+export interface CurrentExecutionLeaseOptions {
+  space: string;
+  branch: BranchName;
+  nowMs: number;
+}
+
+export interface RenewExecutionLeaseOptions {
+  lease: ExecutionLease;
+  nowMs: number;
+  ttlMs: number;
+  /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
+  authorizeWrite?: (engine: Engine) => boolean;
+}
+
+export interface BeginExecutionLeaseDrainOptions {
+  lease: ExecutionLease;
+  nowMs: number;
+  drainTtlMs: number;
+}
+
+export interface RevokeExecutionLeaseOptions {
+  lease: ExecutionLease;
+  nowMs: number;
+}
+
+export interface ExpireExecutionLeaseOptions {
+  space: string;
+  branch: BranchName;
+  nowMs: number;
+}
+
+/** Host-only authority checked against the durable row inside applyCommit. */
+export interface ExecutionLeaseFence {
+  lease: ExecutionLease;
+  nowMs: number;
+  /**
+   * Canonical current WRITE and execution-policy check. It is invoked after
+   * exact replay detection but before first-application mutation, inside the
+   * same IMMEDIATE transaction.
+   */
+  authorize?: (engine: Engine) => boolean;
+}
+
 export interface ApplyCommitOptions {
   sessionId: SessionId;
   space?: string;
@@ -830,6 +904,12 @@ export interface ApplyCommitOptions {
    * crosses the memory protocol boundary.
    */
   executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+  /**
+   * Host-only durable authority for executor writes. Exact transaction
+   * replays return before this fence; first applications validate it inside
+   * the same immediate transaction as the data and scheduler writes.
+   */
+  executionLeaseFence?: ExecutionLeaseFence;
   /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
    *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
    *  apply loop executes the SQL inside the commit's transaction against the
@@ -1262,6 +1342,15 @@ type BranchRow = {
   created_seq: number;
   head_seq: number;
   status: string;
+};
+
+type ExecutionLeaseRow = {
+  branch: string;
+  lease_generation: number;
+  host_id: string;
+  on_behalf_of: string;
+  state: ExecutionLease["state"];
+  expires_at: number;
 };
 
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
@@ -2514,6 +2603,425 @@ export const headSeq = (
 
 export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
+};
+
+const SELECT_EXECUTION_LEASE = `
+SELECT
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+FROM execution_lease
+WHERE branch = :branch
+`;
+
+const UPSERT_EXECUTION_LEASE = `
+INSERT INTO execution_lease (
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+)
+VALUES (
+  :branch,
+  :lease_generation,
+  :host_id,
+  :on_behalf_of,
+  :state,
+  :expires_at
+)
+ON CONFLICT (branch) DO UPDATE SET
+  lease_generation = excluded.lease_generation,
+  host_id = excluded.host_id,
+  on_behalf_of = excluded.on_behalf_of,
+  state = excluded.state,
+  expires_at = excluded.expires_at
+`;
+
+const UPDATE_EXECUTION_LEASE = `
+UPDATE execution_lease
+SET state = :state,
+    expires_at = :expires_at
+WHERE branch = :branch
+  AND lease_generation = :lease_generation
+  AND host_id = :host_id
+  AND on_behalf_of = :on_behalf_of
+`;
+
+const assertLeaseClock = (name: string, value: number): void => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative integer`);
+  }
+};
+
+const leaseExpiry = (nowMs: number, ttlMs: number): number => {
+  assertLeaseClock("execution lease server time", nowMs);
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
+    throw new TypeError("execution lease TTL must be a positive integer");
+  }
+  const expiresAt = nowMs + ttlMs;
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new TypeError("execution lease expiry must be a safe integer");
+  }
+  return expiresAt;
+};
+
+const assertLeaseIdentityPart = (name: string, value: string): void => {
+  if (value.length === 0) {
+    throw new TypeError(`execution lease ${name} must not be empty`);
+  }
+};
+
+const assertLeaseSnapshot = (lease: ExecutionLease): void => {
+  if (lease.version !== 1) {
+    throw new TypeError("unsupported execution lease version");
+  }
+  assertLeaseIdentityPart("space", lease.space);
+  assertLeaseIdentityPart("host id", lease.hostId);
+  assertLeaseIdentityPart("principal", lease.onBehalfOf);
+  if (
+    !Number.isSafeInteger(lease.leaseGeneration) ||
+    lease.leaseGeneration <= 0
+  ) {
+    throw new TypeError(
+      "execution lease generation must be a positive integer",
+    );
+  }
+  assertLeaseClock("execution lease expiry", lease.expiresAt);
+  if (
+    lease.state !== "active" && lease.state !== "draining" &&
+    lease.state !== "revoked"
+  ) {
+    throw new TypeError("unsupported execution lease state");
+  }
+};
+
+const selectExecutionLeaseRow = (
+  engine: Engine,
+  branch: BranchName,
+): ExecutionLeaseRow | null =>
+  (engine.database.prepare(SELECT_EXECUTION_LEASE).get({ branch }) as
+    | ExecutionLeaseRow
+    | undefined) ?? null;
+
+const toExecutionLease = (
+  space: string,
+  row: ExecutionLeaseRow,
+): ExecutionLease => ({
+  version: 1,
+  space,
+  branch: row.branch,
+  leaseGeneration: row.lease_generation,
+  hostId: row.host_id,
+  onBehalfOf: row.on_behalf_of,
+  state: row.state,
+  expiresAt: row.expires_at,
+});
+
+const leaseOwnerMatches = (
+  row: ExecutionLeaseRow,
+  expected: Pick<ExecutionLease, "leaseGeneration" | "hostId" | "onBehalfOf">,
+): boolean =>
+  row.lease_generation === expected.leaseGeneration &&
+  row.host_id === expected.hostId &&
+  row.on_behalf_of === expected.onBehalfOf;
+
+const leaseIsLive = (row: ExecutionLeaseRow, nowMs: number): boolean =>
+  (row.state === "active" || row.state === "draining") &&
+  row.expires_at > nowMs;
+
+const branchIsActive = (engine: Engine, branch: BranchName): boolean => {
+  const row = engine.statements.selectBranchStatus.get({ branch }) as
+    | { status: string }
+    | undefined;
+  return row?.status === "active";
+};
+
+const acquireExecutionLeaseTransaction = (
+  engine: Engine,
+  options: AcquireExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseIdentityPart("space", options.space);
+  assertLeaseIdentityPart("host id", options.hostId);
+  assertLeaseIdentityPart("principal", options.onBehalfOf);
+  const expiresAt = leaseExpiry(options.nowMs, options.ttlMs);
+  ensureActiveBranch(engine, options.branch);
+  if (options.authorizeWrite?.(engine) !== true) return null;
+
+  const current = selectExecutionLeaseRow(engine, options.branch);
+  if (current !== null && leaseIsLive(current, options.nowMs)) {
+    if (
+      current.host_id !== options.hostId ||
+      current.on_behalf_of !== options.onBehalfOf
+    ) {
+      return null;
+    }
+    return toExecutionLease(options.space, current);
+  }
+
+  const leaseGeneration = (current?.lease_generation ?? 0) + 1;
+  if (!Number.isSafeInteger(leaseGeneration)) {
+    throw new TypeError("execution lease generation exhausted");
+  }
+  engine.database.prepare(UPSERT_EXECUTION_LEASE).run({
+    branch: options.branch,
+    lease_generation: leaseGeneration,
+    host_id: options.hostId,
+    on_behalf_of: options.onBehalfOf,
+    state: "active",
+    expires_at: expiresAt,
+  });
+  return {
+    version: 1,
+    space: options.space,
+    branch: options.branch,
+    leaseGeneration,
+    hostId: options.hostId,
+    onBehalfOf: options.onBehalfOf,
+    state: "active",
+    expiresAt,
+  };
+};
+
+/** Acquire one durable branch/space lease with a monotonic fence generation. */
+export const acquireExecutionLease = (
+  engine: Engine,
+  options: AcquireExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(acquireExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const currentExecutionLeaseTransaction = (
+  engine: Engine,
+  options: CurrentExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseIdentityPart("space", options.space);
+  assertLeaseClock("execution lease server time", options.nowMs);
+  if (!branchIsActive(engine, options.branch)) return null;
+  const row = selectExecutionLeaseRow(engine, options.branch);
+  return row !== null && leaseIsLive(row, options.nowMs)
+    ? toExecutionLease(options.space, row)
+    : null;
+};
+
+/** Return the unexpired active or draining durable lease for a branch. */
+export const currentExecutionLease = (
+  engine: Engine,
+  options: CurrentExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(currentExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const renewExecutionLeaseTransaction = (
+  engine: Engine,
+  options: RenewExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  const expiresAt = leaseExpiry(options.nowMs, options.ttlMs);
+  if (!branchIsActive(engine, options.lease.branch)) return null;
+  if (options.authorizeWrite?.(engine) !== true) return null;
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || current.state !== "active" ||
+    current.expires_at <= options.nowMs ||
+    !leaseOwnerMatches(current, options.lease)
+  ) {
+    return null;
+  }
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "active",
+    expires_at: expiresAt,
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    expiresAt,
+  };
+};
+
+/** Renew an active lease from the supplied server time. */
+export const renewExecutionLease = (
+  engine: Engine,
+  options: RenewExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(renewExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const beginExecutionLeaseDrainTransaction = (
+  engine: Engine,
+  options: BeginExecutionLeaseDrainOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  const drainDeadline = leaseExpiry(options.nowMs, options.drainTtlMs);
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || !leaseIsLive(current, options.nowMs) ||
+    !leaseOwnerMatches(current, options.lease)
+  ) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, drainDeadline);
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "draining",
+    expires_at: expiresAt,
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    state: "draining",
+    expiresAt,
+  };
+};
+
+/** Stop issuing work and bound completion of already-started attempts. */
+export const beginExecutionLeaseDrain = (
+  engine: Engine,
+  options: BeginExecutionLeaseDrainOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(beginExecutionLeaseDrainTransaction).immediate(
+    engine,
+    options,
+  );
+
+const revokeExecutionLeaseTransaction = (
+  engine: Engine,
+  options: RevokeExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  assertLeaseClock("execution lease server time", options.nowMs);
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (current === null || !leaseOwnerMatches(current, options.lease)) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, options.nowMs);
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "revoked",
+    expires_at: expiresAt,
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    state: "revoked",
+    expiresAt,
+  };
+};
+
+/** Revoke only the exact durable owner/generation named by the caller. */
+export const revokeExecutionLease = (
+  engine: Engine,
+  options: RevokeExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(revokeExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const expireExecutionLeaseTransaction = (
+  engine: Engine,
+  options: ExpireExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseIdentityPart("space", options.space);
+  assertLeaseClock("execution lease server time", options.nowMs);
+  const current = selectExecutionLeaseRow(engine, options.branch);
+  if (current === null) return null;
+  if (
+    (current.state === "active" || current.state === "draining") &&
+    current.expires_at > options.nowMs
+  ) {
+    return null;
+  }
+  if (current.state !== "revoked") {
+    engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+      branch: current.branch,
+      lease_generation: current.lease_generation,
+      host_id: current.host_id,
+      on_behalf_of: current.on_behalf_of,
+      state: "revoked",
+      expires_at: current.expires_at,
+    });
+  }
+  return {
+    ...toExecutionLease(options.space, current),
+    state: "revoked",
+  };
+};
+
+/** Mark an elapsed lease revoked without naming a possibly stale owner. */
+export const expireExecutionLease = (
+  engine: Engine,
+  options: ExpireExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(expireExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const assertExecutionLeaseFenceTransaction = (
+  engine: Engine,
+  options: {
+    fence?: ExecutionLeaseFence;
+    space?: string;
+    branch: BranchName;
+    principal?: string;
+    claims: readonly ExecutionClaim[];
+  },
+): void => {
+  const fence = options.fence;
+  if (fence === undefined) return;
+  assertLeaseSnapshot(fence.lease);
+  assertLeaseClock("execution lease server time", fence.nowMs);
+  if (
+    options.space === undefined || fence.lease.space !== options.space ||
+    fence.lease.branch !== options.branch ||
+    options.principal !== fence.lease.onBehalfOf
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "execution lease does not match the commit lane and principal",
+    );
+  }
+  const current = selectExecutionLeaseRow(engine, options.branch);
+  if (
+    current === null || !leaseIsLive(current, fence.nowMs) ||
+    !leaseOwnerMatches(current, fence.lease)
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "execution lease is stale, expired, or revoked",
+    );
+  }
+  for (const claim of options.claims) {
+    if (
+      claim.branch !== options.branch || claim.space !== options.space ||
+      claim.leaseGeneration !== current.lease_generation
+    ) {
+      throw new ExecutionLeaseFenceError(
+        "execution claim does not match the durable lease generation",
+      );
+    }
+  }
+  if (fence.authorize?.(engine) !== true) {
+    throw new ExecutionLeaseFenceError(
+      "execution sponsor lacks current WRITE authority or execution policy",
+    );
+  }
 };
 
 export const applyCommit = (
@@ -5402,6 +5910,7 @@ const applyCommitTransaction = (
     principal,
     commit,
     executionClaims,
+    executionLeaseFence,
     sqliteAttachments,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
@@ -5494,6 +6003,7 @@ const applyCommitTransaction = (
       branch,
       batch: schedulerObservationBatch,
       executionClaims,
+      executionLeaseFence,
     });
   }
 
@@ -5508,6 +6018,7 @@ const applyCommitTransaction = (
       reads: commit.reads,
       schedulerObservation,
       executionClaim: executionClaims?.get(commit.localSeq),
+      executionLeaseFence,
     });
   }
 
@@ -5541,6 +6052,14 @@ const applyCommitTransaction = (
       "failed claimed actions must not include semantic operations",
     );
   }
+
+  assertExecutionLeaseFenceTransaction(engine, {
+    fence: executionLeaseFence,
+    space,
+    branch,
+    principal,
+    claims: executionClaims === undefined ? [] : [...executionClaims.values()],
+  });
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -6360,6 +6879,7 @@ const applySchedulerObservationOnlyCommit = (
     reads,
     schedulerObservation,
     executionClaim,
+    executionLeaseFence,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -6370,6 +6890,7 @@ const applySchedulerObservationOnlyCommit = (
     reads: ClientCommit["reads"];
     schedulerObservation: SchedulerActionObservation;
     executionClaim?: ExecutionClaim;
+    executionLeaseFence?: ExecutionLeaseFence;
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
@@ -6426,6 +6947,13 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     branch,
     reads,
+  });
+  assertExecutionLeaseFenceTransaction(engine, {
+    fence: executionLeaseFence,
+    space,
+    branch,
+    principal,
+    claims: executionClaim === undefined ? [] : [executionClaim],
   });
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
@@ -6515,6 +7043,7 @@ const applySchedulerObservationBatchCommit = (
     branch,
     batch,
     executionClaims,
+    executionLeaseFence,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -6523,6 +7052,7 @@ const applySchedulerObservationBatchCommit = (
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+    executionLeaseFence?: ExecutionLeaseFence;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
@@ -6540,6 +7070,7 @@ const applySchedulerObservationBatchCommit = (
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
       executionClaim: executionClaims?.get(item.localSeq),
+      executionLeaseFence,
     });
     hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);
