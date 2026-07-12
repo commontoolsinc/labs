@@ -18,6 +18,8 @@ export type SessionState = {
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
+  /** Capability negotiated by the connection currently owning this session. */
+  serverPrimaryExecutionV1: boolean;
 };
 
 type OpenSessionState = {
@@ -63,6 +65,7 @@ export class SessionRegistry {
     serverSeq: number,
     ownerConnectionId = "session-registry",
     principal?: string,
+    capabilities: { serverPrimaryExecutionV1?: boolean } = {},
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -110,6 +113,8 @@ export class SessionRegistry {
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,
+      serverPrimaryExecutionV1:
+        capabilities.serverPrimaryExecutionV1 === true,
     });
     return {
       sessionId,

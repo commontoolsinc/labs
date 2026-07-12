@@ -15,8 +15,10 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  getMemoryProtocolFlags,
   type Operation,
   parseMemoryProtocolFlags,
+  type MemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerExecutionContextKey,
@@ -51,6 +53,7 @@ import {
   type WatchSetResult,
   type WatchSpec,
   type WireMemoryProtocolFlags,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 import {
@@ -100,6 +103,11 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import {
+  executionPolicyId,
+  isExecutionPolicyEnabled,
+  parseExecutionPolicy,
+} from "./execution-policy.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -273,6 +281,16 @@ const commitTouchesAclDoc = (
   );
 };
 
+const commitTouchesExecutionPolicy = (
+  operations: readonly Operation[],
+  space: string,
+): boolean => {
+  const id = executionPolicyId(space);
+  return operations.some((operation) =>
+    "id" in operation && operation.id === id
+  );
+};
+
 /** Deterministic, collision-resistant-enough token for a filename component
  *  (FNV-1a 32-bit + length). Used to derive cell-db file names from (space,id). */
 function hashToken(s: string): string {
@@ -403,6 +421,8 @@ class Connection {
   // clients' action runs instead of re-running them
   // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
   #persistentSchedulerState = false;
+  #clientFlags: MemoryProtocolFlags | null = null;
+  #serverFlags: MemoryProtocolFlags | null = null;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -414,6 +434,11 @@ class Connection {
     private readonly server: Server,
     private readonly sendRaw: Send,
   ) {}
+
+  get serverPrimaryExecutionV1(): boolean {
+    return this.#clientFlags?.serverPrimaryExecutionV1 === true &&
+      this.#serverFlags?.serverPrimaryExecutionV1 === true;
+  }
 
   private send(message: ServerMessage): void {
     this.sendRaw(
@@ -629,7 +654,7 @@ class Connection {
         });
         return;
       }
-      const response = respondToHello(parsed);
+      const response = respondToHello(parsed, this.server.memoryProtocolFlags());
       if (response.type === "hello.ok") {
         response.sessionOpen = this.issueSessionOpenAuth();
       }
@@ -639,6 +664,8 @@ class Connection {
       }
       const clientFlags = parseMemoryProtocolFlags(parsed.flags);
       const serverFlags = parseMemoryProtocolFlags(response.flags);
+      this.#clientFlags = clientFlags;
+      this.#serverFlags = serverFlags;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#persistentSchedulerState =
@@ -982,6 +1009,9 @@ export class Server {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
       };
+      /** Optional per-server protocol override. Rollout hosts use the ambient
+       *  runtime flag; tests may model client/server version skew in-process. */
+      protocolFlags?: Partial<WireMemoryProtocolFlags>;
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
@@ -991,6 +1021,20 @@ export class Server {
   nowSeconds(): number {
     return this.options.sessionOpenAuth.nowSeconds?.() ??
       Math.floor(Date.now() / 1000);
+  }
+
+  memoryProtocolFlags(): MemoryProtocolFlags {
+    if (this.options.protocolFlags === undefined) {
+      return getMemoryProtocolFlags();
+    }
+    const flags = parseMemoryProtocolFlags({
+      ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+      ...this.options.protocolFlags,
+    });
+    if (flags === null) {
+      throw new Error("memory server protocol flags are malformed");
+    }
+    return flags;
   }
 
   sessionOpenAudience(): string {
@@ -1231,6 +1275,74 @@ export class Server {
     return null;
   }
 
+  #executionPolicyEnabled(
+    engine: Engine.Engine,
+    space: string,
+  ): boolean {
+    return isExecutionPolicyEnabled(
+      Engine.read(engine, {
+        id: executionPolicyId(space),
+        branch: "",
+        scope: "space",
+      }),
+    );
+  }
+
+  /** Validate the owner-managed opt-in policy as one isolated whole-document
+   * mutation. Claims, actors, leases, and liveness never belong in this doc. */
+  #validateExecutionPolicyCommit(
+    space: string,
+    commit: ClientCommit,
+  ): V2Error | null {
+    if (!commitTouchesExecutionPolicy(commit.operations, space)) return null;
+    if (commit.branch !== undefined && commit.branch !== "") {
+      return toError(
+        "ProtocolError",
+        "execution policy mutations are only valid on the default branch",
+      );
+    }
+    if (commit.operations.length !== 1) {
+      return toError(
+        "ProtocolError",
+        "execution policy mutations must be policy-only commits",
+      );
+    }
+    const operation = commit.operations[0];
+    if (
+      (operation.op !== "set" && operation.op !== "delete") ||
+      operation.id !== executionPolicyId(space) ||
+      (operation.scope !== undefined && operation.scope !== "space")
+    ) {
+      return toError(
+        "ProtocolError",
+        "execution policy mutations must replace or delete the space-scoped policy document",
+      );
+    }
+    const policy = operation.op === "set"
+      ? parseExecutionPolicy(operation.value)
+      : null;
+    if (operation.op === "set" && policy === null) {
+      return toError(
+        "ProtocolError",
+        "execution policy must be exactly {version:1,serverPrimaryExecution:boolean}",
+      );
+    }
+    if (
+      policy?.serverPrimaryExecution === true &&
+      this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
+      this.#sessions.sessionsForSpace(space).some((session) =>
+        session.ownerConnectionId !== null &&
+        !session.serverPrimaryExecutionV1
+      )
+    ) {
+      return toError(
+        "ProtocolError",
+        "cannot enable server-primary execution while an incompatible session is attached",
+      );
+    }
+    return null;
+  }
+
   /** After an ACL change, drop live sessions whose principal no longer
    *  holds READ (enforce mode only): per-message gating alone would still
    *  let their already-registered subscriptions receive pushes. The owning
@@ -1440,6 +1552,11 @@ export class Server {
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
     const engine = await this.openEngine(space);
+    if (id === executionPolicyId(space)) {
+      throw new Engine.ProtocolError(
+        "direct writes may not mutate the execution policy document",
+      );
+    }
     if (this.#aclMode() !== "off") {
       if (id === aclDocId(space)) {
         throw new Engine.ProtocolError(
@@ -1977,12 +2094,26 @@ export class Server {
       if (deny) {
         return respondTypedError<SessionOpenResult>(message.requestId, deny);
       }
+      if (
+        this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
+        this.#executionPolicyEnabled(engine, message.space) &&
+        !connection.serverPrimaryExecutionV1
+      ) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError(
+            "ProtocolError",
+            `Space ${message.space} requires memory capability server-primary-execution-v1`,
+          ),
+        );
+      }
       const opened = this.#sessions.open(
         message.space,
         message.session,
         Engine.serverSeq(engine),
         connection.id,
         principal,
+        { serverPrimaryExecutionV1: connection.serverPrimaryExecutionV1 },
       );
       if (opened.revokedConnectionId !== undefined) {
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
@@ -2143,8 +2274,23 @@ export class Server {
               invalid,
             );
           }
-          // ACL-document writes change who may access the space — OWNER only.
+          const invalidExecutionPolicy = this.#validateExecutionPolicyCommit(
+            message.space,
+            message.commit,
+          );
+          if (invalidExecutionPolicy) {
+            return respondTypedError<Engine.AppliedCommit>(
+              message.requestId,
+              invalidExecutionPolicy,
+            );
+          }
+          // ACL and execution-policy documents change authorization/authority
+          // rules and are OWNER-only.
           const aclTouched = commitTouchesAclDoc(
+            message.commit.operations,
+            message.space,
+          );
+          const executionPolicyTouched = commitTouchesExecutionPolicy(
             message.commit.operations,
             message.space,
           );
@@ -2152,7 +2298,7 @@ export class Server {
             engine,
             message.space,
             session.principal,
-            aclTouched ? "OWNER" : "WRITE",
+            aclTouched || executionPolicyTouched ? "OWNER" : "WRITE",
           );
           if (deny) {
             return respondTypedError<Engine.AppliedCommit>(
