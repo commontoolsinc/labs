@@ -125,6 +125,8 @@ const compareEntitySnapshot = (
   (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
   left.id.localeCompare(right.id);
 
+type SessionRestoreResult = "restored" | "fresh-connection-required";
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -453,8 +455,24 @@ export class Client {
       while (!this.#closed) {
         try {
           await this.hello();
+          let needsFreshSessionOpenChallenge = false;
           for (const session of this.#spaces) {
-            await session.restore();
+            if (await session.restore() === "fresh-connection-required") {
+              needsFreshSessionOpenChallenge = true;
+              break;
+            }
+          }
+          if (needsFreshSessionOpenChallenge) {
+            // session.open authentication challenges are single-use, including
+            // when the server rejects the open. Rotate the physical connection
+            // after terminalizing that one session so unrelated spaces reopen
+            // with a fresh challenge instead of failing authentication too.
+            this.#connected = false;
+            for (const session of this.#spaces) {
+              session.handleDisconnect();
+            }
+            await this.transport.close();
+            continue;
           }
           return;
         } catch (error) {
@@ -893,9 +911,9 @@ export class SpaceSession {
     this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
-  async restore(): Promise<void> {
+  async restore(): Promise<SessionRestoreResult> {
     if (this.#closed) {
-      return;
+      return "restored";
     }
     this.#restoring = true;
     this.#readyOnConnection = false;
@@ -907,12 +925,16 @@ export class SpaceSession {
       } catch (error) {
         if (isSessionRevokedError(error)) {
           this.handleRevoked("taken-over");
-          return;
+          return "fresh-connection-required";
+        }
+        if (isProtocolError(error)) {
+          this.terminate(error);
+          return "fresh-connection-required";
         }
         throw error;
       }
       if (this.#closed) {
-        return;
+        return "restored";
       }
       this.#readyOnConnection = true;
       replayedThroughLocalSeq = Math.max(
@@ -975,6 +997,7 @@ export class SpaceSession {
         })
       );
       await Promise.all(replayTasks);
+      return "restored";
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
@@ -1024,6 +1047,13 @@ export class SpaceSession {
     }
     const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
+    this.terminate(error);
+  }
+
+  private terminate(error: Error): void {
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
@@ -1183,6 +1213,7 @@ export class SpaceSession {
     const pending = this.#pendingSettlements;
     this.#pendingSettlements = [];
     for (const settlement of pending) {
+      if (!this.#claimMatchesLive(settlement.claim)) continue;
       if (
         settlement.outcome === "committed" &&
         settlement.acceptedCommitSeq > this.#executionDataSeq
@@ -1197,6 +1228,12 @@ export class SpaceSession {
     }
   }
 
+  #prunePendingSettlements(): void {
+    this.#pendingSettlements = this.#pendingSettlements.filter((settlement) =>
+      this.#claimMatchesLive(settlement.claim)
+    );
+  }
+
   #applyExecutionEvent(event: ExecutionControlEvent): void {
     switch (event.type) {
       case "session.execution.claim.set": {
@@ -1207,6 +1244,7 @@ export class SpaceSession {
           event.claim.claimGeneration > current.claimGeneration
         ) {
           this.#executionClaims.set(key, event.claim);
+          this.#prunePendingSettlements();
           this.#emitExecutionControl(event);
         }
         return;
@@ -1220,6 +1258,7 @@ export class SpaceSession {
           current.claimGeneration === event.claimGeneration
         ) {
           this.#executionClaims.delete(key);
+          this.#prunePendingSettlements();
           this.#emitExecutionControl(event);
         }
         return;
@@ -1242,6 +1281,7 @@ export class SpaceSession {
       // A live ordered stream may never skip authority changes. Clear claims
       // fail-open; reconnect will install a full snapshot barrier.
       this.#executionClaims.clear();
+      this.#prunePendingSettlements();
       return;
     }
     for (const event of batch.events) {
@@ -1253,6 +1293,7 @@ export class SpaceSession {
       );
       const previous = this.#executionClaims;
       this.#executionClaims = next;
+      this.#prunePendingSettlements();
       for (const [key, claim] of previous) {
         const replacement = next.get(key);
         if (
@@ -1868,3 +1909,6 @@ const isEmptySync = (sync: SessionSync): boolean =>
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";
+
+const isProtocolError = (error: unknown): error is Error =>
+  error instanceof Error && error.name === "ProtocolError";
