@@ -144,6 +144,57 @@ describe("Memory v2 lazy session creation", () => {
     expect(closes).toBe(1);
   });
 
+  it("coalesces session creation across synchronous factory re-entry", async () => {
+    let sessionCreates = 0;
+    let commits = 0;
+    let reentrantCommit: Promise<unknown> | undefined;
+    let storage!: TestStorageManager;
+    const sessionFactory = {
+      create(_space: MemorySpace) {
+        sessionCreates += 1;
+        if (sessionCreates === 1) {
+          const nestedTx = storage.edit();
+          nestedTx.write({
+            space,
+            id: "of:memory-v2-reentrant-session-nested" as URI,
+            type,
+            path: [],
+          }, { value: { count: 2 } });
+          reentrantCommit = nestedTx.commit();
+        }
+        return Promise.resolve({
+          client: { close: () => Promise.resolve() } as never,
+          session: {
+            transact: (commit: { operations: { id: URI }[] }) => {
+              commits += 1;
+              return Promise.resolve(
+                appliedCommitFor(commit.operations.map((op) => op.id)),
+              );
+            },
+          } as never,
+        });
+      },
+    };
+    storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://"),
+    }, sessionFactory);
+
+    const tx = storage.edit();
+    tx.write({
+      space,
+      id: "of:memory-v2-reentrant-session-outer" as URI,
+      type,
+      path: [],
+    }, { value: { count: 1 } });
+
+    expect(await tx.commit()).toEqual({ ok: {} });
+    expect(await reentrantCommit).toEqual({ ok: {} });
+    expect(sessionCreates).toBe(1);
+    expect(commits).toBe(2);
+    await storage.close();
+  });
+
   it("retries lazy session creation after a transient failure", async () => {
     let sessionCreates = 0;
     let commits = 0;

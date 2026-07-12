@@ -3256,10 +3256,17 @@ class SpaceReplica implements ISpaceReplica {
     session: MemoryV2Client.SpaceSession;
   }> {
     if (this.#sessionHandle === undefined) {
-      const handle = this.#createSession().then((resolved) => {
-        this.#sessionClient = resolved.client;
-        return resolved;
-      }).catch((error) => {
+      // Defer the factory call until after #sessionHandle is installed. Session
+      // setup can synchronously re-enter provider work (notably home-space ACL
+      // bootstrap); calling the factory inline leaves a window where that work
+      // starts a second mount with the same explicit session id and revokes the
+      // first mount before it can commit.
+      const handle = Promise.resolve().then(() => this.#createSession()).then(
+        (resolved) => {
+          this.#sessionClient = resolved.client;
+          return resolved;
+        },
+      ).catch((error) => {
         if (this.#sessionHandle === handle) {
           this.#sessionHandle = undefined;
         }
