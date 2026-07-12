@@ -25,6 +25,7 @@ import {
   type CommitPrecondition,
   type DocumentPath,
   type EntityDocument,
+  type ExecutionClaim,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type LegacyBackgroundExclusion,
@@ -577,7 +578,12 @@ export type ActionTransactionRoute =
   }
   | {
     readonly disposition: "local";
-    readonly kind: "executor-shadow" | "claimed-overlay";
+    readonly kind: "executor-shadow";
+  }
+  | {
+    readonly disposition: "local";
+    readonly kind: "claimed-overlay";
+    readonly claim: ExecutionClaim;
   }
   | {
     readonly disposition: "unserved";
