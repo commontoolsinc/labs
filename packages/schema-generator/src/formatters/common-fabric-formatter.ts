@@ -1504,6 +1504,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   private writeAuthorizedByIdentityForBinding(
     context: GenerationContext,
     bindingName: ts.Identifier,
+    normalizeFile = true,
   ): { file: string; path: string[] } {
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
@@ -1524,7 +1525,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       "unknown";
 
     return {
-      file: normalizeWriterIdentityFile(sourceFileName),
+      file: normalizeFile
+        ? normalizeWriterIdentityFile(sourceFileName)
+        : sourceFileName.replace(/\\/g, "/"),
       path: [declaredName],
     };
   }
@@ -1621,7 +1624,11 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (
         ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
       ) {
-        if (typeNode.typeName.text === "AnyOf") {
+        const referencedName = this.resolveTypeReferenceName(
+          typeNode.typeName,
+          context,
+        );
+        if (referencedName === "AnyOf") {
           const alternativesNode = typeNode.typeArguments?.[0];
           const alternatives = this.extractLiteralLikeValue(
             undefined,
@@ -1632,7 +1639,7 @@ export class CommonFabricFormatter implements TypeFormatter {
             ? { anyOf: alternatives }
             : undefined;
         }
-        if (typeNode.typeName.text === "PolicyOf") {
+        if (referencedName === "PolicyOf") {
           const bindingNode = typeNode.typeArguments?.[0];
           if (
             bindingNode && ts.isTypeQueryNode(bindingNode) &&
@@ -1644,6 +1651,7 @@ export class CommonFabricFormatter implements TypeFormatter {
               __ctPolicyIdentityOf: this.writeAuthorizedByIdentityForBinding(
                 context,
                 bindingNode.exprName,
+                false,
               ),
               subject: { __ctOwningSpace: true },
             };
@@ -1768,6 +1776,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return undefined;
+  }
+
+  private resolveTypeReferenceName(
+    typeName: ts.Identifier,
+    context: GenerationContext,
+  ): string {
+    const symbol = context.typeChecker.getSymbolAtLocation(typeName);
+    const resolved = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? context.typeChecker.getAliasedSymbol(symbol)
+      : symbol;
+    return resolved?.name ?? typeName.text;
   }
 
   private extractDefaultValueFromNode(

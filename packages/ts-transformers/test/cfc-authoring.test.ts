@@ -466,6 +466,77 @@ Deno.test("PolicyOf retains the defining identity of an imported ruleset", async
   );
 });
 
+Deno.test("PolicyOf does not confuse defining files with the same normalized suffix", async () => {
+  const policySource = (role: string) => `/// <cts-enable />
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "${role}")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    export const rules = exchangeRules([release]);
+  `;
+  const outputs = await transformFiles({
+    "/a/policy.ts": policySource("reader-a"),
+    "/b/policy.ts": policySource("reader-b"),
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./b/policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/a/policy.ts", "sha256:policy-a"],
+      ["/b/policy.ts", "sha256:policy-b"],
+      ["/main.tsx", "sha256:importer"],
+    ]),
+  });
+
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:policy-b"'),
+    true,
+  );
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:policy-a"'),
+    false,
+  );
+});
+
+Deno.test("exchangeRules rejects renamed export specifiers", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    const rules = exchangeRules([release]);
+    export { release, rules as publicRules };
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-authoring" &&
+      diagnostic.message.includes("renamed export specifiers")
+    ),
+    true,
+  );
+});
+
 Deno.test("PolicyOf rejects non-ruleset and non-typeof bindings", async () => {
   for (const binding of ["{ forged: true }", "typeof plain"]) {
     const { diagnostics } = await validateSource(

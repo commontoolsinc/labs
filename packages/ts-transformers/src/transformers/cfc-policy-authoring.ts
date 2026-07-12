@@ -442,7 +442,31 @@ const exportedNames = (sourceFile: ts.SourceFile): Set<string> => {
       statement.exportClause && ts.isNamedExports(statement.exportClause)
     ) {
       for (const element of statement.exportClause.elements) {
-        result.add(element.propertyName?.text ?? element.name.text);
+        if (
+          element.propertyName === undefined ||
+          element.propertyName.text === element.name.text
+        ) {
+          result.add(element.name.text);
+        }
+      }
+    }
+  }
+  return result;
+};
+
+const renamedExportBindings = (sourceFile: ts.SourceFile): Set<string> => {
+  const result = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isExportDeclaration(statement) || statement.moduleSpecifier ||
+      !statement.exportClause || !ts.isNamedExports(statement.exportClause)
+    ) continue;
+    for (const element of statement.exportClause.elements) {
+      if (
+        element.propertyName !== undefined &&
+        element.propertyName.text !== element.name.text
+      ) {
+        result.add(element.propertyName.text);
       }
     }
   }
@@ -537,6 +561,7 @@ export class CfcPolicyAuthoringTransformer extends Transformer {
     }
 
     const exported = exportedNames(sourceFile);
+    const renamedExports = renamedExportBindings(sourceFile);
     const declarations = new Map<string, ts.VariableDeclaration>();
     for (const statement of sourceFile.statements) {
       if (!ts.isVariableStatement(statement)) continue;
@@ -570,6 +595,15 @@ export class CfcPolicyAuthoringTransformer extends Transformer {
       if (isCallOf(initializer.expression, imports.exchangeRule)) {
         handledCalls.add(initializer);
         ruleNodes.set(name, declaration);
+        if (renamedExports.has(name)) {
+          report(
+            new StaticAuthoringError(
+              declaration.name,
+              "exchangeRule() bindings do not support renamed export specifiers",
+            ),
+          );
+          continue;
+        }
         if (!exported.has(name)) {
           report(
             new StaticAuthoringError(
@@ -598,6 +632,15 @@ export class CfcPolicyAuthoringTransformer extends Transformer {
         }
       } else if (isCallOf(initializer.expression, imports.exchangeRules)) {
         handledCalls.add(initializer);
+        if (renamedExports.has(name)) {
+          report(
+            new StaticAuthoringError(
+              declaration.name,
+              "exchangeRules() bindings do not support renamed export specifiers",
+            ),
+          );
+          continue;
+        }
         if (!exported.has(name)) {
           report(
             new StaticAuthoringError(

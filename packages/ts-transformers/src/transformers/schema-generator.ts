@@ -185,11 +185,23 @@ function resolvePolicyOfMarkers(
         typeof identity.path[0] === "string"
       ? identity.path[0]
       : undefined;
-    const sourceEntry = file === undefined
+    const identityEntries = [
+      ...(context.options.moduleIdentities?.entries() ?? []),
+    ];
+    const exactSourceEntry = file === undefined
       ? undefined
-      : [...(context.options.moduleIdentities?.entries() ?? [])].find(
-        ([sourceName]) => normalizePolicySource(sourceName) === file,
+      : identityEntries.find(([sourceName]) =>
+        sourceName.replace(/\\/g, "/") === file
       );
+    const normalizedSourceEntries = file === undefined
+      ? []
+      : identityEntries.filter(([sourceName]) =>
+        normalizePolicySource(sourceName) === file
+      );
+    const sourceEntry = exactSourceEntry ??
+      (normalizedSourceEntries.length === 1
+        ? normalizedSourceEntries[0]
+        : undefined);
     let manifests = sourceEntry === undefined
       ? undefined
       : context.options.state?.getPolicyManifests().get(sourceEntry[0]);

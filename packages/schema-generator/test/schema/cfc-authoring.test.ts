@@ -27,6 +27,50 @@ describe("Schema: CFC authoring aliases", () => {
       .toEqual([{ anyOf: ["reader-a", "reader-b"] }]);
   });
 
+  it("lowers renamed imports of PolicyOf and AnyOf", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/cfc-types.ts": `
+          export type PolicyOf<Binding> = {
+            readonly __ct_cfc_policy_of__?: Binding;
+          };
+          export type AnyOf<X extends readonly unknown[]> = {
+            readonly __ct_cfc_any_of__?: X;
+          };
+        `,
+        "/entry.ts": `
+          import type { AnyOf as Or, PolicyOf as P } from "./cfc-types.ts";
+          type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+          type Confidential<T, X extends readonly unknown[]> =
+            Cfc<T, { confidentiality: X }>;
+          declare const rules: unknown;
+
+          interface SchemaRoot {
+            policy: Confidential<string, readonly [P<typeof rules>]>;
+            either: Confidential<string, readonly [
+              Or<readonly ["reader-a", "reader-b"]>
+            ]>;
+          }
+        `,
+      },
+      "/entry.ts",
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.policy as any).ifc?.confidentiality).toEqual([{
+      type: "https://commonfabric.org/cfc/atom/Policy",
+      policyRefKind: "module",
+      __ctPolicyIdentityOf: { file: "/entry.ts", path: ["rules"] },
+      subject: { __ctOwningSpace: true },
+    }]);
+    expect((schema.properties?.either as any).ifc?.confidentiality).toEqual([{
+      anyOf: ["reader-a", "reader-b"],
+    }]);
+  });
+
   it("lowers Confidential and projection aliases through the canonical Cfc carrier", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
