@@ -563,16 +563,17 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
   }
 });
 
-Deno.test("claim expiry revokes clients and rejects stale settlement", async () => {
-  let now = 1_000;
+Deno.test("claim expiry timer revokes clients and rejects stale settlement", async () => {
   const server = createControlServer("memory-v2-execution-claim-expiry", {
-    executionControl: { claimTtlMs: 10, nowMs: () => now },
+    executionControl: { claimTtlMs: 5 },
   });
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   const events: ExecutionControlEvent[] = [];
+  const expired = Promise.withResolvers<void>();
   const unsubscribe = session.subscribeExecutionControl((event) => {
     events.push(event);
+    if (event.type === "session.execution.claim.revoke") expired.resolve();
   });
   try {
     await setPolicy(session, true);
@@ -580,9 +581,8 @@ Deno.test("claim expiry revokes clients and rejects stale settlement", async () 
       ...claimKey(POLICY_SPACE, ""),
       leaseGeneration: 2,
     });
-    now = claim.expiresAt;
+    await expired.promise;
 
-    assertEquals(server.expireExecutionClaims(), 1);
     assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
     assertEquals(session.executionClaims, []);
     assertEquals(
@@ -601,6 +601,25 @@ Deno.test("claim expiry revokes clients and rejects stale settlement", async () 
     );
   } finally {
     unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("closing a control server cancels a live claim deadline", async () => {
+  const server = createControlServer("memory-v2-execution-claim-expiry-close", {
+    executionControl: { claimTtlMs: 60_000 },
+  });
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    await setPolicy(session, true);
+    server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, ""),
+      leaseGeneration: 2,
+    });
+    assertEquals(server.listExecutionClaims(POLICY_SPACE).length, 1);
+  } finally {
     await client.close();
     await server.close();
   }

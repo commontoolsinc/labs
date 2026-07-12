@@ -278,6 +278,36 @@ Deno.test("execution policy remains OWNER-only outside ACL enforcement", async (
         "lacks OWNER",
       );
       assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
+
+      // In off/observe modes an ordinary writer can currently replace the ACL
+      // document. That must not let it manufacture the independent authority
+      // required to turn on server-primary execution.
+      await writer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${SPACE}`,
+          value: { value: { [WRITER]: "OWNER" } },
+        }],
+      });
+      await assertRejects(
+        () =>
+          writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: POLICY_ID,
+              value: {
+                value: { version: 1, serverPrimaryExecution: true },
+              },
+            }],
+          }),
+        Error,
+        "lacks OWNER",
+      );
+      assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
     } finally {
       await writerConnection.client.close();
       await ownerConnection.client.close();

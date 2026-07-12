@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import * as MemoryClient from "../v2/client.ts";
 import { Server } from "../v2/server.ts";
@@ -227,6 +228,7 @@ const withTimeout = async <T>(promise: Promise<T>, message: string) => {
 };
 
 Deno.test("a reopen ProtocolError closes only the incompatible space session", async () => {
+  using time = new FakeTime();
   const server = new Server({
     store: new URL("memory://execution-client-protocol-terminal"),
     authorizeSessionOpen(message) {
@@ -311,7 +313,8 @@ Deno.test("a reopen ProtocolError closes only the incompatible space session", a
     const query = await clientPrimarySession.queryGraph({ roots: [] });
     assertEquals(query.entities, []);
 
-    await new Promise((resolve) => setTimeout(resolve, 75));
+    time.tick(60_000);
+    await time.runMicrotasks();
     assertEquals(transport.helloCount, 3);
     assertEquals(staleClient.isConnected(), true);
   } finally {

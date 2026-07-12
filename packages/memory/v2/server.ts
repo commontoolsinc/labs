@@ -1335,8 +1335,17 @@ export class Server {
     space: string,
     principal: string | undefined,
   ): V2Error | null {
-    const capability = this.#resolveCapability(engine, space, principal);
-    if (capability !== null && isCapable(capability, "OWNER")) return null;
+    // While ACL mutation authorization itself is rollout-relaxed, a writer
+    // could rewrite the ACL to self-grant OWNER. Do not let that manufacture
+    // authority over the server-primary switch: outside enforce mode, only
+    // non-mutable implicit owners (space identity/service DIDs) qualify.
+    let owner = principal !== undefined &&
+      (principal === space || this.#isServicePrincipal(principal));
+    if (this.#aclMode() === "enforce") {
+      const capability = this.#resolveCapability(engine, space, principal);
+      owner = capability !== null && isCapable(capability, "OWNER");
+    }
+    if (owner) return null;
     this.aclStats.denied += 1;
     return toError(
       "AuthorizationError",

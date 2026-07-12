@@ -493,12 +493,14 @@ The implemented opt-in is the default-branch, space-scoped document
 whole-document set/delete policy-only commits. Absent, deleted, disabled, or
 malformed state is client-primary; direct host writes cannot bypass owner
 authorization. OWNER is enforced for this authority switch even when ordinary
-ACL enforcement is configured `off` or `observe`. Positive claims require an
-enabled policy; disabling or deleting it revokes every live claim while leaving
-shadow demand intact. The runtime flag remains the higher-priority rollback,
-so a true policy is inert when `serverPrimaryExecution` is off. Deployment flag
-changes take effect on new negotiated connections (normally after host
-restart/redeploy).
+ACL enforcement is configured `off` or `observe`; in those rollout-relaxed
+modes, only the implicit space identity/service owners qualify, so a writer
+cannot first rewrite the ACL to manufacture policy authority. Positive claims
+require an enabled policy; disabling or deleting it revokes every live claim
+while leaving shadow demand intact. The runtime flag remains the
+higher-priority rollback, so a true policy is inert when
+`serverPrimaryExecution` is off. Deployment flag changes take effect on new
+negotiated connections (normally after host restart/redeploy).
 
 The fields from `branch` through `runtimeFingerprint` form the shared
 `ActionClaimKey` that both client and server can derive. `leaseGeneration`
