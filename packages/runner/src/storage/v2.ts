@@ -29,6 +29,7 @@ import {
   type SchedulerActionSnapshotQuery,
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
+  type SchedulerWritersForTargetsResult,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -79,6 +80,7 @@ import type {
   PullError,
   PushError,
   Result,
+  SchedulerWritersForTargetsProviderQuery,
   State,
   StorageNotification,
   StorageTransactionRejected,
@@ -1431,6 +1433,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.listSchedulerActionSnapshots(query);
   }
 
+  writersForTargets(
+    query: SchedulerWritersForTargetsProviderQuery,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    return this.replica.writersForTargets(query);
+  }
+
   areSchedulerAddressesCurrentAtOrBelow(
     addresses: readonly IMemorySpaceAddress[],
     seq: number,
@@ -1700,6 +1708,29 @@ class SpaceReplica implements ISpaceReplica {
       return { serverSeq: 0, snapshots: [] };
     }
     return await session.listSchedulerActionSnapshots(query);
+  }
+
+  async writersForTargets(
+    query: SchedulerWritersForTargetsProviderQuery,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    if (
+      !getPersistentSchedulerStateConfig() ||
+      query.targets.some((target) => target.space !== this.#space)
+    ) {
+      return { serverSeq: 0, writers: [] };
+    }
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.schedulerWriterLookup !== true) {
+      return { serverSeq: 0, writers: [] };
+    }
+    return await session.writersForTargets({
+      ...(query.branch !== undefined ? { branch: query.branch } : {}),
+      targets: query.targets.map((target) => ({
+        id: target.id,
+        ...(target.scope !== undefined ? { scope: target.scope } : {}),
+        path: toDocumentPath([...target.path]),
+      })),
+    });
   }
 
   areSchedulerAddressesCurrentAtOrBelow(

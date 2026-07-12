@@ -12,6 +12,7 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageProviderWithReplica,
   IStorageSubscription,
   MemorySpace,
   StorageNotification,
@@ -157,6 +158,11 @@ import type {
 } from "./types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { entityKey } from "./keys.ts";
+import {
+  type SchedulerDurableWriterProvider,
+  type SchedulerWriterCandidate,
+  schedulerWritersForTargets,
+} from "./writer-lookup.ts";
 
 ensureNotRenderThread();
 
@@ -362,6 +368,11 @@ function observationAdoptionAddresses(
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
+export type {
+  LiveSchedulerMatchedWrite,
+  LiveSchedulerWriterEvidence,
+  SchedulerWriterCandidate,
+} from "./writer-lookup.ts";
 export type {
   Action,
   ActionRunTraceAddress,
@@ -615,6 +626,30 @@ export class Scheduler {
         this._running = undefined;
       });
     }
+  }
+
+  /**
+   * Find every live or durable scheduler action whose registered write surface
+   * overlaps one of the requested targets. Durable lookup is optional and
+   * fail-open; live actions remain discoverable before their first run.
+   */
+  async writersForTargets(
+    branch: string,
+    space: MemorySpace,
+    targets: readonly IMemorySpaceAddress[],
+  ): Promise<SchedulerWriterCandidate[]> {
+    const provider = this.runtime.storageManager.open(
+      space,
+    ) as IStorageProviderWithReplica & SchedulerDurableWriterProvider;
+    return await schedulerWritersForTargets(
+      {
+        nodes: this.nodes,
+        writeIndex: this.writeIndex,
+        materializers: this.materializers,
+        getActionId: (action) => this.getActionId(action),
+      },
+      { branch, space, targets, provider },
+    );
   }
 
   /**
