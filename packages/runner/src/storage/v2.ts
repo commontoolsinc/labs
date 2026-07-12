@@ -136,9 +136,20 @@ import {
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
+import type {
+  ReplicaClient,
+  ReplicaSessionHandle,
+  ReplicaWatchView,
+} from "./v2-replica-session.ts";
 
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";
+export type {
+  ReplicaClient,
+  ReplicaSession,
+  ReplicaSessionHandle,
+  ReplicaWatchView,
+} from "./v2-replica-session.ts";
 
 const logger = getLogger("storage.v2", {
   enabled: true,
@@ -881,10 +892,7 @@ export class StorageManager implements IStorageManager {
   async #createInitializedSession(
     space: MemorySpace,
     signer: Signer,
-  ): Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }> {
+  ): Promise<ReplicaSessionHandle> {
     const normal = await this.#sessionFactory.create(space, signer, {
       sessionId: this.#sessionId,
     });
@@ -1442,10 +1450,7 @@ type ProviderOptions = {
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
-  createSession: () => Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }>;
+  createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
 };
@@ -1606,17 +1611,11 @@ const docKey = (id: URI, scope?: CellScope): string =>
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
-  readonly #createSession: () => Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }>;
-  #sessionHandle?: Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }>;
+  readonly #createSession: () => Promise<ReplicaSessionHandle>;
+  #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
-  #sessionClient?: MemoryV2Client.Client;
+  #sessionClient?: ReplicaClient;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
@@ -1633,14 +1632,14 @@ class SpaceReplica implements ISpaceReplica {
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
-  #watchView: MemoryV2Client.WatchView | null = null;
+  #watchView: ReplicaWatchView | null = null;
   // The specific view instance that `consumeUpdates` is iterating. This can
   // diverge from `#watchView` (the client may hand back a fresh view instance
   // on a later refresh while the original consumer keeps running), so teardown
   // must close *this* view to settle the consumer's pending `next()`. Closing
   // only `#watchView` can leave the consumer's view open, hanging dispose() on
   // `Promise.allSettled([...#updatePromises])`.
-  #subscribedWatchView: MemoryV2Client.WatchView | null = null;
+  #subscribedWatchView: ReplicaWatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
@@ -1863,10 +1862,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#sessionHandle = undefined;
     if (sessionHandle) {
       let resolved:
-        | {
-          client: MemoryV2Client.Client;
-          session: MemoryV2Client.SpaceSession;
-        }
+        | ReplicaSessionHandle
         | undefined;
       try {
         resolved = await sessionHandle;
@@ -3364,10 +3360,7 @@ class SpaceReplica implements ISpaceReplica {
     return false;
   }
 
-  private sessionHandle(): Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }> {
+  private sessionHandle(): Promise<ReplicaSessionHandle> {
     if (this.#sessionHandle === undefined) {
       // Defer the factory call until after #sessionHandle is installed. Session
       // setup can synchronously re-enter provider work (notably home-space ACL
