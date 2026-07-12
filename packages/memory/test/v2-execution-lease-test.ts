@@ -2,7 +2,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import * as MemoryClient from "../v2/client.ts";
 import { type ExecutionLeaseHandle, Server } from "../v2/server.ts";
-import type { ExecutionLease } from "../v2.ts";
+import type { ExecutionControlEvent, ExecutionLease } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-execution-lease-space";
 const OWNER = "did:key:z6Mk-execution-lease-owner";
@@ -54,6 +54,9 @@ type LeaseSession = MemoryClient.SpaceSession & {
   setExecutionDemand(branch: string, pieces: readonly string[]): Promise<
     boolean
   >;
+  subscribeExecutionControl(
+    listener: (event: ExecutionControlEvent) => void,
+  ): () => void;
 };
 
 const authFactoryFor = (
@@ -316,6 +319,122 @@ Deno.test("sponsor disconnect drains before a remaining writer can replace it", 
     await firstClient?.close();
     await secondClient?.close();
     await ownerClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("stale host relinquishes claims after another host acquires the next generation", async () => {
+  const directory = await Deno.makeTempDir();
+  const store = toFileUrl(`${directory}/`);
+  let nowA = 1_000;
+  let nowB = 1_000;
+  const serverA = createLeaseServer(store, "host:stale-a", {
+    nowMs: () => nowA,
+    leaseTtlMs: 100_000,
+  });
+  const serverB = createLeaseServer(store, "host:replacement-b", {
+    nowMs: () => nowB,
+    leaseTtlMs: 100_000,
+  });
+  const clientA = await connect(serverA);
+  const clientB = await connect(serverB);
+  const sponsorA = await mount(clientA, OWNER);
+  const sponsorB = await mount(clientB, OWNER);
+  const events: ExecutionControlEvent[] = [];
+  const unsubscribe = sponsorA.subscribeExecutionControl((event) => {
+    events.push(event);
+  });
+  try {
+    await setPolicy(sponsorA, 1);
+    await sponsorA.setExecutionDemand("", ["space:piece-a"]);
+    await sponsorB.setExecutionDemand("", ["space:piece-b"]);
+    const first = await serverA.acquireExecutionLease(SPACE, "");
+    assertExists(first);
+    await serverA.setExecutionClaim(first, {
+      branch: "",
+      space: SPACE,
+      contextKey: "space",
+      pieceId: "of:piece",
+      actionId: "action:stale-host",
+      actionKind: "computation",
+      implementationFingerprint: "impl:v1",
+      runtimeFingerprint: "runtime:v1",
+    });
+
+    nowB = first.expiresAt + 1;
+    const replacement = await serverB.acquireExecutionLease(SPACE, "");
+    assertExists(replacement);
+    assertEquals(
+      replacement.leaseGeneration,
+      first.leaseGeneration + 1,
+    );
+
+    nowA = first.expiresAt;
+    assertEquals(await serverA.expireExecutionLeases(nowA), 0);
+    assertEquals(
+      events.some((event) =>
+        event.type === "session.execution.claim.revoke" &&
+        event.leaseGeneration === first.leaseGeneration
+      ),
+      true,
+    );
+  } finally {
+    unsubscribe();
+    await clientA.close();
+    await clientB.close();
+    await serverA.close();
+    await serverB.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("draining lease rejects work started after sponsor disconnect", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = createLeaseServer(
+    toFileUrl(`${directory}/`),
+    "host:fresh-after-drain",
+    { leaseTtlMs: 30_000, drainTimeoutMs: 5_000 },
+  );
+  const sponsorClient = await connect(server);
+  const sponsor = await mount(sponsorClient, OWNER);
+  const executorClient = await connect(server);
+  const executor = await mount(executorClient, OWNER);
+  try {
+    await setPolicy(sponsor, 1);
+    await sponsor.setExecutionDemand("", ["space:piece"]);
+    const acquired = await server.acquireExecutionLease(SPACE, "");
+    assertExists(acquired);
+    server.bindExecutionSession(SPACE, executor.sessionId, acquired);
+
+    await sponsorClient.close();
+    await server.flushExecutionLeaseTasks();
+    assertEquals(
+      (await server.currentExecutionLease(SPACE, ""))?.state,
+      "draining",
+    );
+
+    await assertRejects(
+      () =>
+        executor.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:fresh-after-drain",
+            value: { value: { accepted: true } },
+          }],
+        }),
+      Error,
+      "execution lease",
+    );
+    assertEquals(
+      await server.readDocument(SPACE, "of:fresh-after-drain"),
+      null,
+    );
+  } finally {
+    await executorClient.close();
+    await sponsorClient.close();
     await server.close();
     await Deno.remove(directory, { recursive: true });
   }
