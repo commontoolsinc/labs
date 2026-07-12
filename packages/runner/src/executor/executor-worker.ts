@@ -18,6 +18,10 @@ import {
 import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
 import type { IStorageNotification } from "../storage/interface.ts";
 import { HostStorageManager } from "../storage/v2-host-provider.ts";
+import {
+  isPermanentRejection,
+  isTerminalRejection,
+} from "../storage/rejection.ts";
 
 type WorkerRequest = {
   type:
@@ -76,6 +80,13 @@ const claimKey = (claim: ActionClaimKey): string =>
     implementationFingerprint: claim.implementationFingerprint,
     runtimeFingerprint: claim.runtimeFingerprint,
   });
+
+const invalidatesExecutorClaim = (error: unknown): boolean => {
+  const named = error as { name?: string } | undefined | null;
+  return named?.name === "StorageTransactionAborted" ||
+    named?.name === "AuthorizationError" ||
+    isPermanentRejection(named) || isTerminalRejection(named);
+};
 
 const pullDemand = async (): Promise<void> => {
   for (const cell of demanded.values()) await cell.pull();
@@ -170,6 +181,18 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     fetch: denyExternalBuiltinFetch,
     externalSinkDisposition: "suppress",
   }));
+  runtime.scheduler.setActionCommitRejectionHandler((action, error) => {
+    const claim = claimsByAction.get(action);
+    if (claim === undefined || !invalidatesExecutorClaim(error)) return;
+    claimsByAction.delete(action);
+    worker.postMessage({
+      type: "invalidated-claim",
+      claim,
+      diagnosticCode: `commit-rejected:${
+        (error as { name?: string })?.name ?? "unknown"
+      }`,
+    });
+  });
   const storageSubscription: IStorageNotification = {
     next(notification) {
       if (notification.type === "integrate" && !stopped) {

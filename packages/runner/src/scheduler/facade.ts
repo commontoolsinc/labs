@@ -565,6 +565,10 @@ export class Scheduler {
   // only event-driven piece-start tasks, which must not pause pull scheduling.
   private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
+  private actionCommitRejectionHandler?: (
+    action: Action,
+    error: unknown,
+  ) => void;
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
@@ -626,6 +630,15 @@ export class Scheduler {
         this._running = undefined;
       });
     }
+  }
+
+  /** Host-only lifecycle hook used by the server executor to release an exact
+   * claim when CFC/ACL rejects before ordinary transaction routing can settle
+   * it. It carries no authority and is unset in ordinary runtimes. */
+  setActionCommitRejectionHandler(
+    handler: ((action: Action, error: unknown) => void) | undefined,
+  ): void {
+    this.actionCommitRejectionHandler = handler;
   }
 
   /**
@@ -2400,6 +2413,8 @@ export class Scheduler {
         this.executingAction = null;
         this.currentActionId = undefined;
       },
+      handleActionCommitRejected: (target, error) =>
+        this.actionCommitRejectionHandler?.(target, error),
     };
   }
 

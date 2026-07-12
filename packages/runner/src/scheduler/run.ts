@@ -114,6 +114,7 @@ export function watchReactiveActionCommit(state: {
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
+  readonly onCommitRejected?: (error: unknown) => void;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
@@ -127,6 +128,15 @@ export function watchReactiveActionCommit(state: {
       "Error committing transaction",
       error,
     );
+    try {
+      state.onCommitRejected?.(error);
+    } catch (callbackError) {
+      logger.warn(
+        "action-commit-rejection-callback",
+        "Action commit rejection callback failed",
+        callbackError,
+      );
+    }
 
     // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
     // means one of its inputs moved: the authoritative version is ahead of this
@@ -301,6 +311,10 @@ export interface SchedulerActionRunState {
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
+  readonly handleActionCommitRejected: (
+    action: Action,
+    error: unknown,
+  ) => void;
 }
 
 export async function runSchedulerAction(
@@ -551,6 +565,8 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    onCommitRejected: (error) =>
+      state.handleActionCommitRejected(args.action, error),
   });
 
   logger.debug("schedule-run-complete", () => [
