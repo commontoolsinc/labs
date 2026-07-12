@@ -1,5 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { toFileUrl } from "@std/path";
 import * as MemoryClient from "../v2/client.ts";
+import * as Engine from "../v2/engine.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
   type ExecutionLeaseHandle,
   parseClientMessage,
@@ -617,6 +620,90 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     unsubscribe();
     await client.close();
     await server.close();
+  }
+});
+
+Deno.test("claims, revokes, and settlements remain independent across branches", async () => {
+  const directory = await Deno.makeTempDir();
+  const store = toFileUrl(`${directory}/`);
+  await Deno.mkdir(new URL("./engine-v3/", store), { recursive: true });
+  const engine = await Engine.open({
+    url: resolveSpaceStoreUrl(store, POLICY_SPACE),
+  });
+  Engine.createBranch(engine, "feature");
+  Engine.close(engine);
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+    acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
+  }) as ExecutionServer;
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const events: ExecutionControlEvent[] = [];
+  const unsubscribe = session.subscribeExecutionControl((event) => {
+    events.push(event);
+  });
+  try {
+    await setPolicy(session, true);
+    const mainLease = await demandAndAcquireLease(server, session, "");
+    const featureLease = await demandAndAcquireLease(
+      server,
+      session,
+      "feature",
+    );
+    const main = await server.setExecutionClaim(
+      mainLease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    const feature = await server.setExecutionClaim(
+      featureLease,
+      claimKey(POLICY_SPACE, "feature"),
+    );
+    assertEquals(session.executionClaims.map((claim) => claim.branch), [
+      "",
+      "feature",
+    ]);
+
+    assertEquals(server.revokeExecutionClaim(main), true);
+    assertEquals(
+      session.executionClaims.map((claim) => claim.branch),
+      ["feature"],
+    );
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "",
+        claim: main,
+        inputBasisSeq: 1,
+        outcome: "no-op",
+      }),
+      false,
+    );
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "feature",
+        claim: feature,
+        inputBasisSeq: 1,
+        outcome: "no-op",
+      }),
+      true,
+    );
+    assertEquals(
+      events.filter((event) => event.type === "session.execution.settlement")
+        .map((event) =>
+          (event as { settlement: ActionSettlement }).settlement.branch
+        ),
+      ["feature"],
+    );
+  } finally {
+    unsubscribe();
+    await client.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
   }
 });
 
@@ -1424,13 +1511,19 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
 });
 
 Deno.test("host cannot acquire claim authority while the rollout flag is off", async () => {
-  const server = createServer("memory-v2-execution-claims-off", false);
+  const server = createServer("memory-v2-execution-claims-off", true);
+  const client = await connectClient(server, true);
   try {
+    const session = await mount(client);
+    await session.setExecutionDemand("", ["piece:off"]);
+    assertEquals(server.listExecutionDemands(POLICY_SPACE, "").length, 1);
+    server.options.protocolFlags = { serverPrimaryExecutionV1: false };
     assertEquals(
       await server.acquireExecutionLease(POLICY_SPACE, ""),
       null,
     );
   } finally {
+    await client.close();
     await server.close();
   }
 });
