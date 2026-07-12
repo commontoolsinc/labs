@@ -75,6 +75,16 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(artifact.manifest.moduleIdentity).toBe(module.identity);
     expect(artifact.manifest.symbol).toBe("rules");
     expect(module.js).not.toContain(artifact.policyDigest);
+
+    const checked = await engine.typeCheckBatch([program]);
+    expect(checked.patternCount).toBe(1);
+    expect(checked.diagnostics).toEqual([]);
+
+    const recovered = await engine.compileResolvedToRecordGraph(
+      program.files,
+      program.main,
+    );
+    expect(recovered.modules[0]?.policyManifests).toHaveLength(1);
   });
 
   it("does not initialize the TypeScript compiler when evaluating a precompiled graph", async () => {

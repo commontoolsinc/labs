@@ -636,6 +636,101 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     } finally {
       badTx.abort?.();
     }
+
+    const wrongModuleArtifact = buildCfcPolicyArtifactManifest({
+      ...artifact.manifest,
+      moduleIdentity: "sha256:another-module",
+    });
+    const wrongModule = modules.map((module) =>
+      module.identity === entryIdentity
+        ? { ...module, policyManifests: [wrongModuleArtifact] }
+        : module
+    );
+    const wrongModuleTx = runtime.edit();
+    try {
+      expect(() =>
+        writeCompiledDocs(
+          runtime,
+          spaceA,
+          wrongModule,
+          entryIdentity,
+          opts(),
+          wrongModuleTx,
+        )
+      ).toThrow("module identity mismatch");
+    } finally {
+      wrongModuleTx.abort?.();
+    }
+  });
+
+  it("fails closed on malformed cold-cache policy manifests", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const artifact = buildCfcPolicyArtifactManifest({
+      formatVersion: 1,
+      moduleIdentity: entryIdentity,
+      symbol: "rules",
+      template: {
+        templateVersion: 1,
+        exchangeRules: [],
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    });
+    modules[0] = { ...modules[0]!, policyManifests: [artifact] };
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const replaceEntryFields = async (fields: Record<string, unknown>) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        cell.set({
+          ...(cell.get() as Record<string, unknown>),
+          ...fields,
+        });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+    const coldLoad = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded;
+    };
+
+    await replaceEntryFields({ policyManifests: [{ forged: true }] });
+    expect((await coldLoad()).size).toBe(0);
+
+    const wrongModule = buildCfcPolicyArtifactManifest({
+      ...artifact.manifest,
+      moduleIdentity: "sha256:wrong-module",
+    });
+    await replaceEntryFields({ policyManifests: [wrongModule] });
+    expect((await coldLoad()).size).toBe(0);
+
+    await replaceEntryFields({ identity: null, policyManifests: [] });
+    expect((await coldLoad()).size).toBe(0);
   });
 
   it("loads duplicate compiled import links once", async () => {

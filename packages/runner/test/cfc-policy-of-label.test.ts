@@ -106,6 +106,27 @@ describe("PolicyOf label-time binding", () => {
     tx.abort?.();
   });
 
+  it("rejects a malformed owning-space PolicyOf marker", () => {
+    const malformedSchema = {
+      type: "string",
+      ifc: {
+        confidentiality: [{
+          type: CFC_ATOM_TYPE.Policy,
+          policyRefKind: "module",
+          symbol: artifact.manifest.symbol,
+          policyDigest: artifact.policyDigest,
+          subject: { __ctOwningSpace: true },
+        }],
+      },
+    } as const;
+    const tx = runtime.edit();
+    runtime.getCell(space, "malformed-policy", malformedSchema, tx).set(
+      "secret",
+    );
+    expect(() => tx.prepareCfc()).toThrow("malformed PolicyOf schema marker");
+    tx.abort?.();
+  });
+
   it("rejects unprivileged overwrite and deletion of a durable manifest", async () => {
     runtime.registerCfcPolicyManifests(space, [artifact]);
     const installTx = runtime.edit();

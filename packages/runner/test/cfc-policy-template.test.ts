@@ -1,9 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { assertThrows } from "@std/assert";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   buildCfcPolicyArtifactManifest,
+  lowerCfcPolicyTemplateRules,
   validateCfcPolicyArtifactManifest,
 } from "../src/cfc/policy.ts";
 
@@ -36,6 +38,14 @@ const manifestBody = () => ({
     integrityRequirements: {},
   },
 });
+
+type MutableRecord = Record<string, unknown>;
+const mutableBody = (): MutableRecord =>
+  structuredClone(manifestBody()) as unknown as MutableRecord;
+const mutableTemplate = (body: MutableRecord): MutableRecord =>
+  body.template as MutableRecord;
+const mutableRule = (body: MutableRecord): MutableRecord =>
+  (mutableTemplate(body).exchangeRules as unknown[])[0] as MutableRecord;
 
 describe("CFC module policy templates", () => {
   it("computes the normative manifest digest and deep-freezes the artifact", () => {
@@ -133,6 +143,338 @@ describe("CFC module policy templates", () => {
     expect(() => buildCfcPolicyArtifactManifest(body)).toThrow(
       /unbound postcondition variable "\$unbound"/,
     );
+  });
+
+  it("validates every portable template field and nested pattern", () => {
+    const rich = mutableBody();
+    const template = mutableTemplate(rich);
+    const rule = mutableRule(rich);
+    template.dependencies = {
+      authorityOnly: ["did:key:authority"],
+      dataBearing: ["of:data"],
+    };
+    template.integrityRequirements = {
+      read: [{
+        type: "ReadEvidence",
+        delegates: [{ var: "$reviewer" }],
+      }],
+      write: [{ type: "WriteEvidence" }],
+      share: [{ type: "ShareEvidence" }],
+    };
+    rule.guard = {
+      policyState: [{ kind: "approved", reviewer: { var: "$reviewer" } }],
+    };
+    rule.preConfScope = "anywhere";
+    expect(buildCfcPolicyArtifactManifest(rich as never).manifest.template)
+      .toEqual(template);
+    expect(
+      lowerCfcPolicyTemplateRules(
+        buildCfcPolicyArtifactManifest(rich as never).manifest.template,
+      )[0],
+    ).toMatchObject({
+      id: "releaseToReviewer",
+      preConfScope: "anywhere",
+      preCondition: {
+        policyState: [{ kind: "approved", reviewer: { var: "$reviewer" } }],
+      },
+    });
+
+    const invalid: Array<[RegExp, () => unknown]> = [
+      [/manifest body must be an object/, () => null],
+      [
+        /moduleIdentity must be/,
+        () => ({ ...manifestBody(), moduleIdentity: "" }),
+      ],
+      [/symbol must be/, () => ({ ...manifestBody(), symbol: "" })],
+      [
+        /template must be an object/,
+        () => ({ ...manifestBody(), template: null }),
+      ],
+      [
+        /templateVersion must be 1/,
+        () => {
+          const body = mutableBody();
+          mutableTemplate(body).templateVersion = 2;
+          return body;
+        },
+      ],
+      [
+        /exchangeRules must be an array/,
+        () => {
+          const body = mutableBody();
+          mutableTemplate(body).exchangeRules = "rules";
+          return body;
+        },
+      ],
+      [
+        /module policy rule must be an object/,
+        () => {
+          const body = mutableBody();
+          mutableTemplate(body).exchangeRules = [null];
+          return body;
+        },
+      ],
+      [
+        /unknown key "extra"/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).extra = true;
+          return body;
+        },
+      ],
+      [
+        /rule needs a name/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).name = "";
+          return body;
+        },
+      ],
+      [
+        /needs a preCondition/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).preCondition = null;
+          return body;
+        },
+      ],
+      [
+        /preCondition.*unknown key|unknown key.*preCondition/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).extra = true;
+          return body;
+        },
+      ],
+      [
+        /confidentiality must be an array/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).confidentiality =
+            true;
+          return body;
+        },
+      ],
+      [
+        /must target THIS_POLICY/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).confidentiality =
+            [];
+          return body;
+        },
+      ],
+      [
+        /contains an undefined/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).integrity = [
+            undefined,
+          ];
+          return body;
+        },
+      ],
+      [
+        /contains undefined/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).integrity = [{
+            type: "Evidence",
+            nested: { value: undefined },
+          }];
+          return body;
+        },
+      ],
+      [
+        /malformed variable/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).integrity = [{
+            var: "",
+          }];
+          return body;
+        },
+      ],
+      [
+        /invalid THIS_POLICY in/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).integrity = [{
+            thisPolicy: true,
+          }];
+          return body;
+        },
+      ],
+      [
+        /invalid THIS_POLICY field/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).preCondition as MutableRecord).integrity = [{
+            thisPolicyField: "other",
+          }];
+          return body;
+        },
+      ],
+      [
+        /preConfScope must be/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).preConfScope = "invalid";
+          return body;
+        },
+      ],
+      [
+        /needs a postCondition/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).postCondition = null;
+          return body;
+        },
+      ],
+      [
+        /postCondition.*unknown key|unknown key.*postCondition/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).postCondition as MutableRecord).extra = true;
+          return body;
+        },
+      ],
+      [
+        /cannot mint integrity/,
+        () => {
+          const body = mutableBody();
+          (mutableRule(body).postCondition as MutableRecord).integrity = [{
+            type: "Minted",
+          }];
+          return body;
+        },
+      ],
+      [
+        /guard must be an object/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = true;
+          return body;
+        },
+      ],
+      [
+        /guard.*unknown key|unknown key.*guard/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = {
+            policyState: [{ kind: "ok" }],
+            extra: true,
+          };
+          return body;
+        },
+      ],
+      [
+        /must be an array/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = { policyState: true };
+          return body;
+        },
+      ],
+      [
+        /must name at least one/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = { policyState: [] };
+          return body;
+        },
+      ],
+      [
+        /grant-pattern records/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = { policyState: [1] };
+          return body;
+        },
+      ],
+      [
+        /concrete non-empty string kind/,
+        () => {
+          const body = mutableBody();
+          mutableRule(body).guard = { policyState: [{ kind: "" }] };
+          return body;
+        },
+      ],
+      [
+        /dependencies must be an object/,
+        () => {
+          const body = mutableBody();
+          mutableTemplate(body).dependencies = null;
+          return body;
+        },
+      ],
+      [
+        /template dependencies.*unknown key|unknown key.*template dependencies/,
+        () => {
+          const body = mutableBody();
+          (mutableTemplate(body).dependencies as MutableRecord).extra = true;
+          return body;
+        },
+      ],
+      [
+        /authorityOnly must be a string array/,
+        () => {
+          const body = mutableBody();
+          (mutableTemplate(body).dependencies as MutableRecord).authorityOnly =
+            [1];
+          return body;
+        },
+      ],
+      [
+        /integrityRequirements must be an object/,
+        () => {
+          const body = mutableBody();
+          mutableTemplate(body).integrityRequirements = null;
+          return body;
+        },
+      ],
+      [
+        /integrityRequirements.*unknown key|unknown key.*integrityRequirements/,
+        () => {
+          const body = mutableBody();
+          (mutableTemplate(body).integrityRequirements as MutableRecord).extra =
+            true;
+          return body;
+        },
+      ],
+      [
+        /integrityRequirements.read must be an array/,
+        () => {
+          const body = mutableBody();
+          (mutableTemplate(body).integrityRequirements as MutableRecord).read =
+            true;
+          return body;
+        },
+      ],
+    ];
+
+    for (const [message, create] of invalid) {
+      const error = assertThrows(
+        () => buildCfcPolicyArtifactManifest(create() as never),
+        Error,
+      );
+      if (!message.test(error.message)) {
+        throw new Error(`${message}: ${error.message}`);
+      }
+    }
+  });
+
+  it("rejects malformed transported manifest envelopes", () => {
+    const artifact = buildCfcPolicyArtifactManifest(manifestBody());
+    expect(() => validateCfcPolicyArtifactManifest(null)).toThrow(
+      "envelope must be an object",
+    );
+    expect(() =>
+      validateCfcPolicyArtifactManifest({ ...artifact, extra: true })
+    ).toThrow('unknown key "extra"');
+    expect(() =>
+      validateCfcPolicyArtifactManifest({ ...artifact, policyDigest: "" })
+    ).toThrow("policyDigest must be a non-empty string");
   });
 
   it("keeps legacy deployment-record digest bytes unchanged", async () => {

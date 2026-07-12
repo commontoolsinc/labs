@@ -135,17 +135,30 @@ describe("module-policy exchange evaluation", () => {
 
   it("fails closed on a manifest pair or digest mismatch", () => {
     const label = { confidentiality: [ref(ALICE_SPACE)] };
-    const wrongPair = {
-      ...artifact,
-      manifest: { ...artifact.manifest, symbol: "otherRules" },
-    };
+    const wrongPair = buildCfcPolicyArtifactManifest({
+      ...artifact.manifest,
+      symbol: "otherRules",
+    });
     const wrongDigest = { ...artifact, policyDigest: "sha256:wrong" };
-    for (const resolved of [wrongPair, wrongDigest]) {
+    const resolverError = evaluateExchangeRules(label, undefined, {
+      modulePolicyResolver: () => {
+        throw new Error("resolver failed");
+      },
+    });
+    expect(resolverError.resolutionFailures[0]?.reason).toBe("resolver-error");
+
+    for (
+      const [resolved, reason] of [
+        [wrongPair, "reference-mismatch"],
+        [wrongDigest, "invalid-manifest"],
+      ] as const
+    ) {
       const result = evaluateExchangeRules(label, undefined, {
         modulePolicyResolver: () => resolved,
       });
       expect(result.label).toBe(label);
       expect(result.resolutionFailures).toHaveLength(1);
+      expect(result.resolutionFailures[0]?.reason).toBe(reason);
     }
   });
 
@@ -161,5 +174,22 @@ describe("module-policy exchange evaluation", () => {
     });
     expect(result.label).toBe(label);
     expect(result.resolutionFailures).toHaveLength(1);
+  });
+
+  it("rejects malformed module-reference candidates", () => {
+    const malformed = {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: "",
+      symbol: "rules",
+      policyDigest: "sha256:manifest",
+      subject: ALICE_SPACE,
+    };
+    const result = evaluateExchangeRules(
+      { confidentiality: [malformed] },
+      undefined,
+      { modulePolicyResolver: resolver },
+    );
+    expect(result.resolutionFailures[0]?.reason).toBe("malformed-reference");
   });
 });
