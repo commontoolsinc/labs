@@ -11,6 +11,9 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
+const destinationSpace = (await Identity.fromPassphrase(
+  "cfc PolicyOf label destination",
+)).did();
 
 describe("PolicyOf label-time binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -233,6 +236,91 @@ describe("PolicyOf label-time binding", () => {
       ).set("secret after restart");
       coldTx.prepareCfc();
       expect((await coldTx.commit()).ok).toBeDefined();
+    } finally {
+      await coldRuntime.dispose();
+    }
+  });
+
+  it("copies a carried policy manifest into a cross-space destination", async () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const sourceTx = runtime.edit();
+    const source = runtime.getCell(space, "policy-source", schema, sourceTx);
+    source.set("secret");
+    sourceTx.prepareCfc();
+    expect((await sourceTx.commit()).ok).toBeDefined();
+
+    const boundReference = {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: artifact.manifest.moduleIdentity,
+      symbol: artifact.manifest.symbol,
+      policyDigest: artifact.policyDigest,
+      subject: space,
+    };
+    const scopedProbe = runtime.edit();
+    source.withTx(scopedProbe).get();
+    runtime.getCell(
+      destinationSpace,
+      "missing-destination-policy",
+      undefined,
+      scopedProbe,
+    ).get();
+    expect(
+      scopedProbe.resolveCfcPolicyManifest(
+        boundReference,
+        destinationSpace,
+      ),
+    ).toBeUndefined();
+    scopedProbe.abort();
+
+    const copyTx = runtime.edit();
+    const target = runtime.getCell(
+      destinationSpace,
+      "policy-destination",
+      undefined,
+      copyTx,
+    );
+    const sourceLink = source.getAsNormalizedFullLink();
+    const targetLink = target.getAsNormalizedFullLink();
+    copyTx.writeValueOrThrow({
+      ...targetLink,
+      path: ["value"],
+    }, "copied secret");
+    copyTx.recordCfcWritePolicyInput({
+      kind: "link-write",
+      target: { ...targetLink, path: ["value"] },
+      source: { ...sourceLink, path: [] },
+    });
+    copyTx.prepareCfc();
+    expect((await copyTx.commit()).ok).toBeDefined();
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const coldTx = coldRuntime.edit();
+      target.withTx(coldTx).get();
+      const metadata = readStoredCfcMetadata(coldTx, targetLink);
+      const reference = metadata?.labelMap.entries
+        .flatMap((entry) => entry.label.confidentiality ?? [])
+        .find((value) =>
+          typeof value === "object" && value !== null &&
+          (value as Record<string, unknown>).policyRefKind === "module"
+        );
+      expect(reference).toBeDefined();
+      expect(
+        coldTx.resolveCfcPolicyManifest(reference, destinationSpace),
+      ).toBeDefined();
+      expect(
+        coldRuntime.hasCfcPolicyManifest(
+          destinationSpace,
+          reference,
+          coldTx,
+        ),
+      ).toBe(true);
+      coldTx.abort();
     } finally {
       await coldRuntime.dispose();
     }

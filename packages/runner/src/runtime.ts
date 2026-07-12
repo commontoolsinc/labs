@@ -641,8 +641,12 @@ export class Runtime {
   resolveCfcPolicyManifest(
     reference: unknown,
     tx?: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
   ): PolicyArtifactManifestV1 | undefined {
     if (tx === undefined) return this.#registeredCfcPolicyManifest(reference);
+    if (destinationSpace !== undefined) {
+      return this.#readCfcPolicyManifest(destinationSpace, reference, tx);
+    }
     let artifact: PolicyArtifactManifestV1 | undefined;
     const spaces = new Set<MemorySpace>();
     const log = tx.getReactivityLog?.();
@@ -1117,8 +1121,8 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
-      resolvePolicyManifest: (reference, tx) =>
-        this.resolveCfcPolicyManifest(reference, tx),
+      resolvePolicyManifest: (reference, tx, destinationSpace) =>
+        this.resolveCfcPolicyManifest(reference, tx, destinationSpace),
       hasPolicyManifest: (space, reference, tx) =>
         this.hasCfcPolicyManifest(space, reference, tx),
       installPolicyManifest: (space, reference, tx) =>

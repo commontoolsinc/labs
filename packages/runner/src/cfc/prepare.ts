@@ -3577,6 +3577,7 @@ const verifyInputRequirements = (
           read.label?.integrity ?? [],
           [],
           mode === "enforce" ? "consuming" : "observing",
+          target.space,
         );
         if (mode === "enforce") {
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
@@ -3889,7 +3890,7 @@ const resolvePolicyOfValue = (
     }
     const resolver = createTxCfcModulePolicyResolver(
       tx,
-      (candidate) => tx.resolveCfcPolicyManifest(candidate),
+      (candidate) => tx.resolveCfcPolicyManifest(candidate, owningSpace),
     );
     if (resolver(reference as never) === undefined) {
       throw new Error("cfcPolicyManifest: PolicyOf reference did not resolve");
@@ -3902,6 +3903,58 @@ const resolvePolicyOfValue = (
       resolvePolicyOfValue(tx, entry, owningSpace),
     ]),
   );
+};
+
+const modulePolicyReferencesIn = (value: unknown): unknown[] => {
+  const references: unknown[] = [];
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (!isRecord(candidate)) return;
+    if (
+      candidate.type === CFC_ATOM_TYPE.Policy &&
+      candidate.policyRefKind === "module" &&
+      typeof candidate.moduleIdentity === "string" &&
+      typeof candidate.symbol === "string" &&
+      typeof candidate.policyDigest === "string"
+    ) {
+      references.push(candidate);
+      return;
+    }
+    Object.values(candidate).forEach(visit);
+  };
+  visit(value);
+  return references;
+};
+
+const installCarriedPolicyManifests = (
+  tx: IExtendedStorageTransaction,
+  destination: MemorySpace,
+  entries: readonly LabelMapEntry[],
+): string[] => {
+  const failures: string[] = [];
+  const seen = new Set<string>();
+  for (const reference of modulePolicyReferencesIn(entries)) {
+    const digest = (reference as { policyDigest: string }).policyDigest;
+    if (seen.has(digest)) continue;
+    seen.add(digest);
+    // A cold cross-space copy may know the artifact only through the source
+    // space it just read. Resolve first so the runtime verifies and indexes
+    // that exact artifact, then atomically install it beside the destination
+    // label in this transaction.
+    tx.resolveCfcPolicyManifest(reference);
+    if (
+      !tx.hasCfcPolicyManifest(destination, reference) &&
+      !tx.installCfcPolicyManifest(destination, reference)
+    ) {
+      failures.push(
+        `cfcPolicyManifest: manifest ${digest} is not installed in ${destination}`,
+      );
+    }
+  }
+  return failures;
 };
 
 // Integrity atom families that are concrete evidence minted only by trusted
@@ -4444,6 +4497,7 @@ const evaluateGatedConfidentiality = (
   integrity: readonly unknown[],
   boundary: readonly unknown[],
   consumption: CfcGrantConsumptionContext,
+  destinationSpace?: MemorySpace,
 ): {
   confidentiality: readonly unknown[];
   exhausted: boolean;
@@ -4472,7 +4526,8 @@ const evaluateGatedConfidentiality = (
       grantConsumption: consumption,
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
-        (reference) => tx.resolveCfcPolicyManifest(reference),
+        (reference) =>
+          tx.resolveCfcPolicyManifest(reference, destinationSpace),
       ),
     },
   );
@@ -6199,6 +6254,16 @@ export const prepareBoundaryCommit = (
     persistedLabelEntries.push(
       ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
     );
+
+    const manifestFailures = installCarriedPolicyManifests(
+      tx,
+      space,
+      persistedLabelEntries,
+    );
+    if (manifestFailures.length > 0) {
+      reasons.push(...manifestFailures);
+      continue;
+    }
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 

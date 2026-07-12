@@ -131,6 +131,7 @@ type CfcInstrumentationHooks = {
   resolvePolicyManifest?(
     reference: unknown,
     tx: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
   ): unknown;
   hasPolicyManifest?(
     space: MemorySpace,
@@ -374,8 +375,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return readOnlyCfcView(this.#cfcState);
   }
 
-  resolveCfcPolicyManifest(reference: unknown): unknown {
-    return this.cfcInstrumentation.resolvePolicyManifest?.(reference, this);
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+  ): unknown {
+    return this.cfcInstrumentation.resolvePolicyManifest?.(
+      reference,
+      this,
+      destinationSpace,
+    );
   }
 
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
@@ -1983,8 +1991,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.recordCfcConsultedPolicyManifest(consulted);
   }
 
-  resolveCfcPolicyManifest(reference: unknown): unknown {
-    return this.wrapped.resolveCfcPolicyManifest(reference);
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+  ): unknown {
+    return this.wrapped.resolveCfcPolicyManifest(reference, destinationSpace);
   }
 
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {

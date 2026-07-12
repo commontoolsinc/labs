@@ -1063,7 +1063,10 @@ export interface IExtendedStorageTransaction
   ): void;
 
   /** Runtime-verified module policy manifest lookup (read-only). */
-  resolveCfcPolicyManifest(reference: unknown): unknown;
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+  ): unknown;
 
   /** Whether the exact manifest is installed for a destination space. */
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
