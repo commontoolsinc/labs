@@ -659,7 +659,9 @@ connection. Demand requires READ; later sponsor selection separately requires
 WRITE. Demand is policy-independent because Phase 1 consumes it for shadow
 execution while clients remain authoritative. The host subscription publishes
 `{space, branch, order, demands}` so the final empty snapshot still identifies
-the exact worker-pool slot to stop.
+the exact worker-pool slot to stop. It is a delta subscription with no initial
+replay; the shared pool MUST install it before the memory host accepts client
+connections.
 
 Claims and settlements are server-generated `SessionSync.execution.events`:
 
@@ -750,10 +752,12 @@ last-owner removal are rejected. These shape and genesis rules are hard
 storage invariants in both `observe` and `enforce`; `observe` relaxes only
 ordinary capability shortfalls on an already valid ACL.
 
-Execution-policy mutation is a separate authority invariant: the effective
-principal must hold OWNER even when the general ACL rollout dial is `off` or
-`observe`. This prevents rollout configuration from turning the server-primary
-authority switch into an ordinary WRITE.
+Execution-policy mutation is a separate authority invariant. In ACL `enforce`
+mode, the effective principal must hold OWNER. While ACL mutation itself is
+rollout-relaxed in `off` or `observe`, only the immutable implicit owners—the
+space identity and configured service DIDs—may mutate execution policy. This
+prevents a writer from self-granting ACL OWNER and taking over the
+server-primary authority switch.
 
 Genesis remains an explicit transaction. For a fresh named space, the storage
 manager briefly authenticates as the derived space identity, writes

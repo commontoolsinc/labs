@@ -530,9 +530,10 @@ passivity remain independently absent-false until W2.1 and W2.3.
    policy-only commits; direct host writes cannot bypass that rule. Enabling is
    rejected while an incompatible session remains attached. Do not put claims,
    actor identity, heartbeat, exception lists, or epochs in it.
-   OWNER remains mandatory when ordinary ACL checks are off/observe. Positive
-   claims require the effective policy; disabling/deleting it revokes all live
-   claims without suppressing shadow demand.
+   OWNER remains mandatory when ordinary ACL checks are off/observe; because
+   ACL mutation is rollout-relaxed there, only implicit space/service owners
+   qualify. Positive claims require the effective policy; disabling/deleting
+   it revokes all live claims without suppressing shadow demand.
 8. Gate all messages behind serverPrimaryExecution, default off.
    Negotiate absent-false `serverPrimaryExecutionClaimRoutingV1` and
    `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities while the WOs
@@ -647,9 +648,11 @@ and signing authority are separate.
 
 **Steps:**
 
-1. Add a host pool `Map<BranchSpaceKey, SpaceExecutionSlot>`. Union every
-   connection's ExecutionDemand into the slot; acquire one lease and launch one
-   Worker for the union.
+1. Install the delta-only demand listener before the memory host accepts client
+   connections, then add a host pool
+   `Map<BranchSpaceKey, SpaceExecutionSlot>`. Union every connection's
+   ExecutionDemand into the slot; acquire one lease and launch one Worker for
+   the union.
 2. Construct one runtime with persistentSchedulerState enabled and the
    authenticated host provider. Rehydrate the applicable space/user/session
    scheduler rows for its sponsor context.
