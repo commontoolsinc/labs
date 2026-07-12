@@ -247,6 +247,10 @@ export interface MemoryProtocolFlags {
   persistentSchedulerState: boolean;
   /** Optional server-primary-execution-v1 control/feed protocol. */
   serverPrimaryExecutionV1: boolean;
+  /** Client can honor computation claim routing (dark until W2.1). */
+  serverPrimaryExecutionClaimRoutingV1: boolean;
+  /** Client can keep async builtins passive for a claim (dark until W2.3). */
+  serverPrimaryExecutionBuiltinPassivityV1: boolean;
   /** Build-inherent support for authenticated scheduler writer lookup. */
   schedulerWriterLookup: boolean;
   commitPreconditions: boolean;
@@ -274,6 +278,8 @@ export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   serverPrimaryExecutionV1?: boolean;
+  serverPrimaryExecutionClaimRoutingV1?: boolean;
+  serverPrimaryExecutionBuiltinPassivityV1?: boolean;
   schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
@@ -307,6 +313,7 @@ export interface SessionOpenAuthMetadata {
 export interface SessionDescriptor {
   sessionId?: SessionId;
   seenSeq?: number;
+  executionFeedSeq?: number;
   sessionToken?: SessionToken;
 }
 
@@ -359,6 +366,76 @@ export interface GraphWatchSpec {
 
 export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
 
+export interface ActionClaimKey {
+  branch: BranchName;
+  space: string;
+  contextKey: SchedulerExecutionContextKey;
+  pieceId: string;
+  actionId: string;
+  actionKind: "computation" | "effect" | "event-handler";
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+}
+
+export interface ExecutionClaim extends ActionClaimKey {
+  leaseGeneration: number;
+  claimGeneration: number;
+  /** Unix milliseconds assigned by the host clock. */
+  expiresAt: number;
+}
+
+export interface ExecutionClaimSetEvent {
+  type: "session.execution.claim.set";
+  claim: ExecutionClaim;
+}
+
+export interface ExecutionClaimRevokeEvent {
+  type: "session.execution.claim.revoke";
+  branch: BranchName;
+  claim: ActionClaimKey;
+  leaseGeneration: number;
+  claimGeneration: number;
+}
+
+export type ActionSettlement =
+  | {
+    branch: BranchName;
+    claim: ExecutionClaim;
+    inputBasisSeq: number;
+    outcome: "committed";
+    acceptedCommitSeq: number;
+    diagnosticCode?: never;
+  }
+  | {
+    branch: BranchName;
+    claim: ExecutionClaim;
+    inputBasisSeq: number;
+    outcome: "no-op" | "failed" | "unserved";
+    acceptedCommitSeq?: never;
+    diagnosticCode?: string;
+  };
+
+export interface ExecutionSettlementEvent {
+  type: "session.execution.settlement";
+  settlement: ActionSettlement;
+}
+
+export type ExecutionControlEvent =
+  | ExecutionClaimSetEvent
+  | ExecutionClaimRevokeEvent
+  | ExecutionSettlementEvent;
+
+export interface ExecutionClaimSnapshot {
+  claims: ExecutionClaim[];
+}
+
+export interface ExecutionFeedBatch {
+  fromFeedSeq: number;
+  toFeedSeq: number;
+  snapshot?: ExecutionClaimSnapshot;
+  events: ExecutionControlEvent[];
+}
+
 export interface SessionSyncUpsert {
   branch: BranchName;
   id: EntityId;
@@ -390,6 +467,9 @@ export interface SessionSync {
   // scheduler.snapshot.list result; `observation` is intentionally
   // `unknown` — the runner owns validation.
   observations?: SchedulerActionSnapshotResult[];
+  /** Ordered reconnectable server-execution control/data envelope. A
+   * control-only batch leaves fromSeq/toSeq unchanged. */
+  execution?: ExecutionFeedBatch;
 }
 
 export interface WatchSetResult {
@@ -573,6 +653,7 @@ export interface SessionAckRequest {
   space: string;
   sessionId: SessionId;
   seenSeq: number;
+  executionFeedSeq?: number;
 }
 
 export interface SchedulerActionSnapshotQuery {
@@ -840,6 +921,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   serverPrimaryExecutionV1: getServerPrimaryExecutionConfig(),
+  // Protocol shapes land before either client behavior. Test-only overrides
+  // exercise them in W0.6; production turns them on with W2.1/W2.3.
+  serverPrimaryExecutionClaimRoutingV1: false,
+  serverPrimaryExecutionBuiltinPassivityV1: false,
   // Build-inherent capability: older servers omit it and clients fail open to
   // piece-root discovery rather than sending an RPC the peer cannot parse.
   schedulerWriterLookup: true,
@@ -899,6 +984,24 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const serverPrimaryExecutionClaimRoutingV1 =
+    value.serverPrimaryExecutionClaimRoutingV1;
+  if (
+    serverPrimaryExecutionClaimRoutingV1 !== undefined &&
+    typeof serverPrimaryExecutionClaimRoutingV1 !== "boolean"
+  ) {
+    return null;
+  }
+
+  const serverPrimaryExecutionBuiltinPassivityV1 =
+    value.serverPrimaryExecutionBuiltinPassivityV1;
+  if (
+    serverPrimaryExecutionBuiltinPassivityV1 !== undefined &&
+    typeof serverPrimaryExecutionBuiltinPassivityV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const commitPreconditions = value.commitPreconditions;
   if (
     commitPreconditions !== undefined &&
@@ -943,6 +1046,10 @@ export const parseMemoryProtocolFlags = (
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     serverPrimaryExecutionV1: serverPrimaryExecutionV1 === true,
+    serverPrimaryExecutionClaimRoutingV1:
+      serverPrimaryExecutionClaimRoutingV1 === true,
+    serverPrimaryExecutionBuiltinPassivityV1:
+      serverPrimaryExecutionBuiltinPassivityV1 === true,
     schedulerWriterLookup: schedulerWriterLookup === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
@@ -962,6 +1069,10 @@ export const wireMemoryProtocolFlags = (
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
   serverPrimaryExecutionV1: flags.serverPrimaryExecutionV1,
+  serverPrimaryExecutionClaimRoutingV1:
+    flags.serverPrimaryExecutionClaimRoutingV1,
+  serverPrimaryExecutionBuiltinPassivityV1:
+    flags.serverPrimaryExecutionBuiltinPassivityV1,
   schedulerWriterLookup: flags.schedulerWriterLookup,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
