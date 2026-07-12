@@ -284,3 +284,64 @@ Deno.test("executor action router keeps broker-required effects local", async ()
   assertEquals(result, { disposition: "local", kind: "executor-shadow" });
   assertStrictEquals(diagnostics[0]?.diagnosticCode, "broker-required");
 });
+
+Deno.test("ownerless malformed observation reports a diagnostic without an invalid claim key", async () => {
+  const malformed = commit();
+  delete (malformed.schedulerObservation as Record<string, unknown>).ownerSpace;
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => undefined,
+    onCandidate: () => {
+      throw new Error("malformed observation must not become a candidate");
+    },
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  assertEquals(
+    await router({ space: SPACE, commit: malformed, sourceAction: action }),
+    { disposition: "local", kind: "executor-shadow" },
+  );
+  assertEquals(diagnostics, [{ diagnosticCode: "malformed-candidate" }]);
+});
+
+Deno.test("changed action identity invalidates its old exact claim", async () => {
+  const claim: ExecutionClaim = {
+    ...key,
+    leaseGeneration: 15,
+    claimGeneration: 17,
+    expiresAt: 100_000,
+  };
+  const invalidated: Array<{
+    claim: ExecutionClaim;
+    sourceAction: object;
+    diagnosticCode: string;
+  }> = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => claim,
+    onCandidate: () => {
+      throw new Error("changed identity must invalidate before recandidating");
+    },
+    onInvalidated: (
+      oldClaim: ExecutionClaim,
+      sourceAction: object,
+      diagnosticCode: string,
+    ) => invalidated.push({ claim: oldClaim, sourceAction, diagnosticCode }),
+  });
+  const changed = commit();
+  (changed.schedulerObservation as Record<string, unknown>)
+    .runtimeFingerprint = "runtime:changed";
+
+  assertEquals(
+    await router({ space: SPACE, commit: changed, sourceAction: action }),
+    { disposition: "local", kind: "executor-shadow" },
+  );
+  assertEquals(invalidated, [{
+    claim,
+    sourceAction: action,
+    diagnosticCode: "claim-key-mismatch",
+  }]);
+});

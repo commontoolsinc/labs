@@ -98,6 +98,14 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     );
   }
 
+  invalidated(claim: ExecutionClaim, diagnosticCode: string): void {
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "invalidated-claim", claim, diagnosticCode },
+      }),
+    );
+  }
+
   postMessage(message: unknown, _transfer?: Transferable[]): void {
     this.messages.push(message);
     const request = message as { type?: string; requestId?: number };
@@ -256,6 +264,29 @@ Deno.test("ordinary shadow rejection reports a host-local candidate diagnostic",
     }]);
     assertEquals(server.claimRequests, []);
     assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("changed action identity revokes its old host claim", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    worker.invalidated(CLAIM, "claim-key-mismatch");
+    await flushClaimControl();
+
+    assertEquals(crashes, []);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(diagnostics, [{
+      claim: CLAIM,
+      diagnosticCode: "claim-key-mismatch",
+    }]);
   } finally {
     await executor.stop();
   }
