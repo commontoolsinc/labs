@@ -1386,6 +1386,22 @@ and the existing warm bound-list matrix. The aggregate WP3.5 checkbox remains
 open until live replacement/resume, CFC/scope, fixture migration, and the full
 package gates are green.
 
+WP3.5 list-replacement slice (2026-07-11): the first red preserved the call
+site's row link but produced a sparse result after A(params1) was replaced by
+B(params2), because unchanged indices never restarted their row runners. Each
+canonical list coordinator now owns a switch-latest selector supervisor. An
+exact-address cancellation lane watches both the stable op binding and its
+terminal source, stops every cached row before an authored promise can settle,
+and leaves materialization/activation on the normal transactional path. A
+monotonic selection generation restarts present and removed-then-reappearing
+rows in their existing result cells; child actions also read the stable op
+binding for reactive and CFC provenance. Focused coverage now passes for all
+three list builtins across A -> B -> A, different params on reused artifacts,
+stale async completion, old-subscription teardown, equal-state replay,
+aggregate/row identity, and replacement while a cached row is absent. The cold
+and replacement matrix passes `3 passed (6 steps)` with the warm canonical and
+explicit legacy reader tests included.
+
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
 - [ ] Record trusted framework-provided paths in compiler/artifact metadata for

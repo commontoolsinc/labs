@@ -50,7 +50,7 @@ import {
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { materializeListPatternFactory } from "./list-factory-materialization.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -99,8 +99,17 @@ export function map(
   // there's no need to store the element cell separately.
   const elementRuns = new Map<
     string,
-    { resultCell: Cell<any>; lastIndex: number }
+    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
   >();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
   // runs until storage sync completes. This coordinator registers as
@@ -197,17 +206,21 @@ export function map(
     const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
       Object.hasOwn(rawInputs, "params");
     let opPattern: Pattern;
+    let factoryGeneration: number | undefined;
+    let factorySelectionLink: NormalizedFullLink | undefined;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
       opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
       argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     } else {
-      opPattern = materializeListPatternFactory(
-        runtime,
+      const selection = factorySupervisor.materialize(
         tx,
-        op,
+        inputsCell.key("op"),
         "map",
       );
+      opPattern = selection.pattern;
+      factoryGeneration = selection.generation;
+      factorySelectionLink = selection.factorySelectionLink;
       argumentUsage = {
         usesElement: true,
         usesIndex: true,
@@ -373,7 +386,12 @@ export function map(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        const staleFactoryGeneration = factoryGeneration !== undefined &&
+          existing.runGeneration !== factoryGeneration;
+        if (
+          staleFactoryGeneration ||
+          (argumentUsage.usesIndex && existing.lastIndex !== i)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -382,8 +400,12 @@ export function map(
             {
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
+              ...(factorySelectionLink === undefined
+                ? {}
+                : { factorySelectionLink }),
             },
           );
+          existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
         newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
@@ -402,6 +424,9 @@ export function map(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            ...(factorySelectionLink === undefined
+              ? {}
+              : { factorySelectionLink }),
           },
         );
         // Link these individual cells to the top cell
@@ -409,7 +434,11 @@ export function map(
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        elementRuns.set(elementKey, {
+          resultCell,
+          lastIndex: i,
+          runGeneration: factoryGeneration,
+        });
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }

@@ -50,7 +50,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { materializeListPatternFactory } from "./list-factory-materialization.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.filter", { enabled: true, level: "warn" });
 
@@ -92,8 +92,17 @@ export function filter(
   // resultCell holds the predicate boolean for this element.
   const elementRuns = new Map<
     string,
-    { resultCell: Cell<any>; lastIndex: number }
+    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
   >();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Only the initial (resume) reconcile defers its per-element sub-pattern runs
   // until sync completes; elements from later (post-resume) reconciles are fresh
@@ -206,17 +215,21 @@ export function filter(
     const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
       Object.hasOwn(rawInputs, "params");
     let opPattern: Pattern;
+    let factoryGeneration: number | undefined;
+    let factorySelectionLink: NormalizedFullLink | undefined;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
       opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
       argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     } else {
-      opPattern = materializeListPatternFactory(
-        runtime,
+      const selection = factorySupervisor.materialize(
         tx,
-        op,
+        inputsCell.key("op"),
         "filter",
       );
+      opPattern = selection.pattern;
+      factoryGeneration = selection.generation;
+      factorySelectionLink = selection.factorySelectionLink;
       argumentUsage = {
         usesElement: true,
         usesIndex: true,
@@ -392,7 +405,12 @@ export function filter(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        const staleFactoryGeneration = factoryGeneration !== undefined &&
+          existing.runGeneration !== factoryGeneration;
+        if (
+          staleFactoryGeneration ||
+          (argumentUsage.usesIndex && existing.lastIndex !== i)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -401,8 +419,12 @@ export function filter(
             {
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
+              ...(factorySelectionLink === undefined
+                ? {}
+                : { factorySelectionLink }),
             },
           );
+          existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
       } else {
@@ -420,6 +442,9 @@ export function filter(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            ...(factorySelectionLink === undefined
+              ? {}
+              : { factorySelectionLink }),
           },
         );
         // Link these individual cells to the top cell
@@ -428,7 +453,11 @@ export function filter(
         setPatternCell(resultCell, parentCell.key("pattern"));
 
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        elementRuns.set(elementKey, {
+          resultCell,
+          lastIndex: i,
+          runGeneration: factoryGeneration,
+        });
 
         // An element first seen after the resume batch cleared, while the space
         // may still be syncing: its inline op write rode on this reconcile's

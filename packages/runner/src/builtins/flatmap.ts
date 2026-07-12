@@ -50,7 +50,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { materializeListPatternFactory } from "./list-factory-materialization.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -94,8 +94,17 @@ export function flatMap(
   // resultCell holds the per-element result array.
   const elementRuns = new Map<
     string,
-    { resultCell: Cell<any>; lastIndex: number }
+    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
   >();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Only the initial (resume) reconcile defers its per-element sub-pattern runs
   // until sync completes; elements from later (post-resume) reconciles are fresh
@@ -207,17 +216,21 @@ export function flatMap(
     const legacyInputs = typeof rawInputs === "object" && rawInputs !== null &&
       Object.hasOwn(rawInputs, "params");
     let opPattern: Pattern;
+    let factoryGeneration: number | undefined;
+    let factorySelectionLink: NormalizedFullLink | undefined;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
       opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
       argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     } else {
-      opPattern = materializeListPatternFactory(
-        runtime,
+      const selection = factorySupervisor.materialize(
         tx,
-        op,
+        inputsCell.key("op"),
         "flatMap",
       );
+      opPattern = selection.pattern;
+      factoryGeneration = selection.generation;
+      factorySelectionLink = selection.factorySelectionLink;
       argumentUsage = {
         usesElement: true,
         usesIndex: true,
@@ -389,7 +402,12 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        const staleFactoryGeneration = factoryGeneration !== undefined &&
+          existing.runGeneration !== factoryGeneration;
+        if (
+          staleFactoryGeneration ||
+          (argumentUsage.usesIndex && existing.lastIndex !== i)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -398,8 +416,12 @@ export function flatMap(
             {
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
+              ...(factorySelectionLink === undefined
+                ? {}
+                : { factorySelectionLink }),
             },
           );
+          existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
       } else {
@@ -417,12 +439,19 @@ export function flatMap(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            ...(factorySelectionLink === undefined
+              ? {}
+              : { factorySelectionLink }),
           },
         );
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        elementRuns.set(elementKey, {
+          resultCell,
+          lastIndex: i,
+          runGeneration: factoryGeneration,
+        });
 
         // An element first seen after the resume batch cleared, while the space
         // may still be syncing: its inline op write rode on this reconcile's
