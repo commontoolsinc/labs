@@ -366,6 +366,31 @@ Deno.test("flag-off clients do not send execution demand messages", async () => 
   }
 });
 
+Deno.test("one connection replaces demand independently on each branch", async () => {
+  const server = createServer("memory-v2-execution-demand-branches", true);
+  const client = await connectClient(server, true);
+  const session = await mount(client);
+  try {
+    await session.setExecutionDemand("", ["piece:main"]);
+    await session.setExecutionDemand("feature", ["piece:feature-v1"]);
+    await session.setExecutionDemand("feature", ["piece:feature-v2"]);
+    assertEquals(server.listExecutionDemands(POLICY_SPACE, "")[0].pieces, [
+      "piece:main",
+    ]);
+    assertEquals(
+      server.listExecutionDemands(POLICY_SPACE, "feature")[0].pieces,
+      ["piece:feature-v2"],
+    );
+
+    await session.setExecutionDemand("feature", []);
+    assertEquals(server.listExecutionDemands(POLICY_SPACE, "feature"), []);
+    assertEquals(server.listExecutionDemands(POLICY_SPACE, "").length, 1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("claims are branch-qualified and reclaim mints a fresh generation", async () => {
   const server = createControlServer("memory-v2-execution-claims");
   const client = await connectControlClient(server);
