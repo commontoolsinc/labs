@@ -10,6 +10,8 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
+  type ExecutionDemandSetRequest,
+  type ExecutionDemandSetResult,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -411,6 +413,26 @@ export type AcceptedCommitListener = (
   event: AcceptedCommitEvent,
 ) => void | Promise<void>;
 
+export interface AuthenticatedExecutionDemand {
+  readonly space: string;
+  readonly branch: BranchName;
+  readonly sessionId: string;
+  readonly connectionId: string;
+  readonly principal: string;
+  readonly pieces: readonly string[];
+}
+
+export type ExecutionDemandListener = (
+  demands: readonly AuthenticatedExecutionDemand[],
+) => void | Promise<void>;
+
+const executionDemandKey = (
+  connectionId: string,
+  space: string,
+  sessionId: string,
+  branch: BranchName,
+): string => encodeMemoryBoundary([connectionId, space, sessionId, branch]);
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -499,6 +521,11 @@ class Connection {
     if (!this.#sessions.delete(key) || this.#closed) {
       return;
     }
+    this.server.removeExecutionDemandsForSession(
+      this.id,
+      space,
+      sessionId,
+    );
     this.send({
       type: "session/revoked",
       space,
@@ -837,6 +864,37 @@ class Connection {
           );
         }
         return;
+      case "session.execution.demand.set":
+        if (!this.serverPrimaryExecutionV1) {
+          this.send({
+            type: "response",
+            requestId: parsed.requestId,
+            error: toError(
+              "UnsupportedProtocol",
+              "memory capability server-primary-execution-v1 was not negotiated",
+            ),
+          });
+          return;
+        }
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.setExecutionDemand(parsed, this);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
       case "session.ack":
         if (
           !this.requireSession(
@@ -928,6 +986,8 @@ export class Server {
   #lastRefreshDurationMs = 0;
   #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
   #acceptedCommitOrderBySpace = new Map<string, number>();
+  #executionDemands = new Map<string, AuthenticatedExecutionDemand>();
+  #executionDemandListeners = new Set<ExecutionDemandListener>();
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1401,6 +1461,7 @@ export class Server {
 
   disconnect(connection: Connection): void {
     this.#connections.delete(connection.id);
+    this.#removeExecutionDemands({ connectionId: connection.id });
     if (this.#connections.size === 0) {
       this.cancelScheduledRefresh();
     }
@@ -1414,6 +1475,158 @@ export class Server {
     this.#sessions.detach(space, sessionId, ownerConnectionId);
   }
 
+  removeExecutionDemandsForSession(
+    connectionId: string,
+    space: string,
+    sessionId: string,
+  ): void {
+    this.#removeExecutionDemands({ connectionId, space, sessionId });
+  }
+
+  listExecutionDemands(
+    space: string,
+    branch: BranchName,
+  ): readonly AuthenticatedExecutionDemand[] {
+    return Object.freeze(
+      [...this.#executionDemands.values()]
+        .filter((demand) =>
+          demand.space === space && demand.branch === branch
+        )
+        .sort((left, right) =>
+          left.connectionId.localeCompare(right.connectionId) ||
+          left.sessionId.localeCompare(right.sessionId)
+        )
+        .map((demand) => Object.freeze({
+          ...demand,
+          pieces: Object.freeze([...demand.pieces]),
+        })),
+    );
+  }
+
+  subscribeExecutionDemands(listener: ExecutionDemandListener): () => void {
+    this.#executionDemandListeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      this.#executionDemandListeners.delete(listener);
+    };
+  }
+
+  #publishExecutionDemands(space: string, branch: BranchName): void {
+    const snapshot = this.listExecutionDemands(space, branch);
+    for (const listener of this.#executionDemandListeners) {
+      try {
+        const result = listener(snapshot);
+        if (result instanceof Promise) {
+          void result.catch((error) =>
+            console.warn("execution demand listener failed", error)
+          );
+        }
+      } catch (error) {
+        console.warn("execution demand listener failed", error);
+      }
+    }
+  }
+
+  #removeExecutionDemands(match: {
+    connectionId: string;
+    space?: string;
+    sessionId?: string;
+  }): void {
+    const changed = new Map<string, { space: string; branch: BranchName }>();
+    for (const [key, demand] of this.#executionDemands) {
+      if (
+        demand.connectionId !== match.connectionId ||
+        (match.space !== undefined && demand.space !== match.space) ||
+        (match.sessionId !== undefined && demand.sessionId !== match.sessionId)
+      ) {
+        continue;
+      }
+      this.#executionDemands.delete(key);
+      changed.set(
+        encodeMemoryBoundary([demand.space, demand.branch]),
+        { space: demand.space, branch: demand.branch },
+      );
+    }
+    for (const { space, branch } of changed.values()) {
+      this.#publishExecutionDemands(space, branch);
+    }
+  }
+
+  async setExecutionDemand(
+    message: ExecutionDemandSetRequest,
+    connection: Connection,
+  ): Promise<ResponseMessage<ExecutionDemandSetResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (
+      session === null || session.ownerConnectionId !== connection.id ||
+      session.principal === undefined
+    ) {
+      return respondTypedError<ExecutionDemandSetResult>(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "execution demand requires an authenticated attached session",
+        ),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<ExecutionDemandSetResult>(
+          message.requestId,
+          deny,
+        );
+      }
+      const key = executionDemandKey(
+        connection.id,
+        message.space,
+        message.sessionId,
+        message.branch,
+      );
+      if (message.pieces.length === 0) {
+        this.#executionDemands.delete(key);
+      } else {
+        this.#executionDemands.set(key, Object.freeze({
+          space: message.space,
+          branch: message.branch,
+          sessionId: message.sessionId,
+          connectionId: connection.id,
+          principal: session.principal,
+          pieces: Object.freeze([...message.pieces]),
+        }));
+      }
+      this.#publishExecutionDemands(message.space, message.branch);
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          references: this.listExecutionDemands(
+            message.space,
+            message.branch,
+          ).length,
+        },
+      };
+    } catch (error) {
+      return respondTypedError<ExecutionDemandSetResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "ExecutionDemandError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     await this.#refreshing;
@@ -1424,6 +1637,8 @@ export class Server {
     this.#connections.clear();
     this.#acceptedCommitListeners.clear();
     this.#acceptedCommitOrderBySpace.clear();
+    this.#executionDemands.clear();
+    this.#executionDemandListeners.clear();
     this.#readPool.close();
   }
 
@@ -4118,6 +4333,34 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query,
+    };
+  }
+
+  if (
+    parsed.type === "session.execution.demand.set" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.branch === "string" &&
+    parsed.branch.length <= 256 &&
+    Array.isArray(parsed.pieces) &&
+    parsed.pieces.length <= 256 &&
+    parsed.pieces.every((piece) =>
+      typeof piece === "string" && piece.length > 0 && piece.length <= 512
+    ) &&
+    new Set(parsed.pieces).size === parsed.pieces.length &&
+    Object.keys(parsed).every((key) =>
+      key === "type" || key === "requestId" || key === "space" ||
+      key === "sessionId" || key === "branch" || key === "pieces"
+    )
+  ) {
+    return {
+      type: "session.execution.demand.set",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      branch: parsed.branch,
+      pieces: [...parsed.pieces] as string[],
     };
   }
 
