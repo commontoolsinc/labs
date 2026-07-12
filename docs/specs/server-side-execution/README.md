@@ -304,10 +304,11 @@ than guessing a producer.
 
 Important patterns now go through the transformer. Enforce that every normal
 computation node has exactly one primary output binding, directly to the
-root path of its target cell. The runner must not recursively search the
+root path of its target cell. The runner does not recursively search the
 emitted static output binding for a redirect to determine result identity.
-This is the `firstResolvedOutputRedirect` path; plain lift/computed result
-identity from `_resultFor` does not recurse and is not being replaced.
+This replaces the former `firstResolvedOutputRedirect` path; plain
+lift/computed result identity from `_resultFor` does not recurse and is not
+being replaced.
 Additional static side writes and materializer envelopes remain explicit write
 surfaces and are indexed separately.
 
@@ -1236,7 +1237,7 @@ means a design doc/decision is required before implementation.
 | G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | indexes exist; query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
-| G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | small needs-impl; no migration |
+| G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |
 | G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |

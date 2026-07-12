@@ -196,7 +196,10 @@ describe("ensurePieceRunning", () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
-      result: {},
+      derivedInternalCells: [{ partialCause: "start" }],
+      result: {
+        start: { $alias: { partialCause: "start", path: [] } },
+      },
       nodes: [
         {
           module: {
@@ -206,7 +209,7 @@ describe("ensurePieceRunning", () => {
             },
           },
           inputs: {},
-          outputs: {},
+          outputs: { $alias: { partialCause: "start", path: [] } },
         },
       ],
     };
@@ -233,10 +236,14 @@ describe("ensurePieceRunning", () => {
       tx,
       pattern.argumentSchema,
     );
+    const startCell = getDerivedInternalCell(resultCell, {
+      partialCause: "start",
+    }, tx);
 
-    resultCell.set({});
+    resultCell.setRaw({ start: startCell.getAsWriteRedirectLink() });
     resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(startCell, resultCell);
     argumentCell.set({});
 
     await tx.commit();
@@ -269,7 +276,10 @@ describe("ensurePieceRunning", () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
-      result: {},
+      derivedInternalCells: [{ partialCause: "start" }],
+      result: {
+        start: { $alias: { partialCause: "start", path: [] } },
+      },
       nodes: [
         {
           module: {
@@ -279,7 +289,7 @@ describe("ensurePieceRunning", () => {
             },
           },
           inputs: {},
-          outputs: {},
+          outputs: { $alias: { partialCause: "start", path: [] } },
         },
       ],
     };
@@ -306,10 +316,14 @@ describe("ensurePieceRunning", () => {
       tx,
       pattern.argumentSchema,
     );
+    const startCell = getDerivedInternalCell(resultCell, {
+      partialCause: "start",
+    }, tx);
 
-    resultCell.set({});
+    resultCell.setRaw({ start: startCell.getAsWriteRedirectLink() });
     resultCell.setMetaRaw("patternIdentity", patternIdentity);
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    setResultCell(startCell, resultCell);
     argumentCell.set({});
 
     await tx.commit();
