@@ -155,6 +155,40 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   );
 });
 
+Deno.test("sync schema table preserves ordered execution control metadata", () => {
+  const sync: SessionSync = {
+    ...repeatedSchemaSync(2),
+    execution: {
+      fromFeedSeq: 3,
+      toFeedSeq: 4,
+      snapshot: { claims: [] },
+      events: [{
+        type: "session.execution.claim.set",
+        claim: {
+          branch: "feature",
+          space: "did:key:z6Mk-sync-execution",
+          contextKey: "space",
+          pieceId: "piece:sync",
+          actionId: "action:sync",
+          actionKind: "computation",
+          implementationFingerprint: "impl:sync",
+          runtimeFingerprint: "runtime:sync",
+          leaseGeneration: 1,
+          claimGeneration: 2,
+          expiresAt: 1234,
+        },
+      }],
+    },
+  };
+
+  const compressed = compressSessionSyncSchemas(sync);
+  assertEquals(
+    compressed.execution,
+    sync.execution,
+  );
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
 Deno.test("sync schema table round-trips legacy aliases nested in arrays", () => {
   const schema: JSONSchema = {
     type: "object",

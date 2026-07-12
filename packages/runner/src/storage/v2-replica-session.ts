@@ -1,5 +1,7 @@
 import type {
   ClientCommit,
+  ExecutionClaim,
+  ExecutionControlEvent,
   GraphQuery,
   GraphQueryResult,
   MemoryProtocolFlags,
@@ -52,6 +54,16 @@ export interface ReplicaSession {
   writersForTargets(
     query: SchedulerWritersForTargetsQuery,
   ): Promise<SchedulerWritersForTargetsResult>;
+  /** Client-only execution-control surface. Executor provider sessions omit
+   *  these methods so a Worker cannot manufacture client demand. */
+  readonly executionClaims?: readonly ExecutionClaim[];
+  setExecutionDemand?(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean>;
+  subscribeExecutionControl?(
+    listener: (event: ExecutionControlEvent) => void,
+  ): () => void;
 }
 
 /** Connection lifecycle and negotiated capabilities used by SpaceReplica. */

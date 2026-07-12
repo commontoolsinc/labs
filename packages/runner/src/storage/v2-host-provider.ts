@@ -229,6 +229,13 @@ export function createHostProviderChannel(
       });
       return;
     }
+    if (parsed.type === "session.execution.demand.set") {
+      sendError(parsed.requestId, {
+        name: "AuthorizationError",
+        message: "executor providers cannot originate client execution demand",
+      });
+      return;
+    }
     if (parsed.type === "session.open") {
       if (authContext === null) {
         sendError(parsed.requestId, {

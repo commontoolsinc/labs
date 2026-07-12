@@ -1,4 +1,9 @@
-import type { SessionDescriptor, SessionToken, WatchSpec } from "../v2.ts";
+import type {
+  ExecutionControlEvent,
+  SessionDescriptor,
+  SessionToken,
+  WatchSpec,
+} from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -18,6 +23,16 @@ export type SessionState = {
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
+  /** Capability negotiated by the connection currently owning this session. */
+  serverPrimaryExecutionV1: boolean;
+  serverPrimaryExecutionClaimRoutingV1: boolean;
+  serverPrimaryExecutionBuiltinPassivityV1: boolean;
+  executionFeedSeq: number;
+  executionFeedAckSeq: number;
+  executionEvents: Array<{
+    feedSeq: number;
+    event: ExecutionControlEvent;
+  }>;
 };
 
 type OpenSessionState = {
@@ -63,6 +78,11 @@ export class SessionRegistry {
     serverSeq: number,
     ownerConnectionId = "session-registry",
     principal?: string,
+    capabilities: {
+      serverPrimaryExecutionV1?: boolean;
+      serverPrimaryExecutionClaimRoutingV1?: boolean;
+      serverPrimaryExecutionBuiltinPassivityV1?: boolean;
+    } = {},
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -94,6 +114,14 @@ export class SessionRegistry {
         existing.ownerConnectionId !== ownerConnectionId
       ? existing.ownerConnectionId
       : undefined;
+    const executionFeedSeq = existing?.executionFeedSeq ?? 0;
+    const executionFeedAckSeq = Math.min(
+      executionFeedSeq,
+      Math.max(
+        existing?.executionFeedAckSeq ?? 0,
+        session.executionFeedSeq ?? 0,
+      ),
+    );
     this.#sessions.set(key, {
       id: sessionId,
       space,
@@ -110,6 +138,16 @@ export class SessionRegistry {
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,
+      serverPrimaryExecutionV1: capabilities.serverPrimaryExecutionV1 === true,
+      serverPrimaryExecutionClaimRoutingV1:
+        capabilities.serverPrimaryExecutionClaimRoutingV1 === true,
+      serverPrimaryExecutionBuiltinPassivityV1:
+        capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
+      executionFeedSeq,
+      executionFeedAckSeq,
+      executionEvents: (existing?.executionEvents ?? []).filter((entry) =>
+        entry.feedSeq > executionFeedAckSeq
+      ),
     });
     return {
       sessionId,

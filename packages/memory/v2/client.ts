@@ -1,9 +1,14 @@
 import {
+  type ActionClaimKey,
+  type ActionSettlement,
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntitySnapshot,
+  type ExecutionClaim,
+  type ExecutionControlEvent,
+  type ExecutionDemandSetResult,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -29,6 +34,8 @@ import {
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
+  type WireMemoryProtocolFlags,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
@@ -44,11 +51,15 @@ export interface Transport {
 
 export interface ConnectOptions {
   transport: Transport;
+  /** Optional per-client capability override, primarily for skew tests and
+   *  hosts whose client and server runtimes use different rollout settings. */
+  protocolFlags?: Partial<WireMemoryProtocolFlags>;
 }
 
 export interface MountOptions {
   sessionId?: string;
   seenSeq?: number;
+  executionFeedSeq?: number;
   sessionToken?: string;
 }
 
@@ -94,6 +105,18 @@ const watchKey = (
   scope: string | undefined,
 ): string => `${branch}\0${scope ?? "space"}\0${id}`;
 
+const actionClaimMapKey = (claim: ActionClaimKey): string =>
+  encodeMemoryBoundary({
+    branch: claim.branch,
+    space: claim.space,
+    contextKey: claim.contextKey,
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+    actionKind: claim.actionKind,
+    implementationFingerprint: claim.implementationFingerprint,
+    runtimeFingerprint: claim.runtimeFingerprint,
+  });
+
 const compareEntitySnapshot = (
   left: EntitySnapshot,
   right: EntitySnapshot,
@@ -102,6 +125,8 @@ const compareEntitySnapshot = (
   (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
   left.id.localeCompare(right.id);
 
+type SessionRestoreResult = "restored" | "fresh-connection-required";
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -109,6 +134,7 @@ export class Client {
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
+  #advertisedFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
@@ -116,13 +142,14 @@ export class Client {
 
   private constructor(
     private readonly transport: Transport,
+    private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
   ) {
     this.transport.setReceiver((payload) => this.onMessage(payload));
     this.transport.setCloseReceiver?.((error) => this.onClose(error));
   }
 
   static async connect(options: ConnectOptions): Promise<Client> {
-    const client = new Client(options.transport);
+    const client = new Client(options.transport, options.protocolFlags);
     await client.hello();
     return client;
   }
@@ -132,6 +159,11 @@ export class Client {
    *  optional-capability consumers fail closed by reading this. */
   get serverFlags(): MemoryProtocolFlags | null {
     return this.#serverFlags;
+  }
+
+  get serverPrimaryExecutionV1(): boolean {
+    return this.#advertisedFlags?.serverPrimaryExecutionV1 === true &&
+      this.#serverFlags?.serverPrimaryExecutionV1 === true;
   }
 
   async close(): Promise<void> {
@@ -164,6 +196,9 @@ export class Client {
       result.serverSeq,
       openAuthFactory,
     );
+    if (result.sync !== undefined) {
+      session.initializeSync(result.sync);
+    }
     this.#spaces.add(session);
     return session;
   }
@@ -257,10 +292,18 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const flags = parseMemoryProtocolFlags({
+      ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+      ...this.protocolFlags,
+    });
+    if (flags === null) {
+      throw protocolError("memory client protocol flags are malformed");
+    }
+    this.#advertisedFlags = flags;
     await this.transport.send(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
+      flags: wireMemoryProtocolFlags(flags),
     }));
     try {
       await ack.promise;
@@ -291,7 +334,10 @@ export class Client {
     if (this.#helloPending !== null) {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
-        const expectedFlags = getMemoryProtocolFlags();
+        const expectedFlags = parseMemoryProtocolFlags({
+          ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+          ...this.protocolFlags,
+        })!;
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           const error = new Error(
             `memory flag mismatch: client=${
@@ -409,8 +455,24 @@ export class Client {
       while (!this.#closed) {
         try {
           await this.hello();
+          let needsFreshSessionOpenChallenge = false;
           for (const session of this.#spaces) {
-            await session.restore();
+            if (await session.restore() === "fresh-connection-required") {
+              needsFreshSessionOpenChallenge = true;
+              break;
+            }
+          }
+          if (needsFreshSessionOpenChallenge) {
+            // session.open authentication challenges are single-use, including
+            // when the server rejects the open. Rotate the physical connection
+            // after terminalizing that one session so unrelated spaces reopen
+            // with a fresh challenge instead of failing authentication too.
+            this.#connected = false;
+            for (const session of this.#spaces) {
+              session.handleDisconnect();
+            }
+            await this.transport.close();
+            continue;
           }
           return;
         } catch (error) {
@@ -474,7 +536,9 @@ export class SpaceSession {
   #sessionToken: string | undefined;
   #serverSeq: number;
   #ackedSeq = 0;
+  #ackedExecutionFeedSeq = 0;
   #pendingAckSeq = 0;
+  #pendingAckExecutionFeedSeq = 0;
   #ackScheduled = false;
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
@@ -494,6 +558,14 @@ export class SpaceSession {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
   }[] = [];
+  #executionDemands = new Map<string, readonly string[]>();
+  #executionFeedSeq = 0;
+  #executionDataSeq = 0;
+  #executionClaims = new Map<string, ExecutionClaim>();
+  #executionControlListeners = new Set<
+    (event: ExecutionControlEvent) => void
+  >();
+  #pendingSettlements: ActionSettlement[] = [];
 
   constructor(
     private readonly client: Client,
@@ -519,6 +591,34 @@ export class SpaceSession {
 
   get serverSeq(): number {
     return this.#serverSeq;
+  }
+
+  get executionClaims(): readonly ExecutionClaim[] {
+    return Object.freeze(
+      [...this.#executionClaims.values()].sort((left, right) =>
+        left.branch.localeCompare(right.branch) ||
+        actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
+      ),
+    );
+  }
+
+  subscribeExecutionControl(
+    listener: (event: ExecutionControlEvent) => void,
+  ): () => void {
+    this.#executionControlListeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      this.#executionControlListeners.delete(listener);
+    };
+  }
+
+  initializeSync(sync: SessionSync): void {
+    this.noteResult(sync.toSeq);
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, sync.toSeq);
+    this.#applyExecution(sync);
+    this.scheduleAck(sync.toSeq, sync.execution?.toFeedSeq);
   }
 
   #assertOpen(): void {
@@ -656,6 +756,29 @@ export class SpaceSession {
     return result;
   }
 
+  async setExecutionDemand(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean> {
+    this.#assertOpen();
+    if (!this.client.serverPrimaryExecutionV1) return false;
+    const result = await this.client.request<ExecutionDemandSetResult>({
+      type: "session.execution.demand.set",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      pieces: [...pieces],
+    });
+    this.noteResult(result.serverSeq);
+    if (pieces.length === 0) {
+      this.#executionDemands.delete(branch);
+    } else {
+      this.#executionDemands.set(branch, Object.freeze([...pieces]));
+    }
+    return true;
+  }
+
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {
     this.#assertOpen();
     const hadView = this.#watchView !== null;
@@ -683,7 +806,12 @@ export class SpaceSession {
       } else {
         this.#watchView.applySync(result.sync, false);
       }
-      this.scheduleAck(result.serverSeq);
+      this.#executionDataSeq = Math.max(
+        this.#executionDataSeq,
+        result.sync.toSeq,
+      );
+      this.#applyExecution(result.sync);
+      this.scheduleAck(result.serverSeq, result.sync.execution?.toFeedSeq);
       return {
         view: this.#watchView,
         sync: result.sync,
@@ -722,7 +850,12 @@ export class SpaceSession {
       } else {
         this.#watchView.applySync(result.sync, false);
       }
-      this.scheduleAck(result.serverSeq);
+      this.#executionDataSeq = Math.max(
+        this.#executionDataSeq,
+        result.sync.toSeq,
+      );
+      this.#applyExecution(result.sync);
+      this.scheduleAck(result.serverSeq, result.sync.execution?.toFeedSeq);
       return {
         view: this.#watchView,
         sync: result.sync,
@@ -734,8 +867,17 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    if (!this.client.isConnected() || seenSeq <= this.#ackedSeq) {
+    const executionFeedSeq = this.#executionFeedSeq;
+    if (
+      !this.client.isConnected() ||
+      (seenSeq <= this.#ackedSeq &&
+        executionFeedSeq <= this.#ackedExecutionFeedSeq)
+    ) {
       this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+      this.#ackedExecutionFeedSeq = Math.max(
+        this.#ackedExecutionFeedSeq,
+        executionFeedSeq,
+      );
       return;
     }
     await this.client.request({
@@ -744,8 +886,13 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       seenSeq,
+      executionFeedSeq,
     });
     this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
+    this.#ackedExecutionFeedSeq = Math.max(
+      this.#ackedExecutionFeedSeq,
+      executionFeedSeq,
+    );
   }
 
   handleEffect(effect: SessionSync): void {
@@ -758,13 +905,15 @@ export class SpaceSession {
     } else {
       this.#watchView.applySync(effect, true);
     }
-    this.scheduleAck(effect.toSeq);
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, effect.toSeq);
+    this.#applyExecution(effect);
+    this.scheduleAck(effect.toSeq, effect.execution?.toFeedSeq);
     this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
-  async restore(): Promise<void> {
+  async restore(): Promise<SessionRestoreResult> {
     if (this.#closed) {
-      return;
+      return "restored";
     }
     this.#restoring = true;
     this.#readyOnConnection = false;
@@ -776,24 +925,21 @@ export class SpaceSession {
       } catch (error) {
         if (isSessionRevokedError(error)) {
           this.handleRevoked("taken-over");
-          return;
+          return "fresh-connection-required";
+        }
+        if (isProtocolError(error)) {
+          this.terminate(error);
+          return "fresh-connection-required";
         }
         throw error;
       }
       if (this.#closed) {
-        return;
+        return "restored";
       }
       this.#readyOnConnection = true;
       replayedThroughLocalSeq = Math.max(
         0,
         ...this.#outstandingCommits.keys(),
-      );
-      const replayTasks = [...this.#outstandingCommits.entries()].map((
-        [localSeq, pendingCommit],
-      ) =>
-        this.sendOutstandingCommit(localSeq, pendingCommit, {
-          throwOnConnectionError: true,
-        })
       );
       if (restored.sync) {
         this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
@@ -802,6 +948,11 @@ export class SpaceSession {
         } else {
           this.#watchView.applySync(restored.sync, false);
         }
+        this.#executionDataSeq = Math.max(
+          this.#executionDataSeq,
+          restored.sync.toSeq,
+        );
+        this.#applyExecution(restored.sync);
         if (
           !isEmptySync(restored.sync) ||
           restored.sync.caughtUpLocalSeq !== undefined
@@ -814,7 +965,10 @@ export class SpaceSession {
             );
           }
         }
-        this.scheduleAck(restored.serverSeq);
+        this.scheduleAck(
+          restored.serverSeq,
+          restored.sync.execution?.toFeedSeq,
+        );
       } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
         this.scheduleAck(restored.serverSeq);
       }
@@ -829,7 +983,21 @@ export class SpaceSession {
           view.emit(sync);
         }
       }
+      // Demand belongs to the physical connection, not the resumable logical
+      // session. Re-establish it after authoritative catch-up and before any
+      // retained derived commits are replayed.
+      for (const [branch, pieces] of this.#executionDemands) {
+        if (!await this.setExecutionDemand(branch, pieces)) break;
+      }
+      const replayTasks = [...this.#outstandingCommits.entries()].map((
+        [localSeq, pendingCommit],
+      ) =>
+        this.sendOutstandingCommit(localSeq, pendingCommit, {
+          throwOnConnectionError: true,
+        })
+      );
       await Promise.all(replayTasks);
+      return "restored";
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
@@ -841,6 +1009,16 @@ export class SpaceSession {
   async close(): Promise<void> {
     if (this.#closed) {
       return;
+    }
+    if (
+      this.client.isConnected() && this.#readyOnConnection &&
+      this.#executionDemands.size > 0
+    ) {
+      await Promise.allSettled(
+        [...this.#executionDemands.keys()].map((branch) =>
+          this.setExecutionDemand(branch, [])
+        ),
+      );
     }
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
@@ -855,6 +1033,10 @@ export class SpaceSession {
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
+    this.#executionClaims.clear();
+    this.#pendingSettlements = [];
+    this.#executionControlListeners.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -865,6 +1047,13 @@ export class SpaceSession {
     }
     const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
+    this.terminate(error);
+  }
+
+  private terminate(error: Error): void {
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
@@ -875,6 +1064,10 @@ export class SpaceSession {
     this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
+    this.#executionClaims.clear();
+    this.#pendingSettlements = [];
+    this.#executionControlListeners.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -893,11 +1086,15 @@ export class SpaceSession {
     this.#background.add(tracked);
   }
 
-  private scheduleAck(seenSeq: number): void {
+  private scheduleAck(seenSeq: number, executionFeedSeq = 0): void {
     if (this.#closed) {
       return;
     }
     this.#pendingAckSeq = Math.max(this.#pendingAckSeq, seenSeq);
+    this.#pendingAckExecutionFeedSeq = Math.max(
+      this.#pendingAckExecutionFeedSeq,
+      executionFeedSeq,
+    );
     if (this.#ackScheduled || this.#ackFlushing) {
       return;
     }
@@ -912,11 +1109,16 @@ export class SpaceSession {
         } finally {
           this.#ackFlushing = false;
           if (
-            this.#pendingAckSeq > this.#ackedSeq &&
+            (this.#pendingAckSeq > this.#ackedSeq ||
+              this.#pendingAckExecutionFeedSeq >
+                this.#ackedExecutionFeedSeq) &&
             !this.#closed &&
             this.client.isConnected()
           ) {
-            this.scheduleAck(this.#pendingAckSeq);
+            this.scheduleAck(
+              this.#pendingAckSeq,
+              this.#pendingAckExecutionFeedSeq,
+            );
           }
         }
       })(),
@@ -926,10 +1128,18 @@ export class SpaceSession {
   private async flushScheduledAcks(): Promise<void> {
     while (true) {
       const target = this.#pendingAckSeq;
+      const executionTarget = this.#pendingAckExecutionFeedSeq;
       if (
-        this.#closed || target <= this.#ackedSeq || !this.client.isConnected()
+        this.#closed ||
+        (target <= this.#ackedSeq &&
+          executionTarget <= this.#ackedExecutionFeedSeq) ||
+        !this.client.isConnected()
       ) {
         this.#ackedSeq = Math.max(this.#ackedSeq, target);
+        this.#ackedExecutionFeedSeq = Math.max(
+          this.#ackedExecutionFeedSeq,
+          executionTarget,
+        );
         return;
       }
       await this.client.request({
@@ -938,9 +1148,17 @@ export class SpaceSession {
         space: this.space,
         sessionId: this.#sessionId,
         seenSeq: target,
+        executionFeedSeq: executionTarget,
       });
       this.#ackedSeq = Math.max(this.#ackedSeq, target);
-      if (this.#pendingAckSeq <= this.#ackedSeq) {
+      this.#ackedExecutionFeedSeq = Math.max(
+        this.#ackedExecutionFeedSeq,
+        executionTarget,
+      );
+      if (
+        this.#pendingAckSeq <= this.#ackedSeq &&
+        this.#pendingAckExecutionFeedSeq <= this.#ackedExecutionFeedSeq
+      ) {
         return;
       }
     }
@@ -956,6 +1174,158 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
+  }
+
+  #emitExecutionControl(event: ExecutionControlEvent): void {
+    for (const listener of this.#executionControlListeners) {
+      try {
+        listener(event);
+      } catch {
+        // One consumer must not prevent the authoritative control view from
+        // reaching the others.
+      }
+    }
+  }
+
+  #claimMatchesLive(claim: ExecutionClaim): boolean {
+    const live = this.#executionClaims.get(actionClaimMapKey(claim));
+    return live !== undefined &&
+      live.leaseGeneration === claim.leaseGeneration &&
+      live.claimGeneration === claim.claimGeneration;
+  }
+
+  #deliverOrBufferSettlement(settlement: ActionSettlement): void {
+    if (!this.#claimMatchesLive(settlement.claim)) return;
+    if (
+      settlement.outcome === "committed" &&
+      settlement.acceptedCommitSeq > this.#executionDataSeq
+    ) {
+      this.#pendingSettlements.push(settlement);
+      return;
+    }
+    this.#emitExecutionControl({
+      type: "session.execution.settlement",
+      settlement,
+    });
+  }
+
+  #flushPendingSettlements(): void {
+    const pending = this.#pendingSettlements;
+    this.#pendingSettlements = [];
+    for (const settlement of pending) {
+      if (!this.#claimMatchesLive(settlement.claim)) continue;
+      if (
+        settlement.outcome === "committed" &&
+        settlement.acceptedCommitSeq > this.#executionDataSeq
+      ) {
+        this.#pendingSettlements.push(settlement);
+      } else {
+        this.#emitExecutionControl({
+          type: "session.execution.settlement",
+          settlement,
+        });
+      }
+    }
+  }
+
+  #prunePendingSettlements(): void {
+    this.#pendingSettlements = this.#pendingSettlements.filter((settlement) =>
+      this.#claimMatchesLive(settlement.claim)
+    );
+  }
+
+  #applyExecutionEvent(event: ExecutionControlEvent): void {
+    switch (event.type) {
+      case "session.execution.claim.set": {
+        const key = actionClaimMapKey(event.claim);
+        const current = this.#executionClaims.get(key);
+        if (
+          current === undefined ||
+          event.claim.claimGeneration > current.claimGeneration
+        ) {
+          this.#executionClaims.set(key, event.claim);
+          this.#prunePendingSettlements();
+          this.#emitExecutionControl(event);
+        }
+        return;
+      }
+      case "session.execution.claim.revoke": {
+        const key = actionClaimMapKey(event.claim);
+        const current = this.#executionClaims.get(key);
+        if (
+          current !== undefined &&
+          current.leaseGeneration === event.leaseGeneration &&
+          current.claimGeneration === event.claimGeneration
+        ) {
+          this.#executionClaims.delete(key);
+          this.#prunePendingSettlements();
+          this.#emitExecutionControl(event);
+        }
+        return;
+      }
+      case "session.execution.settlement":
+        this.#deliverOrBufferSettlement(event.settlement);
+        return;
+    }
+  }
+
+  #applyExecution(sync: SessionSync): void {
+    const batch = sync.execution;
+    if (batch === undefined || batch.toFeedSeq <= this.#executionFeedSeq) {
+      return;
+    }
+    if (
+      batch.snapshot === undefined &&
+      batch.fromFeedSeq !== this.#executionFeedSeq
+    ) {
+      // A live ordered stream may never skip authority changes. Clear claims
+      // fail-open; reconnect will install a full snapshot barrier.
+      this.#executionClaims.clear();
+      this.#prunePendingSettlements();
+      return;
+    }
+    for (const event of batch.events) {
+      this.#applyExecutionEvent(event);
+    }
+    if (batch.snapshot !== undefined) {
+      const next = new Map(
+        batch.snapshot.claims.map((claim) => [actionClaimMapKey(claim), claim]),
+      );
+      const previous = this.#executionClaims;
+      this.#executionClaims = next;
+      this.#prunePendingSettlements();
+      for (const [key, claim] of previous) {
+        const replacement = next.get(key);
+        if (
+          replacement === undefined ||
+          replacement.leaseGeneration !== claim.leaseGeneration ||
+          replacement.claimGeneration !== claim.claimGeneration
+        ) {
+          this.#emitExecutionControl({
+            type: "session.execution.claim.revoke",
+            branch: claim.branch,
+            claim,
+            leaseGeneration: claim.leaseGeneration,
+            claimGeneration: claim.claimGeneration,
+          });
+        }
+      }
+      for (const [key, claim] of next) {
+        const prior = previous.get(key);
+        if (
+          prior === undefined ||
+          prior.leaseGeneration !== claim.leaseGeneration ||
+          prior.claimGeneration !== claim.claimGeneration
+        ) {
+          this.#emitExecutionControl({
+            type: "session.execution.claim.set",
+            claim,
+          });
+        }
+      }
+    }
+    this.#executionFeedSeq = batch.toFeedSeq;
+    this.#flushPendingSettlements();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -1031,6 +1401,7 @@ export class SpaceSession {
     const session = {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      executionFeedSeq: this.#executionFeedSeq,
       sessionToken: this.#sessionToken,
     };
     const auth = await this.openAuthFactory?.(
@@ -1041,6 +1412,7 @@ export class SpaceSession {
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      executionFeedSeq: this.#executionFeedSeq,
       sessionToken: this.#sessionToken,
     }, auth);
     const sessionChanged = restored.sessionId !== oldSessionId;
@@ -1063,6 +1435,11 @@ export class SpaceSession {
       }
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
+      this.#executionFeedSeq = 0;
+      this.#ackedExecutionFeedSeq = 0;
+      this.#pendingAckExecutionFeedSeq = 0;
+      this.#executionClaims.clear();
+      this.#pendingSettlements = [];
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
     }
     this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
@@ -1532,3 +1909,6 @@ const isEmptySync = (sync: SessionSync): boolean =>
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";
+
+const isProtocolError = (error: unknown): error is Error =>
+  error instanceof Error && error.name === "ProtocolError";

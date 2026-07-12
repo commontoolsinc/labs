@@ -22,10 +22,13 @@ import {
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getServerPrimaryExecutionConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setServerPrimaryExecutionConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
@@ -208,6 +211,8 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
+  /** Enable the trusted-client server-primary execution protocol (default off). */
+  serverPrimaryExecution?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -605,6 +610,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      serverPrimaryExecution: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
@@ -641,6 +647,11 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    setServerPrimaryExecutionConfig(
+      this.experimental.serverPrimaryExecution,
+    );
+    this.experimental.serverPrimaryExecution =
+      getServerPrimaryExecutionConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -936,6 +947,7 @@ export class Runtime {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetServerPrimaryExecutionConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

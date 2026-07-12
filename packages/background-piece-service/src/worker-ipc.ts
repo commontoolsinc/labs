@@ -14,6 +14,7 @@ export type InitializationData = {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
+    serverPrimaryExecution?: boolean;
   };
 };
 
