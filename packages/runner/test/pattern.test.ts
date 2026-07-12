@@ -11,6 +11,7 @@ import {
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { installTestPatternArtifact } from "./support/trusted-builder.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -353,13 +354,15 @@ describe("pattern", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            ((({ x }: any) => {
-              const double = lift<number>((x) => x * 2);
-              return { doubled: double(x) };
-            }) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              ((({ x }: any) => {
+                const double = lift<number>((x) => x * 2);
+                return { doubled: double(x) };
+              }) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { doubled };
       },

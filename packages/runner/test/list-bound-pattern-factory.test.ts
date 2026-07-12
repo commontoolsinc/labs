@@ -308,42 +308,88 @@ describe("bound PatternFactory list operations", () => {
     ).toMatchObject(rowIdentity);
   });
 
-  it("keeps the explicit legacy op plus sibling params path", async () => {
+  it("keeps one explicit legacy op plus sibling params path per builtin", async () => {
     const mapNode = createNodeFactory({ type: "ref", implementation: "map" });
-    const calculate = commonfabric.lift(
+    const filterNode = createNodeFactory({
+      type: "ref",
+      implementation: "filter",
+    });
+    const flatMapNode = createNodeFactory({
+      type: "ref",
+      implementation: "flatMap",
+    });
+    const calculateMap = commonfabric.lift(
       ({ element, params }: { element: number; params: { factor: number } }) =>
         element * params.factor,
     );
-    const legacyOp = commonfabric.pattern(
+    const calculateFilter = commonfabric.lift(
+      ({ element, params }: { element: number; params: { factor: number } }) =>
+        element > params.factor,
+    );
+    const calculateFlatMap = commonfabric.lift(
+      (
+        { element, params }: { element: number; params: { factor: number } },
+      ) => [element, element * params.factor],
+    );
+    const legacyArgumentSchema = {
+      type: "object",
+      properties: {
+        element: { type: "number" },
+        params: FACTOR_PARAMS_SCHEMA,
+      },
+      required: ["element", "params"],
+      additionalProperties: true,
+    } as const satisfies JSONSchema;
+    const legacyMapOp = commonfabric.pattern(
       ((argument: any) =>
-        calculate({
+        calculateMap({
           element: argument.element,
           params: argument.params,
         })) as any,
-      {
-        type: "object",
-        properties: {
-          element: { type: "number" },
-          params: FACTOR_PARAMS_SCHEMA,
-        },
-        required: ["element", "params"],
-        additionalProperties: true,
-      },
+      legacyArgumentSchema,
       NUMBER_RESULT_SCHEMA,
+    );
+    const legacyFilterOp = commonfabric.pattern(
+      ((argument: any) =>
+        calculateFilter({
+          element: argument.element,
+          params: argument.params,
+        })) as any,
+      legacyArgumentSchema,
+      BOOLEAN_RESULT_SCHEMA,
+    );
+    const legacyFlatMapOp = commonfabric.pattern(
+      ((argument: any) =>
+        calculateFlatMap({
+          element: argument.element,
+          params: argument.params,
+        })) as any,
+      legacyArgumentSchema,
+      NUMBER_ARRAY_RESULT_SCHEMA,
     );
     const outer = commonfabric.pattern(
       (({ values }: any) => ({
         mapped: mapNode({
           list: values,
-          op: legacyOp,
+          op: legacyMapOp,
+          params: { factor: 3 },
+        }),
+        filtered: filterNode({
+          list: values,
+          op: legacyFilterOp,
+          params: { factor: 3 },
+        }),
+        flattened: flatMapNode({
+          list: values,
+          op: legacyFlatMapOp,
           params: { factor: 3 },
         }),
       })) as any,
       OUTER_ARGUMENT_SCHEMA,
     );
-    expect(Object.hasOwn(outer.nodes[0]!.inputs as object, "params")).toBe(
-      true,
-    );
+    for (const node of outer.nodes) {
+      expect(Object.hasOwn(node.inputs as object, "params")).toBe(true);
+    }
 
     const resultCell = runtime.getCell<Record<string, unknown>>(
       space,
@@ -355,5 +401,9 @@ describe("bound PatternFactory list operations", () => {
     await commitAndRenew();
     expect(await within(result.key("mapped").pull(), "legacy map"))
       .toEqual([6, 12]);
+    expect(await within(result.key("filtered").pull(), "legacy filter"))
+      .toEqual([4]);
+    expect(await within(result.key("flattened").pull(), "legacy flatMap"))
+      .toEqual([2, 6, 4, 12]);
   });
 });

@@ -9,7 +9,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -75,17 +78,19 @@ describe("Pattern Runner - Regressions", () => {
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((item: any) =>
-              ifElse(
-                lift((i: { name: string; visible: boolean }) => i.visible)(
-                  item,
-                ),
-                lift((i: { name: string; visible: boolean }) => i.name)(item),
-                null,
-              )) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              (((item: any) =>
+                ifElse(
+                  lift((i: { name: string; visible: boolean }) => i.visible)(
+                    item,
+                  ),
+                  lift((i: { name: string; visible: boolean }) => i.name)(item),
+                  null,
+                )) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { items, mapped };
       },

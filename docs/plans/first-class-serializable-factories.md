@@ -1434,6 +1434,20 @@ selection structure without sibling leakage. The warm, cold, replacement, and
 CFC matrix passes `4 passed (7 steps)`; all eight existing pointwise-flow steps
 also pass.
 
+WP3.5 fixture-migration slice (2026-07-11): 58 empty two-argument list calls in
+runner tests and benchmarks now use canonical one-argument factories. A
+test-only installer gives hand-built PatternFactories the same warm durable
+artifact association transformed modules receive; it does not make arbitrary
+functions serializable or fabricate a cold source closure. Exactly one
+structural legacy `{ list, op, params }` execution fixture remains per builtin,
+and the only public two-argument calls left are the three deliberately
+deprecated writer-overload assertions in `list-factory-writer-shape.test.ts`.
+The compiled-module-verifier sample and comments use canonical one-argument
+output. The canonical batch passes `9` suites / `86` steps, list edge cases pass
+`5` steps, all eight affected list-scope cases pass, and the verifier passes
+`45` steps. Broader files still expose the separately tracked Stage 4
+patternTool/factory-writer failures, so the aggregate WP3.5 gate remains open.
+
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
 - [ ] Record trusted framework-provided paths in compiler/artifact metadata for

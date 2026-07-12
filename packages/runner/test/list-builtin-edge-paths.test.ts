@@ -14,7 +14,10 @@ import {
   StorageManager as StorageManagerV2,
 } from "../src/storage/v2.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -104,8 +107,7 @@ describe("list builtin edge paths", () => {
       values,
       tagged: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
         // deno-lint-ignore no-explicit-any
-        op as any,
-        {},
+        installTestPatternArtifact(runtime, op as any),
       ),
     }));
 
@@ -152,8 +154,7 @@ describe("list builtin edge paths", () => {
       values,
       evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
         // deno-lint-ignore no-explicit-any
-        op as any,
-        {},
+        installTestPatternArtifact(runtime, op as any),
       ),
     }));
 
@@ -198,8 +199,7 @@ describe("list builtin edge paths", () => {
       values,
       indices: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
         // deno-lint-ignore no-explicit-any
-        op as any,
-        {},
+        installTestPatternArtifact(runtime, op as any),
       ),
     }));
 
@@ -237,8 +237,7 @@ describe("list builtin edge paths", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => ({
       out: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
         // deno-lint-ignore no-explicit-any
-        op as any,
-        {},
+        installTestPatternArtifact(runtime, op as any),
       ),
     }));
 
@@ -314,7 +313,8 @@ describe("list builtin edge paths", () => {
     // their guard is not reachable from a non-array input value.)
     await expectNonArrayThrow(
       "map-non-array",
-      (values, op) => values.mapWithPattern(op, {}),
+      (values, op) =>
+        values.mapWithPattern(installTestPatternArtifact(runtime, op)),
       /map currently only supports arrays/,
     );
   });

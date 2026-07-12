@@ -21,7 +21,10 @@ import {
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
@@ -836,13 +839,15 @@ describe("generateObject with tools", () => {
         >(
           ({ items }) => {
             const result = (items as any).mapWithPattern(
-              pattern(({ element, index, array }: FactoryInput<any>) =>
-                (((item: any) => ({
-                  label: item.label,
-                  value: item.value,
-                })) as any)(element, index, array)
+              installTestPatternArtifact(
+                runtime,
+                pattern(({ element, index, array }: FactoryInput<any>) =>
+                  (((item: any) => ({
+                    label: item.label,
+                    value: item.value,
+                  })) as any)(element, index, array)
+                ),
               ),
-              {},
             );
             return { result };
           },
