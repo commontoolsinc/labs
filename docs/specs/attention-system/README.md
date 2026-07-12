@@ -21,10 +21,15 @@ should compile onto, so each stops hand-rolling its own attention state
 (Appendix A maps Loom's candidate shape onto the envelope; Appendix B walks
 fourteen stress-case user stories). Derived from the 2026-05-21
 multi-user/notifications design sessions and the 2026-07 attention reframe;
-revised 2026-07-12 across four adversarial review rounds (runtime + product;
+revised 2026-07-12 across five adversarial review rounds (runtime + product;
 Android-as-gold-standard + primitive-shape + parsimony; user-story grading +
 naming ergonomics; a second story round that re-verified fixes and added
-first-contact, catch-up, profile, and cold-start coverage).
+first-contact, catch-up, profile, and cold-start coverage; a coherence +
+idiomaticness + pragmatism round that consolidated the raise-authority rule,
+merged phantom concepts, and split this spec into its current directory
+form: [`changes-projection.md`](./changes-projection.md) — independently
+approvable — plus [`prior-art.md`](./prior-art.md),
+[`stories.md`](./stories.md), and [`loom-mapping.md`](./loom-mapping.md)).
 
 ## Last Updated
 
@@ -97,11 +102,14 @@ notice; the append-only log. *Steward* — the per-user trusted fold that admits
 candidates, assigns postures, and guards the user's quiet; called a steward,
 not a "ranker", because ranking is its most minor duty and it works for the
 user, not the feed. (No relation to Loom's retired "Attention Steward"
-auto-surfacing system — this is a routing fold, not a suggestion engine.) *Ledger* — the notices store specifically. *Attention
-state* — the triple of stores (notices, dispositions, seen — §4.5). *Lane* —
-a shell projection over attention state (most lanes correspond to a posture
-rung; some, like the snoozed lane, are lifecycle views). *Watch set* — the
-entity set whose changes the user's attention system observes (§5).
+auto-surfacing system — this is a routing fold, not a suggestion engine.)
+*Ledger* — the notices store specifically. *Attention state* — the triple
+of stores (notices, dispositions, seen — §4.5). *Lane* — a shell projection
+over attention state (most lanes correspond to a posture rung; some, like
+the snoozed lane, are lifecycle views). *Watch set* — the entity set whose
+changes the user's attention system observes (§5). *Artifact* — a
+user-meaningful entity, typically a piece's result cell; the spec says
+"entity" where the memory-v2 identity (versioning, `seq`) is what matters.
 
 ## Goals
 
@@ -132,7 +140,7 @@ entity set whose changes the user's attention system observes (§5).
   the data they render is trustworthy.
 - **Work-start authorization and preparation.** Policies governing whether
   an agent may autonomously begin work, budgets, authority ceilings, and
-  continuity ownership are product-side (§Division of labor). The runtime
+  continuity ownership are product-side (Division of labor, in the Summary). The runtime
   never decides what work happens — only how its results claim attention.
 - **Policy seeding / onboarding flows.** How a product interviews the user
   and proposes an initial policy set is product-scope; the runtime primitive
@@ -188,165 +196,31 @@ Pond's donut prototype ranks pieces spatially by an attention score. Both
 need the same substrate: durable per-user seen-state, a trustworthy
 canonical ledger, and per-user routing policy. This spec is that substrate —
 and only that substrate; Loom's work-start machinery and stance-bearing
-judgment policies stay product-side (§Division of labor).
+judgment policies stay product-side (Division of labor, in the Summary).
 
-### 3.2 Prior art: how the OS notification stacks work
+### 3.2 Prior art, compressed
 
-This design borrows deliberately from the OS notification systems — and its
-strongest claims are about what their architecture *cannot* express — so
-reviewers need the minimum shape of those APIs to judge the comparison.
-(Deeper per-field mappings live in the adapter sections, §9.3.)
+Full reviewer background on the OS notification stacks — Android's channels
+and `notify(id)` model, iOS's interruption levels and Notification Service
+Extension, Web Push, and the seven things the shared
+emitter-priced-snapshot-to-device-tray architecture structurally cannot do —
+lives in [`prior-art.md`](./prior-art.md). The relationship in three lines:
 
-**The shared architecture.** On every platform, an app granted a one-time
-binary permission constructs a notification payload — title, body, media,
-optional buttons — hands it to the OS, and **chooses its own loudness**.
-Delivery to a device where the app isn't running rides a vendor relay
-(Apple's APNs, Google's FCM, a browser's push service) to an OS daemon. The
-notification is a **snapshot copy**: once posted, it has no live tie to the
-data it describes beyond an app-chosen identifier the app can use to replace
-or cancel it. Seen/dismissed state is **per-device tray state** — dismissing
-on the phone does nothing on the laptop unless the app hand-builds
-push-to-cancel sync. The only cross-app arbitration the user gets is a
-chronological pile in a tray.
+- **Adopted**: stable-id replace/retract; only-alert-once (made unconditional
+  for the emitter); lockscreen visibility tiers (generalized to CFC labels);
+  actions + inline reply (re-based on session authority); the
+  interruption-level vocabulary as the posture scale's OS compile target.
+- **Inverted**: the emitter never prices loudness (`postureHint` is
+  advisory; the steward assigns; raising is policy, §4.2/§7); binary app
+  permission becomes condition-bearing policy data; invisible adaptive
+  ranking becomes legible learned policies.
+- **Added** (structurally impossible there): notices live-tied to their
+  subject (handle anywhere → retract everywhere); derived notices (no
+  forgot-to-notify failure mode); cross-person quiet and escalation as
+  single policy records; one queryable ledger with OS trays as degraded
+  projections. Inherited honestly: delivery still rides APNs/FCM/Web Push
+  and their entitlement gates — we compile down, we don't replace.
 
-**Android — the most capable, and this spec's behavioral reference:**
-
-- **Channels**: an app declares named notification categories; after
-  creation, the *user* controls each channel's importance, sound, and
-  lockscreen visibility, and the app can never raise them — only lower.
-  This is the germ of this spec's inversion, but only the germ: the app
-  still picks every channel's *initial* importance, can mint fresh channels
-  freely (resetting defaults), and the user discovers channels reactively,
-  buried in settings, usually after being annoyed.
-- **Replace/retract**: `notify(id, …)` with the same id replaces the
-  delivered notification in place; `cancel(id)` retracts it.
-  `setOnlyAlertOnce(true)` — *optionally* — makes re-posts update silently.
-  `setTimeoutAfter(ms)` auto-cancels. Groups get a summary notification.
-- **Actions + RemoteInput**: buttons and inline text reply on the
-  notification itself — act without opening the app; the input is delivered
-  back to the app via a broadcast.
-- **Lockscreen visibility tiers**: per notification, public / private /
-  secret, with an app-supplied redacted `publicVersion` for untrusted
-  displays.
-- **Ongoing + progress** notifications; full-screen intents for calls and
-  alarms; per-channel do-not-disturb bypass flags.
-- **Delivery**: FCM wakes the app process; notifications post with the app
-  dead and survive reboot.
-
-**iOS:**
-
-- **Interruption levels** — `passive` (no wake), `active` (default),
-  `time-sensitive` (breaks through Focus; requires an entitlement),
-  `critical` (breaks mute; Apple-granted entitlement, effectively
-  medical/safety only). An OS-enforced ceiling on loudness classes — but
-  the *app* picks the level per notification, subject only to those gates.
-- **Replace** via `UNNotificationRequest.identifier` (local) and
-  `apns-collapse-id` (push). Content freezes at delivery — it refreshes
-  when the user reopens the shade but never ticks live; genuinely live UI
-  is a separate API surface (Live Activities).
-- **Notification Service Extension**: a slice of app code runs on receipt
-  and may mutate content before display — the platform's hook for
-  decrypt-on-device and fetch-on-receive (the shape §9.3's redaction rule
-  compiles to).
-- **Focus modes**: user-side routing — which apps and which *people* may
-  break through — but coarse: app-grain and contact-grain, with no
-  conditions, and each app self-reports what a "person" is.
-
-**Web Push**: VAPID-authenticated push to a service worker;
-`showNotification` with `tag` for replace and `actions` for buttons;
-payloads are encrypted to the subscription, so the browser vendor's relay
-cannot read content (alone among the three). The most constrained surface —
-which is exactly why it is this spec's envelope floor (§9.3).
-
-**What the architecture structurally cannot do.** These are not missing
-features; they are consequences of "emitter-priced snapshot copies delivered
-to per-device trays," and they are the holes this design exists to fill:
-
-1. **The emitter prices its own loudness.** Android's channel initial
-   importance and iOS's interruption level are chosen by the party with the
-   incentive to interrupt. The user's recourse is reactive and blunt:
-   per-app or per-channel toggles, discovered after the annoyance.
-2. **Permission is binary and app-grain.** Allow-or-deny at first run.
-   There is no "this thread, quietly", no "this source, only until I've
-   handled one", no conditional grant — unless the app builds its own
-   settings screen, which the OS cannot verify it honors.
-3. **The notification is a dead copy.** Nothing retracts it when the
-   underlying thing is handled elsewhere; read-state doesn't cross devices;
-   the email you answered on your laptop still sits on your phone's
-   lockscreen. Well-engineered apps simulate liveness with push-to-cancel;
-   most don't.
-4. **No cross-source arbitration.** The tray is a chronological pile.
-   Nothing sees "forty things are competing for this person right now" —
-   notification fatigue is unaddressable at the system level because no
-   system-level party holds the queue.
-5. **No cross-person semantics.** "Someone on the team handled it" and
-   "escalate if nobody does" are unexpressible; every paging product is a
-   SaaS control plane bolted on top to compensate.
-6. **The relay reads the payload** (APNs and FCM; Web Push excepted).
-   Confidentiality requires per-app heroics — end-to-end encryption plus
-   on-device decrypt in an extension — rather than being a property of the
-   flow.
-7. **User policy is not data.** The user cannot write, inspect, or port a
-   routing rule. What the OS learned about their preferences (if anything)
-   is invisible and vendor-locked.
-
-### 3.3 What this design adopts, inverts, and adds
-
-**Adopted — the mechanics that earned their keep** (this spec's ledger stays
-"Android-shaped" so adapters compile 1:1):
-
-- Stable-identity replace/retract → `id`, steward-derived (§4.4).
-- Only-alert-once → made *unconditional*: alerting rides posture
-  transitions, and the emitter cannot opt back into re-buzzing (§9.3).
-- Lockscreen visibility tiers → `redacted`, generalized from an app choice
-  to CFC label enforcement at the push boundary (§9.3).
-- Actions + inline reply → `actions`/`replyTo`, with the broadcast-back
-  replaced by an append to a source-space cell under the user's ordinary
-  session authority (§4.6) — same UX, radically simpler trust story.
-- iOS's interruption-level vocabulary → the posture scale's rungs map onto
-  it (and Android channel importance) so OS compilation is a table lookup,
-  and the reserved break-glass mapping (§9.3) targets `time-sensitive` /
-  `critical` when entitlements land.
-- Channels-as-classification → `kind`, but bound to verified source
-  identity instead of self-declared (§4.4).
-
-**Inverted — the same levers, moved to the user's side:**
-
-- Android lets the user *lower* a channel after the app priced it; here the
-  emitter never prices at all — `postureHint` is advisory, the steward
-  assigns, and raising is exclusively user-authored (§4.2). The one lever
-  Android proved users understand (per-channel importance) becomes the
-  *whole* model rather than the escape hatch.
-- Binary app permission becomes per-source, condition-bearing policy data:
-  clamps, quiet hours with named exceptions, watches — proposable by
-  patterns at the moment of intent, adopted by the user, editable forever
-  (§7). Focus modes' "which people break through" becomes a verified-actor
-  policy rather than app-self-reported metadata.
-- The OS's invisible ML ranking (Android's notification assistant) becomes
-  **learned policies**: the same adaptive demotion, materialized as
-  records the user can read, edit, and delete (§7).
-
-**Added — expressible here, structurally impossible there:**
-
-- A notice is live-tied to its `subject`: handle the thing *anywhere* and
-  the notice retracts *everywhere* — the seen-join (§4.4) gives every
-  source the auto-retract behavior only the best-engineered apps simulate,
-  cross-device, for free.
-- Derived notices: in-fabric changes need no posting at all (§5) — there is
-  no "the app forgot to notify" failure mode, and quiet agent work is
-  visible at zero notification cost.
-- Cross-person semantics as single policy records: collective quiet
-  ("acted-by-any demotes for all") and escalation ("nobody in 2h → raise
-  for the owner") (§8).
-- One canonical, queryable ledger with the OS trays as degraded
-  projections — digests, audit, and coverage measurement read the ledger,
-  not N device states.
-
-**Inherited, honestly:** dead-device delivery still rides APNs/FCM/Web Push
-and their gates — the break-glass ceilings (`time-sensitive`, `critical`,
-DND-bypass) are the platforms' to grant, not ours to declare (§9.3), and
-push timing is theirs. This design compiles down to the OS stacks; it does
-not pretend to replace them.
 
 ## 4. Model
 
@@ -385,18 +259,21 @@ occupies exactly one rung, and the rung is a promise:
 
 Two invariants:
 
-- **Downward bias.** Defaults sit low (`silent`/`review`). Sources post a
-  *hint*; the steward assigns the real posture via the policy clamp (§7), and
-  repeated dismiss-without-open feeds back as learned clamps. Crucially,
-  **no emitter-controlled field may raise posture**: reaching `interrupt`
-  (or `heads-up` above a source's learned baseline) requires a user-adopted
-  policy floor — never urgency claims, expiry times, or any other field the
-  emitter writes. An emitter cannot buy `interrupt` with enthusiasm. The
-  same discipline binds the *shipped defaults*: any default above `review`
-  must match on **steward-verified facts** (e.g. `actor` is a human DID with
-  an established relationship to the user), never on self-declared fields
-  like `kind` — otherwise declaring a kind *is* choosing a baseline, which
-  re-opens the loophole this invariant closes.
+- **Downward bias — the raise-authority rule.** This is the spec's central
+  invariant; it has exactly four tiers, and this bullet is its one canonical
+  home (other sections reference it, never restate it):
+  1. **Emitter fields never raise.** No field a source writes — hints,
+     urgency copy, expiry times, self-declared `kind` — can raise posture.
+     An emitter cannot buy `interrupt` with enthusiasm.
+  2. **Shipped defaults may set floors up to `heads-up`**, and only when
+     matching on **steward-verified facts** (e.g. `actor` is a verified
+     human DID with an established relationship) — never on self-declared
+     fields like `kind`, since declaring a kind would *be* choosing a
+     baseline.
+  3. **`interrupt` floors are user-adopted only** — hand-written or
+     accepted through the propose/adopt flow (§7).
+  4. **Learned policies only lower** (§7) — the system's own adaptation can
+     quiet a source, never amplify one.
 - **Attention ≠ confidence.** How sure the system is about a notice and how
   loudly it surfaces are separate axes. Uncertain-but-urgent goes to
   `heads-up` with its uncertainty stated (product copy; `ext` if
@@ -469,8 +346,9 @@ type NoticeCandidate = {
   // kind for a given source sticks; a source changing its declared kind
   // is itself a reputation signal (and does not escape kind-matched
   // clamps, which follow the source identity). Policy matching (§7) and
-  // digest grouping (§9.2) key on it. Self-declared, therefore never a
-  // basis for above-review shipped defaults (§4.2).
+  // digest grouping (§9.2) key on it. Self-declared — see §4.2's
+  // raise-authority tiers and the match-schema comment (§7) for what may
+  // therefore never key on it.
   kind: string;
   // Grouping key for presentation AND displacement: within a threadKey,
   // only the newest live notice is visible (§6.4). One conversation, one
@@ -489,7 +367,11 @@ type NoticeCandidate = {
   // envelope and fetch full content on unlock/open.
   redacted?: { title: string; body: string };
   // Where opening the notice goes, when that differs from subject
-  // (default: subject). Navigated with navigateTo().
+  // (default: subject). Navigation grain: navigateTo() navigates to a
+  // PIECE — when the subject is finer-grain (one message, one entity of
+  // twelve), target must resolve to the containing piece, with the
+  // specific entity carried as a focus hint the destination renders
+  // (changed-region emphasis rides the same hint).
   target?: unknown;           // asCell: ["cell"]
   // Prepared material (draft, diff, packet) when it is a different
   // artifact than the destination.
@@ -536,7 +418,10 @@ type Notice = NoticeCandidate & {
   // The promise made to the user (§4.2) — the only loudness surfaces read.
   posture: "silent" | "review" | "heads-up" | "interrupt";
   // Intra-rung ordering. Opaque; never crosses rungs; never gates
-  // delivery (§4.2).
+  // delivery (§4.2). Write discipline: assigned at admission and updated
+  // only during coalesce — never by standalone re-ranking writes (ledger
+  // writes wake lanes, §4.5); surfaces wanting continuous re-ordering
+  // derive it at read.
   weight?: number;
 };
 
@@ -608,18 +493,18 @@ const alreadySeen = (n: Notice, seen: SeenStore) =>
 const visible = (
   n: Notice, log: NoticeDisposition[], seen: SeenStore, now: number,
 ) =>
+  // realert-matched notices skip the alreadySeen term (§7): they clear
+  // only on a terminal disposition.
   !terminal(n, log) && !alreadySeen(n, seen) && !snoozed(log, now) &&
   (n.notBefore === undefined || now >= n.notBefore) &&
   (n.expiresAt === undefined || now < n.expiresAt);
 ```
 
 Notices that should outlive observation (a todo is not done because you
-looked at it; a medication reminder must nag) are handled deliberately, not
-by the runtime guessing which glances "count": a user-adopted `realert`
-policy (§7) **exempts matched notices from seen-satisfaction entirely** —
-they clear only on a terminal disposition, never because the user glanced
-at the subject — and the source re-posts at a newer version when it is
-meaningfully newsworthy again (content escalation, not liveness).
+looked at it; a medication reminder must nag) are handled by a user-adopted
+`realert` policy — semantics in §7: matched notices are exempt from
+seen-satisfaction and clear only terminally. Sources re-post at newer
+versions for *content* escalation, not liveness.
 Satisfaction that doesn't involve the user looking (someone else handled it;
 the trip ended) is the steward's job: its fold observes the subject change and
 terminally retracts the notice (system disposition by module identity).
@@ -676,8 +561,11 @@ three stores, and the three backings are not ad-hoc — they derive from a
    recommended backing is a small **sqlite database private to seen-state**
    (upsert-by-key is what SQL is for; no trust gating needed — every
    surface of the *user's own runtime* may write the user's own marks),
-   with an array-cell fallback. Write discipline is part of the spec, not
-   an optimization: **seen = focused open** (§5), a mark is written **only
+   with an array-cell fallback. The handle is instantiated and owned by
+   the shell's home-context attention pattern (a trusted surface); other
+   surfaces write marks through it, not via their own handles. Write
+   discipline is part of the spec, not
+   an optimization: seen = focused open (defined in §5), a mark is written **only
    when it advances** (`newSeq > seenSeq` — re-renders and repeat views are
    no-ops, which is also what breaks any render→write→render cycle) and
    **debounced per focus session** (at most one write per entity per
@@ -776,7 +664,7 @@ whose subject is the entity) and it was the focus of their attention.
 Scrolling past a row in a list is *not* seen; rendering a lane is *not*
 seen. This single definition is load-bearing three ways: it keeps unseen
 dots honest, it keeps disclosed read-receipts meaningful (§8), and it keeps
-seen writes rare (§4.5.3).
+seen writes rare (§4.5, seen store).
 
 ```ts
 // Shown for illustration only.
@@ -797,10 +685,11 @@ Everything else is the **changes projection** (§10.1) joined against marks:
   the steward. Renders as a pattern on the home context. This is the
   first-run view and the every-return view — the same query. The affordance
   must answer *what changed, by whom, since you looked* — the projection's
-  `author` field gives session-grain attribution from day one (§10.1) — and
-  a jump-in that emphasizes the changed region (memory-v2 holds both
-  versions; the diff is derivable). A bare dot that says "something
-  happened" does not meet the bar (§4.1).
+  `author` field gives session-grain attribution from day one (§10.1) —
+  with a jump-in to the destination. Emphasizing the changed region at the
+  destination (memory-v2 holds both versions; the diff is derivable) is
+  the phase-1 stretch of this bar, not its phase-0 gate — but a bare dot
+  that says "something happened" does not meet it at any phase (§4.1).
 - **Artifact lifecycle** falls out of the same two numbers plus a timestamp:
   *fresh* (unseen changes) → *seen* → *stale* (untouched for N) →
   *archived*. No new subsystem.
@@ -887,8 +776,8 @@ checks, and the design uses both — every steward write is attributable
 `writeAuthorizedBy` authorizes *code*, not an *instance*: two devices running
 the steward both pass the claim. The single-writer premise therefore needs
 instance discipline, not just CFC: **the interim client-side steward takes a
-lease** (a mutex cell claimed with an expiry; the sqlite spec's
-`tryClaimMutex` shape) and only the leaseholder folds. Independent of the
+lease** (a mutex cell claimed with an expiry — the `tryClaimMutex` shape from the
+fetch builtin's utilities, `packages/runner/src/builtins/fetch-utils.ts`) and only the leaseholder folds. Independent of the
 lease, the fold is specified **idempotent and commutative over the notice
 inbox** (deterministic ids; coalescing recomputes from subject state rather
 than incrementally mutating), so a lease handoff or a brief double-writer
@@ -977,8 +866,8 @@ type AttentionPolicy = {
     // Nag-until-done: a matched notice is EXEMPT from seen-satisfaction —
     // it clears only on a terminal disposition (acted/dismissed/archived),
     // never because the user glanced at the subject — and re-alerts on
-    // this cadence while live. One of the two consented exceptions to
-    // §9.3's alert-once rule. User-authored only; the cadence needs timer
+    // this cadence while live. The one consented exception to §9.3's
+    // alert-once rule. User-authored only; the cadence needs timer
     // wake (§10.5) to fire between commits.
     realert?: { everyMs: number };
     coalesceWindowMs?: number;
@@ -997,40 +886,39 @@ type AttentionPolicy = {
 
 **Composition is one formula, with a hard ceiling.** Effective posture =
 `clampScale(baseline, max(matching mins), min(matching maxes))` where
-**`baseline = min(postureHint, "review")`**, further bounded by the
-source's learned baseline. The ceiling is load-bearing: absent it, a
-brand-new source with no learned history and no matching max would get
-whatever it hinted — the exact cold-start hole §4.2 forbids. As written,
-no notice exceeds `review` unless a *policy min* raises it, and mins above
-`review` are user-authored only (shipped defaults and learned policies
-never set them). **Maxes dominate mins** on conflict, with one exception —
-a user-authored min marked `bypassQuietHours` survives the quiet-hours
-max. `quietHours` is defined as nothing more than a time-conditional max
-(default `"review"`; `days` scopes it — "work sources suppressed on
-weekends" is `{quietHours: {start: "00:00", end: "24:00", days:
-["sat","sun"], max: "suppress"}}`). The canonical case — "quiet hours
-22:00–07:00, but the babysitter thread always breaks through" — is two
-records and zero ambiguity.
+**`baseline = min(postureHint, "review")`**. The ceiling is load-bearing:
+absent it, a brand-new source with no matching max would get whatever it
+hinted — the exact cold-start hole §4.2's tier 1 forbids. Raising above
+the ceiling happens only through policy mins, under §4.2's raise-authority
+tiers (shipped verified-fact defaults up to `heads-up`; `interrupt`
+user-adopted only). Learned demotion needs no term of its own: learned
+policies *are* maxes, absorbed by `min(matching maxes)`. **Maxes dominate
+mins** on conflict, with one exception — a user-authored min marked
+`bypassQuietHours` survives the quiet-hours max. `quietHours` is defined
+as nothing more than a time-conditional max (default `"review"`; `days`
+scopes it — "work sources suppressed on weekends" is `{quietHours:
+{start: "00:00", end: "24:00", days: ["sat","sun"], max: "suppress"}}`).
+The canonical case — "quiet hours 22:00–07:00, but the babysitter thread
+always breaks through" — is two records and zero ambiguity.
 
-- Policies live in the user's home space (`PerUser` scope). The core ships a
-  handful of defaults: messages from **verified human actors with an
-  established relationship** (rosters, prior threads — and rosters are
-  seeded by contact import at onboarding, so this default works on day
-  one, not after weeks of thread history) → `heads-up`; **first contact
-  from a verified human actor with no established relationship** →
-  `review`, grouped in a distinguished **requests** shelf (the
-  message-requests idiom), quota-bounded per source, where the notice
-  carries a one-tap promote affordance that writes `{match: {actor},
-  clamp: {min: "heads-up"}}` through the trusted surface — legitimate
-  strangers (the marketplace buyer, the new-school-year parent) are
-  distinguishable from importer noise without being handed loudness;
-  agent-completions → `silent` (visible as seen-state, never buzzing). Per
-  §4.2, shipped defaults above `silent` key on steward-verified facts only
-  — never on self-declared `kind` (declaring `kind: "group-chat"` must not
-  buy the human-messages baseline; "first contact from a verified human"
-  is verifiable — DID checked, roster/thread absence checked). There is
-  deliberately **no default that maps any emitter-supplied field to
-  `interrupt`**.
+- **User attention policies live in the user's home space** as ordinary
+  cells (the space is single-user; no scope wrapper is needed). Two other
+  policy kinds live *with the shared space they govern*, as `PerSpace`
+  cells: the disclosure policy and escalation proposals (§8) — see §8 for
+  how they reach the fold. The core ships a handful of defaults: messages
+  from **verified human actors with an established relationship** (rosters,
+  prior threads — rosters seeded by contact import at onboarding, so this
+  works on day one) → `heads-up`; **first contact** from a verified human
+  actor with no established relationship → `review`, presented as a
+  distinct requests grouping in the review lane (§9.1) with a one-tap
+  promote affordance that writes `{match: {actor}, clamp: {min:
+  "heads-up"}}` through the trusted surface — legitimate strangers (the
+  marketplace buyer, the new-school-year parent) are distinguishable from
+  importer noise without being handed loudness, and both facts are
+  steward-verifiable (DID checked; roster/thread absence checked);
+  agent-completions → `silent` (visible as seen-state, never buzzing).
+  All defaults obey §4.2's raise-authority tiers; there is deliberately
+  no default involving `interrupt`.
 - **Mute is a policy, not a special relation** (and not a disposition).
   "Mute this thread" writes `{match: {threadKey}, effect: {clamp: {max:
   "suppress"}}}`; the re-fold rule (§4.7) demotes existing notices too.
@@ -1040,27 +928,28 @@ records and zero ambiguity.
   writes — adoption *is* the write, and unadopted proposals never enter the
   fold. Two idioms this primitive must carry, because users won't write
   these policies unaided:
-  - **The emergency pack.** Nobody writes an interrupt floor for their
-    kid's school until the day it's too late. Products should propose a
-    small break-glass set at onboarding — school/daycare numbers and
-    alarm/fraud *sources* — as `{match: {actor | subject | spaceDid},
-    clamp: {min: "interrupt"}, bypassQuietHours: true}` through this same
-    adopt flow. Bind these floors to **verified identities** (`actor`,
-    `subject`, `spaceDid`), never to `kind`: a kind-matched interrupt
-    floor is first-declaration-spoofable by any new source that declares
-    the magic kind. The runtime's part: those adopted policies compile to
-    the OS's highest available interruption level (§9.3's reserved
-    mapping). Honest residual: an emergency from a source the user never
-    adopted and doesn't know lands at `review` (first-contact shelf at
-    best) — the price of the inversion, which the pack exists to shrink,
-    not erase.
-  - **The deadline ladder.** Long-lived obligations post their whole
-    escalation ladder ahead of time: three candidates with `notBefore` =
-    T-90/T-30/T-7, same `threadKey` (each new admission displaces the
-    prior rung), ascending posture hints, plus a proposed min the user
-    adopts once. Obligation met → subject advances → the steward retracts
-    the pending rungs (§4.7's EMBARGOED retraction).
-- **Learned policies: the reputation loop, made legible.** The downward
+  - **The emergency pack** (product guidance; the runtime carries two
+    invariants). Nobody writes an interrupt floor for their kid's school
+    until the day it's too late, so products should propose a small
+    break-glass set at onboarding — `{match: {actor | subject | spaceDid},
+    clamp: {min: "interrupt"}, bypassQuietHours: true}` per source. The
+    runtime invariants: interrupt floors bind to **verified identities**,
+    never `kind` (a kind-matched floor is first-declaration-spoofable by a
+    new source — the schema comment in `match` is this rule's home), and
+    adopted floors compile to the OS's highest available interruption
+    level (§9.3's reserved mapping). Honest residual: an emergency from a
+    source the user never adopted and doesn't know lands at `review` — the
+    price of the inversion, which the pack shrinks, not erases
+    (walkthrough: `stories.md` B.1).
+  - **The deadline ladder** (pure composition, zero new mechanism):
+    long-lived obligations post their escalation ladder ahead of time —
+    candidates at `notBefore` T-90/T-30/T-7, same `threadKey` (each new
+    admission displaces the prior rung), ascending hints, plus a proposed
+    min adopted once. Obligation met → subject advances → the steward
+    retracts the pending rungs (§4.7). Walkthrough: `stories.md` B.9.
+- **Learned policies: the reputation loop, made legible** *(phase 2 — the
+  adaptive loop needs signal volume and its dynamics are open, §12.8;
+  phase 1 ships only the invariant and the `author` slot)*. The downward
   feedback the spec promises (dismiss-without-open, quota pressure ⇒ the
   source's notices sink) has to live *somewhere*, and hidden steward state
   would break the inspectability goal. It lives here: the steward — which is
@@ -1069,10 +958,10 @@ records and zero ambiguity.
   = the evidence, e.g. "7 of 8 notices dismissed without open over 30d")
   into a designated **learned** section of the policy store. They are
   visible, editable, and deletable exactly like hand-written policies; a
-  user deleting one is itself a signal. Learned policies may only *lower*
-  (set maxes / lower the baseline) — raising posture remains exclusively
-  user-authored (§4.2). This follows the platform's existing precedent for
-  system-inferred-but-user-owned data (`packages/home-schemas/learned.ts`).
+  user deleting one is itself a signal. **Learned policies are maxes** —
+  §4.2 tier 4: the system's own adaptation only lowers. This follows the
+  platform's existing precedent for system-inferred-but-user-owned data
+  (`packages/home-schemas/learned.ts`).
 - **Product policy dimensions compile down.** Stance-like vocabularies
   (Loom's `attention-policy-v1`) do not ride an opaque field on runtime
   policies — there is deliberately no `AttentionPolicy.ext`, because an
@@ -1118,9 +1007,17 @@ relation" plus existing constraints:
   want receipts, some don't); a member who discloses nothing simply doesn't
   appear — and, corollary, silently opts out of collective quiet, which the
   space's members should understand when choosing the policy.
-- **Escalation across people is a policy.** "If nobody attends to this
-  within 2h, raise it to `heads-up` for the space owner" is a policy cell on
-  the shared space, evaluated by the owner's steward against contributed
+- **Escalation across people is a policy — adopted, not imposed.** "If
+  nobody attends to this within 2h, raise it to `heads-up` for the space
+  owner" is a policy cell on the shared space. But a shared-space cell must
+  not be able to raise posture for a member who never agreed (§4.2 tier 3),
+  so escalation records are **proposals**: they enter a member's fold only
+  once that member adopts them (a home-space policy referencing the space,
+  written through the ordinary adopt flow — for the owner, typically at
+  space creation). Shared-space policy cells (disclosure, escalation) reach
+  the fold the same way candidates do: forwarded/read through the member's
+  ordinary sessions (§6.1) — no new cross-space capability. Once adopted,
+  it is evaluated by the owner's steward against contributed
   state. No siloed notification system can express this; here it is one
   record. (Escalation is a posture *raise* after admission; §9.3's
   transition rule makes it alert exactly once. Deadline-shaped escalation —
@@ -1128,8 +1025,8 @@ relation" plus existing constraints:
 
 **Profiles.** A user with multiple profiles (work, personal) has one
 attention system *per profile*: profile ≡ its own space graph ≡ its own
-home space, so attention state, policies, steward, and learned baselines
-are independent per profile by construction — nothing new to build, and no
+home space, so attention state, policies, and steward are independent per
+profile by construction — nothing new to build, and no
 cross-profile leakage to prevent (a work source cannot learn it's quiet on
 the personal profile because it never met the personal profile). Merging
 the two into one device's shell — one bell over N profiles' lanes — is a
@@ -1186,16 +1083,15 @@ there:
   coalesce — new message in the thread, progress tick, content refresh —
   **replaces silently** on every surface (Android `setOnlyAlertOnce`
   semantics, made unconditional: the emitter cannot choose to re-buzz).
-  The invariant bends in exactly **two consented ways**, both bounded by
-  user grants: a user-authored `realert` policy (§7) re-alerts a live
-  matched notice on its cadence and exempts it from seen-satisfaction —
+  The invariant bends in exactly **one consented way**: a user-authored
+  `realert` policy (§7) re-alerts a live matched notice on its cadence —
   nag-until-done for medication-grade obligations, grantable only by the
-  user; and a *fresh* notice (new event key, new `id`) first materializing
-  at an alert-bearing rung alerts — which means a source holding a
-  user-granted floor can alert once per genuinely new event, bounded by
-  intake quotas (§6.1) and revocable by editing the floor. Name that
-  honestly: alert-once is per-*notice*; per-*source* alert frequency is
-  governed by quotas plus the user's grant, not by the coalesce rule.
+  user. (A *fresh* notice first materializing at an alert-bearing rung
+  alerting is the base rule, not an exception — but state its consequence
+  honestly: alert-once is per-*notice*, so a source holding a user-granted
+  floor can alert once per genuinely new event; per-*source* frequency is
+  governed by intake quotas (§6.1) plus the user's grant, revocable by
+  editing the floor.)
   Posture *demotion* and visibility flips are retraction triggers: the
   dispatcher retracts or downgrades the delivered surface when either
   occurs. And on device (re)registration after an offline gap, the
@@ -1259,35 +1155,20 @@ This design mostly composes existing primitives, but not entirely. Naming
 the gaps is the point of this section — each is a prerequisite of the phase
 that first needs it (§11), and each needs its own (small) design pass.
 
-1. **Changes projection** *(phase 0)*. Patterns and the shell cannot read an
-   entity's memory-v2 head `seq` — `Cell` exposes no version, deliberately —
-   yet `seq` already crosses the wire in every query result
-   (`FactEntry.seq`, memory-v2 §5.7.1), and changed-since-a-basis is
-   precisely the session catch-up computation (memory-v2 §5.4.2,
-   `SessionSync.fromSeq/toSeq`). Rather than a Cell method, seen-state
-   needs one small **read-only, one-shot, session-independent query**:
+1. **Changes projection** *(phase 0)*. One read-only, one-shot,
+   session-independent memory-v2 query —
+   `changes(roots, branch, sinceSeq?, attribution?) → {toSeq, entries:
+   [{id, seq, deleted?, author?}]}` — giving a non-reactive head read, the
+   changed-since enumeration behind "while you were away", and
+   session-grain "by whom" from the commit log's persisted `sessionId`.
+   Small because every load-bearing piece is shipped (the `head` table, the
+   session catch-up delta, `FactEntry.seq`); a **security surface** because
+   it exposes versions to pattern-space and adds an enumeration read, gated
+   by exactly the read authority of the entities themselves. Full
+   mini-spec, CFC story, and non-attention consumers:
+   [`changes-projection.md`](./changes-projection.md) — deliberately
+   independently approvable.
 
-   `graph.changes(roots, branch, sinceSeq?, attribution?) →
-   { toSeq, entries: [{id, seq, deleted?, author?}] }`
-
-   (a) With a single root and no basis it is the **non-reactive head read**
-   — a one-shot query, not a watch, so re-renders never re-fire. (b) With
-   the watch set as roots and the seen watermark as basis it is the
-   **"while you were away" enumeration** — one indexed scan of the `head`
-   table (add a `(branch, seq)` index). (c) With `attribution: true` it
-   joins the commit log's already-persisted `sessionId` — **session-grain,
-   server-asserted "by whom" from day one**, upgrading in place to
-   `invocationRef`-backed proof when the signed-write pass lands (a join,
-   not a cryptography project). CFC: an entity may appear in a changes
-   result iff the caller may read the entity on that branch — strictly less
-   than a materialized read reveals. Not attention-specific: offline
-   catch-up UIs, activity/audit views, incremental derived indexes, and
-   retention watermarks consume the same query. It is the entity-grain,
-   payload-free member of the projection family memory-v2 §07 sketches —
-   and deliberately *not* built on §07's annotations plane, which is
-   range-anchored collaborative-field machinery, self-declared future work;
-   the one annotation prototype's review (PR #4132) documents why
-   side-table indexes invisible to the reactive graph are the wrong shape.
 2. **Notice inbox append gate** *(phase 1; hardened by phase 2)*. A
    home-space inbox cell with **restricted cross-principal append**: other
    principals' patterns may append candidates (the rosters
@@ -1327,27 +1208,35 @@ that first needs it (§11), and each needs its own (small) design pass.
 Each phase is independently shippable and none re-shapes the data model.
 
 - **Phase 0 — seen-state.** The changes projection (§10.1), the seen store
-  with its write discipline (§4.5.3), unseen dots in the shell, and a
+  with its write discipline (§4.5, seen store), unseen dots in the shell, and a
   "while you were away" home pattern. No steward, no candidates, no push.
   Acceptance bar: the user can see *what changed, by whom (session-grain),
-  and since when*, and jump in with the changed region emphasized — not
-  merely that a dot exists. This makes agent work **visible** — the single
-  most-requested product gap — while run-level *legibility* (one notice per
-  agent run, not twelve dots) is explicitly phase 1's follow-through.
+  and since when*, and jump in — not merely that a dot exists.
+  (Changed-region emphasis at the destination is a phase-1 stretch.) This
+  makes agent work **visible** — the single most-requested product gap —
+  while run-level *legibility* (one notice per agent run, not twelve dots)
+  is explicitly phase 1's follow-through. Rough cost: ~9–13 eng-weeks,
+  dominated by the changes projection's CFC review and focused-open
+  instrumentation across shell and pattern surfaces.
 - **Phase 1 — ledger + lanes.** Envelope, home-space `notices` (array cell
   + `writeAuthorizedBy`) and `dispositions` stores, notice intake (inbox
   gate §10.2, or interim source-space cells), a minimal client-executed
-  steward under lease (verified-fact defaults + clamp composition + learned
-  policies + thread displacement), shell bell/lanes with notice actions
-  (§4.6), receipt-shaped notices for agent runs with attribution folding
-  (§5). Policies v0 (including the emergency-pack and deadline-ladder
-  propose/adopt idioms, §7).
+  steward under lease (verified-fact defaults + clamp composition + thread
+  displacement), shell bell/lanes with notice actions (§4.6),
+  receipt-shaped notices for agent runs with attribution folding (§5), the
+  changed-region-emphasis stretch from phase 0. Policies v0: hand-written
+  and proposed/adopted only (emergency-pack and deadline-ladder idioms,
+  §7) — the learned-policy loop is phase 2. Rough cost: ~19–24 eng-weeks;
+  the sleeper is the propose/adopt trusted-surface UX. Fund against a
+  named first consumer surface (Appendix A note).
 - **Phase 2 — server steward + first transport.** Steward as a standing
   registration on the home space under server-primary execution
-  (dependencies named in §6.3); Web Push with device registration,
-  redaction rules, and retraction; digest queries; timer wake (§10.5),
-  which activates `realert`, escalation deadlines, and timely `notBefore`
-  materialization.
+  (dependencies named in §6.3 — high schedule risk: this sits behind
+  another in-flight spec's later phases); Web Push with device
+  registration, redaction rules, and retraction; digest queries; timer
+  wake (§10.5), which activates `realert`, escalation deadlines, and
+  timely `notBefore` materialization; the learned-policy loop (§7), which
+  by now has signal volume to learn from.
 - **Phase 3 — breadth.** Wrapped-app APNs/FCM; shared seen-state +
   disclosed terminal dispositions + escalation policies (§8); the ledger
   on sqlite once §10.3 lands; snooze/archive surfaced fully; `progress`
@@ -1393,7 +1282,7 @@ Each phase is independently shippable and none re-shapes the data model.
     seen-timestamps. Appendix A is the field mapping; the remaining
     question is sequencing — which loom surface adopts the runtime ledger
     first, and whether loom's materializer becomes the trusted source or a
-    second steward (§Division of labor says: trusted source).
+    second steward (the Division of labor section says: trusted source).
 11. **`realert` bounds.** Minimum cadence, maximum duration, and whether a
     realert policy requires re-confirmation after N fires — the exception
     to alert-once must not become a resharpened nag machine (§7, §9.3).
@@ -1404,35 +1293,16 @@ Each phase is independently shippable and none re-shapes the data model.
     (importer attestation? user confirmation on first sight?) decides how
     much of B.1 and B.11 external sources can actually reach.
 
-## Appendix A — mapping Loom's `attention-candidate-v1`
+## Appendix A — Loom mapping (pointer)
 
-For the first consumer's adoption review. Loom fields → envelope. (Naming
-flag: Loom's `claim_kind` vocabulary includes a value `notice`; product-side
-that value should be renamed — e.g. `fyi` — before the runtime noun lands.)
+The field-by-field mapping of Loom's `attention-candidate-v1` onto the
+envelope — including what deliberately does *not* cross the boundary
+(Work-start Policies, continuity owners, stance vocabularies) — lives in
+[`loom-mapping.md`](./loom-mapping.md). It is the first consumer's adoption
+review artifact and churns on Loom's schedule. Adoption sequencing is open
+question §12.10; phase-1 funding should be contingent on a named first Loom
+surface (durable seen-state, then digest or bell — not the Today block).
 
-| Loom candidate field | Envelope home |
-|---|---|
-| `id` / source identity | `id` (re-derived by steward from verified provenance) |
-| subject / focused target | `subject` (cell link); distinct destination → `target`; `focused_view_fallback` → `ext` |
-| prepared material | `attachment` |
-| `title`, body copy | `title`, `body` (+ `redacted` where the product wants lockscreen-safe copy) |
-| `why_now` | `ext.why_now` (product copy, runtime-opaque) |
-| `claim_kind` (act-now / review / notice→fyi / …) | `kind` + `postureHint` (kind is classification; the hint is the loudness request derived from it) |
-| `channel` (important-and-urgent / yours-in-progress / might-interest-you) | `ext.channel` — audience/genre, orthogonal to posture; product lanes render it |
-| `relation_to_trigger` (augments / supersedes / resolves / …) | `ext.relation_to_trigger`, whole; *supersedes* additionally = share the trigger's `threadKey` (thread displacement, §6.4, does the retraction) |
-| `authorization_state: proposal-required` | `actions: [{key:"approve"…},{key:"deny"…}]` (§4.6) + `ext.authorization_state` — the approval affordance travels with the notice |
-| `authority_class` | `ext` (work-start domain, product-side per §Division of labor) |
-| `not_before` | `notBefore` |
-| sender / subject person | `actor` |
-| delivery/interrupt eligibility | `postureHint`, clamped by user policy (§7) |
-| feedback: done / later | dispositions `acted` / `snoozed` |
-| feedback: never-for-this-class | a policy write (`clamp.max`) via the trusted surface |
-| feedback: not-useful | disposition `dismissed` + `ext.feedback: "not-useful"` (calibration signal round-trips to the product) |
-
-Not mapped, deliberately: Work-start Policies, continuity owners, typed
-receipts' internals, stance vocabularies — upstream product machinery
-(§Division of labor); stance policies compile down to plain clamps/watches
-(§7). A receipt *summary* enters as an ordinary candidate.
 
 ## Appendix B — fourteen worked stories
 
@@ -1453,234 +1323,19 @@ almost immediately.
 | B.3 | On-call triage | multi-user coordination | A− | D (shared state is phase 3) |
 | B.4 | Overnight agent run | quiet agent work | A | A− |
 | B.5 | 2FA code | time-critical, brief | B | B− |
-| B.6 | Social stream | high-volume, low-value | A | A |
+| B.6 | Social stream | high-volume, low-value | A | A− (quotas only; learning is P2) |
 | B.7 | Medical privacy | lockscreen leakage | A | A− (trivially — no push yet) |
 | B.8 | Approve rebooking | act from the surface | A− | B (shell only) |
 | B.9 | Visa renewal | long-lived deadline ladder | B | C+ (evaluate-on-read only) |
 | B.10 | Adversarial source | spam defense | A− | A− |
-| B.11 | Marketplace stranger | first contact, unknown human | B+ (requests shelf + promote) | B− (shell only) |
+| B.11 | Marketplace stranger | first contact, unknown human | B+ (requests grouping + promote) | B− (shell only) |
 | B.12 | Return from vacation | bulk catch-up boundedness | B (aging + reconnect damping) | B− |
 | B.13 | Work/personal split | context separation | B (per-profile state + day-scoped quietHours) | B− |
 | B.14 | Day-one cold start | defaults before any learning | B− (ceiling + roster seeding) | C+ |
 
-### B.1 The school emergency (must-interrupt, novel source)
+The fourteen walkthroughs live in [`stories.md`](./stories.md); the table
+above is the index and the honest summary.
 
-Priya's kid has an allergic reaction at school; the office texts "come now."
-Quiet is the failure mode — and the *novel* emergency is downward bias's
-structural blind spot, because interrupt requires a pre-adopted floor that
-by definition doesn't exist for a first-time source. The design's answer is
-two-part, and honest about its limits: (1) the **emergency pack** (§7) —
-onboarding proposes break-glass floors for school/daycare/alarm/fraud
-sources at the moment the user is thinking about setup, via the ordinary
-propose/adopt flow, **bound to verified identities** (`match.actor` /
-`subject` / `spaceDid` — never spoofable `kind`); (2) the **reserved
-break-glass mapping** (§9.3) — that adopted policy compiles to the OS's
-highest granted interruption level, upgrading to
-`time-sensitive`/`critical` when entitlements land, with no policy
-migration. What the design will *not* do is let the message's own urgency
-raise its posture — that lever, once granted to emergencies, is granted to
-everyone claiming to be one. The residual, stated without varnish: an
-emergency from a source the user never adopted and has no relationship
-with lands at **`review`** (the first-contact requests shelf if it's a
-verified human; §7) — a full miss until the next check-in. That is the
-price of the inversion; the pack exists to shrink it, and how an
-SMS-ingress phone number gets verified as a known actor at all is open
-question §12.12.
-
-### B.2 The medication reminder (seeing must not satisfy)
-
-Elena must take tacrolimus by 9pm; a glance must not silence the reminder.
-Her one-time adopted policy carries `{clamp: {min: "interrupt"},
-bypassQuietHours: true, realert: {everyMs: 600_000}}`, and `realert` does
-the whole job on its own: a matched notice is **exempt from
-seen-satisfaction** — glancing at the reminder does not clear it; only a
-terminal disposition (logging the dose → `acted`, or an explicit dismiss)
-does — and it re-alerts on the cadence while live (§7, §9.3). The med
-pattern may still re-post as the deadline nears (fresh event key, same
-`threadKey`, each rung displacing the last), but that is *content
-escalation* ("30 minutes left"), not liveness — the nag no longer depends
-on the source's own timer discipline. Logging the dose advances the
-subject artifact and the steward terminally retracts every pending rung,
-including embargoed ones (§4.7). Phase gating is real: the cadence firing
-between commits needs timer wake (§10.5) — before phase 2 this story is
-not safely servable and products should not pretend otherwise.
-
-### B.3 On-call triage (exactly one person must act)
-
-A pager event lands in a three-person ops space at 11pm. Each on-call
-member's rotation adopted `{match: {spaceDid: ops-space, kind: "pager"},
-clamp: {min: "interrupt"}, bypassQuietHours: true}` — the `spaceDid` bound
-matters: a bare kind-matched interrupt floor would be claimable by any new
-source declaring `kind: "pager"` (§7). Bea acks from her lockscreen via
-`actions` (§4.6): terminal `acted`, appended to the pattern's `replyTo`
-cell under her session authority. Her runtime discloses the disposition
-into `PerSpace` state; the space's opt-in policy "acted-by-any demotes to
-silent for all" re-lanes Dana's and Sam's notices; posture demotion
-retracts their banners (§9.3). If nobody acts in 15 minutes, the space's
-escalation policy raises the owner's notice — a deadline evaluation that
-needs timer wake (§10.5). One pager event, three independent ledgers,
-collective quiet from one policy record — the part no siloed platform can
-express.
-
-### B.4 The overnight agent run (quiet work, visible)
-
-Tomás's filing agent renames 200 documents at 3am. It posts *one*
-receipt-shaped notice (`threadKey` = run id, `progress` ticking silently),
-laned `silent` by the agent-completions default. The 200 changes are never
-posted at all — they are derived: the while-you-were-away view runs one
-`changes(watchSet, basis, attribution: true)` call and folds every entity
-whose change `author` is the run's session under the receipt. Tomás sees
-one line, expands it, jumps into anything suspicious with the changed
-region emphasized. Zero buzz, full visibility, and the trust that makes
-overnight agents acceptable — the design's home turf, strong from phase 1
-(phase 0 gives the dots without the run grouping).
-
-### B.5 The 2FA code (time-critical, worthless in minutes)
-
-Marcus is mid-login on his laptop; the code arrives via his SMS forwarder.
-Webhook ingress persists durably at the handler (§6.1); the candidate
-carries `expiresAt: +5min` and a `postureHint: "heads-up"` (or `interrupt`
-via a one-time adopted policy the OTP pattern proposed at setup — a
-realistic single config). A second code coalesces silently over the first
-(`id`-keyed replace, §9.3). Expiry hides the notice immediately on read;
-the OS tray copy goes stale until timer wake lands — the spec's own §9.3
-honesty note, and tolerable here because the user is at a client by
-construction (they're logging in). One friction worth product attention: a
-cautious confidentiality label pushes the code behind the generic envelope
-— the rare notice whose whole value is lockscreen visibility; the OTP
-pattern should set `redacted` to carry the code deliberately.
-
-### B.6 The social stream (high-volume, low-value; downward bias earns its keep)
-
-Nina's social importer posts ~80 like/follow events daily; she never opens
-them. Intake quotas bound the flood at the write gate against verified
-writer identity (§10.2). Her dismiss-without-open pattern becomes a
-**learned policy** she can read — `{match: {kind: "social"}, clamp: {max:
-"silent"}, author: steward, reason: "37 of 40 dismissed without open over
-30d"}` — and the source can never buy its way back up (learned policies
-only lower; §7). The review lane stays bounded; the weekly digest groups
-the residue by `kind`. This is the reputation loop as a legible artifact
-rather than a black-box feed model — strong from phase 1.
-
-### B.7 Medical results on a shared-visibility lockscreen (privacy)
-
-Ray's clinic portal posts test results; his partner sometimes sees his
-lockscreen. The notice's confidentiality labels forbid egress to the push
-relay, so the adapter sends the generic envelope unconditionally — full
-content fetched on unlock/app-open (§9.3) — and `redacted` lets the product
-choose neutral copy. Tray-dismiss on the shared-visibility device is
-per-device (§9.3), so dismissing there doesn't clear his laptop. Muting the
-thread is a policy write in his home space — never readable by the clinic
-or anyone else, with the behavioral-inference bound §7 states honestly.
-
-### B.8 Approving the agent's rebooking (act from the surface)
-
-Grace's travel agent drafted a rebooking; the fare hold expires soon. The
-notice carries `attachment` (the itinerary diff), `expiresAt` (the hold),
-and `actions: [approve, deny]` with a `replyTo` cell (§4.6). Approve from
-the lockscreen: terminal `acted` disposition + `{key: "approve", noticeId,
-at}` appended to the pattern's reply cell under her ordinary session
-authority; the acted terminal retracts the notice on every device. Two
-honest caveats: acting from a locked device presumes an authenticated
-session on-device, and a stale tray (§9.3) means she could approve a
-just-expired fare between wakes — the reply cell's consumer must treat
-replies as requests, not facts.
-
-### B.9 The visa renewal (long-lived deadline ladder)
-
-Hana's visa expires in October; she wants `review` at T−90, `heads-up` at
-T−30, `interrupt` at T−7. The **deadline ladder** idiom (§7): the pattern
-posts all three candidates ahead of time with ascending `notBefore` dates,
-the same `threadKey` (each admission displaces the prior rung), ascending
-hints, plus a proposed min she adopts once — at setup, when she's thinking
-about it. Renewal filed → subject advances → the steward retracts every
-pending rung including embargoed ones (§4.7). The gate is timeliness:
-`notBefore` materialization is evaluate-on-read until timer wake (§10.5) —
-nearly harmless at 90-day horizons for a daily shell user, unacceptable for
-B.2's same-day cadence, which is why both stories hang on the same §10.5
-line item.
-
-### B.10 The adversarial source (spam defense)
-
-"DealBlaster," installed for price tracking, turns hostile: floods
-candidates, hints `interrupt` with `ext.urgency: "CRITICAL"`, tries to
-collide the banking source's notification id, re-declares its kind as
-"group-chat" to catch the human-messages default. Every defense is
-structural, not heuristic: hints can't raise (§4.2); `ext` is quarantined
-from routing (§4.4); `id` is steward-derived from verified provenance, so the
-collision is impossible by construction; quotas bind to verified writer
-identity (§10.2); dismiss-without-open writes a legible learned max (§7);
-unconditional alert-once means even fresh-event-key spam can't re-buzz past
-its clamped rung; and the kind-lie fails because above-`review` defaults
-key on verified facts, never self-declared `kind` (§4.2) — declaring
-yourself "group-chat" buys nothing without a verified human `actor` the
-user actually knows.
-
-### B.11 The marketplace stranger (first contact from an unknown human)
-
-Maya lists a couch; a legitimate buyer — verified human DID, zero prior
-relationship — messages her, and the first responder wins the sale. Before
-the first-contact default existed, this story graded C: the buyer failed
-the established-relationship test and sank indistinguishably into `review`
-alongside importer noise, and Maya couldn't even hand-write a fix because
-`match` had no `actor` dimension. As specced now: the message lands in the
-**requests shelf** (`review`, distinguished grouping, quota-bounded — §7),
-where it reads as a person, not noise; one tap on the promote affordance
-writes `{match: {actor}, clamp: {min: "heads-up"}}` and the conversation is
-loud thereafter. For time-critical listings, the sanctioned louder path is
-the pattern proposing a listing-scoped min at listing time (the
-moment-of-intent idiom). Downward bias holds: minting DIDs buys a stranger
-nothing above the requests shelf. Note `threadKey` must be per-buyer, not
-per-listing — thread displacement (§6.4) would otherwise let buyer #2's
-inquiry retract buyer #1's.
-
-### B.12 Return from vacation (bulk catch-up must be bounded)
-
-Jonas is offline 16 days: ~300 notices, ~80 unseen artifact changes across
-12 spaces. The joins do most of the collapsing for free — 16 days of one
-chat is *one* notice (coalescing + thread displacement), everything he
-handled from his phone abroad is already satisfied everywhere (seen-join),
-expired 2FA/fare-holds are hidden and swept, matured ladder rungs displaced
-each other. Two rules close the rest: the sweep's **aging** demotes
-unhandled `heads-up` older than 7 days to `review` (§4.5), so the bell
-shows this week, not a 16-day wall; and the dispatcher's **reconnect
-damping** (§9.3) alerts only for notices newer than the gap — the return is
-a quiet shelf plus one "while you were away" view (which is *specified* as
-the every-return view, §5), not a buzz storm. Residual: whether
-"touched-recently" survives 16 days in the watch set is open question
-§12.2 — the vacation is the case that forces that answer.
-
-### B.13 Work and personal (context separation)
-
-Sofia keeps work and personal profiles and wants work quiet on evenings
-and weekends, family always through, one device. Profiles are the coarse
-cut: profile ≡ own home space ≡ own attention state (§8) — her work
-steward and personal steward are independent by construction, and one
-shell merging two ledgers is presentation, not runtime. Within the work
-profile, context is ordinary policy: `{match: {spaceDid: work-space},
-effect: {quietHours: {start: "18:00", end: "09:00"}}}` for evenings plus
-`{quietHours: {start: "00:00", end: "24:00", days: ["sat","sun"], max:
-"suppress"}}` for weekends (§7's day-scoped, max-bearing quietHours), and
-`{match: {threadKey: family}, clamp: {min: "heads-up"}, bypassQuietHours:
-true}` for the always-through exception. Every piece is a legible record
-she can read back.
-
-### B.14 Day one (defaults before any learning)
-
-Riley is brand new: no learned policies, no adopted packs, defaults only.
-The load-bearing line is §7's composition ceiling — `baseline =
-min(postureHint, "review")` — without which a day-one source hinting
-`interrupt` would simply get it (no learned history, no matching max: the
-formula's original cold-start hole, now closed). The week then looks like:
-messages from imported contacts → `heads-up` from day one (rosters are
-seeded by contact import, §7 — without that, the established-relationship
-default fires for nobody and the app reads as broken silence exactly when
-it's being judged); strangers → the requests shelf; importers and agents →
-`review`/`silent`, bounded by intake quotas until learned clamps
-accumulate evidence. Honest weakness: the review lane is at its noisiest
-in week one, before any learning — the propose/adopt idiom (patterns
-proposing their own sensible clamps at install) is the mitigation, and
-§12.8's evidence thresholds decide how fast learning kicks in.
 
 ## References
 
@@ -1699,8 +1354,7 @@ proposing their own sensible clamps at install) is the mitigation, and
   `08-conflict-granularity.md` (mergeable ops).
 - `docs/specs/sqlite-builtin/` (esp. `05-reactivity.md`, `06-cfc.md`) —
   seen-store backing; why trust-bearing tables wait on §10.3; `reactOn`
-  coarseness; the rev-serialized write path; the `tryClaimMutex` shape §10.4
-  borrows.
+  coarseness; the rev-serialized write path.
 - `docs/specs/space-model/4-cells.md` — stream-cell ephemerality.
 - `docs/specs/pull-based-scheduler/README.md` — demand-driven evaluation
   (and its limits for observed queries, §4.4).
