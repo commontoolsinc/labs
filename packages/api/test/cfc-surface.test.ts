@@ -15,6 +15,9 @@ import type {
   CfcBuiltinAtom,
   CfcCaveatAtom,
   CfcInjectionSafeAtom,
+  CfcModulePolicyRefAtom,
+  CfcNamedPolicyRefAtom,
+  CfcPolicyRefAtom,
   CfcPromptSlotBoundAtom,
   CfcPromptSlotInfluenceAtom,
   CfcResourceAtom,
@@ -143,6 +146,24 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   );
   const builtinAtom: CfcBuiltinAtom = cfcAtom.builtin("current-user");
   const injectionSafeAtom: CfcInjectionSafeAtom = cfcAtom.injectionSafe();
+  const namedPolicyRef: CfcNamedPolicyRefAtom = cfcAtom.policyRef(
+    "named",
+    "did:user:1",
+    "sha256:named",
+  );
+  const modulePolicyRef: CfcModulePolicyRefAtom = cfcAtom.modulePolicyRef(
+    "sha256:module",
+    "releaseRules",
+    "sha256:manifest",
+    "did:user:1",
+  );
+  const policyRefs: CfcPolicyRefAtom[] = [namedPolicyRef, modulePolicyRef];
+  // @ts-expect-error module and named addressing fields are disjoint.
+  const ambiguousPolicyRef: CfcPolicyRefAtom = {
+    ...modulePolicyRef,
+    name: "named",
+    hash: "sha256:named",
+  };
   const userSurfaceInputAtom: CfcUserSurfaceInputAtom = cfcAtom
     .userSurfaceInput("did:user:1", "TrustedSurface", "sha256:abc");
   const promptSlotBoundAtom: CfcPromptSlotBoundAtom<
@@ -200,6 +221,8 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(trustedWriteWithIntegrity, { title: "xi" });
   assertEquals(trustedUiContract, "omicron");
   assertEquals(caveatWithByAtom.by, caveatAtom);
+  assertEquals(policyRefs.length, 2);
+  assertEquals(ambiguousPolicyRef.name, "named");
   assertEquals(atomValues.length, 9);
   assertEquals(aliasNames, [
     "Cfc",

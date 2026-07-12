@@ -118,12 +118,30 @@ export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
   readonly subject: string;
 };
-export type CfcPolicyRefAtom = CfcAtomObject & {
+export type CfcNamedPolicyRefAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Policy | typeof CFC_ATOM_TYPE.Context;
   readonly name: string;
   readonly subject: string;
   readonly hash: string;
+  readonly policyRefKind?: never;
+  readonly moduleIdentity?: never;
+  readonly symbol?: never;
+  readonly policyDigest?: never;
 };
+export type CfcPolicySubjectCommitment = CfcAtomObject & {
+  readonly digestOf: string;
+};
+export type CfcModulePolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy;
+  readonly policyRefKind: "module";
+  readonly moduleIdentity: string;
+  readonly symbol: string;
+  readonly policyDigest: string;
+  readonly subject: string | CfcPolicySubjectCommitment;
+  readonly name?: never;
+  readonly hash?: never;
+};
+export type CfcPolicyRefAtom = CfcNamedPolicyRefAtom | CfcModulePolicyRefAtom;
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
   readonly id: string;
@@ -277,12 +295,18 @@ export declare const cfcAtom: {
     name: string,
     subject: string,
     hash: string,
-  ) => CfcPolicyRefAtom;
+  ) => CfcNamedPolicyRefAtom;
   readonly contextRef: (
     name: string,
     subject: string,
     hash: string,
-  ) => CfcPolicyRefAtom;
+  ) => CfcNamedPolicyRefAtom;
+  readonly modulePolicyRef: (
+    moduleIdentity: string,
+    symbol: string,
+    policyDigest: string,
+    subject: string | CfcPolicySubjectCommitment,
+  ) => CfcModulePolicyRefAtom;
   readonly space: (id: string) => CfcSpaceAtom;
   readonly personalSpace: (owner: string) => CfcPersonalSpaceAtom;
   readonly expires: (timestamp: number) => CfcExpiresAtom;

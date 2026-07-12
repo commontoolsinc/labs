@@ -45,6 +45,25 @@ Deno.test("cfcAtom mints hash-bound policy references (spec §4.4.2)", () => {
   });
 });
 
+Deno.test("cfcAtom mints exact module-policy references (spec §4.4.2)", () => {
+  assertEquals(
+    cfcAtom.modulePolicyRef(
+      "sha256:module",
+      "releaseRules",
+      "sha256:manifest",
+      "did:key:alice",
+    ),
+    {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: "sha256:module",
+      symbol: "releaseRules",
+      policyDigest: "sha256:manifest",
+      subject: "did:key:alice",
+    },
+  );
+});
+
 Deno.test("cfcAtom mints HasRole facts", () => {
   assertEquals(cfcAtom.hasRole("did:key:alice", "space:x", "reader"), {
     type: CFC_ATOM_TYPE.HasRole,

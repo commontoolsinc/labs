@@ -219,17 +219,47 @@ export type CfcUserAtom = CfcAtomObject & {
 };
 
 /**
- * Hash-bound policy reference (spec §4.1.2 `PolicyRefAtom`): `name` selects
+ * Existing hash-bound named policy reference (spec §4.1.2
+ * `PolicyRefAtom`): `name` selects
  * the record, `subject` is the principal the policy speaks for, `hash` binds
  * the exact record content (required in runtime labels, §4.4.2 — an unbound
  * name selects nothing). `Policy` and `Context` share the shape.
  */
-export type CfcPolicyRefAtom = CfcAtomObject & {
+export type CfcNamedPolicyRefAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Policy | typeof CFC_ATOM_TYPE.Context;
   readonly name: string;
   readonly subject: string;
   readonly hash: string;
+  readonly policyRefKind?: never;
+  readonly moduleIdentity?: never;
+  readonly symbol?: never;
+  readonly policyDigest?: never;
 };
+
+/** Commitment-form subject used after cross-space label representation. */
+export type CfcPolicySubjectCommitment = CfcAtomObject & {
+  readonly digestOf: string;
+};
+
+/**
+ * Exact reference to a compiler-verified, subject-independent module policy
+ * manifest (spec §4.3.6/§4.4.2). Structurally disjoint from the named form.
+ */
+export type CfcModulePolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy;
+  readonly policyRefKind: "module";
+  readonly moduleIdentity: string;
+  readonly symbol: string;
+  readonly policyDigest: string;
+  readonly subject: string | CfcPolicySubjectCommitment;
+  readonly name?: never;
+  readonly hash?: never;
+};
+
+/** Both runtime label-time policy-reference families. */
+export type CfcPolicyRefAtom =
+  | CfcNamedPolicyRefAtom
+  | CfcModulePolicyRefAtom;
 
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
@@ -466,12 +496,36 @@ export const cfcAtom = {
     return { type: CFC_ATOM_TYPE.User, subject };
   },
 
-  policyRef(name: string, subject: string, hash: string): CfcPolicyRefAtom {
+  policyRef(
+    name: string,
+    subject: string,
+    hash: string,
+  ): CfcNamedPolicyRefAtom {
     return { type: CFC_ATOM_TYPE.Policy, name, subject, hash };
   },
 
-  contextRef(name: string, subject: string, hash: string): CfcPolicyRefAtom {
+  contextRef(
+    name: string,
+    subject: string,
+    hash: string,
+  ): CfcNamedPolicyRefAtom {
     return { type: CFC_ATOM_TYPE.Context, name, subject, hash };
+  },
+
+  modulePolicyRef(
+    moduleIdentity: string,
+    symbol: string,
+    policyDigest: string,
+    subject: string | CfcPolicySubjectCommitment,
+  ): CfcModulePolicyRefAtom {
+    return {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity,
+      symbol,
+      policyDigest,
+      subject,
+    };
   },
 
   space(id: string): CfcSpaceAtom {

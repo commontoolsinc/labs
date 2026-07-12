@@ -141,6 +141,25 @@ describe("CFC label representation transform (inv-12 Stage 1)", () => {
       ]);
     });
 
+    it("keeps module-policy lookup fields public and commits its subject", () => {
+      const moduleRef = {
+        type: CFC_ATOM_TYPE.Policy,
+        policyRefKind: "module",
+        moduleIdentity: "sha256:module",
+        symbol: "releaseRules",
+        policyDigest: "sha256:manifest",
+        subject: alice,
+      };
+      expect(
+        transformCfcLabelForCrossSpacePersist({
+          confidentiality: [moduleRef],
+        }).confidentiality,
+      ).toEqual([{
+        ...moduleRef,
+        subject: commitCfcFieldValue(alice),
+      }]);
+    });
+
     it("commits nested TransformedBy identity fields via family-scoped paths", () => {
       const transformed = transformCfcLabelForCrossSpacePersist({
         integrity: [{
