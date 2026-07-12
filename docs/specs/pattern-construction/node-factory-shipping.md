@@ -569,6 +569,20 @@ complete artifact closure is durably available in the exact containing space;
 an awaited cross-space by-value copy replicates that closure before commit,
 while a synchronous writer without that proof rejects the value.
 
+### Structured-clone runtime IPC
+
+Browser runtime messages may carry factories inside cell values, VDOM props,
+or telemetry details. Because callable `Factory@1` values are not directly
+structured-cloneable, every such message projects the complete containing
+value through the canonical Fabric JSON codec before crossing the worker
+boundary. An out-of-band protocol discriminator selects that projection;
+authored strings are never sniffed or reinterpreted as Fabric envelopes.
+
+The receiving side performs context-free decode, so every factory leaf is an
+inert callable shell. Worker IPC does not grant materialization or code-loading
+authority, and arbitrary JavaScript functions remain invalid message values.
+Values without factories retain the existing plain structured-clone path.
+
 ### Immutability, cloning, equality, and hashing
 
 Canonical factories are immutable functional values:

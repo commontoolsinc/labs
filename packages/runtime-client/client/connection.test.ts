@@ -12,6 +12,12 @@ import {
   RuntimeErrorCode,
 } from "../protocol/mod.ts";
 import type { RuntimeTransport, RuntimeTransportEvents } from "./transport.ts";
+import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import { encodeFactoryAwareIPCValue } from "../fabric-value-ipc.ts";
 
 /**
  * Transport that records everything sent and auto-acknowledges every request
@@ -270,6 +276,44 @@ describe("RuntimeConnection.attachVDom", () => {
     session.detach();
   });
 
+  it("context-free decodes Factory@1 leaves in VDOM batches", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const session = connection.attachVDom(() => {});
+    const factory = createFactoryShell({
+      kind: "module",
+      ref: { identity: `${"D".repeat(42)}A`, symbol: "vdomFactory" },
+      argumentSchema: true,
+      resultSchema: true,
+    });
+    const encoded = encodeFactoryAwareIPCValue([{
+      op: "set-prop",
+      nodeId: 1,
+      key: "factory",
+      value: factory,
+    }]);
+    const batches: Array<{ ops: Array<{ value?: unknown }> }> = [];
+    session.onBatch((batch) => batches.push(batch as typeof batches[number]));
+
+    transport.emit("message", {
+      type: NotificationType.VDomBatch,
+      batchId: 9,
+      ops: [],
+      encodedOps: encoded.value,
+      opsEncoding: encoded.valueEncoding,
+    } as never);
+
+    expect(batches).toHaveLength(1);
+    const decodedFactory = batches[0].ops[0].value;
+    expect(isAdmittedFabricFactory(decodedFactory)).toBe(true);
+    expect(factoryStateOf(decodedFactory)).toEqual(factoryStateOf(factory));
+    expect(() => (decodedFactory as () => void)()).toThrow(
+      "factory requires runner materialization",
+    );
+    session.detach();
+    await connection.dispose();
+  });
+
   it("skips the unmount round-trip once disposed", async () => {
     const transport = new FakeTransport();
     const connection = await initializedConnection(transport);
@@ -281,6 +325,39 @@ describe("RuntimeConnection.attachVDom", () => {
     // unmount is redundant and is skipped.
     await session.unmount(1);
     expect(transport.sent.length).toBe(sentBefore);
+  });
+});
+
+describe("RuntimeConnection telemetry Factory@1 IPC", () => {
+  it("context-free decodes factory-bearing markers", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const factory = createFactoryShell({
+      kind: "handler",
+      ref: { identity: `${"F".repeat(42)}A`, symbol: "telemetryFactory" },
+      contextSchema: true,
+      eventSchema: true,
+    });
+    const encoded = encodeFactoryAwareIPCValue({
+      type: "scheduler.invocation",
+      factory,
+    });
+    const markers: Array<{ factory?: unknown }> = [];
+    connection.on("telemetry", (notification) => {
+      markers.push(notification.marker as typeof markers[number]);
+    });
+
+    transport.emit("message", {
+      type: NotificationType.Telemetry,
+      marker: {},
+      encodedMarker: encoded.value,
+      markerEncoding: encoded.valueEncoding,
+    } as never);
+
+    expect(markers).toHaveLength(1);
+    expect(isAdmittedFabricFactory(markers[0].factory)).toBe(true);
+    expect(factoryStateOf(markers[0].factory)).toEqual(factoryStateOf(factory));
+    await connection.dispose();
   });
 });
 

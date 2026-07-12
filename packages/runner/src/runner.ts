@@ -121,7 +121,10 @@ import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { getArtifactEntryRef } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  resolveOriginal,
+} from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
