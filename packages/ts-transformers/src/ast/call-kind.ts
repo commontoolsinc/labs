@@ -290,18 +290,202 @@ export function isPatternBuilderCall(
     target.name.text === "pattern";
 }
 
-export function getPatternBuilderCallbackArgument(
+export interface PatternBuilderCallbackDescriptor {
+  /** The `pattern(...)` builder call that owns this callback. */
+  readonly call: ts.CallExpression;
+  /** The complete expression in pattern argument 0, including the carrier. */
+  readonly argument: ts.Expression;
+  /** The expression the carrier (when present) receives as argument 0. */
+  readonly callbackArgument: ts.Expression;
+  /** The resolved callback used by callback analysis and lowering. */
+  readonly callback: ts.ArrowFunction | ts.FunctionExpression;
+  /**
+   * The exact compiler-only params-schema carrier. This is deliberately a
+   * syntactic `__cfHelpers` check: authored aliases must not acquire trusted
+   * compiler-metadata semantics.
+   */
+  readonly paramsSchemaCarrier?: ts.CallExpression;
+  /** The carrier's schema argument, when compiler metadata is present. */
+  readonly paramsSchema?: ts.Expression;
+}
+
+function getPatternParamsSchemaCarrier(
+  expression: ts.Expression,
+): ts.CallExpression | undefined {
+  const target = stripWrappers(expression);
+  if (!ts.isCallExpression(target) || target.arguments.length !== 2) {
+    return undefined;
+  }
+
+  const callee = stripWrappers(target.expression);
+  if (
+    !ts.isPropertyAccessExpression(callee) ||
+    !ts.isIdentifier(callee.expression) ||
+    callee.expression.text !== CF_HELPERS_IDENTIFIER ||
+    callee.name.text !== "withPatternParamsSchema"
+  ) {
+    return undefined;
+  }
+
+  return target;
+}
+
+/**
+ * Describe a pattern callback without losing the compiler-only
+ * `withPatternParamsSchema(callback, schema)` carrier around it.
+ *
+ * Consumers that only analyze the callback can read `callback`. Consumers
+ * that rebuild argument 0 must retain `argument`/`paramsSchemaCarrier` (or use
+ * `updatePatternBuilderCallbackArgument`) so schema metadata reaches the eager
+ * runtime constructor.
+ */
+export function getPatternBuilderCallbackDescriptor(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+): PatternBuilderCallbackDescriptor | undefined {
   if (!isPatternBuilderCall(call, checker)) {
     return undefined;
   }
 
-  const callbackArg = call.arguments[0];
-  return callbackArg
-    ? resolveCallbackFunctionExpression(callbackArg, checker)
+  const argument = call.arguments[0];
+  if (!argument) {
+    return undefined;
+  }
+
+  const paramsSchemaCarrier = getPatternParamsSchemaCarrier(argument);
+  const callbackArgument = paramsSchemaCarrier?.arguments[0] ?? argument;
+  const callback = callbackArgument
+    ? resolveCallbackFunctionExpression(callbackArgument, checker)
     : undefined;
+  if (!callback) {
+    return undefined;
+  }
+
+  return {
+    call,
+    argument,
+    callbackArgument,
+    callback,
+    ...(paramsSchemaCarrier && {
+      paramsSchemaCarrier,
+      paramsSchema: paramsSchemaCarrier.arguments[1],
+    }),
+  };
+}
+
+/**
+ * Find the owning pattern descriptor for an inline callback. The short
+ * ancestor walk crosses expression wrappers and the compiler params-schema
+ * carrier, but never crosses another function boundary.
+ */
+export function findEnclosingPatternBuilderCallbackDescriptor(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+): PatternBuilderCallbackDescriptor | undefined {
+  let current: ts.Node | undefined = callback.parent;
+  while (current) {
+    if (ts.isCallExpression(current)) {
+      const descriptor = getPatternBuilderCallbackDescriptor(current, checker);
+      if (descriptor?.callback === callback) {
+        return descriptor;
+      }
+    }
+    if (ts.isFunctionLike(current)) {
+      return undefined;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function replacePatternCallbackCarrier(
+  expression: ts.Expression,
+  carrier: ts.CallExpression,
+  replacement: ts.CallExpression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (expression === carrier) {
+    return replacement;
+  }
+  if (ts.isParenthesizedExpression(expression)) {
+    return factory.updateParenthesizedExpression(
+      expression,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+    );
+  }
+  if (ts.isAsExpression(expression)) {
+    return factory.updateAsExpression(
+      expression,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+      expression.type,
+    );
+  }
+  if (ts.isTypeAssertionExpression(expression)) {
+    return factory.updateTypeAssertion(
+      expression,
+      expression.type,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+    );
+  }
+  if (ts.isNonNullExpression(expression)) {
+    return factory.updateNonNullExpression(
+      expression,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+    );
+  }
+  return expression;
+}
+
+/** Rebuild pattern argument 0 while retaining compiler params metadata. */
+export function updatePatternBuilderCallbackArgument(
+  descriptor: PatternBuilderCallbackDescriptor,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  const carrier = descriptor.paramsSchemaCarrier;
+  if (!carrier) {
+    return callback;
+  }
+
+  const updatedCarrier = factory.updateCallExpression(
+    carrier,
+    carrier.expression,
+    carrier.typeArguments,
+    [callback, ...carrier.arguments.slice(1)],
+  );
+  return replacePatternCallbackCarrier(
+    descriptor.argument,
+    carrier,
+    updatedCarrier,
+    factory,
+  );
+}
+
+export function getPatternBuilderCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  return getPatternBuilderCallbackDescriptor(call, checker)?.callback;
 }
 
 export function getPatternToolCallbackArgument(
@@ -323,6 +507,87 @@ export function getPatternToolCallbackArgument(
   return callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;
+}
+
+export type LegacyPatternCarrierKind = "pattern-tool" | "with-pattern";
+
+/**
+ * Classify the compatibility carrier whose argument 0 contains a legacy
+ * pattern builder call.
+ *
+ * Parentheses and type-only wrappers do not change argument ownership. Earlier
+ * transformer passes can also clone the pattern call without retaining a
+ * useful synthetic parent chain, so classification consults the authored
+ * original node as a second ancestry root. Keeping this in call-kind prevents
+ * closure conversion, callback-boundary policy, and late hoisting from
+ * disagreeing about the same carrier.
+ */
+export function classifyLegacyPatternCarrier(
+  patternCall: ts.CallExpression,
+  checker: ts.TypeChecker,
+): LegacyPatternCarrierKind | undefined {
+  const candidates = [patternCall];
+  const original = ts.getOriginalNode(patternCall);
+  if (
+    original !== patternCall && ts.isCallExpression(original)
+  ) {
+    candidates.push(original);
+  }
+
+  for (const candidate of candidates) {
+    const carrier = findCallArgumentOwnerThroughTransparentWrappers(
+      candidate,
+      0,
+    );
+    if (!carrier) continue;
+
+    const callee = stripWrappers(carrier.expression);
+    if (
+      ts.isPropertyAccessExpression(callee) &&
+      getArrayMethodAccessKindByName(callee.name.text)?.lowered
+    ) {
+      return "with-pattern";
+    }
+    if (detectCallKind(carrier, checker)?.kind === "pattern-tool") {
+      return "pattern-tool";
+    }
+  }
+  return undefined;
+}
+
+function findCallArgumentOwnerThroughTransparentWrappers(
+  expression: ts.Expression,
+  argumentIndex: number,
+): ts.CallExpression | undefined {
+  let current = expression;
+  while (true) {
+    const parent = current.parent;
+    if (parent && isTransparentExpressionWrapperOf(parent, current)) {
+      current = parent;
+      continue;
+    }
+    return parent && ts.isCallExpression(parent) &&
+        parent.arguments[argumentIndex] === current
+      ? parent
+      : undefined;
+  }
+}
+
+function isTransparentExpressionWrapperOf(
+  node: ts.Node,
+  expression: ts.Expression,
+): node is
+  | ts.ParenthesizedExpression
+  | ts.AsExpression
+  | ts.TypeAssertion
+  | ts.SatisfiesExpression
+  | ts.NonNullExpression
+  | ts.PartiallyEmittedExpression {
+  return (
+    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node) || ts.isPartiallyEmittedExpression(node)
+  ) && node.expression === expression;
 }
 
 /**
@@ -1406,7 +1671,10 @@ function stripWrappers(expression: ts.Expression): ts.Expression {
       current = current.expression;
       continue;
     }
-    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
+    if (
+      ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) ||
+      ts.isSatisfiesExpression(current)
+    ) {
       current = current.expression;
       continue;
     }

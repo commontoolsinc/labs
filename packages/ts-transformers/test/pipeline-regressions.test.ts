@@ -1171,6 +1171,42 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
 );
 
 Deno.test(
+  "Pipeline regression: nested pattern public input and closure params stay separate",
+  async () => {
+    const output = await transformSource(
+      `import { pattern } from "commonfabric";
+
+export default pattern<{ prefix: string }>(({ prefix }) => ({
+  child: pattern<{ suffix: string }>(({ suffix }) => ({ prefix, suffix })),
+}));
+`,
+      { types: COMMONFABRIC_TYPES },
+    );
+    const root = parseModule(output);
+    const carrier = callsNamed(root, "withPatternParamsSchema")[0];
+    assert(carrier, "expected compiler params-schema carrier");
+    const callback = carrier.arguments[0];
+    assert(callback && ts.isArrowFunction(callback));
+    assertEquals(callback.parameters.length, 2);
+    assert(ts.isIdentifier(callback.parameters[0]!.name));
+    assert(ts.isObjectBindingPattern(callback.parameters[1]!.name));
+    assertEquals(callback.parameters[1]!.name.getText(root), "{ prefix }");
+
+    const privateSchema = literalToValue(carrier.arguments[1]!) as {
+      properties?: Record<string, unknown>;
+    };
+    assertEquals(Object.keys(privateSchema.properties ?? {}), ["prefix"]);
+    const base = carrier.parent;
+    assert(base && ts.isCallExpression(base));
+    const publicSchema = literalToValue(base.arguments[1]!) as {
+      properties?: Record<string, unknown>;
+    };
+    assertEquals(Object.keys(publicSchema.properties ?? {}), ["suffix"]);
+    assertEquals(callsNamed(root, "curry").length, 1);
+  },
+);
+
+Deno.test(
   "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
   async () => {
     const source = `import { pattern, Writable } from "commonfabric";

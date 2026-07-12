@@ -34,7 +34,11 @@ interface DefaultUnionEntry {
 function getTypeNodeMemberType(
   node: ts.TypeNode,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.Type | undefined {
+  const registered = typeRegistry?.get(node) ??
+    typeRegistry?.get(ts.getOriginalNode(node));
+  if (registered) return registered;
   try {
     return checker.getTypeFromTypeNode(node);
   } catch {
@@ -58,10 +62,11 @@ function orderMemberNodesBySemanticType(
   members: readonly ts.Type[],
   memberNodes: readonly ts.TypeNode[],
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): Array<ts.TypeNode | undefined> {
   const remaining = memberNodes.map((node) => ({
     node,
-    type: getTypeNodeMemberType(node, checker),
+    type: getTypeNodeMemberType(node, checker, typeRegistry),
   }));
 
   return members.map((member) => {
@@ -100,6 +105,7 @@ export class UnionFormatter implements TypeFormatter {
         members,
         memberNodes,
         context.typeChecker,
+        context.typeRegistry,
       )
       : undefined;
 

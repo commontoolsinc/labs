@@ -143,6 +143,10 @@ export default pattern(() => {
                 contextSchema: {
                     type: "object",
                     properties: {
+                        count: {
+                            type: "number",
+                            asCell: ["cell"]
+                        },
                         users: {
                             type: "array",
                             items: {
@@ -160,18 +164,14 @@ export default pattern(() => {
                                 },
                                 required: ["id", "name", "email"]
                             },
-                            asCell: ["cell"]
+                            asCell: ["writeonly"]
                         },
                         lastAction: {
                             type: "string",
-                            asCell: ["cell"]
-                        },
-                        count: {
-                            type: "number",
-                            asCell: ["cell"]
+                            asCell: ["writeonly"]
                         }
                     },
-                    required: ["users", "lastAction", "count"]
+                    required: ["count", "users", "lastAction"]
                 },
                 eventSchema: {
                     type: "object",
@@ -184,9 +184,6 @@ export default pattern(() => {
                                 },
                                 email: {
                                     type: "string"
-                                },
-                                age: {
-                                    type: "number"
                                 }
                             },
                             required: ["name", "email"]

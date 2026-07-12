@@ -20,6 +20,7 @@ import {
 import { getEnclosingFunctionLikeDeclaration } from "../../src/ast/function-predicates.ts";
 import {
   getPatternBuilderCallbackArgument,
+  getPatternBuilderCallbackDescriptor,
   getPatternToolHoistablePatternCall,
   getWithPatternHoistablePatternCall,
 } from "../../src/ast/call-kind.ts";
@@ -334,6 +335,34 @@ Deno.test("getPatternBuilderCallbackArgument unwraps a function-hardening wrappe
   // reach the underlying arrow function.
   assert(callback && ts.isArrowFunction(callback));
   assertEquals(callback.parameters[0]?.name.getText(), "input");
+});
+
+Deno.test("getPatternBuilderCallbackArgument unwraps the compiler params-schema carrier", () => {
+  const { sourceFile, checker } = createProgramWithCommonFabric(`
+    import { __cfHelpers, pattern } from "commonfabric";
+    const value = pattern(__cfHelpers.withPatternParamsSchema(
+      (input: unknown, params: unknown) => ({ input, params }),
+      { type: "object", properties: {} },
+    ));
+  `);
+
+  const call = findCall(sourceFile, "value");
+  const descriptor = getPatternBuilderCallbackDescriptor(call, checker);
+  const callback = descriptor?.callback;
+
+  assert(callback && ts.isArrowFunction(callback));
+  assertEquals(
+    callback.parameters.map((parameter) => parameter.name.getText()),
+    [
+      "input",
+      "params",
+    ],
+  );
+  assert(descriptor.paramsSchemaCarrier);
+  assertEquals(
+    descriptor.paramsSchema?.getText(),
+    `{ type: "object", properties: {} }`,
+  );
 });
 
 Deno.test("getPatternBuilderCallbackArgument follows an identifier bound to the callback arrow", () => {

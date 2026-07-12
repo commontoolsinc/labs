@@ -2,7 +2,8 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   getCapabilitySummaryCallbackArgument,
-  getPatternBuilderCallbackArgument,
+  getPatternBuilderCallbackDescriptor,
+  updatePatternBuilderCallbackArgument,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -192,9 +193,10 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
 
     // ── Main transform pass ────────────────────────────────────────────
     const visit: ts.Visitor = (node: ts.Node): ts.Node => {
-      const callback = ts.isCallExpression(node)
-        ? getPatternBuilderCallbackArgument(node, context.checker)
+      const descriptor = ts.isCallExpression(node)
+        ? getPatternBuilderCallbackDescriptor(node, context.checker)
         : undefined;
+      const callback = descriptor?.callback;
       const arrayMethodInfo = ts.isCallExpression(node) && callback
         ? getArrayMethodCallbackInfo(node, scopeStack.at(-1), context)
         : undefined;
@@ -215,23 +217,28 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
         return visitedNode;
       }
 
-      const callbackArg = getPatternBuilderCallbackArgument(
+      const callbackDescriptor = getPatternBuilderCallbackDescriptor(
         visitedNode,
         context.checker,
       );
-      if (callbackArg) {
+      if (callbackDescriptor) {
         const transformedCallback = transformPatternCallback(
-          callbackArg,
+          callbackDescriptor.callback,
           context,
           !!arrayMethodInfo?.isArrayMethodCallback,
           arrayMethodInfo?.nonReactiveCaptures,
+        );
+        const transformedArgument = updatePatternBuilderCallbackArgument(
+          callbackDescriptor,
+          transformedCallback,
+          context.factory,
         );
         const rewritten = context.factory.updateCallExpression(
           visitedNode,
           visitedNode.expression,
           visitedNode.typeArguments,
           [
-            transformedCallback,
+            transformedArgument,
             ...visitedNode.arguments.slice(1),
           ],
         );

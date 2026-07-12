@@ -1,0 +1,1088 @@
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import ts from "typescript";
+
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callsNamed, literalToValue, parseModule } from "./transformed-ast.ts";
+import { transformSource, validateSource } from "./utils.ts";
+
+interface PatternContract {
+  kind: "pattern";
+  argumentSchema: unknown;
+  resultSchema: unknown;
+}
+
+function patternCalls(root: ts.SourceFile): ts.CallExpression[] {
+  return callsNamed(root, "pattern").filter((call) =>
+    call.arguments.length === 3
+  );
+}
+
+function basePatternCalls(root: ts.SourceFile): ts.CallExpression[] {
+  return patternCalls(root).filter((call) =>
+    ts.isPropertyAccessExpression(call.expression) &&
+    call.expression.name.text === "pattern"
+  );
+}
+
+function rootPatternCall(root: ts.SourceFile): ts.CallExpression {
+  const call = patternCalls(root).find((candidate) =>
+    ts.isIdentifier(candidate.expression) &&
+    candidate.expression.text === "pattern"
+  );
+  assert(call, root.getFullText());
+  return call;
+}
+
+function callContract(call: ts.CallExpression): PatternContract {
+  return {
+    kind: "pattern",
+    argumentSchema: literalToValue(call.arguments[1]!),
+    resultSchema: literalToValue(call.arguments[2]!),
+  };
+}
+
+function resultProperties(call: ts.CallExpression): Record<string, unknown> {
+  const schema = literalToValue(call.arguments[2]!) as {
+    properties: Record<string, unknown>;
+  };
+  return schema.properties;
+}
+
+function propertyContract(value: unknown): PatternContract {
+  return (value as { asFactory: PatternContract }).asFactory;
+}
+
+function collectPropertyContracts(value: unknown): PatternContract[] {
+  const found: PatternContract[] = [];
+  const visit = (entry: unknown): void => {
+    if (Array.isArray(entry)) {
+      for (const child of entry) visit(child);
+      return;
+    }
+    if (!entry || typeof entry !== "object") return;
+    const record = entry as Record<string, unknown>;
+    if (record.asFactory) {
+      const contract = record.asFactory as PatternContract;
+      if (contract.kind === "pattern") found.push(contract);
+    }
+    for (const child of Object.values(record)) visit(child);
+  };
+  visit(value);
+  return found;
+}
+
+function requiredFields(schema: unknown): readonly string[] {
+  return (schema as { required?: readonly string[] }).required ?? [];
+}
+
+Deno.test("nested factory schemas match the hoisted base contract exactly", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ prefix: string }>(({ prefix }) => ({
+  child: pattern<{ suffix: string }>(({ suffix }) => ({ prefix, suffix })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const calls = patternCalls(root);
+  const base = calls.find((call) =>
+    call.arguments[0] &&
+    callsNamed(call.arguments[0], "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+  const outer = calls.find((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "pattern"
+  );
+  assert(outer, output);
+
+  const baseArgumentSchema = literalToValue(base.arguments[1]!);
+  const baseResultSchema = literalToValue(base.arguments[2]!);
+  const outerResultSchema = literalToValue(outer.arguments[2]!) as {
+    properties: {
+      child: {
+        asFactory: {
+          argumentSchema: unknown;
+          resultSchema: unknown;
+        };
+      };
+    };
+  };
+  const childContract = outerResultSchema.properties.child.asFactory;
+
+  assertEquals(childContract.argumentSchema, baseArgumentSchema);
+  assertEquals(childContract.resultSchema, baseResultSchema);
+});
+
+Deno.test("local aliases and shorthand properties retain exact factory contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => {
+  const child = pattern<{ value: string }>(({ value }) => ({ size: value.length }));
+  return { child };
+});
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const [base] = basePatternCalls(root);
+  assert(base, output);
+
+  assertEquals(
+    propertyContract(resultProperties(rootPatternCall(root)).child),
+    callContract(base),
+  );
+});
+
+Deno.test("object-container aliases retain nested exact factory contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => {
+  const bag = {
+    child: pattern<{ value: string }>(({ value }) => ({ size: value.length })),
+  };
+  return bag;
+});
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const [base] = basePatternCalls(root);
+  assert(base, output);
+  assertEquals(
+    propertyContract(resultProperties(rootPatternCall(root)).child),
+    callContract(base),
+  );
+});
+
+Deno.test("selected container members retain exact factory contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => {
+  const bag = {
+    child: pattern<{ value: string }>(({ value }) => ({ size: value.length })),
+  };
+  const tuple = [
+    pattern<{ count: number }>(({ count }) => ({ label: String(count) })),
+  ] as const;
+  const { child: destructured } = bag;
+  return {
+    property: bag.child,
+    element: tuple[0],
+    destructured,
+  };
+});
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const bases = basePatternCalls(root);
+  const byInput = new Map(
+    bases.map((call) => [
+      requiredFields(callContract(call).argumentSchema)[0],
+      callContract(call),
+    ]),
+  );
+  const properties = resultProperties(rootPatternCall(root));
+
+  assertEquals(propertyContract(properties.property), byInput.get("value"));
+  assertEquals(propertyContract(properties.destructured), byInput.get("value"));
+  assertEquals(propertyContract(properties.element), byInput.get("count"));
+});
+
+Deno.test("conditional containers retain every nested factory contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ enabled: boolean }>(({ enabled }) => {
+  const text = {
+    child: pattern<{ value: string }>(({ value }) => ({ text: value })),
+  };
+  const size = {
+    child: pattern<{ value: string }>(({ value }) => ({ size: value.length })),
+  };
+  return enabled ? text : size;
+});
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const expected = basePatternCalls(root).map(callContract);
+  const actual = collectPropertyContracts(
+    resultProperties(rootPatternCall(root)).child,
+  );
+
+  assertEquals(actual.length, 2, output);
+  for (const contract of expected) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(contract)
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("capture-free and zero-input nested factories keep exact contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  free: pattern<{ value: string }>(({ value }) => ({ value })),
+  zero: pattern(() => ({ ready: true as boolean })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const bases = basePatternCalls(root);
+  assertEquals(bases.length, 2, output);
+  const properties = resultProperties(rootPatternCall(root));
+  const free = bases.find((call) =>
+    requiredFields(callContract(call).argumentSchema).includes("value")
+  );
+  const zero = bases.find((call) =>
+    callContract(call).argumentSchema === false
+  );
+  assert(free && zero, output);
+
+  assertEquals(propertyContract(properties.free), callContract(free));
+  assertEquals(propertyContract(properties.zero), callContract(zero));
+});
+
+Deno.test("nested wrapper contracts are exact at both factory boundaries", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ prefix: string }>(({ prefix }) => ({
+  outer: pattern<{ suffix: string }>(({ suffix }) => ({
+    inner: pattern<{ value: string }>(({ value }) => ({ prefix, suffix, value })),
+  })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const bases = basePatternCalls(root);
+  const outerBase = bases.find((call) =>
+    requiredFields(callContract(call).argumentSchema).includes("suffix")
+  );
+  const innerBase = bases.find((call) =>
+    requiredFields(callContract(call).argumentSchema).includes("value")
+  );
+  assert(outerBase && innerBase, output);
+
+  const rootOuter = propertyContract(
+    resultProperties(rootPatternCall(root)).outer,
+  );
+  assertEquals(rootOuter, callContract(outerBase));
+  const nestedInner = propertyContract(resultProperties(outerBase).inner);
+  assertEquals(nestedInner, callContract(innerBase));
+});
+
+Deno.test("conditional factory unions match both input and output contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ enabled: boolean }>(({ enabled }) => ({
+  child: enabled
+    ? pattern<{ left: string }>(({ left }) => ({ value: left }))
+    : pattern<{ right: string }>(({ right }) => ({ value: right })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const expected = basePatternCalls(root).map(callContract);
+  assertEquals(expected.length, 2, output);
+  const child = resultProperties(rootPatternCall(root)).child as {
+    anyOf: Array<{ asFactory: PatternContract }>;
+  };
+  const actual = child.anyOf.map((entry) => entry.asFactory);
+
+  for (const contract of expected) {
+    const required = requiredFields(contract.argumentSchema);
+    assert(
+      actual.some((candidate) =>
+        requiredFields(candidate.argumentSchema)[0] === required[0] &&
+        JSON.stringify(candidate.resultSchema) ===
+          JSON.stringify(contract.resultSchema)
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("same-input conditional alternatives retain distinct output contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ enabled: boolean }>(({ enabled }) => ({
+  child: enabled
+    ? pattern<{ value: string }>(({ value }) => ({ text: value }))
+    : pattern<{ value: string }>(({ value }) => ({ size: value.length })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const expected = basePatternCalls(root).map(callContract);
+  assertEquals(expected.length, 2, output);
+  const actual = collectPropertyContracts(
+    resultProperties(rootPatternCall(root)).child,
+  );
+
+  assertEquals(actual.length, 2, output);
+  for (const contract of expected) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(contract)
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("nested factory metadata keeps text-identical outer contracts distinct", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern<{ enabled: boolean }>(({ enabled }) => ({
+  child: enabled
+    ? pattern<{ x: string }>(({ x }) => ({
+      inner: pattern<{ value: string }>(({ value }) => ({ text: x + value })),
+    }))
+    : pattern<{ x: string }>(({ x }) => ({
+      inner: pattern<{ value: string }>(({ value }) => ({ size: (x + value).length })),
+    })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const outerBases = basePatternCalls(root).filter((call) =>
+    requiredFields(callContract(call).argumentSchema).includes("x")
+  );
+  assertEquals(outerBases.length, 2, output);
+  const child = resultProperties(rootPatternCall(root)).child as {
+    anyOf?: Array<{ asFactory: PatternContract }>;
+  };
+  const actual = child.anyOf?.map((entry) => entry.asFactory) ?? [];
+
+  assertEquals(actual.length, 2, output);
+  for (const base of outerBases) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(callContract(base))
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("mixed inline and module factories retain every exact contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+const Existing = pattern<{ value: string }>(({ value }) => ({ size: value.length }));
+
+export default pattern<{ enabled: boolean }>(({ enabled }) => ({
+  child: enabled
+    ? pattern<{ value: string }>(({ value }) => ({ text: value }))
+    : Existing,
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const existing = patternCalls(root).find((call) =>
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === "pattern" &&
+    requiredFields(callContract(call).argumentSchema).includes("value")
+  );
+  const outer = patternCalls(root).find((call) =>
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === "pattern" &&
+    requiredFields(callContract(call).argumentSchema).includes("enabled")
+  );
+  const inline = basePatternCalls(root).find((call) =>
+    requiredFields(callContract(call).argumentSchema).includes("value")
+  );
+  assert(existing && outer && inline, output);
+  const child = resultProperties(outer).child as {
+    anyOf?: Array<{ asFactory: PatternContract }>;
+  };
+  const actual = child.anyOf?.map((entry) => entry.asFactory) ?? [];
+
+  assertEquals(actual.length, 2, output);
+  for (const call of [inline, existing]) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(callContract(call))
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("array and tuple containers retain every exact factory contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  tuple: [
+    pattern<{ left: string }>(({ left }) => ({ value: left })),
+    pattern<{ right: number }>(({ right }) => ({ value: String(right) })),
+  ] as const,
+  array: [
+    pattern<{ alpha: string }>(({ alpha }) => ({ value: alpha })),
+    pattern<{ beta: number }>(({ beta }) => ({ value: String(beta) })),
+  ],
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const expected = basePatternCalls(root).map(callContract);
+  assertEquals(expected.length, 4, output);
+  const properties = resultProperties(rootPatternCall(root));
+  const actual = [
+    ...collectPropertyContracts(properties.tuple),
+    ...collectPropertyContracts(properties.array),
+  ];
+  assertEquals(actual.length, 4, output);
+  for (const contract of expected) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(contract)
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("homogeneous arrays retain every distinct factory output contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  children: [
+    pattern<{ value: string }>(({ value }) => ({ text: value })),
+    pattern<{ value: string }>(({ value }) => ({ size: value.length })),
+  ],
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const expected = basePatternCalls(root).map(callContract);
+  assertEquals(expected.length, 2, output);
+  const actual = collectPropertyContracts(
+    resultProperties(rootPatternCall(root)).children,
+  );
+
+  assertEquals(actual.length, 2, output);
+  for (const contract of expected) {
+    assert(
+      actual.some((candidate) =>
+        JSON.stringify(candidate) === JSON.stringify(contract)
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("explicit result types and typed schema arguments retain canonical contracts", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  explicit: pattern<{ value: string }, { size: number }>(
+    ({ value }) => ({ size: value.length }),
+  ),
+  schemas: pattern<{ value: string }>(
+    ({ value }) => ({ size: value.length }),
+    {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    },
+    {
+      type: "object",
+      properties: { size: { type: "number" } },
+      required: ["size"],
+    },
+  ),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const bases = basePatternCalls(root);
+  assertEquals(bases.length, 2, output);
+  const properties = resultProperties(rootPatternCall(root));
+
+  assertEquals(propertyContract(properties.explicit), callContract(bases[0]!));
+  assertEquals(propertyContract(properties.schemas), callContract(bases[1]!));
+});
+
+Deno.test("typed schema arguments retain authored metadata as the canonical contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+const Existing = pattern<{ value: string }>(
+  ({ value }) => ({ size: value.length }),
+  {
+    type: "object",
+    description: "typed authored input",
+    properties: { value: { type: "string", minLength: 2 } },
+    required: ["value"],
+  } as const,
+  {
+    type: "object",
+    description: "typed authored output",
+    properties: { size: { type: "number", minimum: 0 } },
+    required: ["size"],
+  } as const,
+);
+
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const calls = patternCalls(root).filter((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "pattern"
+  );
+  const existing = calls[0];
+  const outer = calls.at(-1);
+  assert(existing && outer, output);
+  const expected: PatternContract = {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      description: "typed authored input",
+      properties: { value: { type: "string", minLength: 2 } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      description: "typed authored output",
+      properties: { size: { type: "number", minimum: 0 } },
+      required: ["size"],
+    },
+  };
+
+  assertEquals(callContract(existing), expected);
+  assertEquals(propertyContract(resultProperties(outer).child), expected);
+});
+
+Deno.test("module factories retain exact authored schema metadata", async () => {
+  const output = await transformSource(
+    `
+import { lift, pattern } from "commonfabric";
+
+const inputSchema = {
+  type: "object",
+  description: "module input",
+  properties: { value: { type: "string", minLength: 2 } },
+  required: ["value"],
+} as const;
+const outputSchema = {
+  type: "object",
+  description: "module output",
+  properties: { size: { type: "number", minimum: 0 } },
+  required: ["size"],
+} as const;
+const operation = lift(
+  (input: { value: string }) => ({ size: input.value.length }),
+  inputSchema,
+  outputSchema,
+);
+
+export default pattern(() => ({ operation }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contract = (resultProperties(rootPatternCall(parseModule(output)))
+    .operation as { asFactory: Record<string, unknown> }).asFactory;
+
+  assertEquals(contract, {
+    kind: "module",
+    argumentSchema: {
+      type: "object",
+      description: "module input",
+      properties: { value: { type: "string", minLength: 2 } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      description: "module output",
+      properties: { size: { type: "number", minimum: 0 } },
+      required: ["size"],
+    },
+  });
+});
+
+Deno.test("handler factories retain exact authored schema metadata", async () => {
+  const output = await transformSource(
+    `
+import { handler, pattern } from "commonfabric";
+
+const eventSchema = {
+  type: "object",
+  description: "handler event",
+  properties: { id: { type: "string", minLength: 1 } },
+  required: ["id"],
+} as const;
+const contextSchema = {
+  type: "object",
+  description: "handler context",
+  properties: { count: { type: "number", minimum: 0 } },
+  required: ["count"],
+} as const;
+const action = handler(
+  eventSchema,
+  contextSchema,
+  (_event: { id: string }, _context: { count: number }) => undefined,
+);
+
+export default pattern(() => ({ action }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contract = (resultProperties(rootPatternCall(parseModule(output)))
+    .action as { asFactory: Record<string, unknown> }).asFactory;
+
+  assertEquals(contract, {
+    kind: "handler",
+    contextSchema: {
+      type: "object",
+      description: "handler context",
+      properties: { count: { type: "number", minimum: 0 } },
+      required: ["count"],
+    },
+    eventSchema: {
+      type: "object",
+      description: "handler event",
+      properties: { id: { type: "string", minLength: 1 } },
+      required: ["id"],
+    },
+  });
+});
+
+Deno.test("inferred module and handler contracts match injected schemas", async () => {
+  const output = await transformSource(
+    `
+import { Cell, handler, lift, pattern } from "commonfabric";
+
+const operation = lift((input: { value: string }) => ({
+  size: input.value.length,
+}));
+const action = handler<
+  { detail: { id: string; ignored?: number } },
+  { count: Cell<number>; untouched: Cell<string> }
+>((event, context) => {
+  context.count.set(event.detail.id.length);
+});
+
+export default pattern(() => ({ operation, action }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const liftCall = callsNamed(root, "lift")[0];
+  const handlerCall = callsNamed(root, "handler")[0];
+  assert(liftCall && handlerCall, output);
+  const properties = resultProperties(rootPatternCall(root));
+
+  assertEquals(
+    (properties.operation as { asFactory: unknown }).asFactory,
+    {
+      kind: "module",
+      argumentSchema: literalToValue(liftCall.arguments[1]!),
+      resultSchema: literalToValue(liftCall.arguments[2]!),
+    },
+  );
+  assertEquals(
+    (properties.action as { asFactory: unknown }).asFactory,
+    {
+      kind: "handler",
+      contextSchema: literalToValue(handlerCall.arguments[1]!),
+      eventSchema: literalToValue(handlerCall.arguments[0]!),
+    },
+  );
+});
+
+Deno.test("toSchema-backed factories retain compiler-generated schema options", async () => {
+  const output = await transformSource(
+    `
+import { pattern, toSchema } from "commonfabric";
+
+interface Input { value: string }
+const inputSchema = toSchema<Input>({
+  description: "generated input",
+  default: { value: "seed" },
+});
+
+export default pattern(() => ({
+  child: pattern<Input>(({ value }) => ({ value }), inputSchema),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contract = propertyContract(
+    resultProperties(rootPatternCall(parseModule(output))).child,
+  );
+
+  assertEquals(contract.argumentSchema, {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+    description: "generated input",
+    default: { value: "seed" },
+  });
+});
+
+Deno.test("schema-only nested overload retains the authored public contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  child: pattern(
+    ({ value }) => ({ size: value.length }),
+    {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    } as const,
+    {
+      type: "object",
+      properties: { size: { type: "number" } },
+      required: ["size"],
+    } as const,
+  ),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const [base] = basePatternCalls(root);
+  assert(base, output);
+  assertEquals(
+    propertyContract(resultProperties(rootPatternCall(root)).child),
+    callContract(base),
+  );
+});
+
+Deno.test("single-schema nested overload retains its inferred result contract", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => ({
+  child: pattern(
+    ({ value }) => ({ size: value.length }),
+    {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    } as const,
+  ),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const [base] = basePatternCalls(root);
+  assert(base, output);
+  assertEquals(
+    propertyContract(resultProperties(rootPatternCall(root)).child),
+    callContract(base),
+  );
+});
+
+Deno.test("single-schema module factory retains nested factory metadata", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+const Existing = pattern(
+  ({ prefix }) => ({
+    inner: pattern<{ value: string }>(({ value }) => ({ text: prefix + value })),
+  }),
+  {
+    type: "object",
+    properties: { prefix: { type: "string" } },
+    required: ["prefix"],
+  } as const,
+);
+
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const existing = patternCalls(root).find((call) =>
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === "pattern" &&
+    requiredFields(callContract(call).argumentSchema).includes("prefix")
+  );
+  const outer = patternCalls(root).filter((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "pattern"
+  ).at(-1);
+  assert(existing && outer, output);
+  assertEquals(
+    propertyContract(resultProperties(outer).child),
+    callContract(existing),
+  );
+});
+
+Deno.test("two-schema module factory retains non-type-level schema metadata", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+const Existing = pattern(
+  ({ value }) => ({ size: value.length }),
+  {
+    type: "object",
+    description: "authored input contract",
+    properties: { value: { type: "string", minLength: 1 } },
+    required: ["value"],
+  } as const,
+  {
+    type: "object",
+    description: "authored output contract",
+    properties: { size: { type: "number", minimum: 0 } },
+    required: ["size"],
+  } as const,
+);
+
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const existing = patternCalls(root).find((call) =>
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === "pattern" &&
+    requiredFields(callContract(call).argumentSchema).includes("value")
+  );
+  const outer = patternCalls(root).find((call) =>
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === "pattern" &&
+    callContract(call).argumentSchema === false
+  );
+  assert(existing && outer, output);
+  assertEquals(
+    propertyContract(resultProperties(outer).child),
+    callContract(existing),
+  );
+});
+
+Deno.test("factory contracts resolve const schema bindings and static spreads", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+const objectSchema = { type: "object" } as const;
+const inputSchema = {
+  ...objectSchema,
+  description: "spread input",
+  properties: { value: { type: "string" } },
+  required: ["value"],
+} as const;
+const outputSchema = {
+  ...objectSchema,
+  description: "spread output",
+  properties: { size: { type: "number" } },
+  required: ["size"],
+} as const;
+const Existing = pattern(
+  ({ value }) => ({ size: value.length }),
+  inputSchema,
+  outputSchema,
+);
+
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const root = parseModule(output);
+  const outer = patternCalls(root).filter((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "pattern"
+  ).at(-1);
+  assert(outer, output);
+  assertEquals(propertyContract(resultProperties(outer).child), {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      description: "spread input",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      description: "spread output",
+      properties: { size: { type: "number" } },
+      required: ["size"],
+    },
+  });
+});
+
+Deno.test("nested schema-bearing factories reject executable schema discovery", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern, type JSONSchema } from "commonfabric";
+
+declare function schemaAtRuntime(): JSONSchema;
+
+export default pattern(() => ({
+  child: pattern(
+    () => ({ ready: true }),
+    schemaAtRuntime(),
+    schemaAtRuntime(),
+  ),
+}));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contractDiagnostics = diagnostics.filter((diagnostic) =>
+    diagnostic.type === "pattern-factory:non-static-public-schema"
+  );
+
+  assertEquals(contractDiagnostics.length, 1);
+  assertStringIncludes(
+    contractDiagnostics[0]!.message,
+    "never executed to discover a schema",
+  );
+});
+
+Deno.test("factory contracts reject mutated const schema bindings", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern } from "commonfabric";
+
+const inputSchema = {
+  type: "object",
+  description: "before",
+  properties: { value: { type: "string" } },
+  required: ["value"],
+} as const;
+const outputSchema = {
+  type: "object",
+  properties: { size: { type: "number" } },
+  required: ["size"],
+} as const;
+
+(inputSchema as any).description = "after";
+const Existing = pattern(
+  ({ value }) => ({ size: value.length }),
+  inputSchema,
+  outputSchema,
+);
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contractDiagnostics = diagnostics.filter((diagnostic) =>
+    diagnostic.type === "pattern-factory:non-static-public-schema"
+  );
+
+  assertEquals(contractDiagnostics.length, 1);
+  assertStringIncludes(
+    contractDiagnostics[0]!.message,
+    "statically resolvable public schemas",
+  );
+});
+
+Deno.test("factory contracts reject mutation through a const alias", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern } from "commonfabric";
+
+const inputSchema = {
+  type: "object",
+  description: "before",
+  properties: { value: { type: "string" } },
+  required: ["value"],
+} as const;
+const alias = inputSchema;
+(alias as any).description = "after";
+
+const Existing = pattern(
+  ({ value }) => ({ size: value.length }),
+  inputSchema,
+  {
+    type: "object",
+    properties: { size: { type: "number" } },
+    required: ["size"],
+  } as const,
+);
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contractDiagnostics = diagnostics.filter((diagnostic) =>
+    diagnostic.type === "pattern-factory:non-static-public-schema"
+  );
+
+  assertEquals(contractDiagnostics.length, 1);
+});
+
+Deno.test("type-only Schema references do not count as runtime schema escapes", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern } from "commonfabric";
+import type { Schema } from "commonfabric/schema";
+
+const inputSchema = {
+  type: "object",
+  properties: { value: { type: "string" } },
+  required: ["value"],
+} as const;
+const outputSchema = {
+  type: "object",
+  properties: { size: { type: "number" } },
+  required: ["size"],
+} as const;
+type Input = Schema<typeof inputSchema>;
+
+const Existing = pattern(
+  ({ value }: Input) => ({ size: value.length }),
+  inputSchema,
+  outputSchema,
+);
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-factory:non-static-public-schema"
+    ),
+    [],
+  );
+});

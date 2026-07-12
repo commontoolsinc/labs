@@ -396,13 +396,13 @@ function getUiContractHint(
   context: GenerationContext,
   typeNode: ts.TypeNode | undefined = context.typeNode,
 ): {
-  helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-  action?: string;
-  surface?: string;
-  role?: string;
-  kind?: string;
-  trustedPattern?: string;
-  requiredEventIntegrity?: string[];
+  readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+  readonly action?: string;
+  readonly surface?: string;
+  readonly role?: string;
+  readonly kind?: string;
+  readonly trustedPattern?: string;
+  readonly requiredEventIntegrity?: readonly string[];
 } | undefined {
   if (!context.schemaHints || !typeNode) {
     return undefined;
@@ -415,19 +415,28 @@ function getUiContractHint(
 function attachUiContract(
   schema: JSONSchemaMutable,
   uiContract: {
-    helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-    action?: string;
-    surface?: string;
-    role?: string;
-    kind?: string;
-    trustedPattern?: string;
-    requiredEventIntegrity?: string[];
+    readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    readonly action?: string;
+    readonly surface?: string;
+    readonly role?: string;
+    readonly kind?: string;
+    readonly trustedPattern?: string;
+    readonly requiredEventIntegrity?: readonly string[];
   },
 ): JSONSchemaMutable {
+  const { requiredEventIntegrity, ...uiContractFields } = uiContract;
+  const storedUiContract = {
+    ...uiContractFields,
+    ...(requiredEventIntegrity && {
+      requiredEventIntegrity: [...requiredEventIntegrity],
+    }),
+  };
   if (typeof schema === "boolean") {
-    return schema === false ? { not: true, ifc: { uiContract } } : {
-      ifc: { uiContract },
-    };
+    return schema === false
+      ? { not: true, ifc: { uiContract: storedUiContract } }
+      : {
+        ifc: { uiContract: storedUiContract },
+      };
   }
 
   const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
@@ -435,7 +444,7 @@ function attachUiContract(
     ...schema,
     ifc: {
       ...existingIfc,
-      uiContract,
+      uiContract: storedUiContract,
     },
   };
 }

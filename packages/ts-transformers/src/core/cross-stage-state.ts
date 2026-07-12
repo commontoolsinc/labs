@@ -181,10 +181,16 @@ export class CrossStageState {
   // --- schemaHints ---
 
   recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
-    this.schemaHints.set(node, hint);
+    this.schemaHints.set(node, {
+      ...this.schemaHints.get(node),
+      ...hint,
+    });
     const original = ts.getOriginalNode(node);
     if (original !== node) {
-      this.schemaHints.set(original, hint);
+      this.schemaHints.set(original, {
+        ...this.schemaHints.get(original),
+        ...hint,
+      });
     }
   }
 

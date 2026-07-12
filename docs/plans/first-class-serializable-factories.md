@@ -971,7 +971,7 @@ until Stage 4 migrates those writers; no failure is waived.
   state.
 - [x] Carry that trusted schema through the internal Pattern/factory metadata
   used by cold resolution without exposing it as public input schema.
-- [ ] Reject an authored second callback parameter that lacks compiler-created
+- [x] Reject an authored second callback parameter that lacks compiler-created
   metadata.
 - [x] Keep the public callback type one-parameter and keep the public
   `PatternFactory` type free of `.curry`.
@@ -998,10 +998,11 @@ The builder serialization half of WP3.4's params alias vocabulary was pulled
 forward deliberately: without `{ $alias: { cell: "params" } }`, a marked
 callback could not preserve argument-1 references for WP3.3. Runtime resolution
 and ownership of that pseudo-root remain in WP3.4. Ordinary authored two-arg
-callbacks now fail closed at runtime, but `Function.length` cannot detect a
-defaulted or rest second parameter. The corresponding checkbox remains open
-until WP3.3 adds the complete source-level diagnostic; it is not being treated
-as passed by the partial runtime guard.
+callbacks still fail closed at runtime as a defense in depth. WP3.3 adds the
+source-level boundary diagnostic, including required, defaulted, rest, and
+alias-erased second parameters, while admitting only the compiler-created
+params-schema carrier. That completes the previously open checkbox without
+relying on `Function.length`.
 
 ### WP3.2 — Implement the internal one-shot curry derivation
 
@@ -1052,33 +1053,33 @@ canonical-writer migration cluster accounts for every failure.
 
 ### WP3.3 — Generalize nested-pattern hoisting
 
-- [ ] Update transformability validation so an inline `pattern(...)` in a
+- [x] Update transformability validation so an inline `pattern(...)` in a
   pattern-owned context is a supported value, not only a `patternTool` or
   `*WithPattern` special case.
-- [ ] Collect every non-module lexical capture, including Cells/Reactives and
+- [x] Collect every non-module lexical capture, including Cells/Reactives and
   all three factory kinds; keep verified module-scoped helpers lexical.
-- [ ] Preserve a captured factory input's symbolic binding through the hoist
+- [x] Preserve a captured factory input's symbolic binding through the hoist
   and params record. Only schema-driven runtime delivery or direct dynamic
   invocation may read/materialize its selected value.
-- [ ] Rewrite the hoisted callback to receive public input in argument 0 and a
+- [x] Rewrite the hoisted callback to receive public input in argument 0 and a
   deterministically ordered capture record in argument 1.
-- [ ] Generate public argument/result schemas plus the private params schema.
-- [ ] Wrap the callback with
+- [x] Generate public argument/result schemas plus the private params schema.
+- [x] Wrap the callback with
   `withPatternParamsSchema(callback, paramsSchema)` before passing it to
   `pattern()`; assert there is no fourth `pattern()` argument.
-- [ ] Hoist a capture-free base to a deterministic `__cfPattern_N` declaration
+- [x] Hoist a capture-free base to a deterministic `__cfPattern_N` declaration
   and register it through `__cfReg`.
-- [ ] Replace a capturing authored site with exactly
+- [x] Replace a capturing authored site with exactly
   `__cfPattern_N.curry({ ...captures })`.
-- [ ] Replace a capture-free authored site with the bare hoisted factory and no
+- [x] Replace a capture-free authored site with the bare hoisted factory and no
   curry call.
-- [ ] Apply normal cause assignment after the site rewrite.
-- [ ] Reject non-portable captured functions and unrepresentable capture
+- [x] Apply normal cause assignment after the site rewrite.
+- [x] Reject non-portable captured functions and unrepresentable capture
   schemas with source-located diagnostics.
-- [ ] Fail closed when an inline wrapper touches a `FrameworkProvided` path
+- [x] Fail closed when an inline wrapper touches a `FrameworkProvided` path
   until WP3.6's trusted forwarding metadata is available; general closure
   conversion must never temporarily permit capture or authored supply.
-- [ ] Verify a wrapper around a bound pattern creates a new hoisted wrapper and
+- [x] Verify a wrapper around a bound pattern creates a new hoisted wrapper and
   one curry for that wrapper; it must not curry the original twice.
 
 Primary transformer seams:
@@ -1107,6 +1108,74 @@ At minimum, add focused `nested-pattern-capture`, capture-free, and
 nested-wrapper fixture pairs; extend
 `packages/ts-transformers/test/closures/module-scope-helper-hoisting.test.ts`
 and the transformer pipeline regression suite.
+
+WP3.3 implementation audit (2026-07-11): closure conversion now has a dedicated
+`PatternStrategy` plus one wrapper/original-aware callback and legacy-carrier
+classifier shared by closure analysis, callback policy, and builder hoisting.
+That shared descriptor was required because later transformer stages see
+cloned/wrapped calls whose immediate syntax no longer identifies the authored
+boundary. Legacy `patternTool` and `*WithPattern` carriers remain on their old
+paths; ordinary nested patterns hoist/register deterministic bases and retain
+exactly one site-local curry only when captures exist. The zero-authored-input
+case uses a collision-free synthetic `never` argument-0 root so closure params
+remain argument 1 even when public input is absent.
+
+Capture analysis keeps verified module helpers lexical, preserves Cell and all
+three branded factory bindings symbolically, and narrows the SES callable
+exception to semantically branded first-class factories. Arbitrary functions,
+unrepresentable capture schemas, authored second callback parameters, and a
+rest-style public argument 0 now produce source-located diagnostics.
+`FrameworkProvided` provenance is traced through aliases (including widened
+module aliases), casts, conditionals, destructuring, and object/array/tuple
+containers; nested public input, captures, invocation, or exposure fail closed
+until WP3.6 supplies trusted forwarding metadata.
+
+The original plan underestimated schema-contract loss after TypeScript widens
+`PatternFactory<Input, Result>` to `PatternFactory<Input, any>`. A compiler-only
+WeakMap hint now carries ordered exact contracts for pattern, module/lift, and
+handler factories through aliases, selected object/tuple members,
+destructuring, objects, arrays, readonly tuples, unions, and conditional
+containers (including lowered `ifElse`). Multiple runtime contracts sharing one
+semantic TypeNode emit ordered `anyOf` alternatives and deduplicate only by
+compiler contract identity, since text-identical TypeNodes can carry different
+nested factory metadata. Ordinary module-scope builders are registered through
+the same path, so mixed inline/module alternatives remain exhaustive. For
+inferred lift and handler schemas the hint is attached only after capability
+shrinking, so the containing `asFactory` schema matches the schemas actually
+injected at the builder call. No serialized factory state or wire schema becomes
+compiler authority, and runtime equality is not weakened.
+
+Two related code/plan discrepancies were repaired rather than hidden. The
+shared transformer test environment omitted the production
+`commonfabric-schema.d.ts` augmentation, and its single-schema `pattern`
+overload returned `any` even though the runner overload infers the callback
+result. Both now match production behavior. Type information alone still
+cannot reproduce authored JSON Schema-only keywords, so schema-bearing factory
+contracts also carry statically evaluated JSON-compatible const schemas in the
+compiler-only hint. Proven-stable const bindings and static spreads are
+supported; property mutation, mutable aliases, exports, arbitrary-call escapes,
+and executable schema discovery are rejected rather than snapshotting a value
+that can diverge, running authored code, or emitting a knowingly mismatched
+contract. Stable `toSchema<T>(options)` sources are the one compiler-owned
+non-literal form: their exact generated value and options are obtained through
+the same schema-generator implementation that later emits the call. These
+requirements added schema-generator and static-JSON seams not named in the
+original file list.
+
+Red/green coverage includes the required fixture matrix, callback argument
+separation, deterministic names/order, factory and Cell captures, legacy
+carrier routing, FrameworkProvided laundering attempts, exact nested contracts,
+alias/shorthand propagation, same-type alternatives, nested metadata,
+selected members/destructuring, conditional containers, authored and inferred
+schemas for all three factory kinds, `toSchema` options, schema-authored
+metadata/constraints, and static-schema failure. The focused WP3.3 matrix
+passes `163 passed, 0 failed`; complete affected tasks pass in API
+(`16 passed`), schema-generator (`28 passed (251 steps)`), and ts-transformers
+(`1116 passed (742 steps)`). Nested and schema-preservation goldens are
+byte-stable and direct
+transformed-output inspection confirms argument 0/public input, argument
+1/private params, one curry, no fourth `pattern()` argument, and exact
+containing `asFactory` schemas.
 
 ### WP3.4 — Add the hidden params root and invocation-owned cell
 

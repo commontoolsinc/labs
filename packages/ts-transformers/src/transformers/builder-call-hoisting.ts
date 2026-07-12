@@ -1,16 +1,19 @@
 import ts from "typescript";
 import {
+  classifyLegacyPatternCarrier,
   detectCallKind,
   getHandlerAppliedInnerCall,
   getLiftAppliedInnerCall,
   getPatternToolHoistablePatternCall,
   getWithPatternHoistablePatternCall,
   isHandlerAppliedCall,
+  isPatternBuilderCall,
   SYNTHETIC_HANDLER_HOIST_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../ast/call-kind.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { extractBindingNames } from "../utils/identifiers.ts";
 
 /**
  * Hoist every reactive *builder call* to module scope: `lift` (CT-1644, Phase 2
@@ -191,11 +194,79 @@ const PATTERN_BUILDER: HoistableBuilderSpec = {
   },
 };
 
+/** Compiler-generated `pattern(...).curry(captures)` nested value. */
+const CURRIED_PATTERN_BUILDER: HoistableBuilderSpec = {
+  prefix: SYNTHETIC_PATTERN_HOIST_PREFIX,
+  resolveHoistable: (call, context) => {
+    if (
+      !ts.isPropertyAccessExpression(call.expression) ||
+      call.expression.name.text !== "curry"
+    ) {
+      return undefined;
+    }
+    const base = call.expression.expression;
+    return ts.isCallExpression(base) &&
+        isPatternBuilderCall(base, context.checker)
+      ? base
+      : undefined;
+  },
+  rewriteSite: (visited, hoistedName, _innerCall, factory) => {
+    return factory.updateCallExpression(
+      visited,
+      factory.createPropertyAccessExpression(hoistedName, "curry"),
+      visited.typeArguments,
+      visited.arguments,
+    );
+  },
+};
+
+/** Capture-free authored pattern used as a value inside a parent pattern. */
+const NESTED_PATTERN_BUILDER: HoistableBuilderSpec = {
+  prefix: SYNTHETIC_PATTERN_HOIST_PREFIX,
+  resolveHoistable: (call, context) => {
+    if (
+      !isPatternBuilderCall(call, context.checker) ||
+      (!isNestedInPatternBuilder(call, context.checker) &&
+        !isGeneratedNestedPattern(call)) ||
+      classifyLegacyPatternCarrier(call, context.checker) !== undefined
+    ) {
+      return undefined;
+    }
+    return call;
+  },
+  rewriteSite: (_visited, hoistedName) => hoistedName,
+};
+
 const HOISTABLE_BUILDERS: readonly HoistableBuilderSpec[] = [
   LIFT_BUILDER,
   HANDLER_BUILDER,
+  CURRIED_PATTERN_BUILDER,
+  NESTED_PATTERN_BUILDER,
   PATTERN_BUILDER,
 ];
+
+function isNestedInPatternBuilder(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Node | undefined = call.parent;
+  while (current) {
+    if (
+      ts.isCallExpression(current) && isPatternBuilderCall(current, checker)
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isGeneratedNestedPattern(call: ts.CallExpression): boolean {
+  return ts.isPropertyAccessExpression(call.expression) &&
+    ts.isIdentifier(call.expression.expression) &&
+    call.expression.expression.text === "__cfHelpers" &&
+    call.expression.name.text === "pattern";
+}
 
 function hoistBuilderCalls(
   sourceFile: ts.SourceFile,
@@ -225,6 +296,7 @@ function hoistBuilderCalls(
   // lookups later stages rely on to match a `<prefix>_N` call site back to its
   // hoisted const).
   const counters = new Map<string, number>();
+  const reservedNames = collectTopLevelBindingNames(sourceFile);
 
   // Every hoisted builder-artifact name (`__cfPattern_N`, `__cfLift_N`,
   // `__cfHandler_N`), in creation order. After the whole file is visited we emit
@@ -249,9 +321,14 @@ function hoistBuilderCalls(
         continue;
       }
 
-      const next = (counters.get(builder.prefix) ?? 0) + 1;
+      let next = counters.get(builder.prefix) ?? 0;
+      let nameText: string;
+      do {
+        next++;
+        nameText = `${builder.prefix}_${next}`;
+      } while (reservedNames.has(nameText));
       counters.set(builder.prefix, next);
-      const nameText = `${builder.prefix}_${next}`;
+      reservedNames.add(nameText);
       const name = factory.createIdentifier(nameText);
       registeredNames.push(nameText);
       // Carry the hoisted call's identity on the synthetic call-site identifier.
@@ -367,6 +444,42 @@ function hoistBuilderCalls(
   }
 
   return factory.updateSourceFile(sourceFile, resultStatements);
+}
+
+function collectTopLevelBindingNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        for (const name of extractBindingNames(declaration.name)) {
+          names.add(name);
+        }
+      }
+      continue;
+    }
+    if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement) ||
+        ts.isEnumDeclaration(statement)) && statement.name
+    ) {
+      names.add(statement.name.text);
+      continue;
+    }
+    if (ts.isImportDeclaration(statement) && statement.importClause) {
+      const clause = statement.importClause;
+      if (clause.name) names.add(clause.name.text);
+      if (clause.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings)) {
+          names.add(clause.namedBindings.name.text);
+        } else {
+          for (const element of clause.namedBindings.elements) {
+            names.add(element.name.text);
+          }
+        }
+      }
+    }
+  }
+  return names;
 }
 
 /**

@@ -11,7 +11,11 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
-import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
+import {
+  detectCallKind,
+  findEnclosingPatternBuilderCallbackDescriptor,
+  isReactiveOriginCall,
+} from "../ast/call-kind.ts";
 import { getNodeText } from "../ast/mod.ts";
 
 export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
@@ -178,6 +182,14 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
       functionNode = functionNode.parent;
     }
     if (!functionNode) return false;
+
+    if (
+      (ts.isArrowFunction(functionNode) ||
+        ts.isFunctionExpression(functionNode)) &&
+      findEnclosingPatternBuilderCallbackDescriptor(functionNode, checker)
+    ) {
+      return true;
+    }
 
     let candidate: ts.Node | undefined = functionNode.parent;
     while (candidate && !ts.isCallExpression(candidate)) {

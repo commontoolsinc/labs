@@ -594,6 +594,43 @@ export function getArrayElementInfo(
   typeNode?: ts.TypeNode,
 ): ArrayElementInfo | undefined {
   if (typeNode) {
+    while (ts.isParenthesizedTypeNode(typeNode)) {
+      typeNode = typeNode.type;
+    }
+    if (
+      ts.isTypeOperatorNode(typeNode) &&
+      typeNode.operator === ts.SyntaxKind.ReadonlyKeyword
+    ) {
+      typeNode = typeNode.type;
+    }
+
+    // Tuple schemas are emitted as arrays whose items are the union of every
+    // element. Preserve the authored element TypeNodes in a synthetic union so
+    // compiler-owned per-element schema hints (for example exact generated
+    // factory contracts) remain visible to UnionFormatter. Falling through to
+    // the semantic numeric index type alone would retain the Types but discard
+    // their node-keyed hints.
+    if (ts.isTupleTypeNode(typeNode)) {
+      const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+      const elementNodes = typeNode.elements.map((element): ts.TypeNode => {
+        let current: ts.TypeNode = ts.isNamedTupleMember(element)
+          ? element.type
+          : element;
+        if (ts.isOptionalTypeNode(current) || ts.isRestTypeNode(current)) {
+          current = current.type;
+        }
+        return current;
+      });
+      if (elementType && elementNodes.length > 0) {
+        return {
+          elementType,
+          elementNode: elementNodes.length === 1
+            ? elementNodes[0]!
+            : ts.factory.createUnionTypeNode(elementNodes),
+        };
+      }
+    }
+
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
       // For array types, get the element type from the parent array Type

@@ -363,7 +363,7 @@ export class TransformationContext {
       return this.#callbackContextCache.get(node) ?? undefined;
     }
 
-    const info = findEnclosingCallbackContext(node);
+    const info = findEnclosingCallbackContext(node, this.checker);
     this.#callbackContextCache.set(node, info ?? null);
     return info;
   }

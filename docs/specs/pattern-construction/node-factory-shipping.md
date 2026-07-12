@@ -640,7 +640,10 @@ and cold resolution.
 The helper is part of the first argument expression. It does not add a fourth
 argument to `pattern()` and is not author-facing API. The public callback type
 still has one parameter; an authored second parameter is rejected unless the
-callback carries this compiler-created metadata.
+callback carries this compiler-created metadata. Authored argument 0 is one
+public input value and therefore may not be a rest parameter: appending the
+compiler-owned argument 1 after a rest parameter would violate both JavaScript
+syntax and this ABI.
 
 ### Logical transformation
 
@@ -807,6 +810,34 @@ Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
 Schema variance is deferred. The resolved trusted artifact is authoritative;
 wire-carried schema hints never grant execution or CFC authority.
+
+The compiler must preserve that exact public contract even when TypeScript
+widens a factory expression to `PatternFactory<Input, any>` or merges several
+factory alternatives into one semantic type. Compiler-owned, node-keyed
+metadata may retain the builder's canonical type/schema contract through
+aliases, selected object/tuple members, destructuring, containers, and lowered
+conditionals; it is not serialized and is never populated from a decoded
+`Factory@1` value. This applies equally to pattern, module/lift, and handler
+factories. Inferred lift/handler contracts are captured after capability
+shrinking so the containing schema equals the schemas actually injected at the
+builder call. If one semantic position can hold multiple exact contracts, its
+schema contains ordered alternatives rather than dropping or broadening any
+contract.
+
+For schema-bearing builder overloads, type reconstruction is insufficient:
+JSON Schema keywords such as constraints, descriptions, defaults, and nested
+`asFactory` metadata are part of the equality contract. The compiler therefore
+retains statically resolvable JSON-compatible schema literals (including
+proven-stable const bindings and static spreads) as compiler metadata. `const`
+alone is not proof: property writes, mutable aliases, exports, or arbitrary-call
+escapes make the binding ineligible. The compiler must not execute authored code
+to discover a schema. A schema expression that requires execution or lacks that
+stability proof is rejected when compiling a first-class factory contract
+rather than producing a knowingly mismatched containing schema.
+`toSchema<T>(options)` is a compiler-owned schema source rather than authored
+execution: for a proven-stable reference, contract capture uses the same schema
+generator and options evaluation as final emission. Arbitrary calls remain
+unresolvable and fail closed.
 
 Schema-light factories may still be passed and stored. Before symbolically
 invoking a `type: "ref"` module factory such as `byRef()`, resolution follows

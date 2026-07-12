@@ -8,6 +8,7 @@ import type {
 import type {
   GenerationContext,
   SchemaGenerator as ISchemaGenerator,
+  SchemaHint,
   TypeFormatter,
 } from "./interface.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
@@ -58,21 +59,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     return this.generateSchemaInternal(
@@ -97,21 +84,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
@@ -137,21 +110,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     // Create unified context with all state
@@ -559,19 +518,26 @@ export class SchemaGenerator implements ISchemaGenerator {
   private attachUiContract(
     schema: JSONSchemaMutable,
     uiContract: {
-      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-      action?: string;
-      surface?: string;
-      role?: string;
-      kind?: string;
-      trustedPattern?: string;
-      requiredEventIntegrity?: string[];
+      readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+      readonly action?: string;
+      readonly surface?: string;
+      readonly role?: string;
+      readonly kind?: string;
+      readonly trustedPattern?: string;
+      readonly requiredEventIntegrity?: readonly string[];
     },
   ): JSONSchemaMutable {
+    const { requiredEventIntegrity, ...uiContractFields } = uiContract;
+    const storedUiContract = {
+      ...uiContractFields,
+      ...(requiredEventIntegrity && {
+        requiredEventIntegrity: [...requiredEventIntegrity],
+      }),
+    };
     if (typeof schema === "boolean") {
       return schema === false
-        ? { not: true, ifc: { uiContract } }
-        : { ifc: { uiContract } };
+        ? { not: true, ifc: { uiContract: storedUiContract } }
+        : { ifc: { uiContract: storedUiContract } };
     }
 
     const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
@@ -579,7 +545,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...schema,
       ifc: {
         ...existingIfc,
-        uiContract,
+        uiContract: storedUiContract,
       },
     };
   }

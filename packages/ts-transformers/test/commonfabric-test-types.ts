@@ -15,6 +15,9 @@ const staticCache = new StaticCacheFS();
 export const commonfabricTypes = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
+export const commonfabricSchemaTypes = await staticCache.getText(
+  "types/commonfabric-schema.d.ts",
+);
 export const cfcTypes = await staticCache.getText("types/cfc.ts");
 
 /**
@@ -22,5 +25,6 @@ export const cfcTypes = await staticCache.getText("types/cfc.ts");
  */
 export const COMMONFABRIC_TYPES: Record<string, string> = {
   "commonfabric.d.ts": commonfabricTypes,
+  "commonfabric-schema.d.ts": commonfabricSchemaTypes,
   "cfc.ts": cfcTypes,
 };

@@ -508,12 +508,12 @@ declare module "commonfabric" {
     ): PatternFactory<SchemaWithoutCell<IS>, Schema<OS>>;
 
     // Function + one schema: infer input type from JSONSchema literal
-    <IS extends JSONSchema = JSONSchema>(
+    <IS extends JSONSchema, Result>(
       fn: (
         input: Reactive<Schema<IS>> & { [SELF]: Reactive<any> },
-      ) => any,
+      ) => Result,
       argumentSchema: IS,
-    ): PatternFactory<SchemaWithoutCell<IS>, any>;
+    ): PatternFactory<SchemaWithoutCell<IS>, Result>;
   }
 
   // Augment LiftFunction with schema-based overloads (callback-first, matching

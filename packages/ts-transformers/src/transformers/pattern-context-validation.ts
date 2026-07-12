@@ -19,7 +19,8 @@
  *   computed()/lift() callback remain reactive and cannot be used as plain
  *   values until a nested computed()/lift() consumes them.
  *
- * - Function creation is NOT allowed in pattern context (must be at module scope)
+ * - Function creation is NOT allowed in pattern context except at supported
+ *   callback boundaries, including closure-converted nested pattern builders
  * - lift() and handler() must be defined at module scope, not inside patterns
  *
  * Errors reported:
@@ -29,19 +30,24 @@
  *     expression sites
  *   - optional calls and non-lowerable optional access still error
  * - Calling .get() on cells: ERROR (must wrap in computed())
- * - Function creation in pattern context: ERROR (move to module scope)
+ * - Unsupported function creation in pattern context: ERROR (move to module
+ *   scope or use a supported callback boundary)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
  * - Local computed()/lift() aliases used as plain values in the same
  *   callback: ERROR (use a nested computed()/lift())
  */
 import ts from "typescript";
+import { detectFactoryType } from "@commonfabric/schema-generator";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
+import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
+  findEnclosingPatternBuilderCallbackDescriptor,
   getNodeText,
+  getPatternBuilderCallbackDescriptor,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
@@ -69,6 +75,9 @@ import type {
 } from "../policy/callback-boundary.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
+const AUTHORED_SECOND_PATTERN_PARAMETER =
+  "pattern-callback:authored-second-parameter";
+const AUTHORED_REST_PATTERN_INPUT = "pattern-callback:authored-rest-input";
 const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   SupportedCallbackBoundaryKind
 >([
@@ -140,6 +149,37 @@ export class PatternContextValidationTransformer
       // Skip JSX element containers; expression-level handling is shared.
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
+      }
+
+      if (ts.isCallExpression(node)) {
+        const descriptor = getPatternBuilderCallbackDescriptor(node, checker);
+        const firstParameter = descriptor?.callback.parameters[0];
+        if (firstParameter?.dotDotDotToken) {
+          context.reportDiagnosticOnce({
+            severity: "error",
+            type: AUTHORED_REST_PATTERN_INPUT,
+            message:
+              "Pattern callback argument 0 is one public input value and " +
+              "cannot be a rest parameter. Argument 1 is reserved for " +
+              "compiler-generated closure params metadata.",
+            node: firstParameter,
+          });
+        }
+        const secondParameter = descriptor?.callback.parameters[1];
+        if (
+          secondParameter &&
+          !descriptor.paramsSchemaCarrier
+        ) {
+          context.reportDiagnosticOnce({
+            severity: "error",
+            type: AUTHORED_SECOND_PATTERN_PARAMETER,
+            message:
+              "Pattern callback argument 1 is reserved for compiler-generated " +
+              "closure params metadata. Authors may only declare public input " +
+              "as callback argument 0.",
+            node: secondParameter,
+          });
+        }
       }
 
       // Check for function creation in pattern context
@@ -634,8 +674,9 @@ export class PatternContextValidationTransformer
 
   /**
    * Validates that functions are not created directly in pattern context.
-   * Functions inside safe wrappers (computed, action, lift, handler)
-   * and inside JSX expressions are allowed since they get transformed.
+   * Functions inside safe wrappers (computed, action, lift, handler), nested
+   * pattern callbacks, and supported JSX expressions are allowed because a
+   * later transformer gives each boundary a self-contained representation.
    */
   private validateFunctionCreation(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
@@ -697,7 +738,7 @@ export class PatternContextValidationTransformer
       type: "pattern-context:function-creation",
       message: `Function creation is not allowed in pattern context. ` +
         `Move this function to module scope and add explicit type parameters. ` +
-        `Note: callbacks inside computed(), action(), and .map() are allowed.`,
+        `Note: callbacks inside nested pattern(), computed(), action(), and .map() are allowed.`,
       node,
     });
   }
@@ -1113,6 +1154,11 @@ export class PatternContextValidationTransformer
     }
 
     const diagnosticsSeen = new Set<string>();
+    const permitsFactoryCaptures = this.isClosureConvertedNestedPatternBoundary(
+      func,
+      boundarySemantics,
+      checker,
+    );
 
     const report = (node: ts.Identifier): void => {
       if (diagnosticsSeen.has(node.text)) return;
@@ -1144,7 +1190,9 @@ export class PatternContextValidationTransformer
           declarations.some((decl) =>
             this.isEnclosingFunctionScopedDeclaration(decl, func)
           ) &&
-          this.isCallableReference(node, declarations, checker)
+          this.isCallableReference(node, declarations, checker) &&
+          !(permitsFactoryCaptures &&
+            this.isFirstClassFactoryReference(node, checker))
         ) {
           report(node);
         }
@@ -1159,6 +1207,78 @@ export class PatternContextValidationTransformer
       }
     }
     visit(func.body);
+  }
+
+  /**
+   * Only nested patterns that the closure converter will hoist may carry a
+   * callable factory through their private params record. Other SES callback
+   * boundaries — especially the legacy patternTool carrier — retain the
+   * ordinary callable-capture rejection.
+   */
+  private isClosureConvertedNestedPatternBoundary(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    boundarySemantics: CallbackBoundarySemantics,
+    checker: ts.TypeChecker,
+  ): boolean {
+    const decision = boundarySemantics.decision;
+    if (
+      decision.kind !== "supported" ||
+      decision.boundaryKind !== "pattern-builder"
+    ) {
+      return false;
+    }
+
+    const ownPattern = findEnclosingPatternBuilderCallbackDescriptor(
+      func,
+      checker,
+    );
+    if (!ownPattern) return false;
+
+    let current: ts.Node | undefined = ownPattern.call.parent;
+    while (current) {
+      if (
+        ts.isCallExpression(current) &&
+        getPatternBuilderCallbackDescriptor(current, checker)
+      ) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Recognize the branded Common Fabric factory protocol semantically. The
+   * schema generator supplies the kind/contracts, while the trusted unique-
+   * symbol declaration check prevents a user alias merely named
+   * `PatternFactory` from granting the exception.
+   */
+  private isFirstClassFactoryReference(
+    node: ts.Identifier,
+    checker: ts.TypeChecker,
+  ): boolean {
+    let type: ts.Type;
+    try {
+      type = checker.getTypeAtLocation(node);
+    } catch {
+      return false;
+    }
+
+    const members = type.isUnion()
+      ? type.types.filter((member) =>
+        (member.flags &
+          (ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) ===
+          0
+      )
+      : [type];
+    return members.length > 0 &&
+      members.every((member) =>
+        detectFactoryType(member, checker) !== undefined &&
+        checker.getPropertiesOfType(member).some((property) =>
+          property.getName().startsWith("__@FABRIC_FACTORY_TYPE") &&
+          isCommonFabricSymbol(property)
+        )
+      );
   }
 
   /**

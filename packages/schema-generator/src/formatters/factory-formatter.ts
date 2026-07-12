@@ -16,6 +16,14 @@ export interface FactoryTypeInfo {
   readonly outputType: ts.Type;
 }
 
+interface HintedFactoryContract {
+  readonly kind: FactoryTypeKind;
+  readonly inputTypeNode: ts.TypeNode;
+  readonly inputSchema?: unknown;
+  readonly outputTypeNode: ts.TypeNode;
+  readonly outputSchema?: unknown;
+}
+
 const FACTORY_ALIAS_KINDS: Readonly<Record<string, FactoryTypeKind>> = {
   PatternFactory: "pattern",
   ModuleFactory: "module",
@@ -134,43 +142,98 @@ export function containsFactoryType(
 export class FactoryFormatter implements TypeFormatter {
   constructor(private readonly schemaGenerator: SchemaGenerator) {}
 
+  private hintedFactories(
+    context: GenerationContext,
+  ): readonly HintedFactoryContract[] | undefined {
+    const typeNode = context.typeNode;
+    if (!typeNode || !context.schemaHints) return undefined;
+    const hint = context.schemaHints.get(typeNode) ??
+      context.schemaHints.get(ts.getOriginalNode(typeNode));
+    return hint?.factoryContracts;
+  }
+
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    return detectFactoryType(type, context.typeChecker) !== undefined;
+    return (this.hintedFactories(context)?.length ?? 0) > 0 ||
+      detectFactoryType(type, context.typeChecker) !== undefined;
   }
 
   formatType(
     type: ts.Type,
     context: GenerationContext,
   ): JSONSchemaMutable {
-    const factory = detectFactoryType(type, context.typeChecker);
-    if (!factory) {
+    const hints = this.hintedFactories(context);
+    const detected = detectFactoryType(type, context.typeChecker);
+    if ((!hints || hints.length === 0) && !detected) {
       throw new Error("FactoryFormatter received a non-factory type");
     }
 
+    const alternatives = hints?.length
+      ? hints.map((hint) => this.formatContract(context, hint))
+      : [this.formatDetected(context, detected!)];
+    return alternatives.length === 1
+      ? alternatives[0]!
+      : { anyOf: alternatives };
+  }
+
+  private formatContract(
+    context: GenerationContext,
+    hint: HintedFactoryContract,
+  ): JSONSchemaObjMutable {
     // Each carried public schema is an independently comparable document.
     // Generate it in a fresh schema context so any $ref has its own $defs
     // rather than borrowing definitions from the containing value schema.
+    const inputSchema = hint.inputSchema !== undefined
+      ? hint.inputSchema as JSONSchemaMutable
+      : this.schemaGenerator.generateSchemaFromSyntheticTypeNode(
+        hint.inputTypeNode,
+        context.typeChecker,
+        context.typeRegistry,
+        context.schemaHints,
+        context.sourceFile,
+      );
+    const outputSchema = hint.outputSchema !== undefined
+      ? hint.outputSchema as JSONSchemaMutable
+      : this.schemaGenerator.generateSchemaFromSyntheticTypeNode(
+        hint.outputTypeNode,
+        context.typeChecker,
+        context.typeRegistry,
+        context.schemaHints,
+        context.sourceFile,
+      );
+    return asFactorySchema(hint.kind, inputSchema, outputSchema);
+  }
+
+  private formatDetected(
+    context: GenerationContext,
+    detected: FactoryTypeInfo,
+  ): JSONSchemaObjMutable {
     const inputSchema = this.schemaGenerator.generateSchema(
-      factory.inputType,
+      detected.inputType,
       context.typeChecker,
     );
     const outputSchema = this.schemaGenerator.generateSchema(
-      factory.outputType,
+      detected.outputType,
       context.typeChecker,
     );
-
-    const asFactory = factory.kind === "handler"
-      ? {
-        kind: "handler" as const,
-        contextSchema: inputSchema,
-        eventSchema: outputSchema,
-      }
-      : {
-        kind: factory.kind,
-        argumentSchema: inputSchema,
-        resultSchema: outputSchema,
-      };
-
-    return { asFactory } as JSONSchemaObjMutable;
+    return asFactorySchema(detected.kind, inputSchema, outputSchema);
   }
+}
+
+function asFactorySchema(
+  kind: FactoryTypeKind,
+  inputSchema: JSONSchemaMutable,
+  outputSchema: JSONSchemaMutable,
+): JSONSchemaObjMutable {
+  const asFactory = kind === "handler"
+    ? {
+      kind: "handler" as const,
+      contextSchema: inputSchema,
+      eventSchema: outputSchema,
+    }
+    : {
+      kind,
+      argumentSchema: inputSchema,
+      resultSchema: outputSchema,
+    };
+  return { asFactory } as JSONSchemaObjMutable;
 }

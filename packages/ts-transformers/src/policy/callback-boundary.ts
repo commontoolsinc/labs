@@ -2,7 +2,9 @@ import ts from "typescript";
 
 import {
   classifyArrayCallbackContainerCall,
+  classifyLegacyPatternCarrier,
   detectCallKind,
+  findEnclosingPatternBuilderCallbackDescriptor,
   getPatternBuilderCallbackArgument,
   getPatternToolCallbackArgument,
 } from "../ast/call-kind.ts";
@@ -125,14 +127,7 @@ function isPatternToolPatternArgument(
   patternCall: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
-  const grandparent = patternCall.parent;
-  if (!grandparent || !ts.isCallExpression(grandparent)) {
-    return false;
-  }
-  if (grandparent.arguments[0] !== patternCall) {
-    return false;
-  }
-  return detectCallKind(grandparent, checker)?.kind === "pattern-tool";
+  return classifyLegacyPatternCarrier(patternCall, checker) === "pattern-tool";
 }
 
 export function classifyCallbackBoundary(
@@ -157,14 +152,6 @@ export function classifyCallbackBoundary(
     };
   }
 
-  const parent = callback.parent;
-  if (
-    !parent || !ts.isCallExpression(parent) ||
-    !parent.arguments.includes(callback)
-  ) {
-    return { kind: "none" };
-  }
-
   if (lookup?.isArrayMethodCallback(callback)) {
     return {
       kind: "supported",
@@ -175,6 +162,41 @@ export function classifyCallbackBoundary(
         owner: "array-method",
       },
     };
+  }
+
+  const patternDescriptor = findEnclosingPatternBuilderCallbackDescriptor(
+    callback,
+    checker,
+  );
+  if (patternDescriptor) {
+    if (isPatternToolPatternArgument(patternDescriptor.call, checker)) {
+      return {
+        kind: "supported",
+        boundaryKind: "pattern-tool",
+        bodyContext: {
+          strategy: "explicit",
+          kind: "compute",
+          owner: "unknown",
+        },
+      };
+    }
+    return {
+      kind: "supported",
+      boundaryKind: "pattern-builder",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "pattern",
+        owner: "pattern",
+      },
+    };
+  }
+
+  const parent = callback.parent;
+  if (
+    !parent || !ts.isCallExpression(parent) ||
+    !parent.arguments.includes(callback)
+  ) {
+    return { kind: "none" };
   }
 
   const callKind = detectCallKind(parent, checker);
@@ -415,7 +437,6 @@ export function getCallbackBoundarySemantics(
       supportedKind === "render-builder",
     allowsRestrictedContextFunctionCallback: !!supportedKind &&
       supportedKind !== "event-handler" &&
-      supportedKind !== "pattern-builder" &&
       supportedKind !== "render-builder",
     establishesLocalReactiveAliasScope: supportedKind === "lift-applied" ||
       supportedKind === "computed-builder",
