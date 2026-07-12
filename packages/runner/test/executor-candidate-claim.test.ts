@@ -79,6 +79,7 @@ type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
 class FakeWorker extends EventTarget implements ExecutorWorkerLike {
   readonly messages: unknown[] = [];
   terminated = false;
+  settledSeq = 41;
 
   boot(): void {
     this.dispatchEvent(
@@ -138,6 +139,16 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
       this.dispatchEvent(
         new MessageEvent("message", {
           data: { type: "ready", requestId: request.requestId },
+        }),
+      );
+    } else if (request.type === "settle") {
+      this.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "settled",
+            requestId: request.requestId,
+            dataSeq: this.settledSeq,
+          },
         }),
       );
     } else if (
@@ -247,6 +258,27 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
   } finally {
     await executor.stop();
   }
+});
+
+Deno.test("executor settlement returns the Worker barrier and abrupt stop skips a second round trip", async () => {
+  const { worker, executor } = await startExecutor({ routing: false });
+
+  assertEquals(await executor.settle(), worker.settledSeq);
+  await executor.stop({ abrupt: true });
+
+  assertEquals(
+    worker.messages.filter((message) =>
+      (message as { type?: string }).type === "settle"
+    ).length,
+    1,
+  );
+  assertEquals(
+    worker.messages.some((message) =>
+      (message as { type?: string }).type === "stop"
+    ),
+    false,
+  );
+  assertEquals(worker.terminated, true);
 });
 
 Deno.test("canonical unserved attempts revoke the exact test-only claim", async () => {

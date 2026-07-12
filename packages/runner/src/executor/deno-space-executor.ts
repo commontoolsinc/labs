@@ -78,6 +78,7 @@ type WorkerResponse = {
     | "booted"
     | "ready"
     | "complete"
+    | "settled"
     | "fatal"
     | "candidate-claim"
     | "candidate-diagnostic"
@@ -91,13 +92,15 @@ type WorkerResponse = {
   discovery?: ExecutorWriterDiscovery;
   claim?: ExecutionClaim;
   diagnosticCode?: string;
+  dataSeq?: number;
 };
 
 const isWorkerResponse = (value: unknown): value is WorkerResponse => {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
   return (message.type === "booted" || message.type === "ready" ||
-    message.type === "complete" || message.type === "fatal" ||
+    message.type === "complete" || message.type === "settled" ||
+    message.type === "fatal" ||
     message.type === "candidate-claim" ||
     message.type === "candidate-diagnostic" ||
     message.type === "invalidated-claim" ||
@@ -106,6 +109,9 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
     (message.message === undefined || typeof message.message === "string") &&
+    (message.type !== "settled" ||
+      (Number.isSafeInteger(message.dataSeq) &&
+        Number(message.dataSeq) >= 0)) &&
     (message.type !== "candidate-claim" ||
       isCandidateClaim(message.candidate)) &&
     (message.type !== "candidate-diagnostic" ||
@@ -214,7 +220,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   readonly #claims = new Map<string, ExecutionClaim>();
   readonly #pending = new Map<
     number,
-    PromiseWithResolvers<void>
+    PromiseWithResolvers<WorkerResponse>
   >();
   readonly #booted = Promise.withResolvers<void>();
   #claimControl = Promise.resolve();
@@ -295,20 +301,32 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }, [this.#provider.port, this.#builtinBrokerPort]);
   }
 
-  setDemand(pieces: readonly string[]): Promise<void> {
-    return this.#request("set-demand", { pieces: [...pieces] });
+  async setDemand(pieces: readonly string[]): Promise<void> {
+    await this.#request("set-demand", { pieces: [...pieces] });
   }
 
-  wake(): Promise<void> {
-    return this.#request("wake");
+  async wake(): Promise<void> {
+    await this.#request("wake");
   }
 
-  async stop(): Promise<void> {
+  async settle(): Promise<number> {
+    const response = await this.#request("settle");
+    if (response.type !== "settled" || response.dataSeq === undefined) {
+      throw new Error("executor Worker returned an invalid settle barrier");
+    }
+    return response.dataSeq;
+  }
+
+  async stop(options: { abrupt?: boolean } = {}): Promise<void> {
     if (this.#stopped) return;
     this.#stopped = true;
     try {
       await this.#claimControl;
-      if (!this.#failed) await this.#request("stop");
+      if (options.abrupt === true) {
+        this.#rejectPending(new Error("executor Worker stopped abruptly"));
+      } else if (!this.#failed) {
+        await this.#request("stop");
+      }
     } finally {
       this.#revokeClaims();
       this.#detach();
@@ -319,15 +337,15 @@ class DenoSpaceExecutor implements SpaceExecutor {
   }
 
   #request(
-    type: "initialize" | "set-demand" | "wake" | "stop",
+    type: "initialize" | "set-demand" | "wake" | "settle" | "stop",
     fields: Record<string, unknown> = {},
     transfer: Transferable[] = [],
-  ): Promise<void> {
+  ): Promise<WorkerResponse> {
     if (this.#failed) {
       return Promise.reject(new Error("executor Worker failed"));
     }
     const requestId = ++this.#requestId;
-    const pending = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<WorkerResponse>();
     this.#pending.set(requestId, pending);
     try {
       this.#worker.postMessage({ type, requestId, ...fields }, transfer);
@@ -390,7 +408,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       return;
     }
     this.#pending.delete(message.requestId);
-    pending.resolve();
+    pending.resolve(message);
   };
 
   async #handleCandidate(candidate: CandidateClaim): Promise<void> {
@@ -494,6 +512,11 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#revokeClaim(claim);
     }
     this.#claims.clear();
+  }
+
+  #rejectPending(error: Error): void {
+    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#pending.clear();
   }
 
   #revokeClaim(claim: ExecutionClaim): void {
