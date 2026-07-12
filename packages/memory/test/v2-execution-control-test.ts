@@ -74,6 +74,7 @@ type ActionSettlement =
     claim: ExecutionClaim;
     inputBasisSeq: number;
     outcome: "no-op" | "failed" | "unserved";
+    diagnosticCode?: string;
   };
 
 type ExecutionControlEvent =
@@ -1189,6 +1190,358 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   } finally {
     unbind();
     unsubscribeControl();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed transactions reject non-space surfaces atomically", async () => {
+  const server = createControlServer("memory-v2-execution-scope-firewall");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:scope-firewall"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+
+    const spaceOutput = "of:scope-firewall-space";
+    const userOutput = "of:scope-firewall-user";
+    const userSurface = {
+      space: POLICY_SPACE,
+      scope: "user" as const,
+      id: userOutput,
+      path: ["value"],
+    };
+    const base = claimedSpaceObservation(claim, spaceOutput);
+    const observation = {
+      ...base,
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary,
+        writes: [
+          ...base.completeActionScopeSummary.writes,
+          userSurface,
+        ],
+        directOutputs: [
+          ...base.completeActionScopeSummary.directOutputs,
+          userSurface,
+        ],
+      },
+      actualChangedWrites: [...base.actualChangedWrites, userSurface],
+      currentKnownWrites: [...base.currentKnownWrites, userSurface],
+      declaredWrites: [...base.declaredWrites, userSurface],
+    };
+    const error = await assertRejects(() =>
+      session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: spaceOutput,
+          value: { value: "must-roll-back" },
+        }, {
+          op: "set",
+          id: userOutput,
+          scope: "user",
+          value: { value: "must-not-land" },
+        }],
+        schedulerObservation: observation,
+      })
+    );
+    assertEquals((error as Error).name, "ExecutionActionFirewallError");
+    assertEquals(
+      (error as Error & { diagnosticCode?: string }).diagnosticCode,
+      "non-space-scope",
+    );
+    assertEquals(await server.readDocument(POLICY_SPACE, spaceOutput), null);
+    assertEquals(await server.readDocument(POLICY_SPACE, userOutput), null);
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed transactions reject foreign and unsupported surfaces", async () => {
+  const server = createControlServer("memory-v2-execution-shape-firewall");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+
+    const foreignClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:foreign-firewall"),
+    );
+    const output = "of:foreign-firewall-output";
+    const base = claimedSpaceObservation(foreignClaim, output);
+    const foreignRead = {
+      space: "did:key:z6Mk-foreign-firewall-space",
+      scope: "space" as const,
+      id: "of:foreign-input",
+      path: ["value"],
+    };
+    const foreignObservation = {
+      ...base,
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary,
+        reads: [foreignRead],
+      },
+      reads: [foreignRead],
+    };
+    const foreignError = await assertRejects(() =>
+      session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: output,
+          value: { value: "must-not-land" },
+        }],
+        schedulerObservation: foreignObservation,
+      })
+    );
+    assertEquals(
+      (foreignError as Error).name,
+      "ExecutionActionFirewallError",
+    );
+    assertEquals(
+      (foreignError as Error & { diagnosticCode?: string }).diagnosticCode,
+      "foreign-space-surface",
+    );
+    assertEquals(await server.readDocument(POLICY_SPACE, output), null);
+
+    const sqliteClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:sqlite-firewall"),
+    );
+    const sqliteError = await assertRejects(() =>
+      session.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "sqlite",
+          db: {
+            id: "of:claimed-sqlite-firewall",
+            tables: {
+              messages: {
+                columns: { body: { type: "TEXT" } },
+              },
+            },
+          },
+          sql: "INSERT INTO messages (body) VALUES ('must-not-land')",
+        }],
+        schedulerObservation: claimedSpaceObservation(
+          sqliteClaim,
+          "of:claimed-sqlite-firewall",
+        ),
+      })
+    );
+    assertEquals(
+      (sqliteError as Error).name,
+      "ExecutionActionFirewallError",
+    );
+    assertEquals(
+      (sqliteError as Error & { diagnosticCode?: string }).diagnosticCode,
+      "sqlite-operation",
+    );
+
+    const mergeClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:merge-firewall"),
+    );
+    const mergeOutput = "of:merge-firewall-output";
+    const mergeError = await assertRejects(() =>
+      session.transact({
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: mergeOutput,
+          value: { value: "must-not-land" },
+        }],
+        merge: {
+          sourceBranch: "source",
+          sourceSeq: 1,
+          baseBranch: "",
+          baseSeq: 0,
+        },
+        schedulerObservation: claimedSpaceObservation(
+          mergeClaim,
+          mergeOutput,
+        ),
+      })
+    );
+    assertEquals(
+      (mergeError as Error).name,
+      "ExecutionActionFirewallError",
+    );
+    assertEquals(
+      (mergeError as Error & { diagnosticCode?: string }).diagnosticCode,
+      "merge-commit",
+    );
+    assertEquals(
+      await server.readDocument(POLICY_SPACE, mergeOutput),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("unserved attempts derive their basis and settle canonically", async () => {
+  const server = createControlServer("memory-v2-execution-unserved-attempt");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const settlements: ActionSettlement[] = [];
+  const settled = Promise.withResolvers<void>();
+  const unsubscribe = session.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      settlements.push(event.settlement);
+      settled.resolve();
+    }
+  });
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:unserved-attempt"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const confirmed = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:unserved-confirmed",
+        value: { value: 1 },
+      }],
+    });
+    const pending = await session.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:unserved-pending",
+        value: { value: 2 },
+      }],
+    });
+
+    const base = claimedSpaceObservation(
+      claim,
+      "of:unserved-output",
+    );
+    const confirmedRead = {
+      space: POLICY_SPACE,
+      scope: "space" as const,
+      id: "of:unserved-confirmed",
+      path: ["value"],
+    };
+    const pendingRead = {
+      space: POLICY_SPACE,
+      scope: "space" as const,
+      id: "of:unserved-pending",
+      path: ["value"],
+    };
+    const observation = {
+      ...base,
+      inputBasisSeq: 999_999,
+      executionUnservedAttempt: {
+        diagnosticCode: "dynamic-non-space-scope",
+      },
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary,
+        reads: [confirmedRead, pendingRead],
+      },
+      reads: [confirmedRead, pendingRead],
+      actualChangedWrites: [],
+    };
+    const result = await session.transact({
+      localSeq: 4,
+      reads: {
+        confirmed: [{
+          id: confirmedRead.id,
+          path: toDocumentPath(confirmedRead.path),
+          seq: confirmed.seq,
+        }],
+        pending: [{
+          id: pendingRead.id,
+          path: toDocumentPath(pendingRead.path),
+          localSeq: 3,
+        }],
+      },
+      operations: [],
+      schedulerObservation: observation,
+    });
+    assertEquals(result.actionAttempts as unknown, [{
+      localSeq: 4,
+      claim,
+      provenance: {
+        claim: claimKey(POLICY_SPACE, "", "action:unserved-attempt"),
+        onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
+        leaseGeneration: claim.leaseGeneration,
+        claimGeneration: claim.claimGeneration,
+        causedBy: [],
+        inputBasisSeq: pending.seq,
+      },
+      outcome: "unserved",
+      diagnosticCode: "dynamic-non-space-scope",
+    }]);
+    await Promise.race([
+      settled.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("unserved settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(settlements, [{
+      branch: "",
+      claim,
+      inputBasisSeq: pending.seq,
+      outcome: "unserved",
+      diagnosticCode: "dynamic-non-space-scope",
+    }]);
+
+    const snapshots = await session.listSchedulerActionSnapshots({
+      actionId: claim.actionId,
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+    });
+    const stored = snapshots.snapshots[0]?.observation as Record<
+      string,
+      unknown
+    >;
+    assertEquals(stored.executionUnservedAttempt, undefined);
+    assertEquals(stored.inputBasisSeq, pending.seq);
+    assertEquals(stored.executionProvenance, undefined);
+  } finally {
+    unbind();
+    unsubscribe();
     await client.close();
     await server.close();
   }
