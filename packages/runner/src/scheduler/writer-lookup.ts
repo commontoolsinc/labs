@@ -1,6 +1,7 @@
 import type {
   SchedulerWriterCandidate as DurableSchedulerWriterCandidate,
 } from "@commonfabric/memory/v2";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { arraysOverlap } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -322,5 +323,5 @@ function cloneAddress(address: IMemorySpaceAddress): IMemorySpaceAddress {
 }
 
 function compareKeys(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  return utf8Compare(left, right);
 }
