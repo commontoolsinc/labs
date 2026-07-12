@@ -21,6 +21,13 @@ reference. Sibling and input-derived clauses remain conjunctive and untouched.
 identity of `direct-release.tsx`; a pinned `cf:pattern:<identity>` import
 follows the same defining-identity rule.
 
+Multiple entries in `Confidential<T, [PolicyOf<A>, PolicyOf<B>]>` are separate
+conjunctive clauses: both must release. Spell a deliberate weakening as
+`Confidential<T, [AnyOf<[PolicyOf<A>, PolicyOf<B>]>]>`; this creates one
+disjunctive clause where either policy is sufficient. `AnyOf` still uses the
+runtime's authored-OR validation and cannot contain forbidden expiry or caveat
+alternatives.
+
 Run:
 
 ```sh

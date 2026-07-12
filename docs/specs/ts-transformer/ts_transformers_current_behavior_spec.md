@@ -9,8 +9,8 @@ and exercised by current tests/fixtures. **Related:**
 - `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
 - `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
 - `docs/specs/ts-transformer/ts_transformers_goals.md`
-- `docs/specs/ts-transformer/cfc_authoring_contract.md` (draft, not current
-  implemented behavior)
+- `docs/specs/ts-transformer/cfc_authoring_contract.md` (implemented direct
+  CFC authoring behavior)
 - `docs/specs/ts-transformer/cfc_ui_helper_contract.md` (draft, not current
   implemented behavior)
 
@@ -533,13 +533,22 @@ returns JSX: ternaries and logical control flow inside the compute callback
 body stay authored JavaScript rather than recursively lowered helper control
 flow.
 
-### 6.8 WriteAuthorizedBy validation (CFC, validation-only)
+### 6.8 CFC authoring and validation
 
-`WriteAuthorizedByValidationTransformer` (pipeline stage 10) is the one piece of
-the CFC authoring contract that has landed on `main`, and it is **validation
-only** — there is no CFC schema lowering yet (no `ifc.integrity` / `ifc.opaque` /
-`ifc.collection` emission anywhere in `src/`; the draft lowering rules in
-`cfc_authoring_contract.md` remain unimplemented — see §14).
+The pipeline implements both schema aliases and direct module-authored exchange
+rules. `CfcPolicyAuthoringTransformer` validates and lowers static exported
+`exchangeRule(...)` / `exchangeRules([...])` declarations, stamps deterministic
+rule names, and records compiler manifests in cross-stage state. The manifests
+are side-channel compiler artifacts and never JavaScript module exports.
+
+`CfcPolicyOfValidationTransformer` accepts only a direct
+`PolicyOf<typeof rules>` query of an exported ruleset. Schema generation binds
+that reference to the defining module identity, export symbol, exact manifest
+digest, and an owning-space placeholder. Direct imports and pinned `cf:` imports
+retain the dependency's identity.
+
+`WriteAuthorizedByValidationTransformer` separately validates writer-binding
+claims.
 
 It scans `toSchema<T>()` (one type arg) and `pattern<I, R>()` (the result type
 arg) for `WriteAuthorizedBy<T, typeof binding>` references, resolving through
@@ -562,7 +571,8 @@ exercised by `test/cfc-authoring.test.ts`,
 `ts-transformers` also re-exports the canonical CFC alias-name set
 (`CFC_CANONICAL_ALIAS_NAMES`, from `@commonfabric/api/cfc`) via
 `src/cfc-authoring.ts` — `Cfc`, `Confidential`, `Integrity`,
-`WriteAuthorizedBy`, the `TrustedAction*` family, the projection aliases, etc.
+`AnyOf`, `PolicyOf`, `WriteAuthorizedBy`, the `TrustedAction*` family, the
+projection aliases, etc.
 (The former collection/opaque helpers — `OpaqueInput`, `SubsetOf`,
 `FilteredFrom`, `LengthPreservedFrom`, `PermutationOf` — were removed: the
 runner rejects their lowered `ifc` keys fail-closed.) The canonical aliases
@@ -1136,10 +1146,11 @@ pipeline. Current built-in behavior:
    `ifc.*` schema metadata during the `SchemaGeneratorTransformer` stage. The
    former collection/opaque helpers were removed (the runner rejects their
    lowered keys fail-closed). `WriteAuthorizedBy` usage is additionally
-   validated (`cfc-write-authorized-by`, §6.8). Note: the authoring contract
-   says the schema generator validates `WriteAuthorizedBy`; in the pipeline
-   that validation is a separate stage-10
-   `WriteAuthorizedByValidationTransformer`, not the schema generator.
+   validated (`cfc-write-authorized-by`, §6.8). Static policy declarations and
+   `PolicyOf` bindings are additionally validated by their dedicated passes;
+   schema generation resolves the resulting exact manifest marker. The
+   `WriteAuthorizedBy` validation remains a separate transformer rather than a
+   schema-generator responsibility.
 
 ## 15. Test Coverage Snapshot
 
