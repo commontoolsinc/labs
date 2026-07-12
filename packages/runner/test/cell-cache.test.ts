@@ -30,6 +30,7 @@ import {
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -569,6 +570,65 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
       new Set(["/main.tsx", "/util.ts", "/types.ts"]),
     );
+  });
+
+  it("persists and cold-loads verified policy manifests without module evaluation", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const artifact = buildCfcPolicyArtifactManifest({
+      formatVersion: 1,
+      moduleIdentity: entryIdentity,
+      symbol: "rules",
+      template: {
+        templateVersion: 1,
+        exchangeRules: [{
+          name: "release",
+          preCondition: {
+            confidentiality: [{ thisPolicy: true }],
+            integrity: [{ type: "IntegrityEvidence" }],
+          },
+          postCondition: { confidentiality: [], integrity: [] },
+        }],
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    });
+    modules[0] = { ...modules[0]!, policyManifests: [artifact] };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const wtx = runtime.edit();
+      writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+      wtx.prepareCfc();
+      await wtx.commit();
+    }
+
+    const rtx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+    expect(loaded.get(entryIdentity)?.policyManifests).toEqual([artifact]);
+
+    const tampered = {
+      ...artifact,
+      manifest: { ...artifact.manifest, symbol: "substituted" },
+    };
+    const bad = modules.map((module) =>
+      module.identity === entryIdentity
+        ? { ...module, policyManifests: [tampered] }
+        : module
+    );
+    const badTx = runtime.edit();
+    try {
+      expect(() =>
+        writeCompiledDocs(runtime, spaceA, bad, entryIdentity, opts(), badTx)
+      ).toThrow("policyDigest mismatch");
+    } finally {
+      badTx.abort?.();
+    }
   });
 
   it("loads duplicate compiled import links once", async () => {
