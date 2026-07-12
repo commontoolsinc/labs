@@ -451,16 +451,17 @@ provenance, hook, and notification path as a remote client.
 5. Preserve remote and in-process behavioral equivalence with a differential
    fixture, including scheduler observations and rejected commits. Compare
    exact user operations/data, then normalize legitimate session ids,
-   sequences, lease generations, and transport metadata before comparing
-   scheduler semantics; assert the expected identity/fence fields separately.
+   sequences, and transport metadata before comparing scheduler semantics.
+   W1.1 extends the fixture with lease generation and host-derived provenance
+   assertions once those fields exist.
 6. Ensure provider disposal unregisters callbacks and cannot outlive its lease.
 
 **Success criteria:**
 
 - [x] Differential fixture produces identical user operations/data and
       normalized-equivalent scheduler semantics through remote/loopback and
-      host-provider paths; expected session/provenance/fence differences are
-      asserted explicitly.
+      host-provider paths; expected session/transport differences are asserted
+      explicitly.
 - [x] ACL denial, CFC denial, and conflict produce the same atomic rejection
       shape with no partial apply.
 - [ ] A revoked/fenced lease produces the same atomic rejection shape with no
@@ -468,7 +469,9 @@ provenance, hook, and notification path as a remote client.
       record and generation in the canonical transaction.
 - [x] An ordinary client commit invalidates and re-settles the Worker without a
       watch/poll loop.
-- [x] Worker termination releases callbacks and pending requests.
+- [x] Worker-controller termination plus channel disposal releases callbacks
+      and pending requests, including host-first disposal during an in-flight
+      read.
 - [x] A test guard proves no provider path calls Engine.applyCommit directly.
 
 ---

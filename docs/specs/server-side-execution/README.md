@@ -891,18 +891,21 @@ hooks. In-process means transport-efficient, not policy-bypassing.
 
 The provider does not install a `session.watch` graph query. Instead, the
 server's host-only accepted-commit callback reports successful canonical
-commits after their scheduler side effects. The provider tracks the Worker's
-known roots and performs authenticated point queries for affected state, then
-delivers ordinary replica syncs over the port. Rejected transactions and
-catch-up reads do not appear as accepted commits; callback failures are
-contained and disposal unregisters the callback. The callback's per-space
+first applications after their scheduler side effects. Its frozen payload is
+limited to scalar revision metadata and changed scheduler-row ids; document
+values never enter the callback surface. Replays, rejected transactions, and
+catch-up reads do not appear as accepted commits. The provider tracks the
+Worker's known roots and performs authenticated point queries for affected
+state, then delivers ordinary replica syncs over the port. Scheduler-adoption
+failure is fail-open for those required data invalidations. Callback failures
+are contained and disposal unregisters the callback. The callback's per-space
 `order` is process-local wake ordering, not the reconnectable execution-control
 feed defined in §6.4/W0.6.
 
 W1.1 adds the `ExecutionLease` record and generation, host-derived
 `onBehalfOf`, and atomic fence validation to this same canonical transaction
-path. The provider buffers a claimed transaction until whole-action scope
-validation succeeds (§5.B.2).
+path. W1.3 will make the provider buffer a claimed transaction until
+whole-action scope validation succeeds (§5.B.2).
 
 ### 6.3 What runs: demand, not pieces
 
