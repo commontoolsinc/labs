@@ -32,7 +32,7 @@ Deno.test("executor host provider commits through authenticated memory without a
       authorization: { principal: hostSigner.did() },
     }),
   });
-  const storage = HostStorageManager.open({
+  const storage = HostStorageManager.connect({
     port: channel.port,
     principal: hostSigner.did(),
     space,
