@@ -1823,76 +1823,44 @@ Deno.test("scheduler writer lookup filters shared targets by action context", as
 Deno.test("scheduler writer lookup keeps its target index at 10k rows", async () => {
   await withEngine((engine) => {
     const actionId = "context:writer-index-plan";
-    const stored = storeObservation(
-      engine,
-      observationFor({ actionId, summaryScope: "user" }),
-      ALICE_A,
+    const writes = Array.from(
+      { length: 10_000 },
+      (_, index) =>
+        schedulerAddress(
+          `output-${index.toString().padStart(5, "0")}`,
+          "user",
+        ),
     );
-    engine.database.prepare(`
-      DELETE FROM scheduler_write_index
-      WHERE action_id = :action_id
-    `).run({ action_id: actionId });
-
-    const insert = engine.database.prepare(`
-      INSERT INTO scheduler_write_index (
-        branch,
-        owner_space,
-        write_space,
-        write_id,
-        write_scope,
-        write_scope_key,
-        write_path,
-        write_kind,
-        piece_id,
-        process_generation,
-        action_id,
-        execution_context_key,
-        observation_id
-      ) VALUES (
-        '',
-        :owner_space,
-        :write_space,
-        :write_id,
-        'user',
-        :write_scope_key,
-        :write_path,
-        'current-known',
-        :piece_id,
-        1,
-        :action_id,
-        :execution_context_key,
-        :observation_id
-      )
-    `);
-    engine.database.transaction(() => {
-      for (let index = 0; index < 10_000; index++) {
-        insert.run({
-          owner_space: OWNER_SPACE,
-          write_space: OWNER_SPACE,
-          write_id: `output-${index.toString().padStart(5, "0")}`,
-          write_scope_key: ALICE_USER_KEY,
-          write_path: encodeMemoryBoundary(["value"]),
-          piece_id: PIECE_ID,
-          action_id: actionId,
-          execution_context_key: stored.executionContextKey,
-          observation_id: stored.observationId,
-        });
-      }
-    }).immediate();
+    const base = observationFor({ actionId, summaryScope: "user" });
+    storeObservation(engine, {
+      ...base,
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary!,
+        writes,
+        directOutputs: writes,
+      },
+      currentKnownWrites: writes,
+    }, ALICE_A);
+    const target = writes.at(-1)!;
 
     assertEquals(
       writersForTargets(engine, {
         branch: "",
         targets: [{
-          space: OWNER_SPACE,
-          id: "output-09999",
-          scope: "user",
+          ...target,
           scopeKey: ALICE_USER_KEY,
-          path: ["value"],
         }],
         applicableExecutionContextKeys: [ALICE_USER_KEY],
       })[0]?.actionId,
       actionId,
+    );
+    assertEquals(
+      (engine.database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM scheduler_write_index
+        WHERE action_id = :action_id
+      `).get({ action_id: actionId }) as { count: number }).count,
+      10_000,
     );
 
     const plan = engine.database.prepare(`
@@ -1905,7 +1873,7 @@ Deno.test("scheduler writer lookup keeps its target index at 10k rows", async ()
         AND write_scope_key = :write_scope_key
     `).all({
       write_space: OWNER_SPACE,
-      write_id: "output-09999",
+      write_id: target.id,
       write_scope_key: ALICE_USER_KEY,
     }) as Array<{ detail: string }>;
     assert(
