@@ -40,10 +40,9 @@ const CLEAN_RESTART_PROGRAM: RuntimeProgram = {
   files: [{
     name: "/main.tsx",
     contents: [
-      "import { pattern, lift } from 'commonfabric';",
-      "const double = lift((input: number) => input * 2);",
+      "import { computed, pattern } from 'commonfabric';",
       "export default pattern<{ value: number }>(({ value }) => {",
-      "  const doubled = double(value);",
+      "  const doubled = computed(() => value * 2);",
       "  return { doubled };",
       "});",
     ].join("\n"),
@@ -141,24 +140,27 @@ const hasPersistedDirtyState = (
 
 const snapshotsByActionId = (
   snapshots: SchedulerSnapshotWithObservation[],
-): ReadonlyMap<string, PersistedSchedulerObservationSnapshot> =>
-  new Map(
-    snapshots.map((snapshot) => [
-      snapshot.observation.actionId,
-      {
-        observation: snapshot.observation,
-        ...(snapshot.directDirtySeq !== undefined
-          ? { directDirtySeq: snapshot.directDirtySeq }
-          : {}),
-        ...(snapshot.staleSeq !== undefined
-          ? { staleSeq: snapshot.staleSeq }
-          : {}),
-        ...(snapshot.unknownReason !== undefined
-          ? { unknownReason: snapshot.unknownReason }
-          : {}),
-      },
-    ]),
-  );
+): ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]> => {
+  const result = new Map<string, PersistedSchedulerObservationSnapshot[]>();
+  for (const snapshot of snapshots) {
+    const candidates = result.get(snapshot.observation.actionId) ?? [];
+    candidates.push({
+      executionContextKey: snapshot.executionContextKey,
+      observation: snapshot.observation,
+      ...(snapshot.directDirtySeq !== undefined
+        ? { directDirtySeq: snapshot.directDirtySeq }
+        : {}),
+      ...(snapshot.staleSeq !== undefined
+        ? { staleSeq: snapshot.staleSeq }
+        : {}),
+      ...(snapshot.unknownReason !== undefined
+        ? { unknownReason: snapshot.unknownReason }
+        : {}),
+    });
+    result.set(snapshot.observation.actionId, candidates);
+  }
+  return result;
+};
 
 const currentSnapshotOracle = {
   addressesCurrentAtOrBelow: () => true,
@@ -237,6 +239,102 @@ describe("persistent scheduler observations", () => {
     expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
+  it("binds complete structural summaries to observation fingerprints", () => {
+    const summaryReads = [{ ...readAddress, path: [...readAddress.path] }];
+    const observation = buildSchedulerActionObservation({
+      ownerSpace: "did:key:space",
+      actionId: "pattern.tsx:computed:complete",
+      actionKind: "computation",
+      branch: "",
+      pieceId: "space:of:piece",
+      processGeneration: 0,
+      implementationFingerprint: "impl:complete",
+      runtimeFingerprint: "runtime:complete",
+      observedAtSeq: 7,
+      transactionKind: "action-run",
+      transactionLog: {
+        reads: [readAddress],
+        shallowReads: [],
+        writes: [writeAddress],
+        attemptedWrites: [],
+      },
+      currentKnownWrites: [writeAddress],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        piece: {
+          space: "did:key:space",
+          scope: "space",
+          id: "of:piece",
+          path: ["value"],
+        },
+        reads: summaryReads,
+        writes: [writeAddress],
+        materializerWriteEnvelopes: [materializerEnvelope],
+        directOutputs: [writeAddress],
+      },
+    });
+
+    expect(observation.completeActionScopeSummary).toMatchObject({
+      version: 1,
+      complete: true,
+      implementationFingerprint: "impl:complete",
+      runtimeFingerprint: "runtime:complete",
+      reads: [readAddress],
+    });
+    summaryReads[0]!.path.push("mutated-after-build");
+    expect(observation.completeActionScopeSummary?.reads).toEqual([
+      readAddress,
+    ]);
+    expect(isSchedulerActionObservation(observation)).toBe(true);
+    expect(isSchedulerActionObservation({
+      ...observation,
+      completeActionScopeSummary: {
+        ...observation.completeActionScopeSummary!,
+        runtimeFingerprint: "runtime:forged",
+      },
+    })).toBe(false);
+  });
+
+  it("suppresses complete summaries for fallback action fingerprints", () => {
+    const observation = buildSchedulerActionObservation({
+      ownerSpace: "did:key:space",
+      actionId: "unverified-action",
+      actionKind: "computation",
+      branch: "",
+      pieceId: "space:of:piece",
+      processGeneration: 0,
+      implementationFingerprint: "action:piece:unverified-action",
+      runtimeFingerprint: schedulerRuntimeFingerprint(),
+      observedAtSeq: 1,
+      transactionKind: "action-run",
+      transactionLog: {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+        attemptedWrites: [],
+      },
+      currentKnownWrites: [],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        piece: {
+          space: "did:key:space",
+          scope: "space",
+          id: "of:piece",
+          path: ["value"],
+        },
+        reads: [],
+        writes: [],
+        materializerWriteEnvelopes: [],
+        directOutputs: [],
+      },
+    });
+
+    expect(observation.completeActionScopeSummary).toBeUndefined();
+    expect(isSchedulerActionObservation(observation)).toBe(true);
+  });
+
   it("rejects persisted observations missing required scheduler metadata", () => {
     const observation = buildSchedulerActionObservation({
       actionId: "pattern.tsx:computed:1",
@@ -302,6 +400,7 @@ describe("persistent scheduler observations", () => {
 
       const rehydrated = testRuntime.runtime.scheduler
         .rehydrateActionFromObservation(persistedAction, {
+          executionContextKey: "session:test:test",
           observation: buildSchedulerActionObservation({
             actionId: "persistedAction",
             actionKind: "computation",
@@ -440,7 +539,10 @@ describe("persistent scheduler observations", () => {
       expect(
         runtime.scheduler.rehydrateActionFromObservation(
           restoredChangingWriter,
-          { observation: changedObservation! },
+          {
+            executionContextKey: "session:test:test",
+            observation: changedObservation!,
+          },
         ),
       ).toBe(true);
       expect(runtime.scheduler.getMightWrite(restoredChangingWriter)).toEqual(
@@ -526,7 +628,10 @@ describe("persistent scheduler observations", () => {
       expect(
         runtime.scheduler.rehydrateActionFromObservation(
           restoredWriter,
-          { observation: observations.at(-1)! },
+          {
+            executionContextKey: "session:test:test",
+            observation: observations.at(-1)!,
+          },
         ),
       ).toBe(true);
       expect(runtime.scheduler.getMightWrite(restoredWriter)).toEqual(
@@ -549,6 +654,7 @@ describe("persistent scheduler observations", () => {
 
       const rehydrated = testRuntime.runtime.scheduler
         .rehydrateActionFromObservation(failedPersistedAction, {
+          executionContextKey: "session:test:test",
           observation: buildSchedulerActionObservation({
             actionId: "failedPersistedAction",
             actionKind: "computation",
@@ -591,6 +697,7 @@ describe("persistent scheduler observations", () => {
 
       const rehydrated = testRuntime.runtime.scheduler
         .rehydrateActionFromObservation(dirtyPersistedAction, {
+          executionContextKey: "session:test:test",
           directDirtySeq: 7,
           observation: buildSchedulerActionObservation({
             actionId: "dirtyPersistedAction",
@@ -621,7 +728,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("auto-rehydrates subscribed actions from preloaded piece snapshots", async () => {
+  it("selects a matching preloaded candidate instead of the first row", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
@@ -649,7 +756,7 @@ describe("persistent scheduler observations", () => {
       const observation = buildSchedulerActionObservation({
         ownerSpace: space,
         actionId,
-        actionKind: "computation",
+        actionKind: "effect",
         branch: "",
         pieceId: "space:preloaded-process",
         processGeneration: 1,
@@ -674,6 +781,7 @@ describe("persistent scheduler observations", () => {
         shallowReads: [],
         writes: [],
       }, {
+        isEffect: true,
         rehydrateFromStorage: {
           space,
           pieceId: "space:preloaded-process",
@@ -681,7 +789,16 @@ describe("persistent scheduler observations", () => {
           ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             actionId,
-            { observation },
+            [{
+              executionContextKey: "session:did%3Akey%3Aalice:session-one",
+              observation: {
+                ...observation,
+                implementationFingerprint: "impl:older-candidate",
+              },
+            }, {
+              executionContextKey: "session:did%3Akey%3Aalice:session-one",
+              observation,
+            }],
           ]]),
         },
       });
@@ -692,10 +809,249 @@ describe("persistent scheduler observations", () => {
       expect(queryCount).toBe(0);
       expect(testRuntime.runtime.scheduler.isDirty(preloadedPersistedAction))
         .toBe(false);
-      expect(
-        testRuntime.runtime.scheduler.getMightWrite(preloadedPersistedAction),
-      )
-        .toEqual([writeAddress]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("accepts a certified cross-space PerUser candidate", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const action = Object.assign(
+        function crossSpaceUserCandidate() {
+          runs++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:cross-space-user",
+        },
+      );
+      const actionId = "cf:module/test:cross-space-user";
+      const crossSpaceUserRead = {
+        ...readAddress,
+        space: "did:key:other-space" as const,
+        scope: "user" as const,
+      };
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:of:cross-space-user-process",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
+        transactionLog: {
+          reads: [crossSpaceUserRead],
+          shallowReads: [],
+          writes: [],
+        },
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:cross-space-user-process",
+            path: [],
+          },
+          reads: [crossSpaceUserRead],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      });
+      testRuntime.runtime.scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: observation.pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{
+              executionContextKey: "user:did%3Akey%3Aalice",
+              observation,
+            }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      expect(runs).toBe(0);
+      expect(testRuntime.runtime.scheduler.isDirty(action)).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("rejects a fallback-fingerprint shared candidate and runs fresh", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const action = Object.assign(
+        function unprovedSharedCandidate() {
+          runs++;
+        },
+        { writes: [writeLink] },
+      );
+      const actionId = "unprovedSharedCandidate";
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:of:unproved-shared-process",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+      });
+      const forgedObservation: SchedulerActionObservation = {
+        ...observation,
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: observation.implementationFingerprint,
+          runtimeFingerprint: observation.runtimeFingerprint,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:unproved-shared-process",
+            path: [],
+          },
+          reads: [readAddress],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      };
+
+      testRuntime.runtime.scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: observation.pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{ executionContextKey: "space", observation: forgedObservation }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      expect(runs).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("does not fall back past a dirty narrower candidate", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const action = Object.assign(
+        function dirtyNarrowerCandidate() {
+          runs++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:dirty-narrower",
+        },
+      );
+      const actionId = "dirtyNarrowerCandidate";
+      const implementationFingerprint = schedulerImplementationFingerprint(
+        action,
+        actionId,
+        undefined,
+      );
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:of:dirty-narrower-process",
+        processGeneration: 1,
+        implementationFingerprint,
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:dirty-narrower-process",
+            path: [],
+          },
+          reads: [readAddress],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      });
+
+      testRuntime.runtime.scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: observation.pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{ executionContextKey: "space", observation }, {
+              executionContextKey: "session:did%3Akey%3Aalice:session-narrow",
+              observation,
+              directDirtySeq: 7,
+            }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      expect(runs).toBe(1);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -761,7 +1117,11 @@ describe("persistent scheduler observations", () => {
           ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             name,
-            { observation: entry.observation },
+            [{
+              executionContextKey:
+                "session:did%3Akey%3Aalice:always-run-session" as const,
+              observation: entry.observation,
+            }],
           ]]),
         },
       });
@@ -807,6 +1167,7 @@ describe("persistent scheduler observations", () => {
           { writes: [writeLink] },
         );
         const snapshot: PersistedSchedulerObservationSnapshot = {
+          executionContextKey: "session:test:test",
           observation: buildSchedulerActionObservation({
             ownerSpace: space,
             actionId: name,
@@ -911,6 +1272,7 @@ describe("persistent scheduler observations", () => {
       }
 
       const snapshot: PersistedSchedulerObservationSnapshot = {
+        executionContextKey: "session:test:test",
         observation: buildSchedulerActionObservation({
           ownerSpace: space,
           branch: "",
@@ -963,6 +1325,83 @@ describe("persistent scheduler observations", () => {
       expect(scheduler.isDirty(pieceOne)).toBe(false);
       // Same action id and fingerprint, different piece: must remain invalid.
       expect(scheduler.isDirty(pieceTwo)).toBe(true);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("does not adopt a clean broad row past a dirty session candidate", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const action = Object.assign(function adoptionContextCandidate() {}, {
+        writes: [writeLink],
+        implementationHash: "cf:module/test:adoption-context",
+      });
+      const actionId = "adoptionContextCandidate";
+      const pieceId = "space:of:adoption-context-piece";
+      scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId,
+          processGeneration: 0,
+        },
+      });
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        branch: "",
+        pieceId,
+        processGeneration: 0,
+        actionId,
+        actionKind: "computation",
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        transactionLog: {
+          reads: [readAddress],
+          shallowReads: [],
+          writes: [],
+        },
+        currentKnownWrites: [writeAddress],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          piece: {
+            space,
+            scope: "space",
+            id: "of:adoption-context-piece",
+            path: [],
+          },
+          reads: [readAddress],
+          writes: [writeAddress],
+          materializerWriteEnvelopes: [],
+          directOutputs: [writeAddress],
+        },
+      });
+      const oracle = {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      };
+
+      expect(scheduler.isDirty(action)).toBe(true);
+      expect(scheduler.adoptRemoteObservations([{
+        executionContextKey: "space",
+        observation,
+      }, {
+        executionContextKey: "session:did%3Akey%3Aalice:adoption-session",
+        observation,
+        directDirtySeq: 6,
+      }], oracle)).toBe(0);
+      expect(scheduler.isDirty(action)).toBe(true);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
@@ -1066,7 +1505,13 @@ describe("persistent scheduler observations", () => {
       });
 
       expect(ownerSnapshots?.snapshots.length).toBe(1);
+      // One StorageManager owns one authenticated session across all mounted
+      // spaces, so the read-space mirror exposes the same context-qualified
+      // snapshot to this manager and no other session.
       expect(readSnapshots?.snapshots.length).toBe(1);
+      expect(readSnapshots?.snapshots[0]?.executionContextKey).toBe(
+        ownerSnapshots?.snapshots[0]?.executionContextKey,
+      );
       expect(
         (ownerSnapshots?.snapshots[0]?.observation as
           & SchedulerActionObservation
@@ -1412,7 +1857,10 @@ describe("persistent scheduler observations", () => {
       });
 
       const subscribeGeneratedReader = (
-        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+        preloaded?: ReadonlyMap<
+          string,
+          readonly PersistedSchedulerObservationSnapshot[]
+        >,
       ) =>
         runtime.scheduler.subscribe(
           readGenerated,
@@ -1437,7 +1885,10 @@ describe("persistent scheduler observations", () => {
           },
         );
       const subscribeStableReader = (
-        preloaded?: ReadonlyMap<string, PersistedSchedulerObservationSnapshot>,
+        preloaded?: ReadonlyMap<
+          string,
+          readonly PersistedSchedulerObservationSnapshot[]
+        >,
       ) =>
         runtime.scheduler.subscribe(
           readStable,
@@ -1659,6 +2110,7 @@ describe("persistent scheduler observations", () => {
       }, { isEffect: true });
       expect(
         runtime.scheduler.rehydrateActionFromObservation(persistedReader, {
+          executionContextKey: "session:test:test",
           observation: buildSchedulerActionObservation({
             actionId: "persistedReader",
             actionKind: "effect",
@@ -1690,6 +2142,7 @@ describe("persistent scheduler observations", () => {
       });
       expect(
         runtime.scheduler.rehydrateActionFromObservation(persistedWriter, {
+          executionContextKey: "session:test:test",
           observation: buildSchedulerActionObservation({
             actionId: "persistedWriter",
             actionKind: "computation",
@@ -1762,7 +2215,10 @@ describe("persistent scheduler observations", () => {
           ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             "stalePersistedAction",
-            { observation },
+            [{
+              executionContextKey: "session:did%3Akey%3Aalice:stale-session",
+              observation,
+            }],
           ]]),
         },
       });
@@ -1834,6 +2290,26 @@ describe("persistent scheduler observations", () => {
 
       expect(await result.pull()).toEqual({ doubled: 10 });
       await runtimeA.storageManager.synced();
+      const persisted = await persistedSchedulerSnapshots(
+        runtimeA,
+        resultCellPieceId(resultCellA),
+      );
+      const completeObservation = persisted.find((snapshot) =>
+        snapshot.observation.completeActionScopeSummary !== undefined
+      )?.observation;
+      expect(completeObservation?.completeActionScopeSummary).toMatchObject({
+        version: 1,
+        complete: true,
+        implementationFingerprint: completeObservation
+          ?.implementationFingerprint,
+        runtimeFingerprint: completeObservation?.runtimeFingerprint,
+        piece: {
+          space,
+          scope: "space",
+          id: resultCellA.getAsNormalizedFullLink().id,
+          path: ["value"],
+        },
+      });
       runtimeA.scheduler.dispose();
 
       const server = (storageManager as unknown as {

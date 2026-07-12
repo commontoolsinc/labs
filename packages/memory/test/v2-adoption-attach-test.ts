@@ -49,6 +49,7 @@ const SHARED_DOC = "of:adoption-attach-shared";
 const UNTRACKED_DOC = "of:adoption-attach-untracked";
 const USER_OUT = "of:adoption-attach-user-out";
 const SESSION_OUT = "of:adoption-attach-session-out";
+const PIECE_ID = "space:of:adoption-attach-piece";
 
 const authFactoryFor = (principal: string): SessionOpenAuthFactory =>
 (
@@ -90,31 +91,58 @@ const teeSyncs = (
 const observationFor = (
   actionId: string,
   overrides: Partial<SchedulerActionObservation> = {},
-): SchedulerActionObservation => ({
-  version: 1,
-  branch: "",
-  pieceId: "of:adoption-attach-piece",
-  processGeneration: 0,
-  actionId,
-  actionKind: "computation",
-  implementationFingerprint: "impl:v1",
-  runtimeFingerprint: "runtime:test",
-  observedAtSeq: 0,
-  transactionKind: "action-run",
-  reads: [{
-    space: SPACE,
-    scope: "space",
-    id: SHARED_DOC,
-    path: ["value", "count"],
-  }],
-  shallowReads: [],
-  actualChangedWrites: [],
-  currentKnownWrites: [],
-  declaredWrites: [],
-  materializerWriteEnvelopes: [],
-  status: "success",
-  ...overrides,
-});
+): SchedulerActionObservation => {
+  const observation: SchedulerActionObservation = {
+    version: 2,
+    branch: "",
+    pieceId: PIECE_ID,
+    processGeneration: 0,
+    actionId,
+    actionKind: "computation",
+    implementationFingerprint: "impl:v1",
+    runtimeFingerprint: "runtime:test",
+    observedAtSeq: 0,
+    transactionKind: "action-run",
+    reads: [{
+      space: SPACE,
+      scope: "space",
+      id: SHARED_DOC,
+      path: ["value", "count"],
+    }],
+    shallowReads: [],
+    actualChangedWrites: [],
+    currentKnownWrites: [],
+    declaredWrites: [],
+    materializerWriteEnvelopes: [],
+    status: "success",
+    ...overrides,
+  };
+  return {
+    ...observation,
+    completeActionScopeSummary: {
+      version: 1,
+      complete: true,
+      implementationFingerprint: observation.implementationFingerprint,
+      runtimeFingerprint: observation.runtimeFingerprint,
+      piece: {
+        space: SPACE,
+        scope: "space",
+        id: "of:adoption-attach-piece",
+        path: [],
+      },
+      reads: [...observation.reads, ...observation.shallowReads],
+      writes: [
+        ...observation.actualChangedWrites,
+        ...observation.currentKnownWrites,
+        ...(observation.declaredWrites ?? []),
+      ],
+      materializerWriteEnvelopes: [
+        ...observation.materializerWriteEnvelopes,
+      ],
+      directOutputs: [...observation.currentKnownWrites],
+    },
+  };
+};
 
 const attachedActionIds = (
   syncs: readonly SessionSync[],
@@ -399,15 +427,14 @@ Deno.test("memory v2 adoption rows are watch- and reader-scoped like the doc dif
     assertEquals(aliceAttached.includes("session-scope-actual-write"), false);
     assertEquals(bobAttached.includes("session-scope-actual-write"), false);
 
-    // Boot-listing flavor of the reader gate: the snapshot store keeps one
-    // row per actionId, so a user-scope row lists only for the writer's
-    // principal (another principal reloading must run fresh over its OWN
-    // rows), and session-scope rows list for no one — a reloaded runtime is
-    // a new session. The listing is NOT watch-scoped: rehydration itself
-    // re-subscribes the observation's reads.
+    // Boot-listing flavor of the reader gate: context-qualified user rows list
+    // only for that authenticated principal, while session rows list only for
+    // the exact originating session (and therefore not for these receivers).
+    // The listing is NOT watch-scoped: rehydration itself re-subscribes the
+    // observation's reads.
     const listedActionIds = async (session: typeof alice) => {
       const listed = await session.listSchedulerActionSnapshots({
-        pieceId: "of:adoption-attach-piece",
+        pieceId: PIECE_ID,
       });
       return listed.snapshots.map((row) =>
         (row.observation as SchedulerActionObservation).actionId

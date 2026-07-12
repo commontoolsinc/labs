@@ -17,6 +17,8 @@ import {
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerExecutionContextKey,
   type SchedulerSnapshotListRequest,
   type SchedulerSnapshotListResult,
   type ServerMessage,
@@ -169,79 +171,26 @@ const randomHex = (bytes: number): string => {
   return [...data].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-const schedulerObservationFromValue = (
-  observation: unknown,
-): Engine.SchedulerActionObservation | undefined => {
-  if (
-    !isRecord(observation) ||
-    (observation.version !== 1 && observation.version !== 2) ||
-    (observation.ownerSpace !== undefined &&
-      typeof observation.ownerSpace !== "string") ||
-    typeof observation.branch !== "string" ||
-    typeof observation.pieceId !== "string" ||
-    typeof observation.actionId !== "string" ||
-    !isNonNegativeInteger(observation.processGeneration) ||
-    !isSchedulerActionKind(observation.actionKind) ||
-    typeof observation.implementationFingerprint !== "string" ||
-    typeof observation.runtimeFingerprint !== "string" ||
-    !isNonNegativeInteger(observation.observedAtSeq) ||
-    (observation.observedAtLocalSeq !== undefined &&
-      !isNonNegativeInteger(observation.observedAtLocalSeq)) ||
-    !isSchedulerObservationTransactionKind(observation.transactionKind) ||
-    !isSchedulerAddressArray(observation.reads) ||
-    !isSchedulerAddressArray(observation.shallowReads) ||
-    !isSchedulerAddressArray(observation.actualChangedWrites) ||
-    !isSchedulerAddressArray(observation.currentKnownWrites) ||
-    (observation.declaredWrites === undefined
-      ? observation.version === 1
-      : !isSchedulerAddressArray(observation.declaredWrites)) ||
-    !isSchedulerAddressArray(observation.materializerWriteEnvelopes) ||
-    (observation.ignoredSchedulingWrites !== undefined &&
-      !isSchedulerAddressArray(observation.ignoredSchedulingWrites)) ||
-    (observation.actionOptions !== undefined &&
-      !isSchedulerActionOptions(observation.actionOptions)) ||
-    (observation.status !== "success" && observation.status !== "failed") ||
-    (observation.errorFingerprint !== undefined &&
-      typeof observation.errorFingerprint !== "string")
-  ) {
-    return undefined;
-  }
-  return observation as unknown as Engine.SchedulerActionObservation;
-};
-
-const isSchedulerAddressArray = (value: unknown): boolean =>
-  Array.isArray(value) && value.every((address) =>
-    isRecord(address) &&
-    typeof address.space === "string" &&
-    typeof address.id === "string" &&
-    (address.scope === undefined ||
-      address.scope === "space" ||
-      address.scope === "user" ||
-      address.scope === "session") &&
-    Array.isArray(address.path) &&
-    address.path.every((segment) => typeof segment === "string")
-  );
-
-const isSchedulerActionKind = (value: unknown): boolean =>
-  value === "computation" || value === "effect" || value === "event-handler";
-
-const isSchedulerObservationTransactionKind = (value: unknown): boolean =>
-  value === "dependency-collection" || value === "action-run" ||
-  value === "event-preflight";
-
-const isSchedulerActionOptions = (value: unknown): boolean =>
-  isRecord(value) &&
-  (value.debounceMs === undefined ||
-    isNonNegativeFiniteNumber(value.debounceMs)) &&
-  (value.noDebounce === undefined || typeof value.noDebounce === "boolean") &&
-  (value.throttleMs === undefined ||
-    isNonNegativeFiniteNumber(value.throttleMs));
-
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const isNonNegativeFiniteNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0;
+const schedulerApplicableContextKeys = (
+  principal: string | undefined,
+  sessionId: string,
+): SchedulerExecutionContextKey[] => {
+  const keys: SchedulerExecutionContextKey[] = ["space"];
+  if (principal === undefined) return keys;
+  keys.push(
+    Engine.resolveScopeKey("user", {
+      principal,
+    }) as SchedulerExecutionContextKey,
+    Engine.resolveScopeKey("session", {
+      principal,
+      sessionId,
+    }) as SchedulerExecutionContextKey,
+  );
+  return keys;
+};
 
 type CommitSchedulerObservation = {
   localSeq: number;
@@ -251,7 +200,9 @@ type CommitSchedulerObservation = {
 const schedulerObservationsFromCommit = (
   commit: ClientCommit,
 ): CommitSchedulerObservation[] => {
-  const single = schedulerObservationFromValue(commit.schedulerObservation);
+  const single = Engine.schedulerObservationFromValue(
+    commit.schedulerObservation,
+  );
   if (single) {
     return [{ localSeq: commit.localSeq, observation: single }];
   }
@@ -259,7 +210,7 @@ const schedulerObservationsFromCommit = (
   const batch = commit.schedulerObservationBatch ?? [];
   const observations: CommitSchedulerObservation[] = [];
   for (const item of batch) {
-    const observation = schedulerObservationFromValue(
+    const observation = Engine.schedulerObservationFromValue(
       item.schedulerObservation,
     );
     if (!observation) {
@@ -2027,7 +1978,11 @@ export class Server {
               deny,
             );
           }
-          const schedulerStateEnabled = getPersistentSchedulerStateConfig();
+          // Scheduler ownership is derived from an authenticated principal.
+          // An otherwise-authorized anonymous memory session may still commit
+          // cell data, but cannot persist scoped scheduler metadata.
+          const schedulerStateEnabled = getPersistentSchedulerStateConfig() &&
+            session.principal !== undefined;
           const commitPayload = schedulerStateEnabled ? message.commit : {
             ...message.commit,
             schedulerObservation: undefined,
@@ -2038,16 +1993,28 @@ export class Server {
             : [];
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
+            const previousSnapshots = Engine.listSchedulerActionSnapshots(
+              engine,
+              {
+                branch: message.commit.branch ?? "",
+                ownerSpace: message.space,
+                pieceId: observation.pieceId,
+                processGeneration: observation.processGeneration,
+                actionId: observation.actionId,
+                applicableExecutionContextKeys: schedulerApplicableContextKeys(
+                  session.principal,
+                  message.sessionId,
+                ),
+              },
+            ).snapshots;
             previousReadSpaces.set(
               localSeq,
-              this.schedulerObservationReadSpaces(
-                Engine.getLatestSchedulerActionSnapshot(engine, {
-                  branch: message.commit.branch ?? "",
-                  ownerSpace: message.space,
-                  pieceId: observation.pieceId,
-                  processGeneration: observation.processGeneration,
-                  actionId: observation.actionId,
-                })?.observation,
+              new Set(
+                previousSnapshots.flatMap((
+                  snapshot,
+                ) => [...this.schedulerObservationReadSpaces(
+                  snapshot.observation,
+                )]),
               ),
             );
           }
@@ -2302,24 +2269,19 @@ export class Server {
       }
       const page = Engine.listSchedulerActionSnapshots(
         engine,
-        message.query,
+        {
+          ...message.query,
+          applicableExecutionContextKeys: schedulerApplicableContextKeys(
+            session.principal,
+            message.sessionId,
+          ),
+        },
       );
-      // Reader-isolation gate (C6), reload flavor: the snapshot store keeps
-      // ONE row per actionId, so a shared derivation over user-scope docs
-      // holds whichever principal ran last — and that run also cleared the
-      // shared dirty markers. Handing such a row to another principal would
-      // rehydrate it clean over that reader's own (possibly stale) rows.
-      // Drop it; the reloading runtime runs the action fresh instead.
-      const snapshots = page.snapshots.filter((snapshot) =>
-        this.#observationScopeAdoptable(
-          snapshot.observation,
-          snapshot.writerSessionId,
-          session.principal,
-        )
-      ).map((snapshot) => ({
+      const snapshots = page.snapshots.map((snapshot) => ({
         observationId: snapshot.observationId,
         commitSeq: snapshot.commitSeq,
         observedAtSeq: snapshot.observedAtSeq,
+        executionContextKey: snapshot.executionContextKey,
         observation: snapshot.observation,
         ...(snapshot.directDirtySeq !== undefined
           ? { directDirtySeq: snapshot.directDirtySeq }
@@ -2903,44 +2865,6 @@ export class Server {
     );
   }
 
-  // C6, incremental-observation-adoption.md §2: reader-isolated scopes name
-  // DIFFERENT data per reader — a scope:"user" address resolves per
-  // principal, scope:"session" per session — so the determinism premise of
-  // adoption (same action over the same committed reads => same result)
-  // only holds within the same reader. Session-scope rows never leave their
-  // session (a reloaded runtime is a NEW session, so they never rehydrate
-  // either), and user-scope rows reach only sessions of the writer's
-  // principal — fail closed when the writer is unknown. Gates both the
-  // live attach fan-out and the boot listing: a dropped row degrades to
-  // the receiver running the action itself.
-  #observationScopeAdoptable(
-    observation: Engine.SchedulerActionObservation,
-    writerSessionKey: string | undefined,
-    receiverPrincipal: string | undefined,
-  ): boolean {
-    let touchesUserScope = false;
-    for (
-      const address of [
-        ...(observation.reads ?? []),
-        ...(observation.shallowReads ?? []),
-        ...(observation.actualChangedWrites ?? []),
-        ...(observation.currentKnownWrites ?? []),
-        ...(observation.declaredWrites ?? []),
-        ...(observation.materializerWriteEnvelopes ?? []),
-        ...(observation.ignoredSchedulingWrites ?? []),
-      ]
-    ) {
-      const scope = declaredScope(address.scope);
-      if (scope === "session") return false;
-      if (scope === "user") touchesUserScope = true;
-    }
-    if (!touchesUserScope) return true;
-    if (writerSessionKey === undefined) return false;
-    const writerPrincipal = Engine.principalOfSessionKey(writerSessionKey);
-    return writerPrincipal !== undefined &&
-      writerPrincipal === receiverPrincipal;
-  }
-
   // Attach the sync window's scheduler observation rows so the receiving
   // client can ADOPT other clients' committed action runs instead of
   // re-running them (incremental-observation-adoption.md §4). Only for
@@ -2989,6 +2913,10 @@ export class Server {
       const page = Engine.listSchedulerActionSnapshots(engine, {
         sinceCommitSeq: sync.fromSeq,
         throughCommitSeq: sync.toSeq,
+        applicableExecutionContextKeys: schedulerApplicableContextKeys(
+          session.principal,
+          sessionId,
+        ),
       });
       const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
         sessionId,
@@ -2997,17 +2925,13 @@ export class Server {
       const observations = page.snapshots
         .filter((snapshot) =>
           snapshot.writerSessionId !== receiverWriterSessionKey &&
-          adoptionSurfaceTracked(snapshot.observation) &&
-          this.#observationScopeAdoptable(
-            snapshot.observation,
-            snapshot.writerSessionId,
-            session.principal,
-          )
+          adoptionSurfaceTracked(snapshot.observation)
         )
         .map((snapshot) => ({
           observationId: snapshot.observationId,
           commitSeq: snapshot.commitSeq,
           observedAtSeq: snapshot.observedAtSeq,
+          executionContextKey: snapshot.executionContextKey,
           observation: snapshot.observation,
           ...(snapshot.directDirtySeq !== undefined
             ? { directDirtySeq: snapshot.directDirtySeq }
@@ -3259,10 +3183,14 @@ export class Server {
   private async mirrorSchedulerObservation(
     ownerSpace: string,
     observation: Engine.SchedulerActionObservation,
+    originExecutionContextKey: SchedulerExecutionContextKey,
     commit: Engine.AppliedCommit,
     previousReadSpaces: ReadonlySet<string>,
     session: SessionState | undefined,
   ): Promise<void> {
+    if (session?.principal === undefined) {
+      return;
+    }
     const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
     for (const space of previousReadSpaces) {
       mirrorSpaces.add(space);
@@ -3277,10 +3205,19 @@ export class Server {
         continue;
       }
       const engine = await this.openEngine(space);
-      Engine.upsertSchedulerObservation(engine, {
+      Engine.upsertMirroredSchedulerObservation(engine, {
         branch: commit.branch,
         ownerSpace,
         observedAtSeq: commit.seq,
+        scopeContext: {
+          principal: session.principal,
+          sessionId: session.id,
+        },
+        writerSessionId: Engine.resolveCommitSessionKey(
+          session.id,
+          session.principal,
+        ),
+        originExecutionContextKey,
         observation,
       });
     }
@@ -3299,23 +3236,41 @@ export class Server {
 
     try {
       await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
-      const keptObservationLocalSeqs = commit.schedulerObservationResults
-        ? new Set(
-          commit.schedulerObservationResults
-            .filter((result) => result.status === "kept")
-            .map((result) => result.localSeq),
+      const observationResults = commit.schedulerObservationResults
+        ? new Map(
+          commit.schedulerObservationResults.map((result) => [
+            result.localSeq,
+            result,
+          ]),
         )
         : undefined;
+      // A semantic commit replay can outlive an observation that was removed by
+      // later context narrowing. There is no active owner context to mirror in
+      // that case; replaying the stale payload would resurrect invalid state.
+      if (observations.length > 0 && observationResults === undefined) {
+        return;
+      }
       for (const { localSeq, observation } of observations) {
-        if (
-          keptObservationLocalSeqs &&
-          !keptObservationLocalSeqs.has(localSeq)
-        ) {
+        const result = observationResults?.get(localSeq);
+        if (result === undefined) {
+          throw new Error(
+            `scheduler observation ${localSeq} missing owner result`,
+          );
+        }
+        if (result.status === "dropped") {
+          continue;
+        }
+        // A kept replay remains idempotently acknowledged even after a later
+        // observation replaced or narrowed its owner snapshot. The engine omits
+        // the effective context in that case so this stale payload cannot
+        // recreate or roll back a mirror.
+        if (result.executionContextKey === undefined) {
           continue;
         }
         await this.mirrorSchedulerObservation(
           ownerSpace,
           observation,
+          result.executionContextKey,
           commit,
           previousReadSpaces.get(localSeq) ?? new Set(),
           session,
@@ -3416,6 +3371,84 @@ export class Server {
     return opened;
   }
 }
+
+const isSchedulerExecutionContextKey = (
+  value: unknown,
+): value is SchedulerExecutionContextKey =>
+  value === "space" ||
+  (typeof value === "string" &&
+    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+
+const parseSchedulerSnapshotQuery = (
+  value: Record<string, unknown>,
+): SchedulerActionSnapshotQuery | undefined => {
+  // Context is selected only from the authenticated server session. A cursor
+  // may carry the last returned context for stable continuation, but the query
+  // itself has no arbitrary context selector.
+  if (
+    "executionContextKey" in value ||
+    "execution_context_key" in value ||
+    (value.branch !== undefined && typeof value.branch !== "string") ||
+    (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
+    (value.pieceId !== undefined && typeof value.pieceId !== "string") ||
+    (value.processGeneration !== undefined &&
+      !isNonNegativeInteger(value.processGeneration)) ||
+    (value.actionId !== undefined && typeof value.actionId !== "string") ||
+    (value.sinceCommitSeq !== undefined &&
+      !isNonNegativeInteger(value.sinceCommitSeq)) ||
+    (value.throughCommitSeq !== undefined &&
+      !isNonNegativeInteger(value.throughCommitSeq)) ||
+    (value.limit !== undefined && !isNonNegativeInteger(value.limit))
+  ) {
+    return undefined;
+  }
+  let cursor: SchedulerActionSnapshotQuery["cursor"];
+  if (value.cursor !== undefined) {
+    if (
+      !isRecord(value.cursor) ||
+      (value.cursor.ownerSpace !== undefined &&
+        typeof value.cursor.ownerSpace !== "string") ||
+      typeof value.cursor.pieceId !== "string" ||
+      !isNonNegativeInteger(value.cursor.processGeneration) ||
+      typeof value.cursor.actionId !== "string" ||
+      !isSchedulerExecutionContextKey(value.cursor.executionContextKey)
+    ) {
+      return undefined;
+    }
+    cursor = {
+      ...(value.cursor.ownerSpace !== undefined
+        ? { ownerSpace: value.cursor.ownerSpace }
+        : {}),
+      pieceId: value.cursor.pieceId,
+      processGeneration: value.cursor.processGeneration,
+      actionId: value.cursor.actionId,
+      executionContextKey: value.cursor.executionContextKey,
+    };
+  }
+  return {
+    ...(value.branch !== undefined ? { branch: value.branch as string } : {}),
+    ...(value.ownerSpace !== undefined
+      ? { ownerSpace: value.ownerSpace as string }
+      : {}),
+    ...(value.pieceId !== undefined
+      ? { pieceId: value.pieceId as string }
+      : {}),
+    ...(value.processGeneration !== undefined
+      ? { processGeneration: value.processGeneration as number }
+      : {}),
+    ...(value.actionId !== undefined
+      ? { actionId: value.actionId as string }
+      : {}),
+    ...(value.sinceCommitSeq !== undefined
+      ? { sinceCommitSeq: value.sinceCommitSeq as number }
+      : {}),
+    ...(value.throughCommitSeq !== undefined
+      ? { throughCommitSeq: value.throughCommitSeq as number }
+      : {}),
+    ...(value.limit !== undefined ? { limit: value.limit as number } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
+  };
+};
 
 export const parseClientMessage = (
   payload: string,
@@ -3599,12 +3632,14 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     isRecord(parsed.query)
   ) {
+    const query = parseSchedulerSnapshotQuery(parsed.query);
+    if (query === undefined) return null;
     return {
       type: "scheduler.snapshot.list",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
-      query: parsed.query as SchedulerSnapshotListRequest["query"],
+      query,
     };
   }
 

@@ -15,6 +15,15 @@ observations synchronously as actions register. Missing, invalid,
 fingerprint-mismatched, or stale-at-apply observations fall back to synced fresh
 registration.
 
+Active scheduler ownership is qualified by a server-derived execution context:
+`space`, `user:<principal>`, or
+`session:<principal>:<session-id>`. A trusted complete action-scope summary is
+required before state can be shared at space or user scope; incomplete,
+unknown, or dynamic surfaces remain session-owned. Read/write index targets
+also retain their resolved effective `scope_key`, so scoped writes dirty only
+the matching principal or session. The authenticated server filters snapshot
+listings to shared state plus the caller's own user and exact-session rows.
+
 Observation payloads are now versioned. Payload v2 persists reads, shallow
 reads, changed writes, the fixed registered write surface
 (`currentKnownWrites`), materializer envelopes, action options, status markers,
@@ -236,16 +245,20 @@ owned by a scheduler action still act like external effects: they commit actual
 writes, and those writes initiate scheduler dirty propagation for any actions
 that read the changed paths.
 
-There are four record classes:
+There are five record classes:
 
-- `scheduler_action_snapshot`: latest durable observation for one action in one
-  piece generation.
+- `scheduler_action_snapshot`: latest durable observation for one action,
+  piece generation, and execution context.
 - `scheduler_observation`: ordered observation events, including no-op
-  observations, tied to the memory sequence that was current when the
-  observation became visible.
+  observations, tied to the memory sequence and execution context that were
+  current when the observation became visible.
 - `scheduler_read_index` and `scheduler_write_index`: server-side path indexes
-  used to find inactive readers/writers across pieces.
-- `scheduler_action_state`: durable clean/dirty/stale/unknown state per action.
+  used to find inactive readers/writers across pieces. Each target stores both
+  its declared scope and resolved effective scope key.
+- `scheduler_action_state`: durable clean/dirty/stale/unknown state per action
+  and execution context.
+- `scheduler_context_floor`: monotonic shareability evidence per action and
+  implementation/runtime fingerprint.
 
 The names are illustrative; the implementation may choose different table names.
 
@@ -265,6 +278,43 @@ object identity. A durable action key should include:
 
 The current scheduler action id (`src`, function name, or generated anonymous
 id) is useful for diagnostics, but it is not sufficient as the durable key.
+
+### Execution Context Qualification
+
+Cell facts are partitioned by resolved effective scope keys, so the durable
+scheduler projection must use the same ownership dimension. Its active action
+tuple is:
+
+```text
+branch + owner_space + piece_id + process_generation + action_id
+       + execution_context_key
+```
+
+The server derives `execution_context_key` from its authenticated principal and
+session with the shareability lattice `space < user < session`:
+
+- `space` is allowed only when a trusted, complete structural summary proves
+  the piece/result and every possible read, write, materializer envelope, and
+  direct output are same-space and space-scoped.
+- `user:<principal>` is allowed when that proof contains PerUser state but no
+  PerSession state. A certified cross-space PerUser surface remains user-owned
+  for that principal.
+- `session:<principal>:<session-id>` is required for PerSession, incomplete,
+  unknown, dynamic, or otherwise unproved surfaces. Cross-space space-scoped
+  surfaces are also session-owned.
+
+The summary is carried in the observation but is useful only when bound to the
+verified implementation and runtime fingerprints. Observing a small surface in
+one run is not completeness evidence. Within one fingerprint pair, durable
+floor rows make classification monotonic toward narrower contexts: a later
+no-op cannot promote session to user/space or user to space. Runtime evidence
+that contradicts a summary removes only incompatible broader active rows. In
+particular, Alice narrowing from user to session does not remove Bob's user or
+session rows. A broader classification requires a new fingerprint pair.
+
+`writerSessionId` / `scheduler_observation.session_id` remains replay and echo
+provenance. It is not scheduler ownership, and clients cannot provide a
+principal or arbitrary execution-context selector.
 
 #### Version 1 Action Identity
 
@@ -298,6 +348,17 @@ interface SchedulerActionObservationV2 {
   actionKind: "computation" | "effect" | "event-handler";
   implementationFingerprint: string;
   runtimeFingerprint: string;
+  completeActionScopeSummary?: {
+    version: 1;
+    complete: true;
+    implementationFingerprint: string;
+    runtimeFingerprint: string;
+    piece: SchedulerAddress;
+    reads: SchedulerAddress[];
+    writes: SchedulerAddress[];
+    materializerWriteEnvelopes: SchedulerAddress[];
+    directOutputs: SchedulerAddress[];
+  };
 
   observedAtSeq: number;
   observedAtLocalSeq?: number;
@@ -451,22 +512,25 @@ internal sync channel without changing the user data model.
 
 ### Table Sketch
 
-The exact schema should follow memory v2's encoding helpers and migration style,
-but the storage shape should look roughly like this:
+The implementation uses the following context-qualified storage shape. Some
+diagnostic/history columns are included here because their distinction from
+ownership is important:
 
 ```sql
 CREATE TABLE scheduler_observation (
-  observation_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-  branch           TEXT    NOT NULL DEFAULT '',
-  commit_seq       INTEGER,
-  observed_at_seq  INTEGER NOT NULL,
-  session_id       TEXT,
-  local_seq        INTEGER,
-  piece_id         TEXT    NOT NULL,
-  action_id        TEXT    NOT NULL,
-  process_generation INTEGER NOT NULL,
-  payload          JSON    NOT NULL,
-  created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+  observation_id       INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  branch               TEXT    NOT NULL DEFAULT '',
+  execution_context_key TEXT   NOT NULL,
+  commit_seq           INTEGER,
+  observed_at_seq      INTEGER NOT NULL DEFAULT 0,
+  session_id           TEXT,
+  local_seq            INTEGER,
+  piece_id             TEXT    NOT NULL,
+  action_id            TEXT    NOT NULL,
+  process_generation   INTEGER NOT NULL,
+  payload              JSON    NOT NULL,
+  created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
 );
 
 CREATE INDEX idx_scheduler_observation_action
@@ -475,74 +539,162 @@ CREATE INDEX idx_scheduler_observation_action
     piece_id,
     process_generation,
     action_id,
+    execution_context_key,
     observation_id
   );
+CREATE UNIQUE INDEX idx_scheduler_observation_id_context
+  ON scheduler_observation (observation_id, execution_context_key);
 
 CREATE TABLE scheduler_action_snapshot (
-  branch           TEXT    NOT NULL DEFAULT '',
-  piece_id         TEXT    NOT NULL,
-  process_generation INTEGER NOT NULL,
-  action_id        TEXT    NOT NULL,
-  observation_id   INTEGER NOT NULL,
-  payload          JSON    NOT NULL,
-
-  PRIMARY KEY (branch, piece_id, process_generation, action_id),
-  FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+  branch                TEXT    NOT NULL DEFAULT '',
+  owner_space           TEXT    NOT NULL DEFAULT '',
+  piece_id              TEXT    NOT NULL,
+  process_generation    INTEGER NOT NULL,
+  action_id             TEXT    NOT NULL,
+  execution_context_key TEXT    NOT NULL,
+  observation_id        INTEGER NOT NULL,
+  commit_seq            INTEGER,
+  observed_at_seq       INTEGER NOT NULL DEFAULT 0,
+  payload               JSON    NOT NULL,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ),
+  FOREIGN KEY (observation_id, execution_context_key)
+    REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
 
 CREATE TABLE scheduler_read_index (
-  branch             TEXT    NOT NULL DEFAULT '',
-  owner_space        TEXT,
-  read_space         TEXT    NOT NULL,
-  read_id            TEXT    NOT NULL,
-  read_scope         TEXT    NOT NULL,
-  read_path          JSON    NOT NULL,
-  read_kind          TEXT    NOT NULL, -- 'recursive' | 'shallow'
-  piece_id           TEXT    NOT NULL,
-  process_generation INTEGER NOT NULL,
-  action_id          TEXT    NOT NULL,
-  observation_id     INTEGER NOT NULL
+  branch                TEXT    NOT NULL DEFAULT '',
+  owner_space           TEXT,
+  read_space            TEXT    NOT NULL,
+  read_id               TEXT    NOT NULL,
+  read_scope            TEXT    NOT NULL,
+  read_scope_key        TEXT    NOT NULL,
+  read_path             JSON    NOT NULL,
+  read_kind             TEXT    NOT NULL, -- 'recursive' | 'shallow'
+  piece_id              TEXT    NOT NULL,
+  process_generation    INTEGER NOT NULL,
+  action_id             TEXT    NOT NULL,
+  execution_context_key TEXT    NOT NULL,
+  observation_id        INTEGER NOT NULL,
+  FOREIGN KEY (observation_id, execution_context_key)
+    REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
 
 CREATE INDEX idx_scheduler_read_index_lookup
-  ON scheduler_read_index (branch, read_space, read_id, read_scope);
+  ON scheduler_read_index (branch, read_space, read_id, read_scope_key);
+CREATE INDEX idx_scheduler_read_index_action
+  ON scheduler_read_index (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  );
 
 CREATE TABLE scheduler_write_index (
-  branch             TEXT    NOT NULL DEFAULT '',
-  write_space        TEXT    NOT NULL,
-  write_id           TEXT    NOT NULL,
-  write_scope        TEXT    NOT NULL,
-  write_path         JSON    NOT NULL,
-  write_kind         TEXT    NOT NULL, -- v2: 'current-known' | 'materializer'; 'declared' is v1 compatibility
-  piece_id           TEXT    NOT NULL,
-  process_generation INTEGER NOT NULL,
-  action_id          TEXT    NOT NULL,
-  observation_id     INTEGER NOT NULL
+  branch                TEXT    NOT NULL DEFAULT '',
+  owner_space           TEXT    NOT NULL DEFAULT '',
+  write_space           TEXT    NOT NULL,
+  write_id              TEXT    NOT NULL,
+  write_scope           TEXT    NOT NULL,
+  write_scope_key       TEXT    NOT NULL,
+  write_path            JSON    NOT NULL,
+  write_kind            TEXT    NOT NULL,
+  piece_id              TEXT    NOT NULL,
+  process_generation    INTEGER NOT NULL,
+  action_id             TEXT    NOT NULL,
+  execution_context_key TEXT    NOT NULL,
+  observation_id        INTEGER NOT NULL,
+  FOREIGN KEY (observation_id, execution_context_key)
+    REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
 
-CREATE TABLE scheduler_action_state (
-  branch             TEXT    NOT NULL DEFAULT '',
-  piece_id           TEXT    NOT NULL,
-  process_generation INTEGER NOT NULL,
-  action_id          TEXT    NOT NULL,
-  latest_observation_id INTEGER,
-  direct_dirty_seq   INTEGER,
-  stale_seq          INTEGER,
-  unknown_reason     TEXT,
+CREATE INDEX idx_scheduler_write_index_action
+  ON scheduler_write_index (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  );
 
-  PRIMARY KEY (branch, piece_id, process_generation, action_id)
+CREATE TABLE scheduler_action_state (
+  branch                 TEXT    NOT NULL DEFAULT '',
+  owner_space            TEXT    NOT NULL DEFAULT '',
+  piece_id               TEXT    NOT NULL,
+  process_generation     INTEGER NOT NULL,
+  action_id              TEXT    NOT NULL,
+  execution_context_key  TEXT    NOT NULL,
+  latest_observation_id  INTEGER,
+  direct_dirty_seq       INTEGER,
+  stale_seq              INTEGER,
+  unknown_reason         TEXT,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ),
+  FOREIGN KEY (latest_observation_id, execution_context_key)
+    REFERENCES scheduler_observation(observation_id, execution_context_key)
+);
+
+CREATE TABLE scheduler_context_floor (
+  branch                     TEXT NOT NULL DEFAULT '',
+  owner_space                TEXT NOT NULL DEFAULT '',
+  piece_id                   TEXT NOT NULL,
+  process_generation         INTEGER NOT NULL,
+  action_id                  TEXT NOT NULL,
+  implementation_fingerprint TEXT NOT NULL,
+  runtime_fingerprint        TEXT NOT NULL,
+  principal_key              TEXT NOT NULL DEFAULT '',
+  floor_scope                TEXT NOT NULL,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    implementation_fingerprint,
+    runtime_fingerprint,
+    principal_key
+  ),
+  CHECK (floor_scope IN ('space', 'user', 'session'))
 );
 ```
 
-`scheduler_observation` is the ordered history. `scheduler_action_snapshot` is
-the latest usable observation per action. If the same action run produces real
-memory operations, both the memory commit row/revision rows and scheduler
-observation rows should be inserted under the same SQLite transaction and
-linked through `commit_seq`. No-op observations leave `commit_seq` null and use
-`observed_at_seq` plus `observation_id` for ordering.
+`scheduler_observation` is retained history; the other four action tables are
+the active context-qualified projection. `scheduler_observation_replay` remains
+keyed by canonical writer session plus local sequence and points at observation
+history for idempotency. That replay/writer identity is not part of the active
+ownership tuple.
 
-The `scheduler_action_state` sketch compresses dirty/stale causes into summary
+If the same action run produces real memory operations, both memory
+commit/revision rows and scheduler observation rows are inserted under the same
+SQLite transaction and linked through `commit_seq`. No-op observations leave
+the observation's semantic `commit_seq` null; the snapshot may carry the next
+delivery sequence so incremental adoption can include it in a later sync
+window.
+
+The W0.1 migration rebuilds all scheduler tables in one transaction. It retains
+active state only when the snapshot/observation/state identities agree and the
+decoded observation has a trusted complete summary proving same-space,
+space-only behavior. Scoped, incomplete, malformed, ambiguous, or orphaned
+active rows are discarded so their actions run fresh. Preserved read/write
+indexes are reconstructed from the decoded observation with `space` target
+keys, and a second open recognizes the resulting schema without rewriting it.
+
+`scheduler_action_state` compresses dirty/stale causes into summary
 seq fields. A production implementation may need a separate dirty-cause or
 stale-edge table so clearing one upstream dirty source does not accidentally
 clear another.
@@ -557,6 +709,10 @@ keeps the authoritative observation; after the owner-space commit succeeds, the
 server upserts a full scheduler observation snapshot into every read space and
 into any previous read spaces that need stale index cleanup. These mirror rows
 have `commit_seq = NULL` because the semantic commit belongs to another SQLite
+database. They retain the originating action's `owner_space`,
+`execution_context_key`, and resolved read/write target scope keys. The server
+uses the originating authenticated principal/session context when resolving
+those keys; a mirror never reclassifies the action independently in its target
 database.
 
 The owner space remains the source of truth for rehydration state. A write in a
@@ -604,10 +760,14 @@ in-memory scheduler performs today.
 When any transaction commits actual changed writes, whether or not it belongs
 to a scheduler action:
 
-1. Normalize changed write paths using the same recursive/shallow overlap rules
-   used by the scheduler and memory conflict validation.
-2. Query `scheduler_read_index` for overlapping readers across pieces.
-3. Mark those reader actions direct-dirty in `scheduler_action_state`.
+1. Preserve each changed revision's resolved effective scope key and normalize
+   its paths using the same recursive/shallow overlap rules used by the
+   scheduler and memory conflict validation.
+2. Query `scheduler_read_index` for overlapping readers with the exact
+   `(branch, space, id, scope_key)` target. Declared scope alone is not an
+   isolation boundary.
+3. Mark only those context-qualified reader actions direct-dirty in
+   `scheduler_action_state`.
 4. Use persisted dependency edges, or derive edges from `scheduler_write_index`
    plus `scheduler_read_index`, to propagate stale state to downstream actions.
 5. Do not execute actions on the server. Loaded runners may receive
@@ -656,8 +816,11 @@ latest observations.
    fingerprints, schemas, and process generation.
 3. Recreate action objects and scheduler subscriptions from the graph snapshot,
    but do not run actions yet.
-4. Load the latest valid scheduler action observation and durable action state
-   for each action key.
+4. Load the applicable scheduler candidates and durable action state for each
+   action key. The server returns at most the shared `space` row, the
+   authenticated principal's `user` row, and that caller's exact `session` row;
+   the runner selects the candidate whose context and fingerprints match the
+   recreated action rather than assuming the first row is usable.
 5. For each valid observation:
    - restore `dependencies`
    - restore trigger paths from `reads` and `shallowReads`
@@ -679,12 +842,13 @@ latest observations.
 
 The current runner implements this as a boot phase, not an asynchronous
 per-subscription lookup. It syncs the resumed inputs, cursor-lists one
-space-wide snapshot epoch, verifies every page reports the same server
-sequence, syncs the replica again to close the list/register gap, and buckets
-the result by piece doc. Registration applies a bucket synchronously only when
-identity/fingerprints match, every read and output address is locally current at
-or below the observation sequence, and no pending local write overlaps. A miss
-or failed currency proof takes the synced fresh-run path.
+authenticated, space-wide snapshot epoch, verifies every page reports the same
+server sequence, syncs the replica again to close the list/register gap, and
+buckets the result by piece doc. Registration applies a bucket synchronously
+only when identity/fingerprints and the minimum required context match, every
+read and output address is locally current at or below the observation
+sequence, and no pending local write overlaps. A miss or failed currency proof
+takes the synced fresh-run path.
 
 Rehydration must rebuild dependency edges from the restored active scheduling
 write view, not only from the transaction's actual changed writes. A no-op action
@@ -810,6 +974,17 @@ Server-side dirty propagation for materializers follows the same split:
 
 ## Correctness Invariants
 
+- Every active snapshot, action-state row, and owning read/write-index row is
+  qualified by the full action tuple plus `execution_context_key`.
+- Execution context is derived from the authenticated server session. A client
+  may carry a fingerprint-bound structural summary but cannot select a
+  principal or ownership context.
+- Classification is monotonic toward narrower contexts within one
+  implementation/runtime fingerprint pair. Contradictory runtime evidence
+  invalidates only incompatible broader active rows.
+- Dirty matching uses exact resolved `read_scope_key` / changed-write
+  `scopeKey`. Declared `user` or `session` scope without its principal/session
+  key is insufficient.
 - A persisted observation may be used only when its action identity and
   implementation fingerprint match the recreated action.
 - Storage-backed observations may skip execution only when their runtime
@@ -856,6 +1031,7 @@ findOverlappingWritesAfter({
   branch,
   id,
   scope,
+  scopeKey,
   path,
   nonRecursive,
   afterSeq,
@@ -863,11 +1039,14 @@ findOverlappingWritesAfter({
 })
 
 findSchedulerReadersForWrite({
-  space,
   branch,
-  id,
-  scope,
-  path,
+  write: {
+    space,
+    id,
+    scope,
+    scopeKey,
+    path,
+  },
 })
 ```
 
@@ -885,24 +1064,29 @@ The implemented snapshot lookup surface is:
 - engine API `Engine.listSchedulerActionSnapshots()`
 - runner storage-provider method `listSchedulerActionSnapshots()`
 
-The query filters by branch and process generation, and optionally by piece id
-and action id. Bulk listing is cursor-paginated in deterministic owner-space,
-piece, generation, action order. The protocol result intentionally carries
+The query filters by branch and process generation, and optionally by owner
+space, piece id, and action id. Before pagination, the server intersects rows
+with the authenticated session's applicable `space`, user, and exact-session
+keys. The protocol exposes no arbitrary context selector. Bulk listing is
+cursor-paginated in deterministic owner-space, piece, generation, action, and
+execution-context order; the context is part of the continuation cursor so tied
+action keys are stable and complete. The protocol result intentionally carries
 `observation` as `unknown`; the runner owns validation and casting to
-`SchedulerActionObservation`; the runner validates payload versions and address
-shapes before use.
+`SchedulerActionObservation` and validates payload versions, address shapes,
+summary/fingerprint binding, and context compatibility before use.
 
-The resume load is **space-scoped**: a resumed boot issues one listing for the
-whole space (no piece-id filter) and buckets the rows per piece id, so every
-descendant piece — sub-pattern nodes, map/filter/flatMap per-element runs —
-registers against its own bucket from the same listing. Restore is keyed per
-piece **doc** (`pieceId` is the `scope:id` of the doc the piece derives; each
-doc has exactly one deriving piece), and only doc-keyed observations are
-persisted — an action registered without rehydration identity (session-scoped
-effects such as sinks or `pull`) writes no rows. Builtins whose run starts
-child runs (map/filter/flatMap) never rehydrate clean: their reconcile
-re-attaches the children, which then rehydrate individually. See
-`docs/specs/scheduler-v2/per-doc-rehydration.md` for the full design.
+The resume load is **one authenticated space listing**: a resumed boot issues
+one request for the whole space (no piece-id filter) and buckets the applicable
+rows per piece id, so every descendant piece — sub-pattern nodes,
+map/filter/flatMap per-element runs — registers against its own bucket from the
+same listing. Restore is keyed per piece **doc** (`pieceId` is the `scope:id` of
+the doc the piece derives; each doc has exactly one deriving piece), and only
+doc-keyed observations are persisted — an action registered without
+rehydration identity (session-scoped effects such as sinks or `pull`) writes no
+rows. Builtins whose run starts child runs (map/filter/flatMap) never rehydrate
+clean: their reconcile re-attaches the children, which then rehydrate
+individually. See `docs/specs/scheduler-v2/per-doc-rehydration.md` for the full
+design.
 
 Snapshot listing has no correctness timeout. A request failure degrades the
 whole boot to synced fresh registration; lifecycle epochs prevent late results
@@ -919,6 +1103,7 @@ Current branch status:
 | Feature flag | Implemented as `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, default off. |
 | Observation construction and no-op persistence | Implemented, including batched no-op observation commits. |
 | Memory scheduler tables and same-space dirty marking | Implemented. |
+| Context-qualified ownership and migration | Implemented with authenticated space/user/session filtering, monotonic floors, effective target keys, and conservative migration of only provably shared legacy rows. |
 | Cross-space read-index mirrors | Implemented with accepted non-atomic mirror writes. |
 | Snapshot query surface | Implemented. |
 | Runner rehydration primitive and boot-time space listing | Implemented. |
@@ -1014,6 +1199,16 @@ are accepted and served.
   present in scheduler observations.
 - Add memory v2 tests for internal no-op observation rows: no semantic
   revisions, no normal storage notifications, but durable observation data.
+- Add two-user and two-session tests proving scoped snapshot/state/index rows
+  coexist, authenticated listing cannot cross contexts, and scoped writes dirty
+  only the matching effective target key.
+- Add monotonic-narrowing tests for space-to-scoped, user-to-session, and
+  cross-space contradictions, including preservation of unrelated principals.
+- Add migration tests that preserve only certified space rows, reject malformed
+  or ambiguous ownership, verify foreign keys, and prove a second open is a
+  no-op.
+- Keep an approximately 10,000-row query-plan test for the effective
+  `(branch, read_space, read_id, read_scope_key)` lookup index.
 - Add restart tests where a piece rehydrates without rerunning clean
   computations.
 - Add restart tests where an unrelated write after the observation does not

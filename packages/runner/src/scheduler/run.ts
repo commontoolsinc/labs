@@ -647,6 +647,13 @@ function attachSchedulerActionObservation(
   }
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
+  const implementationFingerprint = schedulerImplementationFingerprint(
+    args.action,
+    args.actionId,
+    telemetry,
+  );
+  const runtimeFingerprint = schedulerRuntimeFingerprint();
+  const completeScopeSummary = annotated.completeSchedulerScopeSummary;
   const observation = buildSchedulerActionObservation({
     ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
@@ -658,12 +665,8 @@ function attachSchedulerActionObservation(
     actionKind: state.nodes.isKnownEffect(args.action)
       ? "effect"
       : "computation",
-    implementationFingerprint: schedulerImplementationFingerprint(
-      args.action,
-      args.actionId,
-      telemetry,
-    ),
-    runtimeFingerprint: schedulerRuntimeFingerprint(),
+    implementationFingerprint,
+    runtimeFingerprint,
     // The memory engine overwrites this with the accepting head/commit seq.
     observedAtSeq: 0,
     transactionKind: "action-run",
@@ -679,6 +682,24 @@ function attachSchedulerActionObservation(
       (annotated.ignoredSchedulingWrites ?? []).map(toMemorySpaceAddress),
       [],
     ),
+    ...(completeScopeSummary && implementationFingerprint.startsWith("impl:")
+      ? {
+        completeActionScopeSummary: {
+          version: 1 as const,
+          complete: true as const,
+          piece: toMemorySpaceAddress(completeScopeSummary.piece),
+          reads: completeScopeSummary.reads.map(toMemorySpaceAddress),
+          writes: completeScopeSummary.writes.map(toMemorySpaceAddress),
+          materializerWriteEnvelopes: completeScopeSummary
+            .materializerWriteEnvelopes.map(
+              toMemorySpaceAddress,
+            ),
+          directOutputs: completeScopeSummary.directOutputs.map(
+            toMemorySpaceAddress,
+          ),
+        },
+      }
+      : {}),
     ...(actionOptions ? { actionOptions } : {}),
     status: args.error ? "failed" : "success",
     ...(args.error
@@ -741,7 +762,7 @@ export function schedulerImplementationFingerprint(
 }
 
 export function schedulerRuntimeFingerprint(): string {
-  return "runner:scheduler:v2";
+  return "runner:scheduler:v3";
 }
 
 function schedulerActionOptions(

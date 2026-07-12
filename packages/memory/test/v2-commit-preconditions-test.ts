@@ -556,6 +556,7 @@ Deno.test("observation-only commit still validates preconditions", async () => {
       () =>
         applyCommit(engine, {
           sessionId: "session:lineage",
+          principal: "did:key:precondition-test",
           commit: {
             localSeq: 1,
             reads: { confirmed: [], pending: [] },

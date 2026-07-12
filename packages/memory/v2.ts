@@ -560,17 +560,29 @@ export interface SchedulerActionSnapshotQuery {
   cursor?: SchedulerActionSnapshotCursor;
 }
 
+/**
+ * Server-derived ownership partition for durable scheduler state. The opaque
+ * principal and session components use the same encoding as resolved memory
+ * scope keys; clients must never construct one to select another context.
+ */
+export type SchedulerExecutionContextKey =
+  | "space"
+  | `user:${string}`
+  | `session:${string}:${string}`;
+
 export interface SchedulerActionSnapshotCursor {
   ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
 }
 
 export interface SchedulerActionSnapshotResult {
   observationId: number;
   commitSeq: number | null;
   observedAtSeq: number;
+  executionContextKey: SchedulerExecutionContextKey;
   observation: unknown;
   directDirtySeq?: number;
   staleSeq?: number;

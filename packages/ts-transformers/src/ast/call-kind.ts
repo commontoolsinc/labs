@@ -413,12 +413,9 @@ export function getCapabilitySummaryCallbackArgument(
 
   let callbackArg: ts.Expression | undefined;
   if (callKind.kind === "lift-applied") {
-    // Lift-applied shape `lift(cb)(input)`: the callback lives on the inner
-    // lift call (the outer call's callee is always that inner CallExpression).
-    const innerCallee = stripWrappers(call.expression);
-    if (ts.isCallExpression(innerCallee)) {
-      callbackArg = innerCallee.arguments[innerCallee.arguments.length - 1];
-    }
+    // Lift is function-first: `lift(cb, argSchema?, resultSchema?, options?)`.
+    // Schemas and scheduler options may trail the callback on the inner call.
+    callbackArg = getLiftAppliedInnerCall(call)?.arguments[0];
   } else if (
     callKind.kind === "builder" &&
     (
@@ -518,14 +515,13 @@ export function getLiftAppliedInputAndCallback(
   // call's callee as a CallExpression (the inner `lift(...)` factory). That is
   // the only way detectCallKind produces kind:"lift-applied" — see its
   // recognition in resolveExpressionKind (requires ts.isCallExpression(target)).
-  // The callback is the last arg of the inner lift call; the input is the first
-  // arg of the outer applied call.
-  const innerCallee = stripWrappers(call.expression);
-  if (!ts.isCallExpression(innerCallee)) {
+  // Lift is function-first, so the callback is inner argument zero even after
+  // schema injection or scheduler options; the applied input is outer arg zero.
+  const innerCallee = getLiftAppliedInnerCall(call);
+  if (!innerCallee) {
     return undefined;
   }
-  const callbackIndex = innerCallee.arguments.length - 1;
-  const callbackArg = innerCallee.arguments[callbackIndex];
+  const callbackArg = innerCallee.arguments[0];
   const callback = callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;

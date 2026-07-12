@@ -249,7 +249,7 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: jsx-conditional-rendering-no-name
 // Verifies: same conditional rendering transforms work when pattern has no NAME export
 //   cond ? a : b             → ifElse(schema..., cond, a, b)

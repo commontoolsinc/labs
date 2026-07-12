@@ -54,7 +54,7 @@ const __cfLift_4 = lift((count: number) => count, {
 } as const satisfies __cfHelpers.JSONSchema);
 const rejected = __cfHelpers.__cf_data(__cfLift_4(rejectedCount).for("rejected", true));
 const __cfLift_5 = __cfHelpers.lift(() => `stage:${normalizedStage} attempts:${attempts}` +
-    ` accepted:${accepted} rejected:${rejected}`, false);
+    ` accepted:${accepted} rejected:${rejected}`, false, undefined, { completeSchedulerScopeSummary: true });
 const _summary = __cfHelpers.__cf_data(__cfLift_5().for("_summary", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

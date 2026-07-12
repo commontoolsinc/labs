@@ -15,13 +15,10 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // F6c (docs/specs/scheduler-v2/per-doc-rehydration.md): a resumed piece with
-// map rows must re-attach the per-element child runs AND rehydrate their
-// persisted scheduler state — each child persists under its OWN pieceId (its
-// result doc), and the boot's space-wide snapshot listing feeds every
-// descendant's registration. Pre-fix this failed two ways: a dirty coordinator
-// re-ran every row fresh (their clean snapshots sat unused), and a clean
-// coordinator never ran at all, stranding the rows unregistered (dead
-// per-element reactivity).
+// map rows must re-attach the per-element child runs. Dynamic map callbacks do
+// not have a complete structural scope certificate, so W0.1 keeps their
+// durable scheduler state session-qualified. A different session runs the rows
+// fresh, then leaves them live for later updates.
 //
 // Two managers with their OWN replicas loopback-connected to one in-process
 // server (same shape as resume-argument-link-target-presync.test.ts), so
@@ -96,7 +93,6 @@ function rehydrationCounts() {
     (b as Record<string, { total?: number }>)[k]?.total ?? 0;
   return {
     ok: get("rehydrate/ok"),
-    fallbackRun: get("rehydrate/fallback-run/no-match"),
   };
 }
 
@@ -108,7 +104,7 @@ function opRuns(trace: readonly { actionId: string }[]): string[] {
   );
 }
 
-describe("reload rehydration: map per-element children", () => {
+describe("reload isolation: map per-element children", () => {
   let server: MemoryV2Server.Server;
   let managerA: SharedServerStorageManager;
   let managerB: SharedServerStorageManager;
@@ -125,7 +121,7 @@ describe("reload rehydration: map per-element children", () => {
     await server?.close();
   });
 
-  it("resumed map rows rehydrate instead of re-running, and stay live", async () => {
+  it("resumed map rows run fresh across sessions and stay live", async () => {
     // Session 1: create + settle, then dispose ENTIRELY.
     const rt1 = newRuntime(managerA);
     const tx1 = rt1.edit();
@@ -192,15 +188,14 @@ describe("reload rehydration: map per-element children", () => {
       await rt2.storageManager.synced();
       await rt2.idle();
 
-      // The per-element ops rehydrated from their own piece buckets: none of
-      // them re-ran during the resume (the coordinator's reconcile may run —
-      // it is declared resumeMode "always-run" to re-attach the rows — but
-      // the row computations must not).
+      // Dynamic map callbacks do not carry a complete structural certificate,
+      // so their durable rows are session-keyed. A different authenticated
+      // session must run the three rows fresh rather than adopting session 1's
+      // state. The coordinator still re-attaches the rows for live updates.
       const resumeTrace = rt2.scheduler.getActionRunTrace();
-      expect(opRuns(resumeTrace)).toEqual([]);
+      expect(opRuns(resumeTrace).length).toBe(3);
       const counts = rehydrationCounts();
-      expect(counts.ok).toBeGreaterThanOrEqual(3);
-      expect(counts.fallbackRun).toBe(0);
+      expect(counts.ok).toBe(0);
 
       expect(await resultCell2.key("vs").pull()).toEqual([2, 4, 6]);
 

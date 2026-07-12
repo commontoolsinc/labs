@@ -135,6 +135,7 @@ Deno.test("reload degrades a torn multi-page snapshot listing to fresh runs", as
       pieceId: "space:synthetic",
       processGeneration: 0,
       actionId: "synthetic",
+      executionContextKey: "space",
     };
     provider.listSchedulerActionSnapshots = (): Promise<
       SchedulerSnapshotListResult
@@ -208,12 +209,13 @@ Deno.test("reload buckets valid snapshot metadata and ignores invalid observatio
           string,
           ReadonlyMap<
             string,
-            {
+            readonly {
+              executionContextKey: string;
               observation: SchedulerActionObservation;
               directDirtySeq?: number;
               staleSeq?: number;
               unknownReason?: string;
-            }
+            }[]
           >
         >
         | undefined
@@ -227,12 +229,13 @@ Deno.test("reload buckets valid snapshot metadata and ignores invalid observatio
     expect([...byPiece?.keys() ?? []]).toEqual([valid.observation.pieceId]);
     const bucket = byPiece?.get(valid.observation.pieceId);
     expect(bucket?.size).toBe(1);
-    expect(bucket?.get(valid.observation.actionId)).toEqual({
+    expect(bucket?.get(valid.observation.actionId)).toEqual([{
+      executionContextKey: valid.executionContextKey,
       observation: valid.observation,
       directDirtySeq: 17,
       staleSeq: 18,
       unknownReason: "snapshot metadata fidelity",
-    });
+    }]);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
   }

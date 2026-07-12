@@ -132,6 +132,50 @@ Deno.test("memory v2 server parser ignores transact invocation and authorization
   );
 });
 
+Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () => {
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-context",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: { executionContextKey: "user:did%3Akey%3Abob" },
+    })),
+    null,
+  );
+
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        cursor: {
+          pieceId: "space:of:piece",
+          processGeneration: 0,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
+        },
+      },
+    })),
+    {
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        cursor: {
+          pieceId: "space:of:piece",
+          processGeneration: 0,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
+        },
+      },
+    },
+  );
+});
+
 Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();
   const first = sessions.open(
@@ -966,6 +1010,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
     assertEquals(committed.ok?.seq, 1);
     assertEquals(committed.ok?.revisions, [{
       id: "of:doc:1",
+      scopeKey: "space",
       branch: "",
       seq: 1,
       opIndex: 0,

@@ -70,6 +70,7 @@ for (const actionCount of ACTION_COUNTS) {
           resetMeasuredTiming();
           for (const [index, action] of actions.entries()) {
             env.runtime.scheduler.rehydrateActionFromObservation(action, {
+              executionContextKey: "session:test:test",
               observation: createObservation(index),
             });
           }
@@ -104,6 +105,7 @@ for (const actionCount of ACTION_COUNTS) {
           resetMeasuredTiming();
           for (const [index, action] of actions.entries()) {
             env.runtime.scheduler.rehydrateActionFromObservation(action, {
+              executionContextKey: "session:test:test",
               observation: createObservation(index),
               ...(index === 0 ? { directDirtySeq: 2 } : {}),
             });

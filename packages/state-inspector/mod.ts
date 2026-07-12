@@ -21,3 +21,4 @@ export * from "./identity.ts";
 export * from "./conflicts.ts";
 export * from "./detail.ts";
 export * from "./html.ts";
+export * from "./scheduler.ts";

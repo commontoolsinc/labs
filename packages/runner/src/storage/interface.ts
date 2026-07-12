@@ -9,6 +9,7 @@ import type {
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
   SqliteDbRef,
   SqliteOperation,
@@ -583,6 +584,7 @@ export interface ISchedulerObservationsNotification {
   space: MemorySpace;
   observations: readonly {
     observedAtSeq: number;
+    executionContextKey: SchedulerExecutionContextKey;
     observation: unknown;
     directDirtySeq?: number;
     staleSeq?: number;
