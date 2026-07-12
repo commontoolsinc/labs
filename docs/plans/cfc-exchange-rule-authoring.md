@@ -1,8 +1,10 @@
 # CFC Exchange-Rule Authoring — Implementation Plan
 
-Status: Direct shipping program (Stages 0–4) implemented and verified. Stages
-5–7 remain blocked on the owner decisions named below and are not authorized by
-completion of the direct slice.
+Status: Direct shipping program (Stages 0–4) implemented. All change-owned
+checks pass; the exact schema-generator package task remains blocked by the
+pre-existing shared-utils type error recorded in WP4.3. Stages 5–7 remain
+blocked on the owner decisions named below and are not authorized by completion
+of the direct slice.
 
 This plan turns the direction in
 [CFC Exchange Rules — Pattern Authoring Surface](../specs/cfc-exchange-rules-authoring.md)
@@ -590,13 +592,15 @@ Do not make the first acceptance test depend on unimplemented
 - [x] An unrelated input/sibling clause remains closed.
 - [x] A forged policy object in schema metadata is rejected.
 - [x] A wrong module, symbol, digest, or manifest body fails closed.
-- [x] Warm load, cold load, runtime restart, and federated/cross-space load agree.
+- [x] Warm load, cold load, runtime restart, and cross-space destination load
+  agree, including a cold evaluator that touches only the destination space.
 - [x] A destination evaluates from its local manifest after the defining source
   space becomes unavailable; a persisted-label commit without an atomic local
   manifest copy fails closed.
 - [x] Upgrading the producer creates a new reference while an old label still
   resolves its old immutable artifact or follows the explicit migration
-  posture fixed in Stage 0.
+  posture fixed in Stage 0; the cold old/new-version case is pinned in
+  `cfc-policy-of-label.test.ts`.
 - [x] Imported direct rules retain the exporting module's identity.
 - [x] `AnyOf` demonstrates weakening only when explicitly authored.
 
@@ -607,15 +611,19 @@ test.
 
 ### WP4.3 — Verification gates
 
-- [ ] `deno task cf test packages/patterns/cfc-exchange-rules/`
-- [ ] `deno task check`
-- [ ] `deno task --cwd packages/api test`
-- [ ] `deno task --cwd packages/schema-generator test`
-- [ ] `deno task --cwd packages/ts-transformers test`
-- [ ] `deno task --cwd packages/runner test`
-- [ ] `deno task check-docs specs plans common`
-- [ ] Run the focused cross-space/federation integration case required by the
-  Stage 0 transport.
+- [x] `deno task cf test packages/patterns/cfc-exchange-rules/`
+- [x] `deno task check`
+- [x] `deno task --cwd packages/api test`
+- [ ] `deno task --cwd packages/schema-generator test` — blocked before test
+  execution by the pre-existing `packages/utils/src/arrays.ts:91`
+  `string | undefined` type error. The focused CFC schema suite passes.
+- [x] `deno task --cwd packages/ts-transformers test`
+- [x] `deno task --cwd packages/runner test`
+- [x] `deno task check-docs specs plans common`
+- [x] Run the focused cross-space/federation-equivalent integration case
+  required by the Stage 0 transport: copy source→destination, restart without
+  the producer module, touch only the destination, resolve the local manifest,
+  and evaluate the rule (`cfc-policy-of-label.test.ts`).
 
 ### Stage 4 completion gate
 
@@ -788,15 +796,17 @@ compile. The runner must enforce the semantics in the same landing sequence.
 
 ### Final completion gate
 
-- [ ] Existing named/hash-bound policies and deployment snapshots still work.
-- [ ] Patterns with no new authoring symbols compile to byte-identical or
+- [x] Existing named/hash-bound policies and deployment snapshots still work.
+- [x] Patterns with no new authoring symbols compile to byte-identical or
   semantically identical output, with an explicit test guarding the boundary.
-- [ ] Old module-policy manifests remain resolvable for old labels.
-- [ ] Live CFC authoring docs, API reference, component/examples docs, and
+- [x] Old module-policy manifests remain resolvable for old labels.
+- [x] Live CFC authoring docs, API reference, component/examples docs, and
   `packages/patterns/index.md` match shipped behavior.
-- [ ] Focused checks, affected package tasks, and root `deno task check` pass.
-- [ ] `cfcPolicyEvaluation: observe` has useful diagnostics for policy lookup,
+- [x] Change-owned focused checks, the API/transformer/runner package tasks,
+  docs, and root `deno task check` pass. The schema-generator package-task
+  baseline is recorded in WP4.3.
+- [x] `cfcPolicyEvaluation: observe` has useful diagnostics for policy lookup,
   digest mismatch, rule firing, and exhaustion.
-- [ ] Any proposal to change first-party presets or defaults is reviewed as a
+- [x] Any proposal to change first-party presets or defaults is reviewed as a
   separate rollout change with rollback criteria.
 - [ ] Archive this plan only after the last scheduled shipping stage is complete.

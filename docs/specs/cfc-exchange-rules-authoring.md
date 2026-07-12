@@ -37,11 +37,11 @@ use their separate exact-manifest resolver and never enter that snapshot.
 Exchange rules are the spec's only declassification mechanism: integrity-
 guarded rewrites on hash-bound policy records that may rewrite only the
 clause(s) their policy principal appears in (spec §4.3.2, §4.4.5 home-clause
-locality). The shipped authoring surface (`packages/api/cfc.ts`) cannot
-express them: it stops at `Confidential<T, X>` atom lists, and declassification
-exists only as `declassifyConfidentiality={[...]}` attribute lists on trusted
-components — release paths that live in the *component* rather than in a
-policy record that travels with the *data*. Three needs:
+locality). Before this design landed, the authoring surface stopped at
+`Confidential<T, X>` atom lists and declassification existed only as
+`declassifyConfidentiality={[...]}` attribute lists on trusted components.
+The shipped `PolicyOf` and `exchangeRules` surface now supplies policy records
+whose release paths travel with the *data*. It addresses three needs:
 
 1. **Direct use.** A pattern raises confidentiality on data it produces and, in
    the same declaration, names the exchange rules that are that clause's
@@ -101,6 +101,8 @@ import {
   THIS_POLICY,
   v,
 } from "commonfabric/cfc";
+import type { PolicyOf } from "commonfabric/cfc";
+import type { Confidential } from "commonfabric";
 
 // Release this policy's home clause to a principal with reader evidence for
 // the concrete space bound as THIS_POLICY.subject.
@@ -117,6 +119,12 @@ export const releaseFlagToReader = exchangeRule({
 export const driftFlagRules = exchangeRules([
   releaseFlagToReader,
 ]);
+
+interface Flag {
+  value: boolean;
+}
+
+type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
 ```
 
 - **Identity has three roles.** `{ identity, symbol }` content-addresses the
@@ -148,17 +156,8 @@ export const driftFlagRules = exchangeRules([
 
 ### 2a. Raising, direct
 
-```ts
-import type { Confidential } from "commonfabric";
-import type { PolicyOf } from "commonfabric/cfc";
-
-interface Flag {
-  value: boolean;
-}
-declare const driftFlagRules: unknown;
-
-type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
-```
+The declaration above raises `DriftFlag` directly to the exact exported
+`driftFlagRules` artifact; no raw policy object or ambient name is involved.
 
 Lowering: the schema-time atom is a policy principal addressed by the module
 export, its portable manifest digest, and the invocation-relative subject —
@@ -306,32 +305,45 @@ independent gates, ordinary CNF join:
 
 ```ts
 import type { Confidential } from "commonfabric";
-import type { PolicyOf } from "commonfabric/cfc";
+import {
+  cfcPattern,
+  exchangeRule,
+  exchangeRules,
+  THIS_POLICY,
+  v,
+} from "commonfabric/cfc";
+import type { AnyOf, PolicyOf } from "commonfabric/cfc";
+
+export const releaseRetention = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: { dropClause: true },
+});
+export const retentionRules = exchangeRules([releaseRetention]);
+
+export const releaseDrift = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: { dropClause: true },
+});
+export const driftFlagRules = exchangeRules([releaseDrift]);
 
 interface Flag {
   value: boolean;
 }
-declare const retentionRules: unknown;
-declare const driftFlagRules: unknown;
 
 type CareFlag = Confidential<Flag, readonly [
   PolicyOf<typeof retentionRules>,
   PolicyOf<typeof driftFlagRules>,
 ]>;
-```
-
-Release needs a firing path through *each* clause. The disjunctive form is an
-explicit opt-in via the authored-OR surface (spec §3.1.8):
-
-```ts
-import type { Confidential } from "commonfabric";
-import type { AnyOf, PolicyOf } from "commonfabric/cfc";
-
-interface Flag {
-  value: boolean;
-}
-declare const retentionRules: unknown;
-declare const driftFlagRules: unknown;
 
 type EitherPath = Confidential<Flag, readonly [
   AnyOf<readonly [
@@ -340,6 +352,9 @@ type EitherPath = Confidential<Flag, readonly [
   ]>,
 ]>;
 ```
+
+`CareFlag` needs a firing path through *each* clause. `EitherPath` is the
+explicit disjunctive opt-in via the authored-OR surface (spec §3.1.8).
 
 One clause, either path releases — and the clause's admissible rule set is the
 *union* over alternatives. `AnyOf` is an explicit weakening relative to the
