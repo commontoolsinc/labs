@@ -1189,7 +1189,7 @@ containing `asFactory` schemas.
   linking them into the hidden cell.
 - [x] Preserve nested link parents and cross-space links rather than copying
   values across spaces.
-- [ ] For factory-valued params, preserve artifact-source provenance separately
+- [x] For factory-valued params, preserve artifact-source provenance separately
   from any selected pattern factory's execution `spaceSelector`; resume must
   not infer source space from the target modifier.
 - [x] Update `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct
@@ -1207,7 +1207,7 @@ containing `asFactory` schemas.
   stop, prove they cannot be reused or rescheduled by a later generation.
 - [x] Reject invocation of a closure-bearing base factory with absent params.
 - [x] Prove a public field and closure param with the same name remain distinct.
-- [ ] Traverse nested factories and preserve CFC labels inside params.
+- [x] Traverse nested factories and preserve CFC labels inside params.
 - [x] Add an A-with-params → B-with-different-params → A dynamic replacement
   test proving a stable output spot, generation-fenced captured writes,
   generation-correct params/CFC labels, and resume of only the active
@@ -1273,6 +1273,32 @@ Durable params cells are deliberately not physically deleted: the deterministic
 address is reused only after cancellation, with one complete immutable Fabric
 value installed atomically for the new generation. The focused regression
 matrix passes `10 passed (58 steps)`.
+
+WP3.4 nested-factory provenance slice (2026-07-11): a linked factory captured
+inside nested params cold-loads from the terminal selector link's space while
+its `spaceSelector` remains solely the child execution target. The gated cold
+regression stops the owner before readiness returns and proves the loaded code
+cannot revive it; the warm path invokes the same nested value in its selected
+execution space. The params cell retains the nested link rather than a factory
+snapshot and persists the selector's confidentiality label at the exact nested
+path.
+
+The warm red test exposed a provenance violation in dependency-only selector
+reads: after correct source-aware materialization, the supervisor and its
+scheduled child called ordinary `Cell.get()` on the intermediate params path.
+That attempted a second materialization using the params cell's containing
+space, then retried readiness indefinitely. These authorization/CFC reads now
+use `getWithoutFactoryMaterialization()`; only the runner's source-aware
+materialization chokepoint produces the executable callable. The complete
+focused WP3.4 matrix passes `11 passed (61 steps)`.
+
+The required complete runner package task was also run at this boundary. It
+reported `876 passed (4752 steps), 36 failed (127 steps)`: the new WP3.4 tests
+all pass, while the remaining failures are the still-unmigrated Stage 4 writer
+and compatibility surface (including legacy pattern tools, list-op identity,
+direct pattern/inSpace readers, wish/reload paths, and their stored fixtures).
+This is a recorded later-stage gate, not a waived green package result; the
+complete task must pass after Stage 4 before final handoff.
 
 ### WP3.5 — Unify list callback lowering
 

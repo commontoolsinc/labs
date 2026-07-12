@@ -3617,7 +3617,7 @@ export class Runner {
         // setup transaction, and thread the same link into scheduled
         // action/event transactions below so reactive and CFC provenance are
         // not severed by materialization.
-        bindingCell.withTx(childTx).get();
+        bindingCell.withTx(childTx).getWithoutFactoryMaterialization();
         this.instantiateNode(
           childTx,
           moduleFor(factory, selection),
@@ -5095,7 +5095,7 @@ export class Runner {
           factorySelectionLink,
           factorySelectionLink.schema,
           tx,
-        ).get();
+        ).getWithoutFactoryMaterialization();
       }
 
       const eventInputs = {
@@ -5478,7 +5478,7 @@ export class Runner {
             factorySelectionLink,
             factorySelectionLink.schema,
             tx,
-          ).get();
+          ).getWithoutFactoryMaterialization();
         }
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
