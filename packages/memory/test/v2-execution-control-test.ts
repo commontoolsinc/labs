@@ -1,11 +1,7 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
-import { encodeMemoryBoundary } from "../v2.ts";
+import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
@@ -103,11 +99,13 @@ const createServer = (
   name: string,
   serverPrimaryExecutionV1: boolean,
 ): ExecutionServer =>
-  new Server({
-    ...testSessionOpenServerOptions,
-    store: new URL(`memory://${name}`),
-    protocolFlags: { serverPrimaryExecutionV1 },
-  } as ConstructorParameters<typeof Server>[0]) as ExecutionServer;
+  new Server(
+    {
+      ...testSessionOpenServerOptions,
+      store: new URL(`memory://${name}`),
+      protocolFlags: { serverPrimaryExecutionV1 },
+    } as ConstructorParameters<typeof Server>[0],
+  ) as ExecutionServer;
 
 const connectClient = async (
   server: Server,
@@ -126,16 +124,18 @@ const createControlServer = (
   name: string,
   options: { subscriptionRefreshDelayMs?: number } = {},
 ): ExecutionServer =>
-  new Server({
-    ...testSessionOpenServerOptions,
-    store: new URL(`memory://${name}`),
-    ...options,
-    protocolFlags: {
-      serverPrimaryExecutionV1: true,
-      serverPrimaryExecutionClaimRoutingV1: true,
-      serverPrimaryExecutionBuiltinPassivityV1: true,
-    },
-  } as ConstructorParameters<typeof Server>[0]) as ExecutionServer;
+  new Server(
+    {
+      ...testSessionOpenServerOptions,
+      store: new URL(`memory://${name}`),
+      ...options,
+      protocolFlags: {
+        serverPrimaryExecutionV1: true,
+        serverPrimaryExecutionClaimRoutingV1: true,
+        serverPrimaryExecutionBuiltinPassivityV1: true,
+      },
+    } as ConstructorParameters<typeof Server>[0],
+  ) as ExecutionServer;
 
 const connectControlClient = async (
   server: Server,
@@ -163,6 +163,57 @@ const claimKey = (
   implementationFingerprint: "impl:v1",
   runtimeFingerprint: "runtime:v1",
 });
+
+class ReconnectableExecutionTransport implements MemoryClient.Transport {
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #connection: ReturnType<Server["connect"]> | null = null;
+  #reconnected = Promise.withResolvers<void>();
+  connectionCount = 0;
+
+  constructor(private readonly server: Server) {}
+
+  get reconnected(): Promise<void> {
+    return this.#reconnected.promise;
+  }
+
+  async send(payload: string): Promise<void> {
+    // Decode here to prove every reconnect still starts with hello; the server
+    // remains the sole parser for all actual behavior.
+    decodeMemoryBoundary(payload);
+    await this.#getConnection().receive(payload);
+  }
+
+  close(): Promise<void> {
+    this.disconnect();
+    return Promise.resolve();
+  }
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  disconnect(): void {
+    this.#connection?.close();
+    this.#connection = null;
+    this.#closeReceiver(new Error("controlled disconnect"));
+  }
+
+  #getConnection(): ReturnType<Server["connect"]> {
+    if (this.#connection === null) {
+      this.connectionCount += 1;
+      if (this.connectionCount === 2) this.#reconnected.resolve();
+      this.#connection = this.server.connect((message) =>
+        this.#receiver(encodeMemoryBoundary(message))
+      );
+    }
+    return this.#connection;
+  }
+}
 
 const mount = async (
   client: MemoryClient.Client,
@@ -264,7 +315,10 @@ Deno.test("execution demand is connection-owned and reference-counted", async ()
   const first = await mount(firstClient);
   const second = await mount(secondClient);
   try {
-    assertEquals(await first.setExecutionDemand("feature", ["piece:one"]), true);
+    assertEquals(
+      await first.setExecutionDemand("feature", ["piece:one"]),
+      true,
+    );
     assertEquals(
       await second.setExecutionDemand("feature", ["piece:one"]),
       true,
@@ -450,21 +504,40 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
 });
 
 Deno.test("clients cannot spoof server execution claims or settlements", () => {
-  for (const type of [
-    "session.execution.claim.set",
-    "session.execution.claim.revoke",
-    "session.execution.settlement",
-  ]) {
-    assertEquals(parseClientMessage(encodeMemoryBoundary({
-      type,
-      requestId: "spoof",
+  for (
+    const type of [
+      "session.execution.claim.set",
+      "session.execution.claim.revoke",
+      "session.execution.settlement",
+    ]
+  ) {
+    assertEquals(
+      parseClientMessage(encodeMemoryBoundary({
+        type,
+        requestId: "spoof",
+        space: POLICY_SPACE,
+        sessionId: "session:spoof",
+        branch: "",
+        principal: "did:key:spoof",
+        claim: {},
+      })),
+      null,
+    );
+  }
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "session.execution.demand.set",
+      requestId: "spoof-demand",
       space: POLICY_SPACE,
       sessionId: "session:spoof",
       branch: "",
+      pieces: ["piece:one"],
+      connectionId: "connection:spoof",
       principal: "did:key:spoof",
-      claim: {},
-    })), null);
-  }
+      onBehalfOf: "did:key:spoof",
+    })),
+    null,
+  );
 });
 
 Deno.test("host cannot publish claims while the rollout flag is off", async () => {
@@ -480,6 +553,160 @@ Deno.test("host cannot publish claims while the rollout flag is off", async () =
       "server-primary-execution-v1 is disabled",
     );
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("reconnect applies the claim snapshot then restores connection demand", async () => {
+  const server = createControlServer("memory-v2-execution-reconnect");
+  const transport = new ReconnectableExecutionTransport(server);
+  const client = await MemoryClient.connect({
+    transport,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+  } as ExecutionClientOptions);
+  const session = await mount(client) as ExecutionSession;
+  const settlements: ActionSettlement[] = [];
+  const unsubscribeControl = session.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      settlements.push(event.settlement);
+    }
+  });
+  const demandRestored = Promise.withResolvers<void>();
+  const unsubscribeDemand = server.subscribeExecutionDemands((demands) => {
+    if (
+      transport.connectionCount >= 2 && demands.length === 1 &&
+      demands[0].branch === "feature"
+    ) {
+      demandRestored.resolve();
+    }
+  });
+  try {
+    await session.setExecutionDemand("feature", ["piece:one"]);
+    const first = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "feature"),
+      leaseGeneration: 3,
+    });
+    assertEquals(first.claimGeneration, 1);
+
+    transport.disconnect();
+    assertEquals(server.revokeExecutionClaim(first), true);
+    const second = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "feature"),
+      leaseGeneration: 3,
+    });
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "feature",
+        claim: second,
+        inputBasisSeq: 0,
+        outcome: "no-op",
+      }),
+      true,
+    );
+
+    await transport.reconnected;
+    await demandRestored.promise;
+    assertEquals(session.executionClaims.length, 1);
+    assertEquals(session.executionClaims[0].claimGeneration, 2);
+    assertEquals(settlements.length, 1);
+    assertEquals(settlements[0].claim.claimGeneration, 2);
+    assertEquals(
+      server.listExecutionDemands(POLICY_SPACE, "feature").length,
+      1,
+    );
+  } finally {
+    unsubscribeControl();
+    unsubscribeDemand();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("control-only claim frames advance one feed sequence without advancing data", async () => {
+  const server = createControlServer("memory-v2-execution-feed-order");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    const view = await session.watchSet([]);
+    const syncs = view.subscribeSync();
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, ""),
+      leaseGeneration: 11,
+    });
+    const setFrame = await syncs.next();
+    assertEquals(setFrame.done, false);
+    assertEquals(setFrame.value.fromSeq, setFrame.value.toSeq);
+    assertEquals(
+      setFrame.value.execution!.toFeedSeq,
+      setFrame.value.execution!.fromFeedSeq + 1,
+    );
+    assertEquals(
+      setFrame.value.execution!.events[0].type,
+      "session.execution.claim.set",
+    );
+
+    assertEquals(server.revokeExecutionClaim(claim), true);
+    const revokeFrame = await syncs.next();
+    assertEquals(revokeFrame.done, false);
+    assertEquals(revokeFrame.value.fromSeq, revokeFrame.value.toSeq);
+    assertEquals(
+      revokeFrame.value.execution!.fromFeedSeq,
+      setFrame.value.execution!.toFeedSeq,
+    );
+    assertEquals(
+      revokeFrame.value.execution!.events[0].type,
+      "session.execution.claim.revoke",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("server publishes only claim classes the client advertises", async () => {
+  const server = createControlServer("memory-v2-execution-subcapabilities");
+  const noRoutingClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: false,
+      serverPrimaryExecutionBuiltinPassivityV1: false,
+    },
+  });
+  const computationOnlyClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: false,
+    },
+  });
+  const noRouting = await mount(noRoutingClient) as ExecutionSession;
+  const computationOnly = await mount(
+    computationOnlyClient,
+  ) as ExecutionSession;
+  try {
+    server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:computation"),
+      leaseGeneration: 1,
+    });
+    server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:builtin"),
+      actionKind: "effect",
+      leaseGeneration: 1,
+    });
+    assertEquals(noRouting.executionClaims, []);
+    assertEquals(
+      computationOnly.executionClaims.map((claim) => claim.actionKind),
+      ["computation"],
+    );
+  } finally {
+    await noRoutingClient.close();
+    await computationOnlyClient.close();
     await server.close();
   }
 });
