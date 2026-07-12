@@ -496,6 +496,10 @@ export type InternalBuilderHelpers = BuilderFunctionsAndConstants & {
     callback: T,
     schema: JSONSchema,
   ): T;
+  withFrameworkProvidedPaths<T extends (...args: any[]) => unknown>(
+    callback: T,
+    paths: readonly (readonly string[])[],
+  ): T;
 };
 
 /** Transformer-only callable view; `.curry` is intentionally not public API. */

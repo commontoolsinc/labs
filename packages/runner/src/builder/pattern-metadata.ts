@@ -109,6 +109,9 @@ const entryRefByValue = new WeakMap<
 
 type ArtifactEntryRef = { identity: string; symbol: string };
 
+/** Trusted compiler/artifact metadata; deliberately absent from Factory@1. */
+export type FrameworkProvidedPath = readonly string[];
+
 // These stores are reached by `createNodeFactory()` during the builder import
 // cycle, so they use the same hoisted lazy-accessor pattern as the trust set
 // above rather than top-level `const` bindings that may still be in TDZ.
@@ -143,6 +146,16 @@ function factoryStateDerivers(): WeakMap<object, FactoryStateDeriver> {
     map?: WeakMap<object, FactoryStateDeriver>;
   };
   return (self.map ??= new WeakMap<object, FactoryStateDeriver>());
+}
+
+function frameworkProvidedPathsByArtifact(): WeakMap<
+  object,
+  readonly FrameworkProvidedPath[]
+> {
+  const self = frameworkProvidedPathsByArtifact as {
+    map?: WeakMap<object, readonly FrameworkProvidedPath[]>;
+  };
+  return (self.map ??= new WeakMap<object, readonly FrameworkProvidedPath[]>());
 }
 
 /**
@@ -193,6 +206,42 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   }
   const rootToken = factoryRootTokens().get(root);
   if (rootToken) factoryRootTokens().set(c, rootToken);
+  const frameworkPaths = frameworkProvidedPathsByArtifact().get(root);
+  if (frameworkPaths) {
+    frameworkProvidedPathsByArtifact().set(c, frameworkPaths);
+  }
+}
+
+/**
+ * Attach compiler-proven FrameworkProvided obligations to a trusted builder
+ * artifact. This is runner-private side-table metadata, never serialized in a
+ * Factory@1 state or accepted from authored data.
+ */
+export function setFrameworkProvidedPaths(
+  value: unknown,
+  paths: readonly FrameworkProvidedPath[],
+): void {
+  const key = asKey(value);
+  if (!key || !isTrustedBuilderArtifact(value)) {
+    throw new TypeError(
+      "FrameworkProvided metadata requires a trusted builder artifact",
+    );
+  }
+  const canonical = Object.freeze(
+    paths.map((path) => Object.freeze([...path])),
+  );
+  frameworkProvidedPathsByArtifact().set(key, canonical);
+}
+
+/** Read trusted FrameworkProvided obligations from an artifact or derivation. */
+export function getFrameworkProvidedPaths(
+  value: unknown,
+): readonly FrameworkProvidedPath[] {
+  const key = asKey(value);
+  if (!key || !isTrustedBuilderArtifact(value)) return [];
+  return frameworkProvidedPathsByArtifact().get(key) ??
+    frameworkProvidedPathsByArtifact().get(resolveOriginal(key) as object) ??
+    [];
 }
 
 /** Register the runner-owned reconstruction path for a live builder callable. */

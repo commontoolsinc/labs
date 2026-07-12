@@ -5,6 +5,8 @@ import {
   CfcPolicyAuthoringTransformer,
   CfcPolicyOfValidationTransformer,
   EmptyArrayOfValidationTransformer,
+  FrameworkProvidedForwardingTransformer,
+  FrameworkProvidedTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
   MergeablePushValidationTransformer,
@@ -80,6 +82,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     create: (options) => new AssertDiagnosticsTransformer(options),
   },
   {
+    name: "FrameworkProvidedForwardingTransformer",
+    create: (options) => new FrameworkProvidedForwardingTransformer(options),
+  },
+  {
     name: "SymbolicFactoryCallTransformer",
     create: (options) => new SymbolicFactoryCallTransformer(options),
   },
@@ -112,6 +118,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "SchemaInjectionTransformer",
     create: (options) => new SchemaInjectionTransformer(options),
+  },
+  {
+    name: "FrameworkProvidedTransformer",
+    create: (options) => new FrameworkProvidedTransformer(options),
   },
   {
     name: "BuilderCallHoistingTransformer",

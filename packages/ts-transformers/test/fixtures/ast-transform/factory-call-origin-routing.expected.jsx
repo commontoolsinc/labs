@@ -123,7 +123,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         patternAlias: __cfHelpers.invokeFactory(patternAlias, { value: input.key("value") }, {
             kind: "pattern",
@@ -144,7 +145,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         patternElement: __cfHelpers.invokeFactory(input.key("patterns", "primary")!, { value: input.key("value") }, {
             kind: "pattern",
@@ -165,7 +167,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         moduleProperty: __cfHelpers.invokeFactory(input.key("module"), { value: input.key("value") }, {
             kind: "module",
@@ -186,7 +189,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         moduleAlias: __cfHelpers.invokeFactory(moduleAlias, { value: input.key("value") }, {
             kind: "module",
@@ -207,7 +211,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         moduleElement: __cfHelpers.invokeFactory(input.key("modules", "primary")!, { value: input.key("value") }, {
             kind: "module",
@@ -228,7 +233,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         handlerProperty: __cfHelpers.invokeFactory(input.key("handler"), { value: input.key("value") }, {
             kind: "handler",
@@ -249,7 +255,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         handlerAlias: __cfHelpers.invokeFactory(handlerAlias, { value: input.key("value") }, {
             kind: "handler",
@@ -270,7 +277,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         handlerElement: __cfHelpers.invokeFactory(input.key("handlers", "primary")!, { value: input.key("value") }, {
             kind: "handler",
@@ -291,7 +299,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         compatibleChoice: __cfHelpers.invokeFactory(input.key("choice"), { value: input.key("value") }, {
             kind: "pattern",
@@ -312,7 +321,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         }),
         schemaLightReference: __cfHelpers.invokeFactory(input.key("reference"), { value: input.key("value") }, {
             kind: "module",
@@ -333,7 +343,8 @@ export default pattern((input) => {
                     }
                 },
                 required: ["result"]
-            }
+            },
+            frameworkProvidedPaths: []
         })
     };
 }, {

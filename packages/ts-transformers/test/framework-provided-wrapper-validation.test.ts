@@ -20,7 +20,7 @@ async function frameworkDiagnostics(
 }
 
 Deno.test(
-  "nested pattern rejects aliased optional FrameworkProvided public paths",
+  "nested pattern accepts aliased optional FrameworkProvided public paths as system metadata",
   async () => {
     const diagnostics = await frameworkDiagnostics(`
 import { pattern, type FrameworkProvided } from "commonfabric";
@@ -37,10 +37,7 @@ export default pattern(() => ({
 }));
 `);
 
-    assertEquals(diagnostics.length, 1);
-    assertEquals(diagnostics[0]!.line, 13);
-    assertStringIncludes(diagnostics[0]!.message, "request.sandboxId");
-    assertStringIncludes(diagnostics[0]!.message, "WP3.6");
+    assertEquals(diagnostics.length, 0);
   },
 );
 
@@ -157,7 +154,7 @@ export default pattern<{ operation: Operation }>(({ operation }) => {
 }
 
 Deno.test(
-  "nested pattern rejects invocation of a live factory with FrameworkProvided input",
+  "nested pattern forwards invocation of a live factory with FrameworkProvided input",
   async () => {
     const diagnostics = await frameworkDiagnostics(`
 import { pattern, type FrameworkProvided } from "commonfabric";
@@ -174,17 +171,12 @@ export default pattern<{ command: string }>((input) => ({
 }));
 `);
 
-    assertEquals(diagnostics.length, 1);
-    assertEquals(diagnostics[0]!.line, 12);
-    assertStringIncludes(
-      diagnostics[0]!.message,
-      "factory input 'sandboxId'",
-    );
+    assertEquals(diagnostics.length, 0);
   },
 );
 
 Deno.test(
-  "nested pattern traces FrameworkProvided through a widened module factory alias",
+  "nested pattern forwards FrameworkProvided through a widened module factory alias",
   async () => {
     const diagnostics = await frameworkDiagnostics(`
 import {
@@ -207,14 +199,12 @@ export default pattern(() => ({
 }));
 `);
 
-    assertEquals(diagnostics.length, 1);
-    assertStringIncludes(diagnostics[0]!.message, "sandboxId");
-    assertStringIncludes(diagnostics[0]!.message, "FrameworkProvided");
+    assertEquals(diagnostics.length, 0);
   },
 );
 
 Deno.test(
-  "nested pattern rejects exposing a live factory with FrameworkProvided input",
+  "nested pattern may expose a live factory carrying trusted FrameworkProvided metadata",
   async () => {
     const diagnostics = await frameworkDiagnostics(`
 import { pattern, type FrameworkProvided } from "commonfabric";
@@ -228,12 +218,7 @@ export default pattern(() => ({
 }));
 `);
 
-    assertEquals(diagnostics.length, 1);
-    assertEquals(diagnostics[0]!.line, 10);
-    assertStringIncludes(
-      diagnostics[0]!.message,
-      "factory input 'sandboxId'",
-    );
+    assertEquals(diagnostics.length, 0);
   },
 );
 

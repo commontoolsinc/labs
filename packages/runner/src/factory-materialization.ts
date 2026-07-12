@@ -10,7 +10,10 @@ import {
 import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-import { isTrustedBuilderArtifact } from "./builder/pattern-metadata.ts";
+import {
+  getFrameworkProvidedPaths,
+  isTrustedBuilderArtifact,
+} from "./builder/pattern-metadata.ts";
 import type {
   HandlerFactory,
   InternalPatternFactory,
@@ -117,18 +120,21 @@ function contractForTrustedFactory(
   state: FactoryStateView,
   runtime: Runtime,
 ): FactoryContract {
+  const frameworkProvidedPaths = getFrameworkProvidedPaths(factory);
   switch (state.kind) {
     case "pattern":
       return {
         kind: "pattern",
         argumentSchema: state.argumentSchema,
         resultSchema: state.resultSchema,
+        frameworkProvidedPaths,
       };
     case "handler":
       return {
         kind: "handler",
         contextSchema: state.contextSchema,
         eventSchema: state.eventSchema,
+        frameworkProvidedPaths,
       };
     case "module": {
       const byRefName = schemaLightByRefName(factory, state);
@@ -137,6 +143,7 @@ function contractForTrustedFactory(
           kind: "module",
           argumentSchema: state.argumentSchema,
           resultSchema: state.resultSchema,
+          frameworkProvidedPaths,
         };
       }
       let registered: Module;
@@ -151,6 +158,7 @@ function contractForTrustedFactory(
         kind: "module",
         argumentSchema: registered.argumentSchema,
         resultSchema: registered.resultSchema,
+        frameworkProvidedPaths,
       };
     }
   }
@@ -191,6 +199,17 @@ function assertExpectedContract(
         `Factory materialization schema mismatch: expected ${actual.kind} ${field}`,
       );
     }
+  }
+  if (
+    Object.hasOwn(expected, "frameworkProvidedPaths") &&
+    !deepEqual(
+      actual.frameworkProvidedPaths ?? [],
+      expected.frameworkProvidedPaths ?? [],
+    )
+  ) {
+    throw new Error(
+      "Factory materialization FrameworkProvided metadata mismatch",
+    );
   }
 }
 

@@ -6,6 +6,7 @@ import {
   type FactoryTypeInfo,
   type FactoryTypeKind,
 } from "@commonfabric/schema-generator";
+import { findFrameworkProvidedPaths } from "../policy/framework-provided.ts";
 
 import {
   classifyFactoryCallee,
@@ -18,6 +19,7 @@ interface EmittedFactoryContract {
   readonly kind: FactoryTypeKind;
   readonly inputSchema: JSONSchema;
   readonly outputSchema: JSONSchema;
+  readonly frameworkProvidedPaths: readonly (readonly string[])[];
 }
 
 /** Lower eager symbolic factory proxy calls before closure conversion. */
@@ -137,6 +139,10 @@ function buildCompatibleContract(
   if (!first) return undefined;
 
   const firstSchemas = generateMemberSchemas(first, context, schemaGenerator);
+  const firstFrameworkPaths = findFrameworkProvidedPaths(
+    first.inputType,
+    context.checker,
+  );
   for (const member of rest) {
     if (member.kind !== first.kind) {
       context.reportDiagnosticOnce({
@@ -149,6 +155,10 @@ function buildCompatibleContract(
     }
 
     const schemas = generateMemberSchemas(member, context, schemaGenerator);
+    const frameworkPaths = findFrameworkProvidedPaths(
+      member.inputType,
+      context.checker,
+    );
     if (
       !factorySchemasEqual(
         firstSchemas.inputSchema,
@@ -167,12 +177,24 @@ function buildCompatibleContract(
       });
       return undefined;
     }
+    if (
+      JSON.stringify(frameworkPaths) !== JSON.stringify(firstFrameworkPaths)
+    ) {
+      context.reportDiagnosticOnce({
+        type: "factory-call:framework-provided-mismatch-union",
+        message:
+          "Every callable factory in a same-kind union must have exactly equal FrameworkProvided input paths.",
+        node: diagnosticNode,
+      });
+      return undefined;
+    }
   }
 
   return {
     kind: first.kind,
     inputSchema: firstSchemas.inputSchema,
     outputSchema: firstSchemas.outputSchema,
+    frameworkProvidedPaths: firstFrameworkPaths,
   };
 }
 
@@ -215,7 +237,11 @@ function createContractAst(
       resultSchema: contract.outputSchema,
     };
   return createSchemaAst(
-    { kind: contract.kind, ...schemaFields },
+    {
+      kind: contract.kind,
+      ...schemaFields,
+      frameworkProvidedPaths: contract.frameworkProvidedPaths,
+    },
     factory,
   ) as ts.ObjectLiteralExpression;
 }

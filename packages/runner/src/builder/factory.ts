@@ -27,7 +27,11 @@ import {
   WebhookConfigSchema,
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
-import { pattern, withPatternParamsSchema } from "./pattern.ts";
+import {
+  pattern,
+  withFrameworkProvidedPaths,
+  withPatternParamsSchema,
+} from "./pattern.ts";
 import { invokeFactory } from "./invoke-factory.ts";
 import {
   action,
@@ -304,6 +308,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   };
   const internalHelpers: InternalBuilderHelpers = {
     ...commonfabric,
+    withFrameworkProvidedPaths,
     withPatternParamsSchema,
   };
   commonfabric.__cfHelpers = internalHelpers;

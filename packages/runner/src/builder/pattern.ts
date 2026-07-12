@@ -36,9 +36,11 @@ import { reactive } from "./reactive.ts";
 import {
   bindFactoryRootToken,
   brandTrustedPattern,
+  type FrameworkProvidedPath,
   getDurableArtifactRefForRootToken,
   noteDerivedCopy,
   registerFactoryStateDeriver,
+  setFrameworkProvidedPaths,
 } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
@@ -87,6 +89,10 @@ type CompilerPatternCallback = (...args: any[]) => unknown;
 // lets the helper return the original callback without changing pattern()'s
 // public arity.
 const patternParamsSchemas = new WeakMap<CompilerPatternCallback, JSONSchema>();
+const callbackFrameworkProvidedPaths = new WeakMap<
+  CompilerPatternCallback,
+  readonly FrameworkProvidedPath[]
+>();
 
 export function withPatternParamsSchema<T extends CompilerPatternCallback>(
   callback: T,
@@ -106,6 +112,92 @@ function readPatternParamsSchema(
     );
   }
   return hasParamsSlot ? patternParamsSchemas.get(callback)! : undefined;
+}
+
+export function withFrameworkProvidedPaths<
+  T extends CompilerPatternCallback,
+>(
+  callback: T,
+  paths: readonly FrameworkProvidedPath[],
+): T {
+  callbackFrameworkProvidedPaths.set(callback, normalizeFrameworkPaths(paths));
+  return callback;
+}
+
+export function readFrameworkProvidedPaths(
+  callback: unknown,
+): readonly FrameworkProvidedPath[] {
+  return typeof callback === "function"
+    ? callbackFrameworkProvidedPaths.get(
+      callback as CompilerPatternCallback,
+    ) ?? []
+    : [];
+}
+
+function normalizeFrameworkPaths(
+  paths: readonly FrameworkProvidedPath[],
+): readonly FrameworkProvidedPath[] {
+  const normalized: string[][] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new TypeError("FrameworkProvided paths must be non-empty arrays");
+    }
+    const copy = path.map((segment) => {
+      if (
+        typeof segment !== "string" || segment.length === 0 ||
+        segment === "*" || segment === "[]" ||
+        segment === "__proto__" || segment === "prototype" ||
+        segment === "constructor"
+      ) {
+        throw new TypeError("Invalid FrameworkProvided path segment");
+      }
+      return segment;
+    });
+    const key = JSON.stringify(copy);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(copy);
+  }
+  normalized.sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right))
+  );
+  return normalized;
+}
+
+function addFrameworkPathsToSchema(
+  schema: JSONSchema,
+  paths: readonly FrameworkProvidedPath[],
+): JSONSchema {
+  let result = schema;
+  for (const path of normalizeFrameworkPaths(paths)) {
+    result = addFrameworkPathToSchema(result, path);
+  }
+  return result;
+}
+
+function addFrameworkPathToSchema(
+  schema: JSONSchema,
+  path: readonly string[],
+): JSONSchema {
+  const [head, ...tail] = path;
+  if (!head) return schema;
+  const base: Record<string, unknown> = isRecord(schema)
+    ? { ...schema }
+    : { type: "object" };
+  const oldProperties = isRecord(base.properties) ? base.properties : {};
+  const child = oldProperties[head] as JSONSchema | undefined;
+  const nextChild = tail.length === 0
+    ? child ?? true
+    : addFrameworkPathToSchema(child ?? true, tail);
+  const required = Array.isArray(base.required) ? [...base.required] : [];
+  if (!required.includes(head)) required.push(head);
+  return {
+    ...base,
+    type: "object",
+    properties: { ...oldProperties, [head]: nextChild },
+    required,
+  } as JSONSchema;
 }
 
 type PatternParamsRoot = {
@@ -181,6 +273,7 @@ export function pattern<T, R>(
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
   const paramsSchema = readPatternParamsSchema(fn);
+  const declaredFrameworkPaths = readFrameworkProvidedPaths(fn);
   hardenVerifiedFunction(fn);
 
   // The pattern graph is created by calling `fn` which populates for `inputs`
@@ -229,6 +322,7 @@ export function pattern<T, R>(
       inputs,
       outputs,
       paramsRoot,
+      declaredFrameworkPaths,
     );
   } finally {
     popFrame(frame);
@@ -245,6 +339,7 @@ export function patternFromFrame<T, R>(
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
   const paramsSchema = readPatternParamsSchema(fn);
+  const declaredFrameworkPaths = readFrameworkProvidedPaths(fn);
   const inputs = reactive<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
@@ -276,6 +371,7 @@ export function patternFromFrame<T, R>(
     inputs,
     outputs,
     paramsRoot,
+    declaredFrameworkPaths,
   );
 }
 
@@ -315,6 +411,7 @@ function factoryFromPattern<T, R>(
   inputs: Reactive<RequireDefaults<T>>,
   outputs: FactoryInput<R>,
   paramsRoot?: PatternParamsRoot,
+  frameworkProvidedPaths: readonly FrameworkProvidedPath[] = [],
 ): PatternFactory<T, R> {
   // Capture selfRef before collectCellsAndNodes transforms inputs from Reactive to Cell
   // (collectCellsAndNodes replaces Reactive proxies with their underlying Cells,
@@ -625,7 +722,10 @@ function factoryFromPattern<T, R>(
     );
   }
 
-  const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
+  const argumentSchema: JSONSchema = addFrameworkPathsToSchema(
+    argumentSchemaArg ?? true,
+    frameworkProvidedPaths,
+  );
 
   const resultSchema =
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
@@ -760,6 +860,7 @@ function factoryFromPattern<T, R>(
     // sites check `isTrustedPattern` so a `__cf_data`-forged pattern-shaped
     // object cannot acquire program / verified-load-id metadata.
     brandTrustedPattern(factory);
+    setFrameworkProvidedPaths(factory, frameworkProvidedPaths);
     bindFactoryRootToken(factory, factoryRootToken);
     registerFabricFactory(factory, "pattern", () => {
       const ref = getDurableArtifactRefForRootToken(factoryRootToken);

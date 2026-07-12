@@ -1450,18 +1450,18 @@ patternTool/factory-writer failures, so the aggregate WP3.5 gate remains open.
 
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
-- [ ] Record trusted framework-provided paths in compiler/artifact metadata for
+- [x] Record trusted framework-provided paths in compiler/artifact metadata for
   each base factory. Do not add them to `FactoryStateV1` or trust paths carried
   by `Factory@1` wire data.
-- [ ] When an inline wrapper calls such a factory, synthesize the required
+- [x] When an inline wrapper calls such a factory, synthesize the required
   system fields into the wrapper's argument schema/binding and forward their
   aliases transitively.
 - [ ] Keep those fields out of the model-facing tool schema.
 - [ ] Inject the value from the wrapper tool instance's stable identity and
   carry that exact value to the ultimate call.
-- [ ] Reject an authored literal, capture, or closure param that attempts to
+- [x] Reject an authored literal, capture, or closure param that attempts to
   supply a framework-provided path.
-- [ ] Enforce the same trusted-metadata-only rule when a materialized factory is
+- [x] Enforce the same trusted-metadata-only rule when a materialized factory is
   called inside a lift implementation or handler callback; runtime context or
   event data cannot supply or launder the path.
 - [ ] Fail closed when a required system value or stable tool identity is
@@ -1479,6 +1479,47 @@ Expected tests:
 Replace the hard-coded framework-field handling in
 `packages/runner/src/builtins/llm-dialog.ts` only after the generic trusted
 metadata path has equivalent fail-closed coverage.
+
+WP3.6 core implementation audit (2026-07-11): compiler-emitted
+`withFrameworkProvidedPaths(callback, paths)` metadata is admitted only in the
+verified callback-carrier position with canonical static object-property paths.
+The builder stores those paths in runner-private trusted-artifact side tables;
+derivations retain them, while `FactoryStateV1` and `Factory@1` encoding remain
+unchanged. Inline wrappers synthesize direct argument-0 Cell aliases into the
+inner call, including nested paths and transitive wrapper chains. Authored
+literals, captures, spreads, wildcard/array paths, and scheduled lift/handler
+event or context laundering fail at compile time.
+
+Dynamic symbolic calls carry a separate compiler-owned expected path set on
+the node invocation contract. Warm and cold materialization compare it exactly
+with the resolved trusted artifact metadata, so same-schema privileged and
+ordinary factories cannot substitute for each other; the mismatch path retains
+the previous result and a later cold valid selection recovers without output
+identity churn. Schema-derived `asFactory` contracts reconstruct only their
+public kind/schema fields and cannot grant framework paths.
+
+The existing legacy `patternTool` value stores a bare Pattern graph and loses
+runner-private artifact side tables. Making that graph a new authority channel
+would contradict this work's trust boundary. Therefore the remaining
+model-facing schema stripping, stable tool-instance identity injection, and
+cross-space adapter proof stay unchecked here and are gated on WP4.1's direct
+factory tool shape. The hard-coded `sandboxId` compatibility path remains until
+that replacement has equivalent coverage.
+
+Focused validation before the package gates: the two transformer suites pass
+`15 passed, 0 failed`; builder metadata passes `3 passed, 0 failed`; dynamic
+authority passes `1 passed (2 steps), 0 failed`; and compiled-bundle verifier
+coverage passes `48 steps`.
+
+The complete transformer task passes `1138 passed (742 steps), 0 failed`.
+The complete runner task reports `878 passed (4747 steps), 44 failed (146
+steps), 0 ignored (10 steps)`: every new WP3.6 regression passes, while the
+failures remain in the recorded Stage 4 canonical-writer/compatibility cluster.
+That count also includes traversal and stored-identity oracles whose graph
+identity intentionally changes now that symbolic calls carry an explicit
+compiler-owned `frameworkProvidedPaths: []` authority expectation. Those
+oracles and dependent fixtures must migrate with the Stage 4 writers; this is
+an open aggregate package gate, not a waived green result.
 
 ### Stage 3 completion gate
 

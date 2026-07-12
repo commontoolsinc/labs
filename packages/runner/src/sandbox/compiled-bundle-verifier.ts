@@ -1121,6 +1121,10 @@ function resolveTrustedBuilderCallback(
   argument: { start: number; end: number },
   env: Map<string, BindingInfo>,
   allowPatternParamsCarrier = false,
+  carrierState: Readonly<{
+    patternParams: boolean;
+    frameworkProvided: boolean;
+  }> = { patternParams: false, frameworkProvided: false },
 ): { start: number; end: number } | undefined {
   const trimmed = trimRange(source, argument.start, argument.end);
   const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
@@ -1129,17 +1133,46 @@ function resolveTrustedBuilderCallback(
     return { start: directFunction.start, end: directFunction.end };
   }
 
-  if (allowPatternParamsCarrier) {
-    const call = tryParseCallExpression(source, inner.start, inner.end);
-    if (
-      call?.args.length === 2 &&
-      isPatternParamsSchemaCarrier(stripJsTrivia(call.callee), env)
-    ) {
+  const call = tryParseCallExpression(source, inner.start, inner.end);
+  if (call?.args.length === 2) {
+    const normalizedCallee = stripJsTrivia(call.callee);
+    if (isFrameworkProvidedPathsCarrier(normalizedCallee, env)) {
+      if (carrierState.frameworkProvided) {
+        throw verificationErrorAt(
+          source,
+          filename,
+          call.start,
+          "FrameworkProvided metadata carrier may appear only once per callback",
+        );
+      }
+      verifyFrameworkProvidedPaths(
+        source,
+        filename,
+        call.args[1],
+      );
       const callback = resolveTrustedBuilderCallback(
         source,
         filename,
         call.args[0],
         env,
+        allowPatternParamsCarrier,
+        { ...carrierState, frameworkProvided: true },
+      );
+      return callback;
+    }
+
+    if (
+      allowPatternParamsCarrier &&
+      isPatternParamsSchemaCarrier(normalizedCallee, env)
+    ) {
+      if (carrierState.patternParams) return undefined;
+      const callback = resolveTrustedBuilderCallback(
+        source,
+        filename,
+        call.args[0],
+        env,
+        allowPatternParamsCarrier,
+        { ...carrierState, patternParams: true },
       );
       if (!callback) return undefined;
       verifyTrustedValueExpression(
@@ -1182,6 +1215,90 @@ function isPatternParamsSchemaCarrier(
     properties.length === 2 &&
     properties[0] === "__cfHelpers" &&
     properties[1] === "withPatternParamsSchema";
+}
+
+function isFrameworkProvidedPathsCarrier(
+  normalizedCallee: string,
+  env: Map<string, BindingInfo>,
+): boolean {
+  const ref = parseNormalizedCallReference(normalizedCallee);
+  if (!ref || ref.kind === "identifier") return false;
+  const binding = env.get(ref.root);
+  const properties = ref.properties ?? (ref.property ? [ref.property] : []);
+  return binding?.namespaceImport === true &&
+    binding.trustedRuntimeName !== undefined &&
+    properties.length === 2 &&
+    properties[0] === "__cfHelpers" &&
+    properties[1] === "withFrameworkProvidedPaths";
+}
+
+function verifyFrameworkProvidedPaths(
+  source: string,
+  filename: string,
+  argument: { start: number; end: number },
+): void {
+  const range = trimRange(source, argument.start, argument.end);
+  let value: unknown;
+  try {
+    value = JSON.parse(source.slice(range.start, range.end));
+  } catch {
+    throw verificationErrorAt(
+      source,
+      filename,
+      range.start,
+      "FrameworkProvided metadata must be a static array of path literals",
+    );
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    throw verificationErrorAt(
+      source,
+      filename,
+      range.start,
+      "FrameworkProvided metadata must contain at least one path",
+    );
+  }
+
+  const forbidden = new Set([
+    "*",
+    "[]",
+    "__proto__",
+    "prototype",
+    "constructor",
+  ]);
+  const keys: string[] = [];
+  for (const path of value) {
+    if (
+      !Array.isArray(path) || path.length === 0 ||
+      path.some((segment) =>
+        typeof segment !== "string" || segment.length === 0 ||
+        forbidden.has(segment)
+      )
+    ) {
+      throw verificationErrorAt(
+        source,
+        filename,
+        range.start,
+        "FrameworkProvided metadata paths must be nonempty safe string arrays",
+      );
+    }
+    keys.push(JSON.stringify(path));
+  }
+
+  const canonical = [...new Set(keys)].sort((left, right) =>
+    left.localeCompare(right)
+  );
+  if (
+    canonical.length !== keys.length ||
+    canonical.some((key, index) => key !== keys[index])
+  ) {
+    throw verificationErrorAt(
+      source,
+      filename,
+      range.start,
+      "FrameworkProvided metadata paths must be unique and canonically ordered",
+    );
+  }
 }
 
 function resolveTrustedCallName(

@@ -1,6 +1,11 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 
+type FrameworkProvidedContract = Readonly<{
+  /** Compiler-owned graph metadata; never accepted from an asFactory schema. */
+  frameworkProvidedPaths?: readonly (readonly string[])[];
+}>;
+
 /**
  * Trusted, compiler-emitted call contract for one dynamic factory node.
  *
@@ -9,21 +14,24 @@ import { isRecord } from "@commonfabric/utils/types";
  * any implementation code can run.
  */
 export type FactoryContract =
-  | Readonly<{
-    kind: "pattern";
-    argumentSchema: JSONSchema;
-    resultSchema: JSONSchema;
-  }>
-  | Readonly<{
-    kind: "module";
-    argumentSchema?: JSONSchema;
-    resultSchema?: JSONSchema;
-  }>
-  | Readonly<{
-    kind: "handler";
-    contextSchema?: JSONSchema;
-    eventSchema?: JSONSchema;
-  }>;
+  & FrameworkProvidedContract
+  & (
+    | Readonly<{
+      kind: "pattern";
+      argumentSchema: JSONSchema;
+      resultSchema: JSONSchema;
+    }>
+    | Readonly<{
+      kind: "module";
+      argumentSchema?: JSONSchema;
+      resultSchema?: JSONSchema;
+    }>
+    | Readonly<{
+      kind: "handler";
+      contextSchema?: JSONSchema;
+      eventSchema?: JSONSchema;
+    }>
+  );
 
 /** Read a schema-declared factory contract without granting authored data. */
 export function factoryContractFromSchema(
@@ -36,9 +44,31 @@ export function factoryContractFromSchema(
   }
   switch (contract.kind) {
     case "pattern":
+      return {
+        kind: "pattern",
+        argumentSchema: contract.argumentSchema as JSONSchema,
+        resultSchema: contract.resultSchema as JSONSchema,
+      };
     case "module":
+      return {
+        kind: "module",
+        ...(Object.hasOwn(contract, "argumentSchema")
+          ? { argumentSchema: contract.argumentSchema as JSONSchema }
+          : {}),
+        ...(Object.hasOwn(contract, "resultSchema")
+          ? { resultSchema: contract.resultSchema as JSONSchema }
+          : {}),
+      };
     case "handler":
-      return contract as FactoryContract;
+      return {
+        kind: "handler",
+        ...(Object.hasOwn(contract, "contextSchema")
+          ? { contextSchema: contract.contextSchema as JSONSchema }
+          : {}),
+        ...(Object.hasOwn(contract, "eventSchema")
+          ? { eventSchema: contract.eventSchema as JSONSchema }
+          : {}),
+      };
     default:
       throw new TypeError("Invalid asFactory schema contract kind");
   }

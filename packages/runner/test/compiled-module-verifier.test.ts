@@ -108,6 +108,89 @@ exports.default = __cfPattern_1;
     expect(() => verify(body)).not.toThrow();
   });
 
+  it("accepts canonical FrameworkProvided metadata carriers for trusted builders", () => {
+    const body = `
+${IMPORT}
+const __cfPattern_1 = (0, commonfabric_1.pattern)(
+  (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+    (0, commonfabric_1.__cfHelpers.withPatternParamsSchema)(
+      (argument, params) => ({ id: argument.key("sandboxId"), value: params.value }),
+      { type: "object", properties: { value: { type: "string" } }, required: ["value"] }
+    ),
+    [["sandboxId"]]
+  ),
+  true,
+  true
+);
+const __cfLift_1 = (0, commonfabric_1.lift)(
+  (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+    (input) => input.sandboxId,
+    [["sandboxId"]]
+  ),
+  true,
+  true
+);
+exports.default = (0, commonfabric_1.handler)(
+  true,
+  true,
+  (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+    (_event, context) => ({ pattern: __cfPattern_1, lift: __cfLift_1, context }),
+    [["sandboxId"]]
+  )
+);
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
+  it("rejects dynamic or malformed FrameworkProvided metadata paths", () => {
+    const invalidPaths = [
+      "paths",
+      "[]",
+      "[[]]",
+      '[[""]] ',
+      '[["*"]]',
+      '[["[]"]]',
+      '[["__proto__"]]',
+      '[["prototype"]]',
+      '[["constructor"]]',
+      '[["sandboxId"], ["sandboxId"]]',
+      '[["z"], ["a"]]',
+    ];
+    for (const paths of invalidPaths) {
+      const body = `
+${IMPORT}
+const paths = (0, commonfabric_1.__cf_data)([["sandboxId"]]);
+exports.default = (0, commonfabric_1.pattern)(
+  (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+    (argument) => argument,
+    ${paths}
+  ),
+  true,
+  true
+);
+`;
+
+      expect(() => verify(body), paths).toThrow(
+        "FrameworkProvided metadata",
+      );
+    }
+  });
+
+  it("rejects exporting a FrameworkProvided metadata carrier result", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+  (argument) => argument,
+  [["sandboxId"]]
+);
+`;
+
+    expect(() => verify(body)).toThrow(
+      "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
+    );
+  });
+
   it("rejects exporting the compiler-only params-schema carrier result", () => {
     const body = `
 ${IMPORT}

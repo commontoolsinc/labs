@@ -174,6 +174,7 @@ export function createListPatternFactorySupervisor(
             return false;
           }
           if (notification.type === "reset") return true;
+          if (!("changes" in notification)) return false;
           return [...notification.changes].some((change) =>
             change.address.id === link.id &&
             (change.address.scope ?? "space") === (link.scope ?? "space")

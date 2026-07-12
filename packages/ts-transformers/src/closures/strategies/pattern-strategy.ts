@@ -70,8 +70,6 @@ export class PatternStrategy implements ClosureTransformationStrategy {
     const { captureTree } = collector.analyzeCurrentAndOriginal(callback);
 
     const frameworkProvided = findFrameworkProvidedViolation(
-      node,
-      callback,
       captureTree,
       context,
     );
@@ -274,28 +272,9 @@ interface FrameworkProvidedViolation {
 }
 
 function findFrameworkProvidedViolation(
-  patternCall: ts.CallExpression,
-  callback: ts.ArrowFunction | ts.FunctionExpression,
   captureTree: ReadonlyMap<string, CaptureTreeNode>,
   context: TransformationContext,
 ): FrameworkProvidedViolation | undefined {
-  const publicTypeNode = patternCall.typeArguments?.[0] ??
-    callback.parameters[0]?.type ?? callback.parameters[0];
-  const publicType = publicTypeNode &&
-    typeAtSourceNode(publicTypeNode, context);
-  if (publicType) {
-    const path = findFrameworkProvidedPaths(publicType, context.checker)[0];
-    if (path) {
-      return {
-        message: "Nested pattern public input path '" + formatPath(path) +
-          "' is FrameworkProvided, but wrapper forwarding is unavailable " +
-          "until WP3.6. Keep the privileged factory at module scope instead " +
-          "of turning the system-supplied path into ordinary wrapper input.",
-        node: sourceNode(patternCall),
-      };
-    }
-  }
-
   for (const [root, capture] of captureTree) {
     const violation = findFrameworkProvidedCaptureViolation(
       root,
@@ -305,7 +284,7 @@ function findFrameworkProvidedViolation(
     if (violation) return violation;
   }
 
-  return findFrameworkProvidedInvocationViolation(callback, context);
+  return undefined;
 }
 
 function findFrameworkProvidedCaptureViolation(
@@ -605,67 +584,6 @@ function initializerForDeclaration(
     }
   }
   return undefined;
-}
-
-function findFrameworkProvidedInvocationViolation(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
-  context: TransformationContext,
-): FrameworkProvidedViolation | undefined {
-  let violation: FrameworkProvidedViolation | undefined;
-  const visit = (node: ts.Node): void => {
-    if (violation) return;
-    if (ts.isCallExpression(node)) {
-      const calleeType = typeAtSourceNode(node.expression, context);
-      const path = (calleeType && findFactoryInputFrameworkProvidedPaths(
-        calleeType,
-        context.checker,
-      )[0]) ?? findFrameworkProvidedExpressionOrigin(
-        node.expression,
-        context,
-        new Set(),
-        new Set(),
-      )?.factoryInputPath;
-      if (path) {
-        violation = {
-          message: "Nested pattern invokes a factory input '" +
-            formatPath(path) +
-            "' that is FrameworkProvided. Trusted wrapper forwarding is " +
-            "unavailable until WP3.6, so authored values and closure captures " +
-            "must fail closed.",
-          node: sourceNode(node),
-        };
-        return;
-      }
-    }
-    if (
-      ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) ||
-      ts.isElementAccessExpression(node)
-    ) {
-      const valueType = typeAtSourceNode(node, context);
-      const path = (valueType && findFactoryInputFrameworkProvidedPaths(
-        valueType,
-        context.checker,
-      )[0]) ?? findFrameworkProvidedExpressionOrigin(
-        node,
-        context,
-        new Set(),
-        new Set(),
-      )?.factoryInputPath;
-      if (path) {
-        violation = {
-          message: "Nested pattern references a factory input '" +
-            formatPath(path) +
-            "' that is FrameworkProvided. Shipping that factory through a " +
-            "wrapper would discard trusted metadata before WP3.6.",
-          node: sourceNode(node),
-        };
-        return;
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(callback.body);
-  return violation;
 }
 
 function typeAtSourceNode(
