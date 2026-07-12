@@ -54,6 +54,7 @@ import type {
   CfcTxState,
   CfcWriteFloorMode,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -1055,6 +1056,11 @@ export interface IExtendedStorageTransaction
    * decision, so exposure is harmless (like `noteCfcDiagnostic`).
    */
   recordCfcConsultedGrant(consulted: ConsultedGrant): void;
+
+  /** Records a present/absent exact module-policy manifest lookup. */
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void;
 
   /**
    * Records a label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2):

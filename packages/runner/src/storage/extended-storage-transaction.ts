@@ -79,6 +79,7 @@ import {
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsultedGrant,
+  type ConsultedPolicyManifest,
   type ConsumedRead,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -278,6 +279,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     diagnostics: [],
     unprivilegedSystemWrites: [],
     consultedGrants: [],
+    consultedPolicyManifests: [],
     labelMetadataObservations: [],
   };
   private reportedCfcRelevant = false;
@@ -896,6 +898,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    const index = this.#cfcState.consultedPolicyManifests.findIndex(
+      (existing) => deepEqual(existing.reference, consulted.reference),
+    );
+    if (index !== -1) {
+      if (
+        this.#cfcState.consultedPolicyManifests[index].state === consulted.state
+      ) {
+        return;
+      }
+      this.#cfcState.consultedPolicyManifests[index] = deepFreeze(consulted);
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("consulted-policy-manifest-changed");
+      }
+      return;
+    }
+    this.#cfcState.consultedPolicyManifests.push(deepFreeze(consulted));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("consulted-policy-manifest-added");
+    }
+  }
+
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void {
@@ -1159,6 +1185,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // revocation then takes effect on the next evaluation (design §2.2).
       ...(this.#cfcState.consultedGrants.length > 0
         ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+        : {}),
+      ...(this.#cfcState.consultedPolicyManifests.length > 0
+        ? {
+          consultedPolicyManifests: [
+            ...this.#cfcState.consultedPolicyManifests,
+          ],
+        }
         : {}),
       // Label-metadata observations (inv-12 Stage 2): boundary-decision
       // inputs (they change the flow join and the consumed set), bound like
@@ -1908,6 +1941,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     this.wrapped.recordCfcConsultedGrant(consulted);
+  }
+
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    this.wrapped.recordCfcConsultedPolicyManifest(consulted);
   }
 
   recordCfcLabelMetadataObservation(
