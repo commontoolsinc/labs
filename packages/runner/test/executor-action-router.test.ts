@@ -5,6 +5,7 @@ import type {
   ExecutionClaim,
 } from "@commonfabric/memory/v2";
 import { toDocumentPath } from "@commonfabric/memory/v2";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   createExecutorActionTransactionRouter,
   type ExecutorCandidateDiagnostic,
@@ -294,16 +295,17 @@ Deno.test("executor action router candidates only a canonical supported builtin 
         space: SPACE,
         scope: "space" as const,
         id: "of:action-router-piece",
-        path: ["value"],
+        path: [],
       },
       reads: [{
         space: SPACE,
         scope: "space" as const,
         id: "of:action-router-input",
-        path: ["value"],
+        path: [],
       }],
-      writes: [output],
-      directOutputs: [output],
+      writes: [{ ...output, path: [] }],
+      runtimeWrites: [{ ...output, path: [] }],
+      directOutputs: [{ ...output, path: [] }],
     },
   });
   const effectCommit = commit();
@@ -376,16 +378,17 @@ Deno.test("executor action router carries an accepted builtin claim across async
         space: SPACE,
         scope: "space" as const,
         id: "of:action-router-piece",
-        path: ["value"],
+        path: [],
       },
       reads: [{
         space: SPACE,
         scope: "space" as const,
         id: "of:action-router-input",
-        path: ["value"],
+        path: [],
       }],
-      writes: [output],
-      directOutputs: [output],
+      writes: [{ ...output, path: [] }],
+      runtimeWrites: [{ ...output, path: [] }],
+      directOutputs: [{ ...output, path: [] }],
     },
   });
   const claims = new WeakMap<object, ExecutionClaim>();
@@ -418,6 +421,27 @@ Deno.test("executor action router carries an accepted builtin claim across async
   claims.set(effectAction, claim);
 
   const continuation = commit();
+  const schema = { type: "string" } as const;
+  const schemaHash = internSchemaAsTaggedHashString(schema);
+  continuation.operations = [{
+    op: "patch",
+    id: output.id,
+    scope: "space",
+    patches: [{
+      op: "add",
+      path: "/cfc",
+      value: { version: 1 },
+    }, {
+      op: "replace",
+      path: "/value",
+      value: 42,
+    }],
+  }, {
+    op: "set",
+    id: `cid:${schemaHash}`,
+    scope: "space",
+    value: { value: schema },
+  }];
   continuation.schedulerObservation = undefined;
   assertEquals(
     await router({
@@ -434,6 +458,26 @@ Deno.test("executor action router carries an accepted builtin claim across async
       contextKey: "space",
       leaseGeneration: 3,
       claimGeneration: 4,
+    },
+  );
+
+  const forgedSchema = commit();
+  forgedSchema.operations = [{
+    op: "set",
+    id: `cid:${schemaHash}-forged`,
+    scope: "space",
+    value: { value: schema },
+  }];
+  forgedSchema.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: forgedSchema,
+      sourceAction: effectAction,
+    }),
+    {
+      disposition: "unserved",
+      diagnosticCode: "dynamic-write-outside-static-surface",
     },
   );
 });

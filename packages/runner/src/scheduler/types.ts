@@ -11,6 +11,7 @@ import type {
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import type { ServerBuiltinActionDescriptor } from "../builtins/server-execution.ts";
+import type { CompleteActionScopeSummary } from "./persistent-observation.ts";
 
 export interface TelemetryAnnotations {
   pattern: Pattern;
@@ -34,6 +35,8 @@ export interface TelemetryAnnotations {
   };
   /** Trusted descriptor attached only to canonical registry builtins. */
   serverBuiltin?: ServerBuiltinActionDescriptor;
+  /** Last trusted durable surface adopted for that builtin action. */
+  serverBuiltinPreviousScopeSummary?: CompleteActionScopeSummary;
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 

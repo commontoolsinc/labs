@@ -181,6 +181,7 @@ export class Engine extends EventTarget implements Harness {
   // not depend on which bundle/entry-point compiled the module.
   private canonicalSourceByPrefixed = new Map<string, string>();
   private readonly executableRegistry = new ExecutableRegistry();
+  private compatibilityFetchDisabled = false;
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
   private readonly patternCoverageByGraph = new WeakMap<
     CompiledModuleGraph,
@@ -193,6 +194,16 @@ export class Engine extends EventTarget implements Harness {
   ) {
     super();
     this.ctRuntime = ctRuntime;
+  }
+
+  /** Executor-only hardening; must run before the first SES evaluation. */
+  disableCompatibilityFetch(): void {
+    if (this.runtimeInternals !== undefined || this.sesRuntime !== undefined) {
+      throw new Error(
+        "compatibility fetch must be disabled before SES initialization",
+      );
+    }
+    this.compatibilityFetchDisabled = true;
   }
 
   async initializeRuntime(): Promise<RuntimeInternals> {
@@ -952,6 +963,7 @@ export class Engine extends EventTarget implements Harness {
 
       const patternCoverage = this.patternCoverageByGraph.get(graph);
       const globals = createModuleCompartmentGlobals({
+        ...(this.compatibilityFetchDisabled ? { fetch: undefined } : {}),
         console: this.consoleShim,
         ...(patternCoverage
           ? { [PATTERN_COVERAGE_GLOBAL]: patternCoverage.sandboxGlobal() }
@@ -1498,6 +1510,7 @@ export class Engine extends EventTarget implements Harness {
       ensureSESLockdown();
       this.sesRuntime = new SESRuntime({
         globals: createModuleCompartmentGlobals({
+          ...(this.compatibilityFetchDisabled ? { fetch: undefined } : {}),
           console: this.consoleShim,
         }),
         hideInternalStackFrames: this.options.hideInternalStackFrames,

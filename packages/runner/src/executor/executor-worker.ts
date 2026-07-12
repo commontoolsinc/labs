@@ -23,6 +23,11 @@ import {
   isTerminalRejection,
 } from "../storage/rejection.ts";
 import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
+import {
+  createServerBuiltinBrokerClient,
+  type ServerBuiltinBrokerClient,
+} from "./server-builtin-channel.ts";
+import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
 
 type WorkerRequest = {
   type:
@@ -38,6 +43,7 @@ type WorkerRequest = {
   leaseGeneration?: number;
   pieces?: string[];
   port?: MessagePort;
+  builtinBrokerPort?: MessagePort;
   apiUrl?: string;
   patternApiUrl?: string;
   experimental?: ExperimentalOptions;
@@ -48,6 +54,7 @@ type WorkerRequest = {
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 let runtime: Runtime | null = null;
 let storage: HostStorageManager | null = null;
+let builtinBroker: ServerBuiltinBrokerClient | null = null;
 let space: MemorySpace | null = null;
 let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
@@ -135,6 +142,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     typeof request.apiUrl !== "string" ||
     typeof request.patternApiUrl !== "string" ||
     !(request.port instanceof MessagePort) || !Array.isArray(request.pieces) ||
+    !(request.builtinBrokerPort instanceof MessagePort) ||
     !request.pieces.every((piece) => typeof piece === "string") ||
     !Number.isSafeInteger(request.leaseGeneration) ||
     Number(request.leaseGeneration) <= 0
@@ -146,6 +154,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   const actionTransactionRouter = createExecutorActionTransactionRouter({
     servedSpace: space,
     branch,
+    builtinBrokerAvailable: true,
     claimForAction: (action) => claimsByAction.get(action),
     onCandidate: (candidate, sourceAction) => {
       candidateActions.set(
@@ -179,6 +188,15 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     shadowWrites: true,
     actionTransactionRouter,
   });
+  builtinBroker = createServerBuiltinBrokerClient({
+    port: request.builtinBrokerPort,
+    claimForRequest: () => {
+      const sourceAction = getTransactionSourceAction();
+      return sourceAction === undefined
+        ? undefined
+        : claimsByAction.get(sourceAction);
+    },
+  });
   runtime = new Runtime(runtimePresets.productionServer({
     apiUrl: new URL(request.apiUrl),
     patternApiUrl: new URL(request.patternApiUrl),
@@ -189,8 +207,14 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       serverPrimaryExecution: true,
     },
     fetch: denyExternalBuiltinFetch,
-    externalSinkDisposition: "suppress",
+    externalSinkDisposition: (sourceAction) =>
+      sourceAction !== undefined && claimsByAction.has(sourceAction)
+        ? "allow"
+        : "suppress",
   }));
+  runtime.installServerBuiltinFetch((builtinId, rawUrl, init) =>
+    builtinBroker!.fetch(builtinId, rawUrl, init)
+  );
   runtime.scheduler.setActionCommitRejectionHandler((action, error) => {
     const claim = claimsByAction.get(action);
     if (claim === undefined || !invalidatesExecutorClaim(error)) return;
@@ -226,6 +250,8 @@ const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
   }
   storage.discardShadowWritesForAction(space, action);
   claimsByAction.set(action, claim);
+  (action as Action & { prepareClaimedRerun?: () => void })
+    .prepareClaimedRerun?.();
   await runtime.scheduler.run(action);
 };
 
@@ -235,6 +261,8 @@ const stop = async (): Promise<void> => {
   cancelStorageSubscription?.();
   cancelStorageSubscription = null;
   await work;
+  builtinBroker?.dispose();
+  builtinBroker = null;
   if (runtime !== null) {
     await runtime.settled();
     await runtime.dispose();

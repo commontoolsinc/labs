@@ -15,6 +15,7 @@ import {
   StorageManager,
 } from "../src/storage/v2.ts";
 import { DenoSpaceExecutorFactory } from "../src/executor/deno-space-executor.ts";
+import type { ServerBuiltinFetchRequest } from "../src/executor/server-builtin-egress.ts";
 
 const FLAGS = {
   persistentSchedulerState: true,
@@ -33,6 +34,26 @@ const PROGRAM: RuntimeProgram = {
       "import { pattern, computed } from 'commonfabric';",
       "export default pattern<{ value: number }>(({ value }) =>",
       "  computed(() => (value as any) * 2));",
+    ].join("\n"),
+  }],
+};
+
+const BUILTIN_FLAGS = {
+  ...FLAGS,
+  serverPrimaryExecutionBuiltinPassivityV1: true,
+} as const satisfies Partial<MemoryProtocolFlags>;
+
+const ASYNC_BUILTIN_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "/// <cts-enable />",
+      "import { pattern, fetchText, generateText } from 'commonfabric';",
+      "export default pattern<{ url: string }>(({ url }) => ({",
+      "  fetched: fetchText({ url }),",
+      "  generated: generateText({ prompt: url }),",
+      "}));",
     ].join("\n"),
   }],
 };
@@ -100,6 +121,14 @@ const awaitBarrier = async <T>(
     if (timer !== undefined) clearTimeout(timer);
   }
 };
+
+const containsStoredValue = (value: unknown, expected: string): boolean =>
+  value === expected ||
+  (Array.isArray(value)
+    ? value.some((entry) => containsStoredValue(entry, expected))
+    : typeof value === "object" && value !== null
+    ? Object.values(value).some((entry) => containsStoredValue(entry, expected))
+    : false);
 
 Deno.test("explicit claim routing commits a real pure computation under its sponsor", async () => {
   const principal = await Identity.fromPassphrase(
@@ -226,6 +255,9 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
       events.push(
         `accepted:${event.revisions.map((revision) => revision.id).join(",")}`,
       );
+      events.push(
+        `accepted:${event.revisions.map((revision) => revision.id).join(",")}`,
+      );
       if (
         event.revisions.some((revision) => revision.id === outputId)
       ) {
@@ -337,6 +369,226 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     unsubscribeAccepted();
     unsubscribeControl();
     unsubscribeNoOp();
+    await executor?.stop();
+    await seedRuntime.dispose();
+    await seedStorage.close();
+    await observerClient?.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed fetch and generate builtins execute once through the host broker and persist async results", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor builtin e2e ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const servingOrigin = new URL("https://toolshed.example/");
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-builtin-e2e" },
+    protocolFlags: BUILTIN_FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(
+    server,
+    BUILTIN_FLAGS,
+    { as: principal },
+  );
+  const seedRuntime = new Runtime({
+    apiUrl: servingOrigin,
+    patternEnvironment: { apiUrl: servingOrigin },
+    storageManager: seedStorage,
+    fetch: () => Promise.reject(new Error("seed must not fetch")),
+    externalSinkDisposition: "suppress",
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  let observerClient: MemoryClient.Client | null = null;
+  let unsubscribeAccepted = () => {};
+  const events: string[] = [];
+  const brokerRequests: ServerBuiltinFetchRequest[] = [];
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(
+      ASYNC_BUILTIN_PROGRAM,
+      { space },
+    );
+    const tx = seedRuntime.edit();
+    const input = seedRuntime.getCell<string>(
+      space,
+      "executor-builtin-url",
+      undefined,
+      tx,
+    );
+    input.set("/server");
+    const result = seedRuntime.getCell<Record<string, unknown>>(
+      space,
+      "executor-builtin-result",
+      undefined,
+      tx,
+    );
+    const handle = seedRuntime.run(tx, compiled, { url: input }, result);
+    assertEquals((await tx.commit()).error, undefined);
+    await handle.pull();
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    assertEquals(handle.key("fetched").key("result").get(), undefined);
+    assertEquals(handle.key("generated").key("result").get(), undefined);
+    await seedRuntime.dispose();
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: BUILTIN_FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await observer.setExecutionDemand("", [result.sourceURI]);
+    await observer.watchSet([{
+      id: "executor-builtin-e2e-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+    const lease = await server.acquireExecutionLease(space, "");
+    assertExists(lease);
+    assertEquals(lease.onBehalfOf, space);
+
+    const claimed = Promise.withResolvers<void>();
+    const claimedBuiltins = new Set<string>();
+    const resultAccepted = Promise.withResolvers<void>();
+    const acceptedResults = new Set<string>();
+    observer.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (event.type === "session.execution.claim.set") {
+        claimedBuiltins.add(event.claim.implementationFingerprint);
+        if (
+          [...claimedBuiltins].some((value) => value.includes("fetchText")) &&
+          [...claimedBuiltins].some((value) => value.includes("generateText"))
+        ) {
+          claimed.resolve();
+        }
+      }
+    });
+    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+      for (const revision of event.revisions) {
+        void server.readDocument(space, revision.id).then((document) => {
+          const value = (document as { value?: unknown } | undefined)?.value;
+          if (containsStoredValue(value, "server response")) {
+            acceptedResults.add("server response");
+          }
+          if (containsStoredValue(value, "generated response")) {
+            acceptedResults.add("generated response");
+          }
+          if (
+            acceptedResults.has("server response") &&
+            acceptedResults.has("generated response")
+          ) {
+            resultAccepted.resolve();
+          }
+        });
+      }
+    });
+
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: servingOrigin,
+      patternApiUrl: servingOrigin,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      protocolFlags: BUILTIN_FLAGS,
+      createBuiltinBroker: () => ({
+        fetch(request) {
+          events.push(`broker:${request.url}`);
+          brokerRequests.push(request);
+          const response = request.url.startsWith("/api/ai/llm")
+            ? Response.json({
+              role: "assistant",
+              content: "generated response",
+              id: "server-generate-e2e",
+            })
+            : new Response("server response");
+          return Promise.resolve({
+            response,
+            finalUrl: new URL(request.url, servingOrigin),
+            redirectCount: 0,
+          });
+        },
+      }),
+      authorizeBuiltinRequest: () => {
+        events.push("broker-authorized");
+      },
+      onCandidateClaim: (candidate) =>
+        events.push(
+          `candidate:${candidate.builtinId}:${candidate.claimKey.actionId}`,
+        ),
+      onCandidateDiagnostic: (diagnostic) =>
+        events.push(`diagnostic:${diagnostic.diagnosticCode}`),
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease,
+      pieces: [result.sourceURI],
+      onCrash(error) {
+        events.push(`crash:${error}`);
+      },
+    });
+
+    await awaitBarrier(claimed.promise, "builtin claim", events);
+    await awaitBarrier(
+      resultAccepted.promise,
+      "builtin result writeback",
+      events,
+    );
+
+    assertEquals(brokerRequests.length, 2);
+    assertEquals(
+      brokerRequests.map((request) => request.url).sort(),
+      ["/api/ai/llm", "/server"],
+    );
+    assertEquals(
+      events.some((event) => event.startsWith("candidate:fetchText:")),
+      true,
+    );
+    assertEquals(
+      events.some((event) => event.startsWith("candidate:generateText:")),
+      true,
+    );
+    assertEquals(events.some((event) => event.startsWith("crash:")), false);
+  } finally {
+    unsubscribeAccepted();
     await executor?.stop();
     await seedRuntime.dispose();
     await seedStorage.close();

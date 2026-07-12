@@ -5,6 +5,7 @@ import {
   extractTextFromLLMResponse,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   LLMClient,
+  type LLMClientRequestOptions,
   LLMGenerateObjectRequest,
   type LLMNativeModelToolId,
   LLMRequest,
@@ -20,6 +21,7 @@ import type { Schema } from "@commonfabric/api/schema";
 import type { JSONSchema } from "../builder/types.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
@@ -35,6 +37,8 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
+import { getPatternEnvironment } from "../builder/env.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import { scopedCell } from "./scope-policy.ts";
 import {
@@ -59,6 +63,40 @@ const logger = getLogger("llm", {
 });
 
 const client = new LLMClient();
+
+function llmClientOptions(
+  runtime: Runtime,
+  space: MemorySpace,
+  serverBuiltinId?: "generateText" | "generateObject",
+): LLMClientRequestOptions | undefined {
+  const mappedLlmHost = runtime.mappedHostFor(space);
+  if (!runtime.hasServerBuiltinFetch()) {
+    return mappedLlmHost
+      ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
+      : undefined;
+  }
+  if (serverBuiltinId === undefined) {
+    throw new Error("unsupported LLM builtin has no server broker route");
+  }
+  const endpoint = new URL(
+    "/api/ai/llm",
+    mappedLlmHost ?? getPatternEnvironment().apiUrl,
+  );
+  return {
+    endpoint,
+    fetch: (input, init) => {
+      const target = input instanceof URL
+        ? input
+        : new URL(input instanceof Request ? input.url : input, endpoint);
+      return runtime.fetchBuiltin(
+        serverBuiltinId,
+        `${target.pathname}${target.search}`,
+        target,
+        init,
+      );
+    },
+  };
+}
 
 // TODO(ja): investigate if generateText should be replaced by
 // a fetch builtin with streaming support
@@ -345,10 +383,11 @@ async function executeWithToolsLoop(params: {
   observationMaxConfidentiality?: readonly unknown[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
-  space: any;
+  space: MemorySpace;
   getCurrentRun: () => number;
   thisRun: number;
   onComplete: (llmResult: LLMResponse) => Promise<void>;
+  serverBuiltinId?: "generateText" | "generateObject";
 }): Promise<void> {
   const {
     llmParams,
@@ -361,6 +400,7 @@ async function executeWithToolsLoop(params: {
     getCurrentRun,
     thisRun,
     onComplete,
+    serverBuiltinId,
   } = params;
 
   const executeRecursive = async (
@@ -383,14 +423,11 @@ async function executeWithToolsLoop(params: {
     // module-level default endpoint — like the fetch builtins, hostForSpace's
     // apiUrl fallback is NOT used, because deployments may split the
     // pattern-facing api host from the runtime's memory host.
-    const mappedLlmHost = runtime.mappedHostFor(space);
     const llmResult = await client.sendRequest(
       requestParams,
       updatePartial,
       undefined,
-      mappedLlmHost
-        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-        : undefined,
+      llmClientOptions(runtime, space, serverBuiltinId),
     );
 
     if (thisRun !== getCurrentRun()) return;
@@ -956,8 +993,9 @@ export function generateText(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       system,
@@ -999,6 +1037,11 @@ export function generateText(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
@@ -1135,6 +1178,7 @@ export function generateText(
                 space: parentCell.space,
                 getCurrentRun: getRunForCancellation,
                 thisRun,
+                serverBuiltinId: "generateText",
                 onComplete: async (llmResult) => {
                   await runtime.idle();
 
@@ -1205,6 +1249,12 @@ export function generateText(
       },
     );
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }
 
 /**
@@ -1241,8 +1291,9 @@ export function generateObject<T extends Record<string, unknown>>(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       prompt,
@@ -1295,6 +1346,11 @@ export function generateObject<T extends Record<string, unknown>>(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const messagesWithLog = resultCell.key("messages").withTx(tx);
@@ -1571,16 +1627,15 @@ export function generateObject<T extends Record<string, unknown>>(
                   messages: currentMessages,
                 };
 
-                const mappedLlmHost = runtime.mappedHostFor(
-                  parentCell.space,
-                );
                 const llmResult = await client.sendRequest(
                   requestParams,
                   updatePartial,
                   undefined,
-                  mappedLlmHost
-                    ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-                    : undefined,
+                  llmClientOptions(
+                    runtime,
+                    parentCell.space,
+                    "generateObject",
+                  ),
                 );
 
                 if (isRunCancelled()) return;
@@ -1893,9 +1948,6 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
             });
-            const mappedLlmHost = runtime.mappedHostFor(
-              parentCell.space,
-            );
             const response = await client.generateObject(
               {
                 ...generateObjectParams,
@@ -1903,9 +1955,11 @@ export function generateObject<T extends Record<string, unknown>>(
                   "You are a helpful assistant.",
               },
               undefined,
-              mappedLlmHost
-                ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-                : undefined,
+              llmClientOptions(
+                runtime,
+                parentCell.space,
+                "generateObject",
+              ),
             ) as {
               object: T;
             };
@@ -2006,4 +2060,10 @@ export function generateObject<T extends Record<string, unknown>>(
       );
     }
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }

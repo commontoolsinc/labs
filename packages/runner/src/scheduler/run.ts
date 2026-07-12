@@ -38,6 +38,7 @@ import type {
   TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
+import { serverBuiltinImplementationHash } from "../builtins/server-execution.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -679,7 +680,7 @@ function attachSchedulerActionObservation(
   );
   const runtimeFingerprint = schedulerRuntimeFingerprint();
   const completeScopeSummary = annotated.completeSchedulerScopeSummary;
-  const observation = buildSchedulerActionObservation({
+  const baseObservation = buildSchedulerActionObservation({
     ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
       : {}),
@@ -731,6 +732,64 @@ function attachSchedulerActionObservation(
       ? { errorFingerprint: schedulerErrorFingerprint(args.error) }
       : {}),
   });
+  const serverBuiltin = annotated.serverBuiltin;
+  const previousBuiltinSummary =
+    annotated.serverBuiltinPreviousScopeSummary?.implementationFingerprint ===
+        implementationFingerprint &&
+      annotated.serverBuiltinPreviousScopeSummary?.runtimeFingerprint ===
+        runtimeFingerprint
+      ? annotated.serverBuiltinPreviousScopeSummary
+      : undefined;
+  const observation = serverBuiltin !== undefined &&
+      baseObservation.actionKind === "effect" &&
+      implementationFingerprint ===
+        `impl:${serverBuiltinImplementationHash(serverBuiltin.id)}`
+    ? {
+      ...baseObservation,
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint,
+        runtimeFingerprint,
+        piece: toMemorySpaceAddress(serverBuiltin.piece),
+        reads: sortAndCompactPaths([
+          ...serverBuiltin.reads.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map((link) => ({
+            ...toMemorySpaceAddress(link),
+            path: [],
+          })),
+          ...(previousBuiltinSummary?.reads ?? []),
+          ...baseObservation.reads,
+          ...baseObservation.shallowReads,
+        ]),
+        writes: sortAndCompactPaths([
+          ...serverBuiltin.writes.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map(toMemorySpaceAddress),
+          ...serverBuiltin.runtimeWrites.map((link) => ({
+            ...toMemorySpaceAddress(link),
+            path: [],
+          })),
+          ...serverBuiltin.directOutputs.map(toMemorySpaceAddress),
+          ...(previousBuiltinSummary?.writes ?? []),
+          ...(previousBuiltinSummary?.materializerWriteEnvelopes ?? []),
+          ...(previousBuiltinSummary?.directOutputs ?? []),
+          ...baseObservation.actualChangedWrites,
+          ...baseObservation.currentKnownWrites,
+          ...(baseObservation.declaredWrites ?? []),
+          ...baseObservation.materializerWriteEnvelopes,
+          ...(baseObservation.ignoredSchedulingWrites ?? []),
+        ]),
+        materializerWriteEnvelopes: sortAndCompactPaths(
+          [
+            ...(previousBuiltinSummary?.materializerWriteEnvelopes ?? []),
+            ...baseObservation.materializerWriteEnvelopes,
+          ],
+        ),
+        directOutputs: serverBuiltin.directOutputs.map(toMemorySpaceAddress),
+      },
+    }
+    : baseObservation;
 
   try {
     observationTarget.setSchedulerObservation(observation);

@@ -43,5 +43,7 @@ export interface ServerBuiltinActionDescriptor {
   readonly piece: NormalizedFullLink;
   readonly reads: readonly NormalizedFullLink[];
   readonly writes: readonly NormalizedFullLink[];
+  /** Stable array populated by the builtin when it mints internal cells. */
+  readonly runtimeWrites: readonly NormalizedFullLink[];
   readonly directOutputs: readonly NormalizedFullLink[];
 }

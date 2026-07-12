@@ -17,8 +17,21 @@ import type {
   SpaceExecutorStartOptions,
 } from "./shared-execution-pool.ts";
 import type { ExecutorWriterDiscovery } from "./writer-discovery.ts";
-import type { ServerExecutableBuiltinId } from "../builtins/server-execution.ts";
-import { isServerExecutableBuiltinId } from "../builtins/server-execution.ts";
+import {
+  isServerExecutableBuiltinId,
+  type ServerExecutableBuiltinId,
+} from "../builtins/server-execution.ts";
+import {
+  type AuthorizedServerBuiltinRequest,
+  createServerBuiltinBrokerHost,
+  type ServerBuiltinBrokerContext,
+  type ServerBuiltinBrokerHost,
+} from "./server-builtin-channel.ts";
+import type { ServerBuiltinFetchBroker } from "./server-builtin-egress.ts";
+import {
+  authorizeDefaultServerBuiltinRequest,
+  createDefaultServerBuiltinBroker,
+} from "./server-builtin-transport.ts";
 
 export interface ExecutorWorkerLike extends EventTarget {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -40,6 +53,13 @@ export interface DenoSpaceExecutorFactoryOptions {
   createProvider?: (
     options: HostProviderChannelOptions,
   ) => HostProviderChannel;
+  createBuiltinBroker?: (
+    context: ServerBuiltinBrokerContext,
+  ) => ServerBuiltinFetchBroker;
+  authorizeBuiltinRequest?: (
+    request: AuthorizedServerBuiltinRequest,
+    context: ServerBuiltinBrokerContext,
+  ) => void | Promise<void>;
 }
 
 export interface CandidateClaim {
@@ -181,6 +201,8 @@ const candidateKey = (candidate: CandidateClaim): string =>
 class DenoSpaceExecutor implements SpaceExecutor {
   readonly #worker: ExecutorWorkerLike;
   readonly #provider: HostProviderChannel;
+  readonly #builtinBrokerHost: ServerBuiltinBrokerHost;
+  readonly #builtinBrokerPort: MessagePort;
   readonly #startOptions: SpaceExecutorStartOptions;
   readonly #server: Server;
   readonly #protocolFlags: Partial<WireMemoryProtocolFlags>;
@@ -210,6 +232,14 @@ class DenoSpaceExecutor implements SpaceExecutor {
       onCandidateClaim?: (candidate: CandidateClaim) => void;
       onCandidateDiagnostic?: (diagnostic: CandidateClaimDiagnostic) => void;
       onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
+      createBuiltinBroker: (
+        context: ServerBuiltinBrokerContext,
+      ) => ServerBuiltinFetchBroker;
+      authorizeBuiltinRequest: (
+        request: AuthorizedServerBuiltinRequest,
+        context: ServerBuiltinBrokerContext,
+      ) => void | Promise<void>;
+      servingOrigin: URL;
     },
   ) {
     this.#worker = worker;
@@ -220,6 +250,22 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#onCandidateClaim = control.onCandidateClaim;
     this.#onCandidateDiagnostic = control.onCandidateDiagnostic;
     this.#onWriterDiscovery = control.onWriterDiscovery;
+    const builtinChannel = new MessageChannel();
+    const brokerContext: ServerBuiltinBrokerContext = {
+      space: startOptions.space as MemorySpace,
+      branch: startOptions.branch,
+      leaseGeneration: startOptions.lease.leaseGeneration,
+      onBehalfOf: startOptions.lease.onBehalfOf,
+      servingOrigin: new URL(control.servingOrigin),
+    };
+    this.#builtinBrokerHost = createServerBuiltinBrokerHost({
+      port: builtinChannel.port1,
+      context: brokerContext,
+      broker: control.createBuiltinBroker(brokerContext),
+      isClaimLive: (claim) => this.#isClaimLive(claim),
+      authorize: control.authorizeBuiltinRequest,
+    });
+    this.#builtinBrokerPort = builtinChannel.port2;
     this.#worker.addEventListener("message", this.#onMessage);
     this.#worker.addEventListener("error", this.#onError);
     this.#worker.addEventListener("messageerror", this.#onMessageError);
@@ -239,13 +285,14 @@ class DenoSpaceExecutor implements SpaceExecutor {
       leaseGeneration: this.#startOptions.lease.leaseGeneration,
       pieces: [...this.#startOptions.pieces],
       port: this.#provider.port,
+      builtinBrokerPort: this.#builtinBrokerPort,
       apiUrl: options.apiUrl.href,
       patternApiUrl: (options.patternApiUrl ?? options.apiUrl).href,
       experimental: options.experimental ?? {},
       ...(options.protocolFlags !== undefined
         ? { protocolFlags: options.protocolFlags }
         : {}),
-    }, [this.#provider.port]);
+    }, [this.#provider.port, this.#builtinBrokerPort]);
   }
 
   setDemand(pieces: readonly string[]): Promise<void> {
@@ -266,6 +313,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#revokeClaims();
       this.#detach();
       this.#worker.terminate();
+      this.#builtinBrokerHost.dispose();
       await this.#provider.dispose();
     }
   }
@@ -400,6 +448,22 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#onCandidateDiagnostic?.({ claim: live, diagnosticCode });
   }
 
+  #isClaimLive(claim: ExecutionClaim): boolean {
+    const live = this.#claims.get(candidateKey({ claimKey: claim }));
+    if (
+      live === undefined || live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      return false;
+    }
+    const serverGate = (this.#server as Partial<Server> & {
+      hasLiveExecutionClaim?: (candidate: ExecutionClaim) => boolean;
+    }).hasLiveExecutionClaim;
+    return typeof serverGate === "function"
+      ? serverGate.call(this.#server, claim)
+      : claim.expiresAt > Date.now();
+  }
+
   #onError = (event: Event): void => {
     const error = event as ErrorEvent;
     error.preventDefault();
@@ -420,6 +484,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#revokeClaims();
     this.#detach();
     this.#worker.terminate();
+    this.#builtinBrokerHost.dispose();
     void this.#provider.dispose();
     this.#startOptions.onCrash(failure);
   }
@@ -449,6 +514,9 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
   readonly #createProvider: (
     options: HostProviderChannelOptions,
   ) => HostProviderChannel;
+  readonly #createBuiltinBroker: (
+    context: ServerBuiltinBrokerContext,
+  ) => ServerBuiltinFetchBroker;
 
   constructor(readonly options: DenoSpaceExecutorFactoryOptions) {
     this.#createWorker = options.createWorker ??
@@ -458,6 +526,18 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
           name: "common-fabric-space-executor",
         }));
     this.#createProvider = options.createProvider ?? createHostProviderChannel;
+    this.#createBuiltinBroker = options.createBuiltinBroker ??
+      ((context) =>
+        options.protocolFlags?.serverPrimaryExecutionBuiltinPassivityV1 === true
+          ? createDefaultServerBuiltinBroker({
+            servingOrigin: context.servingOrigin,
+          })
+          : {
+            fetch: () =>
+              Promise.reject(
+                new Error("server builtin passivity is not negotiated"),
+              ),
+          });
   }
 
   async start(options: SpaceExecutorStartOptions): Promise<SpaceExecutor> {
@@ -481,6 +561,10 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       onCandidateClaim: this.options.onCandidateClaim,
       onCandidateDiagnostic: this.options.onCandidateDiagnostic,
       onWriterDiscovery: this.options.onWriterDiscovery,
+      createBuiltinBroker: this.#createBuiltinBroker,
+      authorizeBuiltinRequest: this.options.authorizeBuiltinRequest ??
+        authorizeDefaultServerBuiltinRequest,
+      servingOrigin: this.options.patternApiUrl ?? this.options.apiUrl,
     });
     try {
       await executor.initialize({

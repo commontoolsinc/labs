@@ -868,6 +868,14 @@ export class Scheduler {
     if (observation.actionId !== actionId) {
       return false;
     }
+    const annotated = action as Partial<TelemetryAnnotations>;
+    if (
+      annotated.serverBuiltin !== undefined &&
+      observation.completeActionScopeSummary !== undefined
+    ) {
+      annotated.serverBuiltinPreviousScopeSummary =
+        observation.completeActionScopeSummary;
+    }
 
     // Annotation first; otherwise restore the persisted live surface —
     // mirroring registration, where subscribe's ReactivityLog supplies the

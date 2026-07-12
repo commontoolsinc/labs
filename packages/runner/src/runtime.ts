@@ -109,6 +109,7 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import type { ServerExecutableBuiltinId } from "./builtins/server-execution.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
@@ -612,6 +613,11 @@ export class Runtime {
    * `RuntimeOptions.fetch`.
    */
   readonly fetch: typeof globalThis.fetch;
+  private serverBuiltinFetch?: (
+    builtinId: ServerExecutableBuiltinId,
+    rawUrl: string,
+    init?: RequestInit,
+  ) => Promise<Response>;
   readonly externalSinkDisposition: ExternalSinkDispositionPolicy;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
@@ -1882,6 +1888,47 @@ export class Runtime {
    */
   hostForSpace(space: MemorySpace): URL {
     return new URL(this.mappedHostFor(space) ?? this.apiUrl);
+  }
+
+  /** Install the executor-only narrow broker before any demanded piece runs. */
+  installServerBuiltinFetch(
+    fetchImpl: (
+      builtinId: ServerExecutableBuiltinId,
+      rawUrl: string,
+      init?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    if (!this.experimental.serverPrimaryExecution) {
+      throw new Error(
+        "server builtin fetch requires server-primary execution",
+      );
+    }
+    if (this.serverBuiltinFetch !== undefined) {
+      throw new Error("server builtin fetch is already installed");
+    }
+    this.harness.disableCompatibilityFetch();
+    this.serverBuiltinFetch = fetchImpl;
+  }
+
+  hasServerBuiltinFetch(): boolean {
+    return this.serverBuiltinFetch !== undefined;
+  }
+
+  /**
+   * Network seam used only by trusted builtins. The broker receives the raw
+   * authored URL so it can distinguish relative serving-origin requests from
+   * authored absolute/authority-bearing URLs; ordinary runtimes use the
+   * already-resolved URL and their existing injected fetch.
+   */
+  fetchBuiltin(
+    builtinId: ServerExecutableBuiltinId,
+    rawUrl: string,
+    resolvedUrl: URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    return this.serverBuiltinFetch !== undefined
+      ? this.serverBuiltinFetch(builtinId, rawUrl, init)
+      : this.fetch(resolvedUrl, init);
   }
 
   /**

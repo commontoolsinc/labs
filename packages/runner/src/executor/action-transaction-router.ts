@@ -16,8 +16,12 @@ import type {
   ActionTransactionRouter,
 } from "../storage/v2.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import { toMemorySpaceAddress } from "../link-types.ts";
 import type { TelemetryAnnotations } from "../scheduler/types.ts";
 import type { CompleteActionScopeSummary } from "../scheduler/persistent-observation.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import type { JSONSchema } from "../builder/types.ts";
+import { touchedPointerPaths } from "../../../memory/v2/patch.ts";
 import {
   isServerExecutableBuiltinId,
   type ServerBuiltinActionDescriptor,
@@ -249,15 +253,25 @@ function prepareSupportedBuiltinObservation(
       complete: true,
       implementationFingerprint: observation.implementationFingerprint,
       runtimeFingerprint: observation.runtimeFingerprint,
-      piece: addressOf(descriptor.piece),
+      piece: toMemorySpaceAddress(descriptor.piece),
       reads: dedupeAddresses([
-        ...descriptor.reads,
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map((link) => ({
+          ...toMemorySpaceAddress(link),
+          path: [],
+        })),
         ...observation.reads,
         ...observation.shallowReads,
         ...commitReadAddresses(input),
       ]),
       writes: dedupeAddresses([
-        ...descriptor.writes,
+        ...descriptor.writes.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map((link) => ({
+          ...toMemorySpaceAddress(link),
+          path: [],
+        })),
         ...observation.actualChangedWrites,
         ...observation.currentKnownWrites,
         ...(observation.declaredWrites ?? []),
@@ -268,7 +282,9 @@ function prepareSupportedBuiltinObservation(
       materializerWriteEnvelopes: dedupeAddresses(
         observation.materializerWriteEnvelopes,
       ),
-      directOutputs: dedupeAddresses(descriptor.directOutputs),
+      directOutputs: dedupeAddresses(
+        descriptor.directOutputs.map(toMemorySpaceAddress),
+      ),
     };
     summaries.set(sourceAction, summary);
     templates.set(sourceAction, observation);
@@ -297,6 +313,8 @@ function supportedBuiltinDescriptor(
     !descriptor.reads.every(isAddressLike) ||
     !Array.isArray(descriptor.writes) ||
     !descriptor.writes.every(isAddressLike) ||
+    !Array.isArray(descriptor.runtimeWrites) ||
+    !descriptor.runtimeWrites.every(isAddressLike) ||
     !Array.isArray(descriptor.directOutputs) ||
     !descriptor.directOutputs.every(isAddressLike)
   ) {
@@ -311,10 +329,24 @@ function synthesizeBuiltinContinuationObservation(
   summaries: WeakMap<object, CompleteActionScopeSummary>,
   templates: WeakMap<object, SchedulerActionObservation>,
 ): SchedulerActionObservation | undefined {
-  const summary = summaries.get(sourceAction);
+  let summary = summaries.get(sourceAction);
   const template = templates.get(sourceAction);
   if (summary === undefined || template === undefined) return undefined;
   const writes = commitWriteAddresses(input);
+  const canonicalSchemaWrites = canonicalSchemaDocumentWriteAddresses(input);
+  if (canonicalSchemaWrites.length > 0) {
+    // CFC persistence may materialize a content-addressed schema document only
+    // when an async model result is written. Its id can depend on the result's
+    // post-call confidentiality envelope, so it cannot always be listed by the
+    // pre-call builtin descriptor. Admit only a set operation whose payload
+    // re-hashes to the claimed cid; all semantic writes remain bounded by the
+    // descriptor's pre-effect surface.
+    summary = {
+      ...summary,
+      writes: dedupeAddresses([...summary.writes, ...canonicalSchemaWrites]),
+    };
+    summaries.set(sourceAction, summary);
+  }
   return {
     ...template,
     observedAtSeq: 0,
@@ -328,6 +360,39 @@ function synthesizeBuiltinContinuationObservation(
     status: "success",
     executionClaimAssertion: undefined,
   };
+}
+
+function canonicalSchemaDocumentWriteAddresses(
+  input: ActionTransactionRouteInput,
+): IMemorySpaceAddress[] {
+  return input.commit.operations.flatMap((operation) => {
+    if (
+      operation.op !== "set" ||
+      (operation.scope ?? "space") !== "space" ||
+      !operation.id.startsWith("cid:") ||
+      Object.keys(operation.value).some((key) => key !== "value") ||
+      operation.value.value === undefined
+    ) {
+      return [];
+    }
+    try {
+      if (
+        internSchemaAsTaggedHashString(
+          operation.value.value as JSONSchema,
+        ) !== operation.id.slice("cid:".length)
+      ) {
+        return [];
+      }
+    } catch {
+      return [];
+    }
+    return [addressOf({
+      space: input.space,
+      id: operation.id,
+      scope: "space",
+      path: ["value"],
+    })];
+  });
 }
 
 function commitReadAddresses(
@@ -347,14 +412,22 @@ function commitReadAddresses(
 function commitWriteAddresses(
   input: ActionTransactionRouteInput,
 ): IMemorySpaceAddress[] {
-  return input.commit.operations.flatMap((operation) =>
-    operation.op === "sqlite" ? [] : [addressOf({
-      space: input.space,
-      id: operation.id,
-      scope: operation.scope ?? "space",
-      path: ["value"],
-    })]
-  );
+  return input.commit.operations.flatMap((operation) => {
+    if (operation.op === "sqlite") return [];
+    const paths = operation.op === "patch"
+      ? operation.patches.flatMap(touchedPointerPaths)
+      : operation.op === "delete"
+      ? [[]]
+      : [["value"]];
+    return paths.map((path) =>
+      addressOf({
+        space: input.space,
+        id: operation.id,
+        scope: operation.scope ?? "space",
+        path,
+      })
+    );
+  });
 }
 
 function dedupeAddresses(

@@ -4970,7 +4970,11 @@ export class Runner {
     const schedulingWrites = dedupeNormalizedLinks([
       ...outputCells,
       ...staticRedirectWriteTargets,
+      ...(serverBuiltinId !== undefined ? [outputBinding] : []),
     ]);
+    const serverBuiltinRuntimeWrites = (builtinAction as Action & {
+      serverBuiltinRuntimeWrites?: NormalizedFullLink[];
+    }).serverBuiltinRuntimeWrites ?? [];
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
@@ -4982,7 +4986,8 @@ export class Runner {
             piece: resultCell.getAsNormalizedFullLink(),
             reads: inputCells,
             writes: schedulingWrites,
-            directOutputs: outputCells,
+            runtimeWrites: serverBuiltinRuntimeWrites,
+            directOutputs: [outputBinding],
           },
         }
         : {}),

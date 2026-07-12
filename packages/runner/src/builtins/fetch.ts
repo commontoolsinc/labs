@@ -24,6 +24,7 @@ import {
 } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 
 type FetchRequestOptions = {
   body?: any;
@@ -307,6 +308,7 @@ function fetchBuiltin(kind: FetchKind) {
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
     let abortController: AbortController | undefined = undefined;
+    const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
     // This is called when the pattern containing this node is being stopped.
     addCancel(() => {
@@ -336,7 +338,7 @@ function fetchBuiltin(kind: FetchKind) {
       }
     });
 
-    return (tx: IExtendedStorageTransaction) => {
+    const action: Action = (tx: IExtendedStorageTransaction) => {
       tx.resetNarrowestReadScope();
       const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
       const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
@@ -400,6 +402,14 @@ function fetchBuiltin(kind: FetchKind) {
         cellsInitialized = true;
         cellScope = outputScope;
       }
+      serverBuiltinRuntimeWrites.splice(
+        0,
+        serverBuiltinRuntimeWrites.length,
+        pending.getAsNormalizedFullLink(),
+        result.getAsNormalizedFullLink(),
+        error.getAsNormalizedFullLink(),
+        internal.getAsNormalizedFullLink(),
+      );
 
       // Set results to links to our cells. We have to do this outside of
       // isInitialized since the write could conflict, and then this code will run
@@ -548,6 +558,7 @@ function fetchBuiltin(kind: FetchKind) {
         );
       }
     };
+    return Object.assign(action, { serverBuiltinRuntimeWrites });
   };
 }
 
@@ -610,13 +621,17 @@ async function startFetch(
     const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
     const resolvedUrl = new URL(url!, apiBase);
-    const requestOptions = await signedToolshedFetchOptions(
-      runtime,
-      resolvedUrl,
-      apiBase,
-      options,
-    );
-    const response = await runtime.fetch(
+    const requestOptions = runtime.hasServerBuiltinFetch()
+      ? options
+      : await signedToolshedFetchOptions(
+        runtime,
+        resolvedUrl,
+        apiBase,
+        options,
+      );
+    const response = await runtime.fetchBuiltin(
+      kind.name,
+      url!,
       resolvedUrl,
       {
         signal: abortSignal,
