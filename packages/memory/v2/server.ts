@@ -16,6 +16,7 @@ import {
   type ExecutionControlEvent,
   type ExecutionDemandSetRequest,
   type ExecutionDemandSetResult,
+  type ExecutionLease,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -446,13 +447,36 @@ const executionDemandKey = (
   branch: BranchName,
 ): string => encodeMemoryBoundary([connectionId, space, sessionId, branch]);
 
-type ExecutionClaimInput = ActionClaimKey & { leaseGeneration: number };
+const executionLeaseKey = (space: string, branch: BranchName): string =>
+  encodeMemoryBoundary([space, branch]);
+
+const executionLeaseHandleBrand = Symbol("execution-lease-handle");
+
+/**
+ * Host-only authority for one lease generation. The serializable fields are a
+ * snapshot of the durable row; the exact sponsor session, token, and demand
+ * registration remain private Server state keyed by object identity.
+ */
+export interface ExecutionLeaseHandle extends ExecutionLease {
+  readonly [executionLeaseHandleBrand]: true;
+}
+
+type OwnedExecutionLease = {
+  handle: ExecutionLeaseHandle;
+  readonly sponsorConnectionId: string;
+  readonly sponsorSessionId: string;
+  readonly sponsorSessionToken: SessionToken;
+  readonly firstDemandOrder: number;
+  drainRequested: boolean;
+};
+
+type ExecutionClaimInput = ActionClaimKey;
 
 type BoundExecutionSession = {
   readonly connectionId: string;
   readonly sessionToken: SessionToken;
   readonly principal: string;
-  readonly leaseGeneration: number;
+  readonly lease: ExecutionLeaseHandle;
 };
 
 const actionClaimKey = (claim: ActionClaimKey): ActionClaimKey => ({
@@ -485,6 +509,7 @@ class Connection {
   #clientFlags: MemoryProtocolFlags | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
   #sessions = new Map<string, SessionHandle>();
+  #executionLease: ExecutionLeaseHandle | null = null;
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
@@ -655,6 +680,19 @@ class Connection {
     }
   }
 
+  /** Host-only setup for an executor provider connection. The handle remains
+   * in this realm and is never encoded onto the memory protocol. */
+  bindExecutionLease(lease: ExecutionLeaseHandle): void {
+    if (
+      this.#ready || this.#sessions.size > 0 || this.#executionLease !== null
+    ) {
+      throw new Error(
+        "execution lease must bind a fresh connection exactly once",
+      );
+    }
+    this.#executionLease = lease;
+  }
+
   async receive(payload: string): Promise<void> {
     this.#pendingReceives += 1;
     try {
@@ -781,9 +819,22 @@ class Connection {
         });
         return;
       case "session.open": {
-        const response = await this.server.openSession(parsed, this);
+        const response = this.#executionLease === null
+          ? await this.server.openSession(parsed, this)
+          : await this.server.openSession(
+            parsed,
+            this,
+            this.#executionLease,
+          );
         if (response.ok?.sessionId) {
           this.addSession(parsed.space, response.ok.sessionId);
+          if (this.#executionLease !== null) {
+            this.server.bindExecutionSession(
+              parsed.space,
+              response.ok.sessionId,
+              this.#executionLease,
+            );
+          }
         }
         this.send(response);
         return;
@@ -1086,13 +1137,24 @@ export class Server {
   #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
   #acceptedCommitOrderBySpace = new Map<string, number>();
   #executionDemands = new Map<string, AuthenticatedExecutionDemand>();
+  #executionDemandRegistrationOrder = new Map<string, number>();
+  #executionDemandSessionTokens = new Map<string, SessionToken>();
+  #nextExecutionDemandRegistrationOrder = 0;
   #executionDemandListeners = new Set<ExecutionDemandListener>();
   #executionDemandOrder = 0;
   #executionClaims = new Map<string, ExecutionClaim>();
   #executionClaimGeneration = new Map<string, number>();
   #boundExecutionSessions = new Map<string, BoundExecutionSession>();
+  #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
+  #executionLeaseAuthorities = new WeakMap<
+    ExecutionLeaseHandle,
+    OwnedExecutionLease
+  >();
+  #executionLeaseTasks = new Set<Promise<void>>();
   #executionPolicyEnabledSpaces = new Set<string>();
   #executionClaimExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+  #executionLeaseExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+  #executionHostId: string;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1176,11 +1238,16 @@ export class Server {
       executionControl?: {
         claimTtlMs?: number;
         nowMs?: () => number;
+        hostId?: string;
+        leaseTtlMs?: number;
+        drainTimeoutMs?: number;
       };
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#executionHostId = options.executionControl?.hostId ??
+      `host:${crypto.randomUUID()}`;
   }
 
   nowSeconds(): number {
@@ -1638,25 +1705,44 @@ export class Server {
   /**
    * Bind one authenticated session to host-owned executor authority. This is a
    * process API, never a protocol message; the Worker receives no sponsor key
-   * and cannot select `onBehalfOf`. W1.1 replaces the generation-only seam
-   * with the durable lease/fence record.
+   * and cannot select `onBehalfOf`.
    */
   bindExecutionSession(
     space: string,
     sessionId: string,
-    authority: { leaseGeneration: number },
+    lease: ExecutionLeaseHandle,
   ): () => void {
-    if (!isPositiveSafeInteger(authority.leaseGeneration)) {
-      throw new TypeError("execution lease generation must be positive");
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(lease.space, lease.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      lease.space !== space || authority.handle.leaseGeneration !==
+        lease.leaseGeneration ||
+      authority.handle.state === "revoked"
+    ) {
+      throw new Error("execution authority requires a current owned lease");
+    }
+    const sponsor = this.#sessions.get(space, authority.sponsorSessionId);
+    if (
+      sponsor === null ||
+      sponsor.ownerConnectionId !== authority.sponsorConnectionId ||
+      sponsor.sessionToken !== authority.sponsorSessionToken ||
+      sponsor.principal !== lease.onBehalfOf ||
+      !this.#connections.has(authority.sponsorConnectionId)
+    ) {
+      throw new Error("execution lease sponsor is no longer attached");
     }
     const session = this.#sessions.get(space, sessionId);
     if (
       session === null || session.principal === undefined ||
       session.principal === ANYONE_USER || session.ownerConnectionId === null ||
-      !this.#connections.has(session.ownerConnectionId)
+      !this.#connections.has(session.ownerConnectionId) ||
+      session.principal !== lease.onBehalfOf
     ) {
       throw new Error(
-        "execution authority requires an authenticated session with a live connection",
+        "execution authority requires a matching authenticated session with a live connection",
       );
     }
     const key = sessionKey(space, sessionId);
@@ -1664,16 +1750,16 @@ export class Server {
       connectionId: session.ownerConnectionId,
       sessionToken: session.sessionToken,
       principal: session.principal,
-      leaseGeneration: authority.leaseGeneration,
+      lease,
     });
     this.#boundExecutionSessions.set(key, binding);
-    let bound = true;
+    let released = false;
     return () => {
-      if (!bound) return;
-      bound = false;
-      if (this.#boundExecutionSessions.get(key) === binding) {
-        this.#boundExecutionSessions.delete(key);
-      }
+      if (released) return;
+      released = true;
+      // Keep the immutable executor classification until Connection.close
+      // detaches this exact session. Dropping it early would let a delayed
+      // stale executor transaction downgrade into an ordinary client write.
     };
   }
 
@@ -1695,6 +1781,449 @@ export class Server {
           })
         ),
     );
+  }
+
+  #executionLeaseTtlMs(): number {
+    const ttlMs = this.options.executionControl?.leaseTtlMs ?? 30_000;
+    if (!isPositiveSafeInteger(ttlMs)) {
+      throw new TypeError("execution lease ttl must be a positive integer");
+    }
+    return ttlMs;
+  }
+
+  #createExecutionLeaseHandle(lease: ExecutionLease): ExecutionLeaseHandle {
+    const value = { ...lease } as ExecutionLeaseHandle;
+    Object.defineProperty(value, executionLeaseHandleBrand, {
+      value: true,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    return Object.freeze(value);
+  }
+
+  #sameExecutionLease(
+    left: ExecutionLease,
+    right: ExecutionLease,
+  ): boolean {
+    return left.version === right.version && left.space === right.space &&
+      left.branch === right.branch &&
+      left.leaseGeneration === right.leaseGeneration &&
+      left.hostId === right.hostId && left.onBehalfOf === right.onBehalfOf;
+  }
+
+  #executionDemandAuthority(
+    demand: AuthenticatedExecutionDemand,
+  ): { session: SessionState; firstDemandOrder: number } | null {
+    const key = executionDemandKey(
+      demand.connectionId,
+      demand.space,
+      demand.sessionId,
+      demand.branch,
+    );
+    if (this.#executionDemands.get(key) !== demand) return null;
+    const firstDemandOrder = this.#executionDemandRegistrationOrder.get(key);
+    const demandSessionToken = this.#executionDemandSessionTokens.get(key);
+    if (firstDemandOrder === undefined || demandSessionToken === undefined) {
+      return null;
+    }
+    const session = this.#sessions.get(demand.space, demand.sessionId);
+    if (
+      session === null || session.principal === undefined ||
+      session.principal === ANYONE_USER ||
+      session.principal !== demand.principal ||
+      session.sessionToken !== demandSessionToken ||
+      session.ownerConnectionId !== demand.connectionId ||
+      !this.#connections.has(demand.connectionId) ||
+      !session.serverPrimaryExecutionV1
+    ) {
+      return null;
+    }
+    return { session, firstDemandOrder };
+  }
+
+  #executionSponsorCanWrite(
+    engine: Engine.Engine,
+    demand: AuthenticatedExecutionDemand,
+    session: SessionState,
+  ): boolean {
+    if (
+      this.#sessions.get(demand.space, demand.sessionId) !== session ||
+      session.ownerConnectionId !== demand.connectionId ||
+      session.principal !== demand.principal ||
+      !this.#connections.has(demand.connectionId)
+    ) {
+      return false;
+    }
+    const capability = this.#resolveCapability(
+      engine,
+      demand.space,
+      session.principal,
+    );
+    return capability !== null && isCapable(capability, "WRITE");
+  }
+
+  #executionSponsorCandidates(
+    space: string,
+    branch: BranchName,
+    preferredOriginSessionId?: string,
+  ): readonly Readonly<{
+    demand: AuthenticatedExecutionDemand;
+    session: SessionState;
+    firstDemandOrder: number;
+    preferred: boolean;
+  }>[] {
+    const candidates = [...this.#executionDemands.values()].flatMap(
+      (demand) => {
+        if (demand.space !== space || demand.branch !== branch) return [];
+        const authority = this.#executionDemandAuthority(demand);
+        return authority === null ? [] : [{ demand, ...authority }];
+      },
+    );
+    const preferredSession = preferredOriginSessionId === undefined
+      ? null
+      : this.#sessions.get(space, preferredOriginSessionId);
+    const preferredPrincipal = preferredSession?.ownerConnectionId !== null &&
+        preferredSession?.ownerConnectionId !== undefined &&
+        preferredSession.principal !== undefined &&
+        preferredSession.principal !== ANYONE_USER &&
+        this.#connections.has(preferredSession.ownerConnectionId)
+      ? preferredSession.principal
+      : undefined;
+    return candidates.map((candidate) => ({
+      ...candidate,
+      preferred: preferredPrincipal !== undefined &&
+        candidate.demand.principal === preferredPrincipal,
+    })).sort((left, right) =>
+      Number(right.preferred) - Number(left.preferred) ||
+      left.firstDemandOrder - right.firstDemandOrder ||
+      left.demand.principal.localeCompare(right.demand.principal) ||
+      left.demand.connectionId.localeCompare(right.demand.connectionId) ||
+      left.demand.sessionId.localeCompare(right.demand.sessionId)
+    );
+  }
+
+  /**
+   * Acquire one durable branch/space lease from an authenticated requesting
+   * session. The execution policy intentionally does not gate this shadow
+   * coordination primitive; claims and first-application commits do.
+   */
+  async acquireExecutionLease(
+    space: string,
+    branch: BranchName,
+    options: { preferredOriginSessionId?: string } = {},
+  ): Promise<ExecutionLeaseHandle | null> {
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) return null;
+    const nowMs = this.#executionNowMs();
+    const engine = await this.openEngine(space);
+    const slot = executionLeaseKey(space, branch);
+    const owned = this.#ownedExecutionLeases.get(slot);
+    if (owned !== undefined) {
+      const current = await Engine.currentExecutionLease(engine, {
+        space,
+        branch,
+        nowMs,
+      });
+      if (
+        current !== null && this.#sameExecutionLease(current, owned.handle) &&
+        current.state !== "revoked" && current.expiresAt > nowMs
+      ) {
+        if (
+          current.state !== owned.handle.state ||
+          current.expiresAt !== owned.handle.expiresAt
+        ) {
+          const handle = this.#createExecutionLeaseHandle(current);
+          owned.handle = handle;
+          this.#executionLeaseAuthorities.set(handle, owned);
+        }
+        return owned.handle;
+      }
+      const expired = Engine.expireExecutionLease(engine, {
+        space,
+        branch,
+        nowMs,
+      });
+      if (
+        expired !== null && this.#sameExecutionLease(expired, owned.handle)
+      ) {
+        this.#releaseOwnedExecutionLease(owned, expired);
+      } else {
+        this.#ownedExecutionLeases.delete(slot);
+      }
+    }
+    // A live durable row without this exact host-local sponsor anchor belongs
+    // to another process incarnation, even when host/user strings happen to
+    // match. Never retarget that generation to a different demand session.
+    if (
+      Engine.currentExecutionLease(engine, { space, branch, nowMs }) !== null
+    ) return null;
+
+    for (
+      const candidate of this.#executionSponsorCandidates(
+        space,
+        branch,
+        options.preferredOriginSessionId,
+      )
+    ) {
+      if (
+        !this.#executionSponsorCanWrite(
+          engine,
+          candidate.demand,
+          candidate.session,
+        )
+      ) continue;
+      const lease = await Engine.acquireExecutionLease(engine, {
+        space,
+        branch,
+        hostId: this.#executionHostId,
+        onBehalfOf: candidate.demand.principal,
+        nowMs,
+        ttlMs: this.#executionLeaseTtlMs(),
+        authorizeWrite: (transactionEngine) =>
+          this.#executionSponsorCanWrite(
+            transactionEngine,
+            candidate.demand,
+            candidate.session,
+          ),
+      });
+      if (lease === null) return null;
+      const handle = this.#createExecutionLeaseHandle(lease);
+      const authority: OwnedExecutionLease = {
+        handle,
+        sponsorConnectionId: candidate.demand.connectionId,
+        sponsorSessionId: candidate.demand.sessionId,
+        sponsorSessionToken: candidate.session.sessionToken,
+        firstDemandOrder: candidate.firstDemandOrder,
+        drainRequested: false,
+      };
+      this.#ownedExecutionLeases.set(slot, authority);
+      this.#executionLeaseAuthorities.set(handle, authority);
+      this.#scheduleExecutionLeaseExpiry();
+      return handle;
+    }
+    return null;
+  }
+
+  async currentExecutionLease(
+    space: string,
+    branch: BranchName,
+  ): Promise<ExecutionLease | null> {
+    const engine = await this.openEngine(space);
+    const nowMs = this.#executionNowMs();
+    const current = await Engine.currentExecutionLease(engine, {
+      space,
+      branch,
+      nowMs,
+    });
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(space, branch),
+    );
+    if (current === null) {
+      if (owned !== undefined) {
+        const expired = Engine.expireExecutionLease(engine, {
+          space,
+          branch,
+          nowMs,
+        });
+        if (
+          expired !== null && this.#sameExecutionLease(expired, owned.handle)
+        ) {
+          this.#releaseOwnedExecutionLease(owned, expired);
+        }
+      }
+      return null;
+    }
+    if (
+      owned === undefined || !this.#sameExecutionLease(current, owned.handle)
+    ) {
+      return current;
+    }
+    if (
+      current.state !== owned.handle.state ||
+      current.expiresAt !== owned.handle.expiresAt
+    ) {
+      const handle = this.#createExecutionLeaseHandle(current);
+      owned.handle = handle;
+      this.#executionLeaseAuthorities.set(handle, owned);
+    }
+    return owned.handle;
+  }
+
+  #executionDrainTimeoutMs(): number {
+    const timeoutMs = this.options.executionControl?.drainTimeoutMs ?? 5_000;
+    if (!isPositiveSafeInteger(timeoutMs)) {
+      throw new TypeError(
+        "execution lease drain timeout must be a positive integer",
+      );
+    }
+    return timeoutMs;
+  }
+
+  #replaceOwnedExecutionLease(
+    authority: OwnedExecutionLease,
+    lease: ExecutionLease,
+  ): ExecutionLeaseHandle {
+    const handle = this.#createExecutionLeaseHandle(lease);
+    authority.handle = handle;
+    this.#executionLeaseAuthorities.set(handle, authority);
+    return handle;
+  }
+
+  #trackExecutionLeaseTask(task: Promise<void>): void {
+    this.#executionLeaseTasks.add(task);
+    void task.then(
+      () => this.#executionLeaseTasks.delete(task),
+      () => this.#executionLeaseTasks.delete(task),
+    );
+  }
+
+  async flushExecutionLeaseTasks(): Promise<void> {
+    while (this.#executionLeaseTasks.size > 0) {
+      await Promise.allSettled([...this.#executionLeaseTasks]);
+    }
+  }
+
+  #scheduleExecutionLeaseExpiry(): void {
+    if (this.#executionLeaseExpiryTimer !== null) {
+      clearTimeout(this.#executionLeaseExpiryTimer);
+      this.#executionLeaseExpiryTimer = null;
+    }
+    if (this.#ownedExecutionLeases.size === 0) return;
+    const nextExpiry = Math.min(
+      ...[...this.#ownedExecutionLeases.values()].map((owned) =>
+        owned.handle.expiresAt
+      ),
+    );
+    const delay = Math.min(
+      2_147_483_647,
+      Math.max(0, nextExpiry - this.#executionNowMs()),
+    );
+    this.#executionLeaseExpiryTimer = setTimeout(() => {
+      this.#executionLeaseExpiryTimer = null;
+      this.#trackExecutionLeaseTask(
+        this.expireExecutionLeases().then(() => undefined),
+      );
+    }, delay);
+  }
+
+  #revokeExecutionClaimsForLease(lease: ExecutionLease): number {
+    let revoked = 0;
+    for (const [key, claim] of this.#executionClaims) {
+      if (
+        claim.space !== lease.space || claim.branch !== lease.branch ||
+        claim.leaseGeneration !== lease.leaseGeneration
+      ) continue;
+      this.#executionClaims.delete(key);
+      this.#publishExecutionClaimRevoke(claim);
+      revoked += 1;
+    }
+    this.#scheduleExecutionClaimExpiry();
+    return revoked;
+  }
+
+  #releaseOwnedExecutionLease(
+    authority: OwnedExecutionLease,
+    revoked: ExecutionLease,
+  ): void {
+    const slot = executionLeaseKey(revoked.space, revoked.branch);
+    if (this.#ownedExecutionLeases.get(slot) === authority) {
+      this.#ownedExecutionLeases.delete(slot);
+    }
+    this.#replaceOwnedExecutionLease(authority, revoked);
+    this.#revokeExecutionClaimsForLease(revoked);
+    this.#scheduleExecutionLeaseExpiry();
+  }
+
+  async renewExecutionLease(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null> {
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(lease.space, lease.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      authority.drainRequested
+    ) return null;
+    const sponsor = this.#sessions.get(lease.space, authority.sponsorSessionId);
+    const demand = this.#executionDemands.get(executionDemandKey(
+      authority.sponsorConnectionId,
+      lease.space,
+      authority.sponsorSessionId,
+      lease.branch,
+    ));
+    if (sponsor === null || demand === undefined) return null;
+    const engine = await this.openEngine(lease.space);
+    const renewed = Engine.renewExecutionLease(engine, {
+      lease: authority.handle,
+      nowMs: this.#executionNowMs(),
+      ttlMs: this.#executionLeaseTtlMs(),
+      authorizeWrite: (transactionEngine) =>
+        this.#executionSponsorCanWrite(transactionEngine, demand, sponsor),
+    });
+    if (renewed === null) return null;
+    const handle = this.#replaceOwnedExecutionLease(authority, renewed);
+    this.#scheduleExecutionLeaseExpiry();
+    return handle;
+  }
+
+  async beginExecutionLeaseDrain(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null> {
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(lease.space, lease.branch),
+    );
+    if (authority === undefined || authority !== owned) return null;
+    authority.drainRequested = true;
+    const engine = await this.openEngine(lease.space);
+    const draining = Engine.beginExecutionLeaseDrain(engine, {
+      lease: authority.handle,
+      nowMs: this.#executionNowMs(),
+      drainTtlMs: this.#executionDrainTimeoutMs(),
+    });
+    if (draining === null) return null;
+    const handle = this.#replaceOwnedExecutionLease(authority, draining);
+    this.#scheduleExecutionLeaseExpiry();
+    return handle;
+  }
+
+  async finishExecutionLeaseDrain(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLease | null> {
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    if (authority === undefined) return null;
+    const engine = await this.openEngine(lease.space);
+    const revoked = Engine.revokeExecutionLease(engine, {
+      lease: authority.handle,
+      nowMs: this.#executionNowMs(),
+    });
+    if (revoked === null) return null;
+    this.#releaseOwnedExecutionLease(authority, revoked);
+    return revoked;
+  }
+
+  async expireExecutionLeases(
+    nowMs = this.#executionNowMs(),
+  ): Promise<number> {
+    if (!Number.isFinite(nowMs)) {
+      throw new TypeError("execution lease expiry time must be finite");
+    }
+    let expired = 0;
+    for (const authority of [...this.#ownedExecutionLeases.values()]) {
+      const lease = authority.handle;
+      const engine = await this.openEngine(lease.space);
+      const revoked = Engine.expireExecutionLease(engine, {
+        space: lease.space,
+        branch: lease.branch,
+        nowMs,
+      });
+      if (revoked === null) continue;
+      this.#releaseOwnedExecutionLease(authority, revoked);
+      expired += 1;
+    }
+    this.#scheduleExecutionLeaseExpiry();
+    return expired;
   }
 
   subscribeExecutionDemands(listener: ExecutionDemandListener): () => void {
@@ -1728,6 +2257,55 @@ export class Server {
     }
   }
 
+  #drainExecutionLeasesForDemand(
+    connectionId: string,
+    space: string,
+    sessionId: string,
+    branch: BranchName,
+  ): void {
+    const authority = this.#ownedExecutionLeases.get(
+      executionLeaseKey(space, branch),
+    );
+    if (
+      authority === undefined || authority.drainRequested ||
+      authority.sponsorConnectionId !== connectionId ||
+      authority.sponsorSessionId !== sessionId
+    ) return;
+    authority.drainRequested = true;
+    this.#trackExecutionLeaseTask(
+      this.beginExecutionLeaseDrain(authority.handle).then(() => undefined),
+    );
+  }
+
+  #drainIneligibleExecutionLeases(
+    engine: Engine.Engine,
+    space: string,
+    options: { policyDisabled?: boolean } = {},
+  ): void {
+    for (const authority of this.#ownedExecutionLeases.values()) {
+      const lease = authority.handle;
+      if (
+        lease.space !== space || authority.drainRequested ||
+        lease.state !== "active"
+      ) continue;
+      const sponsor = this.#sessions.get(space, authority.sponsorSessionId);
+      const demand = this.#executionDemands.get(executionDemandKey(
+        authority.sponsorConnectionId,
+        space,
+        authority.sponsorSessionId,
+        lease.branch,
+      ));
+      if (
+        !options.policyDisabled && sponsor !== null && demand !== undefined &&
+        this.#executionSponsorCanWrite(engine, demand, sponsor)
+      ) continue;
+      authority.drainRequested = true;
+      this.#trackExecutionLeaseTask(
+        this.beginExecutionLeaseDrain(lease).then(() => undefined),
+      );
+    }
+  }
+
   #removeExecutionDemands(match: {
     connectionId: string;
     space?: string;
@@ -1743,6 +2321,14 @@ export class Server {
         continue;
       }
       this.#executionDemands.delete(key);
+      this.#executionDemandRegistrationOrder.delete(key);
+      this.#executionDemandSessionTokens.delete(key);
+      this.#drainExecutionLeasesForDemand(
+        demand.connectionId,
+        demand.space,
+        demand.sessionId,
+        demand.branch,
+      );
       changed.set(
         encodeMemoryBoundary([demand.space, demand.branch]),
         { space: demand.space, branch: demand.branch },
@@ -1793,7 +2379,25 @@ export class Server {
       );
       if (message.pieces.length === 0) {
         this.#executionDemands.delete(key);
+        this.#executionDemandRegistrationOrder.delete(key);
+        this.#executionDemandSessionTokens.delete(key);
+        this.#drainExecutionLeasesForDemand(
+          connection.id,
+          message.space,
+          message.sessionId,
+          message.branch,
+        );
       } else {
+        if (
+          !this.#executionDemandRegistrationOrder.has(key) ||
+          this.#executionDemandSessionTokens.get(key) !== session.sessionToken
+        ) {
+          this.#executionDemandRegistrationOrder.set(
+            key,
+            ++this.#nextExecutionDemandRegistrationOrder,
+          );
+        }
+        this.#executionDemandSessionTokens.set(key, session.sessionToken);
         this.#executionDemands.set(
           key,
           Object.freeze({
@@ -1866,33 +2470,75 @@ export class Server {
       );
   }
 
-  #executionClaimsForCommit(
+  #boundExecutionSessionForCommit(
     space: string,
     branch: BranchName,
     session: SessionState,
-    observations: readonly CommitSchedulerObservation[],
-  ): ReadonlyMap<number, ExecutionClaim> | undefined {
+  ): BoundExecutionSession | undefined {
     const binding = this.#boundExecutionSessions.get(
       sessionKey(space, session.id),
     );
+    if (binding === undefined) return undefined;
     if (
-      binding === undefined || session.principal === undefined ||
-      session.principal === ANYONE_USER
-    ) {
-      return undefined;
-    }
-    if (
+      session.principal === undefined || session.principal === ANYONE_USER ||
       session.ownerConnectionId === null ||
       binding.connectionId !== session.ownerConnectionId ||
       binding.sessionToken !== session.sessionToken ||
       binding.principal !== session.principal ||
       !this.#connections.has(binding.connectionId)
     ) {
-      this.#boundExecutionSessions.delete(sessionKey(space, session.id));
       throw new Engine.ProtocolError(
         "execution authority is not bound to this live session connection",
       );
     }
+    if (binding.lease.space !== space || binding.lease.branch !== branch) {
+      throw new Engine.ProtocolError(
+        "execution authority is not bound to this branch and space",
+      );
+    }
+    return binding;
+  }
+
+  #executionLeaseFenceForCommit(
+    space: string,
+    branch: BranchName,
+    session: SessionState,
+    binding: BoundExecutionSession | undefined,
+  ): Engine.ExecutionLeaseFence | undefined {
+    if (binding === undefined) return undefined;
+    const authority = this.#executionLeaseAuthorities.get(binding.lease);
+    const lease = authority?.handle ?? binding.lease;
+    return {
+      lease,
+      nowMs: this.#executionNowMs(),
+      authorize: (transactionEngine) => {
+        if (
+          this.#sessions.get(space, session.id) !== session ||
+          this.#boundExecutionSessions.get(sessionKey(space, session.id)) !==
+            binding ||
+          session.principal !== lease.onBehalfOf
+        ) {
+          return false;
+        }
+        const capability = this.#resolveCapability(
+          transactionEngine,
+          space,
+          session.principal,
+        );
+        return capability !== null && isCapable(capability, "WRITE") &&
+          this.#executionPolicyEnabled(transactionEngine, space);
+      },
+    };
+  }
+
+  #executionClaimsForCommit(
+    space: string,
+    branch: BranchName,
+    session: SessionState,
+    binding: BoundExecutionSession | undefined,
+    observations: readonly CommitSchedulerObservation[],
+  ): ReadonlyMap<number, ExecutionClaim> | undefined {
+    if (binding === undefined) return undefined;
     this.expireExecutionClaims();
     const claims = new Map<number, ExecutionClaim>();
     for (const { localSeq, observation } of observations) {
@@ -1926,7 +2572,7 @@ export class Server {
       const live = this.#executionClaims.get(actionClaimMapKey(key));
       if (
         live !== undefined &&
-        live.leaseGeneration === binding.leaseGeneration &&
+        live.leaseGeneration === binding.lease.leaseGeneration &&
         live.leaseGeneration === expected.leaseGeneration &&
         live.claimGeneration === expected.claimGeneration
       ) {
@@ -2021,7 +2667,6 @@ export class Server {
       claim.implementationFingerprint.length > 1024 ||
       claim.runtimeFingerprint.length === 0 ||
       claim.runtimeFingerprint.length > 1024 ||
-      !isPositiveSafeInteger(claim.leaseGeneration) ||
       (claim.contextKey !== "space" &&
         !claim.contextKey.startsWith("user:") &&
         !claim.contextKey.startsWith("session:")) ||
@@ -2098,7 +2743,10 @@ export class Server {
     return revoked;
   }
 
-  setExecutionClaim(claimInput: ExecutionClaimInput): ExecutionClaim {
+  async setExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimInput: ExecutionClaimInput,
+  ): Promise<ExecutionClaim> {
     const flags = this.memoryProtocolFlags();
     if (!flags.serverPrimaryExecutionV1) {
       throw new Error("server-primary-execution-v1 is disabled");
@@ -2116,13 +2764,45 @@ export class Server {
     ) {
       throw new Error("server-primary builtin passivity is disabled");
     }
-    if (!this.#executionPolicyEnabledSpaces.has(claimInput.space)) {
-      throw new Error(
-        `server-primary execution policy is not enabled for ${claimInput.space}`,
-      );
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(claimInput.space, claimInput.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      authority.drainRequested || lease.space !== claimInput.space ||
+      lease.branch !== claimInput.branch
+    ) {
+      throw new Error("execution claim requires the current owned lease");
     }
     const key = actionClaimMapKey(claimInput);
     const now = this.#executionNowMs();
+    const engine = await this.openEngine(claimInput.space);
+    const current = Engine.currentExecutionLease(engine, {
+      space: claimInput.space,
+      branch: claimInput.branch,
+      nowMs: now,
+    });
+    const sponsor = this.#sessions.get(
+      claimInput.space,
+      authority.sponsorSessionId,
+    );
+    const demand = this.#executionDemands.get(executionDemandKey(
+      authority.sponsorConnectionId,
+      claimInput.space,
+      authority.sponsorSessionId,
+      claimInput.branch,
+    ));
+    if (
+      current === null || current.state !== "active" ||
+      !this.#sameExecutionLease(current, lease) || sponsor === null ||
+      sponsor.sessionToken !== authority.sponsorSessionToken ||
+      demand === undefined || demand.principal !== current.onBehalfOf ||
+      !this.#executionSponsorCanWrite(engine, demand, sponsor) ||
+      !this.#executionPolicyEnabled(engine, claimInput.space)
+    ) {
+      throw new Error("execution lease is not active and authorized");
+    }
     this.expireExecutionClaims(now);
     const existing = this.#executionClaims.get(key);
     if (existing !== undefined) {
@@ -2136,9 +2816,9 @@ export class Server {
     }
     const claim: ExecutionClaim = Object.freeze({
       ...actionClaimKey(claimInput),
-      leaseGeneration: claimInput.leaseGeneration,
+      leaseGeneration: current.leaseGeneration,
       claimGeneration,
-      expiresAt: now + ttlMs,
+      expiresAt: Math.min(now + ttlMs, current.expiresAt),
     });
     this.#executionClaims.set(key, claim);
     this.#publishExecutionControl(Object.freeze({
@@ -2216,7 +2896,19 @@ export class Server {
       clearTimeout(this.#executionClaimExpiryTimer);
       this.#executionClaimExpiryTimer = null;
     }
+    if (this.#executionLeaseExpiryTimer !== null) {
+      clearTimeout(this.#executionLeaseExpiryTimer);
+      this.#executionLeaseExpiryTimer = null;
+    }
     await this.#refreshing;
+    await this.flushExecutionLeaseTasks();
+    for (const authority of [...this.#ownedExecutionLeases.values()]) {
+      await this.finishExecutionLeaseDrain(authority.handle);
+    }
+    if (this.#executionLeaseExpiryTimer !== null) {
+      clearTimeout(this.#executionLeaseExpiryTimer);
+      this.#executionLeaseExpiryTimer = null;
+    }
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -2225,10 +2917,13 @@ export class Server {
     this.#acceptedCommitListeners.clear();
     this.#acceptedCommitOrderBySpace.clear();
     this.#executionDemands.clear();
+    this.#executionDemandRegistrationOrder.clear();
+    this.#executionDemandSessionTokens.clear();
     this.#executionDemandListeners.clear();
     this.#executionClaims.clear();
     this.#executionClaimGeneration.clear();
     this.#boundExecutionSessions.clear();
+    this.#ownedExecutionLeases.clear();
     this.#executionPolicyEnabledSpaces.clear();
     this.#readPool.close();
   }
@@ -2878,14 +3573,57 @@ export class Server {
   async openSession(
     message: SessionOpenRequest,
     connection: Connection,
+    executionLease?: ExecutionLeaseHandle,
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
-      const authContext = connection.sessionOpenAuthContext(message);
-      const principal = await this.options.authorizeSessionOpen(
-        message,
-        authContext,
-      );
-      connection.consumeSessionOpenChallenge(authContext.challenge);
+      let principal: string | undefined;
+      if (executionLease === undefined) {
+        const authContext = connection.sessionOpenAuthContext(message);
+        principal = await this.options.authorizeSessionOpen(
+          message,
+          authContext,
+        );
+        connection.consumeSessionOpenChallenge(authContext.challenge);
+      } else {
+        if (message.space !== executionLease.space) {
+          throw authorizationError(
+            `execution lease is bound to ${executionLease.space}`,
+          );
+        }
+        const authority = this.#executionLeaseAuthorities.get(executionLease);
+        const owned = this.#ownedExecutionLeases.get(
+          executionLeaseKey(executionLease.space, executionLease.branch),
+        );
+        const sponsor = authority === undefined ? null : this.#sessions.get(
+          executionLease.space,
+          authority.sponsorSessionId,
+        );
+        if (
+          authority === undefined || authority !== owned ||
+          sponsor === null ||
+          sponsor.ownerConnectionId !== authority.sponsorConnectionId ||
+          sponsor.sessionToken !== authority.sponsorSessionToken ||
+          sponsor.principal !== executionLease.onBehalfOf ||
+          !this.#connections.has(authority.sponsorConnectionId)
+        ) {
+          throw authorizationError(
+            "execution lease sponsor is no longer attached",
+          );
+        }
+        const leaseEngine = await this.openEngine(executionLease.space);
+        const current = Engine.currentExecutionLease(leaseEngine, {
+          space: executionLease.space,
+          branch: executionLease.branch,
+          nowMs: this.#executionNowMs(),
+        });
+        if (
+          current === null || current.state !== "active" ||
+          !this.#sameExecutionLease(current, executionLease)
+        ) {
+          throw authorizationError("execution lease is not active");
+        }
+        principal = executionLease.onBehalfOf;
+      }
       const engine = await this.openEngine(message.space);
       const deny = this.#authorizeMessageWithEngine(
         engine,
@@ -3165,10 +3903,22 @@ export class Server {
           const schedulerObservations = schedulerStateEnabled
             ? schedulerObservationsFromCommit(commitPayload)
             : [];
+          const executionBinding = this.#boundExecutionSessionForCommit(
+            message.space,
+            message.commit.branch ?? "",
+            session,
+          );
+          const executionLeaseFence = this.#executionLeaseFenceForCommit(
+            message.space,
+            message.commit.branch ?? "",
+            session,
+            executionBinding,
+          );
           const executionClaims = this.#executionClaimsForCommit(
             message.space,
             message.commit.branch ?? "",
             session,
+            executionBinding,
             schedulerObservations,
           );
           const previousReadSpaces = new Map<number, Set<string>>();
@@ -3219,6 +3969,7 @@ export class Server {
                     principal: session.principal,
                     commit: commitPayload,
                     executionClaims,
+                    executionLeaseFence,
                     sqliteAttachments,
                   });
                 } finally {
@@ -3254,6 +4005,7 @@ export class Server {
               message.space,
               message.sessionId,
             );
+            this.#drainIneligibleExecutionLeases(engine, message.space);
           }
           if (executionPolicyTouched) {
             if (this.#executionPolicyEnabled(engine, message.space)) {
@@ -3261,6 +4013,9 @@ export class Server {
             } else {
               this.#executionPolicyEnabledSpaces.delete(message.space);
               this.#revokeExecutionClaimsForSpace(message.space);
+              this.#drainIneligibleExecutionLeases(engine, message.space, {
+                policyDisabled: true,
+              });
             }
           }
           const acceptedSchedulerObservations = this

@@ -336,7 +336,7 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     },
   }]);
 
-  const claim = server.setExecutionClaim({
+  const claim = await server.setExecutionClaim(lease, {
     branch: "",
     space,
     contextKey: "space",
@@ -345,7 +345,6 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     actionKind: "computation",
     implementationFingerprint: baseObservation.implementationFingerprint,
     runtimeFingerprint: baseObservation.runtimeFingerprint,
-    leaseGeneration: lease.leaseGeneration,
   });
   const channel = createHostProviderChannel({
     server,
