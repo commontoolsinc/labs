@@ -916,6 +916,8 @@ export interface SchedulerActionObservation {
   runtimeFingerprint: string;
   completeActionScopeSummary?: CompleteActionScopeSummary;
   observedAtSeq: number;
+  /** Host-derived maximum accepted revision sequence in the commit read set. */
+  inputBasisSeq?: number;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: SchedulerObservationAddress[];
@@ -995,6 +997,9 @@ export const schedulerObservationFromValue = (
         ))) ||
     !Number.isSafeInteger(value.observedAtSeq) ||
     Number(value.observedAtSeq) < 0 ||
+    (value.inputBasisSeq !== undefined &&
+      (!Number.isSafeInteger(value.inputBasisSeq) ||
+        Number(value.inputBasisSeq) < 0)) ||
     (value.observedAtLocalSeq !== undefined &&
       (!Number.isSafeInteger(value.observedAtLocalSeq) ||
         Number(value.observedAtLocalSeq) < 0)) ||
@@ -5293,6 +5298,10 @@ const applyCommitTransaction = (
     branch,
     commit,
   );
+  const inputBasisSeq = acceptedInputBasisSeq(
+    commit.reads.confirmed,
+    resolvedPendingReads,
+  );
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -5379,7 +5388,12 @@ const applyCommitTransaction = (
       scopeContext: { principal: principal!, sessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
-      observation: schedulerObservation,
+      // The host derives the basis from the same confirmed/pending reads that
+      // just passed canonical validation. Never persist a caller assertion.
+      observation: {
+        ...schedulerObservation,
+        inputBasisSeq,
+      },
     })
     : undefined;
 
@@ -5738,6 +5752,41 @@ const resolvePendingReads = (
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
 };
 
+/**
+ * Compute the scalar basis from reads whose revision identities are accepted
+ * by the canonical transaction path. Confirmed reads already name their
+ * durable sequence; pending reads use the server-assigned sequence of the
+ * source commit. The accepting head/commit sequence is deliberately absent.
+ */
+const acceptedInputBasisSeq = (
+  confirmed: ClientCommit["reads"]["confirmed"],
+  resolvedPending: readonly { seq: number }[],
+): number => {
+  let basis = 0;
+  for (const read of confirmed) basis = Math.max(basis, read.seq);
+  for (const read of resolvedPending) basis = Math.max(basis, read.seq);
+  return basis;
+};
+
+const resolvedPendingReadsForBasis = (
+  engine: Engine,
+  sessionKey: string,
+  reads: ClientCommit["reads"]["pending"],
+): { seq: number }[] => {
+  const resolutions = new Map<number, { seq: number }>();
+  for (const read of reads) {
+    if (resolutions.has(read.localSeq)) continue;
+    const row = engine.statements.selectPendingResolution.get({
+      session_id: sessionKey,
+      local_seq: read.localSeq,
+    }) as { seq: number } | undefined;
+    // A missing dependency is handled by the existing observation validation
+    // and the observation is dropped. It contributes no accepted basis.
+    if (row !== undefined) resolutions.set(read.localSeq, row);
+  }
+  return [...resolutions.values()];
+};
+
 const findConflictSeq = (
   engine: Engine,
   branch: BranchName,
@@ -5929,11 +5978,18 @@ const applySchedulerObservationOnlyCommit = (
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
+  const acceptedObservation: SchedulerActionObservation = {
+    ...schedulerObservation,
+    inputBasisSeq: acceptedInputBasisSeq(
+      reads.confirmed,
+      resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
+    ),
+  };
   const replayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
-    ownerSpace: space ?? schedulerObservation.ownerSpace,
-    observation: schedulerObservation,
+    ownerSpace: space ?? acceptedObservation.ownerSpace,
+    observation: acceptedObservation,
   });
   const existingReplay = getSchedulerObservationReplay(engine, {
     branch,
@@ -5992,7 +6048,7 @@ const applySchedulerObservationOnlyCommit = (
 
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
-    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    ownerSpace: space ?? acceptedObservation.ownerSpace,
     // An observation-only commit advances no semantic sequence, so reserve the
     // next GLOBAL server sequence as its delivery slot. `observedAtSeq` is the
     // selected branch's head and can lag the space-wide sync watermark after a
@@ -6004,7 +6060,7 @@ const applySchedulerObservationOnlyCommit = (
     scopeContext: { principal: principal!, sessionId },
     writerSessionId: sessionKey,
     localSeq,
-    observation: schedulerObservation,
+    observation: acceptedObservation,
   });
   return {
     seq: observedAtSeq,
