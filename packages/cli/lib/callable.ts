@@ -12,6 +12,7 @@ import {
 import { prepareFactory } from "../../runner/src/factory-materialization.ts";
 import type { Runtime } from "../../runner/src/runtime.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import { noteLegacyFactoryCompatibilityRead } from "../../runner/src/legacy-factory-compat.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -413,6 +414,7 @@ export async function executeResolvedCallable(
         artifactSpace,
       });
   } else {
+    noteLegacyFactoryCompatibilityRead("tool");
     const legacyPattern = asCallablePattern(
       resolved.callableCell.key("pattern").getRaw?.() ??
         resolved.callableCell.key("pattern").get(),

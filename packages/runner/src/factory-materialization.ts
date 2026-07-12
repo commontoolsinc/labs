@@ -1,5 +1,6 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
+  createFactoryShell,
   factoryStateOf,
   type FactoryStateV1,
   type FactoryStateView,
@@ -9,6 +10,7 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
 
 import {
   getFrameworkProvidedPaths,
@@ -27,6 +29,7 @@ import {
   type FactoryContract,
   factoryContractFromSchema,
 } from "./factory-contract.ts";
+import { noteLegacyFactoryCompatibilityRead } from "./legacy-factory-compat.ts";
 
 export type { FactoryContract } from "./factory-contract.ts";
 
@@ -92,6 +95,26 @@ function inspectFactory(value: unknown): InspectedFactory {
     state: factoryStateOf(value),
     trusted: isTrustedBuilderArtifact(value),
   };
+}
+
+function adaptLegacyPatternRefFactory(value: unknown): unknown {
+  if (isAdmittedFabricFactory(value) || !isRecord(value)) return value;
+  const ref = value.$patternRef;
+  if (
+    !isRecord(ref) || typeof ref.identity !== "string" ||
+    typeof ref.symbol !== "string" ||
+    !("argumentSchema" in value) || !("resultSchema" in value)
+  ) {
+    return value;
+  }
+  const factory = createFactoryShell({
+    kind: "pattern",
+    ref: { identity: ref.identity, symbol: ref.symbol },
+    argumentSchema: value.argumentSchema as JSONSchema,
+    resultSchema: value.resultSchema as JSONSchema,
+  });
+  noteLegacyFactoryCompatibilityRead("patternRef");
+  return factory;
 }
 
 function requireRef(state: FactoryStateView): FactoryRef {
@@ -425,6 +448,7 @@ export function materializeFactory(
   value: unknown,
   context: FactoryMaterializationContext,
 ): MaterializedFactory {
+  value = adaptLegacyPatternRefFactory(value);
   const inspected = inspectFactory(value);
   if (inspected.trusted) {
     const trusted = inspectTrustedFactory(value, context.runtime);
@@ -476,6 +500,8 @@ export async function prepareFactory(
   value: unknown,
   context: FactoryMaterializationContext,
 ): Promise<MaterializedFactory> {
+  const selection = value;
+  value = adaptLegacyPatternRefFactory(value);
   const inspected = inspectFactory(value);
   if (inspected.trusted) {
     const trusted = inspectTrustedFactory(value, context.runtime);
@@ -502,7 +528,7 @@ export async function prepareFactory(
     ref.symbol,
     context.artifactSpace,
   );
-  assertCurrentAfterAwait(value, context.fence);
+  assertCurrentAfterAwait(selection, context.fence);
   if (loaded === undefined) {
     throw new FactoryArtifactUnavailableError(ref);
   }

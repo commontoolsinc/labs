@@ -114,6 +114,7 @@ import {
   prepareFactory,
 } from "../factory-materialization.ts";
 import { RetryWhenReady } from "../scheduler/retry-when-ready.ts";
+import { noteLegacyFactoryCompatibilityRead } from "../legacy-factory-compat.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -2937,6 +2938,7 @@ async function handleInvoke(
         canonical.metadata.useResultSchemaForObservation,
       );
     } else {
+      noteLegacyFactoryCompatibilityRead("tool");
       pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
         | Readonly<Pattern>
         | undefined;

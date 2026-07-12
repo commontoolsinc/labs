@@ -1666,19 +1666,50 @@ failed, 1 ignored` and its subprocess lane at `20 passed (91 steps), 0 failed`.
 
 ### WP4.2 — Install explicit compatibility readers
 
-- [ ] Accept legacy `{ $patternRef, argumentSchema, resultSchema }` wherever a
+- [x] Accept legacy `{ $patternRef, argumentSchema, resultSchema }` wherever a
   pattern factory is expected and adapt it to `FactoryStateV1`.
-- [ ] Retain the full surrounding module descriptor when reading legacy
+- [x] Retain the full surrounding module descriptor when reading legacy
   `$implRef`; do not reinterpret `$implRef` as a factory artifact ref.
-- [ ] Accept legacy `{ pattern, extraParams, ...metadata }` tool values and
+- [x] Accept legacy `{ pattern, extraParams, ...metadata }` tool values and
   preserve their historical merge/precedence rules only in that reader.
-- [ ] Accept stored legacy list nodes carrying sibling `{ op, params }`.
+- [x] Accept stored legacy list nodes carrying sibling `{ op, params }`.
 - [ ] Make canonical transformed/repository writers emit `Factory@1`, inline
   pattern wrappers, and bound list factories only. Until Stage 5, explicitly
   deprecated public legacy APIs may still produce old shapes for compatibility.
-- [ ] Add fixtures for every legacy shape before changing writers.
-- [ ] Add diagnostics or counters sufficient to determine whether legacy values
+- [x] Add fixtures for every legacy shape before changing writers.
+- [x] Add diagnostics or counters sufficient to determine whether legacy values
   remain in supported persistent stores; do not log params or other user data.
+
+WP4.2 audit: the legacy `$patternRef` reader now adapts the exact refs-only
+shape to an inert `Factory@1` shell at the runner materialization boundary. It
+does not execute during context-free decoding, and the resulting reference
+still passes through the normal trusted artifact-resolution path. The `$implRef`
+reader remains a whole-module-descriptor compatibility path and is never used
+as `FactoryStateV1.ref`. The historical tool input merge and list sibling
+`params` paths remain isolated compatibility readers.
+
+The runner exposes process-local compatibility counts for `patternRef`,
+`implRef`, `tool`, and `list` reads. They retain only a kind and count: no
+params, authored values, identities, or user data. These counters provide
+rollout evidence but do not satisfy any Stage 5 stored-data or compatibility-
+window gate by themselves.
+
+Focused fixtures cover refs-only adaptation, full `$implRef` descriptor
+identity, legacy tool callback boundaries, and legacy list writer shape. The
+focused compatibility suites pass. The existing hand-built
+`map-op-by-identity` fixture remains red because its direct factories do not
+yet carry durable refs; that is an ordered WP4.3/WP4.4 canonical-writer fixture
+migration, not a compatibility-reader redesign.
+
+The complete CLI package task passes (`895 passed (249 steps), 0 failed, 1
+ignored`; subprocess lane `20 passed (91 steps), 0 failed`). The complete
+runner task remains an open Stage 4 aggregate gate: it first fails on another
+hand-built tool factory without a durable ref, runtime `schema()` values used
+as factory contracts in compiler fixtures, and a stale captured-binding schema
+in the profile pattern. Failed setup then cascades into cross-space and
+auto-start assertions in the shared test process. These fixtures must be
+migrated with the canonical writers before the Stage 4 package gate can be
+checked; this audit does not represent the runner task as passing.
 
 ### WP4.3 — Migrate repository `patternTool` callers
 

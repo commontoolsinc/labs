@@ -147,6 +147,7 @@ import {
   materializeFactory,
   prepareFactory,
 } from "./factory-materialization.ts";
+import { noteLegacyFactoryCompatibilityRead } from "./legacy-factory-compat.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -4474,6 +4475,7 @@ export class Runner {
     ) {
       return undefined;
     }
+    noteLegacyFactoryCompatibilityRead("implRef");
     const artifact = this.runtime.patternManager.artifactFromIdentitySync(
       ref.identity,
       ref.symbol,
@@ -5914,6 +5916,7 @@ export class Runner {
     // sibling `params`. Only stored legacy `{ op, params }` nodes are adapted
     // to the pattern-ref sentinel consumed by resolveOpPattern().
     if (!Object.hasOwn(inputBindings, "params")) return;
+    noteLegacyFactoryCompatibilityRead("list");
     const op = (inputBindings as Record<string, unknown>).op;
     const opIsFactory = isAdmittedFabricFactory(op);
     if (!isRecord(op) && !opIsFactory) return;
