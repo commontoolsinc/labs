@@ -622,6 +622,8 @@ export class Runtime {
     for (const input of inputs) {
       const artifact = validateCfcPolicyArtifactManifest(input);
       const existing = this.#policyManifests.get(artifact.policyDigest);
+      // Reaching this branch requires a collision in the canonical SHA-256
+      // digest: validation recomputes the digest for both artifacts.
       if (existing !== undefined && !deepEqual(existing, artifact)) {
         throw new Error(
           `cfcPolicyManifest: immutable digest collision for ${artifact.policyDigest}`,
@@ -740,11 +742,9 @@ export class Runtime {
         }
       }
     }
-    let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
-    if (spaces === undefined) {
-      spaces = new Set();
-      this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
-    }
+    // Both registered and durable-loaded artifacts pass through
+    // registerCfcPolicyManifests(), which creates this companion set.
+    const spaces = this.#policyManifestSpaces.get(artifact.policyDigest)!;
     spaces.add(space);
     return true;
   }

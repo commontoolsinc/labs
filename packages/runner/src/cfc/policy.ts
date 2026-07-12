@@ -383,7 +383,6 @@ const validatePolicyStateGuards = (value: unknown, where: string): void => {
 const validateExchangeRule = (
   rule: unknown,
   where: string,
-  template = false,
 ): ExchangeRule => {
   if (!isPlainRecord(rule)) {
     throw new Error(`cfcPolicyRecords: ${where} must be a rule object`);
@@ -405,14 +404,6 @@ const validateExchangeRule = (
       `cfcPolicyRecords: ${ruleWhere} needs an appliesTo pattern`,
     );
   }
-  if (template) {
-    validateTemplatePattern(appliesTo, `${ruleWhere} appliesTo`, true);
-    if (!isThisPolicyPattern(appliesTo)) {
-      throw new Error(
-        `cfcPolicyManifest: ${ruleWhere} appliesTo must be THIS_POLICY`,
-      );
-    }
-  }
   if (preCondition !== undefined) {
     if (!isPlainRecord(preCondition)) {
       throw new Error(
@@ -428,14 +419,6 @@ const validateExchangeRule = (
       const patterns = (preCondition as Record<string, unknown>)[guard];
       if (patterns !== undefined) {
         validatePatternArray(patterns, `${ruleWhere} preCondition.${guard}`);
-        if (template) {
-          (patterns as unknown[]).forEach((pattern, index) =>
-            validateTemplatePattern(
-              pattern,
-              `${ruleWhere} preCondition.${guard}[${index}]`,
-            )
-          );
-        }
       }
     }
     const policyState = (preCondition as Record<string, unknown>).policyState;
@@ -444,14 +427,6 @@ const validateExchangeRule = (
         policyState,
         `${ruleWhere} preCondition.policyState`,
       );
-      if (template) {
-        (policyState as unknown[]).forEach((pattern, index) =>
-          validateTemplatePattern(
-            pattern,
-            `${ruleWhere} preCondition.policyState[${index}]`,
-          )
-        );
-      }
     }
   }
   if (
@@ -479,14 +454,6 @@ const validateExchangeRule = (
     addAlternatives,
     `${ruleWhere} post.addAlternatives`,
   );
-  if (template && adds !== undefined) {
-    adds.forEach((pattern, index) =>
-      validateTemplatePattern(
-        pattern,
-        `${ruleWhere} post.addAlternatives[${index}]`,
-      )
-    );
-  }
   const drops = dropClause === true;
   // Exactly one effect: an empty post is a no-op rule (an authoring error a
   // policy author must see), and add+drop on one rule is contradictory —
@@ -500,40 +467,6 @@ const validateExchangeRule = (
     throw new Error(
       `cfcPolicyRecords: ${ruleWhere} post must addAlternatives or dropClause`,
     );
-  }
-  if (template) {
-    const pre = preCondition as Record<string, unknown> | undefined;
-    const integrity = pre?.integrity;
-    const policyState = pre?.policyState;
-    if (
-      (!Array.isArray(integrity) || integrity.length === 0) &&
-      (!Array.isArray(policyState) || policyState.length === 0)
-    ) {
-      throw new Error(
-        `cfcPolicyManifest: ${ruleWhere} needs an integrity or policyState guard`,
-      );
-    }
-    const bound = new Set<string>();
-    collectPatternVariables(appliesTo, bound);
-    for (
-      const guard of [
-        "confidentiality",
-        "integrity",
-        "boundary",
-        "policyState",
-      ]
-    ) {
-      collectPatternVariables(pre?.[guard], bound);
-    }
-    const postVariables = new Set<string>();
-    collectPatternVariables(adds, postVariables);
-    for (const variable of postVariables) {
-      if (!bound.has(variable)) {
-        throw new Error(
-          `cfcPolicyManifest: ${ruleWhere} has unbound postcondition variable "${variable}"`,
-        );
-      }
-    }
   }
   return rule as ExchangeRule;
 };

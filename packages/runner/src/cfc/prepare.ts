@@ -3892,6 +3892,8 @@ const resolvePolicyOfValue = (
       tx,
       (candidate) => tx.resolveCfcPolicyManifest(candidate, owningSpace),
     );
+    // The exact reference was just proven present or installed above; this is
+    // a defensive assertion against an inconsistent transaction adapter.
     if (resolver(reference as never) === undefined) {
       throw new Error("cfcPolicyManifest: PolicyOf reference did not resolve");
     }
@@ -3929,14 +3931,15 @@ const modulePolicyReferencesIn = (value: unknown): unknown[] => {
   return references;
 };
 
-const modulePolicyArtifactKey = (reference: unknown): string | undefined => {
-  if (!isRecord(reference)) return undefined;
-  if (
-    typeof reference.moduleIdentity !== "string" ||
-    typeof reference.symbol !== "string" ||
-    typeof reference.policyDigest !== "string"
-  ) return undefined;
-  return `${reference.moduleIdentity}\0${reference.symbol}\0${reference.policyDigest}`;
+const modulePolicyArtifactKey = (reference: unknown): string => {
+  // Every caller iterates modulePolicyReferencesIn(), which returns only
+  // records carrying all three string identity fields.
+  const candidate = reference as {
+    moduleIdentity: string;
+    symbol: string;
+    policyDigest: string;
+  };
+  return `${candidate.moduleIdentity}\0${candidate.symbol}\0${candidate.policyDigest}`;
 };
 
 const installCarriedPolicyManifests = (
@@ -4469,11 +4472,9 @@ const collectConsumedLabel = (
         )
       ) {
         const key = modulePolicyArtifactKey(reference);
-        if (key !== undefined) {
-          const spaces = modulePolicySpaces.get(key) ?? new Set<MemorySpace>();
-          spaces.add(read.space);
-          modulePolicySpaces.set(key, spaces);
-        }
+        const spaces = modulePolicySpaces.get(key) ?? new Set<MemorySpace>();
+        spaces.add(read.space);
+        modulePolicySpaces.set(key, spaces);
       }
       integrityAtoms.push(...(entry.label.integrity ?? []));
     }
@@ -4648,7 +4649,6 @@ const verifySinkRequestCeilings = (
         mode === "enforce" ? "consuming" : "observing",
         (reference) => {
           const key = modulePolicyArtifactKey(reference);
-          if (key === undefined) return undefined;
           const spaces = [...(consumed.modulePolicySpaces.get(key) ?? [])]
             .sort();
           if (spaces.length === 0) return undefined;
