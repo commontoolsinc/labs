@@ -9,6 +9,7 @@
 import type { JSONSchema } from "commonfabric";
 import { ContextualFlowControl } from "./cfc.ts";
 import { AsCellType } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
@@ -156,6 +157,25 @@ function schemaToTypeStringInner(
       innerType = getWrappedTypeString(asCellValues[i], innerType);
     }
     return innerType;
+  }
+
+  if (isRecord(s.asFactory)) {
+    const contract = s.asFactory;
+    const input = contract.kind === "handler"
+      ? contract.contextSchema
+      : contract.argumentSchema;
+    const output = contract.kind === "handler"
+      ? contract.eventSchema
+      : contract.resultSchema;
+    const inputType = schemaToTypeString(
+      (input ?? true) as JSONSchema,
+      nextOpts,
+    );
+    const outputType = schemaToTypeString(
+      (output ?? true) as JSONSchema,
+      nextOpts,
+    );
+    return `(e: ${inputType}) => ${outputType}`;
   }
 
   // Handle PatternToolResult - objects with { pattern, extraParams } structure

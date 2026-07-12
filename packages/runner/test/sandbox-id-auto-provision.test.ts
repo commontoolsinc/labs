@@ -39,10 +39,14 @@ import {
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { setFrameworkProvidedPaths } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -134,8 +138,9 @@ describe("auto-provided sandboxId", () => {
     calls: Array<{ callId: string; modelInput: Record<string, unknown> }>;
     argSchema: JSONSchema;
     extraParams?: Record<string, unknown>;
+    canonical?: boolean;
   }): Promise<unknown[]> {
-    const { tag, calls, argSchema, extraParams } = opts;
+    const { tag, calls, argSchema, extraParams, canonical = false } = opts;
     clearMockResponses();
     loadConversationFixture({
       description: tag,
@@ -169,7 +174,7 @@ describe("auto-provided sandboxId", () => {
       ],
     });
 
-    const echoSandbox = pattern(
+    const builtEchoSandbox = pattern(
       ({ command, sandboxId }: { command: string; sandboxId: string }) => ({
         received: sandboxId,
         command,
@@ -177,8 +182,16 @@ describe("auto-provided sandboxId", () => {
       argSchema,
       ECHO_RESULT_SCHEMA,
     );
+    const echoSandbox = canonical
+      ? installTestPatternArtifact(runtime, builtEchoSandbox)
+      : builtEchoSandbox;
+    if (canonical) {
+      setFrameworkProvidedPaths(echoSandbox, [["sandboxId"]]);
+    }
 
-    const toolDef = extraParams
+    const toolDef = canonical
+      ? echoSandbox
+      : extraParams
       ? patternTool(echoSandbox, extraParams as never)
       : patternTool(echoSandbox);
 
@@ -264,6 +277,32 @@ describe("auto-provided sandboxId", () => {
       expect(p2a).toBe(p2b);
       // Across the two patterns, the sandboxes are distinct.
       expect(p1a).not.toBe(p2a);
+    },
+  );
+
+  it(
+    "A2: a canonical factory receives one stable framework-owned id",
+    async () => {
+      const modelPin = "model-cannot-select-this";
+      const [first, second] = await runInstance({
+        tag: "canonical",
+        canonical: true,
+        argSchema: BASH_LIKE_ARG_SCHEMA,
+        calls: [
+          {
+            callId: "canonical-1",
+            modelInput: { command: "echo a", sandboxId: modelPin },
+          },
+          {
+            callId: "canonical-2",
+            modelInput: { command: "echo b", sandboxId: modelPin },
+          },
+        ],
+      });
+
+      expect(first).toBe(second);
+      expect(first).not.toBe(modelPin);
+      expect(first as string).toMatch(/^[A-Za-z0-9_-]+$/);
     },
   );
 
@@ -497,20 +536,24 @@ describe("auto-provided sandboxId", () => {
         },
       );
 
-      const echoSandbox = pattern(
-        ({ command, sandboxId }: { command: string; sandboxId: string }) => ({
-          received: sandboxId,
-          command,
-        }),
-        BASH_LIKE_ARG_SCHEMA,
-        ECHO_RESULT_SCHEMA,
+      const echoSandbox = installTestPatternArtifact(
+        runtime,
+        pattern(
+          ({ command, sandboxId }: { command: string; sandboxId: string }) => ({
+            received: sandboxId,
+            command,
+          }),
+          BASH_LIKE_ARG_SCHEMA,
+          ECHO_RESULT_SCHEMA,
+        ),
       );
+      setFrameworkProvidedPaths(echoSandbox, [["sandboxId"]]);
       const testPattern = pattern<Record<string, never>>(() =>
         generateObject({
           prompt: "strip-model-schema",
           schema: PRESENT_SCHEMA,
           tools: {
-            echoSandbox: patternTool(echoSandbox) as unknown as BuiltInLLMTool,
+            echoSandbox,
           },
         })
       );
@@ -532,6 +575,69 @@ describe("auto-provided sandboxId", () => {
       // The model sees `command` but not the framework-provided `sandboxId`.
       expect(toolJson!).toContain("command");
       expect(toolJson!).not.toContain("sandboxId");
+    },
+  );
+
+  it(
+    "F: an ordinary sandboxId field is neither stripped nor framework-owned",
+    async () => {
+      let toolJson: string | undefined;
+      addMockResponse(
+        (req) => {
+          const tools = (req as { tools?: Record<string, unknown> }).tools;
+          if (tools && tools.ordinarySandbox) {
+            toolJson = JSON.stringify(tools.ordinarySandbox);
+          }
+          return toolJson !== undefined;
+        },
+        {
+          role: "assistant",
+          content: [{
+            type: "tool-call",
+            toolCallId: "f-present",
+            toolName: "presentResult",
+            input: { ok: true },
+          }],
+          id: "f-s0",
+        },
+      );
+
+      const ordinarySandbox = installTestPatternArtifact(
+        runtime,
+        pattern(
+          ({ command, sandboxId }: { command: string; sandboxId: string }) => ({
+            received: sandboxId,
+            command,
+          }),
+          BASH_LIKE_ARG_SCHEMA,
+          ECHO_RESULT_SCHEMA,
+        ),
+      );
+      const testPattern = pattern<Record<string, never>>(() =>
+        generateObject({
+          prompt: "ordinary-sandbox-id-schema",
+          schema: PRESENT_SCHEMA,
+          tools: { ordinarySandbox },
+        })
+      );
+      const runTx = runtime.edit();
+      const result = runtime.run(
+        runTx,
+        testPattern,
+        {},
+        runtime.getCell(
+          space,
+          "ordinary-sandbox-id-schema-instance",
+          testPattern.resultSchema,
+          runTx,
+        ),
+      );
+      runTx.commit();
+      await waitForPendingToBecomeFalse(result);
+      await runtime.idle();
+
+      expect(toolJson).toContain("command");
+      expect(toolJson).toContain("sandboxId");
     },
   );
 });

@@ -1456,17 +1456,17 @@ patternTool/factory-writer failures, so the aggregate WP3.5 gate remains open.
 - [x] When an inline wrapper calls such a factory, synthesize the required
   system fields into the wrapper's argument schema/binding and forward their
   aliases transitively.
-- [ ] Keep those fields out of the model-facing tool schema.
-- [ ] Inject the value from the wrapper tool instance's stable identity and
+- [x] Keep those fields out of the model-facing tool schema.
+- [x] Inject the value from the wrapper tool instance's stable identity and
   carry that exact value to the ultimate call.
 - [x] Reject an authored literal, capture, or closure param that attempts to
   supply a framework-provided path.
 - [x] Enforce the same trusted-metadata-only rule when a materialized factory is
   called inside a lift implementation or handler callback; runtime context or
   event data cannot supply or launder the path.
-- [ ] Fail closed when a required system value or stable tool identity is
+- [x] Fail closed when a required system value or stable tool identity is
   unavailable.
-- [ ] Cover one wrapper, multiple wrappers, a dynamic stored factory, and a
+- [x] Cover one wrapper, multiple wrappers, a dynamic stored factory, and a
   cross-space invocation.
 
 Expected tests:
@@ -1541,20 +1541,20 @@ an open aggregate package gate, not a waived green result.
   `PatternFactory` and `{ pattern: PatternFactory, ...metadata }` as canonical
   authored shapes, while retaining the legacy tool object as a deprecated
   compatibility input.
-- [ ] Update LLM tool discovery to accept a PatternFactory directly and derive
+- [x] Update LLM tool discovery to accept a PatternFactory directly and derive
   the model-facing input from its public `argumentSchema`.
-- [ ] Keep optional description/presentation data in an ordinary metadata
+- [x] Keep optional description/presentation data in an ordinary metadata
   wrapper with a `pattern` field and no `extraParams`.
-- [ ] Invoke through the same async/source-space-aware `materializeFactory`
+- [x] Invoke through the same async/source-space-aware `materializeFactory`
   chokepoint as runner execution. An imperative adapter materializes its
   current snapshot and then uses the ordinary direct callable path; it never
   calls an inert shell or invents a reactive binding.
-- [ ] Update `packages/runner/src/schema-format.ts` and LLM schema formatting to
+- [x] Update `packages/runner/src/schema-format.ts` and LLM schema formatting to
   understand `asFactory` without subtracting closure params.
-- [ ] Update `packages/runner/src/builtins/llm-schemas.ts` and
+- [x] Update `packages/runner/src/builtins/llm-schemas.ts` and
   `packages/runner/src/builtins/llm-dialog.ts` to write/read the new shape while
   retaining the legacy reader.
-- [ ] Preserve `description` and `useResultSchemaForObservation` in the metadata
+- [x] Preserve `description` and `useResultSchemaForObservation` in the metadata
   wrapper, while sending only reduced `{ description, inputSchema }` data to
   `packages/llm`; factory state never crosses into a provider request.
 - [ ] Update `packages/cli/lib/callable.ts` to discover/materialize canonical
@@ -1594,6 +1594,41 @@ compatibility arm requires `extraParams`, which keeps the old stored shape
 distinguishable without admitting arbitrary functions. The red type check was
 `TS2322` for the direct factory; the API package now passes `17 passed, 0
 failed` and the focused type check is green.
+
+WP4.1 runner/LLM slice (2026-07-11): tool discovery now admits a direct
+PatternFactory or `{ pattern: PatternFactory, ...metadata }`, derives only the
+public argument schema, retains the dynamic entry cell, and prepares the
+current factory snapshot through the source-space-aware runner materializer
+before ordinary invocation. Cold catalog construction parks with
+`RetryWhenReady`; the cross-space regression then invokes the loaded factory
+in the destination while preserving its source artifact space. Trusted
+framework paths alone remove model fields and supply nested runtime values from
+the stable tool-entry identity. An ordinary same-named field stays
+model-visible, model pins are overwritten, and missing stable identity fails
+closed. The provider still receives only reduced tool metadata.
+
+The static `LLMToolSchema` cannot honestly express the canonical direct entry
+as `asFactory`: that extension is an exact kind/input/output contract, while a
+tool map is intentionally heterogeneous. A permissive authored wildcard would
+be a new authority channel. The schema file therefore explicitly retains its
+legacy object/metadata projection, while the canonical reader uses the raw
+Fabric-coded entry, validates admitted `Factory@1` state and pattern kind, and
+materializes it. This is a documented plan/code representational split, not a
+weakened schema contract.
+
+The first canonical CFC subagent run also exposed an existing utility bug:
+`deepEqual` read the inherited `constructor` property through a query proxy,
+which turned `Object` into an attempted stored-data read and was correctly
+rejected as an arbitrary function. A focused red test now guards that boundary;
+prototype comparison avoids the data read and preserves the factory/CFC result
+redaction path.
+
+Focused green evidence: `generate-object-tools.test.ts` passes `1 passed (21
+steps)`; `sandbox-id-auto-provision.test.ts` passes `2 passed (14 steps)`;
+`schema-format.test.ts` passes `20 passed`; the cold cross-space tool regression
+passes `1 passed`; and the complete deep-equality file passes `1 passed (59
+steps)`. The CLI/FUSE adapter bullets and their package gates remain open for
+the next WP4.1 slice.
 
 ### WP4.2 — Install explicit compatibility readers
 

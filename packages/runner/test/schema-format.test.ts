@@ -282,6 +282,29 @@ Deno.test("schemaToTypeString converts PatternToolResult to function syntax", ()
   );
 });
 
+Deno.test("schemaToTypeString formats a first-class PatternFactory contract", () => {
+  const result = schemaToTypeString({
+    asFactory: {
+      kind: "pattern",
+      argumentSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+      },
+    },
+  });
+
+  assert(result.includes("=>"));
+  assert(result.includes("query"));
+  assert(result.includes("answer"));
+  assert(!result.includes("extraParams"));
+});
+
 Deno.test("schemaToTypeString handles nested PatternToolResult in object", () => {
   // Schema for a piece output with handler properties
   const schema: any = {

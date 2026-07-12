@@ -1353,8 +1353,15 @@ export function generateObject<T extends Record<string, unknown>>(
         docs: "",
         observedConfidentiality: [],
       };
-    // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const toolsCell = inputs.key("tools").asSchema({
+      type: "object",
+      additionalProperties: LLMToolSchema,
+    });
+    const rawTools = toolsCell.getRaw();
+    // Canonical direct factories can be hidden by the legacy object-shaped
+    // query schema, so tool presence must include the raw Fabric record.
+    const hasTools = isObject(tools) && Object.keys(tools).length > 0 ||
+      isRecord(rawTools) && Object.keys(rawTools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;
@@ -1399,10 +1406,6 @@ export function generateObject<T extends Record<string, unknown>>(
           : {}),
       };
 
-      const toolsCell = inputs.key("tools").asSchema({
-        type: "object",
-        additionalProperties: LLMToolSchema,
-      });
       const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
         toolsCell,
       );

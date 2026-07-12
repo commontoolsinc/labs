@@ -178,6 +178,20 @@ describe("deepEqual", () => {
   });
 
   describe("objects", () => {
+    it("does not read an inherited constructor through a proxy", () => {
+      const value = { type: "label" };
+      const proxy = new Proxy(value, {
+        get(target, property, receiver) {
+          if (property === "constructor") {
+            throw new Error("constructor was read");
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      expect(deepEqual(proxy, { type: "label" })).toBe(true);
+    });
+
     it("returns true for identical objects", () => {
       expect(deepEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
       expect(deepEqual({}, {})).toBe(true);
