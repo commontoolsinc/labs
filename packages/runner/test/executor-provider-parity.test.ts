@@ -1268,6 +1268,98 @@ Deno.test("executor host provider closes the initial read and invalidation race"
   }
 });
 
+Deno.test("executor host provider reports accepted commits only after replica integration", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor provider integrated feed ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new GatedGraphServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-integrated-feed-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(space, {}, authorizeSessionOpen);
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const uri = "of:executor-provider:integrated-feed" as URI;
+  const address = {
+    id: uri,
+    type: "application/json" as MIME,
+    path: [],
+  };
+  const integrated = Promise.withResolvers<{
+    dataSeq: number;
+    deliverySeq: number;
+  }>();
+  let callbackRan = false;
+  let valueAtCallback: unknown;
+  let storage!: HostStorageManager;
+  storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+    onAcceptedCommitIntegrated(notice) {
+      callbackRan = true;
+      valueAtCallback = storage.open(space).replica.get(address)?.is;
+      integrated.resolve(notice);
+    },
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals((await provider.sync(uri)).error, undefined);
+    server.gateNextGraphQuery();
+
+    const commit = writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { integrated: true } },
+      }],
+    });
+    await server.graphQueryStarted.promise;
+    assertEquals(callbackRan, false);
+
+    server.releaseGraphQuery.resolve();
+    await commit;
+    const notice = await integrated.promise;
+    assertEquals(notice.dataSeq, 1);
+    assertEquals(notice.deliverySeq, 1);
+    assertEquals(valueAtCallback, { value: { integrated: true } });
+    assertEquals(await storage.acceptedCommitsSettled(), 1);
+  } finally {
+    server.releaseGraphQuery.resolve();
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
 type ProviderKind = "loopback" | "host";
 
 const runProviderTrace = async (kind: ProviderKind) => {

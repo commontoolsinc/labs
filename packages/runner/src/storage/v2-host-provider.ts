@@ -38,7 +38,7 @@ import {
 } from "./v2.ts";
 import type { ReplicaSession } from "./v2-replica-session.ts";
 
-interface AcceptedCommitNotice {
+export interface AcceptedCommitNotice {
   space: string;
   branch: BranchName;
   order: number;
@@ -514,13 +514,16 @@ class HostReplicaSession implements ReplicaSession {
     private readonly session: MemoryClient.SpaceSession,
     transport: MessagePortTransport,
     private readonly branch: BranchName,
+    private readonly onAcceptedCommitIntegrated?: (
+      notice: AcceptedCommitNotice,
+    ) => void,
   ) {
     this.#appliedSeq = session.serverSeq;
     this.#schedulerDeliverySeq = session.serverSeq;
     transport.setAcceptedCommitReceiver((notice) => {
       const refresh = this.#mutation.then(
-        () => this.refreshAcceptedCommit(notice),
-        () => this.refreshAcceptedCommit(notice),
+        () => this.refreshAndNotifyAcceptedCommit(notice),
+        () => this.refreshAndNotifyAcceptedCommit(notice),
       );
       this.#mutation = refresh.catch((error) => {
         if (
@@ -534,6 +537,26 @@ class HostReplicaSession implements ReplicaSession {
         }
       });
     });
+  }
+
+  /** Wait until every accepted-commit notice already delivered by the host has
+   * refreshed the replica, then return the integrated data watermark. */
+  acceptedCommitsSettled(): Promise<number> {
+    return this.#mutation.then(() => this.#appliedSeq);
+  }
+
+  private async refreshAndNotifyAcceptedCommit(
+    notice: AcceptedCommitNotice,
+  ): Promise<void> {
+    if (!await this.refreshAcceptedCommit(notice)) return;
+    try {
+      this.onAcceptedCommitIntegrated?.(notice);
+    } catch (error) {
+      // The replica is already integrated and the commit durable. A selective
+      // wake observer is diagnostic/control-plane work and cannot roll either
+      // fact back or poison later accepted notices.
+      console.warn("executor accepted-commit observer failed", error);
+    }
   }
 
   get sessionId(): string {
@@ -652,12 +675,12 @@ class HostReplicaSession implements ReplicaSession {
 
   private async refreshAcceptedCommit(
     notice: AcceptedCommitNotice,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (
       this.#closed || notice.space !== this.session.space ||
       notice.branch !== this.branch || notice.order <= this.#acceptedOrder
     ) {
-      return;
+      return false;
     }
     const fromSeq = this.#appliedSeq;
     let observations: SchedulerActionSnapshotResult[] = [];
@@ -679,7 +702,7 @@ class HostReplicaSession implements ReplicaSession {
     if (this.#watches.size === 0) {
       this.#acceptedOrder = notice.order;
       this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
-      return;
+      return true;
     }
     const dirty = new Set(notice.revisions.map(dirtyEntityKey));
     const affected: string[] = [];
@@ -709,8 +732,11 @@ class HostReplicaSession implements ReplicaSession {
           removes: [],
           observations,
         }, true);
+        // WatchView delivery resumes the replica's async iterator in a queued
+        // microtask. Cross that hand-off before reporting integration.
+        await Promise.resolve();
       }
-      return;
+      return true;
     }
 
     const before = this.allEntities();
@@ -733,6 +759,10 @@ class HostReplicaSession implements ReplicaSession {
       ...(observations.length > 0 ? { observations } : {}),
     };
     this.#view?.applySync(sync, true);
+    // `applySync(..., true)` resolves the replica consumer's pending iterator;
+    // its continuation applies the sync synchronously in the next microtask.
+    await Promise.resolve();
+    return true;
   }
 
   private async adoptionObservations(
@@ -823,12 +853,21 @@ class HostReplicaSession implements ReplicaSession {
 }
 
 class HostSessionFactory implements SessionFactory {
+  #session: HostReplicaSession | null = null;
+
   constructor(
     private readonly port: MessagePort,
     private readonly space: MemorySpace,
     private readonly branch: BranchName,
     private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
+    private readonly onAcceptedCommitIntegrated?: (
+      notice: AcceptedCommitNotice,
+    ) => void,
   ) {}
+
+  acceptedCommitsSettled(): Promise<number> {
+    return this.#session?.acceptedCommitsSettled() ?? Promise.resolve(0);
+  }
 
   async create(
     space: MemorySpace,
@@ -851,9 +890,16 @@ class HostSessionFactory implements SessionFactory {
       void client.close().catch(() => undefined);
     });
     const session = await client.mount(space, mountOptions);
+    const replica = new HostReplicaSession(
+      session,
+      transport,
+      this.branch,
+      this.onAcceptedCommitIntegrated,
+    );
+    this.#session = replica;
     return {
       client,
-      session: new HostReplicaSession(session, transport, this.branch),
+      session: replica,
     };
   }
 }
@@ -886,12 +932,29 @@ export interface HostStorageManagerOptions {
   /** Worker-local whole-action routing. The host still validates every
    * asserted upstream transaction against its live lease and claim. */
   actionTransactionRouter?: ActionTransactionRouter;
+  /** Runs synchronously after an accepted host commit has been point-refreshed
+   * and applied to the Worker replica. */
+  onAcceptedCommitIntegrated?: (notice: AcceptedCommitNotice) => void;
 }
 
 /** StorageManager construction available inside the executor Worker. */
 export class HostStorageManager extends StorageManager {
+  readonly #hostSessionFactory: HostSessionFactory;
+
+  private constructor(options: Options, factory: HostSessionFactory) {
+    super(options, factory);
+    this.#hostSessionFactory = factory;
+  }
+
   static connect(options: HostStorageManagerOptions): HostStorageManager {
     const as = opaquePrincipal(options.principal);
+    const factory = new HostSessionFactory(
+      options.port,
+      options.space,
+      options.branch ?? "",
+      options.protocolFlags,
+      options.onAcceptedCommitIntegrated,
+    );
     return new HostStorageManager(
       {
         as,
@@ -902,12 +965,13 @@ export class HostStorageManager extends StorageManager {
         // The host channel is already pinned to the memory Server.
         memoryHost: new URL("memory://executor-provider"),
       },
-      new HostSessionFactory(
-        options.port,
-        options.space,
-        options.branch ?? "",
-        options.protocolFlags,
-      ),
+      factory,
     );
+  }
+
+  /** Drain the host-pushed accepted-commit queue and return the last data seq
+   * applied to this Worker replica. */
+  acceptedCommitsSettled(): Promise<number> {
+    return this.#hostSessionFactory.acceptedCommitsSettled();
   }
 }
