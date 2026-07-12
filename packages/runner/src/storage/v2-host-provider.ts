@@ -1,21 +1,52 @@
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
+  type ClientCommit,
   encodeMemoryBoundary,
+  type EntitySnapshot,
+  type GraphQuery,
+  type GraphQueryResult,
   type HelloOkMessage,
   type ResponseMessage,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerSnapshotListResult,
+  type SchedulerWritersForTargetsQuery,
+  type SchedulerWritersForTargetsResult,
   type SessionOpenRequest,
+  type SessionSync,
+  type SqliteDbRef,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   type V2Error,
+  type WatchSpec,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
+  type AcceptedCommitEvent,
   parseClientMessage,
   type Server,
 } from "@commonfabric/memory/v2/server";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type { BranchName } from "@commonfabric/memory/v2";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
+import type { ReplicaSession } from "./v2-replica-session.ts";
+
+interface AcceptedCommitNotice {
+  space: string;
+  branch: BranchName;
+  seq: number;
+  originSessionId?: string;
+  revisions: {
+    branch: BranchName;
+    id: string;
+    scope?: string;
+    seq: number;
+  }[];
+}
 
 type ProviderPortMessage =
   | { type: "memory"; payload: string }
+  | { type: "accepted-commit"; notice: AcceptedCommitNotice }
   | { type: "close"; message?: string };
 
 export interface HostProviderChannelOptions {
@@ -52,6 +83,23 @@ const requestIdOf = (message: unknown): string =>
 
 const messageSpace = (message: ReturnType<typeof parseClientMessage>) =>
   message !== null && "space" in message ? message.space : undefined;
+
+const toAcceptedCommitNotice = (
+  event: AcceptedCommitEvent,
+): AcceptedCommitNotice => ({
+  space: event.space,
+  branch: event.commit.branch,
+  seq: event.commit.seq,
+  ...(event.originSessionId !== undefined
+    ? { originSessionId: event.originSessionId }
+    : {}),
+  revisions: event.commit.revisions.map((revision) => ({
+    branch: revision.branch,
+    id: revision.id,
+    ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+    seq: revision.seq,
+  })),
+});
 
 /**
  * Normalize every branch-bearing request onto the host-owned lane. Messages
@@ -112,6 +160,7 @@ export function createHostProviderChannel(
   let authContext: MemoryClient.SessionOpenAuthContext | null = null;
   let disposed = false;
   let receiving = Promise.resolve();
+  let unsubscribeAcceptedCommits = () => {};
 
   const connection = options.server.connect((message) => {
     if (disposed) return;
@@ -132,6 +181,7 @@ export function createHostProviderChannel(
   const closeHost = (message?: string) => {
     if (disposed) return;
     disposed = true;
+    unsubscribeAcceptedCommits();
     connection.close();
     if (message !== undefined) {
       try {
@@ -235,6 +285,22 @@ export function createHostProviderChannel(
   });
   hostPort.start();
 
+  // Register before returning the Worker endpoint. MessagePort queues notices
+  // until its peer starts, which closes the initial point-read race without a
+  // server graph watch.
+  unsubscribeAcceptedCommits = options.server.subscribeAcceptedCommits(
+    options.space,
+    (event) => {
+      if (disposed || event.commit.branch !== branch) return;
+      hostPort.postMessage(
+        {
+          type: "accepted-commit",
+          notice: toAcceptedCommitNotice(event),
+        } satisfies ProviderPortMessage,
+      );
+    },
+  );
+
   return {
     port: channel.port2,
     async dispose() {
@@ -248,12 +314,23 @@ class MessagePortTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #closed = false;
+  #acceptedCommitReceiver: ((notice: AcceptedCommitNotice) => void) | null =
+    null;
+  #bufferedAcceptedCommits: AcceptedCommitNotice[] = [];
 
   constructor(private readonly port: MessagePort) {
     port.addEventListener("message", (event: MessageEvent<unknown>) => {
       const message = event.data as Partial<ProviderPortMessage>;
       if (message.type === "memory" && typeof message.payload === "string") {
         this.#receiver(message.payload);
+      } else if (
+        message.type === "accepted-commit" && message.notice !== undefined
+      ) {
+        if (this.#acceptedCommitReceiver === null) {
+          this.#bufferedAcceptedCommits.push(message.notice);
+        } else {
+          this.#acceptedCommitReceiver(message.notice);
+        }
       } else if (message.type === "close") {
         this.closeFromHost(message.message);
       } else {
@@ -272,6 +349,15 @@ class MessagePortTransport implements MemoryClient.Transport {
 
   setCloseReceiver(receiver: (error?: Error) => void): void {
     this.#closeReceiver = receiver;
+  }
+
+  setAcceptedCommitReceiver(
+    receiver: (notice: AcceptedCommitNotice) => void,
+  ): void {
+    this.#acceptedCommitReceiver = receiver;
+    const buffered = this.#bufferedAcceptedCommits;
+    this.#bufferedAcceptedCommits = [];
+    for (const notice of buffered) receiver(notice);
   }
 
   send(payload: string): Promise<void> {
@@ -303,10 +389,228 @@ class MessagePortTransport implements MemoryClient.Transport {
   }
 }
 
+const snapshotKey = (snapshot: {
+  branch: string;
+  id: string;
+  scope?: string;
+}): string =>
+  `${snapshot.branch}\0${snapshot.scope ?? "space"}\0${snapshot.id}`;
+
+const syncUpsert = (snapshot: EntitySnapshot) => ({
+  branch: snapshot.branch,
+  id: snapshot.id,
+  ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+  seq: snapshot.seq,
+  ...(snapshot.document === null
+    ? { deleted: true as const }
+    : { doc: snapshot.document }),
+});
+
+/**
+ * Worker-side session facade. Authenticated operations still use the ordinary
+ * memory session, while graph subscriptions are replaced by host-pushed
+ * accepted-commit notices and exact point reads.
+ */
+class HostReplicaSession implements ReplicaSession {
+  #watches = new Map<string, WatchSpec>();
+  #watchEntities = new Map<string, Map<string, EntitySnapshot>>();
+  #view: MemoryClient.WatchView | null = null;
+  #mutation = Promise.resolve();
+  #appliedSeq: number;
+  #closed = false;
+
+  constructor(
+    private readonly session: MemoryClient.SpaceSession,
+    transport: MessagePortTransport,
+    private readonly branch: BranchName,
+  ) {
+    this.#appliedSeq = session.serverSeq;
+    transport.setAcceptedCommitReceiver((notice) => {
+      this.#mutation = this.#mutation.then(
+        () => this.refreshAcceptedCommit(notice),
+        () => this.refreshAcceptedCommit(notice),
+      );
+    });
+  }
+
+  get sessionId(): string {
+    return this.session.sessionId;
+  }
+
+  get sessionToken(): string | undefined {
+    return this.session.sessionToken;
+  }
+
+  get serverSeq(): number {
+    return this.session.serverSeq;
+  }
+
+  transact(commit: ClientCommit): Promise<AppliedCommit> {
+    return this.session.transact({ ...commit, branch: this.branch });
+  }
+
+  queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+    return this.session.queryGraph({ ...query, branch: this.branch });
+  }
+
+  sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    return this.session.sqliteQuery(db, sql, params);
+  }
+
+  registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    return this.session.registerSqliteDiskSource(id, path);
+  }
+
+  listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    return this.session.listSchedulerActionSnapshots({
+      ...query,
+      branch: this.branch,
+    });
+  }
+
+  writersForTargets(
+    query: SchedulerWritersForTargetsQuery,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    return this.session.writersForTargets({
+      ...query,
+      branch: this.branch,
+    });
+  }
+
+  watchAddSync(watches: WatchSpec[]): Promise<{
+    view: MemoryClient.WatchView;
+    sync: SessionSync;
+  }> {
+    let result!: { view: MemoryClient.WatchView; sync: SessionSync };
+    this.#mutation = this.#mutation.then(async () => {
+      if (this.#closed) throw new Error("executor provider session closed");
+      for (const watch of watches) this.#watches.set(watch.id, watch);
+      const fromSeq = this.#appliedSeq;
+      await this.refreshWatches(watches.map((watch) => watch.id));
+      const sync = this.fullSync(fromSeq, this.#appliedSeq);
+      if (this.#view === null) {
+        this.#view = MemoryClient.WatchView.fromSync(sync);
+      } else {
+        this.#view.applySync(sync, false);
+      }
+      result = { view: this.#view, sync };
+    });
+    return this.#mutation.then(() => result);
+  }
+
+  private async refreshAcceptedCommit(
+    notice: AcceptedCommitNotice,
+  ): Promise<void> {
+    if (
+      this.#closed || notice.space !== this.session.space ||
+      notice.branch !== this.branch || notice.seq <= this.#appliedSeq ||
+      this.#watches.size === 0
+    ) {
+      return;
+    }
+    const dirty = new Set(notice.revisions.map(snapshotKey));
+    const affected: string[] = [];
+    for (const [watchId, watch] of this.#watches) {
+      const previous = this.#watchEntities.get(watchId);
+      const rootDirty = watch.query.roots.some((root) =>
+        dirty.has(snapshotKey({
+          branch: this.branch,
+          id: root.id,
+          scope: root.scope,
+        }))
+      );
+      const trackedDirty = previous !== undefined &&
+        [...previous.keys()].some((key) => dirty.has(key));
+      if (rootDirty || trackedDirty) affected.push(watchId);
+    }
+    if (affected.length === 0) {
+      this.#appliedSeq = notice.seq;
+      return;
+    }
+
+    const before = this.allEntities();
+    const fromSeq = this.#appliedSeq;
+    await this.refreshWatches(affected, notice.seq);
+    this.#appliedSeq = notice.seq;
+    const after = this.allEntities();
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq,
+      toSeq: notice.seq,
+      upserts: [...after.values()].map(syncUpsert),
+      removes: [...before.values()]
+        .filter((snapshot) => !after.has(snapshotKey(snapshot)))
+        .map((snapshot) => ({
+          branch: snapshot.branch,
+          id: snapshot.id,
+          ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+        })),
+    };
+    this.#view?.applySync(sync, true);
+  }
+
+  private async refreshWatches(
+    watchIds: readonly string[],
+    atSeq?: number,
+  ): Promise<void> {
+    for (const watchId of watchIds) {
+      const watch = this.#watches.get(watchId);
+      if (watch === undefined) continue;
+      const result = await this.queryGraph({
+        ...watch.query,
+        ...(atSeq !== undefined ? { atSeq } : {}),
+      });
+      if (atSeq === undefined) {
+        this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
+      }
+      this.#watchEntities.set(
+        watchId,
+        new Map(result.entities.map((snapshot) => [
+          snapshotKey(snapshot),
+          snapshot,
+        ])),
+      );
+    }
+  }
+
+  private allEntities(): Map<string, EntitySnapshot> {
+    const entities = new Map<string, EntitySnapshot>();
+    for (const snapshots of this.#watchEntities.values()) {
+      for (const [key, snapshot] of snapshots) {
+        const previous = entities.get(key);
+        if (previous === undefined || previous.seq <= snapshot.seq) {
+          entities.set(key, snapshot);
+        }
+      }
+    }
+    return entities;
+  }
+
+  private fullSync(fromSeq: number, toSeq: number): SessionSync {
+    return {
+      type: "sync",
+      fromSeq,
+      toSeq,
+      upserts: [...this.allEntities().values()].map(syncUpsert),
+      removes: [],
+    };
+  }
+}
+
 class HostSessionFactory implements SessionFactory {
   constructor(
     private readonly port: MessagePort,
     private readonly space: MemorySpace,
+    private readonly branch: BranchName,
   ) {}
 
   async create(
@@ -317,11 +621,13 @@ class HostSessionFactory implements SessionFactory {
     if (space !== this.space) {
       throw new Error(`executor provider is bound to ${this.space}`);
     }
-    const client = await MemoryClient.connect({
-      transport: new MessagePortTransport(this.port),
-    });
+    const transport = new MessagePortTransport(this.port);
+    const client = await MemoryClient.connect({ transport });
     const session = await client.mount(space, mountOptions);
-    return { client, session };
+    return {
+      client,
+      session: new HostReplicaSession(session, transport, this.branch),
+    };
   }
 }
 
@@ -343,6 +649,7 @@ export interface HostStorageManagerOptions {
   port: MessagePort;
   principal: MemorySpace;
   space: MemorySpace;
+  branch?: BranchName;
   id?: string;
   settings?: Options["settings"];
 }
@@ -359,7 +666,11 @@ export class HostStorageManager extends StorageManager {
         // The host channel is already pinned to the memory Server.
         memoryHost: new URL("memory://executor-provider"),
       },
-      new HostSessionFactory(options.port, options.space),
+      new HostSessionFactory(
+        options.port,
+        options.space,
+        options.branch ?? "",
+      ),
     );
   }
 }
