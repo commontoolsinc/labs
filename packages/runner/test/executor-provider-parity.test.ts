@@ -1,12 +1,23 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
-import type { MIME, URI } from "@commonfabric/memory/interface";
+import type {
+  MemorySpace,
+  MIME,
+  Signer,
+  URI,
+} from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type AcceptedCommitEvent,
   Server,
 } from "@commonfabric/memory/v2/server";
 import type { StorageNotification } from "../src/storage/interface.ts";
+import type { NativeStorageCommit } from "../src/storage/interface.ts";
+import {
+  type Options,
+  type SessionFactory,
+  StorageManager,
+} from "../src/storage/v2.ts";
 import {
   createHostProviderChannel,
   HostStorageManager,
@@ -44,6 +55,44 @@ class GatedGraphServer extends WatchCountingServer {
       await this.releaseGraphQuery.promise;
     }
     return response;
+  }
+}
+
+class LoopbackSessionFactory implements SessionFactory {
+  constructor(private readonly server: Server) {}
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryClient.MountOptions = {},
+  ) {
+    const client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(this.server),
+    });
+    const session = await client.mount(
+      space,
+      mountOptions,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: signer?.did() },
+      }),
+    );
+    return { client, session };
+  }
+}
+
+class LoopbackStorageManager extends StorageManager {
+  static connectTo(
+    server: Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): LoopbackStorageManager {
+    return new LoopbackStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      new LoopbackSessionFactory(server),
+    );
   }
 }
 
@@ -516,4 +565,253 @@ Deno.test("executor host provider closes the initial read and invalidation race"
     await writerClient.close();
     await server.close();
   }
+});
+
+type ProviderKind = "loopback" | "host";
+
+const runProviderTrace = async (kind: ProviderKind) => {
+  const signer = await Identity.fromPassphrase(
+    "executor provider differential " + kind + " " + crypto.randomUUID(),
+  );
+  const space = signer.did();
+  const server = new WatchCountingServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-differential-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: signer.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(
+    space,
+    {},
+    authorizeSessionOpen,
+  );
+  const channel = kind === "host"
+    ? createHostProviderChannel({
+      server,
+      space,
+      authorizeSessionOpen,
+    })
+    : undefined;
+  const storage: StorageManager = kind === "host"
+    ? HostStorageManager.connect({
+      port: channel!.port,
+      principal: signer.did(),
+      space,
+    })
+    : LoopbackStorageManager.connectTo(server, { as: signer });
+  const accepted: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(space, (event) => {
+    accepted.push(event);
+  });
+  const uri = "of:executor-provider:differential" as URI;
+  const type = "application/json" as MIME;
+  const address = { id: uri, type, path: [] };
+
+  try {
+    const provider = storage.open(space);
+    const replica = provider.replica;
+    assert(replica.commitNative);
+    assertEquals((await provider.sync(uri)).error, undefined);
+
+    const commit = (
+      transaction: NativeStorageCommit,
+      source?: Parameters<NonNullable<typeof replica.commitNative>>[1],
+    ) => replica.commitNative!(transaction, source);
+
+    assertEquals(
+      (await commit({
+        operations: [{
+          op: "set",
+          id: uri,
+          type,
+          value: { value: { count: 1 } },
+        }],
+      })).error,
+      undefined,
+    );
+    assertEquals(
+      (await commit({
+        operations: [{
+          op: "patch",
+          id: uri,
+          type,
+          value: { value: { count: 2, label: "patched" } },
+          patches: [
+            { op: "replace", path: "/value/count", value: 2 },
+            { op: "add", path: "/value/label", value: "patched" },
+          ],
+        }],
+      })).error,
+      undefined,
+    );
+
+    const integrated = Promise.withResolvers<void>();
+    storage.subscribe({
+      next(notification) {
+        if (
+          notification.type === "integrate" &&
+          JSON.stringify(replica.get(address)?.is) ===
+            JSON.stringify({ value: { count: 3, external: true } })
+        ) {
+          integrated.resolve();
+        }
+        return { done: false };
+      },
+    });
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { count: 3, external: true } },
+      }],
+    });
+    const timer = setTimeout(
+      () => integrated.reject(new Error("differential external write missed")),
+      1_000,
+    );
+    try {
+      await integrated.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+    const afterExternal = replica.get(address)?.is;
+
+    const staleSource = {
+      getReadActivities() {
+        return [{
+          space,
+          id: uri,
+          type,
+          path: [],
+          meta: { seq: 1 },
+        }];
+      },
+    } as unknown as Parameters<NonNullable<typeof replica.commitNative>>[1];
+    const conflict = await commit({
+      operations: [{
+        op: "set",
+        id: uri,
+        type,
+        value: { value: { count: 4, stale: true } },
+      }],
+    }, staleSource);
+    const afterConflict = replica.get(address)?.is;
+
+    const observationWrite = {
+      space,
+      id: uri,
+      scope: "space" as const,
+      path: [] as string[],
+    };
+    assertEquals(
+      (await commit({
+        operations: [],
+        schedulerObservation: {
+          version: 2,
+          ownerSpace: space,
+          branch: "",
+          pieceId: "space:of:executor-provider:differential-piece",
+          processGeneration: 1,
+          actionId: "action:differential",
+          actionKind: "computation",
+          implementationFingerprint: "impl:executor-differential",
+          runtimeFingerprint: "runtime:executor-differential",
+          observedAtSeq: 0,
+          transactionKind: "action-run",
+          reads: [],
+          shallowReads: [],
+          actualChangedWrites: [],
+          currentKnownWrites: [observationWrite],
+          declaredWrites: [observationWrite],
+          materializerWriteEnvelopes: [],
+          completeActionScopeSummary: {
+            version: 1,
+            complete: true,
+            implementationFingerprint: "impl:executor-differential",
+            runtimeFingerprint: "runtime:executor-differential",
+            piece: {
+              space,
+              id: "of:executor-provider:differential-piece",
+              scope: "space",
+              path: [],
+            },
+            reads: [],
+            writes: [observationWrite],
+            materializerWriteEnvelopes: [],
+            directOutputs: [observationWrite],
+          },
+          status: "success",
+        },
+      })).error,
+      undefined,
+    );
+    const scheduler = await provider.listSchedulerActionSnapshots!({
+      ownerSpace: space,
+      actionId: "action:differential",
+    });
+
+    assertEquals(
+      (await commit({
+        operations: [{ op: "delete", id: uri, type }],
+      })).error,
+      undefined,
+    );
+
+    return {
+      afterExternal,
+      conflict: conflict.error?.name,
+      afterConflict,
+      scheduler: scheduler.snapshots.map((snapshot) => ({
+        actionId: (snapshot.observation as { actionId?: string }).actionId,
+        executionContextKey: snapshot.executionContextKey,
+        status: (snapshot.observation as { status?: string }).status,
+      })),
+      final: replica.get(address)?.is,
+      accepted: accepted.map((event) => ({
+        order: event.order,
+        deliverySeq: event.deliverySeq,
+        revisionOps: event.commit.revisions.map((revision) => revision.op),
+        schedulerStatuses: event.commit.schedulerObservationResults?.map(
+          (result) => result.status,
+        ) ?? [],
+      })),
+      watchAdds: server.watchAddCount,
+    };
+  } finally {
+    await storage.close();
+    await channel?.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+};
+
+Deno.test("executor host provider is behaviorally equivalent to authenticated loopback", async () => {
+  const loopback = await runProviderTrace("loopback");
+  const host = await runProviderTrace("host");
+  assertEquals(
+    { ...host, watchAdds: undefined },
+    { ...loopback, watchAdds: undefined },
+  );
+  assertEquals(host.watchAdds, 0);
+  assert(loopback.watchAdds > 0);
 });
