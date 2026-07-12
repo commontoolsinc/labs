@@ -2,11 +2,9 @@ import ts from "typescript";
 
 import {
   classifyArrayCallbackContainerCall,
-  classifyLegacyPatternCarrier,
   detectCallKind,
   findEnclosingPatternBuilderCallbackDescriptor,
   getPatternBuilderCallbackArgument,
-  getPatternToolCallbackArgument,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 
@@ -21,7 +19,6 @@ export type SupportedCallbackBoundaryKind =
   | "pattern-builder"
   | "render-builder"
   | "lift-applied"
-  | "pattern-tool"
   | "computed-builder"
   | "action-builder"
   | "lift-builder"
@@ -68,7 +65,6 @@ export interface CallbackBoundarySemantics {
   readonly bodyContext: CallbackBoundaryBodyContext | undefined;
   readonly isReactiveArrayMethodCallback: boolean;
   readonly isPlainArrayValueCallback: boolean;
-  readonly isPatternToolCallback: boolean;
   readonly supportsPatternOwnedWrapperCallbackSite: boolean;
   readonly supportsPatternOwnedStatements: boolean;
   readonly allowsRestrictedContextFunctionCallback: boolean;
@@ -86,14 +82,6 @@ function isWithinJsxExpression(node: ts.Node): boolean {
   return false;
 }
 
-/**
- * True when `patternCall` (a `pattern(...)` call) is the first argument of an
- * enclosing `patternTool(...)` call — the canonical CT-1655 shape
- * `patternTool(pattern(cb), extraParams?)`. Used to give such a pattern's
- * callback a patternTool boundary (function creation allowed in the
- * surrounding restricted context) rather than the restricted pattern-builder
- * boundary a bare `pattern(...)` gets.
- */
 /** True when `callee` is the SQLite `table()` builder (the `commonfabric`
  *  export or `cfSqlite.table`) — recognized by name plus the
  *  `SqliteTableFunction` type alias, so local rebinding keeps working and an
@@ -121,13 +109,6 @@ function isSqliteTableCallee(
       file.endsWith("commonfabric.d.ts") ||
       file.includes("/@commonfabric/api/");
   });
-}
-
-function isPatternToolPatternArgument(
-  patternCall: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  return classifyLegacyPatternCarrier(patternCall, checker) === "pattern-tool";
 }
 
 export function classifyCallbackBoundary(
@@ -169,17 +150,6 @@ export function classifyCallbackBoundary(
     checker,
   );
   if (patternDescriptor) {
-    if (isPatternToolPatternArgument(patternDescriptor.call, checker)) {
-      return {
-        kind: "supported",
-        boundaryKind: "pattern-tool",
-        bodyContext: {
-          strategy: "explicit",
-          kind: "compute",
-          owner: "unknown",
-        },
-      };
-    }
     return {
       kind: "supported",
       boundaryKind: "pattern-builder",
@@ -212,18 +182,6 @@ export function classifyCallbackBoundary(
     };
   }
 
-  if (callKind?.kind === "pattern-tool") {
-    return {
-      kind: "supported",
-      boundaryKind: "pattern-tool",
-      bodyContext: {
-        strategy: "explicit",
-        kind: "compute",
-        owner: "unknown",
-      },
-    };
-  }
-
   // SQLite per-row label rule: `table(columns, (f) => ({…}))` — also reached
   // via `cfSqlite.table`. `table()` evaluates the rule EAGERLY at pattern
   // build time into a serialized plain-JSON AST (CFC Phase 3), so the
@@ -247,24 +205,6 @@ export function classifyCallbackBoundary(
   if (callKind?.kind === "builder") {
     switch (callKind.builderName) {
       case "pattern":
-        // A `pattern(...)` that is itself the first argument of a
-        // `patternTool(...)` call is the canonical patternTool shape (CT-1655):
-        // authoring it inside a pattern body is legitimate, so its callback
-        // gets the same boundary as a directly-passed patternTool callback —
-        // allowing function creation in the surrounding restricted context.
-        // A bare `pattern(...)` (not a patternTool argument) keeps the
-        // restricted `pattern-builder` boundary below.
-        if (isPatternToolPatternArgument(parent, checker)) {
-          return {
-            kind: "supported",
-            boundaryKind: "pattern-tool",
-            bodyContext: {
-              strategy: "explicit",
-              kind: "compute",
-              owner: "unknown",
-            },
-          };
-        }
         return {
           kind: "supported",
           boundaryKind: "pattern-builder",
@@ -376,18 +316,6 @@ export function classifyCallbackBoundary(
     };
   }
 
-  if (getPatternToolCallbackArgument(parent, checker) === callback) {
-    return {
-      kind: "supported",
-      boundaryKind: "pattern-tool",
-      bodyContext: {
-        strategy: "explicit",
-        kind: "compute",
-        owner: "unknown",
-      },
-    };
-  }
-
   if (isWithinJsxExpression(callback)) {
     return {
       kind: "unsupported",
@@ -427,7 +355,6 @@ export function getCallbackBoundarySemantics(
     bodyContext,
     isReactiveArrayMethodCallback: supportedKind === "reactive-array-method",
     isPlainArrayValueCallback: supportedKind === "plain-array-value",
-    isPatternToolCallback: supportedKind === "pattern-tool",
     supportsPatternOwnedWrapperCallbackSite: supportedKind ===
         "reactive-array-method" ||
       supportedKind === "pattern-builder" ||

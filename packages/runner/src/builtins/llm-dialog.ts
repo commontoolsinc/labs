@@ -2814,8 +2814,8 @@ function handleUpdateArgument(
  * The server names sandboxes by this id (`/v1/sandboxes/<id>`), so any
  * caller-chosen value is a cross-instance leak vector: two patterns that pin the
  * same id would share a sandbox, and a pattern could name another instance's (or
- * another user's). A pattern that pre-fills `sandboxId` through patternTool's
- * extraParams is rejected outright — a chosen value can never take effect, so
+ * another user's). A legacy tool that pre-fills `sandboxId` through
+ * `extraParams` is rejected outright — a chosen value can never take effect, so
  * silently dropping it would hide an authoring mistake; this throws instead. A
  * model-supplied value (untrusted, not an authoring mistake) is overwritten. If
  * the pattern declares `sandboxId` but no stable id can be derived, this also
@@ -2834,7 +2834,7 @@ function applyAutoProvidedSandboxId(
   if (extraParams.sandboxId !== undefined) {
     throw new Error(
       "sandboxId is framework-provided for tools that declare it; " +
-        "remove it from patternTool's extraParams",
+        "remove it from the legacy tool's extraParams",
     );
   }
   // getEntityId does the heavy lifting the key needs (content-hashing data:

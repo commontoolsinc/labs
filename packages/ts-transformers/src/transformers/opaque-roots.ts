@@ -140,9 +140,6 @@ export function isOpaqueOriginCall(
 ): boolean {
   if (isReactiveOriginExpression(expression, context.checker)) return true;
   if (ts.isNewExpression(expression)) return false;
-  if (detectCallKind(expression, context.checker)?.kind === "pattern-tool") {
-    return true;
-  }
   // User-authored pattern factories (callable values whose type has
   // `argumentSchema` + `resultSchema` and no `with`) return opaque-source
   // values by construction. Treat their invocations as opaque-origin so

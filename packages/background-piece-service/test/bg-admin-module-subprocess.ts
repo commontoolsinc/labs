@@ -153,26 +153,8 @@ assertEquals(pieces.setCount, 1);
 assertEquals(pieces.setCount, 1);
 
 const patternPieces = {
-  mapWithPattern(
-    rowPattern: (input: { key: (...path: string[]) => unknown }) => unknown,
-    params: Record<string, unknown>,
-  ) {
-    return [
-      rowPattern({
-        key: (...path: string[]) => {
-          if (path[0] === "element") {
-            return pieceEntry({
-              status: "Success",
-              lastRun: 1_700_000_004_000,
-            });
-          }
-          if (path[0] === "params" && path[1] === "pieces") {
-            return params.pieces;
-          }
-          return undefined;
-        },
-      }),
-    ];
+  map(row: (piece: FakeEntryCell) => unknown) {
+    return [row(pieceEntry({ status: "Success", lastRun: 1_700_000_004_000 }))];
   },
 };
 const rendered = (adminPattern as never as (
@@ -183,12 +165,9 @@ assert(rendered["$UI"]);
 assertEquals(rendered.pieces, patternPieces);
 assert(
   (pieceRowPattern as never as (
-    input: { key: (...path: string[]) => unknown },
+    input: { piece: FakeEntryCell; pieces: typeof patternPieces },
   ) => unknown)({
-    key: (...path: string[]) => {
-      if (path[0] === "element") return pieceEntry();
-      if (path[0] === "params" && path[1] === "pieces") return patternPieces;
-      return undefined;
-    },
+    piece: pieceEntry(),
+    pieces: patternPieces,
   }),
 );

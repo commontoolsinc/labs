@@ -252,7 +252,7 @@ function classifyCallExpressionRoot(
     case "wish":
     case "generate-text":
     case "generate-object":
-    case "pattern-tool":
+    case "legacy-pattern-tool":
     case "runtime-call":
       return "other";
   }
@@ -658,7 +658,6 @@ const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
   "when",
   "unless",
   "builder",
-  "pattern-tool",
 ]);
 
 function getHelperBoundaryKind(

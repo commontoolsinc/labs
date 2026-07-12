@@ -58,7 +58,7 @@ function authoredPatternCalls(sourceFile: ts.SourceFile): ts.CallExpression[] {
   return calls;
 }
 
-Deno.test("legacy pattern carriers stay outside PatternStrategy through transparent wrappers and cloning", async () => {
+Deno.test("deprecated patternTool uses ordinary nested-pattern conversion while list compatibility stays isolated", async () => {
   const { sourceFile, checker } = await sourceProgram();
   const [, patternToolPattern, withPatternPattern] = authoredPatternCalls(
     sourceFile,
@@ -69,24 +69,27 @@ Deno.test("legacy pattern carriers stay outside PatternStrategy through transpar
 
   const context = { checker } as TransformationContext;
   const strategy = new PatternStrategy();
-  for (const call of [patternToolPattern, withPatternPattern]) {
-    assertEquals(strategy.canTransform(call, context), false);
+  assertEquals(strategy.canTransform(patternToolPattern, context), true);
+  assertEquals(strategy.canTransform(withPatternPattern, context), false);
 
-    const clone = ts.factory.createCallExpression(
-      call.expression,
-      call.typeArguments,
-      call.arguments,
-    );
-    ts.setOriginalNode(clone, call);
-    assertEquals(
-      strategy.canTransform(clone, context),
-      false,
-      "a detached clone must recover its legacy carrier from authored ancestry",
-    );
-  }
+  const toolClone = ts.factory.createCallExpression(
+    patternToolPattern.expression,
+    patternToolPattern.typeArguments,
+    patternToolPattern.arguments,
+  );
+  ts.setOriginalNode(toolClone, patternToolPattern);
+  assertEquals(strategy.canTransform(toolClone, context), true);
+
+  const listClone = ts.factory.createCallExpression(
+    withPatternPattern.expression,
+    withPatternPattern.typeArguments,
+    withPatternPattern.arguments,
+  );
+  ts.setOriginalNode(listClone, withPatternPattern);
+  assertEquals(strategy.canTransform(listClone, context), false);
 });
 
-Deno.test("wrapped patternTool patterns retain the pattern-tool callback boundary", async () => {
+Deno.test("wrapped patternTool patterns use the ordinary pattern callback boundary", async () => {
   const { sourceFile, checker } = await sourceProgram();
   const [, patternToolPattern] = authoredPatternCalls(sourceFile);
   const callback = patternToolPattern?.arguments[0];
@@ -97,18 +100,18 @@ Deno.test("wrapped patternTool patterns retain the pattern-tool callback boundar
   const decision = getCallbackBoundarySemantics(callback, checker).decision;
   assertEquals(
     decision.kind === "supported" ? decision.boundaryKind : decision.kind,
-    "pattern-tool",
+    "pattern-builder",
   );
 });
 
-Deno.test("legacy wrapped pattern carriers never emit compiler curry state", async () => {
+Deno.test("deprecated patternTool receives one normally bound factory", async () => {
   const output = await transformSource(SOURCE, {
     types: COMMONFABRIC_TYPES,
   });
   const root = parseModule(output);
 
-  assertEquals(callsNamed(root, "withPatternParamsSchema").length, 0, output);
-  assertEquals(callsNamed(root, "curry").length, 0, output);
+  assertEquals(callsNamed(root, "withPatternParamsSchema").length, 1, output);
+  assertEquals(callsNamed(root, "curry").length, 1, output);
   assertEquals(callsNamed(root, "patternTool").length, 1, output);
   assertEquals(callsNamed(root, "mapWithPattern").length, 1, output);
 });

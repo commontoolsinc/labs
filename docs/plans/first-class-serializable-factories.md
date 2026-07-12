@@ -1673,7 +1673,7 @@ failed, 1 ignored` and its subprocess lane at `20 passed (91 steps), 0 failed`.
 - [x] Accept legacy `{ pattern, extraParams, ...metadata }` tool values and
   preserve their historical merge/precedence rules only in that reader.
 - [x] Accept stored legacy list nodes carrying sibling `{ op, params }`.
-- [ ] Make canonical transformed/repository writers emit `Factory@1`, inline
+- [x] Make canonical transformed/repository writers emit `Factory@1`, inline
   pattern wrappers, and bound list factories only. Until Stage 5, explicitly
   deprecated public legacy APIs may still produce old shapes for compatibility.
 - [x] Add fixtures for every legacy shape before changing writers.
@@ -1797,35 +1797,78 @@ at argument 1, and exactly one transformer-emitted `.curry(...)`.
 
 ### WP4.4 — Stop canonical production of legacy list and tool shapes
 
-- [ ] Remove canonical transformer, internal tool, and repository-source
+- [x] Remove canonical transformer, internal tool, and repository-source
   construction of `PatternToolResult` and `extraParams`; isolate the deprecated
   public `patternTool` constructor as a named legacy writer until Stage 5.
-- [ ] Remove transformer hoisting/callback-boundary special cases that exist
+- [x] Remove transformer hoisting/callback-boundary special cases that exist
   only to produce `patternTool(pattern(...), extraParams)`.
-- [ ] Remove transformer validation messages that recommend `patternTool`.
-- [ ] Ensure newly transformed list callbacks cannot emit sibling `params`.
-- [ ] Keep separately named, well-tested compatibility readers for old stored
+- [x] Remove transformer validation messages that recommend `patternTool`.
+- [x] Ensure newly transformed list callbacks cannot emit sibling `params`.
+- [x] Keep separately named, well-tested compatibility readers for old stored
   values; do not leave ambiguous branches in the canonical writer.
-- [ ] Add source/fixture assertions that fail if a new canonical writer emits
+- [x] Add source/fixture assertions that fail if a new canonical writer emits
   `extraParams` or legacy list params.
-- [ ] Classify the five transformer `patternTool-*` fixture pairs and the
+- [x] Classify the five transformer `patternTool-*` fixture pairs and the
   patternTool cases in `validation.test.ts`,
   `unknown-capture-validation.test.ts`, `transform.test.ts`,
   `policy/callback-support.test.ts`, and `ast/call-kind-coverage.test.ts`:
   migrate semantic closure cases to inline-pattern coverage and retain only
   explicitly named legacy API/reader cases.
 
+WP4.4 audit (2026-07-11): `patternTool` remains available only as the explicitly
+deprecated `{ pattern, extraParams }` compatibility writer. Its dedicated
+callback boundary, nested-pattern exclusion, whole-call hoister, validation
+diagnostic, opaque-origin classification, and reactive-factory classification
+are removed. Inline patterns passed even to that deprecated helper now use the
+ordinary nested-pattern path, including `withPatternParamsSchema` and exactly
+one compiler-emitted `.curry(...)` when captures exist. One deliberately named
+`legacy-pattern-tool` call kind remains solely to prevent the plain legacy
+writer call from being mistaken for reactive execution; an inventory test
+pins that narrow source footprint.
+
+Of the five old transformer fixture pairs, `basic-capture` and `no-captures`
+remain as explicitly named legacy-writer compatibility fixtures. The redundant
+local-variable, multiple-capture, and pre-filled-params pairs were removed;
+their closure semantics are covered by the general nested-pattern fixture
+matrix, while legacy pre-fill reading remains covered in runner, CLI, FUSE, and
+LLM compatibility suites. Validation, unknown-capture, callback-policy,
+call-kind, and pipeline tests now assert ordinary pattern semantics or explicit
+legacy routing rather than a privileged `patternTool` callback path.
+
+All six production sibling-params list writers were migrated back to ordinary
+`.map(...)` authoring: background admin, BAM school dashboard, calendar change
+detector, United flight tracker, and both USPS stages. Direct transformed-output
+inspection shows `mapWithPattern(boundFactory)` with one argument. The sole
+capturing case emits one `.curry({ pieces })`; capture-free adapters pass bare
+hoisted factories. Source inventory rejects authored `patternTool(...)` and
+manual `*WithPattern(...)` calls in supported patterns/background sources, and
+transformer tests assert every lowered list family has exactly one factory
+argument. The background compiler shim was updated to exercise the public
+`.map(...)` source shape rather than modeling the removed sibling params.
+
+The deprecated public API types and writer are marked `@deprecated`; canonical
+diagnostics no longer recommend them. Schema formatting, LLM, CLI, and FUSE
+`extraParams` branches are retained and labeled as compatibility readers. No
+Stage 5 reader or public API deletion is implied.
+
+Complete package evidence: transformers passes `1137 passed (736 steps), 0
+failed` in 18s; patterns passes `59 passed (29 steps), 0 failed`; background
+piece service passes `12 passed (48 steps), 0 failed`; API passes `17 passed, 0
+failed`. Representative `cf check --show-transformed --no-run` inspections pass
+for all five migrated production files (the USPS, United, BAM, and calendar
+checks retain only the pre-existing Gmail mergeability warning).
+
 ### Stage 4 completion gate
 
-- [ ] A PatternFactory works as an LLM tool directly and inside a metadata
+- [x] A PatternFactory works as an LLM tool directly and inside a metadata
   wrapper.
-- [ ] CLI and FUSE discover/materialize/invoke all three serializable factory
+- [x] CLI and FUSE discover/materialize/invoke all three serializable factory
   kinds where their callable surfaces permit them.
-- [ ] Repository source callers use inline pattern closures, not `patternTool`.
-- [ ] Canonical transformer/repository writers emit no `extraParams`, legacy
+- [x] Repository source callers use inline pattern closures, not `patternTool`.
+- [x] Canonical transformer/repository writers emit no `extraParams`, legacy
   `$patternRef` factory value, or sibling list params; deprecated public legacy
   APIs remain isolated and tested until Stage 5.
-- [ ] Legacy tool/list/module fixtures still read with their old semantics.
+- [x] Legacy tool/list/module fixtures still read with their old semantics.
 - [ ] Pattern, runner, LLM, CLI, FUSE, transformer, and docs checks pass.
 
 ## Stage 5 — Compatibility removal and closeout

@@ -3815,6 +3815,11 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should mention computed()",
       );
+      assertEquals(
+        errors.some((error) => error.message.includes("patternTool")),
+        false,
+        "Canonical guidance must not recommend the deprecated writer",
+      );
     },
   );
 
@@ -3894,11 +3899,16 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should suggest explicit .get().map(...) workaround",
       );
+      assertEquals(
+        errors.some((error) => error.message.includes("patternTool")),
+        false,
+        "Canonical guidance must not recommend the deprecated writer",
+      );
     },
   );
 
   await t.step(
-    "allows reactive operations in the pattern passed to patternTool()",
+    "lets the deprecated writer receive an ordinary pattern factory",
     async () => {
       const source =
         `      import { pattern, patternTool, computed, Cell } from "commonfabric";
@@ -3916,55 +3926,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       assertEquals(
         errors.length,
         0,
-        "Reactive operations inside a patternTool's pattern should be allowed",
-      );
-    },
-  );
-
-  await t.step(
-    "errors when patternTool's first argument is a bare callback",
-    async () => {
-      const source =
-        `      import { patternTool, computed, Cell } from "commonfabric";
-
-      declare const multiplier: Cell<number>;
-
-      const tool = patternTool(({ query }: { query: string }) => {
-        return computed(() => query.length * multiplier.get());
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertHasErrorType(
-        errors,
-        "pattern-context:patterntool-requires-pattern",
-      );
-    },
-  );
-
-  await t.step(
-    "keeps unresolved patternTool callbacks in compute context",
-    async () => {
-      const source = `      const helpers: Record<string, unknown> = {};
-
-      const tool = (helpers.patternTool as (fn: (input: { value?: string }) => string | undefined) => unknown)(
-        (input) => input?.value,
-      );
-      tool;
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      const optionalErrors = errors.filter((error) =>
-        error.type === "pattern-context:optional-chaining"
-      );
-      assertEquals(
-        optionalErrors.length,
-        0,
-        "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
+        "An ordinary pattern keeps its callback semantics at the legacy writer boundary",
       );
     },
   );
@@ -4183,28 +4145,6 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
           return <button onClick={() => helper("x")}>Click</button>;
         });
         return <div>{button}</div>;
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertHasErrorType(errors, "ses-callback:callable-capture");
-    },
-  );
-
-  await t.step(
-    "errors when patternTool callback captures enclosing helper function",
-    async () => {
-      const source =
-        `      import { computed, pattern, patternTool } from "commonfabric";
-
-      export default pattern(() => {
-        const tool = computed(() => {
-          const helper = (value: string) => value.toUpperCase();
-          return patternTool(({ query }: { query: string }) => helper(query));
-        });
-        return { tool };
       });
     `;
       const { diagnostics } = await validateSource(source, {

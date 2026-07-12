@@ -22,7 +22,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  type PatternFactory,
+  safeDateNow,
   TILE_UI,
   toIndentedDebugString,
   UI,
@@ -314,13 +314,6 @@ type UnitedAnalysisItem = ExtractorAnalysisItem & {
   result?: EmailAnalysisResult;
 };
 
-type ReactiveArray<T> = T[] & {
-  mapWithPattern<I, S>(
-    op: PatternFactory<I, S>,
-    params: Record<string, unknown>,
-  ): S[];
-};
-
 const addUnitedResult = pattern<ExtractorAnalysisItem, UnitedAnalysisItem>(
   (item) => ({
     email: item.email,
@@ -540,11 +533,8 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
 
   // Add emailSubject to each analysis item for debug view
   // Alias analysis.result as result for backward compatibility in flight aggregation
-  const emailAnalyses = (
-    rawAnalyses as ReactiveArray<ExtractorAnalysisItem>
-  ).mapWithPattern(
-    addUnitedResult,
-    {},
+  const emailAnalyses = rawAnalyses.map((analysis) =>
+    addUnitedResult(analysis as ExtractorAnalysisItem)
   );
 
   // Reactive clock. Ticks every 60 seconds so day-based countdowns and the

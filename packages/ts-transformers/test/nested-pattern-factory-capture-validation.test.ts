@@ -60,7 +60,7 @@ Deno.test("a user callable named PatternFactory does not spoof first-class facto
   assertStringIncludes(diagnostics[0]!.message, "operation");
 });
 
-Deno.test("patternTool retains its callable-capture rejection for factory values", async () => {
+Deno.test("deprecated patternTool does not suppress nested factory closure conversion", async () => {
   const diagnostics = await callableCaptureDiagnostics(`
     import {
       pattern,
@@ -78,9 +78,7 @@ Deno.test("patternTool retains its callable-capture rejection for factory values
     }));
   `);
 
-  assertEquals(diagnostics.length, 1);
-  assertStringIncludes(diagnostics[0]!.message, "operation");
-  assertStringIncludes(diagnostics[0]!.message, "pattern-tool");
+  assertEquals(diagnostics, []);
 });
 
 Deno.test("a non-nested pattern callback does not gain the factory-capture exception", async () => {

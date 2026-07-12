@@ -19,35 +19,39 @@ The stages relevant to array-method callbacks are:
 8.  JsxExpressionSiteRouterTransformer
 9.  AssertDiagnosticsTransformer             ← rewrites assert(...) bodies; not
                                                 array-method related
-10. LiftLoweringTransformer
-11. ClosureTransformer                       ← lowers .map() to .mapWithPattern()
+10. FrameworkProvidedForwardingTransformer
+11. SymbolicFactoryCallTransformer
+12. LiftLoweringTransformer
+13. ClosureTransformer                       ← lowers .map() to .mapWithPattern()
                                                 + immediately runs the per-callback
                                                 expression-site lowering
-12. PatternOwnedExpressionSiteLoweringTransformer
-13. HelperOwnedExpressionSiteLoweringTransformer
-14. WriteAuthorizedByValidationTransformer
-15. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
+14. PatternOwnedExpressionSiteLoweringTransformer
+15. HelperOwnedExpressionSiteLoweringTransformer
+16. WriteAuthorizedByValidationTransformer
+17. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
                                                 destructuring (ONLY for destructured
                                                 first params)
-16. SchemaInjectionTransformer
-17. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
+18. SchemaInjectionTransformer
+19. FrameworkProvidedTransformer
+20. BuilderCallHoistingTransformer           ← hoists whole lift/handler calls and
                                                 argument-position pattern(...) to
                                                 module-scope consts, after schema
                                                 injection (CT-1644/CT-1655; replaced
                                                 the former BuilderCallbackHoisting +
-                                                LiftHoisting pair, #3864)
-18. SchemaGeneratorTransformer
-19. ReactiveVariableForTransformer
-20. ModuleScopeShadowingTransformer
-21. ModuleScopeCfDataTransformer
-22. PatternCoverageTransformer               ← no-op unless coverage is enabled
-23. ModuleScopeFunctionHardeningTransformer
+                                                LiftHoisting pair, #3864); deprecated
+                                                patternTool has no special hoisting path
+21. SchemaGeneratorTransformer
+22. ReactiveVariableForTransformer
+23. ModuleScopeShadowingTransformer
+24. ModuleScopeCfDataTransformer
+25. PatternCoverageTransformer               ← no-op unless coverage is enabled
+26. ModuleScopeFunctionHardeningTransformer
 ```
 
 A common misconception worth flagging up front:
-`PatternCallbackLoweringTransformer` (stage 15) runs _last_ among the lowering
+`PatternCallbackLoweringTransformer` (stage 17) runs _last_ among the lowering
 passes, not first. By the time it fires, expression-site lowering during
-`ClosureTransformer` (stage 11) has already had its say. The
+`ClosureTransformer` (stage 13) has already had its say. The
 `key()`-substitution prologue it generates is downstream of the analyzer-driven
 decisions about wrapping.
 

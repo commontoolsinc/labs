@@ -210,7 +210,7 @@ export type CallKind =
   | { kind: "wish"; symbol?: ts.Symbol }
   | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol }
-  | { kind: "pattern-tool"; symbol?: ts.Symbol }
+  | { kind: "legacy-pattern-tool"; symbol?: ts.Symbol }
   | {
     kind: "runtime-call";
     symbol?: ts.Symbol;
@@ -489,32 +489,11 @@ export function getPatternBuilderCallbackArgument(
   return getPatternBuilderCallbackDescriptor(call, checker)?.callback;
 }
 
-export function getPatternToolCallbackArgument(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
-  const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "pattern-tool") {
-    const target = stripWrappers(call.expression);
-    if (
-      !ts.isPropertyAccessExpression(target) ||
-      target.name.text !== "patternTool"
-    ) {
-      return undefined;
-    }
-  }
-
-  const callbackArg = call.arguments[0];
-  return callbackArg
-    ? resolveCallbackFunctionExpression(callbackArg, checker)
-    : undefined;
-}
-
-export type LegacyPatternCarrierKind = "pattern-tool" | "with-pattern";
+export type LegacyPatternCarrierKind = "with-pattern";
 
 /**
- * Classify the compatibility carrier whose argument 0 contains a legacy
- * pattern builder call.
+ * Classify a compatibility list carrier whose argument 0 contains a pattern
+ * builder call and whose sibling params must remain on the legacy reader path.
  *
  * Parentheses and type-only wrappers do not change argument ownership. Earlier
  * transformer passes can also clone the pattern call without retaining a
@@ -548,9 +527,6 @@ export function classifyLegacyPatternCarrier(
       getArrayMethodAccessKindByName(callee.name.text)?.lowered
     ) {
       return "with-pattern";
-    }
-    if (detectCallKind(carrier, checker)?.kind === "pattern-tool") {
-      return "pattern-tool";
     }
   }
   return undefined;
@@ -618,42 +594,6 @@ export function getWithPatternHoistablePatternCall(
   }
   const accessKind = getArrayMethodAccessKindByName(callee.name.text);
   if (!accessKind?.lowered) {
-    return undefined;
-  }
-  const firstArg = call.arguments[0];
-  if (!firstArg) {
-    return undefined;
-  }
-  const patternCall = stripWrappers(firstArg);
-  if (
-    !ts.isCallExpression(patternCall) ||
-    !isPatternBuilderCall(patternCall, checker)
-  ) {
-    return undefined;
-  }
-  return patternCall;
-}
-
-/**
- * If `call` is a `patternTool(pattern(...), extraParams?)` call whose FIRST
- * argument is a bare `pattern(...)` builder call, return that inner pattern call
- * (the hoistable unit). Otherwise return undefined.
- *
- * Sibling of {@link getWithPatternHoistablePatternCall}: same hoist mechanic
- * (relocate the bare pattern call sitting in argument 0, leaving the enclosing
- * call's callee and remaining arguments intact), different enclosing call shape.
- * Per-instance values flow through patternTool's SECOND argument (`extraParams`)
- * and module-scoped reactive reads are absorbed by the pattern itself, so the
- * bare `pattern(...)` is capture-free and safe to evaluate once at module scope.
- * As of CT-1655 patternTool's first argument must be a pattern (enforced by
- * PatternContextValidation), so this recognizer covers every reactive
- * patternTool.
- */
-export function getPatternToolHoistablePatternCall(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): ts.CallExpression | undefined {
-  if (detectCallKind(call, checker)?.kind !== "pattern-tool") {
     return undefined;
   }
   const firstArg = call.arguments[0];
@@ -2290,10 +2230,10 @@ function createNamedCallKind(
       return symbol
         ? { kind: "generate-object", symbol }
         : { kind: "generate-object" };
-    case "pattern-tool":
+    case "legacy-pattern-tool":
       return symbol
-        ? { kind: "pattern-tool", symbol }
-        : { kind: "pattern-tool" };
+        ? { kind: "legacy-pattern-tool", symbol }
+        : { kind: "legacy-pattern-tool" };
     case "runtime-call":
       return symbol
         ? {

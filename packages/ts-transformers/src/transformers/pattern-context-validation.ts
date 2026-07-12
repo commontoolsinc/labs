@@ -83,7 +83,6 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
 >([
   "event-handler",
   "reactive-array-method",
-  "pattern-tool",
   "pattern-builder",
   "render-builder",
   "lift-applied",
@@ -278,9 +277,6 @@ export class PatternContextValidationTransformer
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
-
-        // patternTool's first argument must be a pattern() (CT-1655)
-        this.validatePatternToolFirstArgument(node, context, checker);
 
         const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
@@ -1105,40 +1101,6 @@ export class PatternContextValidationTransformer
     }
   }
 
-  /**
-   * Validates that `patternTool(...)`'s first argument is a `pattern(...)`, not a
-   * bare callback (CT-1655). Passing a function directly used to be auto-wrapped
-   * (`pattern(fn)`) by the runtime and auto-captured by a transformer strategy;
-   * both were removed in favor of an explicit, addressable pattern. Authors now
-   * wrap the callback themselves: `patternTool(pattern(fn), extraParams?)`.
-   */
-  private validatePatternToolFirstArgument(
-    node: ts.CallExpression,
-    context: TransformationContext,
-    checker: ts.TypeChecker,
-  ): void {
-    if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
-      return;
-    }
-    const firstArg = node.arguments[0];
-    if (
-      !firstArg ||
-      !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))
-    ) {
-      return;
-    }
-    context.reportDiagnostic({
-      severity: "error",
-      type: "pattern-context:patterntool-requires-pattern",
-      message:
-        `patternTool()'s first argument must be a pattern(), not a bare callback. ` +
-        `Wrap the callback in pattern(): patternTool(pattern(fn), extraParams?). ` +
-        `Module-scoped reactive values the callback reads are captured by the ` +
-        `pattern automatically; per-instance values go in extraParams.`,
-      node: firstArg,
-    });
-  }
-
   private validateCallbackSelfContainment(
     func: ts.ArrowFunction | ts.FunctionExpression,
     boundarySemantics: CallbackBoundarySemantics,
@@ -1212,8 +1174,7 @@ export class PatternContextValidationTransformer
   /**
    * Only nested patterns that the closure converter will hoist may carry a
    * callable factory through their private params record. Other SES callback
-   * boundaries — especially the legacy patternTool carrier — retain the
-   * ordinary callable-capture rejection.
+   * boundaries retain the ordinary callable-capture rejection.
    */
   private isClosureConvertedNestedPatternBoundary(
     func: ts.ArrowFunction | ts.FunctionExpression,
@@ -1286,41 +1247,15 @@ export class PatternContextValidationTransformer
    * computed(), lift(), or .map() on CellLike types.
    *
    * Standalone functions cannot have their closures captured automatically.
-   * Users should either:
-   * - Move the reactive operation out of the standalone function
-   * - Use patternTool() which handles closure capture automatically
-   *
-   * Exception: Functions passed inline to patternTool() are handled by the
-   * patternTool transformer and don't need validation here.
-   *
-   * Limitation: This check is purely syntactic — it only recognizes functions
-   * passed *inline* as the first argument to patternTool(). If a function is
-   * defined separately and then passed to patternTool(), e.g.:
-   *
-   *   const myFn = ({ query }) => { return computed(...) };
-   *   const tool = patternTool(myFn);
-   *
-   * ...the validator will still flag myFn, because it can't trace dataflow to
-   * see that it ends up as a patternTool argument. The workaround is to inline
-   * the function into the patternTool() call.
+   * Move reactive work into a pattern-owned context, where ordinary inline
+   * `pattern(...)` values use the same closure-conversion path as every other
+   * first-class factory.
    */
   private validateStandaloneFunction(
     func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Skip if this function is passed to patternTool()
-    if (!ts.isFunctionDeclaration(func)) {
-      const boundarySemantics = getCallbackBoundarySemantics(
-        func,
-        checker,
-        context,
-      );
-      if (boundarySemantics.isPatternToolCallback) {
-        return;
-      }
-    }
-
     // Walk the function body looking for reactive operations
     const visitBody = (node: ts.Node): void => {
       // Skip nested function definitions - they have their own scope
@@ -1351,7 +1286,7 @@ export class PatternContextValidationTransformer
                 `${callKind.builderName}() is not allowed inside standalone functions. ` +
                 `Common Fabric builders must be authored in an allowed context ` +
                 `so their callbacks can be self-contained for SES sandboxing. ` +
-                `Move the ${callKind.builderName}() call to module scope, a pattern-owned context, or use patternTool() when closure capture is required.`,
+                `Move the ${callKind.builderName}() call to module scope or a pattern-owned context.`,
               node,
             });
             return;
@@ -1366,7 +1301,7 @@ export class PatternContextValidationTransformer
               message:
                 `Reactive computations are not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                `Move the computed() call to a pattern-owned context.`,
               node,
             });
             return;
@@ -1379,7 +1314,7 @@ export class PatternContextValidationTransformer
               message:
                 `.${arrayMethodCallSite.family}() on reactive types is not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the .${arrayMethodCallSite.family}() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                `Move the .${arrayMethodCallSite.family}() call to a pattern-owned context. ` +
                 `If this is an explicit Cell/Writable value and eager ${arrayMethodCallSite.family}ing is acceptable, use <cell>.get().${arrayMethodCallSite.family}(...).`,
               node,
             });

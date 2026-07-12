@@ -21,7 +21,6 @@ import { getEnclosingFunctionLikeDeclaration } from "../../src/ast/function-pred
 import {
   getPatternBuilderCallbackArgument,
   getPatternBuilderCallbackDescriptor,
-  getPatternToolHoistablePatternCall,
   getWithPatternHoistablePatternCall,
 } from "../../src/ast/call-kind.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
@@ -181,39 +180,6 @@ Deno.test("getWithPatternHoistablePatternCall returns undefined for a lowered me
   // Callee is a lowered *WithPattern access, but there is no first argument to
   // hoist, so the recognizer bails at the missing-argument guard.
   assertEquals(getWithPatternHoistablePatternCall(call, checker), undefined);
-});
-
-Deno.test("getPatternToolHoistablePatternCall lifts the bare pattern call out of a patternTool call", () => {
-  const { sourceFile, checker } = createProgramWithCommonFabric(`
-    import { patternTool, pattern } from "commonfabric";
-    const value = patternTool(pattern(() => 1), { p: 1 });
-  `);
-
-  const call = findCall(sourceFile, "value");
-  const hoistable = getPatternToolHoistablePatternCall(call, checker);
-  assertEquals(hoistable?.getText(), "pattern(() => 1)");
-});
-
-Deno.test("getPatternToolHoistablePatternCall returns undefined when patternTool has no arguments", () => {
-  const { sourceFile, checker } = createProgramWithCommonFabric(`
-    import { patternTool } from "commonfabric";
-    const value = patternTool();
-  `);
-
-  const call = findCall(sourceFile, "value");
-  // Recognized as a pattern-tool call, but the missing first argument means
-  // there is nothing to hoist.
-  assertEquals(getPatternToolHoistablePatternCall(call, checker), undefined);
-});
-
-Deno.test("getPatternToolHoistablePatternCall ignores calls that are not patternTool", () => {
-  const { sourceFile, checker } = createProgram(`
-    declare function plain(body: () => number, params?: unknown): number;
-    const value = plain(() => 1, { p: 1 });
-  `);
-
-  const call = findCall(sourceFile, "value");
-  assertEquals(getPatternToolHoistablePatternCall(call, checker), undefined);
 });
 
 Deno.test("getLiftAppliedInputAndCallback returns undefined when the applied lift call has no input argument", () => {
@@ -511,7 +477,7 @@ Deno.test("detectCallKind classifies ifElse, when, unless, wish, and generate ca
   );
   assertEquals(
     detectCallKind(findCall(sourceFile, "g"), checker)?.kind,
-    "pattern-tool",
+    "legacy-pattern-tool",
   );
 });
 
@@ -668,7 +634,7 @@ Deno.test("detectCallKind recognizes synthetic __cfHelpers runtime and cell-fact
   );
   assertEquals(
     detectCallKind(findCall(sourceFile, "patternToolValue"), checker)?.kind,
-    "pattern-tool",
+    "legacy-pattern-tool",
   );
   assertEquals(
     detectCallKind(findCall(sourceFile, "generateTextValue"), checker)?.kind,

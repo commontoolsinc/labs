@@ -133,7 +133,6 @@ export function isStructuralReactiveFactoryExpression(
           case "wish":
           case "generate-text":
           case "generate-object":
-          case "pattern-tool":
           case "runtime-call":
             return true;
           default:

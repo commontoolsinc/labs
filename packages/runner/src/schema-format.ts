@@ -68,7 +68,7 @@ export interface SchemaFormatOptions {
  * // → '"open" | "closed"'
  *
  * @example
- * // PatternToolResult schemas (from patternTool())
+ * // Legacy PatternToolResult compatibility schemas
  * schemaToTypeString({
  *   type: "object",
  *   properties: {
@@ -178,13 +178,12 @@ function schemaToTypeStringInner(
     return `(e: ${inputType}) => ${outputType}`;
   }
 
-  // Handle PatternToolResult - objects with { pattern, extraParams } structure
-  // These represent callable handlers created via patternTool()
+  // Compatibility reader for stored PatternToolResult objects.
   // Format as (e: ExtraParamsType) => void for LLM readability
   if (s.type === "object" || s.properties) {
     const props = s.properties as Record<string, JSONSchema> | undefined;
     if (props && "pattern" in props && "extraParams" in props) {
-      // This is a PatternToolResult schema - format as a handler
+      // Format the legacy projection as a handler.
       const extraParamsSchema = props.extraParams;
       if (depth >= maxDepth) return "(e: {...}) => void";
       const paramType = schemaToTypeString(extraParamsSchema, nextOpts);

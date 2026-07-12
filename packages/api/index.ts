@@ -2232,8 +2232,11 @@ export interface PatternFunction {
 }
 
 /**
- * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
- * This is the actual runtime return type, not a cast.
+ * Legacy LLM tool definition written by `patternTool()`.
+ *
+ * @deprecated Pass a `PatternFactory` directly, or use
+ * `{ pattern: factory, ...metadata }`. This shape remains readable only for
+ * stored compatibility data.
  */
 export interface PatternToolResult<E = Record<PropertyKey, never>> {
   pattern: Pattern;
@@ -2270,6 +2273,10 @@ type FrameworkProvidedKeys<T> = {
     : never;
 }[keyof T];
 
+/**
+ * @deprecated Pass a `PatternFactory` directly, or use a metadata wrapper.
+ * This writer remains available until the durable compatibility gates pass.
+ */
 export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,

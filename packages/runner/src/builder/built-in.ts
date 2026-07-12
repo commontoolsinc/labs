@@ -517,35 +517,11 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 export type { createCell };
 
 /**
- * Helper function for creating LLM tool definitions from patterns with optional
- * pre-filled parameters. Returns an object suitable for use as an LLM tool, with
- * proper TypeScript typing that reflects only the non-pre-filled parameters.
+ * Explicit legacy writer for `{ pattern, extraParams }` tool values.
  *
- * The first argument must be a `pattern(...)` (CT-1655). A module-scoped reactive
- * value the pattern's callback reads is captured by the pattern automatically (as
- * a module-scope closure); per-instance values are pre-filled via `extraParams`.
- *
- * @param pattern - An already-created PatternFactory (wrap callbacks in pattern())
- * @param extraParams - Optional object of parameter values to pre-fill
- * @returns An object with `pattern` and `extraParams` properties, typed to show only remaining params
- *
- * @example
- * ```ts
- * import { pattern, patternTool } from "commonfabric";
- *
- * const grepTool = patternTool(
- *   pattern(({ query, content }: { query: string; content: string }) => {
- *     return content.split("\n").filter((c) => c.includes(query));
- *   }),
- *   { content },
- * );
- *
- * // With a pattern declared elsewhere:
- * const grepTool2 = patternTool(myGrepPattern, { content });
- *
- * // Result type: PatternToolResult<{ content: string }>
- * // which has { pattern: Pattern, extraParams: { content: string } }
- * ```
+ * @deprecated Pass a direct `PatternFactory` or
+ * `{ pattern: factory, ...metadata }`. This writer remains only until the
+ * durable compatibility gates pass.
  */
 export const patternTool = (<
   T,
@@ -558,8 +534,8 @@ export const patternTool = (<
   extraParams?: FactoryInput<E>,
 ): PatternToolResult<E> => {
   return {
-    // `patternTool` is an explicitly deprecated compatibility writer until
-    // the Stage 4 tool migration lands. Preserve its historical structural
+    // `patternTool` is an explicitly deprecated compatibility writer. Preserve
+    // its historical structural
     // Pattern payload here, at the helper boundary, so a keyless/manual tool
     // pattern does not masquerade as a durably cold-loadable Factory@1 value.
     // Ordinary factory-valued graph data remains callable and must satisfy the

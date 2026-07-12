@@ -296,7 +296,7 @@ export class PatternBuilder {
   ): ts.ArrowFunction {
     const eventParam = originalCallback.parameters[0];
     const stateParam = originalCallback.parameters[1];
-    const extraParams = originalCallback.parameters.slice(2);
+    const additionalParams = originalCallback.parameters.slice(2);
 
     // 1. Create event parameter
     // Ensure event parameter doesn't collide with captures
@@ -387,7 +387,7 @@ export class PatternBuilder {
     );
 
     // 3. Handle extra parameters
-    const additionalParameters = extraParams.map(
+    const additionalParameters = additionalParams.map(
       (param: ts.ParameterDeclaration) => {
         const bindingName = normalizeBindingName(
           param.name,
