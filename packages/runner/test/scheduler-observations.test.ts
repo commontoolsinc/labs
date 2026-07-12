@@ -49,6 +49,22 @@ const CLEAN_RESTART_PROGRAM: RuntimeProgram = {
   }],
 };
 
+const DIRECT_OUTPUT_WITH_SIDE_WRITE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern, Writable } from 'commonfabric';",
+      "export default pattern(() => {",
+      "  const source = new Writable<number>(2);",
+      "  const side = new Writable<number>(0);",
+      "  computed(() => side.set(source.get() * 3));",
+      "  return { source, side };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
 const createSchedulerTestRuntime: typeof createBaseSchedulerTestRuntime = (
   apiUrl,
   options = {},
@@ -2266,6 +2282,78 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("indexes a transformed computation's direct output and side write separately", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const { runtime, storageManager, tx } = testRuntime;
+      const compiled = await runtime.patternManager.compilePattern(
+        DIRECT_OUTPUT_WITH_SIDE_WRITE_PROGRAM,
+      );
+      const resultCell = runtime.getCell<{ source: number; side: number }>(
+        space,
+        "persistent scheduler direct output with side write",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, compiled, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      expect(await result.pull()).toEqual({ source: 2, side: 6 });
+      await runtime.storageManager.synced();
+
+      const snapshots = await persistedSchedulerSnapshots(
+        runtime,
+        resultCellPieceId(resultCell),
+      );
+      const materializer = snapshots.find((snapshot) =>
+        snapshot.observation.materializerWriteEnvelopes.length > 0
+      )?.observation;
+      expect(materializer).toBeDefined();
+      expect(materializer?.completeActionScopeSummary?.directOutputs.length)
+        .toBe(1);
+      expect(materializer?.materializerWriteEnvelopes.length).toBe(1);
+
+      const directOutput = materializer!.completeActionScopeSummary!
+        .directOutputs[0];
+      const sideWrite = materializer!.materializerWriteEnvelopes[0];
+      expect(directOutput.id).not.toBe(sideWrite.id);
+
+      type SchedulerIndexServer = {
+        openEngine(space: string): Promise<{
+          database: {
+            prepare(sql: string): {
+              all(params: Record<string, unknown>): Array<{
+                write_id: string;
+                write_kind: string;
+              }>;
+            };
+          };
+        }>;
+      };
+      const server = (storageManager as unknown as {
+        server(): SchedulerIndexServer;
+      }).server();
+      const engine = await server.openEngine(space);
+      const indexedWrites = engine.database.prepare(`
+        SELECT write_id, write_kind
+        FROM scheduler_write_index
+        WHERE action_id = :action_id
+      `).all({ action_id: materializer!.actionId });
+
+      expect(indexedWrites).toContainEqual({
+        write_id: directOutput.id,
+        write_kind: "current-known",
+      });
+      expect(indexedWrites).toContainEqual({
+        write_id: sideWrite.id,
+        write_kind: "materializer",
+      });
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("resumes a clean piece without rerunning or fetching cell data", async () => {
     const runtimeAEnv = createSchedulerTestRuntime("https://example.test", {});
     let runtimeBEnv: ReturnType<typeof createSchedulerTestRuntime> | undefined;
@@ -2310,6 +2398,8 @@ describe("persistent scheduler observations", () => {
           path: ["value"],
         },
       });
+      expect(completeObservation?.completeActionScopeSummary?.directOutputs)
+        .toHaveLength(1);
       runtimeA.scheduler.dispose();
 
       const server = (storageManager as unknown as {
@@ -2346,6 +2436,21 @@ describe("persistent scheduler observations", () => {
       expect(resultCellB.get()).toEqual({ doubled: 10 });
       expect(runtimeB.scheduler.getActionRunTrace()).toHaveLength(0);
       expect(cellDataReads).toBe(0);
+
+      const rehydratedAction = runtimeB.scheduler.getGraphSnapshot().nodes.find(
+        (node) => node.id === completeObservation?.actionId,
+      );
+      expect(rehydratedAction).toMatchObject({
+        id: completeObservation?.actionId,
+        type: "computation",
+      });
+      const directOutput = completeObservation!.completeActionScopeSummary!
+        .directOutputs[0];
+      expect(rehydratedAction?.writes).toContain(
+        `${directOutput.space}/${directOutput.id}/${
+          directOutput.scope ?? "space"
+        }/${directOutput.path.join("/")}`,
+      );
     } finally {
       restoreEvaluateWatchSet?.();
       runtimeAEnv.runtime.scheduler.dispose();
