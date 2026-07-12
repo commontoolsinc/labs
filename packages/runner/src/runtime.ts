@@ -40,7 +40,7 @@ import type {
   ChangeGroup,
   CommitError,
   DID,
-  ExternalSinkDisposition,
+  ExternalSinkDispositionPolicy,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -124,6 +124,7 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
+import { getTransactionSourceAction } from "./storage/transaction-source-context.ts";
 import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
@@ -439,7 +440,7 @@ export interface RuntimeOptions {
    */
   fetch?: typeof globalThis.fetch;
   /** Whether builtins may release external post-commit sink effects. */
-  externalSinkDisposition?: ExternalSinkDisposition;
+  externalSinkDisposition?: ExternalSinkDispositionPolicy;
 }
 
 export interface CfcRuntimeStats {
@@ -611,7 +612,7 @@ export class Runtime {
    * `RuntimeOptions.fetch`.
    */
   readonly fetch: typeof globalThis.fetch;
-  readonly externalSinkDisposition: ExternalSinkDisposition;
+  readonly externalSinkDisposition: ExternalSinkDispositionPolicy;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -1195,6 +1196,10 @@ export class Runtime {
     options: { changeGroup?: ChangeGroup } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
+    const continuationSourceAction = getTransactionSourceAction();
+    if (continuationSourceAction !== undefined) {
+      tx.sourceAction = continuationSourceAction;
+    }
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }

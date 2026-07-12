@@ -82,6 +82,9 @@ export type {
 };
 export type ChangeGroup = unknown;
 export type ExternalSinkDisposition = "allow" | "suppress";
+export type ExternalSinkDispositionPolicy =
+  | ExternalSinkDisposition
+  | ((sourceAction: object | undefined) => ExternalSinkDisposition);
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error

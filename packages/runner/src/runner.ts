@@ -112,6 +112,10 @@ import {
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  isServerExecutableBuiltinId,
+  serverBuiltinImplementationHash,
+} from "./builtins/server-execution.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -4946,7 +4950,15 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
-    this.applyImplementationHash(action, impl);
+    const serverBuiltinId = isServerExecutableBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
+    if (serverBuiltinId !== undefined) {
+      (action as { implementationHash?: string }).implementationHash =
+        serverBuiltinImplementationHash(serverBuiltinId);
+    } else {
+      this.applyImplementationHash(action, impl);
+    }
     (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
       rawInstanceKey;
 
@@ -4962,6 +4974,18 @@ export class Runner {
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
+      ...(serverBuiltinId !== undefined
+        ? {
+          serverBuiltin: {
+            version: 1 as const,
+            id: serverBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            writes: schedulingWrites,
+            directOutputs: outputCells,
+          },
+        }
+        : {}),
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),

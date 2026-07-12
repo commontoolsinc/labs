@@ -38,14 +38,26 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));
-  moduleRegistry.addModuleByRef("fetchBinary", raw(fetchBinary));
-  moduleRegistry.addModuleByRef("fetchText", raw(fetchText));
-  moduleRegistry.addModuleByRef("fetchJson", raw(fetchJson));
+  moduleRegistry.addModuleByRef(
+    "fetchBinary",
+    raw(fetchBinary, { isEffect: true }),
+  );
+  moduleRegistry.addModuleByRef(
+    "fetchText",
+    raw(fetchText, { isEffect: true }),
+  );
+  moduleRegistry.addModuleByRef(
+    "fetchJson",
+    raw(fetchJson, { isEffect: true }),
+  );
   moduleRegistry.addModuleByRef(
     "fetchJsonUnchecked",
-    raw(fetchJsonUnchecked),
+    raw(fetchJsonUnchecked, { isEffect: true }),
   );
-  moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
+  moduleRegistry.addModuleByRef(
+    "fetchProgram",
+    raw(fetchProgram, { isEffect: true }),
+  );
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));

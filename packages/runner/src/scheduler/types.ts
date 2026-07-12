@@ -10,6 +10,7 @@ import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
+import type { ServerBuiltinActionDescriptor } from "../builtins/server-execution.ts";
 
 export interface TelemetryAnnotations {
   pattern: Pattern;
@@ -31,6 +32,8 @@ export interface TelemetryAnnotations {
     materializerWriteEnvelopes: NormalizedFullLink[];
     directOutputs: NormalizedFullLink[];
   };
+  /** Trusted descriptor attached only to canonical registry builtins. */
+  serverBuiltin?: ServerBuiltinActionDescriptor;
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 

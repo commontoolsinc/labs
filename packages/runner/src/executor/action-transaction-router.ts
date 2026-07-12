@@ -16,6 +16,13 @@ import type {
   ActionTransactionRouter,
 } from "../storage/v2.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type { TelemetryAnnotations } from "../scheduler/types.ts";
+import type { CompleteActionScopeSummary } from "../scheduler/persistent-observation.ts";
+import {
+  isServerExecutableBuiltinId,
+  type ServerBuiltinActionDescriptor,
+  serverBuiltinImplementationHash,
+} from "../builtins/server-execution.ts";
 
 export interface ExecutorCandidateDiagnostic {
   readonly diagnosticCode: string;
@@ -25,6 +32,8 @@ export interface ExecutorCandidateDiagnostic {
 export interface ExecutorActionTransactionRouterOptions {
   readonly servedSpace: MemorySpace;
   readonly branch: string;
+  /** The Worker has a narrow host broker for supported builtin effects. */
+  readonly builtinBrokerAvailable?: boolean;
   readonly claimForAction: (sourceAction: object) => ExecutionClaim | undefined;
   readonly onCandidate: (
     candidate: CandidateClaim,
@@ -53,18 +62,38 @@ export function createExecutorActionTransactionRouter(
   options: ExecutorActionTransactionRouterOptions,
 ): ActionTransactionRouter {
   const reported = new WeakMap<object, string>();
+  const builtinSummaries = new WeakMap<object, CompleteActionScopeSummary>();
+  const builtinObservationTemplates = new WeakMap<
+    object,
+    SchedulerActionObservation
+  >();
   const local = {
     disposition: "local",
     kind: "executor-shadow",
   } as const satisfies ActionTransactionRoute;
 
   return (input: ActionTransactionRouteInput) => {
-    const observation = input.commit.schedulerObservation;
+    const sourceAction = input.sourceAction;
+    const liveClaim = sourceAction === undefined
+      ? undefined
+      : options.claimForAction(sourceAction);
+    let observation = input.commit.schedulerObservation;
+    if (
+      !isSchedulerActionObservation(observation) &&
+      sourceAction !== undefined && liveClaim !== undefined
+    ) {
+      const continuation = synthesizeBuiltinContinuationObservation(
+        input,
+        sourceAction,
+        builtinSummaries,
+        builtinObservationTemplates,
+      );
+      if (continuation !== undefined) {
+        input.commit.schedulerObservation = continuation;
+        observation = continuation;
+      }
+    }
     if (!isSchedulerActionObservation(observation)) {
-      const sourceAction = input.sourceAction;
-      const liveClaim = sourceAction === undefined
-        ? undefined
-        : options.claimForAction(sourceAction);
       if (sourceAction !== undefined && liveClaim !== undefined) {
         invalidateClaim(
           reported,
@@ -80,21 +109,28 @@ export function createExecutorActionTransactionRouter(
       }
       return local;
     }
-    const staticDecision = classifyStaticActionServability(
-      observation,
-      options.servedSpace,
-    );
-    const claimKey = safeActionClaimKey(observation);
-    if (input.sourceAction === undefined) {
+    if (sourceAction === undefined) {
+      const claimKey = safeActionClaimKey(observation);
       options.onDiagnostic?.({
         diagnosticCode: "missing-source-action",
         ...(claimKey !== undefined ? { claimKey } : {}),
       });
       return local;
     }
-    const sourceAction = input.sourceAction;
-
-    const liveClaim = options.claimForAction(sourceAction);
+    const builtinId = prepareSupportedBuiltinObservation(
+      input,
+      observation,
+      sourceAction,
+      builtinSummaries,
+      builtinObservationTemplates,
+    );
+    const routedObservation = input.commit
+      .schedulerObservation as SchedulerActionObservation;
+    const staticDecision = classifyStaticActionServability(
+      routedObservation,
+      options.servedSpace,
+    );
+    const claimKey = safeActionClaimKey(routedObservation);
     if (claimKey === undefined) {
       const diagnosticCode = staticDecision.status === "unservable"
         ? staticDecision.reason
@@ -123,12 +159,16 @@ export function createExecutorActionTransactionRouter(
       );
       return local;
     }
-    if (staticDecision.status !== "claim-ready") {
+    const brokeredBuiltinReady = staticDecision.status === "broker-required" &&
+      options.builtinBrokerAvailable === true && builtinId !== undefined;
+    if (staticDecision.status !== "claim-ready" && !brokeredBuiltinReady) {
       const diagnosticCode = staticDecision.status === "broker-required"
-        ? "broker-required"
+        ? options.builtinBrokerAvailable === true
+          ? "unsupported-server-builtin"
+          : "broker-required"
         : staticDecision.reason;
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, observation, liveClaim);
+        attachClaimAssertion(input.commit, routedObservation, liveClaim);
         return unservedRoute(
           reported,
           options,
@@ -140,10 +180,14 @@ export function createExecutorActionTransactionRouter(
       options.onDiagnostic?.({ diagnosticCode, claimKey });
       return local;
     }
-    const dynamicReason = dynamicUnservableReason(input, observation, options);
+    const dynamicReason = dynamicUnservableReason(
+      input,
+      routedObservation,
+      options,
+    );
     if (dynamicReason !== undefined) {
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, observation, liveClaim);
+        attachClaimAssertion(input.commit, routedObservation, liveClaim);
         return unservedRoute(
           reported,
           options,
@@ -159,12 +203,15 @@ export function createExecutorActionTransactionRouter(
       const encoded = JSON.stringify(claimKey);
       if (reported.get(sourceAction) !== encoded) {
         reported.set(sourceAction, encoded);
-        options.onCandidate({ claimKey }, sourceAction);
+        options.onCandidate({
+          claimKey,
+          ...(builtinId !== undefined ? { builtinId } : {}),
+        }, sourceAction);
       }
       return local;
     }
 
-    attachClaimAssertion(input.commit, observation, liveClaim);
+    attachClaimAssertion(input.commit, routedObservation, liveClaim);
     return {
       disposition: "upstream",
       ...(options.onUnserved
@@ -181,6 +228,193 @@ export function createExecutorActionTransactionRouter(
         : {}),
     };
   };
+}
+
+function prepareSupportedBuiltinObservation(
+  input: ActionTransactionRouteInput,
+  observation: SchedulerActionObservation,
+  sourceAction: object,
+  summaries: WeakMap<object, CompleteActionScopeSummary>,
+  templates: WeakMap<object, SchedulerActionObservation>,
+):
+  | import("../builtins/server-execution.ts").ServerExecutableBuiltinId
+  | undefined {
+  const descriptor = supportedBuiltinDescriptor(sourceAction, observation);
+  if (descriptor === undefined) return undefined;
+
+  let summary = summaries.get(sourceAction);
+  if (summary === undefined) {
+    summary = {
+      version: 1,
+      complete: true,
+      implementationFingerprint: observation.implementationFingerprint,
+      runtimeFingerprint: observation.runtimeFingerprint,
+      piece: addressOf(descriptor.piece),
+      reads: dedupeAddresses([
+        ...descriptor.reads,
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...commitReadAddresses(input),
+      ]),
+      writes: dedupeAddresses([
+        ...descriptor.writes,
+        ...observation.actualChangedWrites,
+        ...observation.currentKnownWrites,
+        ...(observation.declaredWrites ?? []),
+        ...observation.materializerWriteEnvelopes,
+        ...(observation.ignoredSchedulingWrites ?? []),
+        ...commitWriteAddresses(input),
+      ]),
+      materializerWriteEnvelopes: dedupeAddresses(
+        observation.materializerWriteEnvelopes,
+      ),
+      directOutputs: dedupeAddresses(descriptor.directOutputs),
+    };
+    summaries.set(sourceAction, summary);
+    templates.set(sourceAction, observation);
+  }
+  input.commit.schedulerObservation = {
+    ...observation,
+    completeActionScopeSummary: summary,
+  };
+  return descriptor.id;
+}
+
+function supportedBuiltinDescriptor(
+  sourceAction: object,
+  observation: SchedulerActionObservation,
+): ServerBuiltinActionDescriptor | undefined {
+  const descriptor = (sourceAction as Partial<TelemetryAnnotations>)
+    .serverBuiltin;
+  if (
+    descriptor?.version !== 1 ||
+    !isServerExecutableBuiltinId(descriptor.id) ||
+    observation.actionKind !== "effect" ||
+    observation.implementationFingerprint !==
+      `impl:${serverBuiltinImplementationHash(descriptor.id)}` ||
+    !isAddressLike(descriptor.piece) ||
+    !Array.isArray(descriptor.reads) ||
+    !descriptor.reads.every(isAddressLike) ||
+    !Array.isArray(descriptor.writes) ||
+    !descriptor.writes.every(isAddressLike) ||
+    !Array.isArray(descriptor.directOutputs) ||
+    !descriptor.directOutputs.every(isAddressLike)
+  ) {
+    return undefined;
+  }
+  return descriptor;
+}
+
+function synthesizeBuiltinContinuationObservation(
+  input: ActionTransactionRouteInput,
+  sourceAction: object,
+  summaries: WeakMap<object, CompleteActionScopeSummary>,
+  templates: WeakMap<object, SchedulerActionObservation>,
+): SchedulerActionObservation | undefined {
+  const summary = summaries.get(sourceAction);
+  const template = templates.get(sourceAction);
+  if (summary === undefined || template === undefined) return undefined;
+  const writes = commitWriteAddresses(input);
+  return {
+    ...template,
+    observedAtSeq: 0,
+    transactionKind: "action-run",
+    reads: commitReadAddresses(input),
+    shallowReads: [],
+    actualChangedWrites: writes,
+    currentKnownWrites: summary.writes,
+    materializerWriteEnvelopes: summary.materializerWriteEnvelopes,
+    completeActionScopeSummary: summary,
+    status: "success",
+    executionClaimAssertion: undefined,
+  };
+}
+
+function commitReadAddresses(
+  input: ActionTransactionRouteInput,
+): IMemorySpaceAddress[] {
+  return [...input.commit.reads.confirmed, ...input.commit.reads.pending].map(
+    (read) =>
+      addressOf({
+        space: input.space,
+        id: read.id,
+        scope: read.scope ?? "space",
+        path: [...read.path],
+      }),
+  );
+}
+
+function commitWriteAddresses(
+  input: ActionTransactionRouteInput,
+): IMemorySpaceAddress[] {
+  return input.commit.operations.flatMap((operation) =>
+    operation.op === "sqlite" ? [] : [addressOf({
+      space: input.space,
+      id: operation.id,
+      scope: operation.scope ?? "space",
+      path: ["value"],
+    })]
+  );
+}
+
+function dedupeAddresses(
+  values: readonly (IMemorySpaceAddress | {
+    space: string;
+    id: string;
+    path: readonly string[];
+    scope?: "space" | "user" | "session";
+    type?: string;
+  })[],
+): IMemorySpaceAddress[] {
+  const result = new Map<string, IMemorySpaceAddress>();
+  for (const value of values) {
+    const address = addressOf(value);
+    result.set(
+      JSON.stringify([
+        address.space,
+        address.id,
+        address.scope ?? "space",
+        address.path,
+      ]),
+      address,
+    );
+  }
+  return [...result.values()];
+}
+
+function addressOf(value: {
+  space: string;
+  id: string;
+  path: readonly string[];
+  scope?: "space" | "user" | "session";
+  type?: string;
+}): IMemorySpaceAddress {
+  return {
+    space: value.space as MemorySpace,
+    id: value.id as IMemorySpaceAddress["id"],
+    scope: value.scope ?? "space",
+    path: [...value.path],
+    ...(value.type !== undefined
+      ? { type: value.type as IMemorySpaceAddress["type"] }
+      : {}),
+  };
+}
+
+function isAddressLike(value: unknown): value is {
+  space: string;
+  id: string;
+  path: string[];
+  scope?: "space" | "user" | "session";
+  type?: string;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const address = value as Record<string, unknown>;
+  return typeof address.space === "string" && address.space.length > 0 &&
+    typeof address.id === "string" && address.id.length > 0 &&
+    Array.isArray(address.path) &&
+    address.path.every((segment) => typeof segment === "string") &&
+    (address.scope === undefined || address.scope === "space" ||
+      address.scope === "user" || address.scope === "session");
 }
 
 function invalidateClaim(

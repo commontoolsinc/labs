@@ -285,6 +285,159 @@ Deno.test("executor action router keeps broker-required effects local", async ()
   assertStrictEquals(diagnostics[0]?.diagnosticCode, "broker-required");
 });
 
+Deno.test("executor action router candidates only a canonical supported builtin when its broker is available", async () => {
+  const effectAction = Object.assign({}, {
+    serverBuiltin: {
+      version: 1 as const,
+      id: "fetchText" as const,
+      piece: {
+        space: SPACE,
+        scope: "space" as const,
+        id: "of:action-router-piece",
+        path: ["value"],
+      },
+      reads: [{
+        space: SPACE,
+        scope: "space" as const,
+        id: "of:action-router-input",
+        path: ["value"],
+      }],
+      writes: [output],
+      directOutputs: [output],
+    },
+  });
+  const effectCommit = commit();
+  const effectObservation = effectCommit.schedulerObservation as Record<
+    string,
+    unknown
+  >;
+  effectObservation.actionKind = "effect";
+  effectObservation.implementationFingerprint =
+    "impl:cf:builtin/fetchText:server-v1";
+  delete effectObservation.completeActionScopeSummary;
+  const candidates: Array<{ builtinId?: string; claimKey: ActionClaimKey }> =
+    [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    claimForAction: () => undefined,
+    onCandidate: (candidate) => candidates.push(candidate),
+  });
+
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: effectCommit,
+      sourceAction: effectAction,
+    }),
+    { disposition: "local", kind: "executor-shadow" },
+  );
+  assertEquals(candidates.length, 1);
+  assertEquals(candidates[0]?.builtinId, "fetchText");
+  assertEquals(candidates[0]?.claimKey.actionKind, "effect");
+});
+
+Deno.test("executor action router never candidates an unsupported effect even with a broker", async () => {
+  const effectCommit = commit();
+  (effectCommit.schedulerObservation as Record<string, unknown>).actionKind =
+    "effect";
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    claimForAction: () => undefined,
+    onCandidate: () => {
+      throw new Error("unsupported effects must stay client-primary");
+    },
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: effectCommit,
+      sourceAction: {},
+    }),
+    { disposition: "local", kind: "executor-shadow" },
+  );
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "unsupported-server-builtin",
+  ]);
+});
+
+Deno.test("executor action router carries an accepted builtin claim across async writebacks", async () => {
+  const effectAction = Object.assign({}, {
+    serverBuiltin: {
+      version: 1 as const,
+      id: "fetchText" as const,
+      piece: {
+        space: SPACE,
+        scope: "space" as const,
+        id: "of:action-router-piece",
+        path: ["value"],
+      },
+      reads: [{
+        space: SPACE,
+        scope: "space" as const,
+        id: "of:action-router-input",
+        path: ["value"],
+      }],
+      writes: [output],
+      directOutputs: [output],
+    },
+  });
+  const claims = new WeakMap<object, ExecutionClaim>();
+  let candidateKey: ActionClaimKey | undefined;
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    claimForAction: (sourceAction) => claims.get(sourceAction),
+    onCandidate: (candidate) => {
+      candidateKey = candidate.claimKey;
+    },
+  });
+  const initial = commit();
+  const initialObservation = initial.schedulerObservation as Record<
+    string,
+    unknown
+  >;
+  initialObservation.actionKind = "effect";
+  initialObservation.implementationFingerprint =
+    "impl:cf:builtin/fetchText:server-v1";
+  delete initialObservation.completeActionScopeSummary;
+  await router({ space: SPACE, commit: initial, sourceAction: effectAction });
+  const claim: ExecutionClaim = {
+    ...candidateKey!,
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  claims.set(effectAction, claim);
+
+  const continuation = commit();
+  continuation.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: continuation,
+      sourceAction: effectAction,
+    }),
+    { disposition: "upstream" },
+  );
+  assertEquals(
+    (continuation.schedulerObservation as Record<string, unknown>)
+      .executionClaimAssertion,
+    {
+      contextKey: "space",
+      leaseGeneration: 3,
+      claimGeneration: 4,
+    },
+  );
+});
+
 Deno.test("ownerless malformed observation reports a diagnostic without an invalid claim key", async () => {
   const malformed = commit();
   delete (malformed.schedulerObservation as Record<string, unknown>).ownerSpace;

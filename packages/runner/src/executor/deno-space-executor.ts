@@ -17,6 +17,8 @@ import type {
   SpaceExecutorStartOptions,
 } from "./shared-execution-pool.ts";
 import type { ExecutorWriterDiscovery } from "./writer-discovery.ts";
+import type { ServerExecutableBuiltinId } from "../builtins/server-execution.ts";
+import { isServerExecutableBuiltinId } from "../builtins/server-execution.ts";
 
 export interface ExecutorWorkerLike extends EventTarget {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -42,6 +44,7 @@ export interface DenoSpaceExecutorFactoryOptions {
 
 export interface CandidateClaim {
   readonly claimKey: ActionClaimKey;
+  readonly builtinId?: ServerExecutableBuiltinId;
 }
 
 export interface CandidateClaimDiagnostic {
@@ -136,7 +139,14 @@ const isCandidateClaimDiagnostic = (
 
 const isCandidateClaim = (value: unknown): value is CandidateClaim => {
   if (typeof value !== "object" || value === null) return false;
-  const claim = (value as { claimKey?: unknown }).claimKey;
+  const candidate = value as { claimKey?: unknown; builtinId?: unknown };
+  if (
+    candidate.builtinId !== undefined &&
+    !isServerExecutableBuiltinId(candidate.builtinId)
+  ) {
+    return false;
+  }
+  const claim = candidate.claimKey;
   if (typeof claim !== "object" || claim === null) return false;
   const key = claim as Record<string, unknown>;
   return typeof key.branch === "string" && typeof key.space === "string" &&
@@ -348,7 +358,8 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#protocolFlags.serverPrimaryExecutionV1 === true &&
       this.#protocolFlags.serverPrimaryExecutionClaimRoutingV1 === true &&
       (key.actionKind !== "effect" ||
-        this.#protocolFlags.serverPrimaryExecutionBuiltinPassivityV1 === true);
+        (this.#protocolFlags.serverPrimaryExecutionBuiltinPassivityV1 ===
+            true && isServerExecutableBuiltinId(candidate.builtinId)));
     const mapKey = candidateKey(candidate);
     if (!routingEnabled || this.#claims.has(mapKey) || this.#stopped) return;
 

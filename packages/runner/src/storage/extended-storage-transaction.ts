@@ -11,6 +11,7 @@ import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
   ExternalSinkDisposition,
+  ExternalSinkDispositionPolicy,
   IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -50,6 +51,7 @@ import {
   isInternalVerifierRead,
   reactivityLogFromActivities,
 } from "./reactivity-log.ts";
+import { runWithTransactionSourceAction } from "./transaction-source-context.ts";
 
 import {
   type NormalizedFullLink,
@@ -353,11 +355,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
-    private readonly sinkDisposition: ExternalSinkDisposition = "allow",
+    private readonly sinkDisposition: ExternalSinkDispositionPolicy = "allow",
   ) {}
 
   externalSinkDisposition(): ExternalSinkDisposition {
-    return this.sinkDisposition;
+    return typeof this.sinkDisposition === "function"
+      ? this.sinkDisposition(this.tx.sourceAction)
+      : this.sinkDisposition;
   }
 
   noteCfcSinkReleaseReject(
@@ -1841,7 +1845,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (result.ok && !readOnly) {
       for (const effect of this.#cfcState.outbox) {
         try {
-          await effect.flush(this);
+          await runWithTransactionSourceAction(
+            this.tx.sourceAction,
+            () => effect.flush(this),
+          );
           this.cfcInstrumentation.onOutboxFlush?.(effect);
         } catch (error) {
           logger.error(

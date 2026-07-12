@@ -92,7 +92,7 @@ import type {
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type {
-  ExternalSinkDisposition,
+  ExternalSinkDispositionPolicy,
   IStorageManager,
 } from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
@@ -283,7 +283,7 @@ export interface ProductionServerPresetParams extends CoreParams {
   telemetry?: RuntimeTelemetry;
   /** Executor workers inject a deny/broker boundary; ordinary servers omit. */
   fetch?: typeof globalThis.fetch;
-  externalSinkDisposition?: ExternalSinkDisposition;
+  externalSinkDisposition?: ExternalSinkDispositionPolicy;
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
