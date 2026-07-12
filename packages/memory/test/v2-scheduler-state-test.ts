@@ -1497,7 +1497,14 @@ Deno.test("memory v2 writer lookup returns every candidate deterministically", a
   };
 
   try {
-    for (const actionId of ["writer:z-last", "writer:a-first"]) {
+    for (
+      const actionId of [
+        "writer:z-last",
+        "writer:\u{10000}",
+        "writer:a-first",
+        "writer:\uffff",
+      ]
+    ) {
       upsertSchedulerObservation(engine, {
         branch: "",
         ownerSpace,
@@ -1514,9 +1521,12 @@ Deno.test("memory v2 writer lookup returns every candidate deterministically", a
       branch: "",
       targets: [{ ...sharedTarget, scopeKey: "space" }],
     });
-    assertEquals(candidates.length, 2);
-    assertEquals(candidates[0]?.actionId, "writer:a-first");
-    assertEquals(candidates[1]?.actionId, "writer:z-last");
+    assertEquals(candidates.map((candidate) => candidate.actionId), [
+      "writer:a-first",
+      "writer:z-last",
+      "writer:\uffff",
+      "writer:\u{10000}",
+    ]);
   } finally {
     close(engine);
     await Deno.remove(path);

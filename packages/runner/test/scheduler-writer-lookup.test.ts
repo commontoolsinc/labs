@@ -351,7 +351,12 @@ describe("scheduler writer lookup", () => {
       );
       const outputLink = output.getAsNormalizedFullLink();
       for (
-        const actionId of ["writer-lookup:z-last", "writer-lookup:a-first"]
+        const actionId of [
+          "writer-lookup:z-last",
+          "writer-lookup:\u{10000}",
+          "writer-lookup:a-first",
+          "writer-lookup:\uffff",
+        ]
       ) {
         registerIdentifiedWriter(
           env.runtime,
@@ -366,6 +371,8 @@ describe("scheduler writer lookup", () => {
       expect(candidates.map((candidate) => candidate.actionId)).toEqual([
         "writer-lookup:a-first",
         "writer-lookup:z-last",
+        "writer-lookup:\uffff",
+        "writer-lookup:\u{10000}",
       ]);
     } finally {
       await disposeSchedulerTestRuntime(env);
