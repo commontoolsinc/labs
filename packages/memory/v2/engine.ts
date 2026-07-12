@@ -894,7 +894,10 @@ export interface ExecutionLeaseFence {
 }
 
 export interface ApplyCommitOptions {
+  /** Actual request/replay identity for this protocol session. */
   sessionId: SessionId;
+  /** Host-derived session used only to resolve PerSession scope. */
+  scopeSessionId?: SessionId;
   space?: string;
   principal?: string;
   invocation?: InvocationRecord;
@@ -5992,6 +5995,7 @@ const applyCommitTransaction = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId = sessionId,
     space,
     principal,
     commit,
@@ -6001,6 +6005,7 @@ const applyCommitTransaction = (
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
+  const scopeContext = { principal, sessionId: scopeSessionId };
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
   const schedulerObservationBatch = commit.schedulerObservationBatch ?? [];
@@ -6075,14 +6080,12 @@ const applyCommitTransaction = (
   // Preconditions gate every commit shape, including the observation-only
   // fast paths below — a descendant of an uncommitted origin must not
   // persist anything, observations included.
-  validateCommitPreconditions(engine, sessionKey, branch, commit, {
-    principal,
-    sessionId,
-  });
+  validateCommitPreconditions(engine, sessionKey, branch, commit, scopeContext);
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
       sessionId,
+      scopeSessionId,
       sessionKey,
       space,
       principal,
@@ -6096,6 +6099,7 @@ const applyCommitTransaction = (
   if (commit.operations.length === 0 && schedulerObservation) {
     return applySchedulerObservationOnlyCommit(engine, {
       sessionId,
+      scopeSessionId,
       sessionKey,
       space,
       principal,
@@ -6108,12 +6112,11 @@ const applyCommitTransaction = (
     });
   }
 
-  validateConfirmedReads(engine, branch, commit, { principal, sessionId });
+  validateConfirmedReads(engine, branch, commit, scopeContext);
   const resolvedPendingReads = resolvePendingReads(
     engine,
     sessionKey,
-    sessionId,
-    principal,
+    scopeContext,
     branch,
     commit,
   );
@@ -6191,8 +6194,7 @@ const applyCommitTransaction = (
       // ops). It is NOT an entity revision — do not push to `revisions[]` so the
       // revision/head/snapshot/dirty machinery never sees it.
       applySqliteOperation(engine, operation, sqliteAttachments, {
-        principal,
-        sessionId,
+        ...scopeContext,
       });
       continue;
     }
@@ -6201,8 +6203,7 @@ const applyCommitTransaction = (
       seq,
       opIndex,
       operation,
-      principal,
-      sessionId,
+      ...scopeContext,
     });
     revisions.push(revision);
   }
@@ -6229,7 +6230,7 @@ const applyCommitTransaction = (
       ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
-      scopeContext: { principal: principal!, sessionId },
+      scopeContext: { principal: principal!, sessionId: scopeSessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
       observation: acceptedObservation.observation,
@@ -6599,8 +6600,7 @@ const validateConfirmedReads = (
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
-  sessionId: SessionId,
-  principal: string | undefined,
+  scopeContext: { principal?: string; sessionId: SessionId },
   branch: BranchName,
   commit: ClientCommit,
 ): Array<{ localSeq: number; seq: number }> => {
@@ -6629,7 +6629,7 @@ const resolvePendingReads = (
       engine,
       branch,
       read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
+      resolveScopeKey(read.scope, scopeContext),
       resolution.seq,
       read.path,
       read.nonRecursive ?? false,
@@ -6825,14 +6825,12 @@ const schedulerObservationReadDropReason = (
   engine: Engine,
   {
     sessionKey,
-    sessionId,
-    principal,
+    scopeContext,
     branch,
     reads,
   }: {
     sessionKey: string;
-    sessionId: SessionId;
-    principal: string | undefined;
+    scopeContext: { principal?: string; sessionId: SessionId };
     branch: BranchName;
     reads: ClientCommit["reads"];
   },
@@ -6840,7 +6838,7 @@ const schedulerObservationReadDropReason = (
   for (const read of reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
-    const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
+    const scopeKey = resolveScopeKey(read.scope, scopeContext);
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -6877,7 +6875,7 @@ const schedulerObservationReadDropReason = (
       engine,
       branch,
       read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
+      resolveScopeKey(read.scope, scopeContext),
       resolution.seq,
       read.path,
       read.nonRecursive ?? false,
@@ -6957,6 +6955,7 @@ const applySchedulerObservationOnlyCommit = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId,
     sessionKey,
     space,
     principal,
@@ -6968,6 +6967,7 @@ const applySchedulerObservationOnlyCommit = (
     executionLeaseFence,
   }: {
     sessionId: SessionId;
+    scopeSessionId: SessionId;
     sessionKey: string;
     space?: string;
     principal?: string;
@@ -7029,8 +7029,7 @@ const applySchedulerObservationOnlyCommit = (
 
   const dropReason = schedulerObservationReadDropReason(engine, {
     sessionKey,
-    sessionId,
-    principal,
+    scopeContext: { principal, sessionId: scopeSessionId },
     branch,
     reads,
   });
@@ -7074,7 +7073,7 @@ const applySchedulerObservationOnlyCommit = (
     // exactly serverSeq + 1 and its advancing sync window can carry this row.
     deliveryCommitSeq: serverSeq(engine) + 1,
     observedAtSeq,
-    scopeContext: { principal: principal!, sessionId },
+    scopeContext: { principal: principal!, sessionId: scopeSessionId },
     writerSessionId: sessionKey,
     localSeq,
     replayPayload,
@@ -7123,6 +7122,7 @@ const applySchedulerObservationBatchCommit = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId,
     sessionKey,
     space,
     principal,
@@ -7132,6 +7132,7 @@ const applySchedulerObservationBatchCommit = (
     executionLeaseFence,
   }: {
     sessionId: SessionId;
+    scopeSessionId: SessionId;
     sessionKey: string;
     space?: string;
     principal?: string;
@@ -7147,6 +7148,7 @@ const applySchedulerObservationBatchCommit = (
   for (const item of batch) {
     const result = applySchedulerObservationOnlyCommit(engine, {
       sessionId,
+      scopeSessionId,
       sessionKey,
       space,
       principal,

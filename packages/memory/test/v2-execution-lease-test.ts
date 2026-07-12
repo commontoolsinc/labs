@@ -1,8 +1,16 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import * as MemoryClient from "../v2/client.ts";
+import * as Engine from "../v2/engine.ts";
 import { type ExecutionLeaseHandle, Server } from "../v2/server.ts";
-import type { ExecutionControlEvent, ExecutionLease } from "../v2.ts";
+import { table } from "../v2/sqlite/schema.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+import {
+  encodeMemoryBoundary,
+  type ExecutionControlEvent,
+  type ExecutionLease,
+  toDocumentPath,
+} from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-execution-lease-space";
 const OWNER = "did:key:z6Mk-execution-lease-owner";
@@ -632,6 +640,11 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
   const sibling = await mount(siblingClient, OWNER);
   const executorClient = await connect(server);
   const executor = await mount(executorClient, OWNER);
+  const sessionDb = {
+    id: "of:sponsor-session-db",
+    scope: "session" as const,
+    tables: { notes: table({ body: "text" }) },
+  };
   const sessionValue = async (session: MemoryClient.SpaceSession, id: string) =>
     (await session.queryGraph({
       roots: [{
@@ -657,6 +670,11 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
         id: "of:sponsor-session-input",
         scope: "session",
         value: { value: { lane: "sponsor" } },
+      }, {
+        op: "set",
+        id: "of:sponsor-session-added",
+        scope: "session",
+        value: { value: { lane: "sponsor-added" } },
       }],
     });
     await sibling.transact({
@@ -680,6 +698,142 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
       { lane: "sponsor" },
     );
 
+    const watch = await executor.watchSet([{
+      id: "sponsor-session-root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:sponsor-session-input",
+          scope: "session",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    assertEquals(watch.entities[0]?.document?.value, { lane: "sponsor" });
+    await executor.watchAdd([{
+      id: "sponsor-session-added",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:sponsor-session-added",
+          scope: "session",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    assertEquals(
+      watch.entities.find((entity) => entity.id === "of:sponsor-session-added")
+        ?.document?.value,
+      { lane: "sponsor-added" },
+    );
+    const updates = watch.subscribe();
+    const nextUpdate = updates.next();
+    await sponsor.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:sponsor-session-input",
+        scope: "session",
+        value: { value: { lane: "sponsor-updated" } },
+      }],
+    });
+    const refreshed = await nextUpdate;
+    if (refreshed.done) throw new Error("sponsor-scoped watch ended early");
+    assertEquals(
+      refreshed.value.entities.find((entity) =>
+        entity.id === "of:sponsor-session-input"
+      )?.document?.value,
+      { lane: "sponsor-updated" },
+    );
+
+    const schedulerWrite = {
+      space: SPACE,
+      id: "of:sponsor-scheduler-output",
+      scope: "session" as const,
+      path: [],
+    };
+    await sponsor.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: SPACE,
+        branch: "",
+        pieceId: "space:of:piece",
+        processGeneration: 1,
+        actionId: "action:sponsor-session",
+        actionKind: "computation",
+        implementationFingerprint: "impl:sponsor-session",
+        runtimeFingerprint: "runtime:sponsor-session",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [],
+        shallowReads: [],
+        actualChangedWrites: [],
+        currentKnownWrites: [schedulerWrite],
+        materializerWriteEnvelopes: [],
+        ignoredSchedulingWrites: [],
+        actionOptions: {},
+        status: "success",
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: "impl:sponsor-session",
+          runtimeFingerprint: "runtime:sponsor-session",
+          piece: {
+            space: SPACE,
+            id: "of:piece",
+            scope: "space",
+            path: [],
+          },
+          reads: [],
+          writes: [schedulerWrite],
+          materializerWriteEnvelopes: [],
+          directOutputs: [schedulerWrite],
+        },
+      },
+    });
+    assertEquals(
+      (await executor.listSchedulerActionSnapshots()).snapshots.map(
+        (snapshot) => (snapshot.observation as { actionId?: string }).actionId,
+      ),
+      ["action:sponsor-session"],
+    );
+    assertEquals(
+      (await sibling.listSchedulerActionSnapshots()).snapshots,
+      [],
+    );
+    assertEquals(
+      (await executor.writersForTargets({
+        targets: [{
+          id: schedulerWrite.id,
+          scope: schedulerWrite.scope,
+          path: toDocumentPath([]),
+        }],
+      })).writers.map((writer) => writer.actionId),
+      ["action:sponsor-session"],
+    );
+
+    await sponsor.transact({
+      localSeq: 5,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "sqlite",
+        db: sessionDb,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["sponsor-row"],
+      }],
+    });
+    assertEquals(
+      (await executor.sqliteQuery(
+        sessionDb,
+        "SELECT body FROM notes ORDER BY rowid",
+      )).rows,
+      [{ body: "sponsor-row" }],
+    );
+
     await executor.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -688,6 +842,11 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
         id: "of:sponsor-session-output",
         scope: "session",
         value: { value: { lane: "executor" } },
+      }, {
+        op: "sqlite",
+        db: sessionDb,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["executor-row"],
       }],
     });
     assertEquals(
@@ -698,9 +857,202 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
       await sessionValue(sibling, "of:sponsor-session-output"),
       undefined,
     );
+    assertEquals(
+      (await sponsor.sqliteQuery(
+        sessionDb,
+        "SELECT body FROM notes ORDER BY rowid",
+      )).rows,
+      [{ body: "sponsor-row" }, { body: "executor-row" }],
+    );
+    assertEquals(
+      (await sibling.sqliteQuery(
+        sessionDb,
+        "SELECT body FROM notes ORDER BY rowid",
+      )).rows,
+      [],
+    );
   } finally {
     await executorClient.close();
     await siblingClient.close();
+    await sponsorClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("scheduler mirrors retain sponsor scope across executor disconnect", async () => {
+  const directory = await Deno.makeTempDir();
+  const store = toFileUrl(`${directory}/`);
+  const readSpace = "did:key:z6Mk-execution-lease-sponsor-mirror-read";
+  const disconnected = Promise.withResolvers<void>();
+  let disconnectDuringFence = false;
+  let armedClockSamples = 0;
+  let disconnectExecutor = () => {};
+  const server = createLeaseServer(store, "host:sponsor-mirror", {
+    nowMs: () => {
+      if (disconnectDuringFence && ++armedClockSamples === 2) {
+        disconnectDuringFence = false;
+        disconnectExecutor();
+        disconnected.resolve();
+      }
+      return Date.now();
+    },
+  });
+  const sponsorClient = await connect(server);
+  const sponsor = await mount(sponsorClient, OWNER);
+
+  let receiver = (_payload: string) => {};
+  const rawConnection = server.connect((message) => {
+    receiver(encodeMemoryBoundary(message));
+  });
+  const executorClient = await MemoryClient.connect({
+    transport: {
+      async send(payload: string) {
+        await rawConnection.receive(payload);
+      },
+      close() {
+        rawConnection.close();
+        return Promise.resolve();
+      },
+      setReceiver(next: (payload: string) => void) {
+        receiver = next;
+      },
+      setCloseReceiver() {},
+    },
+    protocolFlags: flags,
+    executionCapabilities: { routing: true, builtinPassivity: true },
+  } as MemoryClient.ConnectOptions);
+  const executor = await mount(executorClient, OWNER);
+  disconnectExecutor = () => {
+    server.detachSession(SPACE, executor.sessionId, rawConnection.id);
+  };
+  await executorClient.mount(
+    readSpace,
+    { sessionId: executor.sessionId },
+    authFactoryFor(OWNER),
+  );
+
+  const actionId = "action:sponsor-session-disconnect-mirror";
+  const sessionRead = {
+    space: readSpace,
+    id: "of:sponsor-session-mirror-input",
+    scope: "session" as const,
+    path: [],
+  };
+  const sessionWrite = {
+    space: SPACE,
+    id: "of:sponsor-session-mirror-output",
+    scope: "session" as const,
+    path: [],
+  };
+  const secondSessionWrite = {
+    ...sessionWrite,
+    id: "of:sponsor-session-mirror-output-v2",
+  };
+  const schedulerObservation = {
+    version: 2 as const,
+    ownerSpace: SPACE,
+    branch: "",
+    pieceId: "space:of:piece",
+    processGeneration: 1,
+    actionId,
+    actionKind: "event-handler" as const,
+    implementationFingerprint: "impl:sponsor-session-mirror",
+    runtimeFingerprint: "runtime:sponsor-session-mirror",
+    observedAtSeq: 0,
+    transactionKind: "action-run" as const,
+    reads: [sessionRead],
+    shallowReads: [],
+    actualChangedWrites: [],
+    currentKnownWrites: [sessionWrite],
+    materializerWriteEnvelopes: [],
+    ignoredSchedulingWrites: [],
+    actionOptions: {},
+    status: "success" as const,
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint: "impl:sponsor-session-mirror",
+      runtimeFingerprint: "runtime:sponsor-session-mirror",
+      piece: {
+        space: SPACE,
+        id: "of:piece",
+        scope: "space" as const,
+        path: [],
+      },
+      reads: [sessionRead],
+      writes: [sessionWrite],
+      materializerWriteEnvelopes: [],
+      directOutputs: [sessionWrite],
+    },
+  };
+
+  try {
+    await setPolicy(sponsor, 1);
+    await sponsor.setExecutionDemand("", ["space:piece"]);
+    const lease = await server.acquireExecutionLease(SPACE, "");
+    assertExists(lease);
+    server.bindExecutionSession(SPACE, executor.sessionId, lease);
+
+    await executor.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation,
+    });
+
+    disconnectDuringFence = true;
+    const inFlight = executor.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: secondSessionWrite.id,
+        scope: secondSessionWrite.scope,
+        value: { value: { updated: true } },
+      }],
+      schedulerObservation: {
+        ...schedulerObservation,
+        actualChangedWrites: [secondSessionWrite],
+        currentKnownWrites: [sessionWrite, secondSessionWrite],
+        completeActionScopeSummary: {
+          ...schedulerObservation.completeActionScopeSummary,
+          writes: [sessionWrite, secondSessionWrite],
+          directOutputs: [sessionWrite, secondSessionWrite],
+        },
+      },
+    });
+    await disconnected.promise;
+    await inFlight;
+
+    const readEngine = await Engine.open({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const snapshots = Engine.listSchedulerActionSnapshots(readEngine, {
+        actionId,
+      }).snapshots;
+      assertEquals(snapshots.length, 1);
+      assertEquals(
+        snapshots[0].executionContextKey,
+        Engine.resolveScopeKey("session", {
+          principal: OWNER,
+          sessionId: sponsor.sessionId,
+        }),
+      );
+      assertEquals(
+        snapshots[0].writerSessionId,
+        Engine.resolveCommitSessionKey(executor.sessionId, OWNER),
+      );
+      assertEquals(
+        snapshots[0].observation.currentKnownWrites,
+        [sessionWrite, secondSessionWrite],
+      );
+    } finally {
+      Engine.close(readEngine);
+    }
+  } finally {
+    await executorClient.close();
     await sponsorClient.close();
     await server.close();
     await Deno.remove(directory, { recursive: true });

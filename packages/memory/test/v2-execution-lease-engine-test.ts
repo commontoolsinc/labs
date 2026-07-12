@@ -1,7 +1,12 @@
 import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import type { ClientCommit, ExecutionLease } from "../v2.ts";
+import {
+  type ClientCommit,
+  type ExecutionLease,
+  toDocumentPath,
+} from "../v2.ts";
 import * as Engine from "../v2/engine.ts";
+import type { SchedulerActionObservation } from "../v2/engine.ts";
 
 const SPACE = "did:key:z6Mk-engine-execution-lease-space";
 const PRINCIPAL = "did:key:z6Mk-engine-execution-lease-user";
@@ -335,6 +340,152 @@ Deno.test("stale lease commits apply nothing while accepted replay survives revo
     assertEquals(Engine.serverSeq(engine), before);
     assertEquals(Engine.read(engine, { id: "of:partial-a" }), null);
     assertEquals(Engine.read(engine, { id: "of:partial-b" }), null);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("applyCommit separates executor replay identity from sponsor session scope", async () => {
+  const { directory, engine } = await openTempEngine();
+  const sponsorSessionId = "session:sponsor";
+  const executorSessionId = "session:executor";
+  const scoped = (id: string, sessionId: string) =>
+    Engine.read(engine, {
+      id,
+      scope: "session",
+      principal: PRINCIPAL,
+      sessionId,
+    });
+  try {
+    Engine.applyCommit(engine, {
+      sessionId: sponsorSessionId,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:sponsor-scope-input",
+          scope: "session",
+          value: { value: { lane: "sponsor" } },
+        }],
+      },
+    });
+
+    const outputAddress = {
+      space: SPACE,
+      id: "of:sponsor-scope-output",
+      scope: "session" as const,
+      path: ["value", "lane"],
+    };
+    const schedulerObservation: SchedulerActionObservation = {
+      version: 1,
+      branch: "",
+      pieceId: "of:sponsor-scope-piece",
+      processGeneration: 1,
+      actionId: "pattern.tsx:computed:sponsor-session",
+      actionKind: "computation",
+      implementationFingerprint: "impl:sponsor-session",
+      runtimeFingerprint: "runtime:test",
+      observedAtSeq: 1,
+      transactionKind: "action-run",
+      reads: [],
+      shallowReads: [],
+      actualChangedWrites: [outputAddress],
+      currentKnownWrites: [outputAddress],
+      declaredWrites: [outputAddress],
+      materializerWriteEnvelopes: [],
+      status: "success",
+    };
+    const executorCommit: ClientCommit = {
+      localSeq: 1,
+      reads: {
+        confirmed: [{
+          id: "of:sponsor-scope-input",
+          scope: "session",
+          seq: 1,
+          path: toDocumentPath(["value"]),
+        }],
+        pending: [],
+      },
+      preconditions: [{
+        kind: "entity-absent",
+        id: "of:sponsor-scope-output",
+        scope: "session",
+      }],
+      operations: [{
+        op: "set",
+        id: "of:sponsor-scope-output",
+        scope: "session",
+        value: { value: { lane: "executor" } },
+      }],
+      schedulerObservation,
+    };
+    const applied = Engine.applyCommit(engine, {
+      sessionId: executorSessionId,
+      scopeSessionId: sponsorSessionId,
+      principal: PRINCIPAL,
+      commit: executorCommit,
+    });
+    assertEquals(applied.seq, 2);
+    assertEquals(
+      scoped("of:sponsor-scope-output", sponsorSessionId),
+      { value: { lane: "executor" } },
+    );
+    assertEquals(scoped("of:sponsor-scope-output", executorSessionId), null);
+    const [snapshot] = Engine.listSchedulerActionSnapshots(engine, {
+      actionId: schedulerObservation.actionId,
+    }).snapshots;
+    assertEquals(
+      snapshot.executionContextKey,
+      Engine.resolveScopeKey("session", {
+        principal: PRINCIPAL,
+        sessionId: sponsorSessionId,
+      }),
+    );
+    assertEquals(
+      snapshot.writerSessionId,
+      Engine.resolveCommitSessionKey(executorSessionId, PRINCIPAL),
+    );
+
+    const replay = Engine.applyCommit(engine, {
+      sessionId: executorSessionId,
+      scopeSessionId: sponsorSessionId,
+      principal: PRINCIPAL,
+      commit: executorCommit,
+    });
+    assert(Engine.isAppliedCommitReplay(replay));
+    assertEquals(replay.seq, applied.seq);
+
+    Engine.applyCommit(engine, {
+      sessionId: executorSessionId,
+      scopeSessionId: sponsorSessionId,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:sponsor-scope-output",
+            scope: "session",
+            localSeq: 1,
+            path: toDocumentPath(["value"]),
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: "of:sponsor-scope-chained",
+          scope: "session",
+          value: { value: { lane: "chained" } },
+        }],
+      },
+    });
+    assertEquals(
+      scoped("of:sponsor-scope-chained", sponsorSessionId),
+      { value: { lane: "chained" } },
+    );
+    assertEquals(scoped("of:sponsor-scope-chained", executorSessionId), null);
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

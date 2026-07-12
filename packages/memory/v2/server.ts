@@ -476,6 +476,7 @@ type BoundExecutionSession = {
   readonly connectionId: string;
   readonly sessionToken: SessionToken;
   readonly principal: string;
+  readonly sponsorSessionId: string;
   readonly lease: ExecutionLeaseHandle;
 };
 
@@ -1750,6 +1751,7 @@ export class Server {
       connectionId: session.ownerConnectionId,
       sessionToken: session.sessionToken,
       principal: session.principal,
+      sponsorSessionId: authority.sponsorSessionId,
       lease,
     });
     this.#boundExecutionSessions.set(key, binding);
@@ -2523,6 +2525,31 @@ export class Server {
     return binding;
   }
 
+  #scopeContextForSession(
+    space: string,
+    session: SessionState,
+  ): { principal?: string; sessionId: string } {
+    const binding = this.#boundExecutionSessions.get(
+      sessionKey(space, session.id),
+    );
+    if (binding === undefined) {
+      return { principal: session.principal, sessionId: session.id };
+    }
+    if (
+      binding.connectionId !== session.ownerConnectionId ||
+      binding.sessionToken !== session.sessionToken ||
+      binding.principal !== session.principal || binding.lease.space !== space
+    ) {
+      throw new Engine.ProtocolError(
+        "execution scope is not bound to this live session connection",
+      );
+    }
+    return {
+      principal: session.principal,
+      sessionId: binding.sponsorSessionId,
+    };
+  }
+
   #executionLeaseFenceForCommit(
     space: string,
     session: SessionState,
@@ -3116,6 +3143,7 @@ export class Server {
       [],
       new Map(),
       undefined,
+      undefined,
     );
     this.#publishAcceptedCommit({
       space,
@@ -3475,8 +3503,7 @@ export class Server {
           message.sql,
           message.params,
           Engine.resolveScopeKey(message.db.scope, {
-            principal: session.principal,
-            sessionId: message.sessionId,
+            ...this.#scopeContextForSession(message.space, session),
           }),
           wantColumns,
         );
@@ -3930,6 +3957,10 @@ export class Server {
             message.commit.branch ?? "",
             session,
           );
+          const scopeContext = this.#scopeContextForSession(
+            message.space,
+            session,
+          );
           const executionLeaseFence = this.#executionLeaseFenceForCommit(
             message.space,
             session,
@@ -3952,8 +3983,8 @@ export class Server {
                 processGeneration: observation.processGeneration,
                 actionId: observation.actionId,
                 applicableExecutionContextKeys: schedulerApplicableContextKeys(
-                  session.principal,
-                  message.sessionId,
+                  scopeContext.principal,
+                  scopeContext.sessionId,
                 ),
               },
             ).snapshots;
@@ -3975,7 +4006,7 @@ export class Server {
             engine,
             message.space,
             commitPayload.operations,
-            { principal: session.principal, sessionId: message.sessionId },
+            scopeContext,
           );
           let commit: Engine.AppliedCommit;
           try {
@@ -3985,6 +4016,7 @@ export class Server {
                 try {
                   return Engine.applyCommit(engine, {
                     sessionId: message.sessionId,
+                    scopeSessionId: scopeContext.sessionId,
                     space: message.space,
                     principal: session.principal,
                     commit: commitPayload,
@@ -4049,6 +4081,10 @@ export class Server {
             acceptedSchedulerObservations,
             previousReadSpaces,
             session,
+            scopeContext.principal === undefined ? undefined : {
+              principal: scopeContext.principal,
+              sessionId: scopeContext.sessionId,
+            },
           );
           if (!Engine.isAppliedCommitReplay(commit)) {
             this.#publishAcceptedCommit({
@@ -4187,10 +4223,7 @@ export class Server {
           message.query,
           aclEngine,
           undefined,
-          {
-            principal: session.principal,
-            sessionId: message.sessionId,
-          },
+          this.#scopeContextForSession(message.space, session),
         ),
       };
     } catch (error) {
@@ -4251,13 +4284,17 @@ export class Server {
           },
         };
       }
+      const scopeContext = this.#scopeContextForSession(
+        message.space,
+        session,
+      );
       const page = Engine.listSchedulerActionSnapshots(
         engine,
         {
           ...message.query,
           applicableExecutionContextKeys: schedulerApplicableContextKeys(
-            session.principal,
-            message.sessionId,
+            scopeContext.principal,
+            scopeContext.sessionId,
           ),
         },
       );
@@ -4335,15 +4372,17 @@ export class Server {
         };
       }
 
+      const scopeContext = this.#scopeContextForSession(
+        message.space,
+        session,
+      );
+
       const targets: Engine.SchedulerWriterTarget[] = message.query.targets.map(
         (target) => ({
           space: message.space,
           id: target.id,
           scope: target.scope,
-          scopeKey: Engine.resolveScopeKey(target.scope, {
-            principal: session.principal,
-            sessionId: message.sessionId,
-          }),
+          scopeKey: Engine.resolveScopeKey(target.scope, scopeContext),
           path: [...target.path],
         }),
       );
@@ -4353,8 +4392,8 @@ export class Server {
           ownerSpace: message.space,
           targets,
           applicableExecutionContextKeys: schedulerApplicableContextKeys(
-            session.principal,
-            message.sessionId,
+            scopeContext.principal,
+            scopeContext.sessionId,
           ),
         }).map((writer) => ({
           ...writer,
@@ -4425,10 +4464,7 @@ export class Server {
         message.space,
         message.watches,
         aclEngine,
-        {
-          principal: session.principal,
-          sessionId: message.sessionId,
-        },
+        this.#scopeContextForSession(message.space, session),
       );
       const sync = buildFullSync(
         session.entities,
@@ -4545,10 +4581,7 @@ export class Server {
             engine,
             query,
             undefined,
-            {
-              principal: session.principal,
-              sessionId: message.sessionId,
-            },
+            this.#scopeContextForSession(message.space, session),
           );
           graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
@@ -4914,10 +4947,7 @@ export class Server {
             space,
             session.watches,
             undefined,
-            {
-              principal: session.principal,
-              sessionId,
-            },
+            this.#scopeContextForSession(space, session),
           );
           const sync = buildDiffSync(
             session.entities,
@@ -4985,12 +5015,13 @@ export class Server {
           trackedIds.has(toDirtyKey(address.id, declaredScope(address.scope)))
         );
       const engine = await this.openEngine(space);
+      const scopeContext = this.#scopeContextForSession(space, session);
       const page = Engine.listSchedulerActionSnapshots(engine, {
         sinceCommitSeq: sync.fromSeq,
         throughCommitSeq: sync.toSeq,
         applicableExecutionContextKeys: schedulerApplicableContextKeys(
-          session.principal,
-          sessionId,
+          scopeContext.principal,
+          scopeContext.sessionId,
         ),
       });
       const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
@@ -5262,8 +5293,9 @@ export class Server {
     commit: Engine.AppliedCommit,
     previousReadSpaces: ReadonlySet<string>,
     session: SessionState | undefined,
+    scopeContext: Engine.SchedulerScopeContext | undefined,
   ): Promise<void> {
-    if (session?.principal === undefined) {
+    if (session?.principal === undefined || scopeContext === undefined) {
       return;
     }
     const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
@@ -5284,10 +5316,10 @@ export class Server {
         branch: commit.branch,
         ownerSpace,
         observedAtSeq: commit.seq,
-        scopeContext: {
-          principal: session.principal,
-          sessionId: session.id,
-        },
+        // This context was captured before the accepted commit. Never
+        // re-derive it after an await: disconnect tears down the executor
+        // binding, but cannot change the already-accepted sponsor scope.
+        scopeContext,
         writerSessionId: Engine.resolveCommitSessionKey(
           session.id,
           session.principal,
@@ -5330,6 +5362,7 @@ export class Server {
     observations: readonly CommitSchedulerObservation[],
     previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
     session: SessionState | undefined,
+    scopeContext: Engine.SchedulerScopeContext | undefined,
   ): Promise<void> {
     if (!getPersistentSchedulerStateConfig()) {
       return;
@@ -5375,6 +5408,7 @@ export class Server {
           commit,
           previousReadSpaces.get(localSeq) ?? new Set(),
           session,
+          scopeContext,
         );
       }
     } catch (error) {
