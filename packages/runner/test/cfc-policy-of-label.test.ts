@@ -11,7 +11,10 @@ import {
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { createTxCfcModulePolicyResolver } from "../src/cfc/mod.ts";
+import {
+  createTxCfcModulePolicyResolver,
+  evaluateExchangeRules,
+} from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -346,6 +349,72 @@ describe("PolicyOf label-time binding", () => {
     }
   });
 
+  it("retains old immutable policy versions after a producer upgrade", async () => {
+    const upgraded = buildCfcPolicyArtifactManifest({
+      ...artifact.manifest,
+      template: {
+        ...artifact.manifest.template,
+        exchangeRules: [{
+          ...artifact.manifest.template.exchangeRules[0]!,
+          name: "release-v2",
+        }],
+      },
+    });
+    runtime.registerCfcPolicyManifests(space, [artifact, upgraded]);
+    const schemaFor = (policyDigest: string) => ({
+      ...schema,
+      ifc: {
+        confidentiality: [{
+          ...schema.ifc.confidentiality[0],
+          policyDigest,
+        }],
+      },
+    } as const);
+
+    for (const [name, policy] of [
+      ["old-policy-label", artifact],
+      ["new-policy-label", upgraded],
+    ] as const) {
+      const tx = runtime.edit();
+      runtime.getCell(space, name, schemaFor(policy.policyDigest), tx).set(
+        "secret",
+      );
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    }
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const tx = coldRuntime.edit();
+      for (const [name, policy] of [
+        ["old-policy-label", artifact],
+        ["new-policy-label", upgraded],
+      ] as const) {
+        const cell = coldRuntime.getCell(
+          space,
+          name,
+          schemaFor(policy.policyDigest),
+          tx,
+        );
+        const metadata = readStoredCfcMetadata(
+          tx,
+          cell.getAsNormalizedFullLink(),
+        );
+        const reference = metadata?.labelMap.entries[0]?.label
+          .confidentiality?.[0];
+        expect(reference).toBeDefined();
+        expect(tx.resolveCfcPolicyManifest(reference, space)).toBeDefined();
+      }
+      tx.abort();
+    } finally {
+      await coldRuntime.dispose();
+    }
+  });
+
   it("copies a carried policy manifest into a cross-space destination", async () => {
     runtime.registerCfcPolicyManifests(space, [artifact]);
     const sourceTx = runtime.edit();
@@ -415,6 +484,20 @@ describe("PolicyOf label-time binding", () => {
           (value as Record<string, unknown>).policyRefKind === "module"
         );
       expect(reference).toBeDefined();
+      const evaluated = evaluateExchangeRules(
+        { confidentiality: [reference] },
+        undefined,
+        {
+          integrity: [{ type: "IntegrityEvidence" }],
+          modulePolicyResolver: (candidate) =>
+            coldTx.resolveCfcPolicyManifest(
+              candidate,
+              destinationSpace,
+            ) as never,
+        },
+      );
+      expect(evaluated.resolutionFailures).toEqual([]);
+      expect(evaluated.label.confidentiality).toEqual([]);
       expect(
         coldTx.resolveCfcPolicyManifest(reference, destinationSpace),
       ).toBeDefined();
