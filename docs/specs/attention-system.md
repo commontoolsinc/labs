@@ -1,7 +1,7 @@
 # Attention System
 
 A canonical runtime substrate for managing user attention: a per-user
-ledger of **notices** written by a single trusted **usher** under the user's
+ledger of **notices** written by a single trusted **steward** under the user's
 own **policies**, **seen-state over artifacts** derived from the version
 history the runtime already keeps, and **surface adapters** that project the
 ledger onto shell lanes, digests, and (eventually) OS notifications. An OS
@@ -34,7 +34,7 @@ naming ergonomics).
 Every existing notification system is biased toward interruption because the
 *emitter* chooses how loudly to surface, and emitters' incentives favor
 loudness. This design inverts that: **sources only post notices with a
-posture hint; the user's usher — running with the user's policies,
+posture hint; the user's steward — running with the user's policies,
 structurally on the user's side — decides**. The runtime's job is to make
 that inversion enforceable (CFC write-gating on the canonical ledger), cheap
 (derived queries over stores the user already holds, no second event
@@ -49,7 +49,7 @@ Five load-bearing moves:
    downward: a source earns its way up through **learned policies** the user
    can read and edit (§7), and every dismiss-without-open pushes its future
    notices back down.
-2. **The usher is the only writer.** The canonical ledger carries a
+2. **The steward is the only writer.** The canonical ledger carries a
    `writeAuthorizedBy` claim; untrusted patterns can post candidates and
    render their own local views, but cannot spam the ledger (§6).
 3. **Attention over artifacts is derived, not posted.** The runtime already
@@ -62,13 +62,13 @@ Five load-bearing moves:
    notice is a *view over* "an artifact you care about changed", which
    dissolves the "every pattern must remember to send notifications"
    problem.
-4. **Policies are user-owned cells**, not usher code. The core ships a
+4. **Policies are user-owned cells**, not steward code. The core ships a
    good-enough default fold; the bespoke last 20% ("library book due"
    escalations, quiet hours, per-thread mutes, nag-until-done) is data the
-   user — or a pattern, on proposal, or the usher itself, legibly (§7) —
+   user — or a pattern, on proposal, or the steward itself, legibly (§7) —
    writes.
 5. **Multi-user needs almost nothing new.** A notice is a per-(user, notice)
-   relation: a shared space posts one candidate and each member's usher
+   relation: a shared space posts one candidate and each member's steward
    lanes it independently. "Who has seen this" — and, per disclosure policy,
    "who has handled this" — is the same state contributed into shared space,
    read the other direction (§8).
@@ -81,21 +81,22 @@ Everything upstream of a posted notice — deciding whether an agent may
 interviews that seed policy — is product-side and stays there. A product
 framework (e.g. Loom's attention framework) enters this pipeline as a
 *trusted source* posting well-prepared candidates with a posture hint; the
-runtime usher's job for such a source is cross-source arbitration and
+runtime steward's job for such a source is cross-source arbitration and
 enforcement of the user's posture clamps, not re-litigating the product's
 preparation decisions.
 
 ### Vocabulary
 
 *Notice* — the unit: a posted announcement with a destination, that waits to
-be noticed. A **candidate** is a notice as posted, before the usher admits
+be noticed. A **candidate** is a notice as posted, before the steward admits
 it (assigning `id`, `posture`, `weight`) — the same envelope at an earlier
 stage, exactly as `wish()` resolves `candidates` into a `result`.
-*Disposition* — what the user (or the usher on their behalf) did with a
-notice; the append-only log. *Usher* — the per-user trusted fold that admits
-candidates, assigns postures, and keeps the room quiet; called an usher, not
-a "ranker", because ranking is its most minor duty and it works for the
-user, not the feed. *Ledger* — the notices store specifically. *Attention
+*Disposition* — what the user (or the steward on their behalf) did with a
+notice; the append-only log. *Steward* — the per-user trusted fold that admits
+candidates, assigns postures, and guards the user's quiet; called a steward,
+not a "ranker", because ranking is its most minor duty and it works for the
+user, not the feed. (No relation to Loom's retired "Attention Steward"
+auto-surfacing system — this is a routing fold, not a suggestion engine.) *Ledger* — the notices store specifically. *Attention
 state* — the triple of stores (notices, dispositions, seen — §4.5). *Lane* —
 a shell projection over attention state (most lanes correspond to a posture
 rung; some, like the snoozed lane, are lifecycle views). *Watch set* — the
@@ -135,7 +136,7 @@ entity set whose changes the user's attention system observes (§5).
 - **Policy seeding / onboarding flows.** How a product interviews the user
   and proposes an initial policy set is product-scope; the runtime primitive
   is only "patterns propose, the user disposes" (§7) — adoption *is* the
-  write, and proposed-but-unadopted policies never enter the usher's fold.
+  write, and proposed-but-unadopted policies never enter the steward's fold.
   (One product obligation this spec *names* because safety depends on it:
   ship an emergency-sources policy pack through this same propose/adopt
   flow — §7, Appendix B.1.)
@@ -224,14 +225,14 @@ occupies exactly one rung, and the rung is a promise:
 Two invariants:
 
 - **Downward bias.** Defaults sit low (`silent`/`review`). Sources post a
-  *hint*; the usher assigns the real posture via the policy clamp (§7), and
+  *hint*; the steward assigns the real posture via the policy clamp (§7), and
   repeated dismiss-without-open feeds back as learned clamps. Crucially,
   **no emitter-controlled field may raise posture**: reaching `interrupt`
   (or `heads-up` above a source's learned baseline) requires a user-adopted
   policy floor — never urgency claims, expiry times, or any other field the
   emitter writes. An emitter cannot buy `interrupt` with enthusiasm. The
   same discipline binds the *shipped defaults*: any default above `review`
-  must match on **usher-verified facts** (e.g. `actor` is a human DID with
+  must match on **steward-verified facts** (e.g. `actor` is a human DID with
   an established relationship to the user), never on self-declared fields
   like `kind` — otherwise declaring a kind *is* choosing a baseline, which
   re-opens the loophole this invariant closes.
@@ -243,9 +244,9 @@ Two invariants:
 The rung names deliberately match the posture vocabulary the Loom product
 already uses (silent memory → daily review → timely heads-up → interrupt), so
 product surfaces map 1:1 onto runtime postures. Within a rung, ordering is
-the usher-assigned `weight` (§4.4) — an opaque scalar that never crosses
+the steward-assigned `weight` (§4.4) — an opaque scalar that never crosses
 rungs and never gates delivery; it exists so continuous surfaces (Pond's
-radial layout, "ordered by the usher" lists) don't have to invent one.
+radial layout, "ordered by the steward" lists) don't have to invent one.
 
 ### 4.3 The pipeline
 
@@ -259,10 +260,10 @@ Sources                          post candidates (postureHint = advisory)
   external ingress (webhooks)      ▼
 Notice inbox (durable; quota-gated append)       §6.1, §10.2
   ▼
-Usher (per-user, trusted single writer)          §6
+Steward (per-user, trusted single writer)          §6
   folds candidates × policy cells (§7)
   assigns posture + weight; coalesces; writes the ledger
-  ── writeAuthorizedBy gate: only the usher's verified
+  ── writeAuthorizedBy gate: only the steward's verified
      module identity may write the canonical ledger ──
 Ledger (per-user, durable, queryable)            §4.5
   ▼
@@ -277,7 +278,7 @@ cannot do is write the canonical ledger the shell and OS adapters trust.
 
 ### 4.4 The envelope
 
-A source **posts a candidate**; the usher **admits it as a notice**. Same
+A source **posts a candidate**; the steward **admits it as a notice**. Same
 envelope, two stages — and the stage split is structural: a candidate
 *cannot carry* an assigned posture, because `posture`, `weight`, and `id`
 exist only on the admitted type.
@@ -303,7 +304,7 @@ type NoticeCandidate = {
   // advancing version) and re-emergence tombstones (§4.7).
   subjectVersion: EntityVersion;
   // Source classification ("group-chat", "importer", "agent-run", ...).
-  // BOUND BY THE USHER to the source's verified identity: the first-seen
+  // BOUND BY THE STEWARD to the source's verified identity: the first-seen
   // kind for a given source sticks; a source changing its declared kind
   // is itself a reputation signal (and does not escape kind-matched
   // clamps, which follow the source identity). Policy matching (§7) and
@@ -342,17 +343,17 @@ type NoticeCandidate = {
   // surface can render.
   progress?: { done: number; total?: number };
 
-  // Advisory only — the "requested" loudness. The usher assigns the real
+  // Advisory only — the "requested" loudness. The steward assigns the real
   // posture; surfaces never read the hint.
   postureHint: "silent" | "review" | "heads-up" | "interrupt";
 
   postedAt: number;
   notBefore?: number;         // embargo: hold materialization until then
   expiresAt?: number;         // evaluate-on-read; swept terminally by the
-                              // usher (§4.7, §9.3)
+                              // steward (§4.7, §9.3)
 
   // Opaque product round-trip channel. Disciplined by invariant: NO
-  // runtime-derived predicate, NO usher fold step, and NO policy match
+  // runtime-derived predicate, NO steward fold step, and NO policy match
   // may read ext — it carries product fields (Loom's why_now, channel,
   // authorization_state — Appendix A), not routing inputs. An ext key
   // consumed by two independent products is a candidate for promotion to
@@ -360,13 +361,13 @@ type NoticeCandidate = {
   ext?: Record<string, unknown>;
 };
 
-// An admitted notice IS a candidate plus the three fields only the usher
+// An admitted notice IS a candidate plus the three fields only the steward
 // may write. Two stages, one envelope, enforced by the type.
 type Notice = NoticeCandidate & {
   // Identity — THE load-bearing field. Every surface adapter targets it
   // for replace/retract (iOS UNNotificationRequest.identifier +
   // apns-collapse-id, Android notify(id), Web Push options.tag). Derived
-  // by the USHER from verified provenance (source space DID + entity id
+  // by the STEWARD from verified provenance (source space DID + entity id
   // [+ event key]) — never from candidate-supplied strings, so a hostile
   // source cannot collide another source's id to hijack coalescing or OS
   // replace/retract.
@@ -391,7 +392,7 @@ type NoticeAction = {
   replyTo?: unknown;          // asCell: ["cell"]
 };
 
-// Append-only per-notice disposition log — what the user (or the usher,
+// Append-only per-notice disposition log — what the user (or the steward,
 // on the user's behalf) did with the notice. Deliberately small: "seen"
 // is NOT a disposition (it lives in the seen store, §4.5/§5, and
 // notice-seen is a join); "muted" is NOT a disposition (mute IS a policy
@@ -404,12 +405,12 @@ type NoticeDisposition = {
   // ...). Lets policy decide e.g. "os-tray dismiss clears that device
   // only" (§9.3).
   surface: string;
-  // Who did it: the user's DID, or the usher's module identity for
+  // Who did it: the user's DID, or the steward's module identity for
   // system dispositions (expiry sweep, thread displacement — §4.7).
   actor: string;
   // The subjectVersion this disposition was taken against. A dismissal
   // tombstones that version; if the subject advances past it, the notice
-  // re-emerges (the usher's coalesce advances subjectVersion past the
+  // re-emerges (the steward's coalesce advances subjectVersion past the
   // tombstone — one operation, not a separate mechanism) and the old
   // dismissal no longer applies. Comparable only within
   // subjectVersion.space.
@@ -457,13 +458,13 @@ by the runtime guessing which glances "count": the source re-posts at a
 newer version when it is meaningfully newsworthy again, and a user-adopted
 `realert` policy (§7) governs whether re-emergence may make sound.
 Satisfaction that doesn't involve the user looking (someone else handled it;
-the trip ended) is the usher's job: its fold observes the subject change and
+the trip ended) is the steward's job: its fold observes the subject change and
 terminally retracts the notice (system disposition by module identity).
 
 A caveat on "cheap": pull-based scheduling makes *unobserved* queries free
 (`docs/specs/pull-based-scheduler/README.md`), not observed ones. A mounted
 lane is a live subscription over the user's own three stores — no per-notice
-cross-space reads (cross-space reading happens once, in the usher's fold) —
+cross-space reads (cross-space reading happens once, in the steward's fold) —
 and §4.5's write discipline bounds how often those stores change.
 
 ### 4.5 Storage
@@ -476,15 +477,15 @@ three stores, and the three backings are not ad-hoc — they derive from a
 
 | | wakes lane queries | must never wake lane queries |
 |---|---|---|
-| **usher-only writes** | `notices` | *(learned policies live with §7 policies, not here — they are user-visible data)* |
+| **steward-only writes** | `notices` | *(learned policies live with §7 policies, not here — they are user-visible data)* |
 | **any-surface writes** | `dispositions` | `seen` |
 
-1. **`notices`** (the ledger) — written *only* by the usher. Backing for
+1. **`notices`** (the ledger) — written *only* by the steward. Backing for
    phase 1: a **durable array cell carrying the `writeAuthorizedBy`
    claim**, the mechanism already protecting profile links in production
    (`docs/common/conventions/HOME_SPACE.md`,
    `packages/runner/src/cfc/prepare.ts`). Coalescing (same `id`, subject
-   advanced) is an in-place element update by the single leased usher
+   advanced) is an in-place element update by the single leased steward
    instance (§6.2); coalescing **refreshes** content, `expiresAt`, and
    `progress` — a re-emerged notice carries the new posting's lifetime, not
    a stale one. This is deliberately *not* sqlite yet: `writeAuthorizedBy`
@@ -495,7 +496,7 @@ three stores, and the three backings are not ad-hoc — they derive from a
    table (better ranking/pagination/retention at volume) is gated on the
    net-new work item in §10.3, and on giving it **its own database**: every
    `db.exec` serializes on the database handle cell's `rev`, so one shared
-   db cannot hold both an usher-only table and an everyone-writes table
+   db cannot hold both a steward-only table and an everyone-writes table
    without gating both or neither.
 2. **`dispositions`** — written by every surface on every device. Backing: a
    durable array cell appended with **mergeable ops only** (`push`,
@@ -503,7 +504,7 @@ three stores, and the three backings are not ad-hoc — they derive from a
    durable state instead of clobbering (memory is optimistic-concurrency
    with path-aware validation, not CRDT — and this design needs no CRDT:
    the canonical writer is singular per store, and dispositions are
-   mergeable appends). The usher periodically compacts dispositions for
+   mergeable appends). The steward periodically compacts dispositions for
    terminal, swept notices.
 3. **`seen`** — the seen store (§5), highest write rate in the system,
    ships in phase 0 and gets its own store so its writes never wake lane
@@ -527,17 +528,17 @@ Two rules regardless of backing:
   `docs/specs/space-model/4-cells.md`). Streams are append *endpoints*, not
   logs. This matters doubly for ingress: webhook payloads ride an ephemeral
   stream, so a **receiving handler must persist candidates durably at
-  ingress** — otherwise external candidates arriving while no usher is
+  ingress** — otherwise external candidates arriving while no steward is
   live are lost permanently, not delayed (§6.1). The same rule is why
   `NoticeAction.replyTo` must be a durable cell, never a stream.
 - **Never `set()` a whole array** that has more than one writer.
 
-Retention: the usher's sweep terminally retracts expired notices (system
+Retention: the steward's sweep terminally retracts expired notices (system
 disposition — this is the *one* expiry mechanism; `visible()`'s expiry check
 is the read-side shadow of it, so an expired notice is hidden immediately
 and reaped eventually) and reaps notices that are terminal with
 `subjectVersion` below a watermark, plus their dispositions. Sweeping is an
-usher duty (it owns the ledger), bounded and boring by design. Because
+steward duty (it owns the ledger), bounded and boring by design. Because
 sweeping only reaps terminal rows, per-source intake quotas (§6.1) are what
 bound a flooding source, not retention.
 
@@ -570,19 +571,19 @@ For review clarity, the full per-(user, notice) state machine, every
 transition named once:
 
 ```text
-(candidate) --usher fold: clamp > suppress--> ADMITTED
+(candidate) --steward fold: clamp > suppress--> ADMITTED
 ADMITTED --now < notBefore--> EMBARGOED --time--> VISIBLE
-EMBARGOED --usher: subject satisfied / superseded--> TERMINAL
+EMBARGOED --steward: subject satisfied / superseded--> TERMINAL
          (a pre-scheduled reminder is retracted when its reason ends)
 VISIBLE --user: dismissed|archived|acted--> TERMINAL
-VISIBLE --usher: subject satisfied / thread displaced / expiry sweep
+VISIBLE --steward: subject satisfied / thread displaced / expiry sweep
          (system disposition)--> TERMINAL
 VISIBLE --user: snoozed--> SNOOZED --until--> VISIBLE
 VISIBLE --seen mark on subject reaches subjectVersion--> SATISFIED
          (hidden; no disposition row — pure join)
 VISIBLE --now ≥ expiresAt--> hidden immediately (read-side),
          TERMINAL at next sweep (write-side)
-TERMINAL --usher coalesce advances subjectVersion past tombstone-->
+TERMINAL --steward coalesce advances subjectVersion past tombstone-->
          VISIBLE (re-emergence: a consequence of coalescing, not a
          separate mechanism; silent unless a realert policy applies, §9.3)
 TERMINAL + below watermark --sweep--> reaped
@@ -591,7 +592,7 @@ TERMINAL + below watermark --sweep--> reaped
 Posture may change after admission (escalation raises it, collective
 handling demotes it — §8); §9.3 defines alerting and retraction in terms of
 these posture transitions. **Policy changes re-fold**: policy cells are fold
-inputs, so a policy commit wakes the usher and admitted notices re-lane —
+inputs, so a policy commit wakes the steward and admitted notices re-lane —
 muting a thread demotes its existing notices, not just future ones.
 
 ## 5. Seen-state and attention over artifacts
@@ -626,7 +627,7 @@ Everything else is the **changes projection** (§10.1) joined against marks:
   home).
 - **"While you were away"** = one `changes(watchSet, basis: seenWatermark,
   attribution: true)` call, grouped by run/thread then space, ordered by
-  the usher. Renders as a pattern on the home context. This is the
+  the steward. Renders as a pattern on the home context. This is the
   first-run view and the every-return view — the same query. The affordance
   must answer *what changed, by whom, since you looked* — the projection's
   `author` field gives session-grain attribution from day one (§10.1) — and
@@ -663,9 +664,9 @@ watch/unwatch policies (§7). Getting the defaults right is an open question
 (§12.2); getting them wrong in the "too broad" direction is the failure
 mode to avoid (dots everywhere = dots nowhere).
 
-## 6. The usher
+## 6. The steward
 
-**One logical usher per user.** It admits candidates, folds policies,
+**One logical steward per user.** It admits candidates, folds policies,
 assigns postures and weights, coalesces (same `id` when the same subject
 advances — re-emergence is this same operation crossing a tombstone),
 applies thread displacement (§6.4), retracts satisfied notices, and sweeps
@@ -673,14 +674,14 @@ retention (§4.5).
 
 ### 6.1 The notice inbox
 
-Candidates must be **durable before admission**: the usher may be asleep or
+Candidates must be **durable before admission**: the steward may be asleep or
 absent (interim mode, closed clients), and ephemeral candidates would be
 silently lost, not delayed. Intake shape:
 
 - In-fabric artifact changes need no *posting* — they are derived (§5).
   (They do need *reach*: until server-side cross-space wake exists, changes
-  in other spaces reach a server-side usher via the same forwarding path as
-  posted candidates below; a client-side usher reads them directly through
+  in other spaces reach a server-side steward via the same forwarding path as
+  posted candidates below; a client-side steward reads them directly through
   the user's ordinary sessions.)
 - Posted candidates land in the **notice inbox in the user's home space** —
   a cross-principal, quota-gated append surface, named net-new work
@@ -688,7 +689,7 @@ silently lost, not delayed. Intake shape:
   user's home space: the write gate enforces per-source quotas against the
   *verified writer identity*, not against self-reported fields. Until
   §10.2 lands, candidates rest in a durable per-source cell in the space
-  where they arise and the usher reads them there (client-side interim),
+  where they arise and the steward reads them there (client-side interim),
   with quotas enforced at fold time — weaker (a flood bloats the
   source-space cell, not the home space) but sound.
 - Webhook ingress: the receiving handler persists the payload durably at
@@ -700,9 +701,9 @@ silently lost, not delayed. Intake shape:
 
 The ledger carries a CFC `writeAuthorizedBy` claim. Two viable bindings:
 
-1. **Verified module identity** (recommended): the usher ships as a pattern
+1. **Verified module identity** (recommended): the steward ships as a pattern
    with a content-addressed module identity; `writeAuthorizedBy` binds to it.
-   The usher stays in pattern-space — inspectable, forkable in principle,
+   The steward stays in pattern-space — inspectable, forkable in principle,
    updated like any pattern — and "trusted" means *this exact code*, not
    "runs on a server".
 2. **Trusted builtin**: a runtime builtin id in the claim. Stronger, but
@@ -713,12 +714,12 @@ Recommendation: (1), with the fold's *inputs* (policies) as data so the code
 rarely needs to change. Note the identity subtlety: *acting as the user*
 (session `as` / `actingPrincipal` = the user's DID) and *being authorized to
 write the ledger* (module identity matching the claim) are two separate
-checks, and the design uses both — every usher write is attributable
-`onBehalfOf` the user and provably from the usher's code.
+checks, and the design uses both — every steward write is attributable
+`onBehalfOf` the user and provably from the steward's code.
 
 `writeAuthorizedBy` authorizes *code*, not an *instance*: two devices running
-the usher both pass the claim. The single-writer premise therefore needs
-instance discipline, not just CFC: **the interim client-side usher takes a
+the steward both pass the claim. The single-writer premise therefore needs
+instance discipline, not just CFC: **the interim client-side steward takes a
 lease** (a mutex cell claimed with an expiry; the sqlite spec's
 `tryClaimMutex` shape) and only the leaseholder folds. Independent of the
 lease, the fold is specified **idempotent and commutative over the notice
@@ -730,7 +731,7 @@ window degrades to wasted work, not divergence.
 
 - **Target: the server-primary execution model**
   (`docs/specs/server-side-execution/`). With intake home-space-local
-  (§6.1), the usher is a *standing registration on the user's home space* —
+  (§6.1), the steward is a *standing registration on the user's home space* —
   work whose value is its effects rather than client-read output — woken by
   commits to the notice inbox, the policy cells, or forwarded watch-set
   events. Execution is attributed `onBehalfOf` the user. Named
@@ -738,19 +739,19 @@ window degrades to wasted work, not divergence.
   are all **per-space**: standing registrations are its own later phase;
   scoped (`PerUser`) state claims are gated (its G16); server-side
   *cross-space* reads/wake are explicitly deferred there — which is exactly
-  why intake forwards into the home space instead of the usher reading N
+  why intake forwards into the home space instead of the steward reading N
   spaces.
 - **Interim: client-side, under lease** (§6.2). Until standing registrations
-  land, the leaseholder client runs the usher as an ordinary piece. This
+  land, the leaseholder client runs the steward as an ordinary piece. This
   degrades gracefully for in-fabric state (candidates are durable; folding
   happens on next lease) — what's lost is only *timeliness* while no client
   is open, which matters from phase 2 (OS delivery) onward and not before.
-- **Not: `background-piece-service` as-is.** It is per-space (the usher is
-  per-user), ~60s polling (the usher is wake-on-commit shaped), and its own
+- **Not: `background-piece-service` as-is.** It is per-space (the steward is
+  per-user), ~60s polling (the steward is wake-on-commit shaped), and its own
   README documents async-completion unreliability. If bps is pressed into
   interim service, treat that as scaffolding, not the design.
 
-**Laziness.** The usher materializes *rows*; it does not keep derived
+**Laziness.** The steward materializes *rows*; it does not keep derived
 predicates hot. `visible()` evaluates on surface demand over the user's own
 stores (§4.4). The one push-shaped duty is OS delivery (§9.3), which is
 explicitly an edge adapter fed by wake-on-commit, not a hot loop.
@@ -762,10 +763,10 @@ Two mechanisms at two altitudes:
 - **`id` is identity**: the same notice at a newer subject version.
   Coalescing updates the notice in place (refreshing content, expiry,
   progress); crossing a dismissal tombstone is re-emergence. Identity is
-  usher-derived from verified provenance (§4.4), so it cannot be forged.
+  steward-derived from verified provenance (§4.4), so it cannot be forged.
 - **`threadKey` is the thread**, and displacement is a *derived rule over
   it*: **within a threadKey, only the newest live notice is visible**;
-  older live notices in the thread are terminally retracted by the usher
+  older live notices in the thread are terminally retracted by the steward
   (system disposition) when a newer one is admitted. A prepared result
   therefore displaces the raw occurrence by *sharing its thread*, not by
   naming notice ids — no displacement chains, no tombstone bookkeeping for
@@ -777,15 +778,15 @@ Two mechanisms at two altitudes:
 
 ## 7. Policies
 
-A policy is a small declarative record the usher folds over — **data, not
-usher code**:
+A policy is a small declarative record the steward folds over — **data, not
+steward code**:
 
 ```ts
 // Shown for illustration only.
 type AttentionPolicy = {
   match: {
     subject?: unknown;        // asCell: ["cell"] — a specific source/thread
-    kind?: string;            // as bound by the usher, §4.4
+    kind?: string;            // as bound by the steward, §4.4
     spaceDid?: string;
     threadKey?: string;
   };
@@ -809,7 +810,7 @@ type AttentionPolicy = {
   };
   reason?: string;            // human-legible: why this policy exists
   author: string;             // user DID; a pattern's module identity for
-                              // proposals; the USHER's module identity for
+                              // proposals; the STEWARD's module identity for
                               // learned policies (see below)
 };
 ```
@@ -827,7 +828,7 @@ breaks through" — is two records and zero ambiguity.
   handful of defaults: messages from **verified human actors with an
   established relationship** (rosters, prior threads) → `heads-up`;
   agent-completions → `silent` (visible as seen-state, never buzzing). Per
-  §4.2, shipped defaults above `review` key on usher-verified facts only —
+  §4.2, shipped defaults above `review` key on steward-verified facts only —
   never on self-declared `kind` (declaring `kind: "group-chat"` must not
   buy the human-messages baseline). There is deliberately **no default
   that maps any emitter-supplied field to `interrupt`**.
@@ -851,12 +852,12 @@ breaks through" — is two records and zero ambiguity.
     escalation ladder ahead of time: three candidates with `notBefore` =
     T-90/T-30/T-7, same `threadKey` (each new admission displaces the
     prior rung), ascending posture hints, plus a proposed min the user
-    adopts once. Obligation met → subject advances → the usher retracts
+    adopts once. Obligation met → subject advances → the steward retracts
     the pending rungs (§4.7's EMBARGOED retraction).
 - **Learned policies: the reputation loop, made legible.** The downward
   feedback the spec promises (dismiss-without-open, quota pressure ⇒ the
-  source's notices sink) has to live *somewhere*, and hidden usher state
-  would break the inspectability goal. It lives here: the usher — which is
+  source's notices sink) has to live *somewhere*, and hidden steward state
+  would break the inspectability goal. It lives here: the steward — which is
   already the trusted fold, not a third party petitioning for adoption —
   writes ordinary policy records (`author` = its module identity, `reason`
   = the evidence, e.g. "7 of 8 notices dismissed without open over 30d")
@@ -879,7 +880,7 @@ breaks through" — is two records and zero ambiguity.
   that discloses read receipts, a muted member's persistent silence is
   statistically visible to a patient observer. The runtime's guarantee is
   scoped: no direct exposure, and inference surface bounded by the space's
-  own disclosure policy (§8, §12.5). Usher *output* ordering/timing is not
+  own disclosure policy (§8, §12.5). Steward *output* ordering/timing is not
   considered a protected channel in v1.
 
 ## 8. Multi-user
@@ -888,7 +889,7 @@ Three properties, all falling out of "a notice is a per-(user, notice)
 relation" plus existing constraints:
 
 - **One candidate, N ledgers.** A shared space posts one candidate per
-  event; each member's own usher lanes it under their own policies. A new
+  event; each member's own steward lanes it under their own policies. A new
   message can be `interrupt` for the on-call member and `silent` for the
   member who muted the thread. The emitter cannot know or decide this —
   correctly so.
@@ -913,7 +914,7 @@ relation" plus existing constraints:
   space's members should understand when choosing the policy.
 - **Escalation across people is a policy.** "If nobody attends to this
   within 2h, raise it to `heads-up` for the space owner" is a policy cell on
-  the shared space, evaluated by the owner's usher against contributed
+  the shared space, evaluated by the owner's steward against contributed
   state. No siloed notification system can express this; here it is one
   record. (Escalation is a posture *raise* after admission; §9.3's
   transition rule makes it alert exactly once. Deadline-shaped escalation —
@@ -963,7 +964,7 @@ there:
 
 - **Alerting rides posture transitions, not writes.** A delivered notice
   alerts when it first materializes at an alert-bearing rung and again only
-  when the usher *raises* its posture (escalation, §8); every same-rung
+  when the steward *raises* its posture (escalation, §8); every same-rung
   coalesce — new message in the thread, progress tick, content refresh —
   **replaces silently** on every surface (Android `setOnlyAlertOnce`
   semantics, made unconditional: the emitter cannot choose to re-buzz).
@@ -994,7 +995,7 @@ there:
   notice may linger on an OS tray until the next wake re-evaluates it.
   Timer registrations that feed the dispatcher are named net-new work
   (§10.5); until they land, expiry is evaluate-on-read with explicitly
-  stale OS surfaces (the usher's sweep is the terminal write-side, §4.5).
+  stale OS surfaces (the steward's sweep is the terminal write-side, §4.5).
   Second, iOS replaces but does not tick (text refreshes when the shade
   reopens); genuinely-live notices (`progress`) render best-effort per
   platform, and rich live chrome (Live Activities) is a separate later
@@ -1067,7 +1068,7 @@ that first needs it (§11), and each needs its own (small) design pass.
    makes dead-device delivery an authority question with an answer instead
    of an open question — the full chain "someone messages me while all my
    devices are closed → my phone buzzes" is inbox append → home-space
-   wake → usher fold → dispatcher push.
+   wake → steward fold → dispatcher push.
 3. **Write-authorization for sqlite** *(pre-migration of the ledger to
    sqlite; not needed for phase 1's array-cell backing)*.
    `writeAuthorizedBy` is enforced on the cell-write prepare path only;
@@ -1076,9 +1077,9 @@ that first needs it (§11), and each needs its own (small) design pass.
    bump is a cell write, so the prepare path sees it) needs specification
    and a security review of its own, including whether any sqlite write
    path bypasses the rev write.
-4. **Usher lease** *(phase 1)*. A small mutex-cell convention (claim with
+4. **Steward lease** *(phase 1)*. A small mutex-cell convention (claim with
    expiry, renew, steal-on-expiry) for single-instance election of the
-   interim client-side usher (§6.2). Generalizes beyond attention.
+   interim client-side steward (§6.2). Generalizes beyond attention.
 5. **Timer wake** *(phase 2+)*. Executor-pool timer registrations
    (`notBefore`, `expiresAt`, snooze expiry, `realert` cadences, escalation
    deadlines, digest cadence) feeding wake-on-commit's machinery, so
@@ -1099,7 +1100,7 @@ Each phase is independently shippable and none re-shapes the data model.
 
 - **Phase 0 — seen-state.** The changes projection (§10.1), the seen store
   with its write discipline (§4.5.3), unseen dots in the shell, and a
-  "while you were away" home pattern. No usher, no candidates, no push.
+  "while you were away" home pattern. No steward, no candidates, no push.
   Acceptance bar: the user can see *what changed, by whom (session-grain),
   and since when*, and jump in with the changed region emphasized — not
   merely that a dot exists. This makes agent work **visible** — the single
@@ -1108,12 +1109,12 @@ Each phase is independently shippable and none re-shapes the data model.
 - **Phase 1 — ledger + lanes.** Envelope, home-space `notices` (array cell
   + `writeAuthorizedBy`) and `dispositions` stores, notice intake (inbox
   gate §10.2, or interim source-space cells), a minimal client-executed
-  usher under lease (verified-fact defaults + clamp composition + learned
+  steward under lease (verified-fact defaults + clamp composition + learned
   policies + thread displacement), shell bell/lanes with notice actions
   (§4.6), receipt-shaped notices for agent runs with attribution folding
   (§5). Policies v0 (including the emergency-pack and deadline-ladder
   propose/adopt idioms, §7).
-- **Phase 2 — server usher + first transport.** Usher as a standing
+- **Phase 2 — server steward + first transport.** Steward as a standing
   registration on the home space under server-primary execution
   (dependencies named in §6.3); Web Push with device registration,
   redaction rules, and retraction; digest queries; timer wake (§10.5),
@@ -1127,14 +1128,14 @@ Each phase is independently shippable and none re-shapes the data model.
 
 ## 12. Open questions
 
-1. **Usher trust binding.** Verified module identity is recommended (§6.2),
+1. **Steward trust binding.** Verified module identity is recommended (§6.2),
    but the "wholly-system service" alternative keeps resurfacing; if the
    server executor itself writes the ledger, is that a builtin identity, and
-   does that preempt user-forkable ushers? Resolve before phase 1.
+   does that preempt user-forkable stewards? Resolve before phase 1.
 2. **Watch-set defaults.** Touched ∪ agent-authored ∪ watched is the
    working answer (§5); validate against real spaces before hardening, and
    decide whether "touched" decays.
-3. **Forwarder contract.** Cross-space reach for a server-side usher
+3. **Forwarder contract.** Cross-space reach for a server-side steward
    (§6.1, §6.3): who runs the forwarding (the emitting pattern? the user's
    runtime on visit?), and what happens for spaces the user hasn't opened
    in weeks? Partially subsumed by §10.2's inbox gate; the residue is
@@ -1147,7 +1148,7 @@ Each phase is independently shippable and none re-shapes the data model.
    absence reveals, and how much of §7's policy-privacy bound this sets.
 6. **Policy expressiveness boundary.** V1 is plain predicates. Content
    regexes and LLM-judged predicates ("only interrupt if actually urgent")
-   are clearly coming — as usher inputs they inherit the usher's authority,
+   are clearly coming — as steward inputs they inherit the steward's authority,
    so they need their own integrity story before admission.
 7. **Displacement scope.** Thread displacement (§6.4) deliberately cannot
    express cross-thread or multi-target displacement. If a real consumer
@@ -1164,7 +1165,7 @@ Each phase is independently shippable and none re-shapes the data model.
     seen-timestamps. Appendix A is the field mapping; the remaining
     question is sequencing — which loom surface adopts the runtime ledger
     first, and whether loom's materializer becomes the trusted source or a
-    second usher (§Division of labor says: trusted source).
+    second steward (§Division of labor says: trusted source).
 11. **`realert` bounds.** Minimum cadence, maximum duration, and whether a
     realert policy requires re-confirmation after N fires — the exception
     to alert-once must not become a resharpened nag machine (§7, §9.3).
@@ -1177,7 +1178,7 @@ that value should be renamed — e.g. `fyi` — before the runtime noun lands.)
 
 | Loom candidate field | Envelope home |
 |---|---|
-| `id` / source identity | `id` (re-derived by usher from verified provenance) |
+| `id` / source identity | `id` (re-derived by steward from verified provenance) |
 | subject / focused target | `subject` (cell link); distinct destination → `target`; `focused_view_fallback` → `ext` |
 | prepared material | `attachment` |
 | `title`, body copy | `title`, `body` (+ `redacted` where the product wants lockscreen-safe copy) |
@@ -1249,7 +1250,7 @@ Three mechanisms compose: the med pattern re-posts as the deadline nears
 one-time adopted policy carries `{clamp: {min: "interrupt"},
 bypassQuietHours: true, realert: {everyMs: 600_000}}` — `realert` being the
 single user-grantable exception to alert-once (§9.3); logging the dose
-advances the subject artifact, and the usher terminally retracts every
+advances the subject artifact, and the steward terminally retracts every
 pending rung, including embargoed ones (§4.7). Phase gating is real: cadence
 firing between commits needs timer wake (§10.5) — before phase 2 this story
 is not safely servable and products should not pretend otherwise.
@@ -1303,7 +1304,7 @@ Nina's social importer posts ~80 like/follow events daily; she never opens
 them. Intake quotas bound the flood at the write gate against verified
 writer identity (§10.2). Her dismiss-without-open pattern becomes a
 **learned policy** she can read — `{match: {kind: "social"}, clamp: {max:
-"silent"}, author: usher, reason: "37 of 40 dismissed without open over
+"silent"}, author: steward, reason: "37 of 40 dismissed without open over
 30d"}` — and the source can never buy its way back up (learned policies
 only lower; §7). The review lane stays bounded; the weekly digest groups
 the residue by `kind`. This is the reputation loop as a legible artifact
@@ -1340,7 +1341,7 @@ T−30, `interrupt` at T−7. The **deadline ladder** idiom (§7): the pattern
 posts all three candidates ahead of time with ascending `notBefore` dates,
 the same `threadKey` (each admission displaces the prior rung), ascending
 hints, plus a proposed min she adopts once — at setup, when she's thinking
-about it. Renewal filed → subject advances → the usher retracts every
+about it. Renewal filed → subject advances → the steward retracts every
 pending rung including embargoed ones (§4.7). The gate is timeliness:
 `notBefore` materialization is evaluate-on-read until timer wake (§10.5) —
 nearly harmless at 90-day horizons for a daily shell user, unacceptable for
@@ -1354,7 +1355,7 @@ candidates, hints `interrupt` with `ext.urgency: "CRITICAL"`, tries to
 collide the banking source's notification id, re-declares its kind as
 "group-chat" to catch the human-messages default. Every defense is
 structural, not heuristic: hints can't raise (§4.2); `ext` is quarantined
-from routing (§4.4); `id` is usher-derived from verified provenance, so the
+from routing (§4.4); `id` is steward-derived from verified provenance, so the
 collision is impossible by construction; quotas bind to verified writer
 identity (§10.2); dismiss-without-open writes a legible learned max (§7);
 unconditional alert-once means even fresh-event-key spam can't re-buzz past
@@ -1369,7 +1370,7 @@ user actually knows.
   `docs/common/conventions/HOME_SPACE.md` — multi-user substrate; the
   contribute-your-own idiom; `writeAuthorizedBy` in production.
 - `docs/specs/server-side-execution/README.md` — standing registrations,
-  wake-on-commit, `onBehalfOf` attribution (usher execution home; §6.3
+  wake-on-commit, `onBehalfOf` attribution (steward execution home; §6.3
   names this spec's dependencies on it).
 - `docs/specs/memory-v2/` — `01-data-model.md` (seq, heads),
   `03-commit-model.md` (optimistic concurrency; commit-log `sessionId` /
@@ -1398,7 +1399,7 @@ user actually knows.
   the `candidates` → `result` lifecycle precedent for candidate → notice.
 - `packages/ui/src/v2/components/cf-toast/`, `cf-alert`, `cf-badge` —
   existing presentation components.
-- `packages/background-piece-service/README.md` — why the usher does not
+- `packages/background-piece-service/README.md` — why the steward does not
   run there.
 - PR #4132 (annotation-primitive prototype, draft) — the documented
   anti-precedent for storage-side reverse indexes invisible to the reactive
