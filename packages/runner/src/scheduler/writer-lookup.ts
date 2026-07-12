@@ -20,6 +20,7 @@ import {
 } from "./run.ts";
 import type { SchedulerWriteIndex } from "./scheduling-writes.ts";
 import type { Action, TelemetryAnnotations } from "./types.ts";
+import { resolveRegistrationSurface } from "./registration.ts";
 
 export type LiveSchedulerMatchedWrite = {
   kind: "current-known" | "materializer";
@@ -126,7 +127,7 @@ function collectLiveSchedulerWriters(
     const targetEntity = entityKey(target);
     for (const action of actions) {
       const record = state.nodes.get(action);
-      if (!record || record.kind === "effect") continue;
+      if (!record) continue;
       const identity = (action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       if (
@@ -163,6 +164,16 @@ function collectLiveSchedulerWriters(
       state.writeIndex.writersByEntity.get(key),
       "current-known",
       (action) => state.writeIndex.getSchedulingWrites(action),
+    );
+    // Effects are intentionally absent from the computation write index: they
+    // must not become scheduler producers merely because W1.4 needs to inspect
+    // whether the server can broker them. Discover their transformer-declared
+    // surface directly, without changing dependency propagation semantics.
+    addMatches(
+      target,
+      state.nodes.effects,
+      "current-known",
+      (action) => resolveRegistrationSurface(action, undefined),
     );
     addMatches(
       target,
