@@ -55,7 +55,6 @@ import {
   getMetaCell,
   getMetaLink,
   isCellLink,
-  isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -423,43 +422,47 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   );
 };
 
+const DIRECT_ROOT_OUTPUT_BINDING_DIAGNOSTIC =
+  "Computation nodes require exactly one direct root write-redirect output binding";
+
 /**
- * Find the first write-redirect link within an output binding and return its
- * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
- * a pattern node writes through is reserved for that node, so its resolved
- * coordinates form a stable, position-derived, program-independent identity —
- * suitable as the cause for the node's result cell instead of hashing the
- * pattern object (which drags in the session-varying `program`). Returns
- * undefined if the binding contains no write redirect.
+ * Return a computation node's primary output binding without searching its
+ * value shape. Transformer-produced computations bind `node.outputs` itself to
+ * the reserved result cell. Nested objects/arrays are ambiguous (and used to
+ * make identity depend on object traversal order), so reject them at the
+ * runner boundary. Handler output maps are side-write declarations and do not
+ * pass through this helper.
  */
-function firstResolvedOutputRedirect(
+function directRootOutputRedirect(
+  binding: unknown,
+  baseCell: Cell<any>,
+): NormalizedFullLink {
+  if (!isWriteRedirectLink(binding)) {
+    throw new Error(
+      `${DIRECT_ROOT_OUTPUT_BINDING_DIAGNOSTIC}; bind node.outputs itself ` +
+        "to the result cell instead of nesting or multiplying aliases",
+    );
+  }
+  return parseLink(binding, baseCell);
+}
+
+/**
+ * Resolve the direct primary output to its final target. Its coordinates are
+ * the stable, position-derived, program-independent cause used by raw builtin
+ * containers and sub-pattern result cells.
+ */
+function resolveDirectRootOutputRedirect(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   binding: unknown,
   baseCell: Cell<any>,
-): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding)) {
-    return resolveLink(
-      runtime,
-      tx,
-      parseLink(binding, baseCell),
-      "writeRedirect",
-    );
-  }
-  if (Array.isArray(binding)) {
-    for (const child of binding) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  if (isRecord(binding) && !isCellLink(binding)) {
-    for (const child of Object.values(binding)) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
-      if (found) return found;
-    }
-  }
-  return undefined;
+): NormalizedFullLink {
+  return resolveLink(
+    runtime,
+    tx,
+    directRootOutputRedirect(binding, baseCell),
+    "writeRedirect",
+  );
 }
 
 const recordSetupProjectionPolicyInputs = (
@@ -2524,7 +2527,7 @@ export class Runner {
       );
       let spotLink: NormalizedFullLink | undefined;
       try {
-        spotLink = firstResolvedOutputRedirect(
+        spotLink = resolveDirectRootOutputRedirect(
           this.runtime,
           tx,
           unwrappedOutputs,
@@ -4454,7 +4457,17 @@ export class Runner {
       );
     }
 
-    this.instantiateJavaScriptActionNode(context);
+    // Normal computations have one transformer-produced primary output at the
+    // root. Handler output maps were handled above and remain free to describe
+    // multiple side writes.
+    const primaryOutput = directRootOutputRedirect(
+      io.outputs,
+      processCell,
+    );
+    this.instantiateJavaScriptActionNode({
+      ...context,
+      writes: [primaryOutput],
+    });
   }
 
   private getFallbackJavaScriptImplementation(
@@ -4653,12 +4666,11 @@ export class Runner {
         ? { skipTopLevelKeys: opaqueInputKeys }
         : undefined,
     );
-    // outputCells tracks the static write surface for dependency ordering and
-    // event preflight.
-    const outputCells = findAllWriteRedirectCells(
-      mappedOutputBindings,
-      processCell,
-    );
+    // The root binding is the primary output. Materializer envelopes and the
+    // redirect's resolved target are added as separate write surfaces below.
+    const outputCells = [
+      directRootOutputRedirect(mappedOutputBindings, processCell),
+    ];
 
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
@@ -4672,7 +4684,7 @@ export class Runner {
     // program-independent identity. Builtins that mint a result container
     // (map/flatmap/filter) key it on this instead of the serialized op /
     // inputs cell (both of which drag in the session-varying `program`).
-    const resolvedOutputSpot = firstResolvedOutputRedirect(
+    const resolvedOutputSpot = resolveDirectRootOutputRedirect(
       this.runtime,
       tx,
       mappedOutputBindings,
@@ -4911,6 +4923,7 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    directRootOutputRedirect(outputs, resultCell);
 
     sendValueToBinding(
       tx,
@@ -4965,78 +4978,52 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // If output bindings is a link to a non-redirect cell,
-    // use that instead of creating a new cell.
-    let sendToBindings: boolean;
-    let childResultCell: Cell<any>;
-    if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
-      childResultCell = this.runtime.getCellFromLink(
-        parseLink(outputs, resultCell),
-        patternImpl.resultSchema,
-        tx,
-      );
-      sendToBindings = false;
-    } else {
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
-      const targetSpace = module.targetSpace ?? resultCell.space;
-      // CT-1623: identify the result cell by the (fully resolved) output spot
-      // reserved for this node — a stable, position-derived, program-independent
-      // identity — rather than hashing the pattern object (which drags in the
-      // session-varying `program` and forces `materializeRuntimeProgram`). We
-      // still mint a NEW cell and point the binding at it (`sendToBindings`
-      // below); we only borrow the resolved output link's coordinates as the
-      // cause. A pattern node always writes through a write redirect, so the
-      // absence of one is a bug (the legacy non-redirect variants are removed).
-      //
-      // Bind the output bindings first (as `instantiateRawNode` does), so the
-      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
-      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
-      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
-      // the base result cell and collide on one shared child cell.
-      // `bindPatterns: false` — output bindings never carry sub-patterns to
-      // instantiate, so skip that work; we only need the pseudo-cell aliases
-      // resolved to their concrete links.
-      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
-        this.runtime.cfc,
-        outputBindings,
-        argumentCellLink,
-        resultCell,
-      );
-      const outputRedirect = firstResolvedOutputRedirect(
-        this.runtime,
-        tx,
-        mappedOutputBindings,
-        resultCell,
-      );
-      if (!outputRedirect) {
-        throw new Error(
-          "instantiatePatternNode: result cell requires a write-redirect " +
-            "output binding to anchor a reload-stable identity",
-        );
-      }
-      const baseResultCell = this.runtime.getCell(
-        targetSpace,
-        {
-          resultFor: {
-            space: outputRedirect.space,
-            id: outputRedirect.id,
-            path: [...outputRedirect.path],
-          },
+    const resultScope = patternDefaultScope(patternImpl) ?? module.defaultScope;
+    const targetSpace = module.targetSpace ?? resultCell.space;
+    // CT-1623: identify the result cell by the fully resolved direct output
+    // spot reserved for this node — a stable, position-derived,
+    // program-independent identity — rather than hashing the pattern object
+    // (which drags in the session-varying `program` and forces
+    // `materializeRuntimeProgram`). We still mint a NEW cell and point the root
+    // binding at it below; we only borrow the resolved output coordinates as
+    // the cause.
+    //
+    // Bind the output first (as `instantiateRawNode` does), so the
+    // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+    // DISTINCT concrete cells. Resolving the raw binding would let pseudo
+    // cells at the same path collapse onto the base result cell.
+    const mappedOutputBinding = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+    );
+    const outputRedirect = resolveDirectRootOutputRedirect(
+      this.runtime,
+      tx,
+      mappedOutputBinding,
+      resultCell,
+    );
+    const baseResultCell = this.runtime.getCell(
+      targetSpace,
+      {
+        resultFor: {
+          space: outputRedirect.space,
+          id: outputRedirect.id,
+          path: [...outputRedirect.path],
         },
-        patternImpl.resultSchema,
-        tx,
-      );
+      },
+      patternImpl.resultSchema,
+      tx,
+    );
 
-      childResultCell = baseResultCell;
-      if (resultScope !== undefined && resultScope !== "space") {
-        let resultCellLink = baseResultCell.getAsNormalizedFullLink();
-        resultCellLink = { ...resultCellLink, scope: resultScope };
-        // The result cell's scope isn't "space", so we may have just created
-        // this cell. If so, create the corresponding argument/internal cells.
-        childResultCell = createCell(this.runtime, resultCellLink, tx);
-      }
-      sendToBindings = true;
+    let childResultCell = baseResultCell;
+    if (resultScope !== undefined && resultScope !== "space") {
+      let resultCellLink = baseResultCell.getAsNormalizedFullLink();
+      resultCellLink = { ...resultCellLink, scope: resultScope };
+      // The result cell's scope isn't "space", so we may have just created
+      // this cell. If so, create the corresponding argument/internal cells.
+      childResultCell = createCell(this.runtime, resultCellLink, tx);
     }
 
     const sourceKey = getTxDebugActionId(tx) ?? "none";
@@ -5044,7 +5031,7 @@ export class Runner {
       `[PATTERN-NODE] source=${sourceKey}`,
       `result=${childResultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(patternImpl)}`,
-      `sendToBindings=${sendToBindings}`,
+      "sendToBindings=true",
     ]);
 
     if (childResultCell.space !== parentResultCell.space) {
@@ -5073,16 +5060,14 @@ export class Runner {
       ),
     });
 
-    if (sendToBindings) {
-      sendValueToBinding(
-        tx,
-        parentResultCell,
-        argumentCellLink,
-        outputs,
-        childResultCell.getAsLink(),
-        { derivedInternalCells: pattern.derivedInternalCells },
-      );
-    }
+    sendValueToBinding(
+      tx,
+      parentResultCell,
+      argumentCellLink,
+      outputs,
+      childResultCell.getAsLink(),
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
 
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
