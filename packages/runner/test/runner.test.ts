@@ -24,6 +24,8 @@ import {
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+const directRootOutputBindingDiagnostic =
+  "Computation nodes require exactly one direct root write-redirect output binding";
 
 function runTrusted(
   runtime: Runtime,
@@ -129,6 +131,142 @@ describe("runPattern", () => {
     ).toBe(true);
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 1 });
+  });
+
+  it("rejects a nested computation output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => ({ nested: 1 }),
+          },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested computation output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects multiple computation output bindings", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        first: { $alias: { partialCause: "first", path: [] } },
+        second: { $alias: { partialCause: "second", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => ({ first: 1, second: 2 }),
+          },
+          inputs: {},
+          outputs: {
+            first: { $alias: { partialCause: "first", path: [] } },
+            second: { $alias: { partialCause: "second", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects multiple computation output bindings",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested passthrough output binding", () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: {
+            nested: { $alias: { cell: "argument", path: ["input"] } },
+          },
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested passthrough output binding",
+    );
+    expect(() =>
+      runTrusted(runtime, undefined, pattern, { input: 1 }, resultCell)
+    ).toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects multiple passthrough output bindings", () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          first: { type: "number" },
+          second: { type: "number" },
+        },
+      },
+      resultSchema: {},
+      result: {
+        first: { $alias: { partialCause: "first", path: [] } },
+        second: { $alias: { partialCause: "second", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: {
+            first: { $alias: { cell: "argument", path: ["first"] } },
+            second: { $alias: { cell: "argument", path: ["second"] } },
+          },
+          outputs: {
+            first: { $alias: { partialCause: "first", path: [] } },
+            second: { $alias: { partialCause: "second", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects multiple passthrough output bindings",
+    );
+    expect(() =>
+      runTrusted(
+        runtime,
+        undefined,
+        pattern,
+        { first: 1, second: 2 },
+        resultCell,
+      )
+    ).toThrow(directRootOutputBindingDiagnostic);
   });
 
   it("writes internal aliases through derived internal cell manifest links", async () => {
