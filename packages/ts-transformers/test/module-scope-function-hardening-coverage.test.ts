@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -24,24 +24,13 @@ function variableNamed(
   );
 }
 
-/** The `__cfHardenFn(...)` call whose first argument is a function expression. */
-function hardenedFunctionExpression(
-  root: ts.SourceFile,
-): ts.FunctionExpression | undefined {
-  for (const call of callsNamed(root, "__cfHardenFn")) {
-    const arg = call.arguments[0];
-    if (arg && ts.isFunctionExpression(arg)) return arg;
-  }
-  return undefined;
-}
-
 // Module-scope function hardening freezes every top-level callable and, for
 // callables a `WriteAuthorizedBy` / `TrustedActionWrite` type references,
 // stamps a verified-binding identity onto them. The existing
 // `module-scope-function-hardening.test.ts` covers the named function
 // declaration paths. These tests target the still-uncovered shapes: an
-// anonymous default-exported function declaration (rewritten to a hoisted const
-// plus a default export), async modifier retention on that rewrite, and a
+// anonymous default-exported function declaration (hardened in place on the
+// export assignment), async modifier retention on that rewrite, and a
 // trusted binding whose initializer is a direct arrow function bound to a
 // non-exported name (statement-form annotation plus a separate hardening call).
 
@@ -50,7 +39,7 @@ async function transform(source: string): Promise<string> {
 }
 
 Deno.test(
-  "anonymous default-exported function declaration is rewritten to a hardened const and a default export",
+  "anonymous default-exported function declaration is hardened in place on the export assignment",
   async () => {
     const output = await transform(
       `/// <cts-enable />\n` +
@@ -58,26 +47,36 @@ Deno.test(
         `export default function () { return 1; }\n`,
     );
 
-    // The nameless default export cannot be referenced by name, so it is
-    // lowered into a hoisted `const` bound to a hardened function expression and
-    // re-exported by that generated name.
+    // The nameless default export cannot be referenced by name, so the
+    // function expression is wrapped where it stands —
+    // `export default __cfHardenFn(function () { ... });` — with no synthetic
+    // binding minted. (An earlier rewrite minted a `const` via
+    // `createUniqueName` but exported an identifier re-created from its bare
+    // `.text`, so the declared and exported names diverged and the module
+    // threw a ReferenceError at load.)
     const root = parseModule(output);
-    const decl = variableNamed(root, "__cfDefaultFn");
-    assert(decl, "expected a `const __cfDefaultFn` declaration");
     const exported = defaultExportExpression(root);
-    assert(exported && ts.isIdentifier(exported));
-    assert(exported.text.startsWith("__cfDefaultFn"));
-    const wrapped = hardenedFunctionExpression(root);
-    assert(wrapped, "expected __cfHardenFn to wrap a function expression");
+    assert(exported && ts.isCallExpression(exported));
+    assert(
+      ts.isIdentifier(exported.expression) &&
+        exported.expression.text === "__cfHardenFn",
+    );
+    assertEquals(exported.arguments.length, 1);
+    const wrapped = exported.arguments[0]!;
+    assert(ts.isFunctionExpression(wrapped));
     assert(
       !wrapped.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword),
       "expected the wrapped function to be non-async",
+    );
+    assert(
+      !output.includes("__cfDefaultFn"),
+      "expected no synthetic default-fn binding in the output",
     );
   },
 );
 
 Deno.test(
-  "anonymous default-exported async function keeps its async modifier through the rewrite",
+  "anonymous default-exported async function keeps its async modifier through the in-place rewrite",
   async () => {
     const output = await transform(
       `/// <cts-enable />\n` +
@@ -86,19 +85,22 @@ Deno.test(
     );
 
     // Only the `async` modifier survives on the generated function expression;
-    // the export/default modifiers are dropped because the const carries the
-    // export.
+    // `export`/`default` are carried by the export assignment itself
+    // (`retainRuntimeFunctionModifiers`).
     const root = parseModule(output);
-    const decl = variableNamed(root, "__cfDefaultFn");
-    assert(decl, "expected a `const __cfDefaultFn` declaration");
     const exported = defaultExportExpression(root);
-    assert(exported && ts.isIdentifier(exported));
-    assert(exported.text.startsWith("__cfDefaultFn"));
-    const wrapped = hardenedFunctionExpression(root);
-    assert(wrapped, "expected __cfHardenFn to wrap a function expression");
+    assert(exported && ts.isCallExpression(exported));
     assert(
-      wrapped.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword),
-      "expected the wrapped function expression to keep its async modifier",
+      ts.isIdentifier(exported.expression) &&
+        exported.expression.text === "__cfHardenFn",
+    );
+    const wrapped = exported.arguments[0]!;
+    assert(ts.isFunctionExpression(wrapped));
+    assertEquals(wrapped.modifiers?.length, 1);
+    assertEquals(wrapped.modifiers?.[0]?.kind, ts.SyntaxKind.AsyncKeyword);
+    assert(
+      !output.includes("__cfDefaultFn"),
+      "expected no synthetic default-fn binding in the output",
     );
   },
 );

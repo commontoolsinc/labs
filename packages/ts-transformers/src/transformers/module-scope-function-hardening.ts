@@ -146,7 +146,6 @@ function transformFunctionDeclaration(
   }
 
   state.useHelper();
-  const defaultName = factory.createUniqueName("__cfDefaultFn");
   const fnExpr = factory.createFunctionExpression(
     retainRuntimeFunctionModifiers(statement.modifiers),
     statement.asteriskToken,
@@ -157,25 +156,14 @@ function transformFunctionDeclaration(
     statement.body,
   );
 
+  // Wrapped in place — the same shape the export-assignment branch emits for
+  // `export default <fn-expr>` — so no synthetic binding is minted whose
+  // declaration and export names would have to be kept in sync.
   return [
-    factory.createVariableStatement(
-      undefined,
-      factory.createVariableDeclarationList(
-        [
-          factory.createVariableDeclaration(
-            defaultName,
-            undefined,
-            undefined,
-            wrapWithFunctionHardener(fnExpr, factory, state.helperName),
-          ),
-        ],
-        ts.NodeFlags.Const,
-      ),
-    ),
     factory.createExportAssignment(
       undefined,
       false,
-      factory.createIdentifier(defaultName.text),
+      wrapWithFunctionHardener(fnExpr, factory, state.helperName),
     ),
   ];
 }
