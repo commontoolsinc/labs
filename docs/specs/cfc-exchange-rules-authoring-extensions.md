@@ -10,9 +10,12 @@ evaluation, adoption-by-workflow where authority is someone else's to give.
 
 ## Status
 
-Design sketches, one notch below the core doc: each is believed lowerable to
-existing spec machinery, but none has been sized against the runtime. New
-spec-change items: SC-36, SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md).
+Exploratory design sketches, one notch below the core doc. Critical review
+found that several require new runtime semantics rather than authoring sugar;
+none is scheduled by the core implementation program. See the
+[`cfc-exchange-rule-authoring` implementation plan](../plans/cfc-exchange-rule-authoring.md)
+for the prerequisite and safety disposition of each surface. New spec-change
+items: SC-36, SC-37 in [`cfc-spec-changes.md`](./cfc-spec-changes.md).
 
 ## Last Updated
 
@@ -32,7 +35,7 @@ the dependency classification.
 // Strip the gateway token only where it lawfully appears; the sink gate
 // fires this during boundary execution and emits AuthorizedRequest (§5.2.1).
 export const stripGatewayToken = exchangeRule({
-  appliesTo: SELF,
+  appliesTo: THIS_POLICY,
   post: { dropClause: true }, // spec's empty-postcondition removal form
   sink: "fetchData",
   paths: [["options", "headers", "Authorization"]],
@@ -54,11 +57,15 @@ interface GatewayInput {
   token's taint only because the sink-scoped rule fires at the permitted
   path — "not a global exemption such as 'tokens never taint'" (§5.3.1). A
   token that leaks into the request body has no matching rule and taints.
-- The core doc's lint ("no unguarded rewrites") is satisfied here by the
-  boundary scoping — §5.2.1's structural authorization is one of its
-  admissible guard forms.
+- Boundary scoping does not satisfy the core authoring surface's integrity or
+  policy-state guard requirement by itself. This boundary-only syntax remains
+  unavailable until the runtime can enforce its path-local authority contract;
+  if shipped, it uses a dedicated extension surface rather than weakening the
+  general rule lint.
 
-Spec owes: nothing — this is §5.2/§5.3 verbatim with a typed carrier.
+Spec/runtime owe: per-path boundary evaluation, authority-only flow semantics,
+and an acceptance case proving a token leaked outside the authorized path keeps
+its clause.
 
 ## 2. Error exchange rules
 
@@ -77,7 +84,7 @@ export const gatewayErrorSanitizer = errorSanitizer({
 });
 
 export const gatewayErrorRules = errorExchangeRules({
-  match: { policy: SELF, errorCode: [400, 401, 404, 429] },
+  match: { policy: THIS_POLICY, errorCode: [400, 401, 404, 429] },
   release: [
     { path: "/error/code", to: actingUser() },
     { path: "/error/message", to: actingUser(), sanitizedBy: gatewayErrorSanitizer },
@@ -139,6 +146,7 @@ export const participantConsent = exchangeRule({
       participant: v("P"),
       scope: "calendar-intersection",
       audience: v("A"),
+      purpose: "find-mutual-availability",
     })],
   },
   post: { addAlternatives: [cfcAtom.user(v("A"))] },

@@ -1,1215 +1,1084 @@
 # Server-Primary Execution — Implementation Plan
 
-Companion to [README.md](./README.md) (the design). Read the README first;
-this plan does not restate the design rationale. Section references
-(§5.B.3, G4, …) point into the README.
+Companion to [README.md](./README.md). Read the design first; this plan turns
+it into reviewable, red-green work orders.
 
-Status: plan for Phases 0–2 in executable detail; Phases 3–5 outlined with
-entry criteria only (they depend on decisions and landings listed at the
-end). Scope decision from review: direction is A → B → scoped execution →
-dual handler execution.
+Status: executable plan for the scheduler prerequisite and client-driven
+server-primary execution. Later background, feed, scoped, and handler work is
+outlined only.
+
+Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
+its facade, commit-gated starts, cancellation semantics, bounded settle,
+persisted action state, stable action identity, and read/write indexes. Do not
+add compatibility paths for the pre-v2 scheduler.
+
+The first security model trusts protocol-compatible clients to honor server
+claims. The server still authenticates every demand and write, enforces normal
+ACL/CFC validation, and fences duplicate workers. A later phase makes claim
+authority cryptographically enforceable.
+
+Incremental PRs remain dark until both halves of a behavior exist. In
+particular, the server must not publish authoritative claims to ordinary
+sessions until W2.1 claim-aware routing is deployed, and must not claim async
+builtins until W2.3 client passivity is deployed. Earlier WOs exercise those
+paths with explicit test capabilities only; they do not create a rollout window
+where server and clients knowingly duplicate authoritative work.
 
 ---
 
-## 0. How to use this plan (implementing agents)
+## 0. How to use this plan
 
-- **One work order (WO) = one PR.** Do not bundle WOs. If a WO turns out
-  too big for one PR, split at the test boundaries listed in its success
-  criteria and say so in the PR description.
-- **Read-first lists are mandatory.** Every WO names the files/specs that
-  define its seams. Read them before writing code. If the code you find
-  contradicts a step here (line numbers drift, a helper was renamed), the
-  code wins — adapt, and note the delta in the PR description. Do not
-  invent parallel mechanisms when the named seam exists.
-- **Red-green.** For every behavioral criterion, write the failing test
-  first, confirm it fails for the right reason, then implement. PR
-  descriptions must show the red→green transition for the headline test.
-- **Flags default off.** Nothing in Phases 0–2 may change behavior when
-  its flag/option is off. Every WO with a flag has a parity criterion;
-  treat it as the most important one.
-- **Commit style.** Small coherent commits as work completes. Follow
-  existing message conventions (`feat(runner): …`, `test(memory): …`).
-- **When blocked**, stop and surface the blocker with what you learned;
-  do not work around a failed criterion by weakening the test.
+- **One work order (WO) = one PR.** W0.1 may instead be folded into #4288
+  before it lands. Split any other WO only at the test boundaries below and
+  record the resulting dependency.
+- **Red-green is required.** Write the failing behavioral test first, confirm
+  that it fails for the intended reason, then implement. The PR description
+  includes the headline red and green commands/results.
+- **The named seams are mandatory reading.** If symbols move, follow the
+  current code and describe the delta; do not create parallel scheduler,
+  identity, transaction, or serialization machinery.
+- **Flags default off.** Every experimental option is registered in
+  docs/development/EXPERIMENTAL_OPTIONS.md in the same change. Flag-off
+  behavior is proven by test.
+- **Preserve transaction boundaries.** Servability is decided for a whole
+  action transaction. Never commit its space-scoped subset on the server and
+  send scoped or foreign-space operations back to a client.
+- **No anonymous derived writes.** Every server execution lease names the
+  authenticated user on whose behalf it runs. The host, not the Worker,
+  controls that authority.
+- **Use deterministic barriers in timing tests.** Do not use sleeps or polling
+  to force worker, lease, claim, commit, or hibernation races.
+- **Use Deno Workers for multiple runtimes.** Never construct two Engine or
+  runtime realms in one process in a test.
+- **Await runtime.settled()** when async builtin writebacks matter.
+- **Use a port offset** for every test/dev server; never assume port 8000.
+- **Preserve established runtime restrictions.** Raw fetch is unavailable to
+  pattern code in SES. Server execution does not expose it.
 
-### 0.1 Repo practices you must follow (with reasons)
+### 0.1 Definition of done for every WO
 
-- `docs/development/TESTING.md`, `docs/development/DEVELOPMENT.md`,
-  `docs/development/LOCAL_DEV_SERVERS.md` — house rules. Use `dev-local`
-  for shell, not `dev`.
-- **Any test/dev server: always `--port-offset`**, never default `:8000`
-  (a stale toolshed on 8000 produces "No data at cell" wire-skew ghosts).
-- **Never construct a second Engine/runtime realm in one process** in
-  tests — verified identities degrade and CFC gates start failing
-  (`writeAuthorizedBy unsupported`). Multi-runtime tests use Deno Workers:
-  see `packages/patterns/integration/multi-runtime-harness.ts` and
-  `packages/cli/lib/multi-user-test-runner.ts`.
-- **Await `runtime.settled()`** (not `idle()`) when a test depends on
-  async-builtin writebacks (post-commit outbox).
-- **Do not repro flakes by running the same test file ×N in one command**
-  — repeated runs share `$TMPDIR` sqlite state and invalidate the repro.
-- `cf test` fails on console errors/warnings — leave no stray logging.
-- New workspace packages MUST have a `"test"` task in their `deno.jsonc`
-  (root `AGENTS.md` explains why; see `packages/utils/deno.jsonc`).
-- Perf-check: if the Performance Check job flags a change you believe is
-  noise, rerun ONLY that job (up to 3×) before considering
-  `NEW_PERF_BASELINE` with justification.
+1. The touched packages pass their focused tests and deno task check.
+2. Every success criterion is mapped to a named test in the PR description.
+3. Experimental flag-off parity is demonstrated, when applicable.
+4. No new schema-less deep sink, whole-space standing subscription, timer
+   polling loop, identity implementation, or direct database mutation exists.
+5. New protocol fields and storage schemas have compatibility/fail-open tests.
+6. Failure, handoff, and cleanup paths use explicit barriers and are tested.
 
-### 0.2 Definition of done — every PR in this plan
+### 0.2 Terms and reserved names
 
-1. `deno task check` green; the touched packages' `deno task test` green
-   locally.
-2. All success criteria of the WO checked off in the PR description, each
-   with the test file/name that proves it.
-3. Flag-off parity criterion (when the WO has a flag) proven by a test,
-   not by inspection.
-4. CI green on the PR (docs job, runner/memory/pattern shards). Address
-   automated-reviewer comments (fix or rebut with evidence).
-5. No new schema-less deep sinks or whole-state subscriptions anywhere
-   (this family of change caused a ~270× re-run amplification before;
-   reviewers will look for it specifically).
+- **SchedulerExecutionContextKey:** server-derived key for durable scheduler
+  metadata: space, user:<principal DID>, or
+  session:<principal DID>:<session id>.
+- **ExecutionDemand:** authenticated, connection-owned, branch-qualified
+  request to keep one or more piece result roots live.
+- **ExecutionLease:** host-side, expiring, fenced authority for exactly one
+  worker generation in a branch/space. It records onBehalfOf.
+- **ActionClaimKey:** action identity available independently to client and
+  server: branch, space, piece/action identity, execution context, action kind,
+  and implementation/runtime fingerprints.
+- **ExecutionClaim:** positive, ephemeral statement that one action is ready
+  to be server-primary. It contains an ActionClaimKey, worker lease generation,
+  and a monotonic per-action claimGeneration. Every claim issuance gets the
+  next value, even within one worker lease; revoke names the currently live
+  value and does not mint another.
+- **CandidateClaim:** host-local shadow diagnostic saying an action passed
+  servability checks. It never transfers client authority.
+- **ActionSettlement:** control event for every claimed action attempt,
+  including committed, no-op, failed, and unserved outcomes.
+- **ActionExecutionProvenance:** transaction metadata containing action
+  identity, onBehalfOf, lease/claim generations, causedBy, and inputBasisSeq.
+- **executionPolicy:** optional owner-managed space policy expressing only
+  whether server-primary execution is allowed. It does not contain liveness,
+  actor, epoch, authority, or unservable-piece state.
+- Runtime experimental option: serverPrimaryExecution, default false.
+- Existing scheduler option: persistentSchedulerState, default false until its
+  own rollout changes that default.
+- Protocol capability: server-primary-execution-v1.
+- Protocol messages:
+  - session.execution.demand.set
+  - session.execution.claim.set
+  - session.execution.claim.revoke
+  - session.execution.settlement
 
-### 0.3 Naming reserved by this plan
-
-- Runtime option (SHIPPED, already in the tree): `persistentSchedulerState:
-  boolean` (default false), env `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`.
-  (An earlier draft reserved `persistSchedulerState`; that name never
-  shipped — the built option is `persistentSchedulerState`. Use the real
-  name everywhere.)
-- Runtime/provider option: `storageConnection: "remote" | "in-process"`.
-- Env flags: `CF_INTEREST_FEED` (client), `EXECUTOR_MODE=reactive` (bps).
-- Protocol messages: `session.interest.set`.
-- Space config doc key: `executorConfig` (fields:
-  `{ enabled, derivedAuthority: "client" | "executor", epoch,
-  unservablePieces?: string[] }`).
-- Tx envelope type: `TxProvenance`
-  (`{ source?, action?: { id, kind }, observedAtSeq? }`).
+ExecutionClaim and ActionSettlement are server control-plane messages, not
+ordinary space documents. Client authority is the default whenever no matching
+live claim exists in the authoritative connected claim snapshot. Connection
+loss alone does not prove absence. Demand, leases, claims, settlements, and
+reconnect snapshots are all branch-qualified.
 
 ---
 
 ## 1. Dependency graph
 
-```
-Phase 0:  W0.1 ──▶ W0.2 ─────────────▶ W1.3
-          W0.3 (independent)───────────▶ W2.2, W2.3
-          W0.4 (independent)───────────▶ W1.1, W2.1
-          W0.5 ──▶ W0.6 ──────────────▶ W1.1
-          W0.7 (independent)───────────▶ W1.1 discovery, Phase 3
+    Phase 0:
+      W0.1 context keys ──▶ W0.3 writer lookup ──▶ W1.3 servability
+      W0.2 output invariant ─────────────────────▶ W0.3, W1.3
+      W0.4 input basis/provenance ───────────────▶ W1.3, W2.2
+      W0.5 authenticated provider ───────────────▶ W1.1, W1.2
+      W0.6 handshake/control protocol ───────────▶ W1.2, W2.1
 
-Phase 1:  W1.1 ──▶ W1.2, W1.3, W1.4
-Phase 2:  W2.1 ──▶ W2.2 ──▶ W2.3 ──▶ W2.6
-          W2.4 (after W2.1 + W1.2); W2.5 (after W1.1) — both parallel
-          with W2.2/2.3
-```
+    Phase 1:
+      W1.1 leases/fencing ──▶ W1.2 shared pool
+      W1.2 shared pool ─────▶ W1.3 servability/claim readiness
+      W1.3 claim readiness ─▶ W1.4 async builtins, W1.5 wake/hibernate
 
-Parallelizable start set: W0.1, W0.3, W0.4, W0.5, W0.7.
+    Phase 2:
+      W2.1 client routing/overlay ──▶ W2.2 reconciliation
+      W1.4 + W2.1 + W2.2 ──────────▶ W2.3 client builtin passivity
+      W2.2 + W2.3 + W1.5 ─────────▶ W2.4 measurement/rollout
+
+    Later:
+      Phase 3 background demand and feed narrowing
+      Phase 4 scoped execution with delegated keys
+      Phase 5 server-directed handler events and enforced authority
+
+Parallelizable start set after #4288: W0.1, W0.2, W0.4, W0.5, W0.6.
 
 ---
 
-## 2. Phase 0 — foundations
+## 2. Phase 0 — prerequisites and protocol substrate
 
-### W0.1 — Adopt & verify existing observation persistence (already built)
+### W0.1 — Qualify durable scheduler state by effective execution context
 
-**Already built (do not re-implement).** Observation persistence is
-present and functional in the scheduler-v2 tree behind the default-off flag. A
-fresh runtime on the same
-store already skips re-running unchanged actions when the flag is on. Do
-not rebuild any of this; these anchors are the seams you verify/extend:
+**Priority:** first standalone prerequisite. It may be folded into #4288.
 
-- **Flag + default (OFF):** `let persistentSchedulerStateEnabled = false;`
-  (`packages/memory/v2.ts:640`; getter `:653`, setter `:649` coerces
-  `undefined`→false); `setPersistentSchedulerStateConfig(this.experimental
-  .persistentSchedulerState)` at runtime construction
-  (`packages/runner/src/runtime.ts:505`). Env
-  `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` plumbed through
-  `packages/toolshed/env.ts`, `packages/shell/src/lib/env.ts`,
-  `packages/background-piece-service/src/{env.ts,main.ts}`.
-- **Durable transactional write:** the runner attaches the observation to
-  the live commit tx — gate
-  `packages/runner/src/scheduler/run.ts`, build
-  (`buildSchedulerActionObservation`), attach `:708`
-  (`setSchedulerObservation`). Server strips it when the flag is off
-  (`packages/memory/v2/server.ts:1620`). Persisted INSIDE the single
-  commit transaction:
-  `engine.database.transaction(applyCommitTransaction).immediate`
-  (`packages/memory/v2/engine.ts:1554`) →
-  `upsertSchedulerObservationTransaction` (`:3285`). Five durable tables
-  (DDL `engine.ts:206` `scheduler_observation` history, `:232`
-  `scheduler_action_snapshot` LWW-per-action, `:268`
-  `scheduler_read_index`, `:293` `scheduler_write_index`, `:316`
-  `scheduler_action_state`). No-op elision via `payloadChanged`;
-  observation-only + batched (`schedulerObservationBatch`) commits exist.
-- **Durable read + cold-start skip:** indexed SELECT
-  `listSchedulerActionSnapshots` (`packages/memory/v2/engine.ts:1717`);
-  provider method `packages/runner/src/storage/v2.ts:1108`, optional on
-  `interface.ts:272`. Cold start: flag-gated `schedulerRehydrationOptions`
-  in `packages/runner/src/runner.ts` space-lists and buckets one snapshot epoch;
-  subscription `rehydrateFromStorage` reaches `scheduler/facade.ts`, whose
-  fingerprint, full-identity, replica-currency, output-currency, and
-  pending-write checks gate `rehydrateActionFromObservation`. A valid row
-  restores reads/writes without running; a miss falls back conservatively.
-- **`graph-snapshot.ts` is NOT this.**
-  `packages/runner/src/scheduler/graph-snapshot.ts` is in-memory
-  diagnostics/telemetry only (no storage I/O). The durable snapshot is the
-  `scheduler_action_snapshot` SQLite table — do not conflate them.
-- **Current orchestration:** `scheduler.ts` is the public facade export;
-  cold-start listing/lifecycle ownership lives in `runner.ts`, and synchronous
-  observation apply lives in `scheduler/facade.ts`.
+**Problem:** cell facts are partitioned by effective scope key, but scheduler
+snapshots, action state, and read/write index ownership are currently keyed by
+action without the effective user/session context. Two principals or sessions
+can replace each other's scheduler metadata even though their cell values do
+not overlap.
 
-**Depends on:** nothing (substrate already in the tree).
-**Unblocks:** W0.2, W1.3.
-**Deliverable:** one PR that ADOPTS the shipped persistence rather than
-building it: (1) reconcile this plan + README to the real flag name
-`persistentSchedulerState`; (2) close the one composed-durability test gap
-with a single end-to-end kill→reopen→skip test; (3) record the accepted
-deviations from this plan's original sketch. No new tables, commit-payload
-field, or provider method — they exist.
+**Depends on:** #4288.
+**Unblocks:** authoritative writer lookup and every server-primary phase.
 
 **Read first:**
 
-- The "Already built" anchors above.
-- `docs/specs/persistent-scheduler-state.md` +
-  `docs/history/specs/persistent-scheduler-state/implementation_notes.md` — the
-  as-shipped design (normalized multi-table, transaction-coupled); it
-  deviates from this plan's original single-`(space,branch,action_id)`
-  sketch.
-- `packages/runner/src/scheduler/persistent-observation.ts` — observation
-  shapes + `buildSchedulerActionObservation`.
-- `packages/runner/test/reload-rehydration.test.ts` and
-  `packages/memory/test/v2-scheduler-state-test.ts` — the two halves of
-  the durability proof you compose into one test.
-- Cold-start is `runner.ts` `loadSchedulerRehydrationSnapshots` plus
-  `scheduler/facade.ts`; there is no per-action storage lookup in
-  `scheduler.ts`.
+- docs/specs/persistent-scheduler-state.md
+- packages/memory/v2/engine.ts scheduler table DDL, observation upsert,
+  dirtying, and list/read methods
+- packages/runner/src/scheduler/persistent-observation.ts
+- packages/runner/src/scheduler.ts rehydration facade
+- packages/runner/src/storage/v2.ts scope resolution and scheduler state calls
+- packages/memory/test/v2-scheduler-state-test.ts
+- packages/runner/test/reload-rehydration.test.ts
 
 **Steps:**
 
-1. **Naming reconciliation (docs only).** Replace every bare
-   `persistSchedulerState` in this file and in `README.md` with
-   `persistentSchedulerState`; note env
-   `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. No code rename — the shipped
-   name is authoritative.
-2. **Close the durability-composition gap (the only real build).** Add ONE
-   test proving the full stack in a single assertion: commit observations
-   to a FILE-backed store (`Deno.makeTempFile`), fully `close()` server +
-   client, reopen a brand-new runtime whose StorageManager points at the
-   same on-disk path, run the fixture, and assert via a lift-invocation
-   counter that unchanged actions do NOT re-run and that writing one input
-   re-runs exactly the dependent action. The tree lacks this single test
-   (the runtime skip test uses a live `emulate()` server;
-   `v2-scheduler-state-test.ts` reopens the file but stops at the memory
-   layer, not the runner's skip decision).
-3. **Record accepted deviations in the PR description (do not "fix"):**
-   (a) the commit payload carries observations via the bespoke
-   `schedulerObservation`/`schedulerObservationBatch` fields, NOT the
-   patch-operations registry this plan's checklist assumed — accepted
-   as-shipped; a registry migration is a separate follow-up, not this WO.
-   (b) storage is a normalized multi-table shape (history + LWW snapshot +
-   read/write/action-state indexes), not the single LWW-no-history table
-   originally sketched.
-4. **Name the known limitation for W1.1 to inherit:** `processGeneration`
-   is hardcoded `0` on read and write, so cross-generation invalidation is
-   not exercised; per-restart generation bumping is a hibernate/resume
-   identity concern deferred to W1.1.
-5. **Pin handler coverage (persistence only — NOT rehydration).**
-   Persistence should cover event-handler runs, not only
-   computations/effects: the vocabulary already has `"event-handler"` /
-   `"event-preflight"` kinds
-   (`packages/runner/src/scheduler/persistent-observation.ts:9,14`), but
-   `attachSchedulerActionObservation` is wired only at the action-run
-   seam (`packages/runner/src/scheduler/action-run.ts:521`), while
-   handlers dispatch through `dispatchQueuedEvent` with an event payload
-   — a different path. Determine whether that event-commit path attaches
-   observations for handler runs; if it does, pin it with a test; if it
-   does not, wire the attach at the event-commit seam and pin it. Scope
-   note: there is nothing to *rehydrate* for handlers — they run only
-   when an event arrives, and their registration comes from piece
-   instantiation, not from restored scheduler `Action`s. The value of
-   persisting handler observations is (a) their reads populate the
-   readers index (wake/staleness bookkeeping) and (b) run provenance —
-   not skip-on-restart.
-
-**Success criteria (most already pass — this WO proves the DELTA, not the
-substrate):**
-
-- [ ] **Headline delta — single-test cold durability:** the new
-      file-backed kill→reopen→fresh-runtime test (step 2) shows the
-      lift-invocation counter unchanged for stale-free actions (skip) and
-      incremented by exactly one for the dependent action after one input
-      write. Link the red run — it is a genuinely new assertion (no
-      existing test closes the whole stack in one shot), not a re-run of
-      green code.
-- [ ] **Flag-on skip regression guard:** `reload-rehydration.test.ts`
-      ("reload: resumed pattern rehydrates persisted observations") stays
-      green — `reload.ok > 0`, `reload.missNoSnapshot === 0`.
-- [ ] **Disk durability guard:** `v2-scheduler-state-test.ts`
-      (close → reopen on-disk `openEngine`) stays green — reader index +
-      `scheduler_action_state` survive reopen.
-- [ ] **Fail-open:** delete all observation rows between the two runtimes
-      → second runtime re-runs everything, byte-identical result docs, no
-      errors (extend the step-2 fixture).
-- [ ] **Parity (flag off, default):** with `persistentSchedulerState`
-      unset, no observation rows are ever written (server strips at
-      `server.ts:1620`); an existing scheduler test file passes
-      unmodified.
-- [ ] **No-op elision guard:** run the fixture twice with no input change
-      → zero new observation writes on the second settle (`payloadChanged`
-      elision; assert via a write-count test hook).
-- [ ] **Naming:** no `persistSchedulerState` used as an option/flag name
-      remains under `docs/specs/server-side-execution/` — only the
-      historical rename note (§0.3, this WO's step 1) may mention the old
-      name.
-- [ ] **Handler coverage (step 5, persistence only):** a fixture
-      event-handler run under the flag persists an observation with
-      `actionKind: "event-handler"` whose reads land in the readers
-      index; red run first if the event-path wire turns out to be
-      missing. Explicitly NOT asserted: any rehydration/registration
-      restore for handlers (no such path exists; see step 5's scope
-      note).
-
-**Review checklist:**
-
-- This is an ADOPT/VERIFY WO: reject any diff that re-adds a
-  `scheduler_observation` table, a second `listSchedulerActionSnapshots`,
-  or a parallel commit-payload field. The seams exist — the diff should be
-  ~one test + docs, not new machinery.
-- The new durability test must actually close the file: assert against a
-  reopened on-disk DB (`Deno.makeTempFile` + `close()` + reopen), not a
-  still-live `emulate()` server — otherwise it does not test the gap.
-- Rehydration must stay conservative: `scheduler/facade.ts` gates every
-  clean-restore path on full identity, implementation/runtime fingerprints,
-  replica currency for reads and outputs, and absence of overlapping pending
-  writes.
-- The invocation-counter fixture counts lift executions, not
-  subscriptions.
-- Confirm the skip fires via `facade.ts`
-  `setStatus(action, "clean")` + `pending.delete`, and that `runner.ts`
-  `loadSchedulerRehydrationSnapshots` early-returns when the flag is off.
-
----
-
-### W0.2 — doc→readers wake query (index already built)
-
-**Depends on:** W0.1. **Unblocks:** W1.3.
-**Deliverable:** one PR that EXTENDS the existing reverse index (it is
-already built and populated) with the one missing piece: a named
-engine-side batched query `staleReadersFor(space, changedIds, seq)`
-returning the distinct stale reader list for wake. The index tables,
-population, and inline per-write reader-dirtying already exist — do not
-rebuild them.
-
-**Already built (do not re-implement):** `scheduler_read_index` DDL
-`packages/memory/v2/engine.ts:268` (indexed lookup on the read target),
-populated in the SAME observation transaction from `observation.reads` +
-`shallowReads`; `scheduler_write_index` `:293`;
-`findSchedulerReadersForWrite` `:1849` and
-`markSchedulerReadersDirtyForWrites` `:1912`, consumed INLINE in
-`applyCommit` (`:3276` region) to mark same-space + owner-space readers
-direct-dirty; cross-space MIRROR rows exist as the v1 stand-in (README
-§6.8/G9 flag them as not-yet-deployment-global). Tests already cover it:
-`v2-scheduler-state-test.ts` "marks persisted readers dirty during
-semantic commits". What is GENUINELY MISSING is only the named batched
-wake query — the tree dirties readers inline during commit but exposes no
-distinct wake-list query (`staleReadersFor` does not exist).
-
-**Read first:** W0.1's "Already built" anchors;
-`docs/specs/persistent-scheduler-state.md` §9 (read/write indexes as
-shipped); `packages/memory/v2/engine.ts` `findSchedulerReadersForWrite`
-(~1849) and its `applyCommit` call site (~3276) — you add a *batched
-distinct wake query* beside this per-write finder, not a replacement.
-
-**Steps:**
-
-1. Implement `Engine.staleReadersFor(space, changedIds, commitSeq)`: one
-   indexed SELECT over `scheduler_read_index` returning DISTINCT
-   `(reader_space, piece_id, action_id)` where the read target is in
-   `changedIds` AND `observed_at_seq < commitSeq`. Reuse the existing
-   index; add no new table. (This is the symbol W1.3 calls; only the
-   inline `findSchedulerReadersForWrite` exists today.)
-2. Cross-space: the mirror-row mechanism already lands cross-space reader
-   rows; `staleReadersFor` must read them so a changed doc in space B
-   returns the A-space reader. A missing mirror row is fail-open
-   (stale-until-demanded, never wrong) — state which case ships.
-3. Expose as an engine/server method (no wire protocol yet — Phase 1
-   consumes it in-process via the pool host).
+1. Add execution_context_key to scheduler observation/snapshot/action-state
+   ownership and to every read/write index row's owning-action key. Update
+   primary keys, conflict clauses, deletes, and indexes together.
+2. Add resolved read_scope_key to read-index addresses and write_scope_key to
+   write-index addresses. Dirty matching uses the changed revision's effective
+   scope key, not only its declared scope class.
+3. Derive the key server-side using the shareability lattice `space < user <
+   session`, where moving right is narrower:
+   - `space` is permitted only when a trusted, transformer/runner-produced
+     `CompleteActionScopeSummary` proves the piece/result and every possible
+     read, write, materializer envelope, and direct output are same-space and
+     space-scoped;
+   - `user:<principal>` is permitted only when that complete summary excludes
+     PerSession access but includes PerUser access;
+   - `session:<principal>:<sessionId>` is the initial key for PerSession,
+     incomplete, unknown, or dynamic surfaces.
+   Observed absence is never proof of completeness and never promotes a row.
+   Within one action fingerprint, runtime evidence may only move toward a
+   narrower key; a no-op cannot broaden classification. A newly proven broader
+   classification requires a new implementation/runtime fingerprint. Never
+   accept a client-provided principal. A protocol-compatible trusted client may
+   carry the transformer-produced summary, but it must be bound to the verified
+   implementation/runtime fingerprint rather than inferred from one run.
+4. Return the shared space row plus only the authenticated caller's applicable
+   user/session rows during rehydration. Never return another principal's row.
+5. When runtime evidence violates the complete summary, reject that summary,
+   fail open by running, and transactionally invalidate only rows that are
+   broader than the new floor. A `space`→scoped violation removes the shared
+   space row for that fingerprint. A `user`→`session` violation removes that
+   principal's user row, not another principal's independent user/session row.
+   Never delete an equally narrow unrelated context row.
+6. Preserve one shared space row for actions proven to use only same-space
+   space-scoped addresses.
+7. Migrate the #4288 schema transactionally and idempotently. Preserve active
+   snapshot/state/index rows only when their decoded observation is valid and
+   provably space-only. Rebuild those rows with space context/effective target
+   keys; discard scoped, unknown, malformed, or orphaned active rows so they
+   run fresh. Append-only observation/replay history may remain, but active
+   state must not point at discarded rows.
+8. Update state-inspector output to show execution context and target scope
+   keys so failures are diagnosable.
 
 **Success criteria:**
 
-- [ ] `packages/memory`: after a fixture observation batch, querying a
-      changed doc id returns exactly the reading actions; querying an
-      unread doc id returns empty.
-- [ ] Staleness bound respected: readers whose `observed_at_seq` ≥ commit
-      seq are NOT returned (they already saw it).
-- [ ] Index rows are replaced, not accumulated: re-observing an action
-      with a smaller read set removes the stale rows (assert row count).
-- [ ] Micro-sanity: query over a space with 10k index rows returns in
-      < 5ms in a plain `deno bench`/timed test (reads are sync FFI; this
-      is generous).
-- [ ] Same-transaction guarantee: a conflicted commit leaves the index
-      untouched.
-- [ ] Cross-space rows: an observation for a piece in space A reading a
-      doc in space B yields a row queryable from B's commit path —
-      `staleReadersFor(B, …)` returns the A-space piece.
+- [ ] Red→green headline: Alice and Bob run the same PerUser action; both
+      snapshots, action-state rows, read rows, and write rows remain present
+      and independently rehydrate.
+- [ ] Two sessions for one principal retain distinct PerSession metadata.
+- [ ] Alice's scoped write dirties Alice's matching reader and not Bob's.
+- [ ] Running or clearing Alice's dirty action does not clear Bob's state.
+- [ ] A proven space-only action has one shared row that either principal can
+      rehydrate.
+- [ ] A dynamic `space`→`user` or `user`→`session` violation cannot leave a
+      broadly adoptable snapshot; the incompatible broader row is removed and
+      the next runtime fails open by running.
+- [ ] Observed space-only behavior without a complete static summary remains
+      session-keyed; it cannot promote itself to a shared row.
+- [ ] Narrowing Alice's user row never removes Bob's independent user/session
+      row.
+- [ ] Existing space-only persistent scheduler tests remain green.
+- [ ] Query plans still use indexed target lookup at 10k rows.
 
-**Review checklist:** the query must key on `(space, branch, doc_id)` via
-the index (check the query plan comment or EXPLAIN in a test); deletion on
-re-observation must be per `(space, branch, action_id)`.
+**Review checklist:** inspect every action-key WHERE, DELETE, UPSERT, and JOIN.
+A partial migration is worse than no migration. writerSessionId remains
+provenance/echo metadata and is not a substitute for execution_context_key.
 
 ---
 
-### W0.3 — Tx provenance envelope + `source` stamping (§3.3.1)
+### W0.2 — Enforce one direct root output binding for computations
 
-**Depends on:** nothing (parallel with W0.1). **Unblocks:** W2.2, W2.3.
-**Deliverable:** one PR: `TxProvenance` populated at action-tx open,
-carried on the commit, and transferred by the storage layer onto every
-document the transaction CREATES, as the doc-level `["source"]` field.
+**Depends on:** #4288.
+**Unblocks:** deterministic action/output discovery and static servability.
+
+**Decision:** important authored patterns go through the transformer. Do not
+build a legacy Pattern JSON migration or retain recursive emitted-output-binding
+guessing for computation nodes.
 
 **Read first:**
 
-- README §3.3–§3.3.1 (the design, including the two open details:
-  cross-space and setup-tx anchoring — both have decided v1 behaviors
-  below).
-- `packages/runner/src/scheduler/run.ts` — the existing
-  stamp: `(tx.tx as …).debugActionId = actionId; tx.tx.sourceAction =
-  action;`.
-- `docs/specs/memory-v2/01-data-model.md` (document envelope: `source` is
-  a same-space short-link `{"/":"<short-id>"}`; `pattern` is a sigil
-  link) and `docs/specs/memory-v2/05-queries.md` §5.10.1 (traversal does
-  NOT follow `source` — fine: our walk is store-direct, not query-layer).
-- `packages/runner/src/cfc/prepare.ts` ~1148–1210 — the raw `["source"]`
-  surface is already excluded from CFC flow reads. Do not change these
-  exclusions; they are what make stamping label-neutral.
-- `packages/runner/src/result-utils.ts:17` — where `pattern` meta is
-  written (the walk's terminator).
-- `packages/state-inspector/db.ts` — offline store reads (for the walk
-  helper + audit).
+- Transformer emission for computation/lift nodes
+- packages/runner/src/runner.ts `firstResolvedOutputRedirect` (:403-431), its
+  sub-pattern output (:1988), map/filter container (:3907), and pattern-node
+  (:4248-4271) call sites; contrast plain lift/computed `_resultFor` identity
+  (:3033-3038), which does not recurse
+- Scheduler-v2 action registration and static write diagnostics
+- Hand-built runner fixtures that construct serialized Pattern objects,
+  including `type: "passthrough"` nodes
 
 **Steps:**
 
-1. Define `TxProvenance` in `packages/runner/src/storage/` (new
-   `provenance.ts` or alongside the tx types):
-   `{ source?: <short-link>, action?: { id: string, kind:
-   "computation" | "effect" | "event-handler" }, observedAtSeq?: number }`.
-2. Populate at the two tx-open sites:
-   - action runs (`run.ts` — replace/extend the `sourceAction`
-     stamp; keep the old field working until all readers migrate, then
-     remove it in the same PR if the migration is complete);
-   - event-handler dispatch (`packages/runner/src/scheduler/events.ts`).
-   The `source` anchor = the piece root doc id. Resolve it the same way
-   the observation builder resolves `pieceId` (find
-   `buildSchedulerActionObservation`'s call site and reuse its
-   resolution; do NOT invent a second piece-resolution path).
-3. Carry it on the wire: add an optional `provenance` field to the commit
-   payload via the patch-operations registry (same pattern as W0.1 step
-   2; coordinate if both PRs are in flight).
-4. Transfer at apply: in `Engine.applyCommit`, for every entity the
-   commit CREATES (no prior revision row for that id), synthesize the
-   `["source"]` write from `provenance.source` as part of the same
-   commit application (recorded in `revision` like any write). Mirror the
-   identical rule in the runner's local optimistic apply
-   (`packages/runner/src/storage/v2.ts`) so replicas match without
-   waiting for the server echo.
-5. v1 policy decisions (already made in review — implement, don't
-   re-litigate):
-   - **creation-only**: later writes never re-parent (`source` immutable
-     once set);
-   - **same-space only**: if the created doc's space ≠ the anchor's
-     space, skip stamping (walk returns null; counted);
-   - **setup txs**: anchor = the creating context's piece root (parent
-     piece) or, for the space-root pattern itself, unset.
-6. Walk helper + audit: in `packages/state-inspector`, add
-   `followSourceToPatternRoot(space, docId)` returning the pattern-root
-   doc id or null, and a `cf inspect` subcommand (or extend an existing
-   one) that reports, for a space: total docs / docs with terminating
-   chain / orphans grouped by creator hint. This is the G6 audit tool.
-7. Server-side writers: toolshed ingest handlers (`POST /api/ingest/:id`,
-   `packages/toolshed/routes/ingest/`) populate the commit's provenance
-   with `{ source: <ingest-channel doc id> }` so the engine-side transfer
-   stamps ingest-created docs too. Sqlite-builtin result writebacks ride
-   the builtin action's own tx envelope and need no special handling.
+1. Make the transformer emit exactly one direct output binding to the
+   computation's root result cell.
+2. Validate this invariant when registering/instantiating a computation node
+   and fail with an actionable diagnostic if it is violated.
+3. Use that binding as the action's primary output. Keep explicit static side
+   writes/materializer envelopes as separate write surfaces; do not pick the
+   first redirect found by recursively walking the emitted output binding.
+4. Simplify computation-specific compatibility code made unreachable by the
+   invariant. Do not remove general Cell alias/redirect support.
+5. Apply the same runner-boundary invariant to hand-built
+   `type: "passthrough"` nodes. They have no transformer emission path: a direct
+   root primary binding is accepted; nested or multiple alias bindings are
+   fixed in tests or rejected.
+6. Fix only the hand-built tests that violate the transformer-produced shape.
 
 **Success criteria:**
 
-- [ ] Red→green headline: an integration-style runner test runs a fixture
-      pattern that (a) creates docs from a lift, (b) creates docs from a
-      handler, (c) runs a builtin (`fetchJson` against a local stub)
-      whose result cells are created, then asserts via the walk helper
-      that EVERY doc created during the run terminates at a
-      `pattern`-bearing root. This test must exist and fail before the
-      stamping lands (red run linked in the PR).
-- [ ] Creation-only: a second tx (different action) writing an existing
-      doc does not change its `["source"]` (assert byte-equality of the
-      field across the write).
-- [ ] Cross-space: fixture writing into a second space → stamping
-      skipped, walk returns null, and the audit counts it (pin the
-      behavior; do not silently pass).
-- [ ] CFC neutrality: run an existing CFC-heavy test file
-      (reviewer picks; suggestion: one of the S16/observation-class
-      suites) unmodified — green. Plus a targeted test: stamping a doc
-      does not add flow-read/label entries (assert via the CFC policy
-      inputs on a prepared tx).
-- [ ] Wire compatibility: commits WITHOUT the provenance field (old
-      clients) still apply — docs simply get no `source` (test with a
-      hand-built commit payload).
-- [ ] Local/remote parity: after a run against an in-process server, the
-      client replica's doc envelopes equal the server store's (compare
-      `["source"]` for a sample of created docs).
-- [ ] Audit tool: `cf inspect` walk-coverage subcommand runs against a
-      seeded space fixture and prints the coverage report (golden-ish
-      test on its output shape, not exact counts).
-- [ ] Ingest anchoring: a doc created through the ingest route walks to
-      the ingest-channel doc (route-handler test).
-
-**Review checklist:**
-
-- The apply-side stamp must be inside the commit transaction and recorded
-  as a normal revision write (otherwise catch-up/replication would miss
-  it).
-- Check the CFC exclusion list was NOT widened (the diff should not touch
-  `prepare.ts` exclusion predicates at all).
-- Confirm the piece-root resolution is shared with the observation
-  builder, not duplicated.
-- Look for the classic trap: stamping in the runner only (client-side)
-  — server-created docs (ingest, sqlite builtin server writes) must get
-  stamped by the engine-side transfer too. Ask where ingest txs get
-  their anchor (README §3.3.1: the ingest-channel doc).
+- [ ] A transformed lift has one direct root binding and registers the expected
+      stable action/output identity.
+- [ ] A malformed hand-built computation with nested or multiple root bindings
+      fails at registration with the new diagnostic.
+- [ ] A compliant passthrough fixture has one direct root binding; nested or
+      multiple passthrough aliases fail with the same actionable diagnostic.
+- [ ] Static side writes still appear as additional write-index entries.
+- [ ] General Cell redirect and alias tests remain green.
+- [ ] No corpus migration, historical JSON compatibility path, or recursive
+      first-output heuristic remains for computations.
 
 ---
 
-### W0.4 — Executor principal + per-space grant flow
+### W0.3 — Authoritative writer lookup from scheduler-v2 indexes
 
-**Depends on:** nothing. **Unblocks:** W1.1, W2.1.
-**Deliverable:** one PR: a first-class executor service identity, an
-owner-driven grant that gives it WRITE on a space, revocation, and the
-`executorConfig` space doc that records opt-in.
+**Depends on:** W0.1, W0.2.
+**Unblocks:** demand discovery and cold wake.
 
-**Read first:** `packages/background-piece-service/src/main.ts` ~96
-(service identity from env — the precedent);
-`packages/memory/v2/server.ts` ~813+ (ACL enforcement: OWNER/WRITE/READ
-per DID); `docs/specs/toolshed-access-control.md`;
-README §5.B.7 (executor principal; endorsement atom is NOT this WO — it
-lands with Phase 2 and needs its own small spec, G1's atom half).
+**Decision:** creation provenance is not current producer identity. Do not add
+universal source stamping or walk from a target through its creator.
+
+**Read first:**
+
+- scheduler_write_index DDL and population in packages/memory/v2/engine.ts
+- scheduler_action_state and scheduler snapshots
+- Scheduler-v2 static writes and materializer envelope indexing
+- Current path-overlap logic used for reads/writes
 
 **Steps:**
 
-1. Mint/configure the executor identity exactly like bps does (env
-   `IDENTITY`-derived signer); expose its DID via a small module in the
-   executor service package so tests can reference it.
-2. Grant flow: a `cf` CLI command (e.g. `cf space executor enable
-   <space>`) run by an OWNER session that (a) adds the executor DID with
-   WRITE to the space ACL, (b) writes the `executorConfig` doc
-   `{ enabled: true, derivedAuthority: "client", epoch: <seq> }`.
-   Disable reverses both (ACL removal + `enabled: false`, epoch bump).
-3. Server enforcement already exists (ACL check on transact); add a
-   focused test that the executor DID can transact after enable and is
-   rejected after disable.
+1. Add a named indexed query writersForTargets(branch, space, addresses).
+   Return all candidate writers, not an arbitrary winner.
+2. Match exact documents and the same path-overlap semantics used by scheduler
+   invalidation. Include the effective read/write scope key and action
+   execution_context_key in matches.
+3. Join candidates to scheduler_action_state/snapshot so the pool receives
+   piece id, stable action id, kind, implementation/runtime fingerprints,
+   static/dynamic provenance, and last status.
+   Load executable code only through the piece root's durable patternIdentity;
+   do not synthesize a code identity from a target cell.
+4. Combine durable observation-backed rows with the live scheduler's
+   registration-time static surface when a Worker is already present. Do not
+   manufacture a clean durable observation merely to index a never-run action.
+5. Replace an action's dynamic write rows on re-observation; never accumulate
+   stale targets.
+6. On an index miss, fail open to piece-root instantiation and discovery. Do
+   not infer producer from the target document's creator.
 
 **Success criteria:**
 
-- [ ] `packages/memory` (or toolshed route test): executor DID transact →
-      rejected before grant, accepted after, rejected after revoke; a
-      commit in flight across revocation fails cleanly (no partial
-      apply).
-- [ ] `executorConfig` doc round-trips through a normal cell read (it is
-      an ordinary doc; no new storage surface).
-- [ ] CLI: enable → disable → enable leaves exactly one ACL entry and
-      `epoch` strictly increasing (idempotency).
-- [ ] Non-owner session cannot enable (authorization test).
-
-**Review checklist:** the grant writes must be auditable (they are
-ordinary commits by the owner session — verify no direct-DB mutation
-path was added); revocation must not strand the executor mid-settle in a
-crash loop (its commit failures must be terminal-permanent, not retried
-forever — check the rejection is classified permanent, see the
-permanent-rejection taxonomy from scheduler E0).
+- [ ] A direct result target returns its producing action from the durable row
+      after observation and from the live static surface before first run.
+- [ ] A side-write target and materializer target return the correct action.
+- [ ] A pre-existing target redirected from a computation returns the current
+      writer even though its creator is unrelated.
+- [ ] Multiple candidate writers are all returned deterministically.
+- [ ] PerUser/PerSession target lookups never return another context's writer.
+- [ ] Re-observation with a smaller write set removes obsolete lookup results.
+- [ ] A 10k-row query uses the intended index and meets the existing scheduler
+      index performance budget.
 
 ---
 
-### W0.5 — In-process provider, stage 1 (loopback against a live Server)
+### W0.4 — Exact input basis and execution provenance
 
-**Depends on:** nothing. **Unblocks:** W0.6.
-**Deliverable:** one PR: construct a StorageManager/provider against an
-EXISTING `MemoryV2Server.Server` instance in-process (today `emulate()`
-always builds its own).
+**Depends on:** #4288.
+**Unblocks:** claim settlement and overlay reconciliation.
 
-**Read first:** `packages/runner/src/storage/v2-emulate.ts` (~36:
-`EmulatedStorageManager` holds a `#serverFactory`);
-`packages/memory/v2/client.ts` ~1299 (`loopback(server)` transport);
-`packages/runner/src/storage/cache.deno.ts` ~20 (how emulate is reached).
+**Problem:** the accepting commit/head sequence is not proof of which inputs an
+action consumed. A no-op action also produces no ordinary commit to acknowledge
+that it settled.
+
+**Read first:**
+
+- packages/runner/src/scheduler/action-run.ts read tracking, transaction open,
+  no-op elision, and observation construction
+- Scheduler-v2 commit gates and bounded settle
+- Memory-v2 revision sequence assignment and feed ordering
+- Event dispatch transaction provenance
 
 **Steps:**
 
-1. Add `StorageManager.inProcess(server, options)` (or an
-   `emulate({ server })` overload — pick whichever fits the existing
-   factory shape best) that uses `loopback(existingServer)` instead of a
-   fresh server.
-2. Find the storage conformance tests that currently run under
-   `emulate()` (grep `StorageManager.emulate(` in `packages/runner/test`)
-   and parameterize a representative subset to also run under
-   `inProcess` with a shared server.
+1. Track the revision sequence actually observed for every effective read. For
+   this same-space phase, inputBasisSeq is the maximum consumed same-space
+   revision sequence, or zero for no durable reads. Do not substitute current
+   head or accepting commit seq.
+2. Define ActionExecutionProvenance with:
+   - ActionClaimKey;
+   - onBehalfOf user DID;
+   - execution lease generation;
+   - claimGeneration when the action is claimed;
+   - causedBy source commit sequence(s), when known;
+   - inputBasisSeq.
+3. The host derives onBehalfOf from the authenticated sponsor lease and
+   overwrites/rejects any worker- or client-supplied value. It means
+   server-executed on behalf of this user, not semantic authorship of every
+   input.
+4. Carry provenance through the normal validated transaction path and store it
+   with scheduler observation/commit diagnostics.
+5. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
+6. Add ActionSettlement emission for committed, no-op, failed, and unserved
+   attempts. Settlement names the exact leaseGeneration + claimGeneration and
+   inputBasisSeq. A committed settlement must carry acceptedCommitSeq; no-op
+   has no data commit. Emit either only after the normal confirmed-read
+   validation accepts the corresponding data or observation-only transaction.
+7. Co-order data patches and settlements on the session feed. A client may
+   apply a committed settlement only after its confirmed/feed cursor reaches
+   acceptedCommitSeq. No-op settlement follows the accepted observation-only
+   transaction in that ordered stream.
+8. Do not add persistent scheduler observations for handler runs in this phase.
+   Handlers remain client-authoritative, their read sets do not participate in
+   server-primary wake indexes, and existing event/source commit provenance
+   remains unchanged. Phase 5 owns any handler-observation contract; handler
+   semantic authorship remains the authenticated event sender.
 
 **Success criteria:**
 
-- [ ] Two runtimes (in Deno Workers — realm rule!) against ONE shared
-      in-process server see each other's committed writes (loopback
-      two-runtime test; the harness recipe exists — see
-      `multi-runtime-harness.ts`).
-- [ ] The parameterized conformance subset passes identically under
-      `emulate` and `inProcess`.
-- [ ] No behavior change for existing `emulate()` callers (test suite
-      untouched and green).
-
-**Review checklist:** the worker-realm rule — reject any test that
-constructs two runtimes in one realm; check the shared server's lifetime
-is owned outside both runtimes (dispose order test).
+- [ ] An action reading an old revision while unrelated newer commits exist
+      records the old consumed basis, not head.
+- [ ] Two consumed inputs at S1 and S2 record max(S1,S2).
+- [ ] A no-op claimed action emits a settlement with its real basis despite
+      producing no data commit.
+- [ ] A committed settlement cannot clear an overlay before the client has
+      applied the acceptedCommitSeq data patch, including forced reordering.
+- [ ] Commit seq and input basis are independently asserted and cannot be
+      accidentally interchanged by type/API.
+- [ ] The store/control event records the sponsor user as onBehalfOf.
+- [ ] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
+- [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
+      into this scalar.
+- [ ] Handler execution emits no new scheduler observation in this phase and
+      preserves existing authenticated event/source provenance.
 
 ---
 
-### W0.6 — In-process provider, stage 2 (engine-direct, no sessions)
+### W0.5 — Authenticated in-process provider without an Engine bypass
 
-**Depends on:** W0.5. **Unblocks:** W1.1.
-**Deliverable:** one PR: an executor-grade provider that (a) commits via
-the engine directly, (b) reads via the engine read path, (c) receives
-per-space invalidations from a commit-stream callback instead of
-`session.watch` — plus the worker-boundary channel variant.
+**Depends on:** #4288.
+**Unblocks:** leases and executor Workers.
 
-**Read first:** `packages/memory/v2/server.ts`: `Engine.applyCommit` call
-sites (~950, ~1031, ~1628), `markSpaceDirty` (~1051), the read pool
-(`#readPool`, ~711), and the session refresh loop you are bypassing
-(~2155–2466 — understand what you are NOT going through);
-`packages/runner/src/storage/v2.ts` (`Provider`, ~1074) and the
-scheduler's storage-notification entry (search
-`processPullStorageNotification` in `packages/runner/src`).
+**Decision:** low-overhead server execution may be in-process, but every read
+and commit must traverse the same authenticated authorization, conflict, CFC,
+provenance, hook, and notification path as a remote client.
+
+**Read first:**
+
+- packages/memory/v2/server.ts session authentication, ACL/CFC validation,
+  commit apply, and post-commit notifications
+- packages/memory/v2/client.ts loopback transport
+- packages/runner/src/storage/v2.ts provider/replica interfaces
+- Existing multi-runtime Worker harnesses
 
 **Steps:**
 
-1. Server API: `server.onSpaceCommit(space, cb)` — invoked after
-   `applyCommit` success with `{ seq, changedIds }` (the same data
-   `markSpaceDirty` receives). Synchronous registration, idempotent
-   unregister; document that callbacks must not throw (wrap + log).
-2. Provider: implement `IStorageProviderWithReplica` whose replica pulls
-   docs through the engine read path on demand and applies commit-stream
-   notifications into the existing notification entry the scheduler
-   already consumes. Commits go to `applyCommit` with the executor
-   session identity (W0.4) — reuse the commit-validation path, do NOT
-   bypass conflict detection.
-3. Worker variant: the engine lives on the host thread; the executor
-   runtime lives in a Deno Worker. Bridge with a `MessageChannel`:
-   requests (read/commit) as structured-clone messages; invalidations
-   pushed host→worker. Batch reads (the compile-wedge lesson: long
-   MessageChannel chains starve timers — keep the protocol
-   request/response, no polling loops).
-4. Equivalence guard: a differential test running one fixture pattern to
-   settle under (a) the stage-1 loopback provider and (b) the
-   engine-direct provider, then byte-comparing all docs in the space
-   (state-inspector dump) and the observation rows (if W0.1 landed).
+1. Add a host-owned provider adapter against an existing Server. Reuse either
+   authenticated loopback or a dedicated internal Server method that shares
+   all normal validation; do not call Engine.applyCommit directly.
+2. The runtime Worker receives an opaque provider/lease channel over
+   MessageChannel. It receives neither a user private key nor raw Engine
+   access.
+3. Route reads through the authenticated Server read path and commits through
+   normal transact validation. Push post-commit invalidations to the Worker;
+   do not poll.
+4. Allow the host to attach a current ExecutionLease and fence generation to
+   each commit. W1.1 supplies and validates the lease.
+5. Preserve remote and in-process behavioral equivalence with a differential
+   fixture, including scheduler observations and rejected commits. Compare
+   exact user operations/data, then normalize legitimate session ids,
+   sequences, lease generations, and transport metadata before comparing
+   scheduler semantics; assert the expected identity/fence fields separately.
+6. Ensure provider disposal unregisters callbacks and cannot outlive its lease.
 
 **Success criteria:**
 
-- [ ] Differential test green (byte-identical docs under both providers).
-- [ ] Zero sessions: assert the server has no session/watch registered
-      for the executor connection while the fixture runs (inspect server
-      session count — expose a test-only accessor if needed).
-- [ ] Invalidation correctness: an external commit (via a second,
-      ordinary client session) invalidates and re-settles the executor
-      runtime (value observed updated) without any watch.
-- [ ] Worker variant: same fixture green with the runtime in a Worker;
-      no cross-realm construction.
-- [ ] Conflict path: two writers (executor + client) racing one doc →
-      executor sees a normal conflict/retry, not corruption (reuse an
-      existing conflict test shape).
-
-**Review checklist:** confirm commits flow through the SAME
-`applyCommit` validation as remote commits (look for any "trusted"
-shortcut and reject it); callback registration must be per-space and
-cleaned up on provider dispose (leak test); no timer-based polling in the
-worker bridge.
+- [ ] Differential fixture produces identical user operations/data and
+      normalized-equivalent scheduler semantics through remote/loopback and
+      host-provider paths; expected session/provenance/fence differences are
+      asserted explicitly.
+- [ ] ACL denial, CFC denial, conflict, and revoked/fenced lease each produce
+      the same atomic rejection shape; no partial apply.
+- [ ] An ordinary client commit invalidates and re-settles the Worker without a
+      watch/poll loop.
+- [ ] Worker termination releases callbacks and pending requests.
+- [ ] A test guard proves no provider path calls Engine.applyCommit directly.
 
 ---
 
-### W0.7 — `session.interest.set` + doc-set feed (flagged)
+### W0.6 — Trusted-client handshake, demand, claim, and settlement protocol
 
-**Depends on:** nothing. **Unblocks:** W1.1 discovery; Phase 3.
-**Deliverable:** one PR: a flagged alternative to `session.watch` graph
-queries — the session declares interest; the server fans out changed docs
-by set-membership. v0 grain: whole-space (`pieces: "*"`) only;
-piece-granular closures arrive in Phase 1 when the executor can export
-them.
+**Depends on:** #4288.
+**Unblocks:** client-driven pool and client authority split.
 
-**Read first:** `packages/memory/v2/server.ts` — the watch/refresh path
-you are adding an alternative to: `markSpaceDirty` (~2320) → refresh
-loop (~2466) → `refreshDirty` (~649) → `syncSessionForConnection`
-(~2155) → `refreshTrackedGraph` (~2223); catch-up `fromSeq/toSeq`
-(~2187/2269); `docs/specs/memory-v2/04-protocol.md` §4.1.1 (message
-envelope conventions).
+**Read first:**
+
+- docs/specs/memory-v2/04-protocol.md
+- Memory-v2 session handshake/version negotiation
+- Current piece watch/pull registration and session control ordering
+- docs/development/EXPERIMENTAL_OPTIONS.md
 
 **Steps:**
 
-1. Protocol: add `session.interest.set { space, pieces: "*" }` (accept
-   only `"*"` in v0; reject arrays with a clear error so the field can
-   grow). A session in interest mode for a space suppresses graph-query
-   refresh for that space and instead receives `SessionSync` upserts for
-   ALL changed docs in the space (compute from changed ids directly; no
-   graph re-evaluation). Framing: the message is a granularity hint over
-   the doc-centric demand model (README §6.3) — the target grain is the
-   session's read doc-set, with per-piece as the intermediate step.
-2. Catch-up: reuse the existing `seenSeq`→head resume path for interest
-   sessions (it already iterates commits by seq).
-3. Client: behind `CF_INTEREST_FEED`, the shell/runtime sends
-   `interest.set` for each opened space instead of the per-piece watch
-   registration (find where `session.watch.set` is issued in
-   `packages/runner/src/storage/v2.ts` / the shell boot path and branch
-   there). Everything downstream of received upserts is unchanged.
-4. Latency instrumentation: count and time server-side per-commit fan-out
-   work in both modes (a counter the perf test can read; OTel if #4448
-   has landed by then — check).
+1. Add capability negotiation for server-primary-execution-v1. When a
+   deployment/space requires server-primary semantics, reject clients that do
+   not advertise the capability; do not silently mix stale authority rules.
+2. Add session.execution.demand.set. A demand is bound to the authenticated
+   connection, branch, space, and piece result roots. Replacement and disconnect
+   remove that connection's references automatically.
+3. Add branch-qualified claim set/revoke messages containing ActionClaimKey,
+   leaseGeneration, monotonic per-ActionClaimKey claimGeneration, and
+   server-controlled expiry. Revoke names the live claimGeneration. A later
+   claim set uses the next value even if the worker lease generation is
+   unchanged.
+4. Add settlement messages keyed to the exact branch, leaseGeneration +
+   claimGeneration and carrying outcome, inputBasisSeq, diagnostic code, and
+   acceptedCommitSeq for `committed` outcomes. The settlement branch must equal
+   its claim branch. Other outcomes omit acceptedCommitSeq.
+5. Define ordering: claim set is observed before a client may suppress a
+   matching action on that branch; revoke is fail-open while connected;
+   settlements cannot apply to another branch or a newer claim generation.
+   Carry branch-qualified claim snapshots, claim revokes, commit patches, and
+   every settlement outcome on one ordered reconnectable stream with explicit
+   feed-sequence barriers. For committed outcomes,
+   acceptedCommitSeq is an additional data-application gate, not a replacement
+   for control ordering.
+6. Authorize demand using the session's existing READ access. Sponsor
+   eligibility is a separate WRITE check in W1.1.
+7. Add optional executionPolicy owner doc support. It only opts a space into
+   server-primary execution; absent/disabled policy means client-primary. Do
+   not put claims, actor identity, heartbeat, exception lists, or epochs in it.
+8. Gate all messages behind serverPrimaryExecution, default off.
+   Negotiate routing and builtin-passivity sub-capabilities while the WOs land;
+   a server publishes only the claim classes the client says it can honor.
 
 **Success criteria:**
 
-- [ ] Two-client parity test: clients A (watch mode) and B (interest
-      mode) on one space; a third session commits; A and B converge to
-      identical replicas (compare a sampled doc set), B's delivery
-      latency ≤ A's (coarse assert: within 2× of the 5ms refresh tick).
-- [ ] Reconnect: interest-mode session disconnects, misses N commits,
-      reconnects with `seenSeq` → receives exactly the missed changes
-      (no duplicates: assert upsert count).
-- [ ] Server does NOT run `refreshTrackedGraph` for interest-mode
-      sessions (call counter assert).
-- [ ] Flag off: zero protocol traffic difference (snapshot the message
-      log of a fixture run, compare to main).
-- [ ] Old server + flagged client: client falls back to watch mode
-      gracefully when the server rejects the unknown message (version
-      tolerance test — the stale-server skew trap is real).
-- [ ] Ordering: upserts for a space are delivered and applied in
-      nondecreasing seq order under rapid commits (assert the applied
-      seq sequence is sorted). The overlay drop rule (W2.3, README
-      §5.B.4) depends on this guarantee.
-
-**Review checklist:** interest mode must not leak docs the session's ACL
-would not allow (the watch path had per-session scoping — verify the
-interest path enforces the same reader checks; write the adversarial
-test: user partitions of OTHER users must not appear in the feed).
-This is the WO where reader isolation can silently break — treat that
-last criterion as blocking.
+- [ ] Compatible client negotiates and round-trips demand/claim/settlement.
+- [ ] Incompatible/stale client is explicitly rejected when the feature is
+      required and works unchanged when it is not.
+- [ ] Two connections demanding the same root produce two references; closing
+      one leaves the other live; closing both removes demand.
+- [ ] The same piece/action on two branches retains independent demand, claims,
+      revokes, snapshots, and settlements; neither branch can suppress or clear
+      the other's overlay.
+- [ ] Spoofed connection id, principal, claim, or settlement is rejected.
+- [ ] Revoke/re-claim within one lease gets a new claimGeneration, and a
+      reordered old-generation settlement cannot clear the new claim.
+- [ ] A committed settlement delivered before its data frame is buffered until
+      the acceptedCommitSeq patch is applied.
+- [ ] Flag off produces no new protocol messages.
 
 ---
 
-## 3. Phase 1 — Approach A: server catch-up executor
+## 3. Phase 1 — one shadow executor per eligible active space
 
-Phase exit criteria (all must hold before Phase 2 starts):
+Phase exit:
 
-- E1.a A cold, opted-in space catches up within 10s of a source commit
-  with no client connected (W1.3 test).
-- E1.b Zero double-fired async requests in the 3-tab multi-runtime test
-  (W1.2 test).
-- E1.c bps regression suite green under the reactive mode (W1.4).
-- E1.d Executor-served space feed latency ≈ watch latency (W0.7 metric
-  within 2×).
+- Exactly one fenced worker generation runs for an eligible branch/space; a
+  legacy background-owned space is excluded until Phase 3.
+- Multiple client demands merge into it without duplicate schedulers.
+- The ordinary rollout remains observation-only: zero authoritative claims,
+  derived server commits, or external builtin effects are published.
+- Test-only negotiated authority proves every derived commit records on behalf
+  of which user it ran.
+- Only statically and dynamically proven same-space, space-scoped actions are
+  reported as CandidateClaim.
+- Async builtins pass broker/egress tests only under an explicit test
+  capability; client passivity and production claim publication wait for
+  Phase 2.
 
-### W1.1 — Executor pool: reactive worker-per-space service
+### W1.1 — User-sponsored execution leases and fencing
 
-**Depends on:** W0.4, W0.5 (W0.6 preferred), W0.1 (for hibernate/resume).
-**Deliverable:** one PR (large; may split into worker-lifecycle +
-demand-loop): `background-piece-service` gains `EXECUTOR_MODE=reactive`
-— per-space Deno Worker running a runtime on the in-process provider,
-kept current by pull-on-invalidation, hibernating when idle.
+**Depends on:** W0.5.
+**Unblocks:** W1.2.
 
-**Read first:** the whole of
-`packages/background-piece-service/src/` — especially `service.ts` (~31:
-BGPieceEntry discovery via `.sink()`; ~107: SpaceManager per space),
-`space-manager.ts` (~40: `rerunIntervalMs ?? 60000` — the polling you are
-replacing), `worker-controller.ts` (~78: `new Worker(...)`),
-`worker-ipc.ts`, `worker.ts`; `packages/runner/src/cell.ts` ~1032
-(`Cell.pull()` — ephemeral demand root, settles to closure);
-README §6.1–§6.5.
+**Decision:** the executor is not an anonymous service principal for
+client-driven work. One authenticated requesting user sponsors a worker
+generation. Background-only work gets its service identity later.
 
 **Steps:**
 
-1. Mode flag `EXECUTOR_MODE=reactive` (env, default absent = today's
-   polling behavior untouched).
-2. Registration: v1 discovery = the existing BG registry cell UNION
-   spaces with `executorConfig.enabled` (W0.4). Per space, the interested
-   piece set = registry entries for that space (client-driven interest
-   arrives in W1.3+/Phase 3).
-3. Space worker: construct runtime with `persistentSchedulerState: true`,
-   `storageConnection: "in-process"` (worker-bridge from W0.6), the
-   executor signer, and `rehydrateFromStorage` subscriptions.
-   Registration order is load-bearing (README §6.5 spawn sequence): the
-   pool registers `onSpaceCommit` and BUFFERS batches before the
-   worker's first settle; the worker reports "live at seq S" and the
-   pool releases the buffer from S — no notification gap. After
-   rehydration, also register `onSpaceCommit` for every OTHER space in
-   the pieces' read closures (README §6.8).
-4. Demand loop (the core): on each `onSpaceCommit` batch → for each
-   interested piece → `resultCell.pull()` → await settle → await
-   `runtime.settled()` (async builtins). Explicitly DO NOT register a
-   standing schema-less sink over piece state (this exact shape caused a
-   ~270× re-run amplification; reviewers will reject it). Per-piece pulls
-   are the v1 implementation of doc-centric demand (README §6.3) — a
-   coarse over-approximation of the demanded doc set. Keep the loop's
-   interface "wake with a stale doc/piece list" so narrowing to per-doc
-   pulls later is a loop change, not an architecture change.
-5. Hibernation: idle timer (no commits, no in-flight async for N min,
-   default 10 to match the existing worker timeout) → `runtime.settled()`
-   → per-space storage teardown (`StorageManager.closeSpace` ships with
-   PR #4115; if unmerged when you get here, implement teardown against
-   the StorageManager seam and say so in the PR) → terminate worker.
-   Drain protocol: record the worker's last-settled seq; mark the space
-   *draining* in the pool until the worker exits; wake decisions treat
-   draining spaces as having no worker and compare incoming commits
-   against last-settled seq (W1.3), so nothing lands unseen between
-   settle and terminate. Wake = W1.3 (until then, workers for registered
-   spaces stay up).
-6. Crash isolation: worker error → report, restart with exponential
-   backoff, other spaces unaffected (worker-controller has error events
-   already — extend). After N consecutive failures, quarantine the space
-   (stop serving, alert, no restart storm). Stub a quarantine hook the
-   ownership machinery will consume (W2.1 auto-flips `derivedAuthority`
-   to `"client"` on quarantine).
+1. Add a Server/control-plane ExecutionLease record per branch/space with
+   monotonic generation, host id, onBehalfOf DID, expiry, and state. Use a
+   database-backed compare-and-swap/transactional seam so multiple server
+   processes cannot both own the space.
+2. Acquire only from an active demand session with WRITE authority. Prefer the
+   active principal whose source commit caused a cold wake; otherwise choose
+   the oldest eligible demand deterministically.
+   If no requester can sponsor, acquire no lease and publish no claim; clients
+   remain authoritative.
+3. Keep the sponsor sticky for the worker generation. Runtime/StorageManager
+   identity is construction-wide; do not switch actor inside a settled graph.
+4. The host retains the authenticated grant and exposes only an opaque lease
+   channel to the Worker. Every executor commit checks current generation,
+   expiry, sponsor authorization, and executionPolicy immediately before apply.
+5. Renew with server time while demand/in-flight work exists. A heartbeat
+   document is not a lease and must not be introduced.
+6. On sponsor disconnect/revocation, allow a bounded drain of already-started
+   work, revoke the lease, and restart under another eligible requester if
+   demand remains. No old/new overlap is allowed.
+7. Provenance records onBehalfOf and worker generation. Future user-delegated
+   keys can replace the session-derived lease without changing that semantic.
 
 **Success criteria:**
 
-- [ ] Integration test (in bps package, in-process server + cf-CLI-style
-      seeding): opted-in space with a fixture pattern whose lift derives
-      `out = f(in)`; commit `in` via an ordinary client session; with NO
-      client-side execution, `out` is correct in the store within 10s.
-- [ ] Async: fixture with a `fetchJson` against a local stub — executor
-      performs the fetch and writes the result; stub sees exactly 1
-      request.
-- [ ] Hibernate/resume: after idle timeout, the worker is gone (assert
-      pool size); a later commit + manual `ensureSpace` call resumes and
-      catches up using rehydration — and the fixture's lift-invocation
-      counter shows only the stale subset re-ran.
-- [ ] Two spaces, two workers; `Worker.terminate()` one mid-settle →
-      other space unaffected; killed space recovers on restart with
-      correct results (no torn state — commits are transactional).
-- [ ] Mode off: bps behaves byte-identically to main (its existing tests
-      unmodified and green).
-- [ ] No standing schema-less sink anywhere in the new demand path
-      (grep-level review criterion; also assert re-run counts stay flat
-      when an unrelated doc in the space changes — the amplification
-      canary).
-- [ ] Drain race: a commit landing between `settled()` and worker
-      terminate triggers a respawn that catches up (force the window
-      with a test hook/delay; assert final derived state correct and
-      exactly one respawn).
-- [ ] No-gap spawn: a commit landing between worker spawn and its first
-      settle is reflected in the catch-up without a second wake (test
-      hook delays the first settle; assert the buffered batch was
-      applied).
-- [ ] Quarantine: N forced crashes → space quarantined, backoff schedule
-      observed (no restart storm), other spaces unaffected.
-
-**Review checklist:** the demand loop must be pull-based
-(`pull()`-per-wake) as specified; check `settled()` (not `idle()`) gates
-hibernation; check the worker bridge does not poll; check executor
-commits carry the executor identity (sample a commit's session in the
-store); verify the amplification canary test is real (unrelated-doc
-write → zero pulls).
+- [ ] One requester yields one valid lease and commits marked onBehalfOf that
+      user.
+- [ ] Two hosts racing acquire produce one winner; loser cannot commit.
+- [ ] A delayed commit from generation N is rejected after generation N+1
+      begins.
+- [ ] Sponsor loses WRITE or disconnects: in-flight boundary is deterministic,
+      old Worker is fenced, and remaining demand restarts under another user.
+- [ ] A READ-only requester can demand data but cannot sponsor writes.
+- [ ] With only READ-only demand, no worker claim appears and current client
+      behavior continues unchanged.
+- [ ] No user private key enters Worker memory or IPC.
 
 ---
 
-### W1.2 — Async executor priority
+### W1.2 — Shared demand pool: one Worker per eligible active branch/space
 
-**Depends on:** W1.1.
-**Deliverable:** one PR: when a space has a live executor, async builtins
-fire only there; clients defer.
+**Depends on:** W0.6, W1.1, W0.1.
+**Unblocks:** W1.3.
 
-**Read first:** `packages/runner/src/builtins/fetch-utils.ts` ~90–151
-(`tryClaimMutex`: claim record + `lastActivity` + timeouts: 5s fetch /
-5min llm-dialog), ~157–180 (`tryWriteResult` guard);
-`packages/runner/src/builtins/fetch.ts` ~473–500 (claim usage);
-README §5.B.5 (the eventual passive mode is Phase 2 — this WO is only
-priority, not prohibition).
+**Decision:** never start one runtime per client. Worker cardinality, demand,
+and signing authority are separate.
+
+**Read first:**
+
+- packages/background-piece-service worker-controller/IPC for lifecycle
+  patterns only; do not make its registry the primary discovery path
+- Scheduler-v2 demand/pull and bounded settle APIs
+- Cell.pull and piece result-root instantiation
+- Persistent scheduler rehydration through packages/runner/src/scheduler.ts
 
 **Steps:**
 
-1. Executor liveness signal: the space worker maintains a heartbeat doc
-   (`executorHeartbeat`, updated every ~5s while awake; ordinary doc, no
-   new surfaces).
-2. Claim precedence: `tryClaimMutex` gains a role — clients, before
-   claiming, read the heartbeat; if fresh (< 3× interval), do not claim
-   (leave pending rendering as-is). The executor claims unconditionally
-   and may take over a stale client claim immediately.
-3. Timeout fallback unchanged: heartbeat stale → clients behave exactly
-   as today.
+1. Add a host pool `Map<BranchSpaceKey, SpaceExecutionSlot>`. Union every
+   connection's ExecutionDemand into the slot; acquire one lease and launch one
+   Worker for the union.
+2. Construct one runtime with persistentSchedulerState enabled and the
+   authenticated host provider. Rehydrate the applicable space/user/session
+   scheduler rows for its sponsor context.
+   From the first pull, enforce shadow mode: apply computation results only to
+   the Worker's private replica for graph discovery, reject every upstream
+   derived commit, and deny all external builtin broker calls. Source/handler
+   work is not injected into this runtime.
+3. Register post-commit buffering before initial load. Worker reports live at
+   seq S; release buffered notifications after S so spawn has no gap.
+4. Demand exact piece result roots with pull-per-wake. Do not install a
+   schema-less standing sink. Scheduler-v2 deduplicates overlapping client
+   demand inside this single scheduler.
+5. Demand changes update the union without restarting unless sponsor context
+   must rotate. Empty demand begins bounded drain/hibernate.
+6. Isolate Worker crashes, back off, and discard CandidateClaims before retry.
+7. Add a mandatory legacy-background exclusion interlock without refactoring
+   its registry: if background-piece-service has a registration, active
+   controller, or lease for the branch/space, do not launch the new pool slot
+   and publish no claim. Existing background behavior continues. Phase 3
+   imports that demand into the shared slot and removes the exclusion.
 
 **Success criteria:**
 
-- [ ] Multi-runtime test (3 client workers + executor, shared in-process
-      server, stub fetch endpoint): stub receives exactly 1 request; its
-      auth/identity marker shows the executor session.
-- [ ] Kill the executor mid-request: heartbeat goes stale; a client
-      claims after the existing timeout and completes; result correct
-      (the fixture asserts final value, and total requests ≤ 2).
-- [ ] No executor (heartbeat absent): behavior identical to main (run an
-      existing cross-tab mutex test unmodified).
-- [ ] Clock skew guard: heartbeat freshness uses server seq/time
-      consistently (pin whichever the claim records already use —
-      `lastActivity` convention — do not introduce a second clock).
-
-**Review checklist:** the client defer path must not spin (no tight
-retry loop while heartbeat fresh — it should simply not claim and rely
-on normal invalidation); check llm-dialog's 5-minute timeout is
-respected (don't let executor takeover break a live client streaming
-session — takeover only on stale claims).
+- [ ] Ten clients demanding the same piece produce one Worker, one scheduler
+      action run per invalidation, and ten reference-counted demands.
+- [ ] Disjoint roots from two clients run in the same space Worker and only
+      demanded closures stay live.
+- [ ] Closing one client does not remove another's demand; closing the last
+      drains and terminates.
+- [ ] Commit during spawn buffering is observed without a second wake.
+- [ ] Worker crash discards CandidateClaims (and revokes any test-only claims)
+      before restart and leaves other spaces unaffected.
+- [ ] An unrelated document write causes zero pulls/action runs.
+- [ ] Every ordinary shadow pull produces zero server data operations and zero
+      external builtin calls while still collecting local graph observations.
+- [ ] Concurrent legacy background registration plus client demand starts no
+      second server Worker and publishes no server-primary claim.
 
 ---
 
-### W1.3 — Wake-on-commit
+### W1.3 — Whole-action servability, firewall, and claim readiness
 
-**Depends on:** W0.2, W1.1.
-**Deliverable:** one PR: hibernated spaces wake when a commit makes an
-interested piece stale; irrelevant commits don't wake anything.
+**Depends on:** W0.2, W0.3, W0.4, W1.2.
+**Unblocks:** Phase 2 and async serving.
+
+**Decision:** client authority is the default. The server positively claims
+only an action it can serve. Clients need not predict unsupported actions.
 
 **Steps:**
 
-1. Host-side hook: on `onSpaceCommit` for a space with no live worker
-   (including *draining* ones — W1.1's drain protocol), run
-   `staleReadersFor(space, changedIds, seq)` (W0.2) filtered to the
-   registered piece set; non-empty → `ensureSpace(space)` (W1.1) and
-   hand the worker the stale piece list for targeted pulls. For a
-   draining space, additionally wake when `seq >` the recorded
-   last-settled seq even before the readers query (cheap guard against
-   losing the race).
-2. Debounce: batch wake decisions per space per refresh tick (reuse the
-   5ms dirty-batch cadence; do not add a new timer).
-3. Metrics: counters for wakes, suppressed (no-reader) commits, catch-up
-   duration.
+1. Discover all writer actions for demanded targets with writersForTargets.
+   Instantiate the piece root on a safe index miss.
+2. Static preflight rejects candidates with any known foreign-space,
+   PerUser/PerSession, handler/UI-binding, unknown dynamic effect, or malformed
+   output surface. Pure computations with direct root/static write surfaces may
+   proceed to staged execution.
+3. Stage the entire action transaction. Inspect effective reads and writes
+   before apply. The Server transaction firewall accepts only:
+   - owner/read/write space equals the served space;
+   - every effective scope key is space;
+   - every write belongs to the candidate action transaction;
+   - normal ACL/CFC validation succeeds.
+4. If any operation fails the firewall, discard the entire transaction,
+   record an unserved CandidateClaim diagnostic, and never split it. Under the
+   explicit authority test capability, emit unserved settlement and
+   leave/revoke the claim.
+5. For a first pure run, inspect the staged transaction and record a
+   CandidateClaim. Under the explicit test-only routing capability, install a
+   real claim and commit/retry that same action under the fenced lease. A
+   concurrent identical client write may make it a no-op; settlement still
+   acknowledges it.
+6. Claims are action-granular and ActionClaimKey/leaseGeneration/
+   claimGeneration-specific.
+   A piece may contain both claimed and client-primary actions.
+7. Re-evaluate the firewall every run. A dynamically unservable claimed action
+   atomically aborts, revokes, and tells clients to mark it dirty and resume
+   committing the whole action.
+8. Multiple writer candidates are independently claimed. Suppression requires
+   a matching claim for the action producing that transaction.
+9. Until W2.1 is deployed and negotiated, run this machinery only in
+   validation/shadow mode: inspect eligibility and record CandidateClaim
+   diagnostics, but publish no authoritative claim and perform no
+   server-primary commit. The explicit test capability is never advertised to
+   ordinary sessions.
 
 **Success criteria:**
 
-- [ ] Integration: registered space, worker hibernated; external commit
-      to a doc a piece reads → worker spawns, only stale actions re-run
-      (invocation counter), derived docs correct, worker re-hibernates.
-- [ ] Negative: commit to a doc NO piece reads → no worker spawn
-      (counter asserts suppression), and the readers-index query is the
-      only work done.
-- [ ] Burst: 50 rapid commits → at most a handful of wake evaluations
-      (batching assert), one worker spawn.
-- [ ] Cross-space wake: a piece in space A reads a doc in space B (both
-      enabled); with A parked, a commit to that doc in B wakes A's
-      worker and catches the piece up (rides W0.2's cross-space row).
-
-**Review checklist:** the no-reader suppression is the point of W0.2 —
-reject implementations that spin the worker up to "check". Verify the
-stale piece list actually narrows the pulls (not pull-everything).
+- [ ] Same-space pure computation becomes claim-ready in ordinary shadow mode
+      with zero server data commits.
+- [ ] The explicit test capability claims that computation and commits
+      server-derived output under its sponsor.
+- [ ] Mixed space+user writes abort as one transaction; zero operations apply;
+      claim is absent/revoked; client execution commits the complete result.
+- [ ] Cross-space read or write aborts before apply and remains client-primary.
+- [ ] Dynamic scope change after a claim revokes it and converges via client
+      rerun without data loss.
+- [ ] First-run index miss safely instantiates/discovers the piece.
+- [ ] Pre-existing redirected output is served through writer-index identity,
+      not creation source.
+- [ ] No-op produces settlement and leaves no stuck overlay prerequisite.
+- [ ] CFC/ACL denial is not converted into servability or a trusted shortcut.
 
 ---
 
-### W1.4 — Fold bps registry into interest; deprecation path
+### W1.4 — Server async builtins and egress policy
 
-**Depends on:** W1.1.
-**Deliverable:** one PR: BG piece entries become executor interest
-registrations; the 60s polling updater is off for reactive-mode spaces;
-docs updated.
+**Depends on:** W1.3.
+**Unblocks:** W2.3.
 
-**Success criteria:**
-
-- [ ] Existing bps end-to-end test scenarios pass in reactive mode (port
-      the suite; list any intentionally-changed semantics in the PR).
-- [ ] A space in reactive mode never runs the polling rerun loop
-      (`rerunIntervalMs` timer not scheduled — assert via test hook).
-- [ ] Rollback: flipping `EXECUTOR_MODE` off restores polling behavior
-      without data migration.
-
----
-
-## 4. Phase 2 — Approach B: derived-authority split (per-space flag)
-
-Phase exit criteria:
-
-- E2.a On flagged spaces, client commits contain zero space-scoped
-  derived writes (wire assertion in CI).
-- E2.b Multi-client perf fixtures (lunch-poll, group-chat) on flagged
-  spaces: derived write-write conflicts ≈ 0; per-client action volume ≈
-  single-client baseline (measured, with NEW_PERF_BASELINE process for
-  accepted shifts).
-- E2.c Divergence counter ≈ 0 on deterministic fixtures; nonzero only on
-  the rigged-divergence test.
-- E2.d Flag-off spaces byte-identical to main behavior (differential CI
-  job).
-
-Deliberately NOT a Phase-2 WO: the executor-computed endorsement atom
-(G1's second half). It needs a small CFC-owned spec first
-(`writeAuthorizedBy`/integrity machinery); B's flip does not depend on
-it. Coordinate with CFC owners when Phase 2 starts so the spec is ready
-by Phase 4.
-
-### W2.1 — Ownership bit + client honoring skeleton
-
-**Depends on:** W0.4.
-**Deliverable:** one PR: `executorConfig.derivedAuthority:
-"client" | "executor"` with sticky epoch semantics; client runtime reads
-it at space open, subscribes to changes, and exposes
-`spaceDerivedAuthority(space)` to the storage layer; the pool's
-quarantine hook (W1.1) auto-flips the config to `"client"` (epoch bump,
-written pool-side — the pool holds the signer, so the flip survives the
-worker being gone). No routing yet.
-
-**Success criteria:**
-
-- [ ] Flip test: change `derivedAuthority` → connected clients observe
-      the change (assert the exposed getter flips) within one feed tick;
-      epoch increases monotonically; a stale-epoch write of the config
-      doc is rejected by normal conflict rules.
-- [ ] Default: spaces without the doc report `"client"` (today's mode).
-- [ ] Quarantine auto-flip: simulated quarantine flips the config to
-      client authority; connected clients observe it without reload
-      (getter flips; under W2.2 they resume committing derived writes).
-
-### W2.2 — Write-class routing + speculative overlay
-
-**Depends on:** W2.1, W0.3.
-**Deliverable:** one PR (the core of B; expect it to be the
-most-reviewed): on `derivedAuthority: "executor"` spaces, transactions
-whose `TxProvenance.action.kind` is `computation`/materializer-`effect`
-AND whose writes target space-scoped (unscoped) addresses apply to a
-local overlay and are never enqueued upstream; handler/setup/UI-binding
-txs commit exactly as today.
-
-**Read first:** README §5.B.1 (the routing table — implement it
-literally), §5.B.3 (handler semantics: NO new read restrictions — the
-overlay participates in local reads exactly like today's optimistic
-apply), §5.B.6 (scoped writes are EXEMPT from routing — they stay
-client-committed in this phase);
-`packages/runner/src/storage/v2.ts` (`Provider` commit/apply path) and
-`packages/runner/src/storage/interface.ts` (`ISpaceReplica`, ~1367).
+**Scope:** fetch-family and generate-family builtins. Full quotas, a durable
+async ledger, rigorous idempotency, and delegated execution keys are later
+hardening. This WO must not make network reach or duplicate behavior worse than
+the client runtime.
 
 **Steps:**
 
-1. Overlay structure on the replica: per doc,
-   `{ value, basis, generation }` layered above confirmed state for all
-   local reads; `basis` = the latest of the client's OWN source commits
-   the recompute consumed (its localSeq until confirmation, then the
-   assigned seq — README §5.B.4 rule 1). Dropped en masse per doc on
-   watermark (W2.3), on basis-commit rejection (§5.B.4 rule 4), or on
-   authority flip.
-2. Routing decision at commit-enqueue time, from
-   `tx.provenance.action.kind` + target address scope + the W2.1 getter.
-   Scoped-address writes (user/session) bypass routing (commit as
-   today) even from computation txs. Routing also consults
-   `executorConfig.unservablePieces` (README §6.8): pieces on the list
-   route their derived writes as client-authority even on an
-   executor-owned space.
-3. Instrumentation: per-space counters {overlayWrites, committedSource,
-   committedScoped, droppedOverlay, divergences}.
-4. Safety valve: authority flip back to `"client"` → flush semantics:
-   discard overlay, resume committing derived writes from the next
-   settle (document why discard is safe: server state is authoritative
-   and clients recompute).
+1. Statically classify supported builtin actions and their known same-space
+   output surfaces before claiming. Do not trial-run an external side effect to
+   discover servability.
+2. Route builtin network operations through a host broker where practical.
+   A direct executor implementation is acceptable only if it enforces the same
+   tested policy and exposes no raw capability to pattern code.
+3. Preserve the SES invariant: raw fetch remains unavailable inside authored
+   pattern code.
+4. Give the broker the canonical configured serving origin. Resolve relative
+   paths against that origin, preserving today's behavior. Thus a relative path
+   may intentionally reach the serving host even when local development uses
+   localhost/private addresses.
+5. Treat absolute and authority-bearing URLs as external. Block loopback,
+   link-local, private-network, metadata-service, and disallowed schemes.
+   Re-resolve DNS and reapply policy on every redirect hop. A request that
+   began relative remains in trusted-serving-origin mode across a same-origin
+   redirect even when Location is absolute; any origin change becomes external
+   and receives the full policy.
+6. Route generate-family calls through configured provider policy/credentials;
+   never inherit arbitrary client secrets from the demand payload.
+7. For identity-sensitive first-party requests, derive the request actor from
+   the authenticated commit that produced the request and require it to match
+   the current lease sponsor. Never sign as an unrelated sticky sponsor. A
+   mismatch is unservable in v1 or triggers a fenced sponsor handoff; dynamic
+   per-action actors are later work.
+8. Claim a builtin before clients become passive. Transient failure remains a
+   server-owned pending/retry according to existing builtin semantics;
+   permanent policy/servability failure revokes and settles explicitly.
+9. Preserve existing cross-runtime mutex/result guards as defense in depth.
+10. Keep async claim publication dark until W2.3 builtin passivity is deployed
+   and negotiated by every participating client session.
 
 **Success criteria:**
 
-- [ ] Wire assertion: on a flagged space, run a fixture with handler +
-      lifts; capture all ClientCommits (test transport hook): zero
-      operations target unscoped derived docs from computation txs;
-      handler writes present and unchanged.
-- [ ] Local reactivity: with NO server executor running, the client UI
-      value (read through the normal cell read path) still updates
-      immediately after a source write (overlay serves it) — this pins
-      "speculation works offline".
-- [ ] Scoped exemption: PerUser/PerSession derived fixture → those
-      writes still commit (wire assert), and user-partition contents
-      match main behavior.
-- [ ] Parity: flag off → a differential run of the fixture produces
-      byte-identical commits to main (record/compare op streams).
-- [ ] Authority flip mid-session: no crash, overlay discarded, next
-      settle recommits derived state, store converges (end-state equals
-      a from-scratch run).
-- [ ] Handler-read semantics unchanged: an existing handler
-      conflict/retry test passes unmodified on a flagged space with a
-      live executor (two-runtime test: stale handler read → conflict →
-      retry → success).
-- [ ] Unservable carve-out: with piece P in
-      `executorConfig.unservablePieces`, P's derived writes commit from
-      the client (wire assert) while other pieces' stay overlay-only;
-      removing P from the list flips it back without reload.
-
-**Review checklist:** the routing must key on the W0.3 envelope, not on
-heuristics (doc-id patterns, schema sniffing — reject); the overlay must
-be per-space and fully discardable (no partial-drop states); confirm
-setup/seed txs route as source (structural provenance markers must keep
-passing CFC gates — run a setup-heavy CFC test); confirm no path
-commits an overlay value "for convenience".
-
-### W2.3 — Watermark surfacing + overlay reconciliation
-
-**Depends on:** W2.2, W0.1.
-**Deliverable:** one PR: executor derived commits carry
-`observedAtSeq` (envelope field → persisted on the commit → visible in
-the feed); clients drop overlay per README §5.B.4 rules; divergence
-counter live.
-
-**Success criteria:**
-
-- [ ] End-to-end two-runtime test (client + executor, in-process
-      server): client source write (assigned seq S) → overlay shows
-      predicted derived value → executor recomputes and commits with
-      watermark W ≥ S → client drops overlay, confirmed value shown;
-      assert the overlay is GONE (not just equal).
-- [ ] Laggard: executor commit with W < S → overlay retained (assert),
-      then dropped when a later W ≥ S arrives.
-- [ ] Divergence: rig the executor fixture to compute a different value
-      → server wins silently, divergence counter = 1, no error surfaced
-      to the pattern.
-- [ ] Watermark integrity: W equals the max input seq the producing
-      action consumed (assert against the observation row from W0.1 —
-      they must be the same number, same source).
-- [ ] Multi-commit basis: two rapid source writes with assigned seqs
-      S1 < S2; overlay reflects both (basis S2); an executor derived
-      commit with S1 ≤ W < S2 does NOT drop the overlay, W ≥ S2 does
-      (pins §5.B.4 rules 1–3).
-- [ ] Rejected basis: a source commit that conflicts and retries →
-      overlay generations based on it are discarded, post-retry state
-      converges to the executor's recompute (pins §5.B.4 rule 4).
-
-**Review checklist:** the drop rule must compare against the
-CONFIRMATION-assigned seq of the client's own source commit (not
-localSeq); check overlay retention under out-of-order feed delivery
-(seq-ordered application is a memory-v2 guarantee — verify the client
-applies in order).
-
-### W2.4 — Builtin passive mode on flagged spaces
-
-**Depends on:** W2.1, W1.2.
-**Deliverable:** one PR: on `derivedAuthority: "executor"` spaces,
-client builtin actions never issue network work regardless of heartbeat
-(upgrade of W1.2's priority into prohibition); they materialize
-pending/result purely from cells.
-
-**Success criteria:**
-
-- [ ] Multi-runtime: stub endpoint sees requests only from the executor
-      even when the executor heartbeat is briefly stale (clients wait;
-      assert zero client requests over a 2× timeout window).
-- [ ] UX continuity: client renders `pending` → `result` transitions
-      driven by the feed (existing builtin fixture asserts the cell
-      sequence).
-- [ ] Unflagged spaces keep W1.2 behavior (fallback test unmodified).
-- [ ] Executor absent AND space flagged: requests stay pending; a
-      loud diagnostic is logged once (not per retry); flipping authority
-      back to `"client"` releases the work.
-
-**Review checklist:** the "executor down on a flagged space" state is a
-real operational mode — verify the diagnostic + the flip-back release
-path with a test, and that nothing busy-waits.
-
-### W2.5 — Executor demand-root scope exclusion
-
-**Depends on:** W1.1.
-**Deliverable:** one PR: the executor's demand side gets both
-exclusions — (a) per-piece pulls never demand user/session-scoped
-subtrees (transitional carve-out; lifted in Phase 4), and (b)
-cross-space servability discovery: an ACL-denied cross-space read while
-serving piece P records P in `executorConfig.unservablePieces`
-(epoch-bumped write), stops demanding P, and retries on config epoch
-bumps (README §6.8).
-
-**Read first:** scope brands on links (see
-`packages/runner/test/link-utils.test.ts` and the scope-folding
-history); README §5.B.6.
-
-**Success criteria:**
-
-- [ ] Fixture with space-scoped + PerUser derived state: executor
-      catch-up updates the space-scoped docs and leaves ALL `user:`/
-      `session:` partitions untouched (state-inspector assert: zero
-      writes under any user partition by the executor session, and —
-      critically — zero docs created under the EXECUTOR's own user
-      partition: pulling a scoped cell as the executor identity would
-      materialize an executor-partition copy; that must not happen).
-- [ ] Client-side computation of the scoped values still works (its
-      writes commit per W2.2 exemption).
-- [ ] Unservable discovery: a piece reading a non-enabled space → the
-      executor writes the exception within one settle and stops pulling
-      P (pull counter flat afterwards); enabling the target space (epoch
-      bump) clears the exception and P becomes served (pull counter
-      moves, derived docs update).
-
-**Review checklist:** the exclusion must live in the demand walk (what
-gets pulled), not only in write filtering — the criterion about
-executor-partition copies is the tell.
-
-### W2.6 — Phase-2 measurement + flip runbook
-
-**Depends on:** W2.2–W2.5.
-**Deliverable:** one PR: perf fixtures (lunch-poll, group-chat
-multi-user) runnable on a flagged space with the executor pool; a CI/
-locally-runnable report of E2.a–E2.d; a short runbook section in this
-folder for flagging a space on/off in staging.
-
-**Success criteria:**
-
-- [ ] The report emits: derived-conflict count, per-client action
-      volume vs single-client baseline, divergence count, feed latency —
-      with pass/fail against E2.a–E2.d thresholds.
-- [ ] One staging space flipped on, exercised, flipped off, with store
-      state verified consistent afterwards (runbook executed once;
-      evidence linked).
+- [ ] Relative /api/... reaches the configured serving host in local and
+      deployed fixtures.
+- [ ] A relative request may follow an absolute same-serving-origin redirect;
+      an origin-changing redirect is reclassified and blocked when private.
+- [ ] Absolute localhost/private/metadata URLs are blocked, including DNS and
+      redirect rebinding cases.
+- [ ] Raw fetch remains unavailable in a pattern SES test.
+- [ ] Supported fetch and generate actions execute once on the claimed server
+      path in a multi-client fixture.
+- [ ] A request produced by user B is never signed/executed as sticky sponsor A;
+      it stays unclaimed or performs a fenced handoff.
+- [ ] Unsupported builtin/action stays client-primary without first causing an
+      external request.
+- [ ] Claim loss/crash behavior is no worse than today's client mutex tests.
 
 ---
 
-## 5. Phases 3–5 — outline + entry criteria (do not start)
+### W1.5 — Indexed wake, drain, and hibernation
 
-- **Phase 3 — subscriptions retired + projector boot.** Entry: Phase 1
-  exit + W0.7 piece-granular interest (needs the executor to export
-  per-piece read closures — design a small spec addendum first: closure
-  export format, update cadence, cross-space handling per README §6.4).
-  Projector boot additionally requires render output stored as VNode
-  docs — prototyped only on the de-scoped interpreter branch (README
-  §3.4), currently unscheduled — treat projector boot as deferred.
-- **Phase 4 — scoped execution.** Entry: README §10.4 decided
-  (delegation shape: standing grant vs session-minted tokens; sub-worker
-  vs per-user demand roots) → G3 spec written and reviewed; executor
-  endorsement atom spec (G1's second half) — coordinate with CFC owners,
-  it touches `writeAuthorizedBy`/integrity machinery. (Scoped execution
-  is engine-agnostic — runs on the compiled path; README §3.4.)
-- **Phase 5 — dual handler execution.** Entry: G13 envelope spec written
-  (serialize trusted-event provenance; replay protection; verify path —
-  precedent: `docs/specs/toolshed-access-control.md` request proofs) and
-  README §10.1's default-flip trigger named. First implementation slice:
-  `serialize: "server"` opt-in per handler.
+**Depends on:** W0.3, W1.3.
+**Unblocks:** efficient rollout.
+
+**Steps:**
+
+1. Expose an indexed staleReadersForTargets query qualified by effective target
+   scope and execution context. Return distinct demanded actions/pieces.
+2. While a Worker is live, push changed target batches and pull only stale
+   demanded roots.
+3. When the last demand disappears and no async work remains, await
+   runtime.settled(), record last-settled seq, release claims, release lease,
+   close provider callbacks, and terminate.
+4. During drain, buffer commits. New demand or a relevant commit before final
+   release cancels drain or starts a later generation after fencing.
+5. Demand itself wakes a cold space. A source commit wakes it only while a
+   durable/active demand reference exists; background wake arrives in Phase 3.
+6. Emit counters for worker count, wakes, suppressed unrelated commits,
+   action runs, claim churn, and settle latency.
+
+**Success criteria:**
+
+- [ ] Relevant write wakes/re-runs only its demanded readers.
+- [ ] Unrelated write performs one indexed lookup and no Worker/action work.
+- [ ] Commit in the settle→terminate window is not lost.
+- [ ] Rapid commits and demands coalesce without duplicate Worker generations.
+- [ ] Cold resume rehydrates only context-appropriate scheduler rows.
 
 ---
 
-## 6. Review-agent playbook (applies to every PR above)
+## 4. Phase 2 — trusted-client authority split
 
-1. **Map criteria to tests.** For each success criterion, find the test
-   by name in the diff. If a criterion has no test, the PR is incomplete
-   — regardless of how plausible the code looks. Ask for the red run of
-   the headline test (link or transcript).
-2. **Parity first.** Run/inspect the flag-off differential before
-   reading the feature code. A parity break is an automatic
-   request-changes.
-3. **Known traps to grep for** (each has bitten this codebase):
-   - schema-less/whole-state sinks or deep traversals in new demand or
-     feed paths (re-run amplification);
-   - a second runtime/Engine in one realm in tests (breaks verified
-     identity);
-   - `idle()` where `settled()` is needed around async builtins;
-   - new timers/polling loops where an event/callback seam exists;
-   - direct DB writes bypassing `applyCommit` (breaks transactionality,
-     provenance stamping, and the readers index);
-   - widening the CFC raw-surface exclusions in `cfc/prepare.ts`;
-   - tests sharing `$TMPDIR` sqlite across repetitions;
-   - default `:8000` servers in integration tests.
-4. **Identity checks.** Any new write path: whose session signs it, and
-   does the store show that session? Sample a commit in the test store.
-5. **Reader isolation.** Any new read/feed path: write or demand the
-   adversarial test (other users' `user:` partitions must not leak; the
-   executor must not materialize scoped copies under its own identity).
-6. **Failure modes are features.** Hibernate/crash/flip-back paths need
-   tests, not comments. If a WO lists a rollback criterion, execute it.
-7. **Scope discipline.** The WO's non-goals are binding: e.g. W1.2 must
-   not implement prohibition (that is W2.4); W0.4 must not implement the
-   endorsement atom (Phase 2/CFC spec). Flag scope creep even when the
-   extra code is good.
+Phase exit:
 
-## 7. Decisions this plan intentionally does not make
+- Compatible clients suppress derived commits only for matching live claims.
+- Local UI speculation remains immediate.
+- Server settlements, including no-op, reliably clear or retain overlays.
+- Missing/revoked/mismatched claims fail open to existing client commits.
+- Multiple clients perform approximately one server action run per invalidation.
 
-Tracked in README §10: dual-execution default trigger (§10.1), interest
-granularity beyond `"*"` (§10.2), executor principal per deployment vs
-per space (§10.3 — this plan assumes one principal per deployment, per
-the README proposal), delegation shape (§10.4), executor pool placement
-long-term (§10.5), projector-mode render path (§10.6).
+### W2.1 — Claim-aware whole-action routing and speculative overlay
+
+**Depends on:** W0.6, W1.3.
+
+**Steps:**
+
+1. Subscribe to claims through the negotiated session control stream. Store
+   them ephemerally by branch-qualified ActionClaimKey + leaseGeneration +
+   claimGeneration; do not persist them as space state.
+2. At transaction enqueue, derive the shared ActionClaimKey from the client
+   action/transaction and match it to a live claim. Do not match on
+   ActionExecutionProvenance: onBehalfOf and lease/claim generations are
+   trusted server additions that speculative client work does not yet have.
+   No exact ActionClaimKey match means commit through the existing path.
+3. For a matching computation claim, apply the whole transaction to a local
+   per-document overlay and do not enqueue it upstream only when every actual
+   operation is same-space and space-scoped.
+4. If the client itself observes a scoped/foreign/unknown operation, fail open:
+   bypass suppression for the entire transaction and notify diagnostics. Never
+   split.
+5. Source/setup/UI-binding/handler transactions commit as today.
+6. An explicit revoke/expiry/feature-disable received on the live ordered
+   stream discards affected overlays, marks actions dirty, and resumes
+   committing from the next settle.
+7. Connection loss is not evidence that authority returned: keep claimed
+   derived writes local/speculative and do not enqueue them upstream. On
+   reconnect, complete capability negotiation and apply an authoritative full
+   claim snapshot for the exact branch at a feed-sequence barrier before
+   flushing any derived work. Source/handler/UI commits retain their existing
+   offline queue behavior.
+8. Keep clients trusted in v1: protocol tests pin compliance; CFC/server
+   enforcement arrives later.
+
+**Success criteria:**
+
+- [ ] Claimed pure action produces local UI output but zero derived client wire
+      operations.
+- [ ] Unclaimed action produces byte-identical commits to current behavior.
+- [ ] Mixed-scope claimed action commits whole from client; no partial
+      suppression.
+- [ ] Two actions in one piece can independently be server- and client-primary.
+- [ ] Identical action identities on two branches route independently; a claim,
+      revoke, reconnect snapshot, or settlement on branch A never affects
+      branch B.
+- [ ] Revocation/expiry causes deterministic dirty rerun and convergence.
+- [ ] Disconnect while another client keeps the server claim live queues no
+      derived wire commit; reconnect claim-snapshot barrier prevents a stale
+      flush and then converges.
+- [ ] Flag off has byte-identical commit and control traffic.
+
+---
+
+### W2.2 — Settlement-driven overlay reconciliation
+
+**Depends on:** W0.4, W2.1.
+
+**Steps:**
+
+1. Overlay generations record the confirmation-assigned sequence of the
+   client's own source commit(s) they consumed. Translate local optimistic
+   sequence to assigned sequence on confirmation.
+2. On matching ActionSettlement:
+   - committed with inputBasisSeq at or beyond overlay basis is buffered until
+     the local confirmed/feed cursor reaches acceptedCommitSeq, then drops it;
+   - no-op with inputBasisSeq at or beyond overlay basis drops it after its
+     ordered observation-only settlement arrives;
+   - an older basis retains it;
+   - failed retains pending only if the claim remains retryable;
+   - unserved discards the attempt; the separately ordered claim.revoke control
+     message restores client authority.
+3. Reject settlements whose leaseGeneration or claimGeneration does not match
+   the exact overlay incarnation.
+4. When confirmed server value differs from overlay, server wins and increment
+   divergence telemetry; do not surface a pattern exception.
+5. If the client's source commit is rejected/retried, discard overlay
+   generations based on the rejected version and recompute.
+6. Treat inputBasisSeq as a direct-read scalar, not transitive lineage. In a
+   chain, a stale intermediate plus an unrelated newer input may let a
+   downstream settlement pass the source sequence and briefly reveal stale
+   confirmed state after overlay drop. V1 accepts, measures, and self-heals
+   that window through the intermediate/downstream re-settle; a later causal
+   frontier closes it.
+
+**Success criteria:**
+
+- [ ] Direct source read at S → local overlay → server settlement basis ≥ S →
+      overlay is physically removed only after acceptedCommitSeq is locally
+      confirmed; the confirmed value remains.
+- [ ] Settlement basis < S retains overlay.
+- [ ] A no-op settlement clears the overlay.
+- [ ] Two rapid source commits require settlement through the later basis.
+- [ ] Old generation cannot clear new overlay.
+- [ ] Delayed/reordered commit data keeps the overlay until the matching data
+      frame is applied; settlement-first delivery cannot flash stale state.
+- [ ] A chained-action fixture demonstrates the accepted non-transitive basis
+      window, records divergence, and deterministically converges after the
+      intermediate and downstream actions re-settle.
+- [ ] Rigged divergence records one event and shows server value.
+- [ ] Rejected source basis discards and recomputes correctly.
+
+---
+
+### W2.3 — Client builtin passivity per claim
+
+**Depends on:** W1.4, W2.1, W2.2.
+
+**Steps:**
+
+1. A client builtin action becomes passive only for an exact supported live
+   claim. It renders pending/result from local overlay and confirmed feed.
+2. Missing/revoked claims preserve today's client claim/mutex behavior.
+3. Do not use a worker heartbeat as authority. Claim generation and lease-backed
+   settlement are the signal.
+4. Server transient failure keeps clients passive while the claim is valid;
+   permanent failure revokes and releases them.
+
+**Success criteria:**
+
+- [ ] Three clients plus one server claim produce one external request.
+- [ ] Pending→result UI transition arrives through overlay/feed.
+- [ ] No claim behaves identically to current client builtin execution.
+- [ ] Permanent revoke releases client work without busy waiting.
+
+---
+
+### W2.4 — Measurement and opt-in rollout
+
+**Depends on:** W1.5, W2.2, W2.3.
+
+**Deliverable:** perf fixtures, operational metrics, and an enable/disable
+runbook using serverPrimaryExecution plus optional executionPolicy.
+
+**Measure:**
+
+- active demands, workers, sponsor rotations, and fenced rejects;
+- per-action claims/revocations/unserved reasons;
+- client vs server action runs and derived commits;
+- derived conflicts and divergence;
+- feed/settlement latency and overlays retained;
+- async requests by role;
+- hibernation/wake latency.
+
+**Success criteria:**
+
+- [ ] Multi-client lunch-poll/group-chat fixtures approach one server action run
+      per invalidation and zero client derived wire writes for claimed actions.
+- [ ] Unclaimed/scoped/cross-space actions remain behaviorally identical.
+- [ ] Enabling then disabling a staging space converges without data migration.
+- [ ] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
+      duplicate worker commits.
+- [ ] Browser compute and lazy-client CPU are measured; first rollout is at
+      least no worse, with later suppression optimization tracked explicitly.
+
+---
+
+## 5. Later phases — do not pull into the first implementation
+
+### Phase 3 — background demand and narrower feeds
+
+Client demand is P1. Background registry cleanup is lower priority.
+
+1. Translate existing background registry entries into lower-priority
+   ExecutionDemand references in the same pool. Never create a second worker
+   for a space already serving clients. Remove the Phase-1 legacy exclusion
+   only after a two-source demand test proves one slot/worker.
+2. When only background demand remains, sponsor with the background service
+   identity and record that identity as onBehalfOf. Client-triggered work must
+   never silently switch to it.
+3. Remove the old polling loop only after parity tests pass.
+4. Narrow watch/query refresh toward declared document interest and server
+   control/data events. Preserve ACL isolation and ordered catch-up.
+5. Add a separately gated client-compute suppression mode only after the claim
+   snapshot and closure are complete: a client may leave a remotely owned
+   action cold until local dependency or handler speculation demands it.
+   Measure first-paint and interaction regressions. This later work removes N×
+   client compute; the initial authority split removes duplicate writes and
+   external effects, not local speculative computation.
+
+### Phase 4 — scoped execution and delegated user keys
+
+Entry requires a separate reviewed design for:
+
+- principal/session-qualified runtime and replica contexts;
+- one shared space lane plus per-user and per-session lanes without duplicating
+  unscoped computation;
+- scope-monotonic read/write rules;
+- bounded user-delegated execution keys that survive connection loss;
+- context-qualified claims, indexes, wake, and cross-space permission changes;
+- vector input bases if cross-space actions are admitted.
+
+The W0.1 context-key fix is necessary but not sufficient for this phase.
+
+### Phase 5 — server-directed handler events and enforced authority
+
+Entry requires trusted-event envelope/replay semantics and CFC integration.
+Move handler execution only after events can be sent to the authoritative
+execution location with authenticated sender provenance. Then use CFC and
+server admission to reject unauthorized client-derived writes rather than
+relying on trusted claim compliance.
+
+---
+
+## 6. Review-agent playbook
+
+1. **Start from #4288 surfaces.** Reject pre-v2 scheduler branches, duplicate
+   queues, or compatibility facade code.
+2. **Map every criterion to a named test and red run.**
+3. **Trace identity end to end.** Authenticated demand → sponsor selection →
+   lease → Worker provider → normal Server validation → stored onBehalfOf.
+4. **Trace exclusivity end to end.** Lease CAS → monotonic worker generation →
+   commit fence → distinct monotonic per-action claimGeneration → stale
+   settlement rejection.
+5. **Trace scope end to end.** Effective scope key in scheduler metadata,
+   writer lookup, transaction firewall, client routing, and dirty matching.
+6. **Demand proof, not producer guesses.** Writer index is authoritative;
+   creation source is irrelevant.
+7. **No transaction splitting.** Search specifically for per-operation routing
+   of a claimed action and reject it.
+8. **No implicit authority docs.** executionPolicy is opt-in only. Claims,
+   leases, heartbeats, actors, and unservable lists do not belong in ordinary
+   writable space state.
+9. **No raw Engine shortcut.** In-process commits pass the same ACL, CFC,
+   conflict, provenance, fence, and post-commit hooks as remote commits.
+10. **No ambient network expansion.** Raw SES fetch stays blocked. Builtins
+    enforce relative-serving-origin behavior and external egress restrictions.
+11. **No timing sleeps.** Spawn, drain, commit-gate, cancellation, claim, and
+    lease tests use barriers/signals.
+12. **Fail open deliberately.** Missing index, unsupported scope, live-stream
+    revoke/expiry, or incompatible fingerprint returns authority to existing
+    client behavior. Disconnect instead freezes derived wire writes until the
+    reconnect claim-snapshot barrier; neither path silently drops a transaction.
+
+---
+
+## 7. Decisions fixed by this plan
+
+- #4288 is the scheduler baseline.
+- Compatible clients are trusted in the first iteration; incompatible clients
+  are rejected when server-primary execution is required.
+- One shared worker serves all active client demands in an eligible space;
+  legacy background-owned spaces are excluded until their demand is unified.
+- A sticky authenticated requester sponsors the worker; derived commits record
+  server-executed on behalf of that user.
+- A fenced lease, not a heartbeat, prevents duplicate server workers.
+- executionPolicy is optional opt-in only; positive per-action claims control
+  authority.
+- Every claim has a per-action claimGeneration distinct from its worker lease
+  generation.
+- Client authority is the default for every unclaimed action.
+- Initial servability is same-space and space-scoped, enforced on the complete
+  transaction with deterministic fallback.
+- Scheduler write indexes identify current producers; creation provenance does
+  not.
+- Computation output has one transformer-produced direct root binding; only
+  hand-built tests need adjustment.
+- Overlay reconciliation uses the actual consumed input basis and explicit
+  settlement, including no-op; committed overlays wait for acceptedCommitSeq
+  data before clearing.
+- Raw fetch remains blocked in SES. Supported fetch/generate builtins retain
+  relative serving-host calls while external absolute URLs follow server
+  egress policy.
+- Background registry integration follows the client-driven path, not the
+  reverse.
