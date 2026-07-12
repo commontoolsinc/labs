@@ -517,10 +517,8 @@ export function getLiftAppliedInputAndCallback(
   // recognition in resolveExpressionKind (requires ts.isCallExpression(target)).
   // Lift is function-first, so the callback is inner argument zero even after
   // schema injection or scheduler options; the applied input is outer arg zero.
-  const innerCallee = getLiftAppliedInnerCall(call);
-  if (!innerCallee) {
-    return undefined;
-  }
+  // detectCallKind's lift-applied result proves this structural invariant.
+  const innerCallee = getLiftAppliedInnerCall(call)!;
   const callbackArg = innerCallee.arguments[0];
   const callback = callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)

@@ -1761,6 +1761,77 @@ export default pattern<{ value: Record<string, string>; key: string }>(
 );
 
 Deno.test(
+  "Pipeline regression: uncertain writers keep materializer paths without scope proof",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+  values: Record<string, string>;
+  key: string;
+}
+
+export default pattern<Input>(({ departments, values, key }) => {
+  const dynamicWriter = computed(() => {
+    departments.set(["Bakery"]);
+    return values[key];
+  });
+  return { dynamicWriter };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const options = schedulerOptionsFor(
+      liftCallFor(parseModule(output), "dynamicWriter"),
+    );
+    assertEquals(options?.materializerWriteInputPaths, [["departments"]]);
+    assertEquals(options?.completeSchedulerScopeSummary, undefined);
+  },
+);
+
+Deno.test(
+  "Pipeline regression: unreadable cell arguments do not emit scheduler scope proof",
+  async () => {
+    const source = `import { lift, pattern, type Writable } from "commonfabric";
+import { sendMixed, type Auth } from "ambiguous-clients";
+
+export default pattern<{ auth: Writable<Auth>; marker: boolean }>(
+  ({ auth, marker }) => {
+    const sent = lift((candidate: Writable<Auth>) => {
+      sendMixed(candidate);
+      return marker;
+    })(auth);
+    return { sent };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: {
+        ...COMMONFABRIC_TYPES,
+        "ambiguous-clients.d.ts": `declare module "ambiguous-clients" {
+  import type { Writable } from "commonfabric";
+  export type Auth = { token: string };
+  export interface AuthCell {
+    get(): Auth | undefined;
+    update(values: { token?: string }): void;
+  }
+  export function sendMixed(auth: AuthCell | Writable<Auth>): void;
+}`,
+      },
+    });
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(parseModule(output), "sent"))
+        ?.completeSchedulerScopeSummary,
+      undefined,
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: readonly computed does not mark writable-looking inputs for materialization",
   async () => {
     const source =

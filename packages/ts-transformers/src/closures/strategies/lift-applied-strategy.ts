@@ -135,8 +135,7 @@ function getCapabilityAnalysis(
     includeNestedCallbacks: true,
   });
   const parameter = callback.parameters[0];
-  if (!parameter) return { summary, firstParameter: undefined };
-  const parameterName = ts.isIdentifier(parameter.name)
+  const parameterName = parameter && ts.isIdentifier(parameter.name)
     ? parameter.name.text
     : "__param0";
   return {
