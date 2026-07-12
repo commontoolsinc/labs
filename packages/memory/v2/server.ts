@@ -5,6 +5,7 @@ import {
   type ActionClaimKey,
   type ActionSettlement,
   type BranchName,
+  canonicalSchedulerPieceIdForDemandRoot,
   type CellScope,
   type ClientCommit,
   type ClientMessage,
@@ -419,6 +420,12 @@ export interface AcceptedCommitEvent {
   /** Scheduler snapshot rows changed by this accepted transaction, whether by
    *  re-observation or by a semantic write dirtying a reader. */
   readonly schedulerUpdateIds: readonly number[];
+  /** Distinct demanded space-context actions made dirty/stale by this commit.
+   * Scalar identities only; document and observation payloads stay private to
+   * the engine. */
+  readonly staleDemandedReaders: readonly Readonly<
+    Engine.SchedulerActionState
+  >[];
 }
 
 export type AcceptedCommitListener = (
@@ -3357,6 +3364,31 @@ export class Server {
         ),
       ]),
     ].sort((left, right) => left - right));
+    const demandedSchedulerPieceIds = [
+      ...new Set(
+        this.listExecutionDemands(event.space, event.commit.branch).flatMap(
+          (demand) => demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot),
+        ),
+      ),
+    ];
+    const engine = this.#openedEngines.get(event.space);
+    const staleDemandedReaders = Object.freeze(
+      engine === undefined || demandedSchedulerPieceIds.length === 0 ||
+        event.commit.schedulerDirtiedReaders === undefined
+        ? []
+        : Engine.staleReadersForTargets(engine, {
+          branch: event.commit.branch,
+          ownerSpace: event.space,
+          targets: event.commit.schedulerDirtiedReaders.map((reader) =>
+            reader.read
+          ),
+          demandedSchedulerPieceIds,
+          // Phase 1 claims only provably shared, space-scoped actions. Scoped
+          // rows remain client-primary until delegated contexts arrive.
+          applicableExecutionContextKeys: ["space"],
+          dirtySeq: event.commit.seq,
+        }).map((reader) => Object.freeze({ ...reader })),
+    );
     const orderedEvent: AcceptedCommitEvent = Object.freeze({
       order,
       deliverySeq: event.deliverySeq,
@@ -3368,6 +3400,7 @@ export class Server {
       dataSeq: event.commit.seq,
       revisions,
       schedulerUpdateIds,
+      staleDemandedReaders,
     });
     for (
       const listener of this.#acceptedCommitListeners.get(event.space) ?? []

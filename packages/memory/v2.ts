@@ -812,6 +812,21 @@ export type SchedulerExecutionContextKey =
   | `user:${string}`
   | `session:${string}:${string}`;
 
+/** Map a client demand root onto the durable scheduler's piece identity. The
+ * first server-primary phase accepts raw entity ids and already-qualified ids,
+ * but executes only the shared space partition. */
+export const canonicalSchedulerPieceIdForDemandRoot = (
+  root: string,
+): string => {
+  if (
+    root.startsWith("space:") || root.startsWith("user:") ||
+    root.startsWith("session:")
+  ) {
+    return root;
+  }
+  return `space:${root.startsWith("of:") ? root : `of:${root}`}`;
+};
+
 export interface SchedulerActionSnapshotCursor {
   ownerSpace?: string;
   pieceId: string;

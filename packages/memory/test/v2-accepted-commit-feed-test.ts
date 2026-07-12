@@ -87,6 +87,7 @@ Deno.test("memory v2 accepted-commit feed publishes canonical commits exactly on
         op: revision.op,
       })),
       schedulerUpdateIds: [],
+      staleDemandedReaders: [],
     }]);
 
     unsubscribe();
@@ -165,6 +166,11 @@ Deno.test("memory v2 accepted-commit feed isolates listener payload mutation", a
     } catch {
       // Arrays are immutable across listeners.
     }
+    try {
+      (event.staleDemandedReaders as unknown[]).push({});
+    } catch {
+      // Nested stale-reader metadata is immutable too.
+    }
   });
   server.subscribeAcceptedCommits(SPACE, (event) => {
     observed = event;
@@ -177,6 +183,7 @@ Deno.test("memory v2 accepted-commit feed isolates listener payload mutation", a
     assertEquals(observed?.dataSeq, 1);
     assertEquals(observed?.revisions[0]?.seq, 1);
     assertEquals(observed?.schedulerUpdateIds, []);
+    assertEquals(observed?.staleDemandedReaders, []);
   } finally {
     await client.close();
     await server.close();
@@ -267,8 +274,127 @@ Deno.test("memory v2 accepted-commit feed includes successful direct host writes
         op: revision.op,
       })),
       schedulerUpdateIds: [],
+      staleDemandedReaders: [],
     }]);
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 accepted-commit feed selects only stale demanded scheduler roots", async () => {
+  const flags = { serverPrimaryExecutionV1: true } as const;
+  const server = new Server({
+    authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+    protocolFlags: flags,
+  });
+  const client = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: flags,
+  });
+  const session = await client.mount(
+    SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const pieceRoot = "of:accepted-feed:demanded-piece";
+  const schedulerPieceId = `space:${pieceRoot}`;
+  const source = {
+    space: SPACE,
+    id: "of:accepted-feed:source",
+    scope: "space" as const,
+    path: ["value"],
+  };
+  const output = {
+    space: SPACE,
+    id: "of:accepted-feed:output",
+    scope: "space" as const,
+    path: ["value"],
+  };
+  const events: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    events.push(event);
+  });
+
+  try {
+    await session.setExecutionDemand("", [pieceRoot]);
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: SPACE,
+        branch: "",
+        pieceId: schedulerPieceId,
+        processGeneration: 1,
+        actionId: "action:demanded-reader",
+        actionKind: "computation",
+        implementationFingerprint: "impl:demanded-reader",
+        runtimeFingerprint: "runtime:demanded-reader",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [source],
+        shallowReads: [],
+        actualChangedWrites: [],
+        currentKnownWrites: [output],
+        declaredWrites: [output],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: "impl:demanded-reader",
+          runtimeFingerprint: "runtime:demanded-reader",
+          piece: { ...source, id: pieceRoot, path: [] },
+          reads: [source],
+          writes: [output],
+          materializerWriteEnvelopes: [],
+          directOutputs: [output],
+        },
+        status: "success",
+      },
+    });
+    await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: source.id,
+        value: { value: { changed: true } },
+      }],
+    });
+
+    const writeEvent = events.at(-1)!;
+    assertEquals(
+      writeEvent.staleDemandedReaders.map((reader) => ({
+        pieceId: reader.pieceId,
+        actionId: reader.actionId,
+        executionContextKey: reader.executionContextKey,
+        directDirtySeq: reader.directDirtySeq,
+        staleSeq: reader.staleSeq,
+      })),
+      [{
+        pieceId: schedulerPieceId,
+        actionId: "action:demanded-reader",
+        executionContextKey: "space",
+        directDirtySeq: writeEvent.dataSeq,
+        staleSeq: null,
+      }],
+    );
+
+    await session.setExecutionDemand("", []);
+    await session.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: source.id,
+        value: { value: { changed: "again" } },
+      }],
+    });
+    assertEquals(events.at(-1)?.staleDemandedReaders, []);
+  } finally {
+    await client.close();
     await server.close();
   }
 });
