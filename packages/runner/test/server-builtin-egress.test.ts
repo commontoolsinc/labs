@@ -89,8 +89,10 @@ Deno.test("an origin-changing redirect is reclassified before connecting", async
   let requests = 0;
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
-    resolveHostAddresses: async (hostname) =>
-      hostname === "private.example" ? ["10.23.4.5"] : ["93.184.216.34"],
+    resolveHostAddresses: (hostname) =>
+      Promise.resolve(
+        hostname === "private.example" ? ["10.23.4.5"] : ["93.184.216.34"],
+      ),
     transport: transportFrom(() => {
       requests += 1;
       return response(302, { location: "http://private.example/secret" });
@@ -118,10 +120,12 @@ Deno.test("absolute local, private, metadata, and disallowed-scheme targets are 
     await t.step(url, async () => {
       const broker = createServerBuiltinEgressBroker({
         servingOrigin: "https://fabric.example",
-        resolveHostAddresses: async (hostname) =>
-          hostname === "metadata.google.internal"
-            ? ["169.254.169.254"]
-            : [hostname],
+        resolveHostAddresses: (hostname) =>
+          Promise.resolve(
+            hostname === "metadata.google.internal"
+              ? ["169.254.169.254"]
+              : [hostname],
+          ),
         transport: transportFrom(() => {
           throw new Error("blocked targets must not reach the transport");
         }),
@@ -143,7 +147,7 @@ Deno.test("absolute local, private, metadata, and disallowed-scheme targets are 
     await t.step(url, async () => {
       const broker = createServerBuiltinEgressBroker({
         servingOrigin: "https://fabric.example",
-        resolveHostAddresses: async () => ["93.184.216.34"],
+        resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
         transport: transportFrom(() => {
           throw new Error("disallowed schemes must not reach the transport");
         }),
@@ -158,9 +162,11 @@ Deno.test("DNS is screened again at every redirect hop against rebinding", async
   let requests = 0;
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
-    resolveHostAddresses: async () => {
+    resolveHostAddresses: () => {
       resolutions += 1;
-      return resolutions === 1 ? ["93.184.216.34"] : ["192.168.1.9"];
+      return Promise.resolve(
+        resolutions === 1 ? ["93.184.216.34"] : ["192.168.1.9"],
+      );
     },
     transport: transportFrom((request) => {
       requests += 1;
@@ -180,10 +186,11 @@ Deno.test("DNS is screened again at every redirect hop against rebinding", async
 Deno.test("external transports receive the exact screened address set for connection pinning", async () => {
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
-    resolveHostAddresses: async () => [
-      "93.184.216.34",
-      "2606:2800:220:1:248:1893:25c8:1946",
-    ],
+    resolveHostAddresses: () =>
+      Promise.resolve([
+        "93.184.216.34",
+        "2606:2800:220:1:248:1893:25c8:1946",
+      ]),
     transport: transportFrom((request) => {
       assertEquals(request.trustedServingOrigin, false);
       assertEquals(request.resolvedAddresses, [
@@ -242,7 +249,7 @@ Deno.test("broker normalizes methods and removes server-only request headers", a
   let captured: ServerBuiltinTransportRequest | undefined;
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
-    resolveHostAddresses: async () => ["93.184.216.34"],
+    resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
     transport: transportFrom((request) => {
       captured = request;
       return response(204);
@@ -281,7 +288,7 @@ Deno.test("cross-origin redirects strip authorization before the next request", 
   const requests: ServerBuiltinTransportRequest[] = [];
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
-    resolveHostAddresses: async () => ["93.184.216.34"],
+    resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
     transport: transportFrom((request) => {
       requests.push(request);
       return requests.length === 1
@@ -307,7 +314,7 @@ Deno.test("broker rejects declared and streamed responses above the byte limit",
     const broker = createServerBuiltinEgressBroker({
       servingOrigin: "https://fabric.example",
       limits: { maxResponseBytes: 5 },
-      resolveHostAddresses: async () => ["93.184.216.34"],
+      resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
       transport: transportFrom(() =>
         response(200, { "content-length": "6" }, "ignored")
       ),
@@ -332,7 +339,7 @@ Deno.test("broker rejects declared and streamed responses above the byte limit",
     const broker = createServerBuiltinEgressBroker({
       servingOrigin: "https://fabric.example",
       limits: { maxResponseBytes: 5 },
-      resolveHostAddresses: async () => ["93.184.216.34"],
+      resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
       transport: transportFrom(() => response(200, undefined, body)),
     });
     await expectEgressError(
@@ -348,7 +355,7 @@ Deno.test("broker timeout is deterministic through an injected scheduler", async
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
     limits: { timeoutMs: 1234 },
-    resolveHostAddresses: async () => ["93.184.216.34"],
+    resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
     scheduleTimeout(callback, milliseconds) {
       assertEquals(milliseconds, 1234);
       fireTimeout = callback;
@@ -371,7 +378,7 @@ Deno.test("broker bounds redirects and response headers", async (t) => {
     const broker = createServerBuiltinEgressBroker({
       servingOrigin: "https://fabric.example",
       limits: { maxRedirects: 1 },
-      resolveHostAddresses: async () => ["93.184.216.34"],
+      resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
       transport: transportFrom(() => {
         requests += 1;
         return response(302, { location: `/hop-${requests}` });
@@ -388,7 +395,7 @@ Deno.test("broker bounds redirects and response headers", async (t) => {
     const broker = createServerBuiltinEgressBroker({
       servingOrigin: "https://fabric.example",
       limits: { maxResponseHeaderBytes: 8 },
-      resolveHostAddresses: async () => ["93.184.216.34"],
+      resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
       transport: transportFrom(() => response(200, { "x-long": "123456789" })),
     });
     await expectEgressError(
