@@ -5,7 +5,6 @@ import type {
   FactoryInput,
   JSONSchema,
   NodeFactory,
-  PatternFactory,
   Reactive,
   Schema,
 } from "./types.ts";

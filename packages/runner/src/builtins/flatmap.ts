@@ -192,8 +192,7 @@ export function flatMap(
     // container's STRUCTURE label even when membership does not depend on element
     // content (spec §8.5.6.1, SC-8). Membership taint now rides the op-result
     // reads below + the structure re-stamp (see recordCfcStructureContainer).
-    const op = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op")
-      .get();
+    inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op").get();
     const sourceListCell = inputsCell.key("list");
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const rawList = listCell.withTx(tx).getRaw() as unknown;

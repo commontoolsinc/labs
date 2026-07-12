@@ -598,7 +598,7 @@ Deno.test("buildToolCatalog normalizes schema-backed tools", () => {
     get: readTools,
     getRaw: readTools,
     runtime: {},
-    key(name: string) {
+    key(_name: string) {
       const makeCell = (read: () => unknown): any => ({
         get: read,
         getRaw: read,

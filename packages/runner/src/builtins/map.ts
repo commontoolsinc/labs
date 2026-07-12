@@ -158,8 +158,7 @@ export function map(
     // has been processed (below), so a transient empty first reconcile doesn't
     // burn it.
     const elementAwaitSync = resumeBatchAwaitSync;
-    const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
-    const op = mappedInputs.key("op").get();
+    inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx).key("op").get();
     const sourceListCell = inputsCell.key("list");
     const listTarget = resolveLink(
       runtime,
