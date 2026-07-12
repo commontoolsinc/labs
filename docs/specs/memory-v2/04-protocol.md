@@ -669,7 +669,15 @@ Claims and settlements are server-generated `SessionSync.execution.events`:
 type BranchId = string;
 interface ActionClaimKey {}
 interface ExecutionClaim extends ActionClaimKey {}
-interface ActionSettlement {}
+type InputBasisSeq = number; // nominal non-negative integer in TypeScript
+type AcceptedCommitSeq = number; // nominal positive integer in TypeScript
+interface ActionSettlement {
+  branch: BranchId;
+  claim: ExecutionClaim;
+  inputBasisSeq: InputBasisSeq;
+  outcome: "committed" | "no-op" | "failed" | "unserved";
+  acceptedCommitSeq?: AcceptedCommitSeq;
+}
 
 type ExecutionControlEvent =
   | { type: "session.execution.claim.set"; claim: ExecutionClaim }
@@ -698,6 +706,18 @@ execution. Settlements must match the exact branch, lease, and claim generation.
 forbid it. Client frames using these server-only message names are rejected by
 the strict parser. Retained events are filtered through the reconnecting
 session's current claim-routing/passivity sub-capabilities before replay.
+
+For an accepted scheduler action observation, memory derives `inputBasisSeq`
+from the exact confirmed read preconditions that passed validation plus pending
+reads translated to their accepted global commit sequence. It never substitutes
+the accepting head or trusts a Worker/client field. An executor-grade host
+connection may separately provide the exact live claim through a host-only
+apply option; memory then derives `onBehalfOf` from the authenticated session,
+stores canonical `ActionExecutionProvenance` with the observation, and emits an
+accepted action attempt. The normal Server path turns that attempt into a
+committed, no-op, or failed settlement only after acceptance. A committed
+settlement remains buffered until the local replica explicitly records that it
+applied `acceptedCommitSeq`; a transact response alone is not that barrier.
 
 ## 4.4 Selectors
 
