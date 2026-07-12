@@ -4657,9 +4657,7 @@ const verifySinkRequestCeilings = (
           // one healthy space cannot mask another destination's missing
           // artifact for the same module/symbol/digest.
           if (
-            spaces.some((space) =>
-              !tx.hasCfcPolicyManifest(space, reference)
-            )
+            spaces.some((space) => !tx.hasCfcPolicyManifest(space, reference))
           ) return undefined;
           return spaces[0];
         },

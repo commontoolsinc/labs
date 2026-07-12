@@ -467,7 +467,8 @@ Deno.test("PolicyOf retains the defining identity of an imported ruleset", async
 });
 
 Deno.test("PolicyOf does not confuse defining files with the same normalized suffix", async () => {
-  const policySource = (role: string) => `/// <cts-enable />
+  const policySource = (role: string) =>
+    `/// <cts-enable />
     import {
       cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
     } from "commonfabric/cfc";

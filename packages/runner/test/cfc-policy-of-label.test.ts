@@ -127,12 +127,16 @@ describe("PolicyOf label-time binding", () => {
 
     const deletion = runtime.edit();
     expect(() =>
-      deletion.writeOrThrow({
-        space,
-        id: manifestId,
-        type: "application/json",
-        path: ["value"],
-      }, undefined, { delete: true })
+      deletion.writeOrThrow(
+        {
+          space,
+          id: manifestId,
+          type: "application/json",
+          path: ["value"],
+        },
+        undefined,
+        { delete: true },
+      )
     ).toThrow("immutable reserved policy state");
     deletion.abort();
   });
@@ -155,8 +159,7 @@ describe("PolicyOf label-time binding", () => {
     const decision = runtime.edit();
     const resolver = createTxCfcModulePolicyResolver(
       decision,
-      (candidate) =>
-        decision.resolveCfcPolicyManifest(candidate, space),
+      (candidate) => decision.resolveCfcPolicyManifest(candidate, space),
     );
     expect(resolver(reference)).toBeDefined();
     decision.markCfcRelevant("manifest-decision");
@@ -187,8 +190,7 @@ describe("PolicyOf label-time binding", () => {
     const decision = runtime.edit();
     const resolver = createTxCfcModulePolicyResolver(
       decision,
-      (candidate) =>
-        decision.resolveCfcPolicyManifest(candidate, space),
+      (candidate) => decision.resolveCfcPolicyManifest(candidate, space),
     );
     expect(resolver(missingReference)).toBeUndefined();
     decision.markCfcRelevant("manifest-miss");
@@ -397,10 +399,12 @@ describe("PolicyOf label-time binding", () => {
       },
     } as const);
 
-    for (const [name, policy] of [
-      ["old-policy-label", artifact],
-      ["new-policy-label", upgraded],
-    ] as const) {
+    for (
+      const [name, policy] of [
+        ["old-policy-label", artifact],
+        ["new-policy-label", upgraded],
+      ] as const
+    ) {
       const tx = runtime.edit();
       runtime.getCell(space, name, schemaFor(policy.policyDigest), tx).set(
         "secret",
@@ -416,10 +420,12 @@ describe("PolicyOf label-time binding", () => {
     });
     try {
       const tx = coldRuntime.edit();
-      for (const [name, policy] of [
-        ["old-policy-label", artifact],
-        ["new-policy-label", upgraded],
-      ] as const) {
+      for (
+        const [name, policy] of [
+          ["old-policy-label", artifact],
+          ["new-policy-label", upgraded],
+        ] as const
+      ) {
         const cell = coldRuntime.getCell(
           space,
           name,
@@ -549,11 +555,14 @@ describe("PolicyOf label-time binding", () => {
     installTx.prepareCfc();
     expect((await installTx.commit()).ok).toBeDefined();
 
-    const destinationSchema = internSchema({
-      type: "object",
-      properties: { secret: { type: "string" } },
-      required: ["secret"],
-    } satisfies JSONSchema, true);
+    const destinationSchema = internSchema(
+      {
+        type: "object",
+        properties: { secret: { type: "string" } },
+        required: ["secret"],
+      } satisfies JSONSchema,
+      true,
+    );
     const target = runtime.getCell(
       destinationSpace,
       "sink-missing-local-manifest",
@@ -569,35 +578,39 @@ describe("PolicyOf label-time binding", () => {
       subject: space,
     } as const;
     const seed = storageManager.edit();
-    expect(seed.write({
-      space: destinationSpace,
-      id: targetLink.id,
-      scope: targetLink.scope,
-      type: "application/json",
-      path: [],
-    }, {
-      value: { secret: "rosebud" },
-      cfc: {
-        version: 1,
-        schemaHash: destinationSchema.taggedHashString,
-        labelMap: {
+    expect(
+      seed.write({
+        space: destinationSpace,
+        id: targetLink.id,
+        scope: targetLink.scope,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "rosebud" },
+        cfc: {
           version: 1,
-          entries: [{
-            path: ["secret"],
-            label: {
-              confidentiality: [reference],
-              integrity: [{ type: "IntegrityEvidence" }],
-            },
-          }],
+          schemaHash: destinationSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: {
+                confidentiality: [reference],
+                integrity: [{ type: "IntegrityEvidence" }],
+              },
+            }],
+          },
         },
-      },
-    }).ok).toBeDefined();
-    expect(seed.write({
-      space: destinationSpace,
-      id: `cid:${destinationSchema.taggedHashString}`,
-      type: "application/json",
-      path: [],
-    }, { value: destinationSchema.schema }).ok).toBeDefined();
+      }).ok,
+    ).toBeDefined();
+    expect(
+      seed.write({
+        space: destinationSpace,
+        id: `cid:${destinationSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: destinationSchema.schema }).ok,
+    ).toBeDefined();
     expect((await seed.commit()).ok).toBeDefined();
 
     const sinkRuntime = new Runtime({
@@ -612,12 +625,14 @@ describe("PolicyOf label-time binding", () => {
       // The same policy artifact labels consumed values in both spaces. The
       // valid source-space copy must not mask the destination's missing local
       // artifact.
-      expect(sinkRuntime.getCell(
-        space,
-        "sink-policy-source",
-        schema,
-        tx,
-      ).get()).toBe("secret");
+      expect(
+        sinkRuntime.getCell(
+          space,
+          "sink-policy-source",
+          schema,
+          tx,
+        ).get(),
+      ).toBe("secret");
       expect(target.withTx(tx).key("secret").get()).toBe("rosebud");
       let flushed = false;
       enqueueSinkRequestPostCommitEffect(
