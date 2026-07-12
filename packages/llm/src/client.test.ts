@@ -448,3 +448,59 @@ describe("LLMClient test-environment guard", () => {
     }
   });
 });
+
+describe("LLMClient per-call transport", () => {
+  const client = new LLMClient();
+
+  it("routes sendRequest through the injected fetch and endpoint", async () => {
+    disableMockMode();
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const result = await client.sendRequest(
+      {
+        messages: [{ role: "user", content: "hello" }],
+        model: "test-model",
+        stream: false,
+      },
+      undefined,
+      undefined,
+      {
+        endpoint: new URL("https://broker.example/api/ai/llm"),
+        fetch: (input, init) => {
+          calls.push({ url: input.toString(), init });
+          return Promise.resolve(Response.json({
+            role: "assistant",
+            content: "brokered",
+          }, { headers: { "x-cf-llm-trace-id": "trace-broker" } }));
+        },
+      },
+    );
+
+    expect(result.content).toBe("brokered");
+    expect(calls[0]?.url).toBe("https://broker.example/api/ai/llm");
+    expect(calls[0]?.init?.method).toBe("POST");
+  });
+
+  it("routes generateObject through the injected fetch", async () => {
+    disableMockMode();
+    const calls: string[] = [];
+    const result = await client.generateObject(
+      {
+        messages: [{ role: "user", content: "hello" }],
+        schema: { type: "object" },
+      },
+      undefined,
+      {
+        endpoint: new URL("https://broker.example/api/ai/llm"),
+        fetch: (input) => {
+          calls.push(input.toString());
+          return Promise.resolve(Response.json({ object: { ok: true } }));
+        },
+      },
+    );
+
+    expect(result.object).toEqual({ ok: true });
+    expect(calls).toEqual([
+      "https://broker.example/api/ai/llm/generateObject",
+    ]);
+  });
+});
