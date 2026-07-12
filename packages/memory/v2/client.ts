@@ -14,6 +14,8 @@ import {
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
+  type SchedulerWritersForTargetsQuery,
+  type SchedulerWritersForTargetsResult,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
@@ -598,6 +600,28 @@ export class SpaceSession {
     }
     const result = await this.client.request<SchedulerSnapshotListResult>({
       type: "scheduler.snapshot.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async writersForTargets(
+    query: SchedulerWritersForTargetsQuery,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    this.#assertOpen();
+    if (
+      !getPersistentSchedulerStateConfig() ||
+      this.client.serverFlags?.schedulerWriterLookup !== true
+    ) {
+      return { serverSeq: this.#serverSeq, writers: [] };
+    }
+    const result = await this.client.request<SchedulerWritersForTargetsResult>({
+      type: "scheduler.writer.list",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
