@@ -3815,6 +3815,14 @@ const toRejectedError = (
       "unknown-firewall-rejection";
     return executionFirewallRejection(commit, diagnosticCode, message);
   }
+  if (name === "AuthorizationError") {
+    return {
+      name,
+      message,
+      cause: { name: "SystemError", message, code: 403 },
+      transaction: commit as Transaction,
+    } as unknown as TransactionError;
+  }
   if (name === "RowLabelCommitError") {
     return {
       name,
