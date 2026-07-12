@@ -1302,7 +1302,7 @@ complete task must pass after Stage 4 before final handoff.
 
 ### WP3.5 — Unify list callback lowering
 
-- [ ] Change array callback lowering so `map`/`filter`/`flatMap` capture through
+- [x] Change array callback lowering so `map`/`filter`/`flatMap` capture through
   a bound `PatternFactory`, with no sibling params object in newly emitted
   nodes.
 - [x] Make `mapWithPattern`/`filterWithPattern`/`flatMapWithPattern` accept the
@@ -1341,6 +1341,25 @@ Focused runner coverage includes
 filter, and flatMap CFC/identity regression suites. Keep exactly one explicit
 legacy `{ op, params }` fixture per builtin; migrate the remaining fixtures to
 the one-argument form.
+
+WP3.5 transformer slice (2026-07-11): array callbacks now use the same private
+params carrier as nested patterns. Captured callbacks have public list fields
+only in argument 0, private captures only in argument 1, one
+`withPatternParamsSchema`, and exactly one `.curry(captures)` at the call site;
+capture-free callbacks remain uncurried. Every newly emitted
+`mapWithPattern`/`filterWithPattern`/`flatMapWithPattern` call has one factory
+argument. Registry-owned callback recognition handles the curried wrapper,
+while the old direct-parent plus sibling-params recognition remains explicitly
+legacy-only.
+
+The code exposed an unrecorded `thisArg` discrepancy: the old transformer
+forwarded the optional JavaScript array receiver as a third `*WithPattern`
+argument, but the runtime ignored it. The canonical `{ list, op }` contract
+cannot preserve that accidental behavior, so reactive array lowering now fails
+closed with `array-method:this-arg-unsupported`; the spec records that decision.
+Focused coverage passes `7 passed`, golden regeneration passes `369 steps`,
+direct transformed-output inspection shows the required root split and one
+curry, and the complete transformer task passes `1123 passed (742 steps)`.
 
 WP3.5 canonical writer/runtime slice (2026-07-11): the new one-argument public
 overloads write only `{ list, op }` and the old two-argument overloads remain

@@ -113,9 +113,9 @@ Deno.test("CT-1655: whole synthesized mapWithPattern pattern() call is hoisted t
   // Source shape: a .map() callback whose body invokes a module-level
   // pattern factory (`EntryRow`) and reads a module-level constant
   // (`UI`). After the closure transformer rewrites .map() to
-  // `.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema), { params })`,
+  // `.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema))`,
   // the synthesized pattern callback closes only over module-scoped references —
-  // there are no per-call-site captures (the params object is empty).
+  // there are no per-call-site captures, so no `.curry(...)` is emitted.
   //
   // CT-1585 originally hoisted just the *callback* to `__cfModuleCallback_N`.
   // CT-1655 instead hoists the WHOLE `pattern(...)` call (the first argument of

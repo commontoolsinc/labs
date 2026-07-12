@@ -73,7 +73,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 // FIXTURE: map-single-capture
 // Verifies: .map() with length guard is transformed to when() + mapWithPattern()
 //   people.get().length > 0 && <ul>{people.map((person, index) => <li>)}</ul>
-//   → when(lift(...)(...length), <ul>{people.mapWithPattern(pattern(...), {})}</ul>)
+//   → when(lift(...)(...length), <ul>{people.mapWithPattern(pattern(...))}</ul>)
 export default pattern((_state) => {
     const people = cell([
         { id: "1", name: "Alice" },
@@ -110,7 +110,7 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ people: people }), <ul>
-            {people.mapWithPattern(__cfPattern_1, {})}
+            {people.mapWithPattern(__cfPattern_1)}
           </ul>)}
       </div>),
     };

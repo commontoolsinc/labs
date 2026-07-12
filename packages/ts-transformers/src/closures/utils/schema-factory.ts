@@ -22,15 +22,15 @@ export class SchemaFactory {
   ) {}
 
   /**
-   * Build a TypeNode for an array method callback parameter.
-   * Returns: { element: T, index?: number, array?: T[], params: {...} }
+   * Build the public TypeNode for an array method callback.
+   * Returns: { element: T, index?: number, array?: T[] }
+   * Closure captures have a separate private schema and never appear here.
    */
   createArrayMethodCallbackSchema(
     methodCall: ts.CallExpression,
     elemParam: ts.ParameterDeclaration | undefined,
     indexParam: ts.ParameterDeclaration | undefined,
     arrayParam: ts.ParameterDeclaration | undefined,
-    captureTree: Map<string, CaptureTreeNode>,
   ): ts.TypeNode {
     const { checker } = this.context;
     const typeRegistry = this.context.options.state?.typeRegistry;
@@ -88,26 +88,6 @@ export class SchemaFactory {
           this.factory.createIdentifier("array"),
           this.factory.createToken(ts.SyntaxKind.QuestionToken),
           arrayTypeNode,
-        ),
-      );
-    }
-
-    // 5. Build params object type with hierarchical captures
-    const paramsProperties = buildTypeElementsFromCaptureTree(
-      captureTree,
-      this.context,
-    );
-
-    // 6. Add params property only when captures are present.
-    // Emitting an empty required `params` object for no-capture callbacks
-    // widens mapWithPattern input schemas and regresses fixture parity.
-    if (paramsProperties.length > 0) {
-      callbackParamProperties.push(
-        this.factory.createPropertySignature(
-          undefined,
-          this.factory.createIdentifier("params"),
-          undefined,
-          this.factory.createTypeLiteralNode(paramsProperties),
         ),
       );
     }

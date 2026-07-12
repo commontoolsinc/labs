@@ -42,9 +42,7 @@ export class PatternBuilder {
     return this;
   }
 
-  /**
-   * Set the capture tree to generate the 'params' object or merged captures.
-   */
+  /** Set the capture tree consumed by the selected callback shape. */
   setCaptureTree(tree: Map<string, CaptureTreeNode>): this {
     this.captureTree = tree;
     return this;
@@ -63,7 +61,7 @@ export class PatternBuilder {
   /**
    * Set a map of renamed captures.
    * Key: original capture name
-   * Value: new property name in the destructured object
+   * Value: new property name in the private or merged capture record
    */
   setCaptureRenames(renames: Map<string, string>): this {
     this.captureRenames = renames;
@@ -75,8 +73,9 @@ export class PatternBuilder {
    *
    * @param originalCallback The original callback function (to preserve modifiers/types)
    * @param body The transformed body of the function
-   * @param paramsPropertyName The name of the property containing captures (default: "params").
-   *                           If null, captures are merged into the top-level object (for lift-applied).
+   * @param paramsPropertyName The name of the property containing captures
+   *                           (default: "params"). If null, captures are
+   *                           merged into the top-level object.
    */
   buildCallback(
     originalCallback: ts.ArrowFunction | ts.FunctionExpression,
@@ -135,8 +134,8 @@ export class PatternBuilder {
     }
 
     if (paramsPropertyName) {
-      // Group captures under a 'params' property (for map/handler)
-      // Always add params property to match existing behavior (e.g. params: {})
+      // Group captures under the explicitly requested property, preserving an
+      // empty container when this legacy/general-purpose shape requests one.
       const paramsPattern = this.factory.createObjectBindingPattern(
         captureBindings,
       );
@@ -159,14 +158,104 @@ export class PatternBuilder {
       this.factory,
     );
 
-    // 4. Create the function
-    // If returnType is null, we explicitly want no return type.
-    // If returnType is undefined, we preserve the original type.
-    // If returnType is a node, we use it.
+    return this.createCallback(
+      originalCallback,
+      body,
+      [destructuredParam],
+      returnType,
+    );
+  }
+
+  /**
+   * Build a pattern callback whose public input and compiler-owned closure
+   * captures are separate positional roots.
+   *
+   * Array callback lowering uses argument 0 for `{ element, index, array }`
+   * and argument 1 for the private capture record. Capture-free callbacks have
+   * no second argument, matching ordinary capture-free nested patterns.
+   */
+  buildPatternCallback(
+    originalCallback: ts.ArrowFunction | ts.FunctionExpression,
+    body: ts.ConciseBody,
+    returnType?: ts.TypeNode | null,
+  ): ts.ArrowFunction | ts.FunctionExpression {
+    const publicBindings: ts.BindingElement[] = [];
+    for (const param of this.parameters) {
+      const bindingName = param.bindingName ||
+        this.factory.createIdentifier(param.name);
+      const propertyName = param.propertyName
+        ? this.factory.createIdentifier(param.propertyName)
+        : (param.name !== (bindingName as { text?: string }).text
+          ? this.factory.createIdentifier(param.name)
+          : undefined);
+      publicBindings.push(
+        this.factory.createBindingElement(
+          undefined,
+          propertyName,
+          bindingName,
+          param.initializer,
+        ),
+      );
+      for (const name of extractBindingNames(bindingName)) {
+        this.usedBindingNames.add(name);
+      }
+    }
+
+    const parameters: ts.ParameterDeclaration[] = [
+      createParameterFromBindings(publicBindings, this.factory),
+    ];
+    if (this.captureTree.size > 0) {
+      const captureBindings: ts.BindingElement[] = [];
+      for (const originalName of this.captureTree.keys()) {
+        const renamedName = this.captureRenames.get(originalName) ??
+          originalName;
+        const bindingName = reserveIdentifier(
+          renamedName,
+          this.usedBindingNames,
+          this.factory,
+        );
+        captureBindings.push(
+          this.factory.createBindingElement(
+            undefined,
+            renamedName === bindingName.text
+              ? undefined
+              : this.factory.createIdentifier(renamedName),
+            bindingName,
+            undefined,
+          ),
+        );
+      }
+      parameters.push(
+        this.factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          this.factory.createObjectBindingPattern(captureBindings),
+          undefined,
+          undefined,
+          undefined,
+        ),
+      );
+    }
+
+    return this.createCallback(
+      originalCallback,
+      body,
+      parameters,
+      returnType,
+    );
+  }
+
+  private createCallback(
+    originalCallback: ts.ArrowFunction | ts.FunctionExpression,
+    body: ts.ConciseBody,
+    parameters: readonly ts.ParameterDeclaration[],
+    returnType?: ts.TypeNode | null,
+  ): ts.ArrowFunction | ts.FunctionExpression {
+    // If returnType is null, explicitly omit it. If undefined, preserve the
+    // authored return annotation. Otherwise use the supplied synthetic type.
     const typeNode = returnType === null
       ? undefined
       : (returnType || originalCallback.type);
-
     // Carry the authored callback's source-map position onto the rebuilt
     // closure so the hoisting stage can recover where it was written (every
     // strategy — computed-origin, array-method, inline-handler — routes its
@@ -178,7 +267,7 @@ export class PatternBuilder {
       ? this.factory.createArrowFunction(
         originalCallback.modifiers,
         originalCallback.typeParameters,
-        [destructuredParam],
+        parameters,
         typeNode,
         originalCallback.equalsGreaterThanToken,
         body,
@@ -188,7 +277,7 @@ export class PatternBuilder {
         originalCallback.asteriskToken,
         originalCallback.name,
         originalCallback.typeParameters,
-        [destructuredParam],
+        parameters,
         typeNode,
         body as ts.Block,
       );

@@ -201,10 +201,8 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     id: item.id,
     step: "single",
 }));
-const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((__cf_pattern_input, { state, boundCastVote }) => {
     const item = __cf_pattern_input.key("element");
-    const state = __cf_pattern_input.key("params", "state");
-    const boundCastVote = __cf_pattern_input.key("params", "boundCastVote");
     return (<div>
               {__cfHelpers.when({
         type: "boolean"
@@ -220,7 +218,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                 type: "object",
                 properties: {}
             }]
-    } as const satisfies __cfHelpers.JSONSchema, state.key("canVote"), <button type="button" onClick={__cfHandler_1({
+    } as const satisfies __cfHelpers.JSONSchema, state.canVote, <button type="button" onClick={__cfHandler_1({
         boundCastVote: boundCastVote,
         item: {
             id: item.key("id")
@@ -232,30 +230,21 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 }, {
     type: "object",
     properties: {
-        element: {
-            $ref: "#/$defs/Item"
-        },
-        params: {
+        state: {
             type: "object",
             properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        canVote: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["canVote"]
-                },
-                boundCastVote: {
-                    $ref: "#/$defs/VoteEvent",
-                    asCell: ["stream"]
+                canVote: {
+                    type: "boolean"
                 }
             },
-            required: ["state", "boundCastVote"]
+            required: ["canVote"]
+        },
+        boundCastVote: {
+            $ref: "#/$defs/VoteEvent",
+            asCell: ["stream"]
         }
     },
-    required: ["element", "params"],
+    required: ["state", "boundCastVote"],
     $defs: {
         VoteEvent: {
             type: "object",
@@ -268,7 +257,17 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
                 }
             },
             required: ["id", "step"]
-        },
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema), {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -319,12 +318,12 @@ export default pattern((state) => {
     }).for({ stream: "boundCastVote" }, true);
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfPattern_1, {
+        {state.key("items").mapWithPattern(__cfPattern_1.curry({
                 state: {
                     canVote: state.key("canVote")
                 },
                 boundCastVote: boundCastVote
-            })}
+            }))}
       </div>),
     };
 }, {

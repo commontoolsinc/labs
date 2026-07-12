@@ -80,9 +80,11 @@ import { extractBindingNames } from "../utils/identifiers.ts";
  * {@link HOISTABLE_BUILDERS}. Two shapes are registered:
  *   - applied builders (`lift`, `handler`): `builder(...)(captures)` — hoist the
  *     inner call, leave `name(captures)` (the default callee-swap rewrite);
- *   - argument-position builders (`pattern`): the bare `pattern(...)` sits in
- *     argument 0 of an enclosing `*WithPattern` or `patternTool` call — hoist it
- *     and rewrite that argument (via {@link HoistableBuilderSpec.rewriteSite}).
+ *   - argument-position builders (`pattern`): a capture-free bare `pattern(...)`
+ *     sits in argument 0 of an enclosing `*WithPattern` or `patternTool` call —
+ *     hoist it and rewrite that argument (via
+ *     {@link HoistableBuilderSpec.rewriteSite}). Captured list callbacks use the
+ *     generic curried-pattern path.
  */
 export class BuilderCallHoistingTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -167,11 +169,11 @@ const PATTERN_BUILDER: HoistableBuilderSpec = {
   resolveHoistable: (call, context) => {
     // Pattern is NOT applied: the bare `__cfHelpers.pattern(cb, inSchema,
     // outSchema)` call sits in the FIRST argument of an enclosing call, with
-    // per-instance values flowing through that call's remaining argument(s).
-    // Two enclosing shapes carry a hoistable pattern (identical mechanic —
+    // Two enclosing shapes carry a capture-free hoistable pattern (identical mechanic —
     // relocate argument 0, keep the rest):
-    //   - `receiver.mapWithPattern(pattern(...), { params })` (and the other
-    //     lowered `*WithPattern` array methods); captures in the params object.
+    //   - `receiver.mapWithPattern(pattern(...))` (and the other lowered
+    //     `*WithPattern` array methods). Captured callbacks instead use
+    //     `pattern(...).curry(captures)`, handled by the curried/nested specs.
     //   - `patternTool(pattern(...), extraParams?)` (CT-1655); per-instance
     //     values in extraParams, module-scoped reads absorbed by the pattern.
     // In both, the bare pattern call is capture-free and safe to relocate. The

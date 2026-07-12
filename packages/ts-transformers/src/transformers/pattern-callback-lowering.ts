@@ -116,9 +116,20 @@ function getCaptureSourceSymbol(
 
 function getArrayMethodCallbackInfo(
   patternCall: ts.CallExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
   scope: PatternScopeInfo | undefined,
   context: TransformationContext,
 ): ArrayMethodCallbackInfo {
+  // Canonical list lowering wraps captured callbacks in
+  // `pattern(withPatternParamsSchema(...)).curry(captures)`, so the pattern
+  // call is no longer the direct first argument of `*WithPattern`. The closure
+  // stage records the callback explicitly; prefer that exact compiler-owned
+  // marker. The structural branch below remains the named legacy adapter for
+  // old/manual `*WithPattern(pattern(...), params)` shapes.
+  if (context.isArrayMethodCallback(callback)) {
+    return { isArrayMethodCallback: true };
+  }
+
   const parent = patternCall.parent;
   if (
     !parent ||
@@ -198,7 +209,12 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
         : undefined;
       const callback = descriptor?.callback;
       const arrayMethodInfo = ts.isCallExpression(node) && callback
-        ? getArrayMethodCallbackInfo(node, scopeStack.at(-1), context)
+        ? getArrayMethodCallbackInfo(
+          node,
+          callback,
+          scopeStack.at(-1),
+          context,
+        )
         : undefined;
       const currentScope = callback
         ? buildPatternScope(callback, context)

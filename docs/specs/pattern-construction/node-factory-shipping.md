@@ -770,6 +770,13 @@ Current array-callback lowering must use the same representation. For example,
 longer passes closure params as a separate sibling argument. All pattern
 closure values flow through the one internal `.curry(params)` operation.
 
+Reactive array lowering does not support the optional JavaScript `thisArg`.
+Pattern callbacks have no ambient JavaScript receiver, and the canonical list
+node accepts only the bound factory, so a second array-method argument fails
+compilation with a focused diagnostic. The previous transformer forwarded it
+as an extra `mapWithPattern` argument that the runtime ignored; that accidental
+no-op is not a compatibility contract.
+
 ### Diagnostics
 
 Compilation or runtime fails clearly for:

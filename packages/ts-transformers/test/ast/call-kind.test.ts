@@ -392,12 +392,12 @@ Deno.test("getLiftAppliedInputAndCallback recognizes lift-applied input position
   assertEquals(thirdArgs, undefined);
 });
 
-Deno.test("getWithPatternHoistablePatternCall returns the bare pattern call argument", () => {
+Deno.test("getWithPatternHoistablePatternCall returns the capture-free bare pattern argument", () => {
   const { sourceFile, checker } = createProgram(`
     declare const items: any;
     declare const make: { pattern(body: () => number): number };
 
-    const value = items.mapWithPattern(make.pattern(() => 1), { p: 1 });
+    const value = items.mapWithPattern(make.pattern(() => 1));
   `);
 
   const expression = findInitializer(sourceFile, "value");
