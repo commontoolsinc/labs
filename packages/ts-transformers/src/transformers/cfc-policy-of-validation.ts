@@ -86,6 +86,8 @@ function isExchangeRulesCall(
 }
 
 function isExportedVariable(declaration: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(declaration.name)) return false;
+  const declarationName = declaration.name.text;
   const statement = declaration.parent.parent;
   if (
     ts.isVariableStatement(statement) &&
@@ -98,8 +100,8 @@ function isExportedVariable(declaration: ts.VariableDeclaration): boolean {
     ts.isExportDeclaration(candidate) && !candidate.moduleSpecifier &&
     candidate.exportClause && ts.isNamedExports(candidate.exportClause) &&
     candidate.exportClause.elements.some((element) =>
-      (element.propertyName?.text ?? element.name.text) ===
-        declaration.name.getText()
+      element.propertyName === undefined &&
+      element.name.text === declarationName
     )
   );
 }
