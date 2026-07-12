@@ -540,7 +540,7 @@ the per-epic implementation notes).
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
 
-> Two neighbours in the same handshake are related but are not runtime-toggleable
+> Three neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
 > - **`syncSchemaTable`** is the older, index-keyed predecessor of
@@ -554,6 +554,12 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`schedulerWriterLookup`** is a build-inherent capability, hardwired to
+>   `true`, advertising authenticated target/path-overlap lookup over durable
+>   scheduler write indexes. It is not configuration: an older server that
+>   lacks the capability advertises it absent (parsed as `false`), and a newer
+>   runner fails open to piece-root discovery without sending the unsupported
+>   request. It was added by Bernhard Seefeld for server-side execution W0.3.
 
 ---
 
