@@ -1079,7 +1079,7 @@ export interface ResolvedSchedulerObservationAddress
   scopeKey: string;
 }
 
-type SchedulerWriteAddress = SchedulerObservationAddress & {
+export type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
 
@@ -1348,6 +1348,23 @@ export interface SchedulerActionState {
   directDirtySeq: number | null;
   staleSeq: number | null;
   unknownReason: string | null;
+}
+
+/**
+ * Host-only wake query over the durable scheduler projections.
+ *
+ * `demandedSchedulerPieceIds` contains canonical scheduler piece identities
+ * (for example `space:of:...`), not raw execution-demand roots. The host owns
+ * that normalization because raw demand remains a protocol granularity hint.
+ */
+export interface SchedulerStaleReadersForTargetsOptions {
+  branch?: BranchName;
+  ownerSpace: string;
+  targets: readonly SchedulerWriteAddress[];
+  demandedSchedulerPieceIds: readonly string[];
+  applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  /** Inclusive lower bound for direct-dirty and transitive-stale markers. */
+  dirtySeq: number;
 }
 
 export interface ReadOptions {
@@ -4134,6 +4151,142 @@ export const findSchedulerReadersForWrite = (
 };
 
 /**
+ * Returns the distinct demanded actions that are durably dirty or stale at or
+ * after `dirtySeq`, provided at least one changed target overlaps the indexed
+ * read surface for the same owner/context partition.
+ *
+ * The target gate deliberately composes `findSchedulerReadersForWrite`: path
+ * and effective-scope matching therefore cannot drift from commit-time
+ * dirtying. The state lookup is broader than those direct readers because
+ * propagation may cross an undemanded action before reaching a demanded one.
+ */
+export const staleReadersForTargets = (
+  engine: Engine,
+  options: SchedulerStaleReadersForTargetsOptions,
+): SchedulerActionState[] => {
+  if (!Number.isSafeInteger(options.dirtySeq) || options.dirtySeq < 0) {
+    throw new TypeError("scheduler stale-reader dirtySeq must be non-negative");
+  }
+  if (
+    options.targets.length === 0 ||
+    options.demandedSchedulerPieceIds.length === 0
+  ) {
+    return [];
+  }
+
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const ownerSpace = normalizeSchedulerOwnerSpace(options.ownerSpace);
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const applicableContextKeys = options.applicableExecutionContextKeys ===
+      undefined
+    ? undefined
+    : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+  const applicableContextSet = applicableContextKeys === undefined
+    ? undefined
+    : new Set(applicableContextKeys);
+
+  // Repeated patch paths and coalesced commit batches commonly name the same
+  // effective target more than once. Keep one read-index probe per target.
+  const uniqueTargets = new Map<string, SchedulerWriteAddress>();
+  for (const target of options.targets) {
+    const declaredScope = normalizeSchedulerScope(target.scope);
+    if (target.scopeKey === undefined && declaredScope !== "space") {
+      throw new ProtocolError(
+        "scoped scheduler stale-reader targets require a resolved scope key",
+      );
+    }
+    const scopeKey = target.scopeKey ?? DEFAULT_SCOPE_KEY;
+    uniqueTargets.set(
+      [
+        target.space,
+        target.id,
+        declaredScope,
+        scopeKey,
+        encodeSchedulerPath(target.path),
+      ].join("\0"),
+      target,
+    );
+  }
+
+  let relevantTarget = false;
+  for (const target of uniqueTargets.values()) {
+    const readers = findSchedulerReadersForWrite(engine, {
+      branch,
+      write: target,
+    });
+    relevantTarget = readers.some((reader) =>
+      normalizeSchedulerOwnerSpace(reader.ownerSpace) === ownerSpace &&
+      (applicableContextSet === undefined ||
+        applicableContextSet.has(reader.executionContextKey))
+    );
+    if (relevantTarget) break;
+  }
+  if (!relevantTarget) return [];
+
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [
+      `execution_context_${index}`,
+      key,
+    ]) ?? [],
+  );
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:execution_context_${index}`)
+        .join(", ")
+    })`;
+
+  const rows = engine.database.prepare(`
+    SELECT
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      latest_observation_id,
+      direct_dirty_seq,
+      stale_seq,
+      unknown_reason
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id IN (${pieceFilter})
+      ${contextFilter}
+      AND (
+        direct_dirty_seq >= :dirty_seq OR
+        stale_seq >= :dirty_seq OR
+        unknown_reason IS NOT NULL
+      )
+    ORDER BY
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+  `).all({
+    branch,
+    owner_space: ownerSpace,
+    dirty_seq: options.dirtySeq,
+    ...pieceParams,
+    ...contextParams,
+  }) as SchedulerActionStateRow[];
+
+  return rows.map(schedulerActionStateFromRow);
+};
+
+/**
  * Returns every current durable action whose indexed write surface overlaps
  * one of `targets`.
  *
@@ -4467,7 +4620,12 @@ export const getSchedulerActionState = (
   }) as SchedulerActionStateRow[];
 
   if (rows.length !== 1) return undefined;
-  const row = rows[0];
+  return schedulerActionStateFromRow(rows[0]);
+};
+
+function schedulerActionStateFromRow(
+  row: SchedulerActionStateRow,
+): SchedulerActionState {
   const ownerSpace = denormalizeSchedulerOwnerSpace(row.owner_space);
   return {
     branch: row.branch,
@@ -4481,7 +4639,7 @@ export const getSchedulerActionState = (
     staleSeq: row.stale_seq,
     unknownReason: row.unknown_reason,
   };
-};
+}
 
 function dedupeSchedulerActions(
   actions: readonly SchedulerReaderIndexEntry[],

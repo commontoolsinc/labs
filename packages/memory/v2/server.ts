@@ -2331,6 +2331,26 @@ export class Server {
     };
   }
 
+  /**
+   * Resolve demanded stale readers for a host execution lane. This is a
+   * process API, not a client protocol command: the caller supplies effective
+   * scope keys, server-derived execution contexts, and canonical scheduler
+   * piece ids.
+   */
+  async staleReadersForTargets(
+    space: string,
+    options: Omit<
+      Engine.SchedulerStaleReadersForTargetsOptions,
+      "ownerSpace"
+    >,
+  ): Promise<Engine.SchedulerActionState[]> {
+    const engine = await this.openEngine(space);
+    return Engine.staleReadersForTargets(engine, {
+      ...options,
+      ownerSpace: space,
+    });
+  }
+
   #publishExecutionDemands(space: string, branch: BranchName): void {
     const snapshot: ExecutionDemandSnapshot = Object.freeze({
       space,
