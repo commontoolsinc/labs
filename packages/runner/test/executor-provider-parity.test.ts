@@ -1101,3 +1101,137 @@ Deno.test("executor host provider disposal releases callbacks and pending reads"
     await server.close();
   }
 });
+
+Deno.test("executor host provider transfers as an opaque channel to a real Worker", async () => {
+  const principal = await Identity.fromPassphrase(
+    "executor provider real worker " + crypto.randomUUID(),
+  );
+  const space = principal.did();
+  const server = new LifecycleServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-real-worker-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(
+    space,
+    {},
+    authorizeSessionOpen,
+  );
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const worker = new Worker(
+    new URL(
+      "./fixtures/executor-provider-worker.ts",
+      import.meta.url,
+    ).href,
+    { type: "module" },
+  );
+  const queued: Record<string, unknown>[] = [];
+  const waiters: {
+    type: string;
+    pending: PromiseWithResolvers<Record<string, unknown>>;
+  }[] = [];
+  worker.addEventListener("message", (event: MessageEvent<unknown>) => {
+    const message = event.data as Record<string, unknown>;
+    if (message.type === "error") {
+      const error = new Error(String(message.message ?? "Worker failed"));
+      for (const waiter of waiters.splice(0)) {
+        waiter.pending.reject(error);
+      }
+      queued.push(message);
+      return;
+    }
+    const waiterIndex = waiters.findIndex((waiter) =>
+      waiter.type === message.type
+    );
+    if (waiterIndex === -1) {
+      queued.push(message);
+      return;
+    }
+    const [waiter] = waiters.splice(waiterIndex, 1);
+    waiter.pending.resolve(message);
+  });
+  worker.addEventListener("error", (event) => {
+    for (const waiter of waiters.splice(0)) {
+      waiter.pending.reject(event.error ?? new Error(event.message));
+    }
+  });
+  const nextMessage = (type: string): Promise<Record<string, unknown>> => {
+    const queuedIndex = queued.findIndex((message) => message.type === type);
+    if (queuedIndex !== -1) {
+      return Promise.resolve(queued.splice(queuedIndex, 1)[0]!);
+    }
+    const pending = Promise.withResolvers<Record<string, unknown>>();
+    waiters.push({ type, pending });
+    const timer = setTimeout(
+      () =>
+        pending.reject(
+          new Error(
+            "timed out waiting for Worker " + type + "; queued=" +
+              JSON.stringify(queued),
+          ),
+        ),
+      10_000,
+    );
+    return pending.promise.finally(() => clearTimeout(timer));
+  };
+
+  try {
+    await nextMessage("booted");
+    worker.postMessage({
+      type: "init",
+      port: channel.port,
+      principal: principal.did(),
+      space,
+    }, [channel.port]);
+    await nextMessage("committed");
+    assertEquals(
+      await server.readDocument(space, "of:executor-provider:worker"),
+      { value: { version: 1, realm: "worker" } },
+    );
+
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:executor-provider:worker",
+        value: { value: { version: 2, realm: "external" } },
+      }],
+    });
+    await nextMessage("integrated");
+
+    worker.postMessage({ type: "dispose" });
+    await nextMessage("disposed");
+    await channel.dispose();
+    assertEquals(server.acceptedCommitSubscriptions, 0);
+    assertEquals(queued.find((message) => message.type === "error"), undefined);
+  } finally {
+    worker.terminate();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
