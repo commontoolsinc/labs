@@ -6,7 +6,7 @@ import type { CfcPolicyCompilerManifestV1 } from "../core/runtime-contract.ts";
 
 const USER = "https://commonfabric.org/cfc/atom/User";
 const HAS_ROLE = "https://commonfabric.org/cfc/atom/HasRole";
-const AUTHORING_MODULES = new Set([
+export const CFC_AUTHORING_MODULES = new Set([
   "commonfabric/cfc",
   "@commonfabric/api/cfc-authoring",
 ]);
@@ -411,7 +411,7 @@ const collectImports = (sourceFile: ts.SourceFile): AuthoringImports => {
     if (
       !ts.isImportDeclaration(statement) ||
       !ts.isStringLiteral(statement.moduleSpecifier) ||
-      !AUTHORING_MODULES.has(statement.moduleSpecifier.text) ||
+      !CFC_AUTHORING_MODULES.has(statement.moduleSpecifier.text) ||
       !statement.importClause?.namedBindings ||
       !ts.isNamedImports(statement.importClause.namedBindings)
     ) continue;
@@ -481,6 +481,7 @@ export function compileCfcPolicyManifestsForSource(
   const imports = collectImports(sourceFile);
   const exported = exportedNames(sourceFile);
   const rules = new Map<string, AuthoredRule>();
+  const ruleNodes = new Map<string, ts.VariableDeclaration>();
   const declarations = new Map<string, ts.VariableDeclaration>();
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
@@ -495,25 +496,52 @@ export function compileCfcPolicyManifestsForSource(
       unwrapExpression(declaration.initializer);
     if (
       !initializer || !ts.isCallExpression(initializer) ||
-      !isCallOf(initializer.expression, imports.exchangeRule) ||
-      initializer.arguments.length !== 1 || !exported.has(name)
+      !isCallOf(initializer.expression, imports.exchangeRule)
     ) continue;
+    ruleNodes.set(name, declaration);
+    if (initializer.arguments.length !== 1) {
+      throw new StaticAuthoringError(
+        initializer,
+        "exchangeRule() requires one argument",
+      );
+    }
+    if (!exported.has(name)) {
+      throw new StaticAuthoringError(
+        declaration.name,
+        "exchangeRule() bindings must be exported at module scope",
+      );
+    }
     const authored = evaluateStatic(initializer.arguments[0]!, imports);
     rules.set(name, lowerRule(name, authored, initializer));
   }
 
   const manifests: CfcPolicyCompilerManifestV1[] = [];
+  const useCounts = new Map<string, number>();
   for (const [symbol, declaration] of declarations) {
     const initializer = declaration.initializer &&
       unwrapExpression(declaration.initializer);
     if (
       !initializer || !ts.isCallExpression(initializer) ||
-      !isCallOf(initializer.expression, imports.exchangeRules) ||
-      !exported.has(symbol)
+      !isCallOf(initializer.expression, imports.exchangeRules)
     ) continue;
+    if (!exported.has(symbol)) {
+      throw new StaticAuthoringError(
+        declaration.name,
+        "exchangeRules() bindings must be exported at module scope",
+      );
+    }
     const argument = initializer.arguments[0] &&
       unwrapExpression(initializer.arguments[0]);
-    if (!argument || !ts.isArrayLiteralExpression(argument)) continue;
+    if (
+      initializer.arguments.length !== 1 || !argument ||
+      !ts.isArrayLiteralExpression(argument)
+    ) {
+      throw new StaticAuthoringError(
+        initializer,
+        "exchangeRules() requires one static array of exported rule identifiers",
+      );
+    }
+    const seen = new Set<string>();
     const selected = argument.elements.map((element) => {
       if (!ts.isIdentifier(element)) {
         throw new StaticAuthoringError(
@@ -528,6 +556,14 @@ export function compileCfcPolicyManifestsForSource(
           `exchangeRules() references invalid rule "${element.text}"`,
         );
       }
+      if (seen.has(element.text)) {
+        throw new StaticAuthoringError(
+          element,
+          `exchangeRules() contains duplicate rule "${element.text}"`,
+        );
+      }
+      seen.add(element.text);
+      useCounts.set(element.text, (useCounts.get(element.text) ?? 0) + 1);
       return rule;
     });
     const manifest = {
@@ -548,6 +584,17 @@ export function compileCfcPolicyManifestsForSource(
       }),
       manifest,
     }));
+  }
+  for (const [name, declaration] of ruleNodes) {
+    const count = useCounts.get(name) ?? 0;
+    if (count !== 1) {
+      throw new StaticAuthoringError(
+        declaration.name,
+        count === 0
+          ? `exported rule "${name}" must belong to one exchangeRules() declaration`
+          : `exported rule "${name}" cannot be reused across exchangeRules() declarations`,
+      );
+    }
   }
   return manifests;
 }

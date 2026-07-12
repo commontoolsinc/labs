@@ -3,6 +3,7 @@ import { dirname, join } from "@std/path";
 import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonFabricTransformerPipeline,
+  CrossStageState,
   TransformationDiagnostic,
   transformCfDirective,
 } from "../src/mod.ts";
@@ -24,6 +25,7 @@ export interface TransformOptions {
   pipelineDiagnostics?: TransformationDiagnostic[];
   moduleIdentities?: ReadonlyMap<string, string>;
   policyManifests?: unknown[];
+  state?: CrossStageState;
 }
 
 export interface BatchTypeCheckResult {
@@ -577,6 +579,7 @@ export async function transformFiles(
     mode,
     logger,
     moduleIdentities: options.moduleIdentities,
+    state: options.state,
   });
 
   const out: Record<string, string> = {};
@@ -851,6 +854,8 @@ export async function validateFiles(
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
+    moduleIdentities: options.moduleIdentities,
+    state: options.state,
   });
 
   const outputs: Record<string, string> = {};

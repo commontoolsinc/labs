@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { CFC_AUTHORING_MODULES } from "./cfc-policy-authoring.ts";
 
 export class CfcPolicyOfValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -18,10 +19,7 @@ function isPolicyOfReference(
   context: TransformationContext,
 ): boolean {
   if (!ts.isIdentifier(node.typeName)) return false;
-  if (node.typeName.text === "PolicyOf") return true;
-  const symbol = context.checker.getSymbolAtLocation(node.typeName);
-  if (!symbol || !(symbol.flags & ts.SymbolFlags.Alias)) return false;
-  return context.checker.getAliasedSymbol(symbol).name === "PolicyOf";
+  return isImportedCfcAuthoringBinding(node.typeName, "PolicyOf", context);
 }
 
 function validatePolicyOf(
@@ -78,11 +76,28 @@ function isExchangeRulesCall(
   if (!ts.isCallExpression(expression)) return false;
   const callee = expression.expression;
   if (!ts.isIdentifier(callee)) return false;
-  const symbol = context.checker.getSymbolAtLocation(callee);
-  const target = symbol && (symbol.flags & ts.SymbolFlags.Alias)
-    ? context.checker.getAliasedSymbol(symbol)
-    : symbol;
-  return target?.name === "exchangeRules" || callee.text === "exchangeRules";
+  return isImportedCfcAuthoringBinding(callee, "exchangeRules", context);
+}
+
+function isImportedCfcAuthoringBinding(
+  identifier: ts.Identifier,
+  importedName: string,
+  context: TransformationContext,
+): boolean {
+  const symbol = context.checker.getSymbolAtLocation(identifier);
+  if (!symbol || !(symbol.flags & ts.SymbolFlags.Alias)) return false;
+  return (symbol.declarations ?? []).some((declaration) => {
+    if (!ts.isImportSpecifier(declaration)) return false;
+    if (
+      (declaration.propertyName?.text ?? declaration.name.text) !== importedName
+    ) {
+      return false;
+    }
+    const importDeclaration = declaration.parent.parent.parent;
+    return ts.isImportDeclaration(importDeclaration) &&
+      ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+      CFC_AUTHORING_MODULES.has(importDeclaration.moduleSpecifier.text);
+  });
 }
 
 function isExportedVariable(declaration: ts.VariableDeclaration): boolean {

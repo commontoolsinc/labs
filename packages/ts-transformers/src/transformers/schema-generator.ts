@@ -196,7 +196,7 @@ function resolvePolicyOfMarkers(
     const normalizedSourceEntries = file === undefined
       ? []
       : identityEntries.filter(([sourceName]) =>
-        normalizePolicySource(sourceName) === file
+        normalizeSourceFilePath(sourceName) === file
       );
     const sourceEntry = exactSourceEntry ??
       (normalizedSourceEntries.length === 1
@@ -250,7 +250,7 @@ function resolvePolicyOfMarkers(
   );
 }
 
-function normalizePolicySource(fileName: string): string {
+function normalizeSourceFilePath(fileName: string): string {
   const normalized = fileName.replace(/\\/g, "/");
   return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
@@ -451,7 +451,7 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeWriterIdentityFile(sourceFileName),
+    file: normalizeSourceFilePath(sourceFileName),
     path: [bindingNode.exprName.text],
   };
 }
@@ -511,12 +511,6 @@ function createWriteAuthorizedByMarkerAst(
       ], true),
     ),
   ], true);
-}
-
-function normalizeWriterIdentityFile(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
-  return strippedPrefixed ?? normalized;
 }
 
 function evaluateObjectLiteral(

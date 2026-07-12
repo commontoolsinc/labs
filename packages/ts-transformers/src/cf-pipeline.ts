@@ -143,8 +143,8 @@ export class CommonFabricTransformerPipeline extends Pipeline {
   constructor(options: TransformationOptions = {}) {
     const state = options.state ?? new CrossStageState();
     const ops: TransformationOptions = {
-      state,
       ...options,
+      state,
     };
     // Create a shared diagnostics collector
     const sharedOps: TransformationOptions = {
