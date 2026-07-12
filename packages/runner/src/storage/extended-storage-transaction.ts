@@ -130,6 +130,7 @@ type CfcInstrumentationHooks = {
   onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
   resolvePolicyManifest?(reference: unknown): unknown;
   hasPolicyManifest?(space: MemorySpace, reference: unknown): boolean;
+  installPolicyManifest?(space: MemorySpace, reference: unknown): boolean;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -368,6 +369,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
     return this.cfcInstrumentation.hasPolicyManifest?.(space, reference) ??
+      false;
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.installPolicyManifest?.(space, reference) ??
       false;
   }
 
@@ -1966,6 +1972,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
     return this.wrapped.hasCfcPolicyManifest(space, reference);
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.installCfcPolicyManifest(space, reference);
   }
 
   recordCfcLabelMetadataObservation(

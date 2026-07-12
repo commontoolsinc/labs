@@ -573,6 +573,12 @@ export class Engine extends EventTarget implements Harness {
           imports,
         };
       });
+      for (const module of modules) {
+        this.ctRuntime.registerCfcPolicyManifests(
+          undefined,
+          module.policyManifests ?? [],
+        );
+      }
 
       return {
         id,
@@ -815,6 +821,12 @@ export class Engine extends EventTarget implements Harness {
         imports,
       };
     });
+    for (const module of modules) {
+      this.ctRuntime.registerCfcPolicyManifests(
+        undefined,
+        module.policyManifests ?? [],
+      );
+    }
     const entryIdentity = identityByPath.get(entryFilename)!;
     return { modules, entryIdentity };
   }

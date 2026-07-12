@@ -3874,7 +3874,10 @@ const resolvePolicyOfValue = (
       throw new Error("cfcPolicyManifest: malformed PolicyOf schema marker");
     }
     const reference = { ...value, subject: owningSpace };
-    if (!tx.hasCfcPolicyManifest(owningSpace, reference)) {
+    if (
+      !tx.hasCfcPolicyManifest(owningSpace, reference) &&
+      !tx.installCfcPolicyManifest(owningSpace, reference)
+    ) {
       throw new Error(
         `cfcPolicyManifest: manifest ${value.policyDigest} is not installed in ${owningSpace}`,
       );

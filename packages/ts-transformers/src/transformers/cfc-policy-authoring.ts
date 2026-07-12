@@ -449,6 +449,85 @@ const exportedNames = (sourceFile: ts.SourceFile): Set<string> => {
   return result;
 };
 
+/** Order-independent manifest extraction used by PolicyOf schema lowering. */
+export function compileCfcPolicyManifestsForSource(
+  sourceFile: ts.SourceFile,
+  moduleIdentity: string,
+): readonly CfcPolicyCompilerManifestV1[] {
+  const imports = collectImports(sourceFile);
+  const exported = exportedNames(sourceFile);
+  const rules = new Map<string, AuthoredRule>();
+  const declarations = new Map<string, ts.VariableDeclaration>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name)) {
+        declarations.set(declaration.name.text, declaration);
+      }
+    }
+  }
+  for (const [name, declaration] of declarations) {
+    const initializer = declaration.initializer &&
+      unwrapExpression(declaration.initializer);
+    if (
+      !initializer || !ts.isCallExpression(initializer) ||
+      !isCallOf(initializer.expression, imports.exchangeRule) ||
+      initializer.arguments.length !== 1 || !exported.has(name)
+    ) continue;
+    const authored = evaluateStatic(initializer.arguments[0]!, imports);
+    rules.set(name, lowerRule(name, authored, initializer));
+  }
+
+  const manifests: CfcPolicyCompilerManifestV1[] = [];
+  for (const [symbol, declaration] of declarations) {
+    const initializer = declaration.initializer &&
+      unwrapExpression(declaration.initializer);
+    if (
+      !initializer || !ts.isCallExpression(initializer) ||
+      !isCallOf(initializer.expression, imports.exchangeRules) ||
+      !exported.has(symbol)
+    ) continue;
+    const argument = initializer.arguments[0] &&
+      unwrapExpression(initializer.arguments[0]);
+    if (!argument || !ts.isArrayLiteralExpression(argument)) continue;
+    const selected = argument.elements.map((element) => {
+      if (!ts.isIdentifier(element)) {
+        throw new StaticAuthoringError(
+          element,
+          "exchangeRules() entries must be direct rule identifiers",
+        );
+      }
+      const rule = rules.get(element.text);
+      if (!rule) {
+        throw new StaticAuthoringError(
+          element,
+          `exchangeRules() references invalid rule "${element.text}"`,
+        );
+      }
+      return rule;
+    });
+    const manifest = {
+      formatVersion: 1 as const,
+      moduleIdentity,
+      symbol,
+      template: {
+        templateVersion: 1 as const,
+        exchangeRules: selected,
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    };
+    manifests.push(deepFreeze({
+      policyDigest: hashStringOf({
+        domain: "cfc/policy-manifest/v1",
+        manifest,
+      }),
+      manifest,
+    }));
+  }
+  return manifests;
+}
+
 export class CfcPolicyAuthoringTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile } = context;

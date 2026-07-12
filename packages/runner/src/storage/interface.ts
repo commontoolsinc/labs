@@ -1068,6 +1068,9 @@ export interface IExtendedStorageTransaction
   /** Whether the exact manifest is installed for a destination space. */
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
 
+  /** Atomically stages a compiler-verified manifest for the destination. */
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
+
   /**
    * Records a label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2):
    * the introspection surface observed first-layer label metadata, and the

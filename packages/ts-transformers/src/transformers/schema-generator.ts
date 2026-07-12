@@ -11,6 +11,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -189,9 +190,26 @@ function resolvePolicyOfMarkers(
       : [...(context.options.moduleIdentities?.entries() ?? [])].find(
         ([sourceName]) => normalizePolicySource(sourceName) === file,
       );
-    const manifests = sourceEntry === undefined
+    let manifests = sourceEntry === undefined
       ? undefined
       : context.options.state?.getPolicyManifests().get(sourceEntry[0]);
+    if (sourceEntry !== undefined && manifests === undefined) {
+      const definingSource = context.program.getSourceFile(sourceEntry[0]);
+      if (definingSource !== undefined) {
+        try {
+          manifests = compileCfcPolicyManifestsForSource(
+            definingSource,
+            sourceEntry[1],
+          );
+          context.options.state?.recordPolicyManifests(
+            sourceEntry[0],
+            manifests,
+          );
+        } catch {
+          manifests = undefined;
+        }
+      }
+    }
     const artifact = manifests?.find((candidate) =>
       candidate.manifest.symbol === symbol
     );

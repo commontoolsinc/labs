@@ -608,7 +608,7 @@ export class Runtime {
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
 
   registerCfcPolicyManifests(
-    space: MemorySpace,
+    space: MemorySpace | undefined,
     inputs: readonly unknown[],
   ): void {
     for (const input of inputs) {
@@ -625,7 +625,7 @@ export class Runtime {
         spaces = new Set();
         this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
       }
-      spaces.add(space);
+      if (space !== undefined) spaces.add(space);
     }
   }
 
@@ -652,6 +652,18 @@ export class Runtime {
     return artifact !== undefined &&
       this.#policyManifestSpaces.get(artifact.policyDigest)?.has(space) ===
         true;
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    const artifact = this.resolveCfcPolicyManifest(reference);
+    if (artifact === undefined) return false;
+    let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
+    if (spaces === undefined) {
+      spaces = new Set();
+      this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
+    }
+    spaces.add(space);
+    return true;
   }
 
   constructor(options: RuntimeOptions) {
@@ -1008,6 +1020,8 @@ export class Runtime {
         this.resolveCfcPolicyManifest(reference),
       hasPolicyManifest: (space, reference) =>
         this.hasCfcPolicyManifest(space, reference),
+      installPolicyManifest: (space, reference) =>
+        this.installCfcPolicyManifest(space, reference),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
       },
