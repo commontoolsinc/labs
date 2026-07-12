@@ -958,9 +958,11 @@ Deno.test("executor host provider carries authenticated scheduler observations o
       updatedNotification.observations[0]?.observation as {
         status?: string;
         errorFingerprint?: string;
+        inputBasisSeq?: number;
       },
       {
         ...externalObservation,
+        inputBasisSeq: 0,
         status: "failed",
         errorFingerprint: "error:second-observation",
       },

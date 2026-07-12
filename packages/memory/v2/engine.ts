@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
   observation_id      INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
+  accepted_payload    JSON,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (branch, session_id, local_seq),
   FOREIGN KEY (observation_id)
@@ -1542,6 +1543,7 @@ CREATE TABLE scheduler_action_snapshot (
   commit_seq          INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
+  accepted_payload    JSON,
   PRIMARY KEY (
     branch,
     owner_space,
@@ -1774,6 +1776,18 @@ FROM scheduler_observation_replay_legacy;
 DROP TABLE scheduler_observation_replay_legacy;
 
 COMMIT;
+`);
+};
+
+const migrateSchedulerObservationReplayAcceptedPayload = (
+  database: Database,
+): void => {
+  if (hasColumn(database, "scheduler_observation_replay", "accepted_payload")) {
+    return;
+  }
+  database.exec(`
+ALTER TABLE scheduler_observation_replay
+ADD COLUMN accepted_payload JSON;
 `);
 };
 
@@ -2317,6 +2331,7 @@ export const open = async (
     migrateSchedulerActionSnapshotOwnerSpaceKey(database);
     migrateSchedulerActionStateOwnerSpaceKey(database);
     migrateSchedulerObservationReplayStatus(database);
+    migrateSchedulerObservationReplayAcceptedPayload(database);
   }
   migrateSchedulerExecutionContextSchema(database);
   migrateSchedulerWriteLookupIndex(database);
@@ -2503,6 +2518,9 @@ export interface UpsertSchedulerObservationOptions {
   /** Canonical commit-session key used only for replay/echo provenance. */
   writerSessionId?: string;
   localSeq?: number;
+  /** Client-request replay identity when canonical host fields differ from the
+   * persisted observation payload. */
+  replayPayload?: string;
   observation: SchedulerActionObservation;
 }
 
@@ -2705,7 +2723,10 @@ const upsertSchedulerObservationTransaction = (
       status: "kept",
       observationId,
       observedAtSeq: options.observedAtSeq,
-      payload,
+      payload: options.replayPayload ?? payload,
+      ...(options.replayPayload !== undefined
+        ? { acceptedPayload: payload }
+        : {}),
     });
   }
 
@@ -4625,6 +4646,7 @@ function recordSchedulerObservationReplay(
     observationId?: number;
     observedAtSeq: number;
     payload: string;
+    acceptedPayload?: string;
   },
 ): void {
   runSchedulerObservationStatement("record observation replay", () => {
@@ -4637,7 +4659,8 @@ function recordSchedulerObservationReplay(
         reason,
         observation_id,
         observed_at_seq,
-        payload
+        payload,
+        accepted_payload
       )
       VALUES (
         :branch,
@@ -4647,7 +4670,8 @@ function recordSchedulerObservationReplay(
         :reason,
         :observation_id,
         :observed_at_seq,
-        :payload
+        :payload,
+        :accepted_payload
       )
       ON CONFLICT (branch, session_id, local_seq)
       DO UPDATE SET
@@ -4655,7 +4679,8 @@ function recordSchedulerObservationReplay(
         reason = excluded.reason,
         observation_id = excluded.observation_id,
         observed_at_seq = excluded.observed_at_seq,
-        payload = excluded.payload
+        payload = excluded.payload,
+        accepted_payload = excluded.accepted_payload
     `).run({
       branch: options.branch,
       session_id: options.sessionId,
@@ -4665,6 +4690,7 @@ function recordSchedulerObservationReplay(
       observation_id: options.observationId ?? null,
       observed_at_seq: options.observedAtSeq,
       payload: options.payload,
+      accepted_payload: options.acceptedPayload ?? null,
     });
   });
 }
@@ -4699,7 +4725,8 @@ function getSchedulerObservationReplay(
       ON active_snapshot.observation_id = observation.observation_id
       AND active_snapshot.execution_context_key =
         observation.execution_context_key
-      AND active_snapshot.payload = replay.payload
+      AND active_snapshot.payload =
+        COALESCE(replay.accepted_payload, replay.payload)
       AND active_snapshot.observed_at_seq = replay.observed_at_seq
       AND observation.session_id = replay.session_id
     WHERE replay.branch = :branch
@@ -6377,6 +6404,7 @@ const applySchedulerObservationOnlyCommit = (
     scopeContext: { principal: principal!, sessionId },
     writerSessionId: sessionKey,
     localSeq,
+    replayPayload,
     observation: accepted.observation,
   });
   return {
