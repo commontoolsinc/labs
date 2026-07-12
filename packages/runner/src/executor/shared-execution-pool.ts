@@ -380,7 +380,7 @@ export class SharedExecutionPool {
     slot.backoffTimer = null;
   }
 
-  async #shutdown(slot: Slot, abrupt: boolean): Promise<void> {
+  async #shutdown(slot: Slot, _abrupt: boolean): Promise<void> {
     this.#cancelRenewal(slot);
     this.#cancelBackoff(slot);
     const executor = slot.executor;
@@ -394,10 +394,6 @@ export class SharedExecutionPool {
 
     if (lease !== null && lease.state === "active") {
       lease = await this.#control.beginExecutionLeaseDrain(lease) ?? lease;
-    }
-    if (abrupt && lease !== null) {
-      await this.#control.finishExecutionLeaseDrain(lease);
-      lease = null;
     }
     if (executor !== null) {
       try {
