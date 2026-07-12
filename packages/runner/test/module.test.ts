@@ -28,6 +28,7 @@ import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isWriteRedirectLink } from "../src/link-utils.ts";
 
 type MouseEvent = {
   clientX: number;
@@ -580,6 +581,33 @@ describe("module", () => {
       expect(computedNode.module.implementation.src).not.toContain(
         "main.tsx:1:23",
       );
+    });
+
+    it("emits transformed lift outputs as one direct root binding", async () => {
+      const source = [
+        'import { lift, pattern } from "commonfabric";',
+        "const double = lift((value: number) => value * 2);",
+        "export default pattern<{ value: number }>(({ value }) => ({ doubled: double(value) }));",
+      ].join("\n");
+
+      const { main } = await compileMain(source);
+      const transformedPattern = main?.default;
+      expect(isPattern(transformedPattern)).toBe(true);
+      if (!isPattern(transformedPattern)) {
+        throw new Error(
+          "Expected the transformed default export to be a pattern",
+        );
+      }
+
+      expect(transformedPattern.nodes.length).toBe(1);
+      const outputBinding = transformedPattern.nodes[0].outputs;
+      expect(isWriteRedirectLink(outputBinding)).toBe(true);
+      expect(Object.keys(outputBinding as Record<string, unknown>)).toEqual([
+        "$alias",
+      ]);
+      expect(
+        (outputBinding as { $alias: { path: string[] } }).$alias.path,
+      ).toEqual([]);
     });
 
     it("maps action callsites through the CTS pipeline", async () => {
