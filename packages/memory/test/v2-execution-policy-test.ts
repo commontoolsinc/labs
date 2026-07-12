@@ -19,16 +19,19 @@ const authFactory =
     authorization: { principal },
   });
 
-const createServer = () =>
+const createServer = (
+  name = "memory-v2-execution-policy-acl",
+  aclMode: "off" | "observe" | "enforce" = "enforce",
+) =>
   new Server({
-    store: new URL("memory://memory-v2-execution-policy-acl"),
+    store: new URL(`memory://${name}`),
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
       return typeof principal === "string" ? principal : undefined;
     },
     sessionOpenAuth: { audience: AUDIENCE },
-    acl: { mode: "enforce", serviceDids: [OWNER] },
+    acl: { mode: aclMode, serviceDids: [OWNER] },
     protocolFlags: { serverPrimaryExecutionV1: true },
   });
 
@@ -220,6 +223,94 @@ Deno.test("execution policy is strict, owner-managed, and cannot be enabled arou
     });
     assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
   } finally {
+    await ownerConnection.client.close();
+    await server.close();
+  }
+});
+
+Deno.test("execution policy remains OWNER-only when the general ACL dial is off", async () => {
+  const server = createServer("memory-v2-execution-policy-acl-off", "off");
+  const writerConnection = await connect(server, WRITER, true);
+  const writer = await writerConnection.client.mount(
+    SPACE,
+    {},
+    writerConnection.auth,
+  );
+  try {
+    await assertRejects(
+      () =>
+        writer.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: POLICY_ID,
+            value: {
+              value: { version: 1, serverPrimaryExecution: true },
+            },
+          }],
+        }),
+      Error,
+      "lacks OWNER",
+    );
+    assertEquals(await server.readDocument(SPACE, POLICY_ID), null);
+  } finally {
+    await writerConnection.client.close();
+    await server.close();
+  }
+});
+
+Deno.test("self-deauthorization removes connection-owned execution demand", async () => {
+  const server = createServer("memory-v2-execution-policy-demand-cleanup");
+  const ownerConnection = await connect(server, OWNER, true);
+  const owner = await ownerConnection.client.mount(
+    SPACE,
+    {},
+    ownerConnection.auth,
+  );
+  let writerConnection:
+    | Awaited<ReturnType<typeof connect>>
+    | undefined;
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${SPACE}`,
+        value: {
+          value: {
+            [OWNER]: "OWNER",
+            [WRITER]: "OWNER",
+          },
+        },
+      }],
+    });
+
+    writerConnection = await connect(server, WRITER, true);
+    const writer = await writerConnection.client.mount(
+      SPACE,
+      {},
+      writerConnection.auth,
+    );
+    assertEquals(
+      await writer.setExecutionDemand("feature", ["piece:one"]),
+      true,
+    );
+    assertEquals(server.listExecutionDemands(SPACE, "feature").length, 1);
+
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${SPACE}`,
+        value: { value: { [OWNER]: "OWNER" } },
+      }],
+    });
+    assertEquals(server.listExecutionDemands(SPACE, "feature"), []);
+  } finally {
+    await writerConnection?.client.close();
     await ownerConnection.client.close();
     await server.close();
   }
