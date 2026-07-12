@@ -1328,7 +1328,10 @@ export class PatternManager {
     // builder gate. Probe the gate again here so this public API never turns a
     // corrupted/private-table value into executable authority.
     const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
-    if (indexed !== undefined && isTrustedBuilderArtifact(indexed)) {
+    if (
+      sourceAvailable && indexed !== undefined &&
+      isTrustedBuilderArtifact(indexed)
+    ) {
       this.esmCacheStats.byIdentityHits++;
       return indexed as object;
     }

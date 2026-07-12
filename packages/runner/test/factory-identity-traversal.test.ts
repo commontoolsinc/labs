@@ -59,6 +59,52 @@ describe("factory-aware createRef identity", () => {
     );
   });
 
+  it("hashes a ref-less nested module through its legacy descriptor only", () => {
+    const implementation = (value: unknown) => value;
+    const module = registerFabricFactory(
+      Object.assign(
+        (_input: unknown) => undefined,
+        {
+          type: "javascript",
+          implementation,
+          toJSON: () => ({
+            type: "javascript",
+            implementation: implementation.toString(),
+          }),
+          asScope: () => undefined,
+        },
+      ),
+      "module",
+      {
+        kind: "module",
+        rootToken: {},
+        argumentSchema: true,
+        resultSchema: true,
+      },
+    );
+    const keylessPattern = registerFabricFactory(
+      Object.assign(
+        (_input: unknown) => undefined,
+        {
+          argumentSchema: true,
+          resultSchema: true,
+          result: {},
+          nodes: [{ module, inputs: {}, outputs: {} }],
+          toJSON: () => ({}),
+        },
+      ),
+      "pattern",
+      {
+        kind: "pattern",
+        rootToken: {},
+        argumentSchema: true,
+        resultSchema: true,
+      },
+    );
+
+    expect(() => id({ pattern: keylessPattern })).not.toThrow();
+  });
+
   it("rejects arbitrary functions and a real cycle through hidden params", () => {
     expect(() => createRef({ invalid: () => undefined }, "cause")).toThrow(
       "Arbitrary functions are not valid createRef values",

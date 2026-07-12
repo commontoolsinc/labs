@@ -95,7 +95,7 @@ during `ClosureTransformer`. `PatternCallbackLoweringTransformer` sees only the
 synthesized destructured `({element, …})` param and handles all three
 identically as far as the key-prologue is concerned.
 
-| Source form                                             | `ClosureTransformer` (stage 11)                                                                                                                                                                                                                                                                                                               |
+| Source form                                             | `ClosureTransformer` (stage 13)                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `(elem) => …elem.foo…`                                  | Identifier form. `bindingName = elem`, no aliases, body unchanged. Later passes (and our new analyzer hook) recognize `elem` as the element binding via `mapCallbackRegistry`.                                                                                                                                                                |
 | `({piece, name}) => …` (plain object destructure)       | Destructure with no computed property names. `plan.aliases.length === 0`: the destructure binding passes through unchanged (no fresh `element` identifier synthesized). `PatternCallbackLoweringTransformer` sees the destructured param and generates a `key()` prologue (`const piece = __cf_pattern_input.key("element", "piece");` etc.). |
@@ -109,14 +109,14 @@ path is therefore the dominant one and the one most worth understanding deeply.
 
 For the identifier-form path, the late stages handle most of the lowering:
 
-- During `ClosureTransformer` (stage 11), expression-site lowering decides
+- During `ClosureTransformer` (stage 13), expression-site lowering decides
   whether each expression in the body needs an early lift-applied wrapper. The
   decision flows from `analyze(expression)` reporting `containsReactive` /
   `requiresRewrite` / `dataFlows`.
 - Most `elem.foo`-style passthrough reads (inside `{elem.foo}` JSX, inside
   `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at this
   stage. They flow through to `PatternCallbackLoweringTransformer`.
-- During `PatternCallbackLoweringTransformer` (stage 15),
+- During `PatternCallbackLoweringTransformer` (stage 17),
   `pattern-body-reactive-root-lowering` walks the body and rewrites `elem.foo`
   to `elem.key("foo")` in place. This is the cheaper form — it gives the runtime
   a fine-grained key path without pulling `elem` into a lift's inputs.

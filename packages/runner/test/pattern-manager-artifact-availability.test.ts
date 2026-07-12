@@ -194,7 +194,7 @@ describe("PatternManager exact-space artifact availability", () => {
     }
   });
 
-  it("keeps a warm artifact executable without granting another requested space", async () => {
+  it("does not let a warm artifact grant another requested source space", async () => {
     const pattern = await runtime.patternManager.compilePattern(PROGRAM, {
       space: spaceA,
     });
@@ -225,11 +225,11 @@ describe("PatternManager exact-space artifact availability", () => {
         ),
       ).toBe(true);
 
-      // A globally warm index is enough for synchronous execution, but is not
-      // source authority for space B and must not grant durable availability.
+      // A globally warm index is not source authority for space B. Factory
+      // materialization must verify the exact requested source space.
       const warmInOtherSpace = await coldRuntime.patternManager
         .loadPatternByIdentity(ref.identity, ref.symbol, spaceB);
-      expect(warmInOtherSpace).toBeDefined();
+      expect(warmInOtherSpace).toBeUndefined();
       expect(
         coldRuntime.patternManager.isArtifactAvailableInSpace(
           ref.identity,

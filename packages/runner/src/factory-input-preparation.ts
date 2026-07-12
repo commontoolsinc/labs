@@ -16,6 +16,7 @@ import type { Runtime } from "./runtime.ts";
 import { resolveSchema } from "./schema.ts";
 import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { canBranchMatch } from "./traverse.ts";
 
 export interface FactoryInputPreparationContext {
   readonly runtime: Runtime;
@@ -146,8 +147,7 @@ export function materializeScheduledFactoryInputs(
     candidate: JSONSchema | undefined,
   ): JSONSchema | undefined => {
     const withRefs = isRecord(candidate) && typeof candidate.$ref === "string"
-      ? ContextualFlowControl.resolveSchemaRefs(candidate, fullSchema) ??
-        candidate
+      ? ContextualFlowControl.resolveSchemaRefsOrThrow(candidate, fullSchema)
       : candidate;
     return resolveSchema(withRefs) ?? withRefs;
   };
@@ -169,6 +169,8 @@ export function materializeScheduledFactoryInputs(
     const contains = (isRecord(resolved.properties) &&
       Object.values(resolved.properties).some(schemaContainsFactory)) ||
       schemaContainsFactory(resolved.items) ||
+      (Array.isArray(resolved.prefixItems) &&
+        resolved.prefixItems.some(schemaContainsFactory)) ||
       schemaContainsFactory(resolved.additionalProperties) ||
       (["allOf", "anyOf", "oneOf"] as const).some((compound) =>
         Array.isArray(resolved[compound]) &&
@@ -195,6 +197,7 @@ export function materializeScheduledFactoryInputs(
 
     const expected = factoryContractFromSchema(resolvedSchema);
     if (expected !== undefined) {
+      if (currentValue === undefined) return currentValue;
       const resolvedInput = resolveLink(
         context.runtime,
         context.tx,
@@ -242,16 +245,18 @@ export function materializeScheduledFactoryInputs(
       }
     }
 
-    if (
-      Array.isArray(currentValue) &&
-      schemaContainsFactory(resolvedSchema.items)
-    ) {
+    if (Array.isArray(currentValue)) {
+      const prefixItems = Array.isArray(resolvedSchema.prefixItems)
+        ? resolvedSchema.prefixItems
+        : [];
       for (let index = 0; index < currentValue.length; index++) {
         if (!(index in currentValue)) continue;
+        const itemSchema = prefixItems[index] ?? resolvedSchema.items;
+        if (!schemaContainsFactory(itemSchema)) continue;
         const child = currentValue[index];
         const prepared = visit(
           child,
-          resolvedSchema.items,
+          itemSchema,
           [...path, String(index)],
         );
         if (!Object.is(prepared, child)) {
@@ -297,6 +302,12 @@ export function materializeScheduledFactoryInputs(
       for (const branch of branches) {
         if (!schemaContainsFactory(branch)) continue;
         const resolvedBranch = resolvedSchemaFor(branch);
+        if (
+          compound !== "allOf" && resolvedBranch !== undefined &&
+          !canBranchMatch(resolvedBranch, result)
+        ) {
+          continue;
+        }
         if (
           compound !== "allOf" && isRecord(resolvedBranch) &&
           "asFactory" in resolvedBranch &&

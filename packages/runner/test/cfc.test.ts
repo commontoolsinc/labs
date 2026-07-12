@@ -199,6 +199,20 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     ]);
   });
 
+  it("accepts schema-light module and handler factory contracts", () => {
+    for (
+      const asFactory of [
+        { kind: "module" },
+        { kind: "handler" },
+      ] as const
+    ) {
+      const refs = new Set<string>();
+      expect(() => findCfcSchemaRefs({ asFactory } as JSONSchema, refs)).not
+        .toThrow();
+      expect(refs.size).toBe(0);
+    }
+  });
+
   it("uses nested property $defs while traversing through array item refs", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {

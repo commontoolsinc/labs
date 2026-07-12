@@ -188,6 +188,35 @@ type InferredModuleFactory = SchemaWithoutCell<typeof MODULE_FACTORY_SCHEMA>;
 type InferredHandlerFactory = Schema<typeof HANDLER_FACTORY_SCHEMA>;
 type InferredNestedFactories = Schema<typeof NESTED_AND_CELL_FACTORY_SCHEMA>;
 
+const EMBEDDED_LOCAL_REF_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: {
+      $ref: "#/$defs/Input",
+      $defs: {
+        Input: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    },
+    resultSchema: {
+      $ref: "#/$defs/Output",
+      $defs: {
+        Output: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+type InferredEmbeddedLocalRefFactory = Schema<
+  typeof EMBEDDED_LOCAL_REF_FACTORY_SCHEMA
+>;
+
 const _patternFactoryInference: MustBeTrue<
   AssertAssignable<
     InferredPatternFactory,
@@ -208,6 +237,12 @@ const _handlerFactoryInference: MustBeTrue<
 > = true;
 const _factoryInferenceIsNotAny: MustBeFalse<IsAny<InferredPatternFactory>> =
   false;
+
+void ((factory: InferredEmbeddedLocalRefFactory) => {
+  factory({ query: "weather" });
+  // @ts-expect-error Embedded factory-local refs retain their input contract.
+  factory({ query: 42 });
+});
 const _factoryIsFabricValue: MustBeTrue<
   AssertAssignable<InferredPatternFactory, FabricValue>
 > = true;

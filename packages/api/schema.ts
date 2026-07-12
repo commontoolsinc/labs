@@ -183,14 +183,14 @@ type SchemaFactory<
   } ? PatternFactory<
       SchemaInner<
         Argument,
-        Root,
+        MergeSchemas<Argument, Root>,
         DecrementDepth<Depth>,
         false,
         DecrementFactoryDepth<FactoryDepth>
       >,
       SchemaInner<
         Result,
-        Root,
+        MergeSchemas<Result, Root>,
         DecrementDepth<Depth>,
         true,
         DecrementFactoryDepth<FactoryDepth>
@@ -203,14 +203,14 @@ type SchemaFactory<
   } ? ModuleFactory<
       SchemaInner<
         Argument,
-        Root,
+        MergeSchemas<Argument, Root>,
         DecrementDepth<Depth>,
         false,
         DecrementFactoryDepth<FactoryDepth>
       >,
       SchemaInner<
         Result,
-        Root,
+        MergeSchemas<Result, Root>,
         DecrementDepth<Depth>,
         true,
         DecrementFactoryDepth<FactoryDepth>
@@ -223,14 +223,14 @@ type SchemaFactory<
   } ? HandlerFactory<
       SchemaInner<
         Context,
-        Root,
+        MergeSchemas<Context, Root>,
         DecrementDepth<Depth>,
         false,
         DecrementFactoryDepth<FactoryDepth>
       >,
       SchemaInner<
         Event,
-        Root,
+        MergeSchemas<Event, Root>,
         DecrementDepth<Depth>,
         false,
         DecrementFactoryDepth<FactoryDepth>

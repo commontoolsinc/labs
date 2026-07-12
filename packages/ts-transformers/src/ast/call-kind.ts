@@ -454,6 +454,29 @@ function replacePatternCallbackCarrier(
       ),
     );
   }
+  if (ts.isSatisfiesExpression(expression)) {
+    return factory.updateSatisfiesExpression(
+      expression,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+      expression.type,
+    );
+  }
+  if (ts.isPartiallyEmittedExpression(expression)) {
+    return factory.updatePartiallyEmittedExpression(
+      expression,
+      replacePatternCallbackCarrier(
+        expression.expression,
+        carrier,
+        replacement,
+        factory,
+      ),
+    );
+  }
   return expression;
 }
 

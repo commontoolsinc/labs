@@ -75,15 +75,27 @@ export function decodeFactoryProjections(value: unknown): unknown {
   const direct = decodeFactoryProjection(value);
   if (direct !== undefined) return direct;
   if (Array.isArray(value)) {
-    return value.map(decodeFactoryProjections);
+    let result: unknown[] | undefined;
+    for (let index = 0; index < value.length; index++) {
+      const child = value[index];
+      const decoded = decodeFactoryProjections(child);
+      if (!Object.is(decoded, child)) {
+        result ??= [...value];
+        result[index] = decoded;
+      }
+    }
+    return result ?? value;
   }
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [
-        key,
-        decodeFactoryProjections(child),
-      ]),
-    );
+    let result: Record<string, unknown> | undefined;
+    for (const [key, child] of Object.entries(value)) {
+      const decoded = decodeFactoryProjections(child);
+      if (!Object.is(decoded, child)) {
+        result ??= { ...(value as Record<string, unknown>) };
+        result[key] = decoded;
+      }
+    }
+    return result ?? value;
   }
   return value;
 }

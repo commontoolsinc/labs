@@ -4635,7 +4635,9 @@ export class Runner {
     tx: IExtendedStorageTransaction,
   ): string {
     try {
-      return JSON.stringify(inputsCell.getAsQueryResult([], tx, false, false));
+      return toCompactDebugString(
+        inputsCell.getAsQueryResult([], tx, false, false),
+      );
     } catch (_error) {
       return "(Can't serialize to JSON)";
     }

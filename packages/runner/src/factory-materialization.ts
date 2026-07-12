@@ -30,6 +30,7 @@ import {
   factoryContractFromSchema,
 } from "./factory-contract.ts";
 import { noteLegacyFactoryCompatibilityRead } from "./legacy-factory-compat.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 
 export type { FactoryContract } from "./factory-contract.ts";
 
@@ -487,7 +488,10 @@ export function materializeFactoryForSchema(
   schema: JSONSchema | undefined,
   context: Omit<FactoryMaterializationContext, "expected">,
 ): unknown {
-  const expected = factoryContractFromSchema(schema);
+  const resolvedSchema = isRecord(schema) && typeof schema.$ref === "string"
+    ? ContextualFlowControl.resolveSchemaRefsOrThrow(schema, schema)
+    : schema;
+  const expected = factoryContractFromSchema(resolvedSchema);
   if (expected === undefined || value === undefined) return value;
   return materializeFactory(value, { ...context, expected });
 }

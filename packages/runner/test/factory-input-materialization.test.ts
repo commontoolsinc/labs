@@ -366,6 +366,77 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
+  it("materializes tuple factory leaves through prefixItems", () => {
+    const selected = selectFactory("module", space, true);
+    const tupleSchema = {
+      type: "array",
+      prefixItems: [{ asFactory: selected.contract }],
+      items: false,
+    } as JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "tuple-factory-input",
+        tupleSchema,
+        tx,
+      );
+      const prepared = materializeScheduledFactoryInputs(
+        [selected.shell],
+        tupleSchema,
+        { runtime, tx, inputsCell },
+      ) as unknown[];
+
+      expect(prepared[0]).toBe(selected.live);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
+  it("skips a non-selected object union branch with a factory property", () => {
+    const selected = selectFactory("module", space, true);
+    const unionSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "plain" },
+            value: { type: "string" },
+          },
+          required: ["kind", "value"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "factory" },
+            factory: { asFactory: selected.contract },
+          },
+          required: ["kind", "factory"],
+        },
+      ],
+    } as JSONSchema;
+    const ordinary = { kind: "plain", value: "untouched" };
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "object-union-factory-input",
+        unionSchema,
+        tx,
+      );
+
+      expect(
+        materializeScheduledFactoryInputs(ordinary, unionSchema, {
+          runtime,
+          tx,
+          inputsCell,
+        }),
+      ).toBe(ordinary);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
   for (const kind of FACTORY_KINDS) {
     it(`materializes a warm ${kind} factory in lift input`, async () => {
       const selected = selectFactory(kind, space, true);

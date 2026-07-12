@@ -1,5 +1,5 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 import {
   createFactoryShell,
   factoryStateOf,
@@ -699,6 +699,11 @@ Deno.test("decodeFactoryProjections restores nested factory leaves", () => {
     factoryStateOf(decoded.nested[0]),
     factoryStateOf(patternFactory),
   );
+});
+
+Deno.test("decodeFactoryProjections preserves ordinary JSON container identity", () => {
+  const object = { nested: { value: 1 }, list: [1, 2, 3] };
+  assertStrictEquals(decodeFactoryProjections(object), object);
 });
 
 Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {

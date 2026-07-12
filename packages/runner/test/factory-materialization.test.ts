@@ -24,6 +24,7 @@ import type { Frame } from "../src/builder/types.ts";
 import {
   type FactoryContract,
   materializeFactory,
+  materializeFactoryForSchema,
   prepareFactory,
 } from "../src/factory-materialization.ts";
 import {
@@ -207,6 +208,26 @@ describe("runner-owned factory materialization", () => {
     ).toThrow(
       "Factory materialization kind mismatch: expected pattern, got module",
     );
+  });
+
+  it("warm-materializes a factory selected through a local schema ref", () => {
+    const { bases } = makeFactories();
+    const state = sealFactoryState(bases[1]);
+    warm.set(key(state.ref.identity, state.ref.symbol), bases[1]);
+    const shell = createFactoryShell(state);
+    const schema = {
+      $ref: "#/$defs/SelectedFactory",
+      $defs: {
+        SelectedFactory: { asFactory: contractOf(state) },
+      },
+    } as JSONSchema;
+
+    expect(
+      materializeFactoryForSchema(shell, schema, {
+        runtime,
+        artifactSpace,
+      }),
+    ).toBe(bases[1]);
   });
 
   it("warm-materializes all kinds, reapplies modifiers, and preserves canonical state", () => {

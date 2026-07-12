@@ -11,6 +11,7 @@ import type {
 } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isPlainObject } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import { deepFreeze } from "./deep-freeze.ts";
 import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
@@ -267,7 +268,7 @@ function mergeResolvedSchemaRef(
     }
     return Object.fromEntries(
       [...Object.entries(targetObject), ...Object.entries(siblings)]
-        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
+        .sort(([left], [right]) => utf8Compare(left, right)),
     ) as Readonly<Record<string, NormalizedSchemaValue>>;
   }
   // Internal normalization marker for a `$ref` whose sibling assertions

@@ -22,6 +22,7 @@ import {
   getPatternBuilderCallbackArgument,
   getPatternBuilderCallbackDescriptor,
   getWithPatternHoistablePatternCall,
+  updatePatternBuilderCallbackArgument,
 } from "../../src/ast/call-kind.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 
@@ -329,6 +330,57 @@ Deno.test("getPatternBuilderCallbackArgument unwraps the compiler params-schema 
     descriptor.paramsSchema?.getText(),
     `{ type: "object", properties: {} }`,
   );
+});
+
+Deno.test("updatePatternBuilderCallbackArgument preserves satisfies and partially-emitted carriers", () => {
+  const { sourceFile, checker } = createProgramWithCommonFabric(`
+    import { __cfHelpers, pattern } from "commonfabric";
+    const value = pattern((__cfHelpers.withPatternParamsSchema(
+      (input: unknown, params: unknown) => ({ input, params }),
+      { type: "object", properties: {} },
+    ) satisfies unknown));
+  `);
+  const call = findCall(sourceFile, "value");
+  const descriptor = getPatternBuilderCallbackDescriptor(call, checker)!;
+  const replacement = ts.factory.createArrowFunction(
+    undefined,
+    undefined,
+    [],
+    undefined,
+    undefined,
+    ts.factory.createNumericLiteral(1),
+  );
+
+  const satisfiesUpdated = updatePatternBuilderCallbackArgument(
+    descriptor,
+    replacement,
+    ts.factory,
+  );
+  const satisfies = ts.isParenthesizedExpression(satisfiesUpdated)
+    ? satisfiesUpdated.expression
+    : satisfiesUpdated;
+  assert(ts.isSatisfiesExpression(satisfies));
+  assert(ts.isCallExpression(satisfies.expression));
+  assertEquals(satisfies.expression.arguments[0], replacement);
+
+  const partiallyEmittedUpdated = updatePatternBuilderCallbackArgument(
+    {
+      ...descriptor,
+      argument: ts.factory.createPartiallyEmittedExpression(
+        descriptor.argument,
+      ),
+    },
+    replacement,
+    ts.factory,
+  );
+  assert(ts.isPartiallyEmittedExpression(partiallyEmittedUpdated));
+  const partiallyEmittedInner = partiallyEmittedUpdated.expression;
+  const wrapped = ts.isParenthesizedExpression(partiallyEmittedInner)
+    ? partiallyEmittedInner.expression
+    : partiallyEmittedInner;
+  assert(ts.isSatisfiesExpression(wrapped));
+  assert(ts.isCallExpression(wrapped.expression));
+  assertEquals(wrapped.expression.arguments[0], replacement);
 });
 
 Deno.test("getPatternBuilderCallbackArgument follows an identifier bound to the callback arrow", () => {
