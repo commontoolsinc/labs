@@ -24,7 +24,10 @@ import {
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
-import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+} from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -1501,6 +1504,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   private writeAuthorizedByIdentityForBinding(
     context: GenerationContext,
     bindingName: ts.Identifier,
+    normalizeFile = true,
   ): { file: string; path: string[] } {
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
@@ -1521,7 +1525,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       "unknown";
 
     return {
-      file: normalizeWriterIdentityFile(sourceFileName),
+      file: normalizeFile
+        ? normalizeWriterIdentityFile(sourceFileName)
+        : sourceFileName.replace(/\\/g, "/"),
       path: [declaredName],
     };
   }
@@ -1618,6 +1624,40 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (
         ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
       ) {
+        const referencedName = this.resolveTypeReferenceName(
+          typeNode.typeName,
+          context,
+        );
+        if (referencedName === "AnyOf") {
+          const alternativesNode = typeNode.typeArguments?.[0];
+          const alternatives = this.extractLiteralLikeValue(
+            undefined,
+            alternativesNode,
+            context,
+          );
+          return Array.isArray(alternatives)
+            ? { anyOf: alternatives }
+            : undefined;
+        }
+        if (referencedName === "PolicyOf") {
+          const bindingNode = typeNode.typeArguments?.[0];
+          if (
+            bindingNode && ts.isTypeQueryNode(bindingNode) &&
+            ts.isIdentifier(bindingNode.exprName)
+          ) {
+            return {
+              type: CFC_ATOM_TYPE.Policy,
+              policyRefKind: "module",
+              __ctPolicyIdentityOf: this.writeAuthorizedByIdentityForBinding(
+                context,
+                bindingNode.exprName,
+                false,
+              ),
+              subject: { __ctOwningSpace: true },
+            };
+          }
+          return undefined;
+        }
         const aliasDeclaration = this.getTypeAliasDeclarationForSymbol(
           context.typeChecker.getSymbolAtLocation(typeNode.typeName),
           context,
@@ -1736,6 +1776,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return undefined;
+  }
+
+  private resolveTypeReferenceName(
+    typeName: ts.Identifier,
+    context: GenerationContext,
+  ): string {
+    const symbol = context.typeChecker.getSymbolAtLocation(typeName);
+    const resolved = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? context.typeChecker.getAliasedSymbol(symbol)
+      : symbol;
+    return resolved?.name ?? typeName.text;
   }
 
   private extractDefaultValueFromNode(

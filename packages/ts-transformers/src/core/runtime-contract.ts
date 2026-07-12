@@ -14,6 +14,25 @@
  */
 export const PATTERN_COVERAGE_GLOBAL = "__cfPatternCoverage";
 
+/** Portable compiler output; trusted ingestion performs the semantic checks. */
+export interface CfcPolicyCompilerManifestV1 {
+  readonly policyDigest: string;
+  readonly manifest: {
+    readonly formatVersion: 1;
+    readonly moduleIdentity: string;
+    readonly symbol: string;
+    readonly template: {
+      readonly templateVersion: 1;
+      readonly exchangeRules: readonly unknown[];
+      readonly dependencies: {
+        readonly authorityOnly: readonly string[];
+        readonly dataBearing: readonly string[];
+      };
+      readonly integrityRequirements: Readonly<Record<string, unknown>>;
+    };
+  };
+}
+
 // A `/// <cf-disable-transform />` directive is honored only at column zero.
 // This is intentional and mirrors TypeScript's own triple-slash directives
 // (`/// <reference ... />`), which are likewise recognized only at the very

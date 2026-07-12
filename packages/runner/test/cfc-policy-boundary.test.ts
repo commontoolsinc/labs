@@ -290,6 +290,33 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
       });
     });
 
+    it("observe: diagnoses an unresolved module policy by digest", async () => {
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: [] },
+        async (runtime) => {
+          const unresolved = cfcAtom.modulePolicyRef(
+            "sha256:missing-module",
+            "rules",
+            "sha256:missing-manifest",
+            signer.did(),
+          );
+          await seedSpaceLabeledCell(runtime, "policy-observe-missing", {
+            confidentiality: [unresolved],
+          });
+          const { diagnostics } = readThenSink(
+            runtime,
+            "policy-observe-missing",
+          );
+          expect(
+            diagnostics.some((note) =>
+              note.includes("module policy missing-manifest") &&
+              note.includes("sha256:missing-manifest")
+            ),
+          ).toBe(true);
+        },
+      );
+    });
+
     it("enforce: fuel exhaustion fails closed", async () => {
       await withRuntime(
         { policyEvaluation: "enforce", policyRecords: CYCLING_POLICY },

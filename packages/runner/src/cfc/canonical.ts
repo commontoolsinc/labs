@@ -7,6 +7,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcMetadata,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ConsumedRead,
   OrderedWriteAttempt,
   PreparedDigestInput,
@@ -80,6 +81,16 @@ const compareConsultedGrant = (
   if (left.space !== right.space) return left.space < right.space ? -1 : 1;
   if (left.id !== right.id) return left.id < right.id ? -1 : 1;
   return left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0;
+};
+
+const compareConsultedPolicyManifest = (
+  left: ConsultedPolicyManifest,
+  right: ConsultedPolicyManifest,
+): number => {
+  const leftKey = hashStringOf(left.reference);
+  const rightKey = hashStringOf(right.reference);
+  if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+  return left.state < right.state ? -1 : left.state > right.state ? 1 : 0;
 };
 
 const compareLabelMetadataObservation = (
@@ -329,6 +340,14 @@ export const canonicalizePreparedDigestInput = (
   ...(input.consultedGrants !== undefined && input.consultedGrants.length > 0
     ? {
       consultedGrants: [...input.consultedGrants].sort(compareConsultedGrant),
+    }
+    : {}),
+  ...(input.consultedPolicyManifests !== undefined &&
+      input.consultedPolicyManifests.length > 0
+    ? {
+      consultedPolicyManifests: [...input.consultedPolicyManifests].sort(
+        compareConsultedPolicyManifest,
+      ),
     }
     : {}),
   // Label-metadata observations (inv-12 Stage 2): address-sorted with a

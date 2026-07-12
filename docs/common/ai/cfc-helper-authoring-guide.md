@@ -19,6 +19,10 @@ The main pieces helper authors use are:
   `I` is present.
 - `WriteAuthorizedBy<T, typeof handler>`: a writable output may be modified by
   that handler identity.
+- `PolicyOf<typeof rules>`: a value is governed by one static exported
+  module-policy manifest.
+- `AnyOf<[A, B]>`: explicitly places alternatives in one disjunctive
+  confidentiality clause; without it, entries are conjunctive.
 - `Cfc<T, Metadata>`: attaches explicit CFC metadata that does not have a
   narrower helper alias yet.
 
@@ -38,6 +42,49 @@ For prompt-injection helpers, treat atoms and schemas as evidence builders, not
 as policy decisions. A helper can build atoms like `PromptSlotBound` or
 `UserSurfaceInput`, but the caller must supply the user, surface, source, role,
 digest, and route-specific integrity requirements.
+
+## Authoring Direct Exchange Rules
+
+Import rule declarations from `commonfabric/cfc`. Keep every rule and its
+owning rule set as exported, module-level static declarations:
+
+```ts
+import type { Confidential } from "commonfabric";
+import {
+  cfcPattern,
+  exchangeRule,
+  exchangeRules,
+  type PolicyOf,
+  THIS_POLICY,
+  v,
+} from "commonfabric/cfc";
+
+export const releaseToReader = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: { addAlternatives: [cfcPattern.user(v("reader"))] },
+});
+
+export const rules = exchangeRules([releaseToReader]);
+export type ProtectedText = Confidential<
+  string,
+  readonly [PolicyOf<typeof rules>]
+>;
+```
+
+`cfcPattern` builds match patterns and accepts `v(...)` /
+`THIS_POLICY.subject`; `cfcAtom` builds concrete runtime atoms. Do not mix the
+two. The compiler rejects dynamic content, unbound variables, unguarded rules,
+non-exported declarations, and reused rules. At label creation the runtime
+binds the owning space and durably installs the exact digest-addressed manifest
+in the destination; an unresolved or mismatched artifact fails closed.
+
+See `packages/patterns/cfc-exchange-rules/` for the copyable example and native
+test.
 
 ## Start With The Boundary
 

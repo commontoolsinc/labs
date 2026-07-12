@@ -1,5 +1,6 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { FabricValue } from "@commonfabric/api";
+import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
@@ -447,6 +448,16 @@ export type ConsultedGrant = {
   readonly digest: string;
 };
 
+/**
+ * One exact module-policy reference consulted by boundary evaluation. Both a
+ * present manifest and an absent lookup are decision inputs; recording the
+ * complete reference prevents pair/subject aliasing.
+ */
+export type ConsultedPolicyManifest = {
+  readonly reference: CfcModulePolicyRefAtom;
+  readonly state: "present" | "absent";
+};
+
 export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
@@ -477,6 +488,7 @@ export type PreparedDigestInput = {
   // cannot commit under another. Absent when no grants were consulted, so
   // pre-existing digests are unchanged; canonicalized address-sorted.
   readonly consultedGrants?: readonly ConsultedGrant[];
+  readonly consultedPolicyManifests?: readonly ConsultedPolicyManifest[];
   // Label-metadata observations (inv-12 Stage 2): boundary-decision inputs —
   // they change the flow join and the consumed set — bound under the same
   // discipline as writePolicyInputs. Absent when none were recorded, so
@@ -698,6 +710,9 @@ export type CfcTxState = {
   // this transaction (§8.12.7 route 2a), recorded by the runner-side grant
   // resolver, deduplicated by address. Folded into PreparedDigestInput.
   consultedGrants: ConsultedGrant[];
+  // Exact module-policy manifest lookups (present and absent), deduplicated by
+  // reference and folded into PreparedDigestInput.
+  consultedPolicyManifests: ConsultedPolicyManifest[];
   // Label-metadata observations recorded by the introspection surface
   // (inv-12 Stage 2, `recordCfcLabelMetadataObservation`): application
   // observations of first-layer label metadata, carrying their §4.6.4.2

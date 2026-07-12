@@ -229,6 +229,15 @@ const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
 
+const activeCommitPreconditions = (
+  preconditions: readonly CommitPrecondition[] | undefined,
+): readonly CommitPrecondition[] =>
+  getCommitPreconditionsConfig()
+    ? (preconditions ?? [])
+    : (preconditions ?? []).filter((precondition) =>
+      precondition.kind === "entity-value-hash"
+    );
+
 const toExplicitDocument = (value: FabricValue): EntityDocument => {
   if (!isObject(value)) {
     throw new Error(
@@ -1825,9 +1834,7 @@ class SpaceReplica implements ISpaceReplica {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
       : undefined;
-    const preconditions = getCommitPreconditionsConfig()
-      ? transaction.preconditions
-      : undefined;
+    const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -2121,10 +2128,7 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const emitCommitPreconditions = getCommitPreconditionsConfig();
-    const activePreconditions = emitCommitPreconditions
-      ? (preconditions ?? [])
-      : [];
+    const activePreconditions = activeCommitPreconditions(preconditions);
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0

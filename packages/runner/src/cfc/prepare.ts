@@ -67,6 +67,7 @@ import {
   createTxCfcGrantResolver,
   flushCfcGrantConsumptionClaims,
 } from "./grants.ts";
+import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
   deriveLabelMetadataTemplateEntries,
@@ -3576,6 +3577,7 @@ const verifyInputRequirements = (
           read.label?.integrity ?? [],
           [],
           mode === "enforce" ? "consuming" : "observing",
+          target.space,
         );
         if (mode === "enforce") {
           // Exhaustion fails closed; otherwise subsumption-fit the REWRITTEN
@@ -3586,6 +3588,11 @@ const verifyInputRequirements = (
                 .length === 0;
         }
         // observe: decide exactly as `off` would, diagnose the divergence.
+        noteModulePolicyResolutionFailures(
+          tx,
+          `input requirement /${entry.path.join("/")}`,
+          outcome.resolutionFailures,
+        );
         const decision = fitsLegacy(confidentiality);
         const rewrittenFits = outcome.exhausted === false &&
           atomsOutsideCeiling(outcome.confidentiality, maxConfidentiality)
@@ -3781,6 +3788,7 @@ const derivePersistedLabel = (
   schema: JSONSchema,
   schemaLabel: IFCLabel,
   sourceEntryLabels?: Map<string, IFCLabel>,
+  owningSpace?: MemorySpace,
 ): IFCLabel => {
   const ifc = isRecord(schema) ? schema.ifc : undefined;
   const actingPrincipal = tx.getCfcState().trustSnapshot?.actingPrincipal;
@@ -3805,7 +3813,11 @@ const derivePersistedLabel = (
     // clauses coalesce. `normalizeClause` is identity on flat atoms, so flat
     // labels are unchanged. Integrity carries no OR-clauses.
     confidentiality: mergeLabelValues(
-      schemaLabel.confidentiality?.map(normalizeClause),
+      resolvePolicyOfConfidentiality(
+        tx,
+        schemaLabel.confidentiality,
+        owningSpace,
+      )?.map(normalizeClause),
       copiedInputLabel?.confidentiality?.map(normalizeClause),
       projectedInputLabel?.confidentiality?.map(normalizeClause),
     ),
@@ -3822,6 +3834,140 @@ const derivePersistedLabel = (
       ),
     ),
   };
+};
+
+const OWNING_SPACE_PLACEHOLDER = "__ctOwningSpace";
+
+const resolvePolicyOfConfidentiality = (
+  tx: IExtendedStorageTransaction,
+  values: readonly unknown[] | undefined,
+  owningSpace: MemorySpace | undefined,
+): readonly unknown[] | undefined =>
+  values?.map((value) => resolvePolicyOfValue(tx, value, owningSpace));
+
+const resolvePolicyOfValue = (
+  tx: IExtendedStorageTransaction,
+  value: unknown,
+  owningSpace: MemorySpace | undefined,
+): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => resolvePolicyOfValue(tx, entry, owningSpace));
+  }
+  if (!isRecord(value)) return value;
+  if (
+    value.type === CFC_ATOM_TYPE.Policy &&
+    value.policyRefKind === "module"
+  ) {
+    if (
+      !isRecord(value.subject) ||
+      value.subject[OWNING_SPACE_PLACEHOLDER] !== true
+    ) {
+      throw new Error(
+        "cfcPolicyManifest: module policy schema atoms require compiler-lowered PolicyOf",
+      );
+    }
+  }
+  if (
+    value.type === CFC_ATOM_TYPE.Policy &&
+    value.policyRefKind === "module" &&
+    isRecord(value.subject) &&
+    value.subject[OWNING_SPACE_PLACEHOLDER] === true
+  ) {
+    if (
+      owningSpace === undefined || typeof value.moduleIdentity !== "string" ||
+      typeof value.symbol !== "string" || typeof value.policyDigest !== "string"
+    ) {
+      throw new Error("cfcPolicyManifest: malformed PolicyOf schema marker");
+    }
+    const reference = { ...value, subject: owningSpace };
+    if (
+      !tx.hasCfcPolicyManifest(owningSpace, reference) &&
+      !tx.installCfcPolicyManifest(owningSpace, reference)
+    ) {
+      throw new Error(
+        `cfcPolicyManifest: manifest ${value.policyDigest} is not installed in ${owningSpace}`,
+      );
+    }
+    const resolver = createTxCfcModulePolicyResolver(
+      tx,
+      (candidate) => tx.resolveCfcPolicyManifest(candidate, owningSpace),
+    );
+    // The exact reference was just proven present or installed above; this is
+    // a defensive assertion against an inconsistent transaction adapter.
+    if (resolver(reference as never) === undefined) {
+      throw new Error("cfcPolicyManifest: PolicyOf reference did not resolve");
+    }
+    return reference;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      resolvePolicyOfValue(tx, entry, owningSpace),
+    ]),
+  );
+};
+
+const modulePolicyReferencesIn = (value: unknown): unknown[] => {
+  const references: unknown[] = [];
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (!isRecord(candidate)) return;
+    if (
+      candidate.type === CFC_ATOM_TYPE.Policy &&
+      candidate.policyRefKind === "module" &&
+      typeof candidate.moduleIdentity === "string" &&
+      typeof candidate.symbol === "string" &&
+      typeof candidate.policyDigest === "string"
+    ) {
+      references.push(candidate);
+      return;
+    }
+    Object.values(candidate).forEach(visit);
+  };
+  visit(value);
+  return references;
+};
+
+const modulePolicyArtifactKey = (reference: unknown): string => {
+  // Every caller iterates modulePolicyReferencesIn(), which returns only
+  // records carrying all three string identity fields.
+  const candidate = reference as {
+    moduleIdentity: string;
+    symbol: string;
+    policyDigest: string;
+  };
+  return `${candidate.moduleIdentity}\0${candidate.symbol}\0${candidate.policyDigest}`;
+};
+
+const installCarriedPolicyManifests = (
+  tx: IExtendedStorageTransaction,
+  destination: MemorySpace,
+  entries: readonly LabelMapEntry[],
+): string[] => {
+  const failures: string[] = [];
+  const seen = new Set<string>();
+  for (const reference of modulePolicyReferencesIn(entries)) {
+    const digest = (reference as { policyDigest: string }).policyDigest;
+    if (seen.has(digest)) continue;
+    seen.add(digest);
+    // A cold cross-space copy may know the artifact only through the source
+    // space it just read. Resolve first so the runtime verifies and indexes
+    // that exact artifact, then atomically install it beside the destination
+    // label in this transaction.
+    tx.resolveCfcPolicyManifest(reference, undefined, false);
+    if (
+      !tx.hasCfcPolicyManifest(destination, reference) &&
+      !tx.installCfcPolicyManifest(destination, reference)
+    ) {
+      failures.push(
+        `cfcPolicyManifest: manifest ${digest} is not installed in ${destination}`,
+      );
+    }
+  }
+  return failures;
 };
 
 // Integrity atom families that are concrete evidence minted only by trusted
@@ -3919,6 +4065,7 @@ const persistedLabelFromSchemaAtPath = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  owningSpace: MemorySpace,
 ): IFCLabel | undefined => {
   const logicalPath = canonicalizeLogicalPath(path);
   const entries = walkIfcSchema(schema);
@@ -3939,7 +4086,13 @@ const persistedLabelFromSchemaAtPath = (
   const entryLabels = new Map<string, IFCLabel>(
     entries.map((entry) => [pathKey(entry.path), entry.label]),
   );
-  return derivePersistedLabel(tx, match.schema, match.label, entryLabels);
+  return derivePersistedLabel(
+    tx,
+    match.schema,
+    match.label,
+    entryLabels,
+    owningSpace,
+  );
 };
 
 const mergeLabels = (
@@ -3970,6 +4123,7 @@ const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
 const rootLabelFromSchema = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema | undefined,
+  owningSpace: MemorySpace,
 ): IFCLabel => {
   if (schema === undefined) {
     return {};
@@ -3977,7 +4131,7 @@ const rootLabelFromSchema = (
   const root = walkIfcSchema(schema).find((entry) => entry.path.length === 0);
   return root === undefined
     ? {}
-    : derivePersistedLabel(tx, root.schema, root.label);
+    : derivePersistedLabel(tx, root.schema, root.label, undefined, owningSpace);
 };
 
 /**
@@ -4035,6 +4189,7 @@ const derivePersistedLinkLabel = (
       tx,
       pendingSourceSchema,
       input.source.path,
+      input.source.space,
     )
     : undefined;
   if (pendingSourceSchema === undefined && sourceMetadata === undefined) {
@@ -4062,11 +4217,16 @@ const derivePersistedLinkLabel = (
           tx,
           targetCandidate,
           input.target.path,
+          input.target.space,
         );
       }
     }
   }
-  const linkSchemaLabel = rootLabelFromSchema(tx, input.linkSchema);
+  const linkSchemaLabel = rootLabelFromSchema(
+    tx,
+    input.linkSchema,
+    input.source.space,
+  );
   const hasCarriedLabel =
     input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
       false;
@@ -4246,8 +4406,13 @@ export const loadSchemaDocument = (
 // (docs/specs/cfc-write-prefix-provenance.md §7.4).
 const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
-): { confidentiality: readonly unknown[]; integrity: readonly unknown[] } => {
+): {
+  confidentiality: readonly unknown[];
+  integrity: readonly unknown[];
+  modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
+} => {
   const atoms: unknown[] = [];
+  const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
   // transaction-global over-approximation as the confidentiality union —
@@ -4301,6 +4466,16 @@ const collectConsumedLabel = (
           (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
       atoms.push(...(entry.label.confidentiality ?? []));
+      for (
+        const reference of modulePolicyReferencesIn(
+          entry.label.confidentiality,
+        )
+      ) {
+        const key = modulePolicyArtifactKey(reference);
+        const spaces = modulePolicySpaces.get(key) ?? new Set<MemorySpace>();
+        spaces.add(read.space);
+        modulePolicySpaces.set(key, spaces);
+      }
       integrityAtoms.push(...(entry.label.integrity ?? []));
     }
   }
@@ -4318,6 +4493,7 @@ const collectConsumedLabel = (
   return {
     confidentiality: uniqueCfcAtoms(atoms),
     integrity: uniqueCfcAtoms(integrityAtoms),
+    modulePolicySpaces,
   };
 };
 
@@ -4350,10 +4526,17 @@ const evaluateGatedConfidentiality = (
   integrity: readonly unknown[],
   boundary: readonly unknown[],
   consumption: CfcGrantConsumptionContext,
+  destinationSpace?:
+    | MemorySpace
+    | ((reference: unknown) => MemorySpace | undefined),
 ): {
   confidentiality: readonly unknown[];
   exhausted: boolean;
   firings: number;
+  resolutionFailures: readonly {
+    readonly reference: unknown;
+    readonly reason: string;
+  }[];
 } => {
   const state = tx.getCfcState();
   const result = evaluateExchangeRules(
@@ -4372,6 +4555,18 @@ const evaluateGatedConfidentiality = (
       // of this evaluation — this function only runs when the dial is on.
       grantResolver: createTxCfcGrantResolver(tx),
       grantConsumption: consumption,
+      modulePolicyResolver: createTxCfcModulePolicyResolver(
+        tx,
+        (reference) => {
+          const space = typeof destinationSpace === "function"
+            ? destinationSpace(reference)
+            : destinationSpace;
+          if (typeof destinationSpace === "function" && space === undefined) {
+            return undefined;
+          }
+          return tx.resolveCfcPolicyManifest(reference, space);
+        },
+      ),
     },
   );
   return {
@@ -4380,7 +4575,29 @@ const evaluateGatedConfidentiality = (
       : result.label.confidentiality ?? [],
     exhausted: result.exhausted,
     firings: result.firings.length,
+    resolutionFailures: result.resolutionFailures,
   };
+};
+
+const noteModulePolicyResolutionFailures = (
+  tx: IExtendedStorageTransaction,
+  site: string,
+  failures: readonly {
+    readonly reference: unknown;
+    readonly reason: string;
+  }[],
+): void => {
+  for (const failure of failures) {
+    const reference = isRecord(failure.reference)
+      ? failure.reference
+      : undefined;
+    const digest = typeof reference?.policyDigest === "string"
+      ? ` digest ${reference.policyDigest}`
+      : "";
+    tx.noteCfcDiagnostic(
+      `policy-evaluation(observe): module policy ${failure.reason}${digest} at ${site}`,
+    );
+  }
 };
 
 // §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
@@ -4430,6 +4647,24 @@ const verifySinkRequestCeilings = (
         consumed.integrity,
         boundary,
         mode === "enforce" ? "consuming" : "observing",
+        (reference) => {
+          const key = modulePolicyArtifactKey(reference);
+          const spaces = [...(consumed.modulePolicySpaces.get(key) ?? [])]
+            .sort();
+          if (spaces.length === 0) return undefined;
+          // Every consumed label origin must carry its own exact local copy.
+          // Bind every origin into the commit, so a concurrent change in any
+          // one of them rejects the release before its post-commit effect can
+          // flush. Precondition-only origin commits are harmless to split; the
+          // effect runs only after the complete transaction succeeds.
+          tx.enableMultiSpaceWrites?.(spaces);
+          for (const space of spaces) {
+            if (tx.resolveCfcPolicyManifest(reference, space) === undefined) {
+              return undefined;
+            }
+          }
+          return spaces[0];
+        },
       );
       if (mode === "enforce") {
         if (outcome.exhausted) {
@@ -4445,6 +4680,11 @@ const verifySinkRequestCeilings = (
       } else {
         // observe: decide exactly as `off` would; diagnose what enforce
         // would have done differently.
+        noteModulePolicyResolutionFailures(
+          tx,
+          `sink-request ${sink}`,
+          outcome.resolutionFailures,
+        );
         const rewrittenOffending = outcome.exhausted
           ? undefined
           : atomsOutsideCeiling(outcome.confidentiality, ceiling);
@@ -4624,7 +4864,13 @@ const verifyWriteFloor = (
     // evidence-gated so a pattern author cannot forge runtime-minted atoms
     // to satisfy their own floor.
     const base = gateRuntimeMintedIntegrity(
-      derivePersistedLabel(tx, entry.schema, entry.label, entryLabels),
+      derivePersistedLabel(
+        tx,
+        entry.schema,
+        entry.label,
+        entryLabels,
+        target.space,
+      ),
       ctx.identityForPath(entry.path),
     ).integrity ?? [];
 
@@ -5152,6 +5398,7 @@ export const prepareBoundaryCommit = (
               entry.schema,
               entry.label,
               mergedSchemaEntryLabels,
+              target.space,
             ),
             identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
           );
@@ -6063,6 +6310,16 @@ export const prepareBoundaryCommit = (
     persistedLabelEntries.push(
       ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
     );
+
+    const manifestFailures = installCarriedPolicyManifests(
+      tx,
+      space,
+      persistedLabelEntries,
+    );
+    if (manifestFailures.length > 0) {
+      reasons.push(...manifestFailures);
+      continue;
+    }
 
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 

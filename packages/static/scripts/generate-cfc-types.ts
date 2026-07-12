@@ -129,9 +129,10 @@ export function collectReExportedNames(
 export function declarationName(statement: ts.Statement): string | undefined {
   if (
     ts.isTypeAliasDeclaration(statement) ||
-    ts.isInterfaceDeclaration(statement)
+    ts.isInterfaceDeclaration(statement) ||
+    ts.isFunctionDeclaration(statement)
   ) {
-    return statement.name.text;
+    return statement.name?.text;
   }
   if (ts.isVariableStatement(statement)) {
     const declaration = statement.declarationList.declarations[0];
@@ -204,6 +205,18 @@ export function withExport(
       statement,
       [...prefix, ...keep(statement.modifiers)],
       statement.declarationList,
+    );
+  }
+  if (ts.isFunctionDeclaration(statement)) {
+    return factory.updateFunctionDeclaration(
+      statement,
+      [...prefix, ...keep(statement.modifiers)],
+      statement.asteriskToken,
+      statement.name,
+      statement.typeParameters,
+      statement.parameters,
+      statement.type,
+      undefined,
     );
   }
   throw new Error(
