@@ -279,12 +279,33 @@ Two invariants:
   `heads-up` with its uncertainty stated (product copy; `ext` if
   structured); certain-but-routine stays in `review`.
 
-The rung names deliberately match the posture vocabulary the Loom product
-already uses (silent memory → daily review → timely heads-up → interrupt), so
-product surfaces map 1:1 onto runtime postures. Within a rung, ordering is
-the steward-assigned `weight` (§4.4) — an opaque scalar that never crosses
-rungs and never gates delivery; it exists so continuous surfaces (Pond's
-radial layout, "ordered by the steward" lists) don't have to invent one.
+**Why these names.** The rungs match the posture vocabulary the Loom
+product already uses (silent memory → daily review → timely heads-up →
+interrupt), so the first consumer maps 1:1; each is an everyday English
+word whose plain meaning *is* the promise; and the scale is ordinal in
+exactly one dimension — how much of the user's present moment the notice
+claims (none / none-unless-sought / a scheduled batch / the next voluntary
+check-in / right now). That is deliberate contrast with the OS
+vocabularies: Android's `MIN < LOW < DEFAULT < HIGH` are magnitudes in an
+unnamed dimension, and iOS names its sound-making default `active` — a
+word that conceals the cost. Naming the top rung `interrupt` makes the
+cost legible where it matters most: **the name is the consent dialog**
+("allow this source to *interrupt* you?"). Where the wider ecosystem has
+converged on a word, we use it: `silent` is Web Push's `silent: true` and
+Android's shade section of the same name (iOS calls this `passive`). One
+term-of-art collision, named so no adapter author discovers it the hard
+way: Android's "heads-up notification" is their *peek banner* — loudest
+delivery, our `interrupt` — whereas this spec's `heads-up` is the plain
+English idiom ("just a heads-up"): quiet, held, non-interrupting; the
+compile targets in §9.3 disambiguate. And `review` has no OS analog
+because the capability doesn't exist there: no OS has a party that can
+batch across sources (prior-art.md, structural gap 4); the tier exists
+here because the steward does.
+
+Within a rung, ordering is the steward-assigned `weight` (§4.4) — an
+opaque scalar that never crosses rungs and never gates delivery; it exists
+so continuous surfaces (Pond's radial layout, "ordered by the steward"
+lists) don't have to invent one.
 
 ### 4.3 The pipeline
 
@@ -1073,6 +1094,16 @@ policy decision, default no.
 ### 9.3 OS delivery
 
 Only `interrupt` (and optionally `heads-up`, quietly) ever reaches the OS.
+The posture → platform compile table (which also disambiguates the
+Android "heads-up notification" term-of-art collision, §4.2):
+
+| Posture | iOS | Android | Web Push |
+|---|---|---|---|
+| `suppress`, `silent`, `review` | not delivered to the OS — in-fabric projections only (dots, lanes, digest) | — | — |
+| `heads-up` | `passive` interruption level (quiet, Notification Center) | Silent-section importance (`LOW`) — **never** the "heads-up" peek banner | `silent: true` |
+| `interrupt` | `active` | `DEFAULT`/`HIGH` (the peek banner Android calls a heads-up notification) | standard `showNotification` |
+| `interrupt` + user-adopted break-glass floor (§7) | `timeSensitive` / `critical` (entitlement-gated; reserved mapping) | `HIGH` + DND-bypass channel | `requireInteraction` (weak approximation) |
+
 Adapters compile the envelope down; the ledger stays canonical and
 "Android-shaped" (live update + auto-retract), and platforms degrade from
 there:
