@@ -9,6 +9,7 @@ import {
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  type AcceptedCommitSeq,
   type ActionExecutionProvenance,
   type BranchName,
   type CellScope,
@@ -19,6 +20,7 @@ import {
   type EntityDocument,
   type EntityId,
   type ExecutionClaim,
+  type InputBasisSeq,
   isEntityDocument,
   type Operation,
   type PatchOp,
@@ -28,6 +30,8 @@ import {
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
 } from "../v2.ts";
 
 export type { SchedulerExecutionContextKey } from "../v2.ts";
@@ -846,7 +850,7 @@ export interface AppliedSchedulerObservationResult {
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
   /** Canonical accepted basis/provenance, emitted only for kept rows. */
-  inputBasisSeq?: number;
+  inputBasisSeq?: InputBasisSeq;
   executionProvenance?: ActionExecutionProvenance;
   reason?:
     | "stale-confirmed-read"
@@ -860,7 +864,7 @@ export type AppliedActionAttempt =
     claim: ExecutionClaim;
     provenance: ActionExecutionProvenance;
     outcome: "committed";
-    acceptedCommitSeq: number;
+    acceptedCommitSeq: AcceptedCommitSeq;
   }
   | {
     localSeq: number;
@@ -944,7 +948,7 @@ export interface SchedulerActionObservation {
   completeActionScopeSummary?: CompleteActionScopeSummary;
   observedAtSeq: number;
   /** Host-derived maximum accepted revision sequence in the commit read set. */
-  inputBasisSeq?: number;
+  inputBasisSeq?: InputBasisSeq;
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
@@ -5467,7 +5471,7 @@ const applyCommitTransaction = (
           claim: executionClaims.get(commit.localSeq)!,
           provenance: acceptedObservation.provenance,
           outcome: "committed" as const,
-          acceptedCommitSeq: seq,
+          acceptedCommitSeq: toAcceptedCommitSeq(seq),
         }],
       }
       : {}),
@@ -5820,11 +5824,11 @@ const resolvePendingReads = (
 const acceptedInputBasisSeq = (
   confirmed: ClientCommit["reads"]["confirmed"],
   resolvedPending: readonly { seq: number }[],
-): number => {
+): InputBasisSeq => {
   let basis = 0;
   for (const read of confirmed) basis = Math.max(basis, read.seq);
   for (const read of resolvedPending) basis = Math.max(basis, read.seq);
-  return basis;
+  return toInputBasisSeq(basis);
 };
 
 const resolvedPendingReadsForBasis = (
@@ -5865,7 +5869,7 @@ const acceptedSchedulerObservation = (
     branch: BranchName;
     space?: string;
     principal?: string;
-    inputBasisSeq: number;
+    inputBasisSeq: InputBasisSeq;
     executionClaim?: ExecutionClaim;
   },
 ): {

@@ -4,6 +4,7 @@ import type {
 } from "../storage/interface.ts";
 import type {
   ActionExecutionProvenance,
+  InputBasisSeq,
   SchedulerExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import { isCellScope } from "../scope.ts";
@@ -64,7 +65,7 @@ export interface SchedulerActionObservation {
    * action. The memory host overwrites this at acceptance from the validated
    * commit read set; a runner/client value is never authoritative.
    */
-  inputBasisSeq?: number;
+  inputBasisSeq?: InputBasisSeq;
   /** Present only after an authenticated executor commit is accepted. */
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
