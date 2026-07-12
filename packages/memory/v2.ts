@@ -376,6 +376,60 @@ export interface ExecutionClaim extends ActionClaimKey {
   expiresAt: number;
 }
 
+/**
+ * Transient executor assertion naming the exact live claim incarnation under
+ * which one action attempt started. It is accepted only from a host-bound
+ * executor session, checked against live control state, and stripped before
+ * scheduler observations are persisted. It is not provenance by itself.
+ */
+export interface ExecutionClaimAssertion {
+  contextKey: SchedulerExecutionContextKey;
+  leaseGeneration: number;
+  claimGeneration: number;
+}
+
+declare const inputBasisSeqBrand: unique symbol;
+declare const acceptedCommitSeqBrand: unique symbol;
+
+/** Maximum accepted input revision consumed by one action attempt. */
+export type InputBasisSeq = number & {
+  readonly [inputBasisSeqBrand]: "InputBasisSeq";
+};
+
+/** Semantic commit sequence assigned after canonical acceptance. */
+export type AcceptedCommitSeq = number & {
+  readonly [acceptedCommitSeqBrand]: "AcceptedCommitSeq";
+};
+
+export const toInputBasisSeq = (value: number): InputBasisSeq => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError("input basis sequence must be a non-negative integer");
+  }
+  return value as InputBasisSeq;
+};
+
+export const toAcceptedCommitSeq = (value: number): AcceptedCommitSeq => {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("accepted commit sequence must be a positive integer");
+  }
+  return value as AcceptedCommitSeq;
+};
+
+/**
+ * Host-authored metadata for one accepted server action transaction.
+ * `onBehalfOf` is execution authority, not semantic authorship. The host
+ * derives it from the authenticated sponsor session and derives the basis from
+ * the validated commit reads; Worker/client values are never authoritative.
+ */
+export interface ActionExecutionProvenance {
+  claim: ActionClaimKey;
+  onBehalfOf: string;
+  leaseGeneration: number;
+  claimGeneration: number;
+  causedBy: number[];
+  inputBasisSeq: InputBasisSeq;
+}
+
 export interface ExecutionClaimSetEvent {
   type: "session.execution.claim.set";
   claim: ExecutionClaim;
@@ -393,15 +447,15 @@ export type ActionSettlement =
   | {
     branch: BranchName;
     claim: ExecutionClaim;
-    inputBasisSeq: number;
+    inputBasisSeq: InputBasisSeq;
     outcome: "committed";
-    acceptedCommitSeq: number;
+    acceptedCommitSeq: AcceptedCommitSeq;
     diagnosticCode?: never;
   }
   | {
     branch: BranchName;
     claim: ExecutionClaim;
-    inputBasisSeq: number;
+    inputBasisSeq: InputBasisSeq;
     outcome: "no-op" | "failed" | "unserved";
     acceptedCommitSeq?: never;
     diagnosticCode?: string;

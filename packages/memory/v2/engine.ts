@@ -9,6 +9,8 @@ import {
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  type AcceptedCommitSeq,
+  type ActionExecutionProvenance,
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -17,6 +19,9 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
+  type ExecutionClaim,
+  type ExecutionClaimAssertion,
+  type InputBasisSeq,
   isEntityDocument,
   type Operation,
   type PatchOp,
@@ -26,6 +31,8 @@ import {
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
 } from "../v2.ts";
 
 export type { SchedulerExecutionContextKey } from "../v2.ts";
@@ -193,6 +200,7 @@ CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
   observation_id      INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
+  accepted_payload    JSON,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (branch, session_id, local_seq),
   FOREIGN KEY (observation_id)
@@ -811,6 +819,12 @@ export interface ApplyCommitOptions {
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
   commit: ClientCommit;
+  /**
+   * Host-only exact live claims for scheduler observations in this commit,
+   * keyed by the observation localSeq. This never appears in ClientCommit or
+   * crosses the memory protocol boundary.
+   */
+  executionClaims?: ReadonlyMap<number, ExecutionClaim>;
   /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
    *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
    *  apply loop executes the SQL inside the commit's transaction against the
@@ -837,11 +851,29 @@ export interface AppliedSchedulerObservationResult {
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
+  /** Canonical accepted basis/provenance, emitted only for kept rows. */
+  inputBasisSeq?: InputBasisSeq;
+  executionProvenance?: ActionExecutionProvenance;
   reason?:
     | "stale-confirmed-read"
     | "stale-pending-read"
     | "pending-read-missing";
 }
+
+export type AppliedActionAttempt =
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "committed";
+    acceptedCommitSeq: AcceptedCommitSeq;
+  }
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "no-op" | "failed";
+  };
 
 export interface AppliedCommit {
   seq: number;
@@ -849,6 +881,7 @@ export interface AppliedCommit {
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
+  actionAttempts?: AppliedActionAttempt[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
 
@@ -916,6 +949,11 @@ export interface SchedulerActionObservation {
   runtimeFingerprint: string;
   completeActionScopeSummary?: CompleteActionScopeSummary;
   observedAtSeq: number;
+  /** Host-derived maximum accepted revision sequence in the commit read set. */
+  inputBasisSeq?: InputBasisSeq;
+  /** Transient exact-claim assertion; validated by the bound executor host. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
+  executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: SchedulerObservationAddress[];
@@ -938,6 +976,23 @@ const isSchedulerRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isSchedulerExecutionContextKey = (
+  value: unknown,
+): value is SchedulerExecutionContextKey =>
+  value === "space" ||
+  (typeof value === "string" &&
+    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+
+const isExecutionClaimAssertion = (
+  value: unknown,
+): value is ExecutionClaimAssertion =>
+  isSchedulerRecord(value) &&
+  isSchedulerExecutionContextKey(value.contextKey) &&
+  Number.isSafeInteger(value.leaseGeneration) &&
+  Number(value.leaseGeneration) > 0 &&
+  Number.isSafeInteger(value.claimGeneration) &&
+  Number(value.claimGeneration) > 0;
 
 const isSchedulerObservationAddress = (value: unknown): boolean =>
   isSchedulerRecord(value) &&
@@ -995,6 +1050,11 @@ export const schedulerObservationFromValue = (
         ))) ||
     !Number.isSafeInteger(value.observedAtSeq) ||
     Number(value.observedAtSeq) < 0 ||
+    (value.inputBasisSeq !== undefined &&
+      (!Number.isSafeInteger(value.inputBasisSeq) ||
+        Number(value.inputBasisSeq) < 0)) ||
+    (value.executionClaimAssertion !== undefined &&
+      !isExecutionClaimAssertion(value.executionClaimAssertion)) ||
     (value.observedAtLocalSeq !== undefined &&
       (!Number.isSafeInteger(value.observedAtLocalSeq) ||
         Number(value.observedAtLocalSeq) < 0)) ||
@@ -1735,6 +1795,18 @@ COMMIT;
 `);
 };
 
+const migrateSchedulerObservationReplayAcceptedPayload = (
+  database: Database,
+): void => {
+  if (hasColumn(database, "scheduler_observation_replay", "accepted_payload")) {
+    return;
+  }
+  database.exec(`
+ALTER TABLE scheduler_observation_replay
+ADD COLUMN accepted_payload JSON;
+`);
+};
+
 const SCHEDULER_ACTION_OWNERSHIP_COLUMNS = [
   "branch",
   "owner_space",
@@ -2277,6 +2349,7 @@ export const open = async (
     migrateSchedulerObservationReplayStatus(database);
   }
   migrateSchedulerExecutionContextSchema(database);
+  migrateSchedulerObservationReplayAcceptedPayload(database);
   migrateSchedulerWriteLookupIndex(database);
   migrateSchedulerActionIndexes(database);
   return {
@@ -2461,6 +2534,9 @@ export interface UpsertSchedulerObservationOptions {
   /** Canonical commit-session key used only for replay/echo provenance. */
   writerSessionId?: string;
   localSeq?: number;
+  /** Client-request replay identity when canonical host fields differ from the
+   * persisted observation payload. */
+  replayPayload?: string;
   observation: SchedulerActionObservation;
 }
 
@@ -2626,7 +2702,10 @@ const upsertSchedulerObservationTransaction = (
       status: "kept",
       observationId,
       observedAtSeq: options.observedAtSeq,
-      payload,
+      payload: options.replayPayload ?? payload,
+      ...(options.replayPayload !== undefined
+        ? { acceptedPayload: payload }
+        : {}),
     });
   }
 
@@ -4450,6 +4529,7 @@ function recordSchedulerObservationReplay(
     observationId?: number;
     observedAtSeq: number;
     payload: string;
+    acceptedPayload?: string;
   },
 ): void {
   runSchedulerObservationStatement("record observation replay", () => {
@@ -4462,7 +4542,8 @@ function recordSchedulerObservationReplay(
         reason,
         observation_id,
         observed_at_seq,
-        payload
+        payload,
+        accepted_payload
       )
       VALUES (
         :branch,
@@ -4472,7 +4553,8 @@ function recordSchedulerObservationReplay(
         :reason,
         :observation_id,
         :observed_at_seq,
-        :payload
+        :payload,
+        :accepted_payload
       )
       ON CONFLICT (branch, session_id, local_seq)
       DO UPDATE SET
@@ -4480,7 +4562,8 @@ function recordSchedulerObservationReplay(
         reason = excluded.reason,
         observation_id = excluded.observation_id,
         observed_at_seq = excluded.observed_at_seq,
-        payload = excluded.payload
+        payload = excluded.payload,
+        accepted_payload = excluded.accepted_payload
     `).run({
       branch: options.branch,
       session_id: options.sessionId,
@@ -4490,6 +4573,7 @@ function recordSchedulerObservationReplay(
       observation_id: options.observationId ?? null,
       observed_at_seq: options.observedAtSeq,
       payload: options.payload,
+      accepted_payload: options.acceptedPayload ?? null,
     });
   });
 }
@@ -4508,6 +4592,7 @@ function getSchedulerObservationReplay(
   execution_context_key: SchedulerExecutionContextKey | null;
   observed_at_seq: number;
   payload: string;
+  accepted_payload: string | null;
 } | undefined {
   return engine.database.prepare(`
     SELECT
@@ -4515,6 +4600,7 @@ function getSchedulerObservationReplay(
       replay.reason,
       replay.observation_id,
       active_snapshot.execution_context_key,
+      active_snapshot.payload AS accepted_payload,
       replay.observed_at_seq,
       replay.payload
     FROM scheduler_observation_replay replay
@@ -4524,7 +4610,8 @@ function getSchedulerObservationReplay(
       ON active_snapshot.observation_id = observation.observation_id
       AND active_snapshot.execution_context_key =
         observation.execution_context_key
-      AND active_snapshot.payload = replay.payload
+      AND active_snapshot.payload =
+        COALESCE(replay.accepted_payload, replay.payload)
       AND active_snapshot.observed_at_seq = replay.observed_at_seq
       AND observation.session_id = replay.session_id
     WHERE replay.branch = :branch
@@ -4541,6 +4628,7 @@ function getSchedulerObservationReplay(
     execution_context_key: SchedulerExecutionContextKey | null;
     observed_at_seq: number;
     payload: string;
+    accepted_payload: string | null;
   } | undefined;
 }
 
@@ -5175,6 +5263,7 @@ const applyCommitTransaction = (
     space,
     principal,
     commit,
+    executionClaims,
     sqliteAttachments,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
@@ -5268,6 +5357,7 @@ const applyCommitTransaction = (
       principal,
       branch,
       batch: schedulerObservationBatch,
+      executionClaims,
     });
   }
 
@@ -5281,6 +5371,7 @@ const applyCommitTransaction = (
       localSeq: commit.localSeq,
       reads: commit.reads,
       schedulerObservation,
+      executionClaim: executionClaims?.get(commit.localSeq),
     });
   }
 
@@ -5293,6 +5384,27 @@ const applyCommitTransaction = (
     branch,
     commit,
   );
+  const inputBasisSeq = acceptedInputBasisSeq(
+    commit.reads.confirmed,
+    resolvedPendingReads,
+  );
+  const acceptedObservation = schedulerObservation
+    ? acceptedSchedulerObservation(schedulerObservation, {
+      branch,
+      space,
+      principal,
+      inputBasisSeq,
+      executionClaim: executionClaims?.get(commit.localSeq),
+    })
+    : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservation?.status === "failed"
+  ) {
+    throw new ProtocolError(
+      "failed claimed actions must not include semantic operations",
+    );
+  }
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -5370,18 +5482,27 @@ const applyCommitTransaction = (
     });
   }
 
-  const schedulerObservationResult = schedulerObservation
+  const schedulerObservationResult = acceptedObservation
     ? upsertSchedulerObservationTransaction(engine, {
       branch,
-      ownerSpace: space ?? schedulerObservation.ownerSpace,
+      ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
       scopeContext: { principal: principal!, sessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
-      observation: schedulerObservation,
+      observation: acceptedObservation.observation,
     })
     : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservationResult?.executionContextKey !==
+      acceptedObservation.provenance.claim.contextKey
+  ) {
+    throw new ProtocolError(
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
 
   return {
     seq,
@@ -5395,6 +5516,22 @@ const applyCommitTransaction = (
           status: "kept" as const,
           schedulerObservationId: schedulerObservationResult.observationId,
           executionContextKey: schedulerObservationResult.executionContextKey,
+          inputBasisSeq,
+          ...(acceptedObservation?.provenance !== undefined
+            ? { executionProvenance: acceptedObservation.provenance }
+            : {}),
+        }],
+      }
+      : {}),
+    ...(acceptedObservation?.provenance !== undefined &&
+        executionClaims?.get(commit.localSeq) !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq: commit.localSeq,
+          claim: executionClaims.get(commit.localSeq)!,
+          provenance: acceptedObservation.provenance,
+          outcome: "committed" as const,
+          acceptedCommitSeq: toAcceptedCommitSeq(seq),
         }],
       }
       : {}),
@@ -5738,6 +5875,132 @@ const resolvePendingReads = (
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
 };
 
+/**
+ * Compute the scalar basis from reads whose revision identities are accepted
+ * by the canonical transaction path. Confirmed reads already name their
+ * durable sequence; pending reads use the server-assigned sequence of the
+ * source commit. The accepting head/commit sequence is deliberately absent.
+ */
+const acceptedInputBasisSeq = (
+  confirmed: ClientCommit["reads"]["confirmed"],
+  resolvedPending: readonly { seq: number }[],
+): InputBasisSeq => {
+  let basis = 0;
+  for (const read of confirmed) basis = Math.max(basis, read.seq);
+  for (const read of resolvedPending) basis = Math.max(basis, read.seq);
+  return toInputBasisSeq(basis);
+};
+
+const resolvedPendingReadsForBasis = (
+  engine: Engine,
+  sessionKey: string,
+  reads: ClientCommit["reads"]["pending"],
+): { seq: number }[] => {
+  const resolutions = new Map<number, { seq: number }>();
+  for (const read of reads) {
+    if (resolutions.has(read.localSeq)) continue;
+    const row = engine.statements.selectPendingResolution.get({
+      session_id: sessionKey,
+      local_seq: read.localSeq,
+    }) as { seq: number } | undefined;
+    // A missing dependency is handled by the existing observation validation
+    // and the observation is dropped. It contributes no accepted basis.
+    if (row !== undefined) resolutions.set(read.localSeq, row);
+  }
+  return [...resolutions.values()];
+};
+
+const claimKeyFromExecutionClaim = (
+  claim: ExecutionClaim,
+): ActionExecutionProvenance["claim"] => ({
+  branch: claim.branch,
+  space: claim.space,
+  contextKey: claim.contextKey,
+  pieceId: claim.pieceId,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+});
+
+const acceptedSchedulerObservation = (
+  observation: SchedulerActionObservation,
+  options: {
+    branch: BranchName;
+    space?: string;
+    principal?: string;
+    inputBasisSeq: InputBasisSeq;
+    executionClaim?: ExecutionClaim;
+  },
+): {
+  observation: SchedulerActionObservation;
+  provenance?: ActionExecutionProvenance;
+} => {
+  const assertedClaim = observation.executionClaimAssertion;
+  // Reserved fields are host outputs. Strip any wire/Worker assertion before
+  // constructing the canonical accepted observation.
+  const {
+    inputBasisSeq: _assertedBasis,
+    executionClaimAssertion: _assertedClaim,
+    executionProvenance: _assertedProvenance,
+    ...untrustedObservation
+  } = observation;
+  const claim = options.executionClaim;
+  if (claim === undefined) {
+    if (assertedClaim !== undefined) {
+      throw new ProtocolError(
+        "execution claim incarnation is not live for this action attempt",
+      );
+    }
+    return {
+      observation: {
+        ...untrustedObservation,
+        inputBasisSeq: options.inputBasisSeq,
+      },
+    };
+  }
+  if (
+    assertedClaim === undefined ||
+    assertedClaim.contextKey !== claim.contextKey ||
+    assertedClaim.leaseGeneration !== claim.leaseGeneration ||
+    assertedClaim.claimGeneration !== claim.claimGeneration ||
+    options.principal === undefined || options.space === undefined ||
+    claim.branch !== options.branch || claim.space !== options.space ||
+    // Initial server execution is deliberately space-scoped. W1.3 owns the
+    // full firewall; a host cannot smuggle a narrower claim through W0.4.
+    claim.contextKey !== "space" ||
+    claim.pieceId !== observation.pieceId ||
+    claim.actionId !== observation.actionId ||
+    claim.actionKind !== observation.actionKind ||
+    claim.implementationFingerprint !== observation.implementationFingerprint ||
+    claim.runtimeFingerprint !== observation.runtimeFingerprint ||
+    observation.actionKind === "event-handler" ||
+    observation.transactionKind !== "action-run"
+  ) {
+    throw new ProtocolError(
+      "execution claim incarnation does not match the accepted scheduler action",
+    );
+  }
+  const provenance: ActionExecutionProvenance = {
+    claim: claimKeyFromExecutionClaim(claim),
+    onBehalfOf: options.principal,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+    // Invalidations currently retain addresses, not authoritative source
+    // sequences. Unknown is represented honestly as an empty sorted set.
+    causedBy: [],
+    inputBasisSeq: options.inputBasisSeq,
+  };
+  return {
+    provenance,
+    observation: {
+      ...untrustedObservation,
+      inputBasisSeq: options.inputBasisSeq,
+      executionProvenance: provenance,
+    },
+  };
+};
+
 const findConflictSeq = (
   engine: Engine,
   branch: BranchName,
@@ -5865,6 +6128,7 @@ const replayedSchedulerObservationResult = (
     reason: AppliedSchedulerObservationResult["reason"] | null;
     observation_id: number | null;
     execution_context_key: SchedulerExecutionContextKey | null;
+    accepted_payload: string | null;
   },
 ): AppliedSchedulerObservationResult => {
   if (replay.status === "dropped") {
@@ -5879,12 +6143,21 @@ const replayedSchedulerObservationResult = (
       `kept scheduler observation replay missing observation identity for localSeq ${localSeq}`,
     );
   }
+  const accepted = replay.accepted_payload === null
+    ? undefined
+    : decodeSchedulerObservation(replay.accepted_payload);
   return {
     localSeq,
     status: "kept",
     schedulerObservationId: replay.observation_id,
     ...(replay.execution_context_key !== null
       ? { executionContextKey: replay.execution_context_key }
+      : {}),
+    ...(accepted?.inputBasisSeq !== undefined
+      ? { inputBasisSeq: accepted.inputBasisSeq }
+      : {}),
+    ...(accepted?.executionProvenance !== undefined
+      ? { executionProvenance: accepted.executionProvenance }
       : {}),
   };
 };
@@ -5896,15 +6169,23 @@ const schedulerObservationReplayPayload = (
     ownerSpace?: string;
     observation: SchedulerActionObservation;
   },
-): string =>
-  encodeSchedulerDependencySnapshot(
+): string => {
+  // Replay identity is the client/Worker request, not host-derived acceptance
+  // metadata. A reconnect may reconstruct the same authority separately.
+  const {
+    inputBasisSeq: _acceptedBasis,
+    executionProvenance: _acceptedProvenance,
+    ...requestedObservation
+  } = options.observation;
+  return encodeSchedulerDependencySnapshot(
     normalizeSchedulerObservation(
-      options.observation,
+      requestedObservation as SchedulerActionObservation,
       options.branch,
       options.observedAtSeq,
       options.ownerSpace,
     ),
   );
+};
 
 const applySchedulerObservationOnlyCommit = (
   engine: Engine,
@@ -5917,6 +6198,7 @@ const applySchedulerObservationOnlyCommit = (
     localSeq,
     reads,
     schedulerObservation,
+    executionClaim,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -5926,9 +6208,13 @@ const applySchedulerObservationOnlyCommit = (
     localSeq: number;
     reads: ClientCommit["reads"];
     schedulerObservation: SchedulerActionObservation;
+    executionClaim?: ExecutionClaim;
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
+  // Request replay identity retains the transient exact-claim assertion while
+  // excluding only host-authored acceptance fields. Check it before the live
+  // claim fence so a lost-response replay remains idempotent after revoke.
   const replayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
@@ -5961,6 +6247,18 @@ const applySchedulerObservationOnlyCommit = (
     });
   }
 
+  const inputBasisSeq = acceptedInputBasisSeq(
+    reads.confirmed,
+    resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
+  );
+  const accepted = acceptedSchedulerObservation(schedulerObservation, {
+    branch,
+    space,
+    principal,
+    inputBasisSeq,
+    executionClaim,
+  });
+
   const dropReason = schedulerObservationReadDropReason(engine, {
     sessionKey,
     sessionId,
@@ -5992,7 +6290,7 @@ const applySchedulerObservationOnlyCommit = (
 
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
-    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    ownerSpace: space ?? accepted.observation.ownerSpace,
     // An observation-only commit advances no semantic sequence, so reserve the
     // next GLOBAL server sequence as its delivery slot. `observedAtSeq` is the
     // selected branch's head and can lag the space-wide sync watermark after a
@@ -6004,8 +6302,18 @@ const applySchedulerObservationOnlyCommit = (
     scopeContext: { principal: principal!, sessionId },
     writerSessionId: sessionKey,
     localSeq,
-    observation: schedulerObservation,
+    replayPayload,
+    observation: accepted.observation,
   });
+  if (
+    accepted.provenance !== undefined &&
+    observationResult.executionContextKey !==
+      accepted.provenance.claim.contextKey
+  ) {
+    throw new ProtocolError(
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
   return {
     seq: observedAtSeq,
     branch,
@@ -6016,7 +6324,23 @@ const applySchedulerObservationOnlyCommit = (
       status: "kept",
       schedulerObservationId: observationResult.observationId,
       executionContextKey: observationResult.executionContextKey,
+      inputBasisSeq,
+      ...(accepted.provenance !== undefined
+        ? { executionProvenance: accepted.provenance }
+        : {}),
     }],
+    ...(accepted.provenance !== undefined && executionClaim !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq,
+          claim: executionClaim,
+          provenance: accepted.provenance,
+          outcome: schedulerObservation.status === "failed"
+            ? "failed" as const
+            : "no-op" as const,
+        }],
+      }
+      : {}),
   };
 };
 
@@ -6029,6 +6353,7 @@ const applySchedulerObservationBatchCommit = (
     principal,
     branch,
     batch,
+    executionClaims,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -6036,9 +6361,11 @@ const applySchedulerObservationBatchCommit = (
     principal?: string;
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
+  const actionAttempts: AppliedActionAttempt[] = [];
   let hasNewObservation = false;
   for (const item of batch) {
     const result = applySchedulerObservationOnlyCommit(engine, {
@@ -6051,9 +6378,11 @@ const applySchedulerObservationBatchCommit = (
       reads: item.reads,
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
+      executionClaim: executionClaims?.get(item.localSeq),
     });
     hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);
+    actionAttempts.push(...(result.actionAttempts ?? []));
   }
 
   const commit: AppliedCommit = {
@@ -6061,6 +6390,7 @@ const applySchedulerObservationBatchCommit = (
     branch,
     revisions: [],
     schedulerObservationResults: results,
+    ...(actionAttempts.length > 0 ? { actionAttempts } : {}),
   };
   return hasNewObservation ? commit : markAppliedCommitReplay(commit);
 };

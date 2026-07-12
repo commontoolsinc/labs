@@ -614,6 +614,20 @@ export class SpaceSession {
     };
   }
 
+  /**
+   * Called by the replica after it has applied an accepted local commit. The
+   * transact response alone is not sufficient: resolving it precedes
+   * SpaceReplica.confirmPending(), while settlement must never clear an
+   * overlay before that data application barrier.
+   */
+  noteAppliedCommit(seq: number): void {
+    if (!Number.isSafeInteger(seq) || seq < 0) {
+      throw new TypeError("applied commit sequence must be non-negative");
+    }
+    this.#executionDataSeq = Math.max(this.#executionDataSeq, seq);
+    this.#flushPendingSettlements();
+  }
+
   initializeSync(sync: SessionSync): void {
     this.noteResult(sync.toSeq);
     this.#executionDataSeq = Math.max(this.#executionDataSeq, sync.toSeq);

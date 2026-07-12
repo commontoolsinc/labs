@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
-import { encodeMemoryBoundary } from "../v2.ts";
+import { encodeMemoryBoundary, toInputBasisSeq } from "../v2.ts";
 import {
   applyCommit,
   close,
@@ -593,11 +593,17 @@ Deno.test("scheduler context keeps two PerSession rows for one principal", async
     });
 
     assertEquals(
-      storeObservation(engine, observation, ALICE_A).executionContextKey,
+      storeObservation(engine, {
+        ...observation,
+        inputBasisSeq: toInputBasisSeq(11),
+      }, ALICE_A).executionContextKey,
       ALICE_A_SESSION_KEY,
     );
     assertEquals(
-      storeObservation(engine, observation, ALICE_B).executionContextKey,
+      storeObservation(engine, {
+        ...observation,
+        inputBasisSeq: toInputBasisSeq(22),
+      }, ALICE_B).executionContextKey,
       ALICE_B_SESSION_KEY,
     );
     assertOwnedContexts(engine, actionId, [
@@ -625,6 +631,22 @@ Deno.test("scheduler context keeps two PerSession rows for one principal", async
       { write_scope_key: ALICE_A_SESSION_KEY },
       { write_scope_key: ALICE_B_SESSION_KEY },
     ]);
+    assertEquals(
+      listSchedulerActionSnapshots(engine, {
+        actionId,
+        applicableExecutionContextKeys: [
+          ALICE_A_SESSION_KEY,
+          ALICE_B_SESSION_KEY,
+        ],
+      }).snapshots.map((snapshot) => [
+        snapshot.executionContextKey,
+        Number(snapshot.observation.inputBasisSeq),
+      ]),
+      [
+        [ALICE_A_SESSION_KEY, 11],
+        [ALICE_B_SESSION_KEY, 22],
+      ],
+    );
   });
 });
 

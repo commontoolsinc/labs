@@ -1,7 +1,11 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
-import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  toDocumentPath,
+} from "../v2.ts";
 import {
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
@@ -30,6 +34,7 @@ type ExecutionSession = MemoryClient.SpaceSession & {
   subscribeExecutionControl(
     listener: (event: ExecutionControlEvent) => void,
   ): () => void;
+  noteAppliedCommit(seq: number): void;
 };
 
 type ActionClaimKey = {
@@ -106,6 +111,11 @@ type ExecutionServer = Server & {
   subscribeExecutionDemands(
     listener: (snapshot: ExecutionDemandSnapshot) => void,
   ): () => void;
+  bindExecutionSession(
+    space: string,
+    sessionId: string,
+    authority: { leaseGeneration: number },
+  ): () => void;
 };
 
 const createServer = (
@@ -175,11 +185,81 @@ const claimKey = (
   branch,
   space,
   contextKey: "space",
-  pieceId: "piece:one",
+  pieceId: "space:piece:one",
   actionId,
   actionKind: "computation",
   implementationFingerprint: "impl:v1",
   runtimeFingerprint: "runtime:v1",
+});
+
+const claimedSpaceObservation = (
+  claim: ExecutionClaim,
+  outputId: string,
+) => ({
+  version: 2 as const,
+  ownerSpace: claim.space,
+  branch: claim.branch,
+  pieceId: claim.pieceId,
+  processGeneration: 1,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+  executionClaimAssertion: {
+    contextKey: claim.contextKey,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+  },
+  completeActionScopeSummary: {
+    version: 1 as const,
+    complete: true as const,
+    implementationFingerprint: claim.implementationFingerprint,
+    runtimeFingerprint: claim.runtimeFingerprint,
+    piece: {
+      space: claim.space,
+      scope: "space" as const,
+      id: claim.pieceId.slice("space:".length),
+      path: [],
+    },
+    reads: [],
+    writes: [{
+      space: claim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+    materializerWriteEnvelopes: [],
+    directOutputs: [{
+      space: claim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+  },
+  observedAtSeq: 0,
+  transactionKind: "action-run" as const,
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  currentKnownWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  declaredWrites: [{
+    space: claim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  materializerWriteEnvelopes: [],
+  status: "success" as const,
 });
 
 class ReconnectableExecutionTransport implements MemoryClient.Transport {
@@ -686,6 +766,580 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
     unsubscribe();
     await writerClient.close();
     await observerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("accepted claimed runs derive provenance and settlements on the host", async () => {
+  const server = createControlServer("memory-v2-execution-provenance");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const settlements: ActionSettlement[] = [];
+  const firstSettlement = Promise.withResolvers<void>();
+  const secondSettlement = Promise.withResolvers<void>();
+  const thirdSettlement = Promise.withResolvers<void>();
+  const unsubscribeControl = session.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      settlements.push(event.settlement);
+      if (settlements.length === 1) firstSettlement.resolve();
+      if (settlements.length === 2) secondSettlement.resolve();
+      if (settlements.length === 3) thirdSettlement.resolve();
+    }
+  });
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    await session.watchSet([{
+      id: "provenance-output",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:provenance-output",
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:provenance"),
+      leaseGeneration: 17,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+
+    const source = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:provenance-source",
+        value: { value: { count: 1 } },
+      }],
+    });
+    const observation = {
+      version: 2 as const,
+      ownerSpace: POLICY_SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+      actionId: claim.actionId,
+      actionKind: claim.actionKind,
+      implementationFingerprint: claim.implementationFingerprint,
+      runtimeFingerprint: claim.runtimeFingerprint,
+      // This is an executor assertion about the exact claim incarnation under
+      // which the attempt started. The host validates it against live control
+      // state and never persists it as authority metadata.
+      executionClaimAssertion: {
+        contextKey: claim.contextKey,
+        leaseGeneration: claim.leaseGeneration,
+        claimGeneration: claim.claimGeneration,
+      },
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+        piece: {
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: claim.pieceId.slice("space:".length),
+          path: [],
+        },
+        reads: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-source",
+          path: ["value", "count"],
+        }],
+        writes: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-output",
+          path: ["value"],
+        }],
+        materializerWriteEnvelopes: [],
+        directOutputs: [{
+          space: POLICY_SPACE,
+          scope: "space" as const,
+          id: "of:provenance-output",
+          path: ["value"],
+        }],
+      },
+      observedAtSeq: 0,
+      // Both fields are deliberately forged. The host must derive/overwrite
+      // them from accepted reads and authenticated session authority.
+      inputBasisSeq: 999_999,
+      executionProvenance: {
+        claim,
+        onBehalfOf: "did:key:forged",
+        leaseGeneration: 999,
+        claimGeneration: 999,
+        causedBy: [999_999],
+        inputBasisSeq: 999_999,
+      },
+      transactionKind: "action-run" as const,
+      reads: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-source",
+        path: ["value", "count"],
+      }],
+      shallowReads: [],
+      actualChangedWrites: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-output",
+        path: ["value", "answer"],
+      }],
+      currentKnownWrites: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-output",
+        path: ["value"],
+      }],
+      materializerWriteEnvelopes: [],
+      status: "success" as const,
+    };
+
+    const committed = await session.transact({
+      localSeq: 3,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [{
+        op: "set",
+        id: "of:provenance-output",
+        value: { value: { answer: 2 } },
+      }],
+      schedulerObservation: observation,
+    });
+
+    const snapshots = await session.listSchedulerActionSnapshots({
+      actionId: claim.actionId,
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+    });
+    const stored = snapshots.snapshots[0]?.observation as {
+      inputBasisSeq?: number;
+      executionProvenance?: {
+        claim: ActionClaimKey;
+        onBehalfOf: string;
+        leaseGeneration: number;
+        claimGeneration: number;
+        causedBy: number[];
+        inputBasisSeq: number;
+      };
+    };
+    assertEquals(stored.inputBasisSeq, source.seq);
+    assertEquals(stored.executionProvenance, {
+      claim: claimKey(POLICY_SPACE, "", "action:provenance"),
+      onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
+      leaseGeneration: claim.leaseGeneration,
+      claimGeneration: claim.claimGeneration,
+      causedBy: [],
+      inputBasisSeq: source.seq,
+    });
+    session.noteAppliedCommit(committed.seq);
+    await Promise.race([
+      firstSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("committed settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(settlements, [{
+      branch: "",
+      claim,
+      inputBasisSeq: source.seq,
+      outcome: "committed",
+      acceptedCommitSeq: committed.seq,
+    }]);
+
+    const noop = await session.transact({
+      localSeq: 4,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: {
+        ...observation,
+        actualChangedWrites: [],
+      },
+    });
+    assertEquals(noop.actionAttempts?.map((attempt) => attempt.outcome), [
+      "no-op",
+    ]);
+    await server.flushSessions();
+    await Promise.race([
+      secondSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("no-op settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(settlements.at(-1), {
+      branch: "",
+      claim,
+      inputBasisSeq: source.seq,
+      outcome: "no-op",
+    });
+
+    const failedClaim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:provenance-failed"),
+      leaseGeneration: claim.leaseGeneration,
+    });
+    const failedObservation = {
+      ...observation,
+      actionId: failedClaim.actionId,
+      executionClaimAssertion: {
+        contextKey: failedClaim.contextKey,
+        leaseGeneration: failedClaim.leaseGeneration,
+        claimGeneration: failedClaim.claimGeneration,
+      },
+      status: "failed" as const,
+      errorFingerprint: "error:test",
+      actualChangedWrites: [],
+    };
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 5,
+          reads: {
+            confirmed: [{
+              id: "of:provenance-source",
+              path: toDocumentPath(["value", "count"]),
+              seq: source.seq,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:failed-must-not-land",
+            value: { value: true },
+          }],
+          schedulerObservation: failedObservation,
+        }),
+      Error,
+      "failed claimed actions must not include semantic operations",
+    );
+    assertEquals(
+      await server.readDocument(POLICY_SPACE, "of:failed-must-not-land"),
+      null,
+    );
+    await session.transact({
+      localSeq: 6,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: failedObservation,
+    });
+    await Promise.race([
+      thirdSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("failed settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(settlements.at(-1), {
+      branch: "",
+      claim: failedClaim,
+      inputBasisSeq: source.seq,
+      outcome: "failed",
+    });
+  } finally {
+    unbind();
+    unsubscribeControl();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("bound executor rejects a delayed attempt after claim replacement", async () => {
+  const server = createControlServer("memory-v2-execution-stale-attempt");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const first = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      leaseGeneration: 31,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: first.leaseGeneration,
+    });
+    assertEquals(server.revokeExecutionClaim(first), true);
+    const replacement = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      leaseGeneration: first.leaseGeneration,
+    });
+    assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:stale-attempt-must-not-land",
+            value: { value: "stale" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            first,
+            "of:stale-attempt-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:stale-attempt-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("bound executor never downgrades a revoked attempt to an ordinary write", async () => {
+  const server = createControlServer("memory-v2-execution-revoked-attempt");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:revoked-attempt"),
+      leaseGeneration: 32,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+    assertEquals(server.revokeExecutionClaim(claim), true);
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:revoked-attempt-must-not-land",
+            value: { value: "revoked" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            claim,
+            "of:revoked-attempt-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:revoked-attempt-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed executor rejects an effective context narrower than its claim", async () => {
+  const server = createControlServer("memory-v2-execution-context-fence");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:context-fence"),
+      leaseGeneration: 33,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+    const incomplete = claimedSpaceObservation(
+      claim,
+      "of:context-fence-must-not-land",
+    );
+    delete (incomplete as { completeActionScopeSummary?: unknown })
+      .completeActionScopeSummary;
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:context-fence-must-not-land",
+            value: { value: "narrower" },
+          }],
+          schedulerObservation: incomplete,
+        }),
+      Error,
+      "execution claim context",
+    );
+    assertEquals(
+      await server.readDocument(POLICY_SPACE, "of:context-fence-must-not-land"),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("detached resumable sessions cannot acquire executor authority", async () => {
+  const server = createControlServer("memory-v2-execution-detached-binding");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const sessionId = session.sessionId;
+  try {
+    await setPolicy(session, true);
+    await client.close();
+    assertThrows(
+      () =>
+        server.bindExecutionSession(POLICY_SPACE, sessionId, {
+          leaseGeneration: 34,
+        }),
+      Error,
+      "live connection",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("an accepted claim replay stays idempotent after revoke", async () => {
+  const server = createControlServer("memory-v2-execution-replay-fence");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const firstClaim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      leaseGeneration: 35,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: firstClaim.leaseGeneration,
+    });
+    const commit = {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set" as const,
+        id: "of:accepted-claim-replay",
+        value: { value: "accepted" },
+      }],
+      schedulerObservation: claimedSpaceObservation(
+        firstClaim,
+        "of:accepted-claim-replay",
+      ),
+    };
+    const accepted = await session.transact(commit);
+    assertEquals(accepted.actionAttempts?.[0]?.claim.claimGeneration, 1);
+    assertEquals(server.revokeExecutionClaim(firstClaim), true);
+
+    const replay = await session.transact(commit);
+    assertEquals(replay.seq, accepted.seq);
+    assertEquals(replay.actionAttempts, undefined);
+
+    const replacement = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      leaseGeneration: firstClaim.leaseGeneration,
+    });
+    await assertRejects(
+      () =>
+        session.transact({
+          ...commit,
+          schedulerObservation: claimedSpaceObservation(
+            replacement,
+            "of:accepted-claim-replay",
+          ),
+        }),
+      Error,
+      "replay mismatch",
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("an unbound client claim assertion cannot create executor provenance", async () => {
+  const server = createControlServer("memory-v2-execution-unbound-assertion");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:unbound-assertion"),
+      leaseGeneration: 36,
+    });
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:unbound-assertion-must-not-land",
+            value: { value: "forged" },
+          }],
+          schedulerObservation: claimedSpaceObservation(
+            claim,
+            "of:unbound-assertion-must-not-land",
+          ),
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:unbound-assertion-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    await client.close();
     await server.close();
   }
 });

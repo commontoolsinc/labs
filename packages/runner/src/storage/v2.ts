@@ -2578,6 +2578,7 @@ class SpaceReplica implements ISpaceReplica {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
+      session.noteAppliedCommit?.(applied.seq);
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit, this.#space);

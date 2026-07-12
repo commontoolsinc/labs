@@ -240,6 +240,82 @@ Deno.test("memory v2 migrates scheduler read indexes to include owner space", as
   }
 });
 
+Deno.test("memory v2 migrates canonical replay payload without changing snapshots", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  close(engine);
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`
+      ALTER TABLE scheduler_observation_replay
+      DROP COLUMN accepted_payload;
+
+      INSERT INTO scheduler_observation_replay (
+        branch,
+        session_id,
+        local_seq,
+        status,
+        reason,
+        observation_id,
+        observed_at_seq,
+        payload
+      ) VALUES (
+        '',
+        'migration-session',
+        7,
+        'dropped',
+        'stale-confirmed-read',
+        NULL,
+        11,
+        '{}'
+      );
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    const replayColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_observation_replay")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      replayColumns.some((column) => column.name === "accepted_payload"),
+      true,
+    );
+    const replay = engine.database.prepare(`
+      SELECT local_seq, status, reason, observed_at_seq, accepted_payload
+      FROM scheduler_observation_replay
+      WHERE session_id = 'migration-session'
+    `).get() as {
+      local_seq: number;
+      status: string;
+      reason: string;
+      observed_at_seq: number;
+      accepted_payload: string | null;
+    };
+    assertEquals(replay, {
+      local_seq: 7,
+      status: "dropped",
+      reason: "stale-confirmed-read",
+      observed_at_seq: 11,
+      accepted_payload: null,
+    });
+
+    const snapshotColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_action_snapshot")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      snapshotColumns.some((column) => column.name === "accepted_payload"),
+      false,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 migrates legacy scheduler write and snapshot metadata", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const legacyDb = new Database(path, { create: true });
@@ -557,6 +633,212 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 records the exact accepted input basis independently of head", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-input-basis";
+  const sourceId = "of:basis-source";
+  const secondId = "of:basis-second";
+  const semanticActionId = "basis:semantic";
+  const noopActionId = "basis:no-op";
+  const pendingActionId = "basis:pending";
+  const zeroActionId = "basis:zero";
+
+  try {
+    const source = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: sourceId, value: { value: 1 } }],
+      },
+    });
+    const second = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: secondId, value: { value: 2 } }],
+      },
+    });
+
+    const semantic = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: sourceId,
+            path: toDocumentPath(["value"]),
+            seq: source.seq,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "of:basis-output",
+          value: { value: 10 },
+        }],
+        schedulerObservation: observationForAction(semanticActionId, {
+          ownerSpace,
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: sourceId,
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const semanticSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: semanticActionId,
+    });
+    assertEquals(
+      (semanticSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      source.seq,
+    );
+    assertEquals(semanticSnapshot?.observedAtSeq, semantic.seq);
+    assertEquals(semantic.seq > second.seq, true);
+
+    const noop = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [
+            {
+              id: sourceId,
+              path: toDocumentPath(["value"]),
+              seq: source.seq,
+            },
+            {
+              id: secondId,
+              path: toDocumentPath(["value"]),
+              seq: second.seq,
+            },
+          ],
+          pending: [],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(noopActionId, {
+          ownerSpace,
+          reads: [
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: sourceId,
+              path: ["value"],
+            },
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: secondId,
+              path: ["value"],
+            },
+          ],
+        }),
+      },
+    });
+    const noopSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: noopActionId,
+    });
+    assertEquals(
+      (noopSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      second.seq,
+    );
+    assertEquals(noopSnapshot?.observedAtSeq, noop.seq);
+    assertEquals(noop.seq, semantic.seq);
+
+    const pendingSource = applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:basis-pending-source",
+          value: { value: 3 },
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:basis-pending-source",
+            path: toDocumentPath(["value"]),
+            localSeq: 1,
+          }],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(pendingActionId, {
+          ownerSpace,
+          actionKind: "effect",
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: "of:basis-pending-source",
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const pendingSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: pendingActionId,
+    });
+    assertEquals(pendingSnapshot?.observation.inputBasisSeq, pendingSource.seq);
+
+    applyCommit(engine, {
+      sessionId: "session:basis-zero",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction(zeroActionId, {
+          ownerSpace,
+          reads: [],
+        }),
+      },
+    });
+    const zeroSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: zeroActionId,
+    });
+    assertEquals(zeroSnapshot?.observation.inputBasisSeq, 0);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -3010,7 +3292,11 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     {},
     schedulerAuthFactoryFor(principal),
   );
-  await client.mount(readSpace, {}, schedulerAuthFactoryFor(principal));
+  const read = await client.mount(
+    readSpace,
+    {},
+    schedulerAuthFactoryFor(principal),
+  );
   const actionId = "pattern.tsx:computed:replay-mirror";
   const implementationFingerprint = `impl:${actionId}`;
   const piece = {
@@ -3048,6 +3334,24 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     pieceId: "space:of:piece",
     actionId,
     implementationFingerprint,
+    inputBasisSeq: 999 as never,
+    executionProvenance: {
+      claim: {
+        branch: "",
+        space: ownerSpace,
+        contextKey: "space" as const,
+        pieceId: "space:of:piece",
+        actionId,
+        actionKind: "computation" as const,
+        implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+      },
+      onBehalfOf: "did:key:forged-replay-principal",
+      leaseGeneration: 999,
+      claimGeneration: 999,
+      causedBy: [999],
+      inputBasisSeq: 999 as never,
+    },
     reads: [userRead],
     currentKnownWrites: [userWrite],
     completeActionScopeSummary: {
@@ -3093,6 +3397,26 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
 
   try {
     await owner.transact(initialCommit);
+    await owner.transact(initialCommit);
+    const activeReplayMirror = await read.listSchedulerActionSnapshots({
+      actionId,
+      pieceId: userObservation.pieceId,
+      processGeneration: userObservation.processGeneration,
+    });
+    assertEquals(activeReplayMirror.snapshots.length, 1);
+    const mirroredObservation = activeReplayMirror.snapshots[0]
+      ?.observation as {
+        inputBasisSeq?: number;
+        executionProvenance?: unknown;
+      };
+    assertEquals(
+      mirroredObservation.inputBasisSeq,
+      0,
+    );
+    assertEquals(
+      mirroredObservation.executionProvenance,
+      undefined,
+    );
     const sessionResult = await owner.transact(sessionCommit);
     const changedSessionResult = await owner.transact({
       localSeq: 3,

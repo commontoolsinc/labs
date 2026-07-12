@@ -20,6 +20,7 @@ import {
   type SqliteRegisterDiskSourceResult,
   type V2Error,
   type WatchSpec,
+  type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
@@ -59,6 +60,9 @@ export interface HostProviderChannelOptions {
   /** Host-owned grant creation. This callback and its credentials never cross
    *  the MessagePort into the Worker. */
   authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory;
+  /** Host-only lease generation for canonical action provenance. W1.1 binds
+   * this to the durable fenced ExecutionLease before creating the channel. */
+  executionLeaseGeneration?: number;
 }
 
 export interface HostProviderChannel {
@@ -167,6 +171,7 @@ export function createHostProviderChannel(
   let disposed = false;
   let receiving = Promise.resolve();
   let unsubscribeAcceptedCommits = () => {};
+  let unbindExecutionSession = () => {};
 
   const connection = options.server.connect((message) => {
     if (disposed) return;
@@ -175,6 +180,20 @@ export function createHostProviderChannel(
       if (hello.sessionOpen !== undefined) {
         authContext = hello.sessionOpen;
       }
+    }
+    if (
+      options.executionLeaseGeneration !== undefined &&
+      message.type === "response" && "ok" in message &&
+      typeof message.ok === "object" && message.ok !== null &&
+      "sessionId" in message.ok &&
+      typeof message.ok.sessionId === "string"
+    ) {
+      unbindExecutionSession();
+      unbindExecutionSession = options.server.bindExecutionSession(
+        options.space,
+        message.ok.sessionId,
+        { leaseGeneration: options.executionLeaseGeneration },
+      );
     }
     hostPort.postMessage(
       {
@@ -188,6 +207,8 @@ export function createHostProviderChannel(
     if (disposed) return;
     disposed = true;
     unsubscribeAcceptedCommits();
+    unbindExecutionSession();
+    unbindExecutionSession = () => {};
     connection.close();
     try {
       hostPort.postMessage(
@@ -511,6 +532,10 @@ class HostReplicaSession implements ReplicaSession {
     }
   }
 
+  noteAppliedCommit(seq: number): void {
+    this.session.noteAppliedCommit(seq);
+  }
+
   queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
     return this.session.queryGraph({ ...query, branch: this.branch });
   }
@@ -759,6 +784,7 @@ class HostSessionFactory implements SessionFactory {
     private readonly port: MessagePort,
     private readonly space: MemorySpace,
     private readonly branch: BranchName,
+    private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
   ) {}
 
   async create(
@@ -770,7 +796,10 @@ class HostSessionFactory implements SessionFactory {
       throw new Error(`executor provider is bound to ${this.space}`);
     }
     const transport = new MessagePortTransport(this.port);
-    const client = await MemoryClient.connect({ transport });
+    const client = await MemoryClient.connect({
+      transport,
+      ...(this.protocolFlags ? { protocolFlags: this.protocolFlags } : {}),
+    });
     // This transferred channel is a lease-bound one-shot transport, not a
     // reconnectable network endpoint. A host close is terminal: close the
     // client so pending requests reject without starting the generic memory
@@ -807,6 +836,7 @@ export interface HostStorageManagerOptions {
   branch?: BranchName;
   id?: string;
   settings?: Options["settings"];
+  protocolFlags?: Partial<WireMemoryProtocolFlags>;
 }
 
 /** StorageManager construction available inside the executor Worker. */
@@ -825,6 +855,7 @@ export class HostStorageManager extends StorageManager {
         options.port,
         options.space,
         options.branch ?? "",
+        options.protocolFlags,
       ),
     );
   }

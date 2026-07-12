@@ -345,6 +345,10 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 
 **Depends on:** #4288.
 **Unblocks:** claim settlement and overlay reconciliation.
+**Status:** implemented. Each action attempt now carries an exact transient
+claim assertion while W1.1 still replaces the dark generation-only session
+binding with the durable fenced lease. W1.3 owns cross-space rejection and
+unserved-attempt production.
 
 **Problem:** the accepting commit/head sequence is not proof of which inputs an
 action consumed. A no-op action also produces no ordinary commit to acknowledge
@@ -360,7 +364,11 @@ that it settled.
 
 **Steps:**
 
-1. Track the revision sequence actually observed for every effective read. For
+1. Track the revision sequence actually observed for every effective read. An
+   effective read here means a same-space confirmed read precondition accepted
+   by the engine, plus a pending read translated from local sequence to its
+   accepted global sequence. Reads excluded from the canonical conflict set do
+   not enter the basis. For
    this same-space phase, inputBasisSeq is the maximum consumed same-space
    revision sequence, or zero for no durable reads. Do not substitute current
    head or accepting commit seq.
@@ -369,25 +377,35 @@ that it settled.
    - onBehalfOf user DID;
    - execution lease generation;
    - claimGeneration when the action is claimed;
-   - causedBy source commit sequence(s), when known;
+   - causedBy source commit sequence(s), as a sorted unique list when directly
+     known and an empty list otherwise (never substitute head or input basis);
    - inputBasisSeq.
 3. The host derives onBehalfOf from the authenticated sponsor lease and
    overwrites/rejects any worker- or client-supplied value. It means
    server-executed on behalf of this user, not semantic authorship of every
    input.
-4. Carry provenance through the normal validated transaction path and store it
+4. Capture a transient `executionClaimAssertion` when the action attempt starts:
+   effective context key, leaseGeneration, and claimGeneration. The remaining
+   ActionClaimKey fields come from that same observation. A host-bound executor
+   must match the exact live incarnation; revoke/reclaim, expiry, connection or
+   session-token replacement, and effective-context mismatch reject the whole
+   attempt rather than relabeling or downgrading it. Strip the assertion from
+   accepted scheduler-state persistence, but retain it in the raw request's
+   replay/original-commit identity. An exact accepted replay remains idempotent
+   after revoke.
+5. Carry provenance through the normal validated transaction path and store it
    with scheduler observation/commit diagnostics.
-5. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
-6. Add ActionSettlement emission for committed, no-op, failed, and unserved
+6. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
+7. Add ActionSettlement emission for committed, no-op, failed, and unserved
    attempts. Settlement names the exact leaseGeneration + claimGeneration and
    inputBasisSeq. A committed settlement must carry acceptedCommitSeq; no-op
    has no data commit. Emit either only after the normal confirmed-read
    validation accepts the corresponding data or observation-only transaction.
-7. Co-order data patches and settlements on the session feed. A client may
+8. Co-order data patches and settlements on the session feed. A client may
    apply a committed settlement only after its confirmed/feed cursor reaches
    acceptedCommitSeq. No-op settlement follows the accepted observation-only
    transaction in that ordered stream.
-8. Do not add persistent scheduler observations for handler runs in this phase.
+9. Do not add persistent scheduler observations for handler runs in this phase.
    Handlers remain client-authoritative, their read sets do not participate in
    server-primary wake indexes, and existing event/source commit provenance
    remains unchanged. Phase 5 owns any handler-observation contract; handler
@@ -395,20 +413,29 @@ that it settled.
 
 **Success criteria:**
 
-- [ ] An action reading an old revision while unrelated newer commits exist
+- [x] An action reading an old revision while unrelated newer commits exist
       records the old consumed basis, not head.
-- [ ] Two consumed inputs at S1 and S2 record max(S1,S2).
-- [ ] A no-op claimed action emits a settlement with its real basis despite
+- [x] Two consumed inputs at S1 and S2 record max(S1,S2); pending local reads
+      contribute their accepted global sequence and no durable reads yield zero.
+- [x] A no-op claimed action emits a settlement with its real basis despite
       producing no data commit.
-- [ ] A committed settlement cannot clear an overlay before the client has
+- [x] A committed settlement cannot clear an overlay before the client has
       applied the acceptedCommitSeq data patch, including forced reordering.
-- [ ] Commit seq and input basis are independently asserted and cannot be
+- [x] Commit seq and input basis are independently asserted and cannot be
       accidentally interchanged by type/API.
-- [ ] The store/control event records the sponsor user as onBehalfOf.
-- [ ] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
+- [x] The store/control event records the sponsor user as onBehalfOf.
+- [x] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
+- [x] A delayed attempt cannot be relabeled onto a replacement
+      claimGeneration or downgraded after revoke; exact accepted replays remain
+      idempotent and a changed assertion replay-mismatches.
+- [x] Executor authority is bound to the exact live connection, session token,
+      and principal, and an effective context narrower than the claim rolls the
+      whole transaction back.
+- [x] Replay fan-out reloads the canonical accepted basis/provenance rather than
+      mirroring request-forged host fields.
 - [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
       into this scalar.
-- [ ] Handler execution emits no new scheduler observation in this phase and
+- [x] Handler execution emits no new scheduler observation in this phase and
       preserves existing authenticated event/source provenance.
 
 ---
