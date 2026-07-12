@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind, isReactiveOriginExpression } from "../ast/mod.ts";
+import { isReactiveOriginExpression } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";

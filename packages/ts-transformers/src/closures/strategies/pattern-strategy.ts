@@ -48,7 +48,7 @@ export class PatternStrategy implements ClosureTransformationStrategy {
     return ts.isCallExpression(node) &&
       isPatternBuilderCall(node, context.checker) &&
       isPatternOwnedNestedValue(node, context.checker) &&
-      classifyLegacyPatternCarrier(node, context.checker) === undefined;
+      classifyLegacyPatternCarrier(node) === undefined;
   }
 
   transform(

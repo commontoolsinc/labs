@@ -220,7 +220,7 @@ const NESTED_PATTERN_BUILDER: HoistableBuilderSpec = {
       !isPatternBuilderCall(call, context.checker) ||
       (!isNestedInPatternBuilder(call, context.checker) &&
         !isGeneratedNestedPattern(call)) ||
-      classifyLegacyPatternCarrier(call, context.checker) !== undefined
+      classifyLegacyPatternCarrier(call) !== undefined
     ) {
       return undefined;
     }

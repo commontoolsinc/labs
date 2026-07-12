@@ -504,7 +504,6 @@ export type LegacyPatternCarrierKind = "with-pattern";
  */
 export function classifyLegacyPatternCarrier(
   patternCall: ts.CallExpression,
-  checker: ts.TypeChecker,
 ): LegacyPatternCarrierKind | undefined {
   const candidates = [patternCall];
   const original = ts.getOriginalNode(patternCall);

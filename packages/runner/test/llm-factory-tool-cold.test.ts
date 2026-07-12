@@ -58,7 +58,7 @@ Deno.test("a cold direct PatternFactory tool parks catalog construction until it
       warm && identity === ref.identity && symbol === ref.symbol
         ? factory
         : undefined;
-    runtime.patternManager.loadArtifactByIdentity = async (
+    runtime.patternManager.loadArtifactByIdentity = (
       identity,
       symbol,
       artifactSpace,
@@ -67,7 +67,7 @@ Deno.test("a cold direct PatternFactory tool parks catalog construction until it
       expect(artifactSpace).toBe(sourceSpace);
       loads++;
       warm = true;
-      return factory;
+      return Promise.resolve(factory);
     };
 
     const sourceTx = runtime.edit();

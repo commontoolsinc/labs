@@ -828,7 +828,6 @@ export class Runner {
   private createStorageSubscription(): IStorageSubscription {
     return {
       next: (notification) => {
-        const space = notification.space;
         if ("changes" in notification) {
           // Result-cell writes are child execution, not a change to the graph
           // selected by the parent action. The next parent run compares its

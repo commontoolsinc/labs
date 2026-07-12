@@ -568,9 +568,9 @@ describe("dynamic Factory@1 node", () => {
     const resolvedNames: string[] = [];
     runtime.resolveSpaceNameSync = (name) =>
       resolvedNames.includes(name) ? dynamicExecutionSpace : undefined;
-    runtime.resolveSpaceName = async (name) => {
+    runtime.resolveSpaceName = (name) => {
       resolvedNames.push(name);
-      return dynamicExecutionSpace;
+      return Promise.resolve(dynamicExecutionSpace);
     };
 
     const resultCell = runtime.getCell<{ result: number }>(
@@ -616,10 +616,10 @@ describe("dynamic Factory@1 node", () => {
     const resolvedNames: string[] = [];
     runtime.resolveSpaceNameSync = () =>
       resolved ? dynamicExecutionSpace : undefined;
-    runtime.resolveSpaceName = async (name) => {
+    runtime.resolveSpaceName = (name) => {
       resolvedNames.push(name);
       resolved = true;
-      return dynamicExecutionSpace;
+      return Promise.resolve(dynamicExecutionSpace);
     };
 
     const resultCell = runtime.getCell<{ result: number }>(

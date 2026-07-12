@@ -257,10 +257,10 @@ function assertFactoryCallBoundaries(factory: InferredPatternFactory) {
 }
 
 declare const authoredPattern: PatternFunction;
-if (false) {
+void (() => {
   // @ts-expect-error Public pattern callbacks have no authored params slot.
   authoredPattern((_argument: unknown, _params: unknown) => ({}));
-}
+});
 
 Deno.test("FactoryInput accepts reactive cell handles in factory bindings", async () => {
   const schemaModule = await import("@commonfabric/api/schema");
