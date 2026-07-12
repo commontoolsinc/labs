@@ -34,6 +34,9 @@ export interface ReplicaSession {
   readonly sessionToken: string | undefined;
   readonly serverSeq: number;
   transact(commit: ClientCommit): Promise<AppliedCommit>;
+  /** Advance execution settlement gating only after the local replica has
+   * applied/confirmed the accepted commit data. */
+  noteAppliedCommit?(seq: number): void;
   queryGraph(query: GraphQuery): Promise<GraphQueryResult>;
   watchAddSync(watches: WatchSpec[]): Promise<{
     view: ReplicaWatchView;

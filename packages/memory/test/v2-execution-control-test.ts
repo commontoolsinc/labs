@@ -34,6 +34,7 @@ type ExecutionSession = MemoryClient.SpaceSession & {
   subscribeExecutionControl(
     listener: (event: ExecutionControlEvent) => void,
   ): () => void;
+  noteAppliedCommit(seq: number): void;
 };
 
 type ActionClaimKey = {
@@ -704,14 +705,28 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   const settlements: ActionSettlement[] = [];
+  const firstSettlement = Promise.withResolvers<void>();
+  const secondSettlement = Promise.withResolvers<void>();
   const unsubscribeControl = session.subscribeExecutionControl((event) => {
     if (event.type === "session.execution.settlement") {
       settlements.push(event.settlement);
+      if (settlements.length === 1) firstSettlement.resolve();
+      if (settlements.length === 2) secondSettlement.resolve();
     }
   });
   let unbind = () => {};
   try {
     await setPolicy(session, true);
+    await session.watchSet([{
+      id: "provenance-output",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:provenance-output",
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
     const claim = server.setExecutionClaim({
       ...claimKey(POLICY_SPACE, "", "action:provenance"),
       leaseGeneration: 17,
@@ -815,9 +830,19 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
       leaseGeneration: claim.leaseGeneration,
       claimGeneration: claim.claimGeneration,
-      causedBy: [source.seq],
+      causedBy: [],
       inputBasisSeq: source.seq,
     });
+    session.noteAppliedCommit(committed.seq);
+    await Promise.race([
+      firstSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("committed settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
     assertEquals(settlements, [{
       branch: "",
       claim,
@@ -826,7 +851,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       acceptedCommitSeq: committed.seq,
     }]);
 
-    await session.transact({
+    const noop = await session.transact({
       localSeq: 4,
       reads: {
         confirmed: [{
@@ -842,6 +867,19 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
         actualChangedWrites: [],
       },
     });
+    assertEquals(noop.actionAttempts?.map((attempt) => attempt.outcome), [
+      "no-op",
+    ]);
+    await server.flushSessions();
+    await Promise.race([
+      secondSettlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("no-op settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
     assertEquals(settlements.at(-1), {
       branch: "",
       claim,

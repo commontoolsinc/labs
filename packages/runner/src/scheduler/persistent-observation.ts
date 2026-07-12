@@ -2,7 +2,10 @@ import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
-import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
+import type {
+  ActionExecutionProvenance,
+  SchedulerExecutionContextKey,
+} from "@commonfabric/memory/v2";
 import { isCellScope } from "../scope.ts";
 
 export type SchedulerActionKind =
@@ -62,6 +65,8 @@ export interface SchedulerActionObservation {
    * commit read set; a runner/client value is never authoritative.
    */
   inputBasisSeq?: number;
+  /** Present only after an authenticated executor commit is accepted. */
+  executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: IMemorySpaceAddress[];

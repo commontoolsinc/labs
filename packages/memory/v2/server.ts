@@ -447,6 +447,11 @@ const executionDemandKey = (
 
 type ExecutionClaimInput = ActionClaimKey & { leaseGeneration: number };
 
+type BoundExecutionSession = {
+  readonly connectionId: string | null;
+  readonly leaseGeneration: number;
+};
+
 const actionClaimKey = (claim: ActionClaimKey): ActionClaimKey => ({
   branch: claim.branch,
   space: claim.space,
@@ -1082,6 +1087,7 @@ export class Server {
   #executionDemandOrder = 0;
   #executionClaims = new Map<string, ExecutionClaim>();
   #executionClaimGeneration = new Map<string, number>();
+  #boundExecutionSessions = new Map<string, BoundExecutionSession>();
   #executionPolicyEnabledSpaces = new Set<string>();
   #executionClaimExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   #store?: URL;
@@ -1598,6 +1604,11 @@ export class Server {
   disconnect(connection: Connection): void {
     this.#connections.delete(connection.id);
     this.#removeExecutionDemands({ connectionId: connection.id });
+    for (const [key, binding] of this.#boundExecutionSessions) {
+      if (binding.connectionId === connection.id) {
+        this.#boundExecutionSessions.delete(key);
+      }
+    }
     if (this.#connections.size === 0) {
       this.cancelScheduledRefresh();
     }
@@ -1609,6 +1620,7 @@ export class Server {
     ownerConnectionId: string,
   ): void {
     this.#sessions.detach(space, sessionId, ownerConnectionId);
+    this.#boundExecutionSessions.delete(sessionKey(space, sessionId));
   }
 
   removeExecutionDemandsForSession(
@@ -1617,6 +1629,46 @@ export class Server {
     sessionId: string,
   ): void {
     this.#removeExecutionDemands({ connectionId, space, sessionId });
+    this.#boundExecutionSessions.delete(sessionKey(space, sessionId));
+  }
+
+  /**
+   * Bind one authenticated session to host-owned executor authority. This is a
+   * process API, never a protocol message; the Worker receives no sponsor key
+   * and cannot select `onBehalfOf`. W1.1 replaces the generation-only seam
+   * with the durable lease/fence record.
+   */
+  bindExecutionSession(
+    space: string,
+    sessionId: string,
+    authority: { leaseGeneration: number },
+  ): () => void {
+    if (!isPositiveSafeInteger(authority.leaseGeneration)) {
+      throw new TypeError("execution lease generation must be positive");
+    }
+    const session = this.#sessions.get(space, sessionId);
+    if (
+      session === null || session.principal === undefined ||
+      session.principal === ANYONE_USER
+    ) {
+      throw new Error(
+        "execution authority requires an authenticated live session",
+      );
+    }
+    const key = sessionKey(space, sessionId);
+    const binding: BoundExecutionSession = Object.freeze({
+      connectionId: session.ownerConnectionId,
+      leaseGeneration: authority.leaseGeneration,
+    });
+    this.#boundExecutionSessions.set(key, binding);
+    let bound = true;
+    return () => {
+      if (!bound) return;
+      bound = false;
+      if (this.#boundExecutionSessions.get(key) === binding) {
+        this.#boundExecutionSessions.delete(key);
+      }
+    };
   }
 
   listExecutionDemands(
@@ -1806,6 +1858,48 @@ export class Server {
         left.branch.localeCompare(right.branch) ||
         actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
       );
+  }
+
+  #executionClaimsForCommit(
+    space: string,
+    branch: BranchName,
+    session: SessionState,
+    observations: readonly CommitSchedulerObservation[],
+  ): ReadonlyMap<number, ExecutionClaim> | undefined {
+    const binding = this.#boundExecutionSessions.get(
+      sessionKey(space, session.id),
+    );
+    if (
+      binding === undefined || session.principal === undefined ||
+      session.principal === ANYONE_USER
+    ) {
+      return undefined;
+    }
+    this.expireExecutionClaims();
+    const claims = new Map<number, ExecutionClaim>();
+    for (const { localSeq, observation } of observations) {
+      // The first server-primary phase admits only space-scoped actions. The
+      // engine independently verifies this exact claim/action match before it
+      // authors provenance.
+      const key: ActionClaimKey = {
+        branch,
+        space,
+        contextKey: "space",
+        pieceId: observation.pieceId,
+        actionId: observation.actionId,
+        actionKind: observation.actionKind,
+        implementationFingerprint: observation.implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+      };
+      const live = this.#executionClaims.get(actionClaimMapKey(key));
+      if (
+        live !== undefined &&
+        live.leaseGeneration === binding.leaseGeneration
+      ) {
+        claims.set(localSeq, live);
+      }
+    }
+    return claims.size > 0 ? claims : undefined;
   }
 
   #executionControlSync(
@@ -2100,6 +2194,7 @@ export class Server {
     this.#executionDemandListeners.clear();
     this.#executionClaims.clear();
     this.#executionClaimGeneration.clear();
+    this.#boundExecutionSessions.clear();
     this.#executionPolicyEnabledSpaces.clear();
     this.#readPool.close();
   }
@@ -3036,6 +3131,12 @@ export class Server {
           const schedulerObservations = schedulerStateEnabled
             ? schedulerObservationsFromCommit(commitPayload)
             : [];
+          const executionClaims = this.#executionClaimsForCommit(
+            message.space,
+            message.commit.branch ?? "",
+            session,
+            schedulerObservations,
+          );
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
             const previousSnapshots = Engine.listSchedulerActionSnapshots(
@@ -3083,6 +3184,7 @@ export class Server {
                     space: message.space,
                     principal: session.principal,
                     commit: commitPayload,
+                    executionClaims,
                     sqliteAttachments,
                   });
                 } finally {
@@ -3127,10 +3229,15 @@ export class Server {
               this.#revokeExecutionClaimsForSpace(message.space);
             }
           }
+          const acceptedSchedulerObservations = this
+            .#acceptedSchedulerObservations(
+              schedulerObservations,
+              commit,
+            );
           await this.runPostCommitSchedulerSideEffects(
             message.space,
             commit,
-            schedulerObservations,
+            acceptedSchedulerObservations,
             previousReadSpaces,
             session,
           );
@@ -3141,6 +3248,7 @@ export class Server {
               deliverySeq: acceptedDeliverySeq,
               commit,
             });
+            this.#publishAcceptedActionAttempts(commit);
           }
           this.markSpaceDirty(
             message.space,
@@ -4465,6 +4573,57 @@ export class Server {
         "Post-commit scheduler state update failed after semantic commit:",
         error,
       );
+    }
+  }
+
+  #acceptedSchedulerObservations(
+    observations: readonly CommitSchedulerObservation[],
+    commit: Engine.AppliedCommit,
+  ): CommitSchedulerObservation[] {
+    const results = new Map(
+      (commit.schedulerObservationResults ?? []).map((result) => [
+        result.localSeq,
+        result,
+      ]),
+    );
+    return observations.map(({ localSeq, observation }) => {
+      const result = results.get(localSeq);
+      if (result?.status !== "kept" || result.inputBasisSeq === undefined) {
+        return { localSeq, observation };
+      }
+      return {
+        localSeq,
+        observation: {
+          ...observation,
+          inputBasisSeq: result.inputBasisSeq,
+          ...(result.executionProvenance !== undefined
+            ? { executionProvenance: result.executionProvenance }
+            : {}),
+        },
+      };
+    });
+  }
+
+  #publishAcceptedActionAttempts(commit: Engine.AppliedCommit): void {
+    for (const attempt of commit.actionAttempts ?? []) {
+      const settlement: ActionSettlement = attempt.outcome === "committed"
+        ? {
+          branch: attempt.claim.branch,
+          claim: attempt.claim,
+          inputBasisSeq: attempt.provenance.inputBasisSeq,
+          outcome: "committed",
+          acceptedCommitSeq: attempt.acceptedCommitSeq,
+        }
+        : {
+          branch: attempt.claim.branch,
+          claim: attempt.claim,
+          inputBasisSeq: attempt.provenance.inputBasisSeq,
+          outcome: attempt.outcome,
+        };
+      // The attempt was accepted synchronously under this exact live claim.
+      // A false return now means expiry/revocation won during async post-commit
+      // side effects; never resurrect that stale authority.
+      this.publishActionSettlement(settlement);
     }
   }
 
