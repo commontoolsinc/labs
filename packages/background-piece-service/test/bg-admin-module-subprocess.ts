@@ -153,7 +153,7 @@ assertEquals(pieces.setCount, 1);
 assertEquals(pieces.setCount, 1);
 
 const patternPieces = {
-  map(row: (piece: FakeEntryCell) => unknown) {
+  map(row: (piece: BGPieceEntry) => unknown) {
     return [row(pieceEntry({ status: "Success", lastRun: 1_700_000_004_000 }))];
   },
 };
@@ -165,7 +165,7 @@ assert(rendered["$UI"]);
 assertEquals(rendered.pieces, patternPieces);
 assert(
   (pieceRowPattern as never as (
-    input: { piece: FakeEntryCell; pieces: typeof patternPieces },
+    input: { piece: BGPieceEntry; pieces: typeof patternPieces },
   ) => unknown)({
     piece: pieceEntry(),
     pieces: patternPieces,

@@ -48,21 +48,21 @@ implementation. When the final removal gate passes, archive it under
 
 ## Fixed design constraints
 
-- [ ] Use one directly branded callable `Factory@1` value for pattern, module,
+- [x] Use one directly branded callable `Factory@1` value for pattern, module,
   and handler factories; do not introduce `FabricPatternFactory`,
   `FabricModuleFactory`, or another wrapper object.
-- [ ] Keep the factory artifact ref distinct from `$implRef`; only the complete
+- [x] Keep the factory artifact ref distinct from `$implRef`; only the complete
   content-addressed builder artifact can back durable factory state.
-- [ ] Decode to a branded, inert callable shell. Only runner-owned
+- [x] Decode to a branded, inert callable shell. Only runner-owned
   `materializeFactory` may turn a shell into an executable builder factory.
-- [ ] Keep public pattern input in callback argument 0 and closure params in
+- [x] Keep public pattern input in callback argument 0 and closure params in
   callback argument 1. Never merge the two records.
-- [ ] Carry the compiler-generated params schema with
+- [x] Carry the compiler-generated params schema with
   `withPatternParamsSchema(callback, schema)` before `pattern()` eagerly invokes
   the callback; do not add a fourth `pattern()` argument.
-- [ ] Emit `.curry(params)` only from the transformer, with exactly one
+- [x] Emit `.curry(params)` only from the transformer, with exactly one
   argument, no argument index, and a hard error on a second call.
-- [ ] Permit durable encoding only when the root artifact has a cold-resolvable
+- [x] Permit durable encoding only when the root artifact has a cold-resolvable
   content-addressed `{ identity, symbol }` ref. Reject keyless, action-created,
   and host-pseudo-module factories.
 - [x] Keep the dynamic call site's output spot as the stable identity anchor
@@ -70,20 +70,20 @@ implementation. When the final removal gate passes, archive it under
 - [x] In an eager pattern callback, keep a factory-valued input/capture as a
   symbolic Cell/link binding. Serialize that binding in the dynamic node;
   never snapshot the currently selected factory ref into the graph.
-- [ ] Before invoking a `lift` implementation or handler event, materialize
+- [x] Before invoking a `lift` implementation or handler event, materialize
   each `asFactory` argument as the current ordinary callable. Never expose an
   inert shell, promise, or lazy executable wrapper to authored callback code.
-- [ ] Make cold readiness local to the consuming dynamic node, lift attempt, or
+- [x] Make cold readiness local to the consuming dynamic node, lift attempt, or
   handler event. Whole-parent preloading is cache-only; only a cold root passed
   to non-transactional Promise-based `setup(undefined, ...)` intrinsically
   gates parent setup. `run()` and transaction-bound setup remain warm-only.
 - [x] Keep artifact source space as trusted runner provenance, distinct from a
   pattern factory's serialized `spaceSelector` execution target. Do not add
   source authority to `Factory@1`.
-- [ ] Read the selected factory in the consuming action/event transaction and
+- [x] Read the selected factory in the consuming action/event transaction and
   reread it after a cold await so reactive dependencies and CFC provenance
   describe the value that actually executes.
-- [ ] Preserve `FrameworkProvided` inputs as system-supplied inputs through
+- [x] Preserve `FrameworkProvided` inputs as system-supplied inputs through
   wrapper chains; reject authored or captured attempts to provide them.
 
 ## Dependency map
@@ -527,7 +527,7 @@ Expected files and tests:
 - [x] Arbitrary functions and pseudo refs are still rejected.
 - [x] Context-free decode is inert; runner materialization is the only path to
   executable behavior.
-- [ ] `deno task test` passes in `packages/data-model` and `packages/runner`.
+- [x] `deno task test` passes in `packages/data-model` and `packages/runner`.
 - [x] `deno check packages/api/index.ts` (or the package's standard type-check)
   passes with `.curry` absent from public `PatternFactory`.
 - [x] Commit Stage 1 in protocol, builder-state, and materialization slices.
@@ -949,7 +949,7 @@ until Stage 4 migrates those writers; no failure is waived.
   start, never calls authored code with a shell, and preserves one durable
   handler event identity through retry.
 - [x] Warm and cold resolution fail closed on kind or schema mismatch.
-- [ ] `deno task test` passes in `packages/api`, `packages/schema-generator`,
+- [x] `deno task test` passes in `packages/api`, `packages/schema-generator`,
   `packages/ts-transformers`, and `packages/runner` using each package's
   available task names.
 
@@ -1322,7 +1322,7 @@ complete task must pass after Stage 4 before final handoff.
   cannot remain an accidental writer dependency.
 - [x] Update closure-capture diagnostics to recommend inline patterns, not
   manual sibling params.
-- [ ] Regenerate affected transformer goldens and test nested map/filter/flatMap
+- [x] Regenerate affected transformer goldens and test nested map/filter/flatMap
   chains, capture-free callbacks, identity stability, resume, and CFC labels.
 
 Primary files:
@@ -1523,15 +1523,15 @@ an open aggregate package gate, not a waived green result.
 
 ### Stage 3 completion gate
 
-- [ ] Exact emitted IR uses a two-parameter callback,
+- [x] Exact emitted IR uses a two-parameter callback,
   `withPatternParamsSchema`, and at most one transformer-only `.curry(params)`.
-- [ ] No emitted or runtime path merges closure params into public input.
-- [ ] Hidden params cells resume, preserve links/CFC, and tear down with their
+- [x] No emitted or runtime path merges closure params into public input.
+- [x] Hidden params cells resume, preserve links/CFC, and tear down with their
   owner.
-- [ ] List callbacks emit only bound-factory nodes while old stored nodes still
+- [x] List callbacks emit only bound-factory nodes while old stored nodes still
   read correctly.
-- [ ] Framework-provided values remain system-supplied through wrapper chains.
-- [ ] Transformer, runner, API, schema-generator, and focused CFC tests pass.
+- [x] Framework-provided values remain system-supplied through wrapper chains.
+- [x] Transformer, runner, API, schema-generator, and focused CFC tests pass.
 
 ## Stage 4 — Boundary and `patternTool` migration
 
@@ -1869,7 +1869,7 @@ checks retain only the pre-existing Gmail mergeability warning).
   `$patternRef` factory value, or sibling list params; deprecated public legacy
   APIs remain isolated and tested until Stage 5.
 - [x] Legacy tool/list/module fixtures still read with their old semantics.
-- [ ] Pattern, runner, LLM, CLI, FUSE, transformer, and docs checks pass.
+- [x] Pattern, runner, LLM, CLI, FUSE, transformer, and docs checks pass.
 
 ## Stage 5 — Compatibility removal and closeout
 
@@ -1877,6 +1877,14 @@ Stage 5 is a separately scheduled cleanup. Do not infer that source migration
 alone authorizes deleting readers for durable values.
 
 ### WP5.1 — Satisfy removal gates
+
+Stage 5 was not executed in this implementation. Stage 4's production-caller
+inventories are green, but the broader supported-tree allowlist/CI gate remains
+part of the separately scheduled cleanup. No deployed-writer compatibility
+window, persistent-store migration/expiry decision, zero-use reader telemetry,
+supported-client rollout evidence, or product/runtime owner removal approval was
+provided. Those gates therefore remain unchecked, and no durable reader is
+eligible for deletion.
 
 - [ ] Confirm all supported source trees contain no `patternTool` caller.
 - [ ] Add a CI/source-inventory assertion with zero `patternTool`,
@@ -1964,88 +1972,110 @@ alone authorizes deleting readers for durable values.
 
 ### Fabric protocol
 
-- [ ] Encode/decode/hash/equality/clone/freeze every factory kind.
-- [ ] Round-trip nested factories, params, Cells/links, scope, and space
+- [x] Encode/decode/hash/equality/clone/freeze every factory kind.
+- [x] Round-trip nested factories, params, Cells/links, scope, and space
   selectors.
-- [ ] Reject arbitrary functions, copied symbols, malformed/cyclic states,
+- [x] Reject arbitrary functions, copied symbols, malformed/cyclic states,
   pre-seal state, pseudo refs, kind mismatches, and schema mismatches.
-- [ ] Verify independent evaluations of equal factory state hash equally.
+- [x] Verify independent evaluations of equal factory state hash equally.
 
 ### Transformer
 
-- [ ] Golden output shows callback `(argument, params)`, callback-wrapped params
+- [x] Golden output shows callback `(argument, params)`, callback-wrapped params
   schema, deterministic hoist, and exactly one internal curry at capturing
   sites.
-- [ ] Golden output contains no fourth `pattern()` argument, curry index, input
+- [x] Golden output contains no fourth `pattern()` argument, curry index, input
   merge, or curry at capture-free sites.
-- [ ] Symbolic calls lower for aliases/properties/elements and direct live calls
+- [x] Symbolic calls lower for aliases/properties/elements and direct live calls
   remain direct; `lift` and handler callback parameters specifically remain
   direct after runner materialization.
-- [ ] List callbacks use bound factories with no sibling params writer.
-- [ ] Diagnostics cover invalid captures, authored callback argument 1, second
+- [x] List callbacks use bound factories with no sibling params writer.
+- [x] Diagnostics cover invalid captures, authored callback argument 1, second
   curry, missing params, untransformable symbolic calls, and bad unions.
 
 ### Runtime
 
-- [ ] Warm and cold invoke stored pattern, module, and handler factories.
-- [ ] Direct symbolic replacement cancels/fences/tears down the prior generation
+- [x] Warm and cold invoke stored pattern, module, and handler factories.
+- [x] Direct symbolic replacement cancels/fences/tears down the prior generation
   while retaining the output spot; same-state replay does not restart it.
-- [ ] Warm/cold `asFactory` values reach lift and handler callbacks as ordinary
+- [x] Warm/cold `asFactory` values reach lift and handler callbacks as ordinary
   callables. Cold readiness stays local, rereads after await, retains lift
   pre-readiness behavior without strengthening its commit contract, and
   preserves complete handler event intent/receipt timing.
-- [ ] Cross-space linked and by-value factories load from trusted artifact
+- [x] Cross-space linked and by-value factories load from trusted artifact
   provenance while `spaceSelector` independently controls child execution.
-- [ ] Hidden params cells preserve same-named public fields, nested aliases,
+- [x] Hidden params cells preserve same-named public fields, nested aliases,
   cross-space links, resume, teardown, and CFC labels.
-- [ ] Captured factories can themselves be stored and invoked.
-- [ ] Schema-light `byRef()` resolves only through trusted registry metadata.
-- [ ] Forged refs/metadata fail closed.
+- [x] Captured factories can themselves be stored and invoked.
+- [x] Schema-light `byRef()` resolves only through trusted registry metadata.
+- [x] Forged refs/metadata fail closed.
 
 ### Boundaries and migration
 
-- [ ] JSON, memory client/server, Cell/query, piece, cross-space, CLI, FUSE, and
+- [x] JSON, memory client/server, Cell/query, piece, cross-space, CLI, FUSE, and
   LLM tool paths preserve canonical factory state and callability after runner
   materialization.
-- [ ] Framework-provided inputs remain hidden from the model and cannot be
+- [x] Framework-provided inputs remain hidden from the model and cannot be
   authored/captured.
-- [ ] Legacy tool and list fixtures read until their explicit removal gates.
-- [ ] No canonical writer emits `extraParams` or sibling list params.
+- [x] Legacy tool and list fixtures read until their explicit removal gates.
+- [x] No canonical writer emits `extraParams` or sibling list params.
 
 ## Final command checklist
 
 Use the package's current task names if they change while this live plan is in
 progress.
 
-- [ ] `deno task test` in `packages/data-model`
-- [ ] `deno task test` in `packages/schema-generator`
-- [ ] `deno task test` in `packages/ts-transformers`
-- [ ] `deno task test` in `packages/runner`
-- [ ] `deno task test` in `packages/llm`
-- [ ] `deno task test` in `packages/cli`
-- [ ] `deno task test` in `packages/fuse`
-- [ ] Root `deno task check`
-- [ ] Focused API type tests, including the negative public `.curry` assertion
-- [ ] A representative `deno task cf check ... --show-transformed --no-run`
+- [x] `deno task test` in `packages/data-model`
+- [x] `deno task test` in `packages/schema-generator`
+- [x] `deno task test` in `packages/ts-transformers`
+- [x] `deno task test` in `packages/runner`
+- [x] `deno task test` in `packages/llm`
+- [x] `deno task test` in `packages/cli`
+- [x] `deno task test` in `packages/fuse`
+- [x] Root `deno task check`
+- [x] Focused API type tests, including the negative public `.curry` assertion
+- [x] A representative `deno task cf check ... --show-transformed --no-run`
   output inspected for closure and symbolic-call IR
-- [ ] Fresh-runtime cold round-trip integration for all three factory kinds
-- [ ] `deno task check-docs specs/pattern-construction`
-- [ ] `deno task check-docs plans`
-- [ ] `git diff --check`
+- [x] Fresh-runtime cold round-trip integration for all three factory kinds
+- [x] `deno task check-docs specs/pattern-construction`
+- [x] `deno task check-docs plans`
+- [x] `git diff --check`
+
+Final validation (2026-07-11): data-model passes `49 passed (1992 steps), 0
+failed`; schema-generator `28 passed (251 steps), 0 failed`; transformers `1137
+passed (736 steps), 0 failed`; runner `929 passed (4897 steps), 0 failed, 0
+ignored (10 steps)` in 3m53s; LLM `2 passed (20 steps), 0 failed`; CLI main
+lane `895 passed (249 steps), 0 failed, 1 ignored` plus subprocess lane `20
+passed (91 steps), 0 failed`; FUSE `204 passed, 0 failed, 1 ignored`. The
+affected patterns and background-piece packages also pass `59 passed (29
+steps)` and `12 passed (48 steps)` respectively. Root `deno task check` passes.
+
+Focused `deno check` passes both API factory type files, including the negative
+public `.curry` assertion. The fresh-runtime integration passes both suites and
+all five steps for pattern, module, and handler factories. The final
+summary-index transform shows callback argument 0 read through
+`__cf_pattern_input`, private `{ entries }` at argument 1 under
+`withPatternParamsSchema`, one `.curry({ entries })`, direct `asFactory` output,
+and no `patternTool`/`extraParams`. Both docs checks pass their checked code
+blocks, and `git diff --check` is clean.
 
 ## Overall completion criteria
 
-- [ ] Every content-addressed pattern/module/handler factory round-trips as a
+- [x] Every content-addressed pattern/module/handler factory round-trips as a
   directly callable-after-materialization `Factory@1`; non-resolvable
   factories fail durable encoding.
-- [ ] Arbitrary JavaScript functions remain invalid Fabric values.
-- [ ] Factory-valued eager inputs and captures invoke through one symbolic
+- [x] Arbitrary JavaScript functions remain invalid Fabric values.
+- [x] Factory-valued eager inputs and captures invoke through one symbolic
   dynamic runner path; runtime lift/handler inputs and imperative boundaries
   use the same materialization chokepoint before ordinary direct invocation.
-- [ ] Nested patterns preserve lexical semantics through callback argument 1
+- [x] Nested patterns preserve lexical semantics through callback argument 1
   and exactly one transformer-only `.curry(params)` per wrapper layer.
-- [ ] Public pattern input and closure params are never merged.
-- [ ] Refs, schemas, params, scope, space selection, CFC labels, equality, and
+- [x] Public pattern input and closure params are never merged.
+- [x] Refs, schemas, params, scope, space selection, CFC labels, equality, and
   hashes survive storage and cold reload.
 - [ ] `patternTool` and sibling list params have no writer/source path, and all
   retained compatibility readers have explicit, evidenced removal gates.
+
+This final criterion remains open intentionally: canonical production writers
+are migrated, but the deprecated public `patternTool` compatibility writer is
+still present until the Stage 5 evidence and owner-decision gates pass.
