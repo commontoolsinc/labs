@@ -47,9 +47,15 @@ interface CandidateClaim {
   claimKey: ActionClaimKey;
 }
 
+interface CandidateDiagnostic {
+  claim: ExecutionClaim;
+  diagnosticCode: string;
+}
+
 type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
   /** Host-local diagnostic only. This callback never publishes authority. */
   onCandidateClaim?: (candidate: CandidateClaim) => void;
+  onCandidateDiagnostic?: (diagnostic: CandidateDiagnostic) => void;
 };
 
 class FakeWorker extends EventTarget implements ExecutorWorkerLike {
@@ -71,6 +77,14 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
           type: "candidate-claim",
           candidate: { claimKey },
         },
+      }),
+    );
+  }
+
+  unserved(claim: ExecutionClaim, diagnosticCode: string): void {
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "unserved-claim", claim, diagnosticCode },
       }),
     );
   }
@@ -106,6 +120,7 @@ class ClaimRecordingServer {
     lease: ExecutionLeaseHandle;
     claimKey: ActionClaimKey;
   }[] = [];
+  readonly revoked: ExecutionClaim[] = [];
 
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
@@ -113,6 +128,11 @@ class ClaimRecordingServer {
   ): Promise<ExecutionClaim> {
     this.claimRequests.push({ lease, claimKey });
     return Promise.resolve(CLAIM);
+  }
+
+  revokeExecutionClaim(claim: ExecutionClaim): boolean {
+    this.revoked.push(claim);
+    return true;
   }
 }
 
@@ -124,6 +144,7 @@ const flushClaimControl = async (): Promise<void> => {
 const startExecutor = async (options: {
   routing: boolean;
   onCandidateClaim?: (candidate: CandidateClaim) => void;
+  onCandidateDiagnostic?: (diagnostic: CandidateDiagnostic) => void;
 }) => {
   const worker = new FakeWorker();
   const server = new ClaimRecordingServer();
@@ -137,6 +158,7 @@ const startExecutor = async (options: {
       serverPrimaryExecutionClaimRoutingV1: options.routing,
     },
     onCandidateClaim: options.onCandidateClaim,
+    onCandidateDiagnostic: options.onCandidateDiagnostic,
     createWorker: () => {
       queueMicrotask(() => worker.boot());
       return worker;
@@ -178,6 +200,29 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
       ),
       false,
     );
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("canonical unserved attempts revoke the exact test-only claim", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    worker.unserved(CLAIM, "dynamic-non-space-read-scope");
+    await flushClaimControl();
+
+    assertEquals(diagnostics, [{
+      claim: CLAIM,
+      diagnosticCode: "dynamic-non-space-read-scope",
+    }]);
+    assertEquals(server.revoked, [CLAIM]);
     assertEquals(crashes, []);
   } finally {
     await executor.stop();
