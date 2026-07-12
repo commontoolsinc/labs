@@ -775,7 +775,11 @@ function admitFabricFactory<T extends Callable>(
       writable: false,
     },
   });
-  factoryAdmissions.set(value, { source, stateAccessor, canonicalState });
+  factoryAdmissions.set(value, {
+    source,
+    stateAccessor,
+    ...(canonicalState === undefined ? {} : { canonicalState }),
+  });
   return value as T & FabricFactory<Parameters<T>, ReturnType<T>>;
 }
 
