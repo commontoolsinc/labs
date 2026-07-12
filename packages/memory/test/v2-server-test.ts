@@ -212,6 +212,74 @@ Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () 
   );
 });
 
+Deno.test("memory v2 scheduler writer lookup accepts only server-scoped targets", () => {
+  const request = {
+    type: "scheduler.writer.list",
+    requestId: "scheduler-writer-list",
+    space: "did:key:z6Mk-space",
+    sessionId: "session:alice",
+    query: {
+      branch: "feature",
+      targets: [{
+        id: "of:output",
+        scope: "user",
+        path: ["value", "result"],
+      }],
+    },
+  };
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary(request)),
+    request as unknown as ReturnType<typeof parseClientMessage>,
+  );
+
+  const invalidQueries = [
+    {
+      executionContextKey: "user:did%3Akey%3Abob",
+      targets: [{ id: "of:output", path: ["value"] }],
+    },
+    {
+      targets: [{
+        id: "of:output",
+        path: ["value"],
+        scopeKey: "user:did%3Akey%3Abob",
+      }],
+    },
+    {
+      targets: [{
+        id: "of:output",
+        path: ["value"],
+        execution_context_key: "session:other:session",
+      }],
+    },
+    {
+      targets: [{
+        space: "did:key:z6Mk-other-space",
+        id: "of:output",
+        path: ["value"],
+      }],
+    },
+    {
+      targets: [{ id: "of:output", scope: "global", path: ["value"] }],
+    },
+    {
+      targets: [{ id: "of:output", path: ["value", 0] }],
+    },
+  ];
+
+  for (const [index, query] of invalidQueries.entries()) {
+    assertEquals(
+      parseClientMessage(encodeMemoryBoundary({
+        type: "scheduler.writer.list",
+        requestId: `scheduler-writer-invalid-${index}`,
+        space: "did:key:z6Mk-space",
+        sessionId: "session:alice",
+        query,
+      })),
+      null,
+    );
+  }
+});
+
 Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();
   const first = sessions.open(

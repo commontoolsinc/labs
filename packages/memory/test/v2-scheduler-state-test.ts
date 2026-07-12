@@ -2173,6 +2173,138 @@ Deno.test("memory v2 keeps scheduler state for two user contexts", async () => {
   }
 });
 
+Deno.test("memory v2 writer lookup derives authenticated action contexts", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const aliceClient = await connect({ transport: loopback(server) });
+  const bobClient = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-writer-protocol-owner";
+  const alicePrincipal = "did:key:scheduler-writer-protocol-alice";
+  const bobPrincipal = "did:key:scheduler-writer-protocol-bob";
+  const alice = await aliceClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(alicePrincipal),
+  );
+  const bob = await bobClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(bobPrincipal),
+  );
+  const piece = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:piece",
+    path: [],
+  };
+  const sharedTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:shared-output",
+    path: ["value"],
+  };
+  const userRead = {
+    space: ownerSpace,
+    scope: "user" as const,
+    id: "of:user-input",
+    path: ["value"],
+  };
+  const contextObservation = (
+    actionId: string,
+  ): SchedulerActionObservation => {
+    const implementationFingerprint = `impl:${actionId}`;
+    return observationForAction(actionId, {
+      version: 2,
+      ownerSpace,
+      pieceId: "space:of:piece",
+      implementationFingerprint,
+      reads: [userRead],
+      currentKnownWrites: [sharedTarget],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+        piece,
+        reads: [userRead],
+        writes: [sharedTarget],
+        materializerWriteEnvelopes: [],
+        directOutputs: [sharedTarget],
+      },
+    });
+  };
+  const aliceAction = "pattern.tsx:computed:writer-alice";
+  const bobAction = "pattern.tsx:computed:writer-bob";
+
+  try {
+    await alice.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: contextObservation(aliceAction),
+    });
+    await bob.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: contextObservation(bobAction),
+    });
+
+    const query = {
+      branch: "",
+      targets: [{
+        id: sharedTarget.id,
+        scope: sharedTarget.scope,
+        path: toDocumentPath(sharedTarget.path),
+      }],
+    };
+    const aliceWriters = await alice.writersForTargets(query);
+    const bobWriters = await bob.writersForTargets(query);
+    assertEquals(
+      aliceWriters.writers.map((writer: {
+        actionId: string;
+        executionContextKey: string;
+      }) => ({
+        actionId: writer.actionId,
+        executionContextKey: writer.executionContextKey,
+      })),
+      [{
+        actionId: aliceAction,
+        executionContextKey: `user:${encodeURIComponent(alicePrincipal)}`,
+      }],
+    );
+    assertEquals(
+      bobWriters.writers.map((writer: {
+        actionId: string;
+        executionContextKey: string;
+      }) => ({
+        actionId: writer.actionId,
+        executionContextKey: writer.executionContextKey,
+      })),
+      [{
+        actionId: bobAction,
+        executionContextKey: `user:${encodeURIComponent(bobPrincipal)}`,
+      }],
+    );
+  } finally {
+    await aliceClient.close().catch(() => {});
+    await bobClient.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 Deno.test("memory v2 server lists only scheduler contexts applicable to the authenticated session", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
@@ -2410,6 +2542,17 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const ownerSpace = "did:key:scheduler-flag-off-owner-space";
+  const ownerTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:flag-off-output",
+    path: ["value"],
+  };
+  const storedObservation = {
+    ...observation,
+    ownerSpace,
+    currentKnownWrites: [ownerTarget],
+  } satisfies SchedulerActionObservation;
 
   setPersistentSchedulerStateConfig(true);
   const setupServer = new Server({
@@ -2428,7 +2571,7 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservation: { ...observation, ownerSpace },
+      schedulerObservation: storedObservation,
     });
   } finally {
     await setupClient.close().catch(() => {});
@@ -2452,6 +2595,15 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
       actionId: observation.actionId,
     });
     assertEquals(listed.snapshots, []);
+    const writers = await owner.writersForTargets({
+      branch: "",
+      targets: [{
+        id: ownerTarget.id,
+        scope: ownerTarget.scope,
+        path: toDocumentPath(ownerTarget.path),
+      }],
+    });
+    assertEquals(writers.writers, []);
   } finally {
     await client.close().catch(() => {});
     await server.close().catch(() => {});

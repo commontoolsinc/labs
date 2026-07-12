@@ -9,7 +9,9 @@ import {
   type EntitySnapshot,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  resetPersistentSchedulerStateConfig,
   type SessionSync,
+  setPersistentSchedulerStateConfig,
   toDocumentPath,
 } from "../v2.ts";
 import {
@@ -3013,6 +3015,79 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
     assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
   } finally {
     await legacy.close();
+  }
+});
+
+Deno.test("memory v2 writer lookup fails open when the server omits its capability", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const requestTypes: string[] = [];
+  const legacyFlags = {
+    ...getMemoryProtocolFlags(),
+  } as unknown as Record<string, boolean>;
+  delete legacyFlags.schedulerWriterLookup;
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      requestTypes.push(message.type ?? "<missing>");
+      switch (message.type) {
+        case "hello":
+          receiver(encodeMemoryBoundary({
+            type: "hello.ok",
+            protocol: MEMORY_PROTOCOL,
+            flags: legacyFlags,
+            sessionOpen: {
+              audience: TEST_SESSION_OPEN_AUDIENCE,
+              challenge: sessionOpenChallenge,
+            },
+          }));
+          return Promise.resolve();
+        case "session.open":
+          receiver(encodeMemoryBoundary({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              sessionId: "session:writer-capability",
+              sessionToken: "token:writer-capability",
+              serverSeq: 17,
+              sessionOpen: sessionOpenFor(message.requestId!),
+            },
+          }));
+          return Promise.resolve();
+        default:
+          throw new Error(`unexpected memory request: ${message.type}`);
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+
+  const client = await connect({ transport });
+  try {
+    assertEquals(client.serverFlags?.schedulerWriterLookup, false);
+    const session = await client.mount(
+      "did:key:z6Mk-writer-capability-space",
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const result = await session.writersForTargets({
+      branch: "",
+      targets: [{
+        id: "of:output",
+        path: toDocumentPath(["value"]),
+      }],
+    });
+    assertEquals(result, { serverSeq: 17, writers: [] });
+    assertEquals(requestTypes, ["hello", "session.open"]);
+  } finally {
+    await client.close();
+    resetPersistentSchedulerStateConfig();
   }
 });
 
