@@ -18,7 +18,7 @@ update when behavior changes.
 | `cfc_authoring_contract.md` | Contract (core implemented) | CFC-aware authoring surface: alias set + lowering rules to `ifc.*`; see its status header for letter-vs-shipped deltas |
 | `cfc_ui_helper_contract.md` | Contract (implemented) | UiAction / UiPromptSlot / UiDisclosure JSX rewrite + `ifc.uiContract` hints |
 | `../schema-generator/ts_to_json_schema_mapping.md` | **Descriptive** | The TypeScript→JSON Schema mapping rules (the other half of the language contract) |
-| `archive/` | Historical | Superseded designs and PR-scoped artifacts, each with a banner; nothing here is current |
+| (historical records) | Historical | Superseded designs and PR-scoped artifacts live in `docs/history/` (see `docs/README.md` for the live/historical rules); nothing there describes the current system |
 
 Related, outside this directory: `docs/specs/json_schema.md` (the runtime
 schema dialect these schemas target; the `JSONSchema` type in
@@ -66,8 +66,9 @@ per-package working guides: doc maps, instruments, conventions).
    pinned by `packages/ts-transformers/test/spec-sync.test.ts`; extend it when
    you add one.
 3. Prose lists are labeled "as of this writing". Status headers say what kind
-   of document you're in. Docs whose content is superseded move to `archive/`
-   with a banner — they do not linger unlabeled.
+   of document you're in. Docs whose content is superseded move to
+   `docs/history/` per the repo-wide live/historical rules (`docs/README.md`)
+   — they do not linger unlabeled.
 4. Periodic verification: run the `spec-audit` skill (`skills/spec-audit/`)
    after major landings or quarterly — it fans out claim-level checks of this
    corpus against the code and reports drift. The 2026-07 audit found the

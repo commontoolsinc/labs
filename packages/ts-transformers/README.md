@@ -160,7 +160,7 @@ onward), and pinned to the constant by `test/spec-sync.test.ts`.
 ## Additional Documentation
 
 - `docs/specs/ts-transformer/README.md` - corpus map, authority rules, and read
-  order (replaces the retired PR-3154 review guide, now in `archive/`)
+  order (replaces the retired PR-3154 review guide, now in `docs/history/`)
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` -
   implemented behavior inventory
 - `docs/specs/ts-transformer/ts_transformers_design_deltas.md` - hardening

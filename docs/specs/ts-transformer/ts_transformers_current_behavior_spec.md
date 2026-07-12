@@ -51,7 +51,14 @@ happens before the transformer pipeline runs.
 
 Opt-out note:
 
-- `/// <cf-disable-transform />` is the explicit opt-out.
+- `/// <cf-disable-transform />` is the explicit opt-out. It is honored only
+  at **column zero** of the first content line (leading blank lines are fine;
+  leading whitespace on the directive line is not), mirroring TypeScript's
+  own triple-slash directives (CT-1815, #4618;
+  `src/core/runtime-contract.ts`). An indented lookalike is silently ignored
+  and the file transforms normally; `sourceHasIgnoredDisableDirective` is
+  exported so compile-time callers can warn the author (the runtime boot path
+  never consults it).
 
 ### 2.2 Pipeline object and cross-stage state
 
@@ -1057,12 +1064,22 @@ Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
 in another file, the callee's declared Common Fabric wrapper parameter type
 (`Writable<T>` → read+write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` →
-write, etc.) is what capability analysis charges to that argument. When a cell
+write, etc.) is what capability analysis charges to that argument. Spread
+arguments of fixed-length tuple type expand positionally against the callee's
+parameter list before matching (#4578). Two write-tracking hardenings
+(#4554): `send` is a WRITER_METHOD (`Stream.send()` delegates to `set()` at
+runtime, so an event enqueue is a write to the stream cell — previously the
+unknown-method fallback recorded it as a read), and an unrecognized method
+call on a **cell-like** receiver (type-checked; array/string methods on
+`.get()` snapshots are unaffected) marks the parameter's
+`hasUnverifiedCellUse` and propagates — the summary fails closed instead of
+defaulting to read. When a cell
 argument reaches an imported parameter whose capability the contract cannot
 classify, the capability would be silently lost, so the transformer reports
 **Error** `capability:unreadable-cell-argument`
 (`schema-injection.ts:269`, via `reportDiagnosticOnce`). The design narrative
-lives in `packages/ts-transformers/SCHEMA_INJECTION_NOTES.md` ("Imported Cell
+lives in `docs/history/packages/ts-transformers/SCHEMA_INJECTION_NOTES.md`
+(a point-in-time design record; "Imported Cell
 Parameters Are a Capability Contract").
 
 ## 11. Builder Call Hoisting And `__cfReg` Registration
@@ -1351,6 +1368,7 @@ A pattern whose result is a single reactive call gets the bare root cause:
 object-result shape (`ast-transform/pattern-object-binary-add.expected.jsx`):
 
 ```ts
+// Shown for illustration only.
 // Shown inside a pattern body, after lowering + hoisting.
 export default pattern((state) => ({
     next: __cfLift_1({ state: { count: state.key("count") } })
@@ -1368,8 +1386,8 @@ gets `.for(<path>, true)` appended (`shouldRetargetReactiveReference`). The
 cause names the property, not the referenced binding:
 
 ```ts
-// Shown inside a pattern body (test: "re-roots reactive identifier members
-// in pattern results").
+// Shown inside a pattern body.
+// (test: "re-roots reactive identifier members in pattern results")
 const foo = Writable.of(1, /* schema */).for("foo", true);
 return {
     foo: foo.for(["__patternResult", "foo"], true),
@@ -1508,6 +1526,7 @@ while `ts.isImportDeclaration` holds and inserts at the first non-import
 non-import statement stay where they are and do not move the guards.
 
 ```ts
+// Shown for illustration only.
 // Input (after earlier stages):
 import { __cfHelpers } from "commonfabric";
 import { handler, Cell } from "commonfabric";
@@ -1715,6 +1734,7 @@ callee is not rewritten — only circumfixed (`test/transform.test.ts` asserts
 `__cfHelpers.safeDateNow` never appears):
 
 ```ts
+// Shown for illustration only.
 // Authored (module scope):
 const model = schema({ type: "string" } as const);
 const days = Array.from({ length: 3 }, (_, i) => String(i + 1));
@@ -1735,6 +1755,7 @@ The most common wrap in fixture output is the schema literal §12 materializes:
 which stage 18 then wraps whole — assertions preserved inside the call:
 
 ```ts
+// Shown at module scope.
 const configSchema = __cfHelpers.__cf_data({
   type: "object",
   /* … */
@@ -1982,6 +2003,7 @@ span id. The callee is an optional-chain property access, so the printed form
 is parenthesized (asserted in `test/pattern-coverage-transformer.test.ts`):
 
 ```ts
+// Shown for illustration only.
 // Inserted before the instrumented statement.
 (globalThis.__cfPatternCoverage?.hit)("mapped:/pattern.tsx", 1001);
 ```
@@ -1998,6 +2020,7 @@ registered span" pins the exact shape, e.g. `const first = 1;` on authored
 line 1 registers (after that test's +10/+100 `mapSpan`):
 
 ```ts
+// Shown for illustration only.
 { fileName: "mapped:/pattern.tsx", id: 11, kind: "runtime",
   startLine: 101, endLine: 101, startColumn: 1, endColumn: 16 }
 ```
@@ -2060,6 +2083,7 @@ In `compileToRecordGraph` (`packages/runner/src/harness/engine.ts`), the
 cached-body lookup is short-circuited whenever coverage is on:
 
 ```ts
+// Shown for illustration only.
 // Coverage compiles need fresh emitted JavaScript because cached bodies do
 // not include counters.
 const cached = patternCoverage !== undefined
@@ -2324,6 +2348,7 @@ expression or a direct function (`isTrustedCallable`), the transformer emits
 `__cfBindVerifiedBinding(value, metadata)` where metadata is
 
 ```ts
+// Shown for illustration only.
 {
     sourceFile: "/test.tsx",       // normalizeWriterIdentityFile(fileName)
     bindingPath: ["saveTitle"]     // single-element: the binding name
@@ -2429,6 +2454,7 @@ And the trusted-binding statement form (non-exported handler; verified by
 direct pipeline run, matching `test/cfc-authoring.test.ts`):
 
 ```ts
+// Shown for illustration only.
 const saveTitle = handler(/* …injected schemas… */, (_event, { title, savedTitle }) => {
     savedTitle.set(title.get());
 });
