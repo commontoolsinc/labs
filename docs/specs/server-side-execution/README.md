@@ -944,9 +944,9 @@ are contained and disposal unregisters the callback. The callback's per-space
 `order` is process-local wake ordering, not the reconnectable execution-control
 feed defined in §6.4/W0.6.
 
-W1.1 adds the `ExecutionLease` record and generation, host-derived
+The provider now binds the durable `ExecutionLease` generation, host-derived
 `onBehalfOf`, and atomic fence validation to this same canonical transaction
-path. W1.3 will make the provider buffer a claimed transaction until
+path. W1.3 will make it buffer a claimed transaction until
 whole-action scope validation succeeds (§5.B.2).
 
 ### 6.3 What runs: demand, not pieces
@@ -1287,9 +1287,9 @@ means a design doc/decision is required before implementation.
 
 | # | Gap | Blocks | Status |
 | --- | --- | --- | --- |
-| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented; W1.1 adds atomic lease fencing |
+| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented, including atomic lease fencing |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
-| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | connection-owned demand implemented; sponsor/lease W1.1–W1.2 |
+| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | demand, sticky sponsor selection, and fenced lease implemented; W1.2 owns the shared Worker pool |
 | G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | handshake, claim generations, snapshots, revoke protocol implemented and dark; eligibility/routing W1.3/W2.1 |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | producer lookup implemented; parked-reader query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
@@ -1301,7 +1301,7 @@ means a design doc/decision is required before implementation.
 | G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | needs-impl; full hardening may follow |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |
-| G14 | Durable multi-process `ExecutionLease` acquisition/fencing | shadow executor exclusivity | needs-impl in Phase 1; one host/process may be the first deployment |
+| G14 | Durable multi-process `ExecutionLease` acquisition/fencing | shadow executor exclusivity | implemented and covered by a two-Worker shared-store CAS race |
 | G15 | Client pending-commit durability (true offline) | orthogonal | out of scope here; noted |
 | G16 | Principal-aware scoped runtime lanes and delegated user keys | scoped execution | later; context-key prerequisite is G1 |
 | G17 | Complete-closure client-compute suppression with cold remote-owned actions | remove N× local compute | later; Phase 2 only suppresses writes/effects |

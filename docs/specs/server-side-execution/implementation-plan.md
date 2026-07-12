@@ -345,10 +345,10 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 
 **Depends on:** #4288.
 **Unblocks:** claim settlement and overlay reconciliation.
-**Status:** implemented. Each action attempt now carries an exact transient
-claim assertion while W1.1 still replaces the dark generation-only session
-binding with the durable fenced lease. W1.3 owns cross-space rejection and
-unserved-attempt production.
+**Status:** implemented. Each action attempt carries an exact transient claim
+assertion, and W1.1 has replaced the generation-only session binding with the
+durable fenced lease. W1.3 owns cross-space rejection and unserved-attempt
+production.
 
 **Problem:** the accepting commit/head sequence is not proof of which inputs an
 action consumed. A no-op action also produces no ordinary commit to acknowledge
@@ -445,9 +445,8 @@ that it settled.
 **Depends on:** #4288.
 **Unblocks:** leases and executor Workers.
 
-**Status:** provider substrate implemented. Atomic ExecutionLease fencing is a
-W1.1 integration criterion because the lease record and compare-and-swap
-generation do not exist before that work package.
+**Status:** implemented, including W1.1's exact opaque lease binding and atomic
+first-application fence.
 
 **Decision:** low-overhead server execution may be in-process, but every read
 and commit must traverse the same authenticated authorization, conflict, CFC,
@@ -472,15 +471,15 @@ provenance, hook, and notification path as a remote client.
 3. Route reads through the authenticated Server read path and commits through
    normal transact validation. Push post-commit invalidations to the Worker;
    do not poll.
-4. Bind the provider channel to an exact space, branch, and opaque executor
-   principal. W1.1 supplies the current ExecutionLease and fence generation
-   and adds their atomic validation to the canonical commit path.
+4. Bind the provider channel to an exact space, branch, opaque executor
+   principal, current ExecutionLease, and fence generation, with atomic
+   validation on the canonical commit path.
 5. Preserve remote and in-process behavioral equivalence with a differential
    fixture, including scheduler observations and rejected commits. Compare
    exact user operations/data, then normalize legitimate session ids,
    sequences, and transport metadata before comparing scheduler semantics.
-   W1.1 extends the fixture with lease generation and host-derived provenance
-   assertions once those fields exist.
+   The fixture includes lease generation and host-derived provenance
+   assertions.
 6. Ensure provider disposal unregisters callbacks and cannot outlive its lease.
 
 **Success criteria:**
@@ -491,9 +490,8 @@ provenance, hook, and notification path as a remote client.
       explicitly.
 - [x] ACL denial, CFC denial, and conflict produce the same atomic rejection
       shape with no partial apply.
-- [ ] A revoked/fenced lease produces the same atomic rejection shape with no
-      partial apply. Deferred to W1.1, which defines and validates the lease
-      record and generation in the canonical transaction.
+- [x] A revoked/fenced lease produces the same atomic rejection shape with no
+      partial apply.
 - [x] An ordinary client commit invalidates and re-settles the Worker without a
       watch/poll loop.
 - [x] Worker-controller termination plus channel disposal releases callbacks
@@ -611,6 +609,7 @@ Phase exit:
 
 **Depends on:** W0.5.
 **Unblocks:** W1.2.
+**Status:** implemented.
 
 **Decision:** the executor is not an anonymous service principal for
 client-driven work. One authenticated requesting user sponsors a worker
@@ -642,17 +641,17 @@ generation. Background-only work gets its service identity later.
 
 **Success criteria:**
 
-- [ ] One requester yields one valid lease and commits marked onBehalfOf that
+- [x] One requester yields one valid lease and commits marked onBehalfOf that
       user.
-- [ ] Two hosts racing acquire produce one winner; loser cannot commit.
-- [ ] A delayed commit from generation N is rejected after generation N+1
+- [x] Two hosts racing acquire produce one winner; loser cannot commit.
+- [x] A delayed commit from generation N is rejected after generation N+1
       begins.
-- [ ] Sponsor loses WRITE or disconnects: in-flight boundary is deterministic,
+- [x] Sponsor loses WRITE or disconnects: in-flight boundary is deterministic,
       old Worker is fenced, and remaining demand restarts under another user.
-- [ ] A READ-only requester can demand data but cannot sponsor writes.
-- [ ] With only READ-only demand, no worker claim appears and current client
+- [x] A READ-only requester can demand data but cannot sponsor writes.
+- [x] With only READ-only demand, no worker claim appears and current client
       behavior continues unchanged.
-- [ ] No user private key enters Worker memory or IPC.
+- [x] No user private key enters Worker memory or IPC.
 
 ---
 
