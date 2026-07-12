@@ -1411,6 +1411,16 @@ aggregate/row identity, and replacement while a cached row is absent. The cold
 and replacement matrix passes `3 passed (6 steps)` with the warm canonical and
 explicit legacy reader tests included.
 
+WP3.5 bound-list resume slice (2026-07-11): a MemoryV2-backed fresh-runtime
+regression compiles the list callback separately from its parent so loading the
+parent cannot accidentally warm the callback artifact. The stored node has no
+sibling params, the canonical bound state retains the hidden linked factor,
+and the second runtime loads the callback independently by identity. Aggregate,
+row, and params-cell addresses all survive resume; changing only the linked
+factor afterward updates `[22, 43]` to `[8, 15]` without identity churn. No
+production change was needed for this slice. The focused resume/list matrix
+passes `5 passed (8 steps)`.
+
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
 - [ ] Record trusted framework-provided paths in compiler/artifact metadata for
