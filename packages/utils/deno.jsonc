@@ -22,6 +22,7 @@
     "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
     "./logger": "./src/logger.ts",
     "./path-key-map": "./src/path-key-map.ts",
+    "./pinned-http-fetch": "./src/pinned-http-fetch.ts",
     "./sandbox-contract": "./src/sandbox-contract.ts",
     "./sleep": "./src/sleep.ts",
     "./strip-undefined-props": "./src/strip-undefined-props.ts",
