@@ -3130,9 +3130,17 @@ export const writersForTargets = (
       }
       if (
         observation === undefined ||
+        observation.branch !== row.branch ||
+        normalizeSchedulerOwnerSpace(observation.ownerSpace) !==
+          row.owner_space ||
         observation.pieceId !== row.piece_id ||
         observation.processGeneration !== row.process_generation ||
-        observation.actionId !== row.action_id
+        observation.actionId !== row.action_id ||
+        !schedulerObservationContainsIndexedWrite(
+          observation,
+          row,
+          writePath,
+        )
       ) {
         continue;
       }
@@ -4254,6 +4262,74 @@ function isSchedulerWriteIndexKind(
 ): value is SchedulerWriteIndexKind {
   return value === "current-known" || value === "declared" ||
     value === "materializer";
+}
+
+function schedulerObservationContainsIndexedWrite(
+  observation: SchedulerActionObservation,
+  row: SchedulerWriterLookupRow,
+  writePath: readonly string[],
+): boolean {
+  const writes = row.write_kind === "current-known"
+    ? observation.currentKnownWrites
+    : row.write_kind === "declared"
+    ? observation.declaredWrites ?? []
+    : row.write_kind === "materializer"
+    ? observation.materializerWriteEnvelopes
+    : [];
+
+  return writes.some((write) => {
+    const scope = normalizeSchedulerScope(write.scope);
+    return write.space === row.write_space &&
+      write.id === row.write_id &&
+      scope === row.write_scope &&
+      schedulerScopeKeyForExecutionContext(
+          scope,
+          row.execution_context_key,
+        ) === row.write_scope_key &&
+      write.path.length === writePath.length &&
+      write.path.every((part, index) => part === writePath[index]);
+  });
+}
+
+function schedulerScopeKeyForExecutionContext(
+  scope: CellScope,
+  executionContextKey: SchedulerExecutionContextKey,
+): string | undefined {
+  const parts = executionContextKey.split(":");
+  let encodedPrincipal: string | undefined;
+  let contextScope: "space" | "user" | "session";
+  if (executionContextKey === "space") {
+    contextScope = "space";
+  } else if (parts.length === 2 && parts[0] === "user" && parts[1] !== "") {
+    contextScope = "user";
+    encodedPrincipal = parts[1];
+  } else if (
+    parts.length === 3 && parts[0] === "session" && parts[1] !== "" &&
+    parts[2] !== ""
+  ) {
+    contextScope = "session";
+    encodedPrincipal = parts[1];
+  } else {
+    return undefined;
+  }
+
+  try {
+    if (encodedPrincipal !== undefined) {
+      decodeURIComponent(encodedPrincipal);
+    }
+    if (contextScope === "session") decodeURIComponent(parts[2]);
+  } catch {
+    return undefined;
+  }
+
+  if (scope === "space") return DEFAULT_SCOPE_KEY;
+  if (scope === "user" && encodedPrincipal !== undefined) {
+    return `user:${encodedPrincipal}`;
+  }
+  if (scope === "session" && contextScope === "session") {
+    return executionContextKey;
+  }
+  return undefined;
 }
 
 function selectSchedulerSnapshotRow(
