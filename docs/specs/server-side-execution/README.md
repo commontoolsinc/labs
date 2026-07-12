@@ -151,8 +151,11 @@ server-side executor would know natively.
 - `background-piece-service` already runs a runtime per space in a **Deno
   Worker thread** (`packages/background-piece-service/src/worker-controller.ts:78`),
   discovered reactively from a registry cell, under a single service
-  identity. It is the seed of the executor pool (§6), currently limited to
-  a ~60s polling updater and websocket transport back to the same host.
+  identity. It is a lifecycle/isolation precedent for the executor pool (§6),
+  not its registry or discovery substrate: bps-owned spaces are excluded from
+  the client-demand pool until Phase 3 unifies their demand. Today bps remains
+  limited to a ~60s polling updater and websocket transport back to the same
+  host.
 - Server-initiated writes into spaces exist and pass CFC: webhook ingest
   (`POST /api/ingest/:id` with `externalIngestStamp`) and the sqlite
   builtin's server-executed query + result writeback.
@@ -273,8 +276,10 @@ Merkle-verified closure with `loadPatternByIdentity` +
 
 Creation provenance is not producer identity. A computation may redirect its
 output into a pre-existing cell whose creator is unrelated to the action that
-currently recomputes it. `source` remains useful for audit and causality, but
-must not select an executor action.
+currently recomputes it. Existing `source` metadata may remain useful as a
+local or historical diagnostic, but this plan neither adds universal source
+stamping nor promises a per-document causal-audit mechanism. A future audit
+lineage design is separate; creation source must not select an executor action.
 
 The authoritative producer projection is `scheduler_write_index`, joined to
 `scheduler_action_state` and the durable action snapshot. Lookup is by
@@ -298,14 +303,20 @@ than guessing a producer.
 
 Important patterns now go through the transformer. Enforce that every normal
 computation node has exactly one primary output binding, directly to the
-root path of its target cell. The runner must not recursively search an
-arbitrary returned object for a redirect to determine result identity.
-Additional static side writes and materializer envelopes remain explicit
-write surfaces and are indexed separately.
+root path of its target cell. The runner must not recursively search the
+emitted static output binding for a redirect to determine result identity.
+This is the `firstResolvedOutputRedirect` path; plain lift/computed result
+identity from `_resultFor` does not recurse and is not being replaced.
+Additional static side writes and materializer envelopes remain explicit write
+surfaces and are indexed separately.
 
 There is no legacy data migration or corpus audit. Update the small number of
 tests that hand-construct Pattern JSON, reject nonconforming new JSON at the
 runner boundary, and simplify the redirect-resolution code accordingly.
+Hand-built `type: "passthrough"` nodes have no transformer emission path but
+participate in the same output-binding contract: their primary binding must
+also be direct at the root, and nested/multiple aliases are fixed in tests or
+rejected.
 General Cell aliases remain supported; this invariant concerns the primary
 computation result binding, not every Cell redirect in the system.
 
@@ -364,7 +375,8 @@ approach comparison honest.
   explicit input basis and settlement acknowledgement (B) / handlers +
   derived, reconciled by event acks (C).
 - **Q4 — Executor placement and isolation:** none (status quo) / worker
-  thread per space co-located with the memory engine (§6.1) / subprocess
+  thread per active branch/space co-located with the memory engine (§6.1) /
+  subprocess
   tier for untrusted or heavy spaces (§6.6).
 
 ---
@@ -400,7 +412,7 @@ shadow mode has no server data writes or external effects, so it adds no
 writer. The explicit test capability may observe conflicts and exercises
 existing mutex guards without creating a production authority window.
 
-**Perf.** No client-side win. Server cost: one runtime per active space.
+**Perf.** No client-side win. Server cost: one runtime per active branch/space.
 Subscription serving cost unchanged.
 
 **Verdict.** A short shadow-validation milestone, not a product phase. It
@@ -432,8 +444,9 @@ no space-wide `derivedAuthority` bit and no client-maintained exception list.
 At handshake the client must advertise the server-execution protocol version.
 An incompatible client is rejected rather than allowed to participate with
 stale authority rules. A compatible authenticated session exports
-`ExecutionDemand` for the pieces/docs it is pulling. The pool unions demand
-from all sessions; it does not create one worker per client (§6.1).
+branch-qualified `ExecutionDemand` for the pieces/docs it is pulling. The pool
+unions demand from all sessions on that branch; it does not create one worker
+per client (§6.1).
 
 After static eligibility checks and at least one successful shadow run, the
 control plane may publish an ephemeral claim:
@@ -441,6 +454,7 @@ control plane may publish an ephemeral claim:
 ```ts
 // Shown for illustration only.
 interface ExecutionClaim {
+  branch: BranchName;
   space: DID;
   contextKey: SchedulerExecutionContextKey; // `space` in the first phase
   pieceId: string;
@@ -458,8 +472,9 @@ space documents. A durable policy may opt a space into server-primary
 execution, but runtime ownership, liveness, generations, and exceptions do
 not belong in mutable user data.
 
-The fields through `runtimeFingerprint` form the shared `ActionClaimKey` that
-both client and server can derive. `leaseGeneration` fences a Worker;
+The fields from `branch` through `runtimeFingerprint` form the shared
+`ActionClaimKey` that both client and server can derive. `leaseGeneration`
+fences a Worker;
 `claimGeneration` identifies one incarnation of this action's authority and
 changes even when the same Worker revokes and reclaims it. The client runner
 routes by that exact identity:
@@ -476,9 +491,10 @@ routes by that exact identity:
 Connection loss is not proof that a claim ended: another requester may keep the
 shared Worker and claim alive. While disconnected, a client may continue local
 speculation but must not enqueue previously claimed derived writes. Reconnect
-first negotiates the capability and applies a complete claim snapshot at a feed
-sequence barrier; only then may newly unclaimed work flush. Source, handler,
-and direct UI commits keep their existing offline behavior.
+first negotiates the capability and applies a complete claim snapshot for the
+exact branch at a feed-sequence barrier; only then may newly unclaimed work
+flush. Source, handler, and direct UI commits keep their existing offline
+behavior.
 
 Trusted compatible clients cooperate with this split in the first iteration.
 Later server admission and CFC policy can reject commits that conflict with a
@@ -524,6 +540,12 @@ existing conflict/retry machinery
 (`packages/runner/src/scheduler/events.ts`, retry budget + `readyToRetry`)
 *is* the speculation guard.
 
+Phase B does not add persistent scheduler observations for handler runs.
+Handlers remain client-authoritative, their read sets do not drive the
+server-primary wake index, and their existing authenticated event/source
+provenance remains unchanged. Phase 5 defines any handler-observation contract
+needed when events move to the server.
+
 One residual window is accepted knowingly: a handler may read an
 overlay-derived value the server has not computed yet (a prediction), and
 its source write can be admitted before the server's recompute lands —
@@ -552,12 +574,14 @@ claimed run produces an `ActionSettlement` on the control/feed path:
 // Shown for illustration only.
 type ActionSettlement =
   | {
+    branch: BranchName;
     claim: ExecutionClaim;
     inputBasisSeq: number;
     outcome: "committed";
     acceptedCommitSeq: number;
   }
   | {
+    branch: BranchName;
     claim: ExecutionClaim;
     inputBasisSeq: number;
     outcome: "no-op" | "failed" | "unserved";
@@ -581,16 +605,23 @@ sequence. This is an additional data-application gate, not a substitute for
 control ordering. No-op has no data patch and is ordered after its accepted
 observation-only transaction.
 
-Client state per doc is `confirmed(seq)`, speculative `overlay(claim,
-basis)`, and pending local source commits. An overlay based on an unconfirmed
+The settlement's top-level `branch` must equal `claim.branch`, and both must
+match the feed branch before the client considers it. Client state per doc is
+`confirmed(seq)`, speculative `overlay(claim, basis)`, and pending local source
+commits. An overlay based on an unconfirmed
 local commit stays until that commit receives global sequence `S(L)`. Once a
 matching settlement has `inputBasisSeq >= S(L)`, the server has consumed that
-source basis. For `committed` it drops the covered overlay only after applying
+source basis when the claimed action reads that source directly. The scalar is
+not transitive across a claimed-action chain: a downstream action can read a
+stale intermediate while an unrelated newer input pushes its maximum basis past
+`S(L)`. V1 accepts the resulting brief stale-confirmed display after overlay
+drop; the intermediate/downstream re-settle self-heals it and records
+divergence. A later transitive causal-frontier design can remove that window.
+For `committed` the client drops the covered overlay only after applying
 `acceptedCommitSeq`; for `no-op` it drops after the ordered settlement. Exact
 lease + claim generation matching prevents a delayed settlement from an older
 claim incarnation clearing a newer overlay. Rejected source commits invalidate
-dependent overlays; handler retry creates a fresh basis. Divergence resolves
-silently in favor of the server and increments a metric.
+dependent overlays; handler retry creates a fresh basis.
 
 #### B.5 Async builtins and egress parity
 
@@ -801,10 +832,10 @@ the execution model.
 
 ## 6. The server executor (shared architecture for A/B/C/D)
 
-### 6.1 Topology: one unioned, user-sponsored worker per active space
+### 6.1 Topology: one unioned, user-sponsored worker per active branch/space
 
 One **executor pool** service is co-resident with the memory engine (initially
-inside toolshed; separable later). Per active space there is at most one
+inside toolshed; separable later). Per active branch/space there is at most one
 authoritative Deno Worker generation running one Runtime — the bps shape
 (`packages/background-piece-service/src/worker-controller.ts:78`). Realm
 isolation is required, and a worker remains a natural unit of resource
@@ -819,7 +850,8 @@ eligible requesters. Runtime/StorageManager identity is construction-wide, so
 the sponsor does not switch per causal wave. Sponsor loss drains and restarts
 the worker under a replacement rather than mutating its principal in place.
 
-The pool owns a fenced `ExecutionLease(space, leaseGeneration, onBehalfOf)`.
+The pool owns a fenced
+`ExecutionLease(branch, space, leaseGeneration, onBehalfOf)`.
 Only its generation may publish claims or commit through the provider. This
 is the single-owner coordination primitive even if the pool later spans
 multiple processes; a heartbeat document alone is not sufficient.
@@ -875,7 +907,8 @@ A space is *active* when any of:
 1. **Authenticated client-read demand:** the docs a client session reads — which is
    exactly the session's feed set (§6.4), so the server already holds it;
    in the limit no separate declaration protocol is needed. v1 grain is
-   coarser — an authenticated `ExecutionDemand {space, pieces}` message
+   coarser — an authenticated
+   `ExecutionDemand {branch, space, pieces}` message
    replacing `session.watch.set` (G7) — because a standing
    per-doc pulled-set export from clients doesn't exist yet
    (`.pull()` is one-shot, `packages/runner/src/cell.ts:1032`). The
@@ -1164,7 +1197,8 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   state, and indexes (G1); enforce the transformer root binding (G6); add
   writer lookup (G4). Parked-reader wake is Phase 1.
 - **Phase 1 — shadow client-demand executor.** Add authenticated
-  `ExecutionDemand`, one fenced user-sponsored `ExecutionLease` per space,
+  `ExecutionDemand`, one fenced user-sponsored `ExecutionLease` per
+  branch/space,
   the validated provider, and claim eligibility reporting without authority
   transfer plus indexed parked-reader wake (G0/G2/G3/G4). Background-registry
   consolidation is deferred, but legacy-owned spaces are excluded immediately
@@ -1197,12 +1231,12 @@ means a design doc/decision is required before implementation.
 | --- | --- | --- | --- |
 | G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | needs-impl; loopback proves the seam |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
-| G2 | Authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
-| G3 | Ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
+| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
+| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | indexes exist; query/consumer needs-impl |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
 | G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | small needs-impl; no migration |
-| G7 | Authenticated demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
+| G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
 | G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | needs-impl; do not reuse `observedAtSeq` |
@@ -1236,3 +1270,8 @@ single authoritative run per event is preserved.
    (co-process, simplest) vs a sibling service with the engine extracted
    behind the in-process channel? Phase 1 forces no commitment; the
    provider seam (G0) is the interface either way.
+4. **What user consent and visibility does sponsorship require:** may any
+   active WRITE-capable requester silently sponsor space-wide derivation caused
+   by other users, should sessions expose an opt-out, or should v1 restrict
+   sponsorship to space owners? Whichever policy is chosen must be visible in
+   sponsor selection and provenance, not inferred from semantic authorship.

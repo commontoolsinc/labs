@@ -70,13 +70,13 @@ where server and clients knowingly duplicate authoritative work.
 - **SchedulerExecutionContextKey:** server-derived key for durable scheduler
   metadata: space, user:<principal DID>, or
   session:<principal DID>:<session id>.
-- **ExecutionDemand:** authenticated, connection-owned request to keep one or
-  more piece result roots live.
+- **ExecutionDemand:** authenticated, connection-owned, branch-qualified
+  request to keep one or more piece result roots live.
 - **ExecutionLease:** host-side, expiring, fenced authority for exactly one
-  worker generation in a space. It records onBehalfOf.
+  worker generation in a branch/space. It records onBehalfOf.
 - **ActionClaimKey:** action identity available independently to client and
-  server: space, piece/action identity, execution context, action kind, and
-  implementation/runtime fingerprints.
+  server: branch, space, piece/action identity, execution context, action kind,
+  and implementation/runtime fingerprints.
 - **ExecutionClaim:** positive, ephemeral statement that one action is ready
   to be server-primary. It contains an ActionClaimKey, worker lease generation,
   and a monotonic per-action claimGeneration. Every claim issuance gets the
@@ -104,7 +104,8 @@ where server and clients knowingly duplicate authoritative work.
 ExecutionClaim and ActionSettlement are server control-plane messages, not
 ordinary space documents. Client authority is the default whenever no matching
 live claim exists in the authoritative connected claim snapshot. Connection
-loss alone does not prove absence.
+loss alone does not prove absence. Demand, leases, claims, settlements, and
+reconnect snapshots are all branch-qualified.
 
 ---
 
@@ -238,16 +239,19 @@ provenance/echo metadata and is not a substitute for execution_context_key.
 **Unblocks:** deterministic action/output discovery and static servability.
 
 **Decision:** important authored patterns go through the transformer. Do not
-build a legacy Pattern JSON migration or retain recursive result-identity
+build a legacy Pattern JSON migration or retain recursive emitted-output-binding
 guessing for computation nodes.
 
 **Read first:**
 
 - Transformer emission for computation/lift nodes
-- packages/runner/src/runner.ts node instantiation and output redirect
-  resolution
+- packages/runner/src/runner.ts `firstResolvedOutputRedirect` (:403-431), its
+  sub-pattern output (:1988), map/filter container (:3907), and pattern-node
+  (:4248-4271) call sites; contrast plain lift/computed `_resultFor` identity
+  (:3033-3038), which does not recurse
 - Scheduler-v2 action registration and static write diagnostics
-- Hand-built runner fixtures that construct serialized Pattern objects
+- Hand-built runner fixtures that construct serialized Pattern objects,
+  including `type: "passthrough"` nodes
 
 **Steps:**
 
@@ -257,10 +261,14 @@ guessing for computation nodes.
    and fail with an actionable diagnostic if it is violated.
 3. Use that binding as the action's primary output. Keep explicit static side
    writes/materializer envelopes as separate write surfaces; do not pick the
-   first redirect found by recursively walking a structure.
+   first redirect found by recursively walking the emitted output binding.
 4. Simplify computation-specific compatibility code made unreachable by the
    invariant. Do not remove general Cell alias/redirect support.
-5. Fix only the hand-built tests that violate the transformer-produced shape.
+5. Apply the same runner-boundary invariant to hand-built
+   `type: "passthrough"` nodes. They have no transformer emission path: a direct
+   root primary binding is accepted; nested or multiple alias bindings are
+   fixed in tests or rejected.
+6. Fix only the hand-built tests that violate the transformer-produced shape.
 
 **Success criteria:**
 
@@ -268,6 +276,8 @@ guessing for computation nodes.
       stable action/output identity.
 - [ ] A malformed hand-built computation with nested or multiple root bindings
       fails at registration with the new diagnostic.
+- [ ] A compliant passthrough fixture has one direct root binding; nested or
+      multiple passthrough aliases fail with the same actionable diagnostic.
 - [ ] Static side writes still appear as additional write-index entries.
 - [ ] General Cell redirect and alias tests remain green.
 - [ ] No corpus migration, historical JSON compatibility path, or recursive
@@ -371,8 +381,11 @@ that it settled.
    apply a committed settlement only after its confirmed/feed cursor reaches
    acceptedCommitSeq. No-op settlement follows the accepted observation-only
    transaction in that ordered stream.
-8. Keep handler/source commits compatible; handler semantic authorship remains
-   the authenticated event sender.
+8. Do not add persistent scheduler observations for handler runs in this phase.
+   Handlers remain client-authoritative, their read sets do not participate in
+   server-primary wake indexes, and existing event/source commit provenance
+   remains unchanged. Phase 5 owns any handler-observation contract; handler
+   semantic authorship remains the authenticated event sender.
 
 **Success criteria:**
 
@@ -389,6 +402,8 @@ that it settled.
 - [ ] A forged onBehalfOf from worker IPC or a client is rejected/overwritten.
 - [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
       into this scalar.
+- [ ] Handler execution emits no new scheduler observation in this phase and
+      preserves existing authenticated event/source provenance.
 
 ---
 
@@ -462,20 +477,23 @@ provenance, hook, and notification path as a remote client.
    deployment/space requires server-primary semantics, reject clients that do
    not advertise the capability; do not silently mix stale authority rules.
 2. Add session.execution.demand.set. A demand is bound to the authenticated
-   connection, space, and piece result roots. Replacement and disconnect remove
-   that connection's references automatically.
-3. Add claim set/revoke messages containing ActionClaimKey, leaseGeneration,
-   monotonic per-ActionClaimKey claimGeneration, and server-controlled expiry.
-   Revoke names the live claimGeneration. A later claim set uses the next value
-   even if the worker lease generation is unchanged.
-4. Add settlement messages keyed to the exact leaseGeneration +
+   connection, branch, space, and piece result roots. Replacement and disconnect
+   remove that connection's references automatically.
+3. Add branch-qualified claim set/revoke messages containing ActionClaimKey,
+   leaseGeneration, monotonic per-ActionClaimKey claimGeneration, and
+   server-controlled expiry. Revoke names the live claimGeneration. A later
+   claim set uses the next value even if the worker lease generation is
+   unchanged.
+4. Add settlement messages keyed to the exact branch, leaseGeneration +
    claimGeneration and carrying outcome, inputBasisSeq, diagnostic code, and
-   acceptedCommitSeq for `committed` outcomes. Other outcomes omit it.
+   acceptedCommitSeq for `committed` outcomes. The settlement branch must equal
+   its claim branch. Other outcomes omit acceptedCommitSeq.
 5. Define ordering: claim set is observed before a client may suppress a
-   matching action; revoke is fail-open while connected; settlements cannot
-   apply to a newer claim generation. Carry claim snapshots, claim revokes,
-   commit patches, and every settlement outcome on one ordered reconnectable
-   stream with explicit feed-sequence barriers. For committed outcomes,
+   matching action on that branch; revoke is fail-open while connected;
+   settlements cannot apply to another branch or a newer claim generation.
+   Carry branch-qualified claim snapshots, claim revokes, commit patches, and
+   every settlement outcome on one ordered reconnectable stream with explicit
+   feed-sequence barriers. For committed outcomes,
    acceptedCommitSeq is an additional data-application gate, not a replacement
    for control ordering.
 6. Authorize demand using the session's existing READ access. Sponsor
@@ -494,6 +512,9 @@ provenance, hook, and notification path as a remote client.
       required and works unchanged when it is not.
 - [ ] Two connections demanding the same root produce two references; closing
       one leaves the other live; closing both removes demand.
+- [ ] The same piece/action on two branches retains independent demand, claims,
+      revokes, snapshots, and settlements; neither branch can suppress or clear
+      the other's overlay.
 - [ ] Spoofed connection id, principal, claim, or settlement is rejected.
 - [ ] Revoke/re-claim within one lease gets a new claimGeneration, and a
       reordered old-generation settlement cannot clear the new claim.
@@ -507,8 +528,8 @@ provenance, hook, and notification path as a remote client.
 
 Phase exit:
 
-- Exactly one fenced worker generation runs for an eligible space; a legacy
-  background-owned space is excluded until Phase 3.
+- Exactly one fenced worker generation runs for an eligible branch/space; a
+  legacy background-owned space is excluded until Phase 3.
 - Multiple client demands merge into it without duplicate schedulers.
 - The ordinary rollout remains observation-only: zero authoritative claims,
   derived server commits, or external builtin effects are published.
@@ -569,7 +590,7 @@ generation. Background-only work gets its service identity later.
 
 ---
 
-### W1.2 — Shared demand pool: one Worker per eligible active space
+### W1.2 — Shared demand pool: one Worker per eligible active branch/space
 
 **Depends on:** W0.6, W1.1, W0.1.
 **Unblocks:** W1.3.
@@ -587,7 +608,7 @@ and signing authority are separate.
 
 **Steps:**
 
-1. Add a host pool Map<branch+space, SpaceExecutionSlot>. Union every
+1. Add a host pool `Map<BranchSpaceKey, SpaceExecutionSlot>`. Union every
    connection's ExecutionDemand into the slot; acquire one lease and launch one
    Worker for the union.
 2. Construct one runtime with persistentSchedulerState enabled and the
@@ -805,8 +826,8 @@ Phase exit:
 **Steps:**
 
 1. Subscribe to claims through the negotiated session control stream. Store
-   them ephemerally by ActionClaimKey + leaseGeneration + claimGeneration; do
-   not persist them as space state.
+   them ephemerally by branch-qualified ActionClaimKey + leaseGeneration +
+   claimGeneration; do not persist them as space state.
 2. At transaction enqueue, derive the shared ActionClaimKey from the client
    action/transaction and match it to a live claim. Do not match on
    ActionExecutionProvenance: onBehalfOf and lease/claim generations are
@@ -825,8 +846,9 @@ Phase exit:
 7. Connection loss is not evidence that authority returned: keep claimed
    derived writes local/speculative and do not enqueue them upstream. On
    reconnect, complete capability negotiation and apply an authoritative full
-   claim snapshot at a feed-sequence barrier before flushing any derived work.
-   Source/handler/UI commits retain their existing offline queue behavior.
+   claim snapshot for the exact branch at a feed-sequence barrier before
+   flushing any derived work. Source/handler/UI commits retain their existing
+   offline queue behavior.
 8. Keep clients trusted in v1: protocol tests pin compliance; CFC/server
    enforcement arrives later.
 
@@ -838,6 +860,9 @@ Phase exit:
 - [ ] Mixed-scope claimed action commits whole from client; no partial
       suppression.
 - [ ] Two actions in one piece can independently be server- and client-primary.
+- [ ] Identical action identities on two branches route independently; a claim,
+      revoke, reconnect snapshot, or settlement on branch A never affects
+      branch B.
 - [ ] Revocation/expiry causes deterministic dirty rerun and convergence.
 - [ ] Disconnect while another client keeps the server claim live queues no
       derived wire commit; reconnect claim-snapshot barrier prevents a stale
@@ -870,18 +895,27 @@ Phase exit:
    divergence telemetry; do not surface a pattern exception.
 5. If the client's source commit is rejected/retried, discard overlay
    generations based on the rejected version and recompute.
+6. Treat inputBasisSeq as a direct-read scalar, not transitive lineage. In a
+   chain, a stale intermediate plus an unrelated newer input may let a
+   downstream settlement pass the source sequence and briefly reveal stale
+   confirmed state after overlay drop. V1 accepts, measures, and self-heals
+   that window through the intermediate/downstream re-settle; a later causal
+   frontier closes it.
 
 **Success criteria:**
 
-- [ ] Source at S → local overlay → server settlement basis ≥ S → overlay is
-      physically removed only after acceptedCommitSeq is locally confirmed;
-      the confirmed value remains.
+- [ ] Direct source read at S → local overlay → server settlement basis ≥ S →
+      overlay is physically removed only after acceptedCommitSeq is locally
+      confirmed; the confirmed value remains.
 - [ ] Settlement basis < S retains overlay.
 - [ ] A no-op settlement clears the overlay.
 - [ ] Two rapid source commits require settlement through the later basis.
 - [ ] Old generation cannot clear new overlay.
 - [ ] Delayed/reordered commit data keeps the overlay until the matching data
       frame is applied; settlement-first delivery cannot flash stale state.
+- [ ] A chained-action fixture demonstrates the accepted non-transitive basis
+      window, records divergence, and deterministically converges after the
+      intermediate and downstream actions re-settle.
 - [ ] Rigged divergence records one event and shows server value.
 - [ ] Rejected source basis discards and recomputes correctly.
 
