@@ -4406,10 +4406,10 @@ const collectConsumedLabel = (
 ): {
   confidentiality: readonly unknown[];
   integrity: readonly unknown[];
-  modulePolicySpaces: ReadonlyMap<string, MemorySpace>;
+  modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
 } => {
   const atoms: unknown[] = [];
-  const modulePolicySpaces = new Map<string, MemorySpace>();
+  const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
   // transaction-global over-approximation as the confidentiality union —
@@ -4469,8 +4469,10 @@ const collectConsumedLabel = (
         )
       ) {
         const key = modulePolicyArtifactKey(reference);
-        if (key !== undefined && !modulePolicySpaces.has(key)) {
-          modulePolicySpaces.set(key, read.space);
+        if (key !== undefined) {
+          const spaces = modulePolicySpaces.get(key) ?? new Set<MemorySpace>();
+          spaces.add(read.space);
+          modulePolicySpaces.set(key, spaces);
         }
       }
       integrityAtoms.push(...(entry.label.integrity ?? []));
@@ -4646,9 +4648,20 @@ const verifySinkRequestCeilings = (
         mode === "enforce" ? "consuming" : "observing",
         (reference) => {
           const key = modulePolicyArtifactKey(reference);
-          return key === undefined
-            ? undefined
-            : consumed.modulePolicySpaces.get(key);
+          if (key === undefined) return undefined;
+          const spaces = [...(consumed.modulePolicySpaces.get(key) ?? [])]
+            .sort();
+          if (spaces.length === 0) return undefined;
+          // Every consumed label origin must carry its own exact local copy.
+          // Resolve from one only after confirming the complete origin set, so
+          // one healthy space cannot mask another destination's missing
+          // artifact for the same module/symbol/digest.
+          if (
+            spaces.some((space) =>
+              !tx.hasCfcPolicyManifest(space, reference)
+            )
+          ) return undefined;
+          return spaces[0];
         },
       );
       if (mode === "enforce") {

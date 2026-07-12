@@ -609,14 +609,15 @@ describe("PolicyOf label-time binding", () => {
     });
     try {
       const tx = sinkRuntime.edit();
-      // This unrelated source-space touch used to let the sink's ambient scan
-      // mask the destination's missing local artifact.
-      expect(tx.readOrThrow({
+      // The same policy artifact labels consumed values in both spaces. The
+      // valid source-space copy must not mask the destination's missing local
+      // artifact.
+      expect(sinkRuntime.getCell(
         space,
-        id: cfcPolicyManifestDocId(artifact.policyDigest),
-        type: "application/json",
-        path: ["value"],
-      })).toBeDefined();
+        "sink-policy-source",
+        schema,
+        tx,
+      ).get()).toBe("secret");
       expect(target.withTx(tx).key("secret").get()).toBe("rosebud");
       let flushed = false;
       enqueueSinkRequestPostCommitEffect(
