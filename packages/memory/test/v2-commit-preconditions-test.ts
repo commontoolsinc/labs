@@ -329,6 +329,62 @@ Deno.test("entity-value-hash null pins absence", async () => {
   }
 });
 
+Deno.test("entity-value-hash treats metadata-only documents as value-absent", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    applyCommit(engine, {
+      sessionId: "session:metadata-writer",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:metadata-only",
+          value: { metadata: "present" },
+        }],
+      },
+    });
+    const pinAbsentValue = (localSeq: number) => ({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      preconditions: [{
+        kind: "entity-value-hash" as const,
+        id: "entity:metadata-only",
+        valueHash: null,
+      }],
+      operations: [],
+    });
+    applyCommit(engine, {
+      sessionId: "session:metadata-reader",
+      commit: pinAbsentValue(1),
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:metadata-writer",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:metadata-only",
+          value: { value: null, metadata: "present" },
+        }],
+      },
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:metadata-reader",
+          commit: pinAbsentValue(2),
+        }),
+      ConflictError,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("entity-absent precondition rejects when the entity head already exists", async () => {
   const { engine, path } = await createEngine();
 

@@ -653,4 +653,69 @@ describe("PolicyOf label-time binding", () => {
       await sinkRuntime.dispose();
     }
   });
+
+  it("rejects a prepared sink when any consumed manifest origin changes", async () => {
+    runtime.registerCfcPolicyManifests(undefined, [artifact]);
+    for (
+      const [origin, id] of [
+        [space, "sink-origin-a"],
+        [destinationSpace, "sink-origin-b"],
+      ] as const
+    ) {
+      const installTx = runtime.edit();
+      runtime.getCell(origin, id, schema, installTx).set("secret");
+      installTx.prepareCfc();
+      expect((await installTx.commit()).ok).toBeDefined();
+    }
+
+    const sinkRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcPolicyEvaluation: "enforce",
+      cfcSinkMaxConfidentiality: { fetchJson: [] },
+    });
+    try {
+      const decision = sinkRuntime.edit();
+      expect(
+        sinkRuntime.getCell(space, "sink-origin-a", schema, decision).get(),
+      ).toBe("secret");
+      expect(
+        sinkRuntime.getCell(
+          destinationSpace,
+          "sink-origin-b",
+          schema,
+          decision,
+        ).get(),
+      ).toBe("secret");
+      let flushed = false;
+      enqueueSinkRequestPostCommitEffect(
+        decision,
+        "fetchJson",
+        "fetchJson:multi-origin-manifest",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchJson-start",
+        () => {
+          flushed = true;
+        },
+      );
+      decision.prepareCfc();
+
+      const tamper = storageManager.edit();
+      expect(
+        tamper.write({
+          space: destinationSpace,
+          id: cfcPolicyManifestDocId(artifact.policyDigest),
+          type: "application/json",
+          path: ["value"],
+        }, { forged: true }).ok,
+      ).toBeDefined();
+      expect((await tamper.commit()).ok).toBeDefined();
+
+      expect((await decision.commit()).error).toBeDefined();
+      expect(flushed).toBe(false);
+    } finally {
+      await sinkRuntime.dispose();
+    }
+  });
 });

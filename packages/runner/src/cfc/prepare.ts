@@ -4653,12 +4653,16 @@ const verifySinkRequestCeilings = (
             .sort();
           if (spaces.length === 0) return undefined;
           // Every consumed label origin must carry its own exact local copy.
-          // Resolve from one only after confirming the complete origin set, so
-          // one healthy space cannot mask another destination's missing
-          // artifact for the same module/symbol/digest.
-          if (
-            spaces.some((space) => !tx.hasCfcPolicyManifest(space, reference))
-          ) return undefined;
+          // Bind every origin into the commit, so a concurrent change in any
+          // one of them rejects the release before its post-commit effect can
+          // flush. Precondition-only origin commits are harmless to split; the
+          // effect runs only after the complete transaction succeeds.
+          tx.enableMultiSpaceWrites?.(spaces);
+          for (const space of spaces) {
+            if (tx.resolveCfcPolicyManifest(reference, space) === undefined) {
+              return undefined;
+            }
+          }
           return spaces[0];
         },
       );

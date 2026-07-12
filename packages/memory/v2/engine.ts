@@ -3565,7 +3565,8 @@ const validateCommitPreconditions = (
           sessionId: scopeContext.sessionId,
         });
         const currentHash = state?.document === null ||
-            state?.document === undefined
+            state?.document === undefined ||
+            !Object.hasOwn(state.document, "value")
           ? null
           : commitPreconditionValueHash(state.document.value);
         if (currentHash !== precondition.valueHash) {
