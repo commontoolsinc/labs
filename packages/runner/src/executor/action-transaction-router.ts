@@ -31,6 +31,11 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
   ) => void;
   readonly onDiagnostic?: (diagnostic: ExecutorCandidateDiagnostic) => void;
+  readonly onUnserved?: (
+    claim: ExecutionClaim,
+    sourceAction: object,
+    diagnosticCode: string,
+  ) => void;
 }
 
 /**
@@ -70,11 +75,6 @@ export function createExecutorActionTransactionRouter(
     }
 
     const claimKey = actionClaimKey(observation);
-    const dynamicReason = dynamicUnservableReason(input, observation, options);
-    if (dynamicReason !== undefined) {
-      options.onDiagnostic?.({ diagnosticCode: dynamicReason, claimKey });
-      return local;
-    }
     if (input.sourceAction === undefined) {
       options.onDiagnostic?.({
         diagnosticCode: "missing-source-action",
@@ -84,6 +84,37 @@ export function createExecutorActionTransactionRouter(
     }
 
     const liveClaim = options.claimForAction(input.sourceAction);
+    if (liveClaim !== undefined && !claimMatchesKey(liveClaim, claimKey)) {
+      options.onDiagnostic?.({
+        diagnosticCode: "claim-key-mismatch",
+        claimKey,
+      });
+      return local;
+    }
+    const dynamicReason = dynamicUnservableReason(input, observation, options);
+    if (dynamicReason !== undefined) {
+      options.onDiagnostic?.({ diagnosticCode: dynamicReason, claimKey });
+      if (liveClaim !== undefined) {
+        attachClaimAssertion(input.commit, observation, liveClaim);
+        return {
+          disposition: "unserved",
+          diagnosticCode: dynamicReason,
+          ...(options.onUnserved
+            ? {
+              onSettled: () => {
+                reported.delete(input.sourceAction!);
+                options.onUnserved!(
+                  liveClaim,
+                  input.sourceAction!,
+                  dynamicReason,
+                );
+              },
+            }
+            : {}),
+        };
+      }
+      return local;
+    }
     if (liveClaim === undefined) {
       const encoded = JSON.stringify(claimKey);
       if (reported.get(input.sourceAction) !== encoded) {
@@ -92,23 +123,38 @@ export function createExecutorActionTransactionRouter(
       }
       return local;
     }
-    if (!claimMatchesKey(liveClaim, claimKey)) {
-      options.onDiagnostic?.({
-        diagnosticCode: "claim-key-mismatch",
-        claimKey,
-      });
-      return local;
-    }
 
-    input.commit.schedulerObservation = {
-      ...observation,
-      executionClaimAssertion: {
-        contextKey: liveClaim.contextKey,
-        leaseGeneration: liveClaim.leaseGeneration,
-        claimGeneration: liveClaim.claimGeneration,
-      },
+    attachClaimAssertion(input.commit, observation, liveClaim);
+    return {
+      disposition: "upstream",
+      ...(options.onUnserved
+        ? {
+          onFirewallRejected: (diagnosticCode: string) => {
+            reported.delete(input.sourceAction!);
+            options.onUnserved!(
+              liveClaim,
+              input.sourceAction!,
+              diagnosticCode,
+            );
+          },
+        }
+        : {}),
     };
-    return { disposition: "upstream" };
+  };
+}
+
+function attachClaimAssertion(
+  commit: ActionTransactionRouteInput["commit"],
+  observation: SchedulerActionObservation,
+  claim: ExecutionClaim,
+): void {
+  commit.schedulerObservation = {
+    ...observation,
+    executionClaimAssertion: {
+      contextKey: claim.contextKey,
+      leaseGeneration: claim.leaseGeneration,
+      claimGeneration: claim.claimGeneration,
+    },
   };
 }
 

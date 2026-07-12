@@ -31,6 +31,7 @@ export interface DenoSpaceExecutorFactoryOptions {
   /** Host-local shadow diagnostic. Receiving one never transfers authority;
    * the explicit claim-routing sub-capability controls that separately. */
   onCandidateClaim?: (candidate: CandidateClaim) => void;
+  onCandidateDiagnostic?: (diagnostic: CandidateClaimDiagnostic) => void;
   createWorker?: () => ExecutorWorkerLike;
   createProvider?: (
     options: HostProviderChannelOptions,
@@ -41,11 +42,24 @@ export interface CandidateClaim {
   readonly claimKey: ActionClaimKey;
 }
 
+export interface CandidateClaimDiagnostic {
+  readonly claim: ExecutionClaim;
+  readonly diagnosticCode: string;
+}
+
 type WorkerResponse = {
-  type: "booted" | "ready" | "complete" | "fatal" | "candidate-claim";
+  type:
+    | "booted"
+    | "ready"
+    | "complete"
+    | "fatal"
+    | "candidate-claim"
+    | "unserved-claim";
   requestId?: number;
   message?: string;
   candidate?: CandidateClaim;
+  claim?: ExecutionClaim;
+  diagnosticCode?: string;
 };
 
 const isWorkerResponse = (value: unknown): value is WorkerResponse => {
@@ -53,12 +67,16 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
   const message = value as Record<string, unknown>;
   return (message.type === "booted" || message.type === "ready" ||
     message.type === "complete" || message.type === "fatal" ||
-    message.type === "candidate-claim") &&
+    message.type === "candidate-claim" || message.type === "unserved-claim") &&
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
     (message.message === undefined || typeof message.message === "string") &&
     (message.type !== "candidate-claim" ||
-      isCandidateClaim(message.candidate));
+      isCandidateClaim(message.candidate)) &&
+    (message.type !== "unserved-claim" ||
+      (isExecutionClaim(message.claim) &&
+        typeof message.diagnosticCode === "string" &&
+        message.diagnosticCode.length > 0));
 };
 
 const isCandidateClaim = (value: unknown): value is CandidateClaim => {
@@ -74,8 +92,26 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
     typeof key.runtimeFingerprint === "string";
 };
 
+const isExecutionClaim = (value: unknown): value is ExecutionClaim => {
+  if (typeof value !== "object" || value === null) return false;
+  const claim = value as ExecutionClaim;
+  return isCandidateClaim({ claimKey: claim }) &&
+    Number.isSafeInteger(claim.leaseGeneration) &&
+    claim.leaseGeneration > 0 && Number.isSafeInteger(claim.claimGeneration) &&
+    claim.claimGeneration > 0 && Number.isFinite(claim.expiresAt);
+};
+
 const candidateKey = (candidate: CandidateClaim): string =>
-  JSON.stringify(candidate.claimKey);
+  JSON.stringify({
+    branch: candidate.claimKey.branch,
+    space: candidate.claimKey.space,
+    contextKey: candidate.claimKey.contextKey,
+    pieceId: candidate.claimKey.pieceId,
+    actionId: candidate.claimKey.actionId,
+    actionKind: candidate.claimKey.actionKind,
+    implementationFingerprint: candidate.claimKey.implementationFingerprint,
+    runtimeFingerprint: candidate.claimKey.runtimeFingerprint,
+  });
 
 class DenoSpaceExecutor implements SpaceExecutor {
   readonly #worker: ExecutorWorkerLike;
@@ -84,6 +120,9 @@ class DenoSpaceExecutor implements SpaceExecutor {
   readonly #server: Server;
   readonly #protocolFlags: Partial<WireMemoryProtocolFlags>;
   readonly #onCandidateClaim?: (candidate: CandidateClaim) => void;
+  readonly #onCandidateDiagnostic?: (
+    diagnostic: CandidateClaimDiagnostic,
+  ) => void;
   readonly #claims = new Map<string, ExecutionClaim>();
   readonly #pending = new Map<
     number,
@@ -103,6 +142,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       server: Server;
       protocolFlags?: Partial<WireMemoryProtocolFlags>;
       onCandidateClaim?: (candidate: CandidateClaim) => void;
+      onCandidateDiagnostic?: (diagnostic: CandidateClaimDiagnostic) => void;
     },
   ) {
     this.#worker = worker;
@@ -111,6 +151,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#server = control.server;
     this.#protocolFlags = control.protocolFlags ?? {};
     this.#onCandidateClaim = control.onCandidateClaim;
+    this.#onCandidateDiagnostic = control.onCandidateDiagnostic;
     this.#worker.addEventListener("message", this.#onMessage);
     this.#worker.addEventListener("error", this.#onError);
     this.#worker.addEventListener("messageerror", this.#onMessageError);
@@ -203,6 +244,15 @@ class DenoSpaceExecutor implements SpaceExecutor {
       ).catch((error) => this.#fail(error));
       return;
     }
+    if (message.type === "unserved-claim") {
+      const claim = message.claim!;
+      const diagnosticCode = message.diagnosticCode!;
+      this.#claimControl = this.#claimControl.then(
+        () => this.#handleUnserved(claim, diagnosticCode),
+        () => this.#handleUnserved(claim, diagnosticCode),
+      ).catch((error) => this.#fail(error));
+      return;
+    }
     if (message.requestId === undefined) {
       this.#fail(new Error("executor Worker response has no request id"));
       return;
@@ -251,6 +301,23 @@ class DenoSpaceExecutor implements SpaceExecutor {
         claimGeneration: claim.claimGeneration,
       },
     });
+  }
+
+  #handleUnserved(
+    claim: ExecutionClaim,
+    diagnosticCode: string,
+  ): void {
+    const mapKey = candidateKey({ claimKey: claim });
+    const live = this.#claims.get(mapKey);
+    if (
+      live === undefined || live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      throw new Error("unserved executor attempt does not match a live claim");
+    }
+    this.#revokeClaim(live);
+    this.#claims.delete(mapKey);
+    this.#onCandidateDiagnostic?.({ claim: live, diagnosticCode });
   }
 
   #onError = (event: Event): void => {
@@ -332,6 +399,7 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       server: this.options.server,
       protocolFlags: this.options.protocolFlags,
       onCandidateClaim: this.options.onCandidateClaim,
+      onCandidateDiagnostic: this.options.onCandidateDiagnostic,
     });
     try {
       await executor.initialize({

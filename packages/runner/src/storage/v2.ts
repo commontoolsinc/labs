@@ -571,10 +571,18 @@ export interface ActionTransactionRouteInput {
 }
 
 export type ActionTransactionRoute =
-  | { readonly disposition: "upstream" }
+  | {
+    readonly disposition: "upstream";
+    readonly onFirewallRejected?: (diagnosticCode: string) => void;
+  }
   | {
     readonly disposition: "local";
     readonly kind: "executor-shadow" | "claimed-overlay";
+  }
+  | {
+    readonly disposition: "unserved";
+    readonly diagnosticCode: string;
+    readonly onSettled?: () => void;
   };
 
 export type ActionTransactionRouter = (
@@ -2593,9 +2601,6 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const localSeq = this.#nextLocalSeq++;
-    if (source !== undefined) {
-      recordCommitLocalSeq(source, this.#space, localSeq);
-    }
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
@@ -2633,6 +2638,12 @@ class SpaceReplica implements ISpaceReplica {
       }),
     );
     const route = await this.routeActionTransaction(commit, source);
+    if (route.disposition === "unserved") {
+      return await this.publishUnservedAttempt(commit, route);
+    }
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -2704,6 +2715,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
+          route,
         ),
     );
     this.#commitPromises.add(promise);
@@ -2730,6 +2742,12 @@ class SpaceReplica implements ISpaceReplica {
       });
       if (route.disposition === "upstream") return route;
       if (
+        route.disposition === "unserved" &&
+        route.diagnosticCode.length > 0
+      ) {
+        return route;
+      }
+      if (
         route.disposition === "local" &&
         (route.kind === "executor-shadow" ||
           route.kind === "claimed-overlay")
@@ -2743,6 +2761,58 @@ class SpaceReplica implements ISpaceReplica {
       ]);
     }
     return fallback;
+  }
+
+  private async publishUnservedAttempt(
+    commit: ClientCommit,
+    route: Extract<ActionTransactionRoute, { disposition: "unserved" }>,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const observation = commit.schedulerObservation;
+    if (
+      typeof observation !== "object" || observation === null ||
+      Array.isArray(observation)
+    ) {
+      return {
+        error: executionFirewallRejection(
+          commit,
+          route.diagnosticCode,
+          "unserved attempt has no action observation",
+        ),
+      };
+    }
+    const unservedCommit: ClientCommit = {
+      ...commit,
+      localSeq: this.#nextLocalSeq++,
+      operations: [],
+      schedulerObservation: {
+        ...observation,
+        executionUnservedAttempt: {
+          diagnosticCode: route.diagnosticCode,
+        },
+      },
+    };
+    try {
+      const { session } = await this.sessionHandle();
+      const applied = await session.transact(unservedCommit);
+      session.noteAppliedCommit?.(applied.seq);
+      try {
+        route.onSettled?.();
+      } catch (error) {
+        logger.warn("execution-route", () => [
+          "Unserved action callback failed after canonical settlement",
+          error,
+        ]);
+      }
+      return {
+        error: executionFirewallRejection(
+          commit,
+          route.diagnosticCode,
+          `claimed action settled unserved: ${route.diagnosticCode}`,
+        ),
+      };
+    } catch (error) {
+      return { error: toRejectedError(error, unservedCommit, this.#space) };
+    }
   }
 
   discardShadowWritesForAction(action: object): void {
@@ -2764,6 +2834,7 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    route?: Extract<ActionTransactionRoute, { disposition: "upstream" }>,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     // Strategy 1: a commit whose read set lands on a still-catching-up id.
     const admissionMode = conflictAdmissionMode();
@@ -2858,7 +2929,24 @@ class SpaceReplica implements ISpaceReplica {
       });
       return { ok: {} };
     } catch (error) {
-      const rejection = toRejectedError(error, commit, this.#space);
+      const diagnosticCode = executionFirewallDiagnostic(error);
+      let rejection = toRejectedError(error, commit, this.#space);
+      if (diagnosticCode !== undefined && route !== undefined) {
+        const unserved = await this.publishUnservedAttempt(commit, {
+          disposition: "unserved",
+          diagnosticCode,
+          ...(route.onFirewallRejected
+            ? { onSettled: () => route.onFirewallRejected!(diagnosticCode) }
+            : {}),
+        });
+        if (
+          unserved.error !== undefined &&
+          (unserved.error as { name?: string }).name !==
+            "ExecutionActionFirewallError"
+        ) {
+          rejection = unserved.error;
+        }
+      }
       telemetry?.submit({
         type: "storage.push.error",
         id: pushOpId,
@@ -3609,6 +3697,26 @@ const toConnectionError = (error: unknown): IConnectionError =>
     },
   }) as IConnectionError;
 
+const executionFirewallDiagnostic = (error: unknown): string | undefined =>
+  error instanceof Error && error.name === "ExecutionActionFirewallError" &&
+    typeof (error as Error & { diagnosticCode?: unknown }).diagnosticCode ===
+      "string"
+    ? (error as Error & { diagnosticCode: string }).diagnosticCode
+    : undefined;
+
+const executionFirewallRejection = (
+  commit: unknown,
+  diagnosticCode: string,
+  message: string,
+): StorageTransactionRejected =>
+  ({
+    name: "ExecutionActionFirewallError",
+    message,
+    diagnosticCode,
+    cause: { name: "SystemError", message, code: 500 },
+    transaction: commit as Transaction,
+  }) as unknown as StorageTransactionRejected;
+
 const toRejectedError = (
   error: unknown,
   commit: unknown,
@@ -3683,6 +3791,11 @@ const toRejectedError = (
   // it as non-retryable instead of collapsing it into a generic, bounded-retry
   // TransactionError. Re-running the identical handler recomputes the identical
   // refused write, so the doomed re-runs would only starve sibling commits.
+  if (name === "ExecutionActionFirewallError") {
+    const diagnosticCode = executionFirewallDiagnostic(error) ??
+      "unknown-firewall-rejection";
+    return executionFirewallRejection(commit, diagnosticCode, message);
+  }
   if (name === "RowLabelCommitError") {
     return {
       name,

@@ -13,7 +13,7 @@ export function isPermanentRejection(
  * The wire names of terminal commit rejections: a server-side commit-time
  * evaluation that DETERMINISTICALLY refused the committed data itself, so
  * re-running the identical handler recomputes the identical refused write and
- * can NEVER converge. Today: `RowLabelCommitError` — a CFC per-row label
+ * can NEVER converge. `RowLabelCommitError` is a CFC per-row label
  * commit-rule violation (memory/v2/sqlite/commit-eval.ts, evaluated inside
  * `applyCommitTransaction`, rolls back the whole commit). The memory server
  * MUST serialize the class name unchanged (memory/v2/server.ts transact catch);
@@ -23,6 +23,10 @@ export function isPermanentRejection(
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
+  // The executor has already published a canonical unserved settlement and
+  // revoked this claim; retrying the same asserted action would be both stale
+  // authority and a duplicate whole-action failure.
+  "ExecutionActionFirewallError",
 ]);
 
 /**

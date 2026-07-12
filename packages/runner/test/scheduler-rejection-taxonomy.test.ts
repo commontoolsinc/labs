@@ -29,6 +29,9 @@ describe("scheduler rejection taxonomy", () => {
     expect(isTerminalRejection({
       name: "RowLabelCommitError",
     })).toBe(true);
+    expect(isTerminalRejection({
+      name: "ExecutionActionFirewallError",
+    })).toBe(true);
   });
 
   it("does not classify retryable/transient rejections as terminal", () => {

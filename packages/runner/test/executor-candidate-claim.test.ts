@@ -137,8 +137,7 @@ class ClaimRecordingServer {
 }
 
 const flushClaimControl = async (): Promise<void> => {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let pending = 0; pending < 8; pending++) await Promise.resolve();
 };
 
 const startExecutor = async (options: {
@@ -218,12 +217,12 @@ Deno.test("canonical unserved attempts revoke the exact test-only claim", async 
     worker.unserved(CLAIM, "dynamic-non-space-read-scope");
     await flushClaimControl();
 
+    assertEquals(crashes, []);
     assertEquals(diagnostics, [{
       claim: CLAIM,
       diagnosticCode: "dynamic-non-space-read-scope",
     }]);
     assertEquals(server.revoked, [CLAIM]);
-    assertEquals(crashes, []);
   } finally {
     await executor.stop();
   }

@@ -133,6 +133,10 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       );
       worker.postMessage({ type: "candidate-claim", candidate });
     },
+    onUnserved: (claim, sourceAction, diagnosticCode) => {
+      claimsByAction.delete(sourceAction);
+      worker.postMessage({ type: "unserved-claim", claim, diagnosticCode });
+    },
   });
   storage = HostStorageManager.connect({
     port: request.port,
